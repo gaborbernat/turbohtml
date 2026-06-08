@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🤷💻🤦 Discussions
+    url: https://github.com/tox-dev/turbohtml/discussions
+    about: Ask questions and discuss usage here.
+  - name: 📝 PyPA Code of Conduct
+    url: https://www.pypa.io/en/latest/code-of-conduct/
+    about: ❤ Be nice to other members of the community. ☮ Behave.

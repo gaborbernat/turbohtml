@@ -1,9 +1,9 @@
-turbohtml
-=========
+###########
+ turbohtml
+###########
 
-A fast, fully typed HTML toolkit for Python, powered by a C-accelerated core.
-``turbohtml`` provides spec-correct HTML escaping and unescaping that match the
-standard library byte for byte while running several times faster, and it is
+A fast, fully typed HTML toolkit for Python, powered by a C-accelerated core. ``turbohtml`` provides spec-correct HTML
+escaping and unescaping that match the standard library byte for byte while running several times faster, and it is
 ready for the free-threaded build.
 
 .. code-block:: pycon

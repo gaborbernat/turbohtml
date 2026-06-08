@@ -1,5 +1,6 @@
-License
-=======
+#########
+ License
+#########
 
 .. literalinclude:: ../LICENSE
     :language: text

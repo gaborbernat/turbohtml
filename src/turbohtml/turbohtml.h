@@ -2,7 +2,7 @@
 
    The module is split per feature for readability (escape.c, unescape.c) but
    compiled into a single _html extension. Each feature file implements one
-   public entry point declared here; module.c wires them into the module. */
+   public entry point declared here; _htmlmodule.c wires them into the module. */
 
 #ifndef TURBOHTML_H
 #define TURBOHTML_H

@@ -3,8 +3,15 @@ env_list = [ "3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.14t", "3.15t", "
 skip_missing_interpreters = true
 
 [env_run_base]
-description = "run the tests with pytest under {env_name}, measuring Python and C coverage"
+description = { replace = "if", condition = "factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = "run the test suite under {env_name} with the Python coverage gate (no gcov for this interpreter)", else = "run the test suite under {env_name} with the Python and C coverage gates" }
 package = "skip"  # we install an instrumented editable build ourselves below
+# gcovr (via lxml) has no wheels for 3.15 or the free-threaded builds, and there is
+# no gcov on Windows, so pull it in only where the coverage gate actually runs
+deps = [
+  { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [], else = [
+    "gcovr>=8.4"
+  ], extend = true },
+]
 dependency_groups = [ "test" ]
 pass_env = [ "COV_GCOV", "PYTEST_*" ]
 commands_pre = [
@@ -26,9 +33,12 @@ commands_pre = [
     "--editable",
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
-    "--config-settings=setup-args=-Dbuildtype=debug",
-    "--config-settings=setup-args=-Db_ndebug=true",
-    "--config-settings=setup-args=-Db_coverage=true",
+    # instrument for C coverage except where gcov/gcovr are unavailable (Windows, 3.15, free-threaded)
+    { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [], else = [
+      "--config-settings=setup-args=-Dbuildtype=debug",
+      "--config-settings=setup-args=-Db_ndebug=true",
+      "--config-settings=setup-args=-Db_coverage=true",
+    ], extend = true },
   ],
 ]
 commands = [
@@ -51,7 +61,15 @@ commands = [
     "html:{env_tmp_dir}{/}htmlcov",
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],
-  [
+  # enforce 100% C LINE coverage everywhere gcov runs, and 100% BRANCH coverage on
+  # every version except 3.10: its pre-PEP-623 PyUnicode_DATA macro emits a ternary
+  # whose non-compact side PyUnicode_New objects can never take (5 dead branches), so
+  # 3.10 floors at 98%. 3.11+ collapsed that macro to a branchless inline function.
+  { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [
+    "python",
+    "-c",
+    "print('C coverage gate skipped on this interpreter (no gcov/gcovr)')",
+  ], else = [
     "gcovr",
     "{env_dir}{/}cbuild",
     "--root",
@@ -59,21 +77,23 @@ commands = [
     "--filter",
     "src/turbohtml/.*\\.c",
     "--gcov-executable",
-    "{env:COV_GCOV}",
+    "{env:COV_GCOV:xcrun llvm-cov gcov}",
     "--fail-under-line",
     "100",
     "--fail-under-branch",
-    "100",
+    { replace = "if", condition = "factor['3.10']", then = "98", else = "100" },
     "--html-details",
     "{env_tmp_dir}{/}c_htmlcov.html",
     "--txt",
     "-",
-  ],
+  ] },
 ]
 
 [env.docs]
 description = "build the documentation"
+package = "editable"  # autodoc imports turbohtml; a normal build, not the coverage one
 dependency_groups = [ "docs" ]
+commands_pre = []  # drop the instrumented editable install inherited from env_run_base
 commands = [
   [
     "sphinx-build",
@@ -101,6 +121,7 @@ commands = [ [ "pre-commit", "run", "--all-files", "--show-diff-on-failure", { r
 description = "check that the package metadata is valid"
 skip_install = true
 dependency_groups = [ "pkg-meta" ]
+commands_pre = []  # uv build does its own isolated build; skip the inherited coverage install
 commands = [
   [ "uv", "build", "--sdist", "--wheel", "--out-dir", "{env_tmp_dir}", "." ],
   [ "twine", "check", "{env_tmp_dir}{/}*" ],
@@ -121,6 +142,15 @@ commands = [ [ "uv", "pip", "list", "--format=columns" ], [ "python", "-c", 'pri
 [env.regen]
 description = "regenerate src/turbohtml/html_entities.h from the standard library"
 skip_install = true
+commands_pre = []
 commands = [
-  [ "python", "{tox_root}{/}tools{/}generate_html_entities.py", "{tox_root}{/}src{/}turbohtml{/}html_entities.h" ]
+  [ "python", "{tox_root}{/}tools{/}generate_html_entities.py", "{tox_root}{/}src{/}turbohtml{/}html_entities.h" ],
 ]
+
+[env.release]
+description = "cut a release; pass the version as a positional argument"
+skip_install = true
+dependency_groups = [ "release" ]
+pass_env = [ "GH_TOKEN" ]
+commands_pre = []
+commands = [ [ "python", "{tox_root}{/}tasks{/}release.py", "--version", "{posargs}" ] ]

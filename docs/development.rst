@@ -1,30 +1,33 @@
-Development
-===========
+#############
+ Development
+#############
 
-This page onboards contributors and records how turbohtml is built and
-maintained.
+This page onboards contributors and records how turbohtml is built and maintained.
 
-Getting set up
---------------
+****************
+ Getting set up
+****************
 
-turbohtml uses `tox <https://tox.wiki>`_ with `tox-uv
-<https://github.com/tox-dev/tox-uv>`_; `uv <https://docs.astral.sh/uv/>`_ manages
-the interpreters, so you do not need to install Python versions yourself.
+turbohtml uses `tox <https://tox.wiki>`_ with `tox-uv <https://github.com/tox-dev/tox-uv>`_; `uv
+<https://docs.astral.sh/uv/>`_ manages the interpreters, so you do not need to install Python versions yourself.
 
 .. code-block:: console
 
-    $ git clone https://github.com/gaborbernat/turbohtml
+    $ git clone --recurse-submodules https://github.com/gaborbernat/turbohtml
     $ cd turbohtml
     $ uvx --with tox-uv tox r -e 3.14   # build, test, and check coverage
 
-``tox r -e 3.14`` builds the extension, runs the test suite, and **fails unless
-both Python and C coverage are 100%** (line and branch). Other environments:
-``type`` (`ty <https://github.com/astral-sh/ty>`_), ``docs`` (Sphinx),
-``fix`` (`pre-commit <https://pre-commit.com>`_), ``pkg_meta`` (wheel/sdist
-metadata), and ``regen`` (regenerate the entity tables).
+The ``--recurse-submodules`` flag fetches the ``html5lib-tests`` conformance suite used by one of the tests; if you
+already cloned without it, run ``git submodule update --init``.
 
-Project layout
---------------
+``tox r -e 3.14`` builds the extension, runs the test suite, and **fails unless both Python and C coverage are 100%**
+(line and branch). Other environments: ``type`` (`ty <https://github.com/astral-sh/ty>`_), ``docs`` (Sphinx), ``fix``
+(`pre-commit <https://pre-commit.com>`_), ``pkg_meta`` (wheel/sdist metadata), and ``regen`` (regenerate the entity
+tables).
+
+****************
+ Project layout
+****************
 
 .. code-block:: text
 
@@ -40,98 +43,82 @@ Project layout
     tools/generate_html_entities.py   # regenerates html_entities.h
     tests/                   # pytest suite (escape + unescape)
 
-The three C files compile into a single ``_html`` extension. They are split per
-feature for readability and share only the entry-point declarations in
-``turbohtml.h``.
+The three C files compile into a single ``_html`` extension. They are split per feature for readability and share only
+the entry-point declarations in ``turbohtml.h``.
 
 .. _architecture-decisions:
 
-Architecture decisions
-----------------------
+************************
+ Architecture decisions
+************************
 
-**A C extension, built with meson-python.** Escaping and unescaping are hot
-paths, so the core is C. `meson-python <https://mesonbuild.com/meson-python/>`_
-is the build backend because `hatchling <https://hatch.pypa.io>`_ (used by our
-pure-Python projects) does not compile C; meson-python is a first-class C
-backend with built-in coverage support.
+**A C extension, built with meson-python.** Escaping and unescaping are hot paths, so the core is C. `meson-python
+<https://mesonbuild.com/meson-python/>`_ is the build backend because `hatchling <https://hatch.pypa.io>`_ (used by our
+pure-Python projects) does not compile C; meson-python is a first-class C backend with built-in coverage support.
 
-**No stable ABI (abi3).** The fast paths require the non–:ref:`Limited API
-<python:stable>` buffer macros ``PyUnicode_KIND``, ``PyUnicode_DATA``,
-``PyUnicode_READ``, ``PyUnicode_WRITE`` and ``PyUnicode_New`` (see the
-`PyUnicode C API <https://docs.python.org/3/c-api/unicode.html>`_ and
-:pep:`393`). The `Limited API <https://docs.python.org/3/c-api/stable.html>`_
-only exposes per-code-point calls (``PyUnicode_ReadChar`` /
-``PyUnicode_WriteChar``) with no access to the underlying buffer, which would
-remove the SWAR scan that justifies the package. We therefore ship one wheel
-per interpreter and let `cibuildwheel <https://cibuildwheel.pypa.io>`_ build the
+**No stable ABI (abi3).** The fast paths require the non–\ :ref:`Limited API <python:stable>` buffer macros
+``PyUnicode_KIND``, ``PyUnicode_DATA``, ``PyUnicode_READ``, ``PyUnicode_WRITE`` and ``PyUnicode_New`` (see the
+`PyUnicode C API <https://docs.python.org/3/c-api/unicode.html>`_ and :PEP:`393`). The `Limited API
+<https://docs.python.org/3/c-api/stable.html>`_ only exposes per-code-point calls (``PyUnicode_ReadChar`` /
+``PyUnicode_WriteChar``) with no access to the underlying buffer, which would remove the SWAR scan that justifies the
+package. We therefore ship one wheel per interpreter and let `cibuildwheel <https://cibuildwheel.pypa.io>`_ build the
 matrix.
 
-**No pure-Python fallback.** :pep:`399` requires a pure-Python fallback only for
-standard-library modules. As a third-party package distributing per-interpreter
-wheels, turbohtml ships only the compiled implementation.
+**No pure-Python fallback.** :PEP:`399` requires a pure-Python fallback only for standard-library modules. As a
+third-party package distributing per-interpreter wheels, turbohtml ships only the compiled implementation.
 
-**SWAR for escape.** ``escape`` confirms most strings need no escaping, so it
-scans one-byte strings eight bytes at a time using the
-`bit-twiddling "has-zero" trick
-<https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord>`_, falling
-back to a scalar scan for UCS-2 / UCS-4 (see :pep:`393` for the representations).
+**SWAR for escape.** ``escape`` confirms most strings need no escaping, so it scans one-byte strings eight bytes at a
+time using the `bit-twiddling "has-zero" trick <https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord>`_,
+falling back to a scalar scan for UCS-2 / UCS-4 (see :PEP:`393` for the representations).
 
-**Free-threading ready.** The module has no mutable state (immutable ``str``
-inputs, read-only tables), so it declares ``Py_MOD_GIL_NOT_USED`` and
-per-interpreter GIL support on interpreters that support them. See the
-`free-threading extension guide
-<https://docs.python.org/3/howto/free-threading-extensions.html>`_.
+**Free-threading ready.** The module has no mutable state (immutable ``str`` inputs, read-only tables), so it declares
+``Py_MOD_GIL_NOT_USED`` and per-interpreter GIL support on interpreters that support them. See the `free-threading
+extension guide <https://docs.python.org/3/howto/free-threading-extensions.html>`_.
 
-**Exact standard-library parity.** turbohtml reproduces :func:`python:html.escape`
-and :func:`python:html.unescape` byte for byte, including ``&#x27;`` for the
-single quote and the full HTML5 character-reference rules. The suite fuzzes the
-C output against the standard library.
+**Exact standard-library parity.** turbohtml reproduces :func:`python:html.escape` and :func:`python:html.unescape` byte
+for byte, including ``&#x27;`` for the single quote and the full HTML5 character-reference rules. The suite fuzzes the C
+output against the standard library.
 
-**Generated entity tables.** ``html_entities.h`` is generated from
-:data:`python:html.entities.html5` (which mirrors the `WHATWG named character
-references <https://html.spec.whatwg.org/multipage/named-characters.html>`_), so
-the C table never drifts from the source of truth.
+**Generated entity tables.** ``html_entities.h`` is produced by ``tools/generate_html_entities.py``. The named
+references come from :data:`python:html.entities.html5` (which mirrors the `WHATWG named character references
+<https://html.spec.whatwg.org/multipage/named-characters.html>`_); the numeric-charref correction tables are derived
+directly from the `WHATWG specification
+<https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-end-state>`_ rather than any private
+standard-library internals, so the C tables never drift from the source of truth.
 
-Maintainer tasks
-----------------
+******************
+ Maintainer tasks
+******************
 
-Regenerate the entity tables (after a CPython update changes
-:mod:`python:html.entities`):
+Regenerate the entity tables (after a CPython update changes :mod:`python:html.entities`):
 
 .. code-block:: console
 
     $ tox r -e regen
 
-Run the full check matrix locally (per-interpreter, 3.10–3.15 plus
-free-threading):
+Run the full check matrix locally (per-interpreter, 3.10–3.15 plus free-threading):
 
 .. code-block:: console
 
     $ tox r            # all environments
     $ tox r -e 3.13    # a single interpreter
 
-Coverage is enforced two ways: Python via `covdefaults
-<https://github.com/asottile/covdefaults>`_ (100%), and C via `gcovr
-<https://gcovr.com>`_ with ``--fail-under-line 100 --fail-under-branch 100`` on
-an instrumented `meson coverage build
-<https://mesonbuild.com/Unit-tests.html#coverage>`_ (``-Db_coverage=true
--Db_ndebug=true``). The only excluded branches are allocation-failure guards
-that a test cannot trigger; each is marked with a `gcovr exclusion marker
-<https://gcovr.com/en/stable/guide/exclusion-markers.html>`_ and a comment
-explaining why.
+Coverage is enforced two ways: Python via `covdefaults <https://github.com/asottile/covdefaults>`_ (100%), and C via
+`gcovr <https://gcovr.com>`_ with ``--fail-under-line 100 --fail-under-branch 100`` on an instrumented `meson coverage
+build <https://mesonbuild.com/Unit-tests.html#coverage>`_ (``-Db_coverage=true -Db_ndebug=true``). The only excluded
+branches are allocation-failure guards that a test cannot trigger; each is marked with a `gcovr exclusion marker
+<https://gcovr.com/en/stable/guide/exclusion-markers.html>`_ and a comment explaining why.
 
 Adding a C feature:
 
-1. Add ``src/turbohtml/<feature>.c`` and declare its entry point in
-   ``turbohtml.h``.
+1. Add ``src/turbohtml/<feature>.c`` and declare its entry point in ``turbohtml.h``.
 2. Add the source to ``meson.build`` and wire the method in ``_htmlmodule.c``.
-3. Add tests and keep coverage at 100%; mark any genuinely unreachable branch
-   with ``GCOVR_EXCL_BR_LINE`` plus a reason.
+3. Add tests and keep coverage at 100%; mark any genuinely unreachable branch with ``GCOVR_EXCL_BR_LINE`` plus a reason.
 
-Releasing
----------
+***********
+ Releasing
+***********
 
-A release is cut by the ``🚀 Release`` GitHub Actions workflow: it builds the
-sdist and the full wheel matrix with `cibuildwheel
-<https://cibuildwheel.pypa.io>`_ and publishes to PyPI via `trusted publishing
+A release is cut by the ``🚀 Release`` GitHub Actions workflow: it builds the sdist and the full wheel matrix with
+`cibuildwheel <https://cibuildwheel.pypa.io>`_ and publishes to PyPI via `trusted publishing
 <https://docs.pypi.org/trusted-publishers/>`_, so no API token is stored.

@@ -1,11 +1,12 @@
 """
-Generate src/turbohtml/html_entities.h from the building Python's html data.
+Generate src/turbohtml/html_entities.h from the HTML5 specification data.
 
 The C accelerator binary-searches the HTML5 named-reference table and the
-numeric-charref correction tables.  Both are derived from the standard library
-(:data:`html.entities.html5` and the private ``html._invalid_*`` tables), which
-mirror the WHATWG HTML specification, so this script regenerates the C header to
-keep them in sync.
+numeric-charref correction tables. The named table comes from the public
+:data:`html.entities.html5` mapping; the numeric correction tables are built here
+directly from the `WHATWG HTML specification
+<https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-end-state>`_
+so we do not depend on any private standard-library internals.
 
 Usage:  python tools/generate_html_entities.py src/turbohtml/html_entities.h
 """
@@ -13,20 +14,39 @@ Usage:  python tools/generate_html_entities.py src/turbohtml/html_entities.h
 from __future__ import annotations
 
 import sys
-
-# Reuse the stdlib's own numeric-charref tables so the generator stays in lockstep
-# with html; these names are private to the module, hence the suppressions below.
-from html import _invalid_charrefs, _invalid_codepoints  # noqa: PLC2701  # type: ignore[attr-defined]
 from html.entities import html5
 from pathlib import Path
 
 
+def _windows_1252(codepoint: int) -> str:
+    """Return the Windows-1252 character for a C1 control byte, else the byte itself."""
+    try:
+        return bytes([codepoint]).decode("cp1252")
+    except UnicodeDecodeError:  # the five undefined cp1252 slots pass through unchanged
+        return chr(codepoint)
+
+
+# Numeric character references in the C1 range are reinterpreted as Windows-1252,
+# with U+0000 and a bare CR getting their own replacements (HTML spec table).
+_invalid_charrefs = {0x00: "\ufffd", 0x0D: "\r", **{cp: _windows_1252(cp) for cp in range(0x80, 0xA0)}}
+# Code points that the spec forbids in numeric references: C0/C1 controls (minus
+# the allowed whitespace), the Arabic-block noncharacters, and the per-plane ones.
+_invalid_codepoints = (
+    set(range(0x01, 0x09))
+    | {0x0B}
+    | set(range(0x0E, 0x20))
+    | set(range(0x7F, 0xA0))
+    | set(range(0xFDD0, 0xFDF0))
+    | {(plane << 16) + low for plane in range(0x11) for low in (0xFFFE, 0xFFFF)}
+)
+
+
 def generate(out_path: Path) -> None:
     """Write the generated HTML5 entity-table C header to *out_path*."""
-    if (longest := max(len(v) for v in html5.values())) > 2:  # a named ref expands to at most two code points
+    if (longest := max(len(value) for value in html5.values())) > 2:  # a named ref expands to at most two code points
         msg = f"named value longer than 2 code points: {longest}"
         raise SystemExit(msg)
-    max_name_len = max(len(k) for k in html5)
+    max_name_len = max(len(name) for name in html5)
 
     named = [
         f'    {{"{name}", {len(name)}u, {ord(value[0])}u, {ord(value[1]) if len(value) == 2 else 0}u}},'
@@ -35,8 +55,9 @@ def generate(out_path: Path) -> None:
     ]
     charrefs = [f"    {{{num}u, {ord(_invalid_charrefs[num])}u}}," for num in sorted(_invalid_charrefs)]
     codepoints = sorted(_invalid_codepoints)
-    cps = "\n".join(
-        "    " + " ".join(f"{cp}u," for cp in codepoints[i : i + 10]) for i in range(0, len(codepoints), 10)
+    codepoint_lines = "\n".join(
+        "    " + " ".join(f"{codepoint}u," for codepoint in codepoints[start : start + 10])
+        for start in range(0, len(codepoints), 10)
     )
 
     out_path.write_text(
@@ -60,7 +81,7 @@ def generate(out_path: Path) -> None:
         "};\n\n"
         f"static const int invalid_codepoint_count = {len(codepoints)};\n"
         "static const Py_UCS4 invalid_codepoints[] = {\n"
-        f"{cps}\n"
+        f"{codepoint_lines}\n"
         "};\n",
         encoding="utf-8",
     )

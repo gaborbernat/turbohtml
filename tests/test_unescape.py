@@ -37,6 +37,7 @@ CASES = [
     pytest.param("&\x0cx", "&\x0cx", id="amp-then-formfeed"),
     pytest.param("&amp#", "&#", id="name-then-hash"),
     pytest.param("&#62x", ">x", id="numeric-no-semicolon"),
+    pytest.param("&#62", ">", id="numeric-digits-to-end"),
     pytest.param("&#x!", "&#x!", id="hex-non-digit-char"),
     pytest.param("&#x1F600;", "\U0001f600", id="numeric-astral-non-surrogate"),
 ]
@@ -77,15 +78,15 @@ def test_unescape_long_text_with_sparse_refs() -> None:
 
 
 def test_unescape_str_subclass() -> None:
-    class S(str):  # noqa: FURB189  # subclassing str is the behavior under test
+    class StrSubclass(str):  # noqa: FURB189  # subclassing str is the behavior under test
         __slots__ = ()
 
-    assert turbohtml.unescape(S("a &amp; b")) == "a & b"
+    assert turbohtml.unescape(StrSubclass("a &amp; b")) == "a & b"
 
 
 def test_unescape_rejects_non_str() -> None:
     with pytest.raises(TypeError):
-        turbohtml.unescape(123)  # type: ignore[arg-type]  # passing a non-str on purpose to exercise the TypeError path
+        turbohtml.unescape(123)  # ty: ignore[invalid-argument-type]  # non-str on purpose to exercise the TypeError path
 
 
 def test_unescape_matches_stdlib_fuzz() -> None:

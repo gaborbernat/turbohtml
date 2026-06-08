@@ -71,17 +71,17 @@ def test_escape_multiple_kinds(text: str, expected: str) -> None:
 
 
 def test_escape_str_subclass_returns_true_str() -> None:
-    class S(str):  # noqa: FURB189  # subclassing str is the behavior under test
+    class StrSubclass(str):  # noqa: FURB189  # subclassing str is the behavior under test
         __slots__ = ()
 
-    result = turbohtml.escape(S("a & b"))
+    result = turbohtml.escape(StrSubclass("a & b"))
     assert result == "a &amp; b"
     assert type(result) is str
-    clean = turbohtml.escape(S("clean"))
+    clean = turbohtml.escape(StrSubclass("clean"))
     assert clean == "clean"
     assert type(clean) is str
 
 
 def test_escape_rejects_non_str() -> None:
     with pytest.raises(TypeError):
-        turbohtml.escape(123)  # type: ignore[arg-type]  # passing a non-str on purpose to exercise the TypeError path
+        turbohtml.escape(123)  # ty: ignore[invalid-argument-type]  # non-str on purpose to exercise the TypeError path

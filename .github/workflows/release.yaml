@@ -5,14 +5,11 @@ on:
   push:
     branches: ["main"]
     tags: ["*"]
-
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 permissions:
   contents: read
-
 jobs:
   sdist:
     name: 📦 sdist
@@ -34,19 +31,27 @@ jobs:
           name: dist-sdist
           path: dist/*.tar.gz
           retention-days: 7
-
   wheels:
-    name: 🎡 wheels - ${{ matrix.os }}
+    name: 🎡 wheels - ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: ["ubuntu-24.04", "ubuntu-24.04-arm", "macos-15", "windows-2025"]
+        include:
+          - {os: "ubuntu-24.04", label: Linux}
+          - {os: "ubuntu-24.04-arm", label: Linux ARM}
+          - {os: "macos-15", label: macOS}
+          - {os: "windows-2025", label: Windows}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: false
       - name: 🎡 Build wheels
         uses: pypa/cibuildwheel@f03ac7617d6cff873ccf24cc0d567ef5ba5a9e6d # v4.0.0
       - name: 📤 Upload wheels
@@ -55,7 +60,6 @@ jobs:
           name: dist-${{ matrix.os }}
           path: wheelhouse/*.whl
           retention-days: 7
-
   publish:
     name: 🚀 Publish to PyPI
     needs: [sdist, wheels]
@@ -77,3 +81,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           skip-existing: true
+          attestations: true

@@ -1,9 +1,10 @@
 /* HTML escaping.
 
-   escape() scans 1-byte strings word-at-a-time (SWAR): it loads eight bytes
-   into a uint64_t and tests every lane for a special character at once, so it
-   skips eight safe bytes per step and returns the input unchanged when nothing
-   needs escaping. UCS-2 / UCS-4 strings use a straightforward scalar scan. */
+   Most strings contain nothing that needs escaping, so the 1-byte path scans a
+   word (eight bytes) at a time with a SWAR has-zero test and skips all eight
+   whenever none is special; that is why escape() can return the input untouched
+   without inspecting most bytes one by one. UCS-2 / UCS-4 strings are rare here
+   and use a plain scalar scan. */
 
 #include "turbohtml.h"
 
@@ -12,30 +13,31 @@
 
 #define SWAR_ONES 0x0101010101010101ULL
 #define SWAR_HIGHS 0x8080808080808080ULL
+#define SWAR_WORD 8
 
-static inline uint64_t swar_haszero(uint64_t v) {
-    return (v - SWAR_ONES) & ~v & SWAR_HIGHS;
+static inline uint64_t swar_haszero(uint64_t word) {
+    return (word - SWAR_ONES) & ~word & SWAR_HIGHS;
 }
 
-static inline uint64_t swar_hasbyte(uint64_t w, uint8_t c) {
-    return swar_haszero(w ^ (SWAR_ONES * c));
+static inline uint64_t swar_hasbyte(uint64_t word, uint8_t byte) {
+    return swar_haszero(word ^ (SWAR_ONES * byte));
 }
 
-static inline uint64_t swar_specials(uint64_t w, int quote) {
-    uint64_t m = swar_hasbyte(w, '&') | swar_hasbyte(w, '<') | swar_hasbyte(w, '>');
+static inline uint64_t swar_specials(uint64_t word, int quote) {
+    uint64_t mask = swar_hasbyte(word, '&') | swar_hasbyte(word, '<') | swar_hasbyte(word, '>');
     if (quote) {
-        m |= swar_hasbyte(w, '"') | swar_hasbyte(w, '\'');
+        mask |= swar_hasbyte(word, '"') | swar_hasbyte(word, '\'');
     }
-    return m;
+    return mask;
 }
 
-static inline Py_ssize_t escape_extra(Py_UCS4 ch, int quote) {
-    switch (ch) {
+static inline Py_ssize_t escape_extra(Py_UCS4 character, int quote) {
+    switch (character) {
     case '&':
-        return 4; /* "&amp;"  */
+        return 4; /* "&amp;" replaces one character with five */
     case '<':
     case '>':
-        return 3; /* "&lt;"   */
+        return 3; /* "&lt;" / "&gt;" */
     case '"':
         return quote ? 5 : 0; /* "&quot;" */
     case '\'':
@@ -45,123 +47,123 @@ static inline Py_ssize_t escape_extra(Py_UCS4 ch, int quote) {
     }
 }
 
-static inline Py_ssize_t write_escaped(int kind, void *data, Py_ssize_t o, Py_UCS4 ch, int quote) {
-    const char *rep = NULL;
-    int rlen = 0;
-    switch (ch) {
+static inline Py_ssize_t write_escaped(int kind, void *data, Py_ssize_t offset, Py_UCS4 character, int quote) {
+    const char *replacement = NULL;
+    int replacement_len = 0;
+    switch (character) {
     case '&':
-        rep = "&amp;";
-        rlen = 5;
+        replacement = "&amp;";
+        replacement_len = 5;
         break;
     case '<':
-        rep = "&lt;";
-        rlen = 4;
+        replacement = "&lt;";
+        replacement_len = 4;
         break;
     case '>':
-        rep = "&gt;";
-        rlen = 4;
+        replacement = "&gt;";
+        replacement_len = 4;
         break;
     case '"':
         if (quote) {
-            rep = "&quot;";
-            rlen = 6;
+            replacement = "&quot;";
+            replacement_len = 6;
         }
         break;
     case '\'':
         if (quote) {
-            rep = "&#x27;";
-            rlen = 6;
+            replacement = "&#x27;";
+            replacement_len = 6;
         }
         break;
     default:
         break;
     }
-    if (rep != NULL) {
-        for (int k = 0; k < rlen; k++) {
-            PyUnicode_WRITE(kind, data, o + k, (Py_UCS4)rep[k]);
+    if (replacement != NULL) {
+        for (int index = 0; index < replacement_len; index++) {
+            PyUnicode_WRITE(kind, data, offset + index, (Py_UCS4)replacement[index]);
         }
-        return rlen;
+        return replacement_len;
     }
-    PyUnicode_WRITE(kind, data, o, ch);
+    PyUnicode_WRITE(kind, data, offset, character);
     return 1;
 }
 
 PyObject *turbohtml_escape(PyObject *Py_UNUSED(module), PyObject *args, PyObject *kwds) {
     static char *kwlist[] = {"s", "quote", NULL};
-    PyObject *s;
+    PyObject *text;
     int quote = 1;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "U|p:escape", kwlist, &s, &quote)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "U|p:escape", kwlist, &text, &quote)) {
         return NULL;
     }
 
-    int kind = PyUnicode_KIND(s);
-    Py_ssize_t n = PyUnicode_GET_LENGTH(s);
-    const void *data = PyUnicode_DATA(s);
+    int kind = PyUnicode_KIND(text);
+    Py_ssize_t length = PyUnicode_GET_LENGTH(text);
+    const void *data = PyUnicode_DATA(text);
 
     Py_ssize_t extra = 0;
     if (kind == PyUnicode_1BYTE_KIND) {
-        const uint8_t *p = (const uint8_t *)data;
-        Py_ssize_t i = 0;
-        while (i + 8 <= n) {
-            uint64_t w;
-            memcpy(&w, p + i, 8);
-            if (swar_specials(w, quote) == 0) {
-                i += 8;
+        const uint8_t *input = (const uint8_t *)data;
+        Py_ssize_t pos = 0;
+        while (pos + SWAR_WORD <= length) {
+            uint64_t word;
+            memcpy(&word, input + pos, SWAR_WORD);
+            if (swar_specials(word, quote) == 0) {
+                pos += SWAR_WORD;
                 continue;
             }
-            for (int j = 0; j < 8; j++) {
-                extra += escape_extra(p[i + j], quote);
+            for (int lane = 0; lane < SWAR_WORD; lane++) {
+                extra += escape_extra(input[pos + lane], quote);
             }
-            i += 8;
+            pos += SWAR_WORD;
         }
-        for (; i < n; i++) {
-            extra += escape_extra(p[i], quote);
+        for (; pos < length; pos++) {
+            extra += escape_extra(input[pos], quote);
         }
     } else {
-        for (Py_ssize_t i = 0; i < n; i++) {
-            extra += escape_extra(PyUnicode_READ(kind, data, i), quote);
+        for (Py_ssize_t pos = 0; pos < length; pos++) {
+            extra += escape_extra(PyUnicode_READ(kind, data, pos), quote);
         }
     }
 
     if (extra == 0) {
-        /* Nothing to escape; return a true str (str subclasses are normalized). */
-        return PyUnicode_FromObject(s);
+        /* normalize str subclasses to a real str even when nothing is escaped */
+        return PyUnicode_FromObject(text);
     }
 
-    Py_UCS4 maxchar = PyUnicode_MAX_CHAR_VALUE(s);
-    PyObject *out = PyUnicode_New(n + extra, maxchar);
+    Py_UCS4 maxchar = PyUnicode_MAX_CHAR_VALUE(text);
+    PyObject *out = PyUnicode_New(length + extra, maxchar);
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE */
     }
-    int okind = PyUnicode_KIND(out);
-    void *odata = PyUnicode_DATA(out);
-    Py_ssize_t o = 0;
+    int out_kind = PyUnicode_KIND(out);
+    void *out_data = PyUnicode_DATA(out);
+    Py_ssize_t written = 0;
 
     if (kind == PyUnicode_1BYTE_KIND) {
-        /* a 1-byte input only gains ASCII escapes, so the output is 1-byte too */
-        const uint8_t *p = (const uint8_t *)data;
-        uint8_t *q = (uint8_t *)odata;
-        Py_ssize_t i = 0;
-        while (i + 8 <= n) {
-            uint64_t w;
-            memcpy(&w, p + i, 8);
-            if (swar_specials(w, quote) == 0) {
-                memcpy(q + o, p + i, 8);
-                o += 8;
-                i += 8;
+        /* a 1-byte input gains only ASCII escapes, so the result stays 1-byte */
+        const uint8_t *input = (const uint8_t *)data;
+        uint8_t *output = (uint8_t *)out_data;
+        Py_ssize_t pos = 0;
+        while (pos + SWAR_WORD <= length) {
+            uint64_t word;
+            memcpy(&word, input + pos, SWAR_WORD);
+            if (swar_specials(word, quote) == 0) {
+                memcpy(output + written, input + pos, SWAR_WORD);
+                written += SWAR_WORD;
+                pos += SWAR_WORD;
                 continue;
             }
-            for (int j = 0; j < 8; j++) {
-                o += write_escaped(okind, odata, o, p[i + j], quote);
+            for (int lane = 0; lane < SWAR_WORD; lane++) {
+                written += write_escaped(out_kind, out_data, written, input[pos + lane], quote);
             }
-            i += 8;
+            pos += SWAR_WORD;
         }
-        for (; i < n; i++) {
-            o += write_escaped(okind, odata, o, p[i], quote);
+        for (; pos < length; pos++) {
+            written += write_escaped(out_kind, out_data, written, input[pos], quote);
         }
     } else {
-        for (Py_ssize_t i = 0; i < n; i++) {
-            o += write_escaped(okind, odata, o, PyUnicode_READ(kind, data, i), quote);
+        for (Py_ssize_t pos = 0; pos < length; pos++) {
+            written += write_escaped(out_kind, out_data, written, PyUnicode_READ(kind, data, pos), quote);
         }
     }
     return out;

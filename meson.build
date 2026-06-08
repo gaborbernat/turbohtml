@@ -1,10 +1,13 @@
 project(
     'turbohtml',
     'c',
-    version: '0.1.0',
+    version: run_command(['tools/generate_version.py'], check: true).stdout().strip(),
     meson_version: '>=1.5.0',
     default_options: ['c_std=c11', 'warning_level=2'],
 )
+
+# Freeze the git-derived version into the sdist so wheels built from it need no git history.
+meson.add_dist_script('tools/generate_version.py', '--write', 'src/turbohtml/_version.py', '--meson-dist')
 
 py = import('python').find_installation(pure: false)
 

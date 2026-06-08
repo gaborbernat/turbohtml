@@ -1,11 +1,11 @@
 /* HTML unescaping.
 
    unescape() makes a single pass over the input, resolving numeric and named
-   character references following the HTML5 rules. Named references are found by
-   binary search over the generated table, with longest-prefix matching for
-   references that omit the trailing semicolon; numeric references apply the
-   spec's correction tables. Output is built into a Py_UCS4 buffer (unescape
-   never lengthens the text) and then materialised at the right width. */
+   character references per the HTML5 rules. Named references use binary search
+   over the generated table, with longest-prefix matching for references that
+   omit the trailing semicolon; numeric references apply the spec's correction
+   tables. The output is built into a Py_UCS4 buffer because unescape never
+   lengthens the text, so the input length is a safe upper bound. */
 
 #include "turbohtml.h"
 
@@ -14,74 +14,74 @@
 
 #include "html_entities.h"
 
-static int cmp_name(const char *a, Py_ssize_t alen, const char *b, unsigned blen) {
-    Py_ssize_t m = alen < (Py_ssize_t)blen ? alen : (Py_ssize_t)blen;
-    int c = memcmp(a, b, (size_t)m);
-    if (c != 0) {
-        return c < 0 ? -1 : 1;
+static int cmp_name(const char *left, Py_ssize_t left_len, const char *right, unsigned right_len) {
+    Py_ssize_t shared = left_len < (Py_ssize_t)right_len ? left_len : (Py_ssize_t)right_len;
+    int order = memcmp(left, right, (size_t)shared);
+    if (order != 0) {
+        return order < 0 ? -1 : 1;
     }
-    if (alen == (Py_ssize_t)blen) {
+    if (left_len == (Py_ssize_t)right_len) {
         return 0;
     }
-    return alen < (Py_ssize_t)blen ? -1 : 1;
+    return left_len < (Py_ssize_t)right_len ? -1 : 1;
 }
 
 static const html5_entity *find_entity(const char *name, Py_ssize_t len) {
-    int lo = 0, hi = html5_count - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) >> 1;
-        const html5_entity *e = &html5_entities[mid];
-        int c = cmp_name(name, len, e->name, e->name_len);
-        if (c == 0) {
-            return e;
+    int low = 0, high = html5_count - 1;
+    while (low <= high) {
+        int mid = (low + high) >> 1;
+        const html5_entity *entity = &html5_entities[mid];
+        int order = cmp_name(name, len, entity->name, entity->name_len);
+        if (order == 0) {
+            return entity;
         }
-        if (c < 0) {
-            hi = mid - 1;
+        if (order < 0) {
+            high = mid - 1;
         } else {
-            lo = mid + 1;
+            low = mid + 1;
         }
     }
     return NULL;
 }
 
-static int find_invalid_charref(Py_UCS4 num, Py_UCS4 *cp) {
-    int lo = 0, hi = invalid_charref_count - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) >> 1;
-        Py_UCS4 v = invalid_charrefs[mid].num;
-        if (v == num) {
-            *cp = invalid_charrefs[mid].cp;
+static int find_invalid_charref(Py_UCS4 num, Py_UCS4 *replacement) {
+    int low = 0, high = invalid_charref_count - 1;
+    while (low <= high) {
+        int mid = (low + high) >> 1;
+        Py_UCS4 candidate = invalid_charrefs[mid].num;
+        if (candidate == num) {
+            *replacement = invalid_charrefs[mid].cp;
             return 1;
         }
-        if (num < v) {
-            hi = mid - 1;
+        if (num < candidate) {
+            high = mid - 1;
         } else {
-            lo = mid + 1;
+            low = mid + 1;
         }
     }
     return 0;
 }
 
 static int is_invalid_codepoint(Py_UCS4 num) {
-    int lo = 0, hi = invalid_codepoint_count - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) >> 1;
-        Py_UCS4 v = invalid_codepoints[mid];
-        if (v == num) {
+    int low = 0, high = invalid_codepoint_count - 1;
+    while (low <= high) {
+        int mid = (low + high) >> 1;
+        Py_UCS4 candidate = invalid_codepoints[mid];
+        if (candidate == num) {
             return 1;
         }
-        if (num < v) {
-            hi = mid - 1;
+        if (num < candidate) {
+            high = mid - 1;
         } else {
-            lo = mid + 1;
+            low = mid + 1;
         }
     }
     return 0;
 }
 
-static inline int is_name_char(Py_UCS4 c) {
-    /* [^\t\n\f <&#;] from the reference HTML5 charref regex. */
-    switch (c) {
+static inline int is_name_char(Py_UCS4 character) {
+    /* the [^\t\n\f <&#;] class from the reference HTML5 charref regex */
+    switch (character) {
     case '\t':
     case '\n':
     case '\x0c':
@@ -96,145 +96,144 @@ static inline int is_name_char(Py_UCS4 c) {
     }
 }
 
-static inline int hex_value(Py_UCS4 c) {
-    if (c >= '0' && c <= '9')
-        return (int)(c - '0');
-    if (c >= 'a' && c <= 'f')
-        return (int)(c - 'a') + 10;
-    if (c >= 'A' && c <= 'F')
-        return (int)(c - 'A') + 10;
+static inline int hex_value(Py_UCS4 character) {
+    if (character >= '0' && character <= '9')
+        return (int)(character - '0');
+    if (character >= 'a' && character <= 'f')
+        return (int)(character - 'a') + 10;
+    if (character >= 'A' && character <= 'F')
+        return (int)(character - 'A') + 10;
     return -1;
 }
 
-static inline void emit(Py_UCS4 *out, Py_ssize_t *o, Py_UCS4 *maxchar, Py_UCS4 c) {
-    out[*o] = c;
-    if (c > *maxchar) {
-        *maxchar = c;
+static inline void emit(Py_UCS4 *out, Py_ssize_t *count, Py_UCS4 *maxchar, Py_UCS4 character) {
+    out[*count] = character;
+    if (character > *maxchar) {
+        *maxchar = character;
     }
-    (*o)++;
+    (*count)++;
 }
 
-/* Parse a character reference starting with '&' at index i.  On a match, append
-   the replacement to out and return the number of input characters consumed
-   (including '&').  Return 0 when no reference matches. */
-static Py_ssize_t parse_charref(int kind, const void *data, Py_ssize_t n, Py_ssize_t i, Py_UCS4 *out, Py_ssize_t *o,
-                                Py_UCS4 *maxchar) {
-    Py_ssize_t p = i + 1;
-    if (p >= n) {
+/* Returns the number of input characters consumed (including '&'), or 0 when no
+   reference matches so the caller can emit a literal '&' and move on. */
+static Py_ssize_t parse_charref(int kind, const void *data, Py_ssize_t length, Py_ssize_t amp_index, Py_UCS4 *out,
+                                Py_ssize_t *count, Py_UCS4 *maxchar) {
+    Py_ssize_t pos = amp_index + 1;
+    if (pos >= length) {
         return 0;
     }
-    Py_UCS4 c = PyUnicode_READ(kind, data, p);
+    Py_UCS4 character = PyUnicode_READ(kind, data, pos);
 
-    if (c == '#') {
-        Py_ssize_t d = p + 1;
+    if (character == '#') {
+        Py_ssize_t cursor = pos + 1;
         int hex = 0;
-        if (d < n) {
-            Py_UCS4 x = PyUnicode_READ(kind, data, d);
-            if (x == 'x' || x == 'X') {
+        if (cursor < length) {
+            Py_UCS4 marker = PyUnicode_READ(kind, data, cursor);
+            if (marker == 'x' || marker == 'X') {
                 hex = 1;
-                d++;
+                cursor++;
             }
         }
         Py_UCS4 num = 0;
         int overflow = 0;
-        Py_ssize_t start = d;
-        while (d < n) {
-            Py_UCS4 x = PyUnicode_READ(kind, data, d);
+        Py_ssize_t first_digit = cursor;
+        while (cursor < length) {
+            Py_UCS4 digit = PyUnicode_READ(kind, data, cursor);
             if (hex) {
-                int v = hex_value(x);
-                if (v < 0) {
+                int value = hex_value(digit);
+                if (value < 0) {
                     break;
                 }
-                num = num * 16 + (Py_UCS4)v;
+                num = num * 16 + (Py_UCS4)value;
             } else {
-                if (x < '0' || x > '9') {
+                if (digit < '0' || digit > '9') {
                     break;
                 }
-                num = num * 10 + (x - '0');
+                num = num * 10 + (digit - '0');
             }
             if (num > 0x110000) {
-                num = 0x110000; /* cap to trigger the > 0x10FFFF branch below */
+                num = 0x110000; /* cap so the > 0x10FFFF branch below fires regardless of further digits */
                 overflow = 1;
             }
-            d++;
+            cursor++;
         }
-        if (d == start) {
-            return 0; /* no digits: not a reference */
+        if (cursor == first_digit) {
+            return 0; /* "&#" with no digits is not a reference */
         }
-        if (d < n && PyUnicode_READ(kind, data, d) == ';') {
-            d++; /* optional trailing ';' */
+        if (cursor < length && PyUnicode_READ(kind, data, cursor) == ';') {
+            cursor++;
         }
 
-        Py_UCS4 repl;
-        if (!overflow && find_invalid_charref(num, &repl)) {
-            emit(out, o, maxchar, repl);
+        Py_UCS4 replacement;
+        if (!overflow && find_invalid_charref(num, &replacement)) {
+            emit(out, count, maxchar, replacement);
         } else if ((num >= 0xD800 && num <= 0xDFFF) || num > 0x10FFFF) {
-            emit(out, o, maxchar, 0xFFFD);
+            emit(out, count, maxchar, 0xFFFD);
         } else if (is_invalid_codepoint(num)) {
-            /* maps to the empty string */
+            /* the spec maps these to the empty string, so emit nothing */
         } else {
-            emit(out, o, maxchar, num);
+            emit(out, count, maxchar, num);
         }
-        return d - i;
+        return cursor - amp_index;
     }
 
-    if (!is_name_char(c)) {
-        return 0; /* e.g. "&;", "& ", "&&" */
+    if (!is_name_char(character)) {
+        return 0; /* "&;", "& ", "&&" and similar are literal */
     }
 
-    Py_UCS4 ucs[HTML5_MAX_NAME_LEN];
+    Py_UCS4 name_chars[HTML5_MAX_NAME_LEN];
     char ascii[HTML5_MAX_NAME_LEN + 1];
-    int nlen = 0;
-    Py_ssize_t d = p;
-    while (d < n && nlen < HTML5_MAX_NAME_LEN) {
-        Py_UCS4 x = PyUnicode_READ(kind, data, d);
-        if (!is_name_char(x)) {
+    int name_len = 0;
+    Py_ssize_t cursor = pos;
+    while (cursor < length && name_len < HTML5_MAX_NAME_LEN) {
+        Py_UCS4 candidate = PyUnicode_READ(kind, data, cursor);
+        if (!is_name_char(candidate)) {
             break;
         }
-        ucs[nlen] = x;
-        ascii[nlen] = (x < 128) ? (char)x : (char)0x01; /* 0x01 never matches */
-        nlen++;
-        d++;
+        name_chars[name_len] = candidate;
+        ascii[name_len] = (candidate < 128) ? (char)candidate : (char)0x01; /* 0x01 is never a table entry */
+        name_len++;
+        cursor++;
     }
-    int semi = 0;
-    if (d < n && PyUnicode_READ(kind, data, d) == ';') {
-        ascii[nlen] = ';';
-        semi = 1;
-        d++;
+    int semicolon = 0;
+    if (cursor < length && PyUnicode_READ(kind, data, cursor) == ';') {
+        ascii[name_len] = ';';
+        semicolon = 1;
+        cursor++;
     }
-    int toklen = nlen + semi;
+    int token_len = name_len + semicolon;
 
-    const html5_entity *e = find_entity(ascii, toklen);
-    int matchlen = toklen;
-    if (e == NULL) {
-        for (int x = toklen - 1; x >= 2; x--) {
-            e = find_entity(ascii, x);
-            if (e != NULL) {
-                matchlen = x;
+    const html5_entity *entity = find_entity(ascii, token_len);
+    int match_len = token_len;
+    if (entity == NULL) {
+        for (int prefix = token_len - 1; prefix >= 2; prefix--) {
+            entity = find_entity(ascii, prefix);
+            if (entity != NULL) {
+                match_len = prefix;
                 break;
             }
         }
     }
 
-    if (e == NULL) {
-        emit(out, o, maxchar, '&');
-        for (int k = 0; k < nlen; k++) {
-            emit(out, o, maxchar, ucs[k]);
+    if (entity == NULL) {
+        emit(out, count, maxchar, '&');
+        for (int index = 0; index < name_len; index++) {
+            emit(out, count, maxchar, name_chars[index]);
         }
-        if (semi) {
-            emit(out, o, maxchar, ';');
+        if (semicolon) {
+            emit(out, count, maxchar, ';');
         }
-        return d - i;
+        return cursor - amp_index;
     }
 
-    emit(out, o, maxchar, e->cp0);
-    if (e->cp1) {
-        emit(out, o, maxchar, e->cp1);
+    emit(out, count, maxchar, entity->cp0);
+    if (entity->cp1) {
+        emit(out, count, maxchar, entity->cp1);
     }
-    for (int k = matchlen; k < toklen; k++) {
-        emit(out, o, maxchar, (k < nlen) ? ucs[k] : (Py_UCS4)';');
+    for (int index = match_len; index < token_len; index++) {
+        emit(out, count, maxchar, (index < name_len) ? name_chars[index] : (Py_UCS4)';');
     }
-    return d - i;
+    return cursor - amp_index;
 }
 
 PyObject *turbohtml_unescape(PyObject *Py_UNUSED(module), PyObject *arg) {
@@ -242,49 +241,50 @@ PyObject *turbohtml_unescape(PyObject *Py_UNUSED(module), PyObject *arg) {
         PyErr_SetString(PyExc_TypeError, "unescape() argument must be str");
         return NULL;
     }
-    Py_ssize_t n = PyUnicode_GET_LENGTH(arg);
+    Py_ssize_t length = PyUnicode_GET_LENGTH(arg);
     int kind = PyUnicode_KIND(arg);
     const void *data = PyUnicode_DATA(arg);
 
-    if (PyUnicode_FindChar(arg, '&', 0, n, 1) < 0) {
-        return Py_NewRef(arg); /* no reference; preserve the input object */
+    if (PyUnicode_FindChar(arg, '&', 0, length, 1) < 0) {
+        return Py_NewRef(arg); /* without a '&' there is nothing to resolve; keep the original object */
     }
 
-    /* We only get here after finding '&', so n >= 1; unescape never lengthens
-       the text, so n code points is a safe upper bound for the output. */
-    Py_UCS4 *out = PyMem_New(Py_UCS4, n); /* GCOVR_EXCL_BR_LINE: size-overflow guard unreachable for valid lengths */
-    if (out == NULL) {                    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return PyErr_NoMemory();          /* GCOVR_EXCL_LINE */
+    /* reached only after finding '&', so length >= 1; unescape never lengthens
+       the text, so length code points is a safe upper bound for the output */
+    Py_UCS4 *out =
+        PyMem_New(Py_UCS4, length); /* GCOVR_EXCL_BR_LINE: size-overflow guard unreachable for valid lengths */
+    if (out == NULL) {              /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory();    /* GCOVR_EXCL_LINE */
     }
-    Py_ssize_t o = 0;
+    Py_ssize_t count = 0;
     Py_UCS4 maxchar = 0;
-    Py_ssize_t i = 0;
-    while (i < n) {
-        Py_UCS4 ch = PyUnicode_READ(kind, data, i);
-        if (ch != '&') {
-            emit(out, &o, &maxchar, ch);
-            i++;
+    Py_ssize_t pos = 0;
+    while (pos < length) {
+        Py_UCS4 character = PyUnicode_READ(kind, data, pos);
+        if (character != '&') {
+            emit(out, &count, &maxchar, character);
+            pos++;
             continue;
         }
-        Py_ssize_t consumed = parse_charref(kind, data, n, i, out, &o, &maxchar);
+        Py_ssize_t consumed = parse_charref(kind, data, length, pos, out, &count, &maxchar);
         if (consumed == 0) {
-            emit(out, &o, &maxchar, '&');
-            i++;
+            emit(out, &count, &maxchar, '&');
+            pos++;
         } else {
-            i += consumed;
+            pos += consumed;
         }
     }
 
-    PyObject *res = PyUnicode_New(o, maxchar);
-    if (res == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(out); /* GCOVR_EXCL_LINE */
-        return NULL;     /* GCOVR_EXCL_LINE */
+    PyObject *result = PyUnicode_New(count, maxchar);
+    if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(out);  /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
     }
-    int rkind = PyUnicode_KIND(res);
-    void *rdata = PyUnicode_DATA(res);
-    for (Py_ssize_t k = 0; k < o; k++) {
-        PyUnicode_WRITE(rkind, rdata, k, out[k]);
+    int result_kind = PyUnicode_KIND(result);
+    void *result_data = PyUnicode_DATA(result);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyUnicode_WRITE(result_kind, result_data, index, out[index]);
     }
     PyMem_Free(out);
-    return res;
+    return result;
 }
