@@ -7,11 +7,14 @@ on:
   pull_request:
   schedule:
     - cron: "0 8 * * *"
+
 concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: true
+
 permissions:
   contents: read
+
 jobs:
   test:
     name: 🧪 ${{ matrix.py }} - ${{ matrix.os }}
@@ -37,6 +40,7 @@ jobs:
         env:
           UV_PYTHON_PREFERENCE: only-managed
           COV_GCOV: ${{ startsWith(matrix.os, 'ubuntu') && 'gcov' || 'xcrun llvm-cov gcov' }}
+
   check:
     name: 🔎 ${{ matrix.tox_env }}
     runs-on: ubuntu-24.04

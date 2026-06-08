@@ -1,0 +1,126 @@
+requires = [ "tox>=4.55.1", "tox-uv>=1.35.2" ]
+env_list = [ "3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.14t", "3.15t", "docs", "fix", "pkg_meta", "type" ]
+skip_missing_interpreters = true
+
+[env_run_base]
+description = "run the tests with pytest under {env_name}, measuring Python and C coverage"
+package = "skip"  # we install an instrumented editable build ourselves below
+dependency_groups = [ "test" ]
+pass_env = [ "COV_GCOV", "PYTEST_*" ]
+commands_pre = [
+  [
+    "python",
+    "-c",
+    """\
+  import pathlib; d = pathlib.Path(r'{env_dir}', 'cbuild'); [p.unlink() for p in d.rglob('*.gcda')] if d.exists() else \
+  None\
+  """,
+  ],
+  [
+    "uv",
+    "pip",
+    "install",
+    "--reinstall",
+    "--no-deps",
+    "--no-build-isolation",
+    "--editable",
+    "{tox_root}",
+    "--config-settings=build-dir={env_dir}{/}cbuild",
+    "--config-settings=setup-args=-Dbuildtype=debug",
+    "--config-settings=setup-args=-Db_ndebug=true",
+    "--config-settings=setup-args=-Db_coverage=true",
+  ],
+]
+commands = [
+  [
+    "pytest",
+    "--durations",
+    "10",
+    "--no-cov-on-fail",
+    "--cov",
+    "turbohtml",
+    "--cov",
+    "{tox_root}{/}tests",
+    "--cov-config",
+    "{tox_root}{/}pyproject.toml",
+    "--cov-context",
+    "test",
+    "--cov-report",
+    "term-missing:skip-covered",
+    "--cov-report",
+    "html:{env_tmp_dir}{/}htmlcov",
+    { replace = "posargs", default = [ "tests" ], extend = true },
+  ],
+  [
+    "gcovr",
+    "{env_dir}{/}cbuild",
+    "--root",
+    "{tox_root}",
+    "--filter",
+    "src/turbohtml/.*\\.c",
+    "--gcov-executable",
+    "{env:COV_GCOV}",
+    "--fail-under-line",
+    "100",
+    "--fail-under-branch",
+    "100",
+    "--html-details",
+    "{env_tmp_dir}{/}c_htmlcov.html",
+    "--txt",
+    "-",
+  ],
+]
+
+[env.docs]
+description = "build the documentation"
+dependency_groups = [ "docs" ]
+commands = [
+  [
+    "sphinx-build",
+    "-d",
+    "{env_tmp_dir}{/}docs_tree",
+    "docs",
+    "{env:READTHEDOCS_OUTPUT:{work_dir}{/}docs_out}/html",
+    "--color",
+    "-b",
+    "html",
+    "-W",
+    { replace = "posargs", default = [], extend = true },
+  ],
+  [ "python", "-c", 'print(r"documentation available under file://{work_dir}{/}docs_out{/}html{/}index.html")' ],
+]
+
+[env.fix]
+description = "format and lint the code base"
+skip_install = true
+dependency_groups = [ "fix" ]
+pass_env = [ "PROGRAMDATA" ]
+commands = [ [ "pre-commit", "run", "--all-files", "--show-diff-on-failure", { replace = "posargs", extend = true } ] ]
+
+[env.pkg_meta]
+description = "check that the package metadata is valid"
+skip_install = true
+dependency_groups = [ "pkg-meta" ]
+commands = [
+  [ "uv", "build", "--sdist", "--wheel", "--out-dir", "{env_tmp_dir}", "." ],
+  [ "twine", "check", "{env_tmp_dir}{/}*" ],
+  [ "check-wheel-contents", "--no-config", "{env_tmp_dir}" ],
+]
+
+[env.type]
+description = "run the type checker on the code base"
+dependency_groups = [ "type" ]
+commands = [ [ "ty", "check", "--output-format", "concise", "--error-on-warning", "src", "tests", "tools" ] ]
+
+[env.dev]
+description = "dev environment with all dependencies at {envdir}"
+package = "editable"
+dependency_groups = [ "dev" ]
+commands = [ [ "uv", "pip", "list", "--format=columns" ], [ "python", "-c", 'print(r"{env_python}")' ] ]
+
+[env.regen]
+description = "regenerate src/turbohtml/html_entities.h from the standard library"
+skip_install = true
+commands = [
+  [ "python", "{tox_root}{/}tools{/}generate_html_entities.py", "{tox_root}{/}src{/}turbohtml{/}html_entities.h" ]
+]

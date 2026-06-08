@@ -5,11 +5,14 @@ on:
   push:
     branches: ["main"]
     tags: ["*"]
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
+
 jobs:
   sdist:
     name: 📦 sdist
@@ -31,6 +34,7 @@ jobs:
           name: dist-sdist
           path: dist/*.tar.gz
           retention-days: 7
+
   wheels:
     name: 🎡 wheels - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -51,6 +55,7 @@ jobs:
           name: dist-${{ matrix.os }}
           path: wheelhouse/*.whl
           retention-days: 7
+
   publish:
     name: 🚀 Publish to PyPI
     needs: [sdist, wheels]
@@ -72,4 +77,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           skip-existing: true
-          attestations: true
