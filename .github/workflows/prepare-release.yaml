@@ -1,0 +1,63 @@
+name: 🛠️ Prepare release
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options: [auto, major, minor, patch]
+        default: auto
+permissions:
+  contents: read
+env:
+  FORCE_COLOR: "1"
+jobs:
+  prepare-release:
+    runs-on: ubuntu-24.04
+    environment: release-auth
+    permissions:
+      contents: write # the release script pushes the changelog commit and the tag
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0 # full history so git describe sees the latest tag
+          token: ${{ secrets.RELEASE_PAT }}
+          persist-credentials: true # the PAT is reused to push the release commit and tag
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔧 Configure git
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+      - name: 🔢 Calculate next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          current=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          IFS='.' read -r major minor patch <<< "$current"
+          bump_type="$BUMP"
+          if [ "$bump_type" = "auto" ]; then
+            if [ "$(find docs/changelog -name '*.feature.rst' 2>/dev/null | wc -l)" -gt 0 ]; then
+              bump_type="minor"
+            else
+              bump_type="patch"
+            fi
+          fi
+          case "$bump_type" in
+            major) next="$((major + 1)).0.0" ;;
+            minor) next="$major.$((minor + 1)).0" ;;
+            patch) next="$major.$minor.$((patch + 1))" ;;
+          esac
+          echo "Next version: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+      - name: 🚀 Run the release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: uvx --with tox-uv tox run -e release -- "$VERSION"

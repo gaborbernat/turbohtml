@@ -1,0 +1,59 @@
+name: 🛠️ check
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    tags-ignore: ["**"]
+  pull_request:
+  schedule:
+    - cron: "0 8 * * *"
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  test:
+    name: 🧪 ${{ matrix.py }} - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The test env enforces Python and C coverage (gcov/llvm-cov), so it
+        # runs where those exist; Windows wheels are exercised in release.yaml.
+        os: ["ubuntu-24.04", "macos-15"]
+        py: ["3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.15t", "3.14t"]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: false
+      - name: ✅ Run ${{ matrix.py }}
+        run: uvx --with tox-uv tox run --skip-missing-interpreters false -e ${{ matrix.py }}
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+          COV_GCOV: ${{ startsWith(matrix.os, 'ubuntu') && 'gcov' || 'xcrun llvm-cov gcov' }}
+  check:
+    name: 🔎 ${{ matrix.tox_env }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        tox_env: ["type", "docs", "pkg_meta"]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: false
+      - name: ✅ Run ${{ matrix.tox_env }}
+        run: uvx --with tox-uv tox run -e ${{ matrix.tox_env }}
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
