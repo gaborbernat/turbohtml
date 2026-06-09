@@ -1,3 +1,0 @@
-Document the measured ``escape``/``unescape`` speedups over the standard library in the README and the docs, add a
-reproducible benchmark behind ``tox -e bench``, and give the API reference typed signatures with intersphinx links - by
-:user:`gaborbernat`.

@@ -1,3 +1,0 @@
-Speed up ``escape`` of non-ASCII (UCS-2/UCS-4) text that needs no escaping by probing for special characters with a
-vectorized scan instead of a scalar one, making it several times faster and ahead of :func:`python:html.escape` - by
-:user:`gaborbernat`.

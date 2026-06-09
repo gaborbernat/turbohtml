@@ -1,3 +1,0 @@
-Add C-accelerated :func:`turbohtml.escape` and :func:`turbohtml.unescape`, matching :func:`python:html.escape` and
-:func:`python:html.unescape` byte for byte, with free-threading support and per-interpreter wheels for CPython 3.10
-through 3.15 - by :user:`gaborbernat`.
