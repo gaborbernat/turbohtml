@@ -10,6 +10,74 @@ Escaping and unescaping sit on hot paths: HTML output escaping runs on every ren
 every chunk of text an HTML parser emits. ``turbohtml`` implements both in C so they run several times faster than an
 equivalent pure-Python implementation, with no change in behavior.
 
+Measured on CPython 3.14 (a release build, via ``tox -e bench``) against :func:`python:html.escape` and
+:func:`python:html.unescape`:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 12 34 14 14 12
+
+    - - operation
+      - input
+      - turbohtml
+      - stdlib
+      - speedup
+    - - ``escape``
+      - plain prose, no specials
+      - 0.35 µs
+      - 2.23 µs
+      - 6.3x
+    - - ``escape``
+      - typical HTML markup
+      - 4.49 µs
+      - 10.5 µs
+      - 2.3x
+    - - ``escape``
+      - special-dense
+      - 2.99 µs
+      - 26.5 µs
+      - 8.9x
+    - - ``escape``
+      - non-ASCII prose (UCS-2)
+      - 0.92 µs
+      - 1.88 µs
+      - 2.0x
+    - - ``escape``
+      - astral text (UCS-4)
+      - 2.58 µs
+      - 2.65 µs
+      - 1.0x
+    - - ``unescape``
+      - named references (dense)
+      - 18.1 µs
+      - 70.2 µs
+      - 3.9x
+    - - ``unescape``
+      - numeric references (dense)
+      - 4.16 µs
+      - 76.8 µs
+      - 18.5x
+    - - ``unescape``
+      - mixed named + numeric
+      - 8.03 µs
+      - 35.2 µs
+      - 4.4x
+    - - ``unescape``
+      - prose, sparse references
+      - 3.93 µs
+      - 3.87 µs
+      - ~1x
+    - - ``unescape``
+      - non-ASCII with references
+      - 9.44 µs
+      - 35.2 µs
+      - 3.7x
+
+``escape`` gains the most on text that needs little escaping (the SWAR scan skips eight safe bytes at a time);
+``unescape`` gains the most on entity-heavy input, especially numeric references, where the standard library pays a
+Python call per match. On mostly-plain text ``unescape`` ties :func:`python:html.unescape`, whose regex already
+short-circuits and runs in C. Numbers vary with input and hardware; reproduce them with ``tox -e bench``.
+
 Unlike a standard-library accelerator, ``turbohtml`` ships **only** the compiled implementation. :PEP:`399` requires a
 pure-Python fallback only for the standard library; as a third-party package distributing per-interpreter wheels,
 turbohtml has no need for one, which keeps the surface small.
