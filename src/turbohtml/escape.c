@@ -120,8 +120,21 @@ PyObject *turbohtml_escape(PyObject *Py_UNUSED(module), PyObject *args, PyObject
             extra += escape_extra(input[pos], quote);
         }
     } else {
-        for (Py_ssize_t pos = 0; pos < length; pos++) {
-            extra += escape_extra(PyUnicode_READ(kind, data, pos), quote);
+        // wide strings are rare and the count scan below is scalar, so first use the
+        // vectorized PyUnicode_FindChar to skip it entirely when nothing is special
+        static const Py_UCS4 specials[] = {'&', '<', '>', '"', '\''};
+        Py_ssize_t special_count = quote ? 5 : 3;
+        int has_special = 0;
+        for (Py_ssize_t index = 0; index < special_count; index++) {
+            if (PyUnicode_FindChar(text, specials[index], 0, length, 1) >= 0) {
+                has_special = 1;
+                break;
+            }
+        }
+        if (has_special) {
+            for (Py_ssize_t pos = 0; pos < length; pos++) {
+                extra += escape_extra(PyUnicode_READ(kind, data, pos), quote);
+            }
         }
     }
 
