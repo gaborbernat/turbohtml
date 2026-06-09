@@ -1,0 +1,2 @@
+Automate releases the tox-dev way: git-tag-derived versioning, a towncrier-managed changelog, and a manual
+prepare-release workflow that tags and triggers the trusted-publishing wheel build - by :user:`gaborbernat`.

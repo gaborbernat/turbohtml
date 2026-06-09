@@ -1,0 +1,214 @@
+[build-system]
+build-backend = "mesonpy"
+requires = [
+  "meson>=1.11.1",
+  "meson-python>=0.19",
+  "ninja>=1.13",
+]
+
+[project]
+name = "turbohtml"
+description = "A fast, fully typed HTML toolkit for Python, powered by a C-accelerated core."
+readme = "README.md"
+keywords = [
+  "escape",
+  "html",
+  "html5",
+  "parser",
+  "unescape",
+]
+license = "MIT"
+maintainers = [
+  { name = "Bernát Gábor", email = "gaborjbernat@gmail.com" },
+]
+requires-python = ">=3.10"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Programming Language :: Python :: Free Threading :: 1 - Unstable",
+  "Topic :: Internet",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Text Processing :: Markup :: HTML",
+]
+dynamic = [
+  "version",
+]
+urls.Documentation = "https://turbohtml.readthedocs.io"
+urls.Homepage = "https://github.com/gaborbernat/turbohtml"
+urls.Source = "https://github.com/gaborbernat/turbohtml"
+urls.Tracker = "https://github.com/gaborbernat/turbohtml/issues"
+
+[dependency-groups]
+dev = [
+  { include-group = "coverage" },
+  { include-group = "docs" },
+  { include-group = "fix" },
+  { include-group = "pkg-meta" },
+  { include-group = "release" },
+  { include-group = "test" },
+  { include-group = "type" },
+]
+test = [
+  "covdefaults>=2.3",
+  "meson>=1.11.1",
+  "meson-python>=0.19",
+  "ninja>=1.13",
+  "pytest>=9.0.3",
+  "pytest-cov>=7.1",
+  "pytest-mock>=3.15.1",
+]
+type = [
+  "ty>=0.0.44",
+  { include-group = "test" },
+]
+docs = [
+  "furo>=2025.12.19",
+  "sphinx>=9.1",
+  "sphinx-autodoc-typehints>=3.10.5",
+  "sphinx-copybutton>=0.5.2",
+  "sphinx-issues>=5.0.1",
+  "sphinxcontrib-towncrier>=0.5.0a0",
+  "towncrier>=25.8",
+]
+coverage = [
+  "covdefaults>=2.3",
+  "coverage[toml]>=7.14.1",
+]
+fix = [
+  "pre-commit-uv>=4.2.1",
+]
+pkg-meta = [
+  "check-wheel-contents>=0.6.3",
+  "twine>=6.2",
+  "uv>=0.11.19",
+]
+release = [
+  "gitpython>=3.1.46",
+  "packaging>=26",
+  "pre-commit>=4.5.1",
+  "towncrier>=25.8",
+]
+
+[tool.cibuildwheel]
+# abi3 is impossible here (the SWAR paths need the non-limited PyUnicode buffer
+# APIs), so we ship a wheel per interpreter; cibuildwheel automates the matrix.
+# requires-python bounds the low end; free-threading wheels for 3.14+/3.15+ are
+# built automatically, and cpython-prerelease covers 3.15 while it is in beta.
+enable = [ "cpython-prerelease" ]
+build-frontend = "build[uv]"
+test-command = "python -c \"import turbohtml; assert turbohtml.unescape(turbohtml.escape('a & b')) == 'a & b'\""
+macos.archs = [ "arm64" ]  # Apple silicon only; x86_64 macOS is end-of-life
+windows.archs = [ "AMD64" ]  # 64-bit only; skip the 32-bit x86 build
+# force the MSVC toolchain: meson otherwise picks up MinGW from the runner's PATH
+windows.config-settings.setup-args = "--vsenv"
+
+[tool.ruff]
+line-length = 120
+format.preview = true
+format.docstring-code-line-length = 100
+format.docstring-code-format = true
+lint.select = [
+  "ALL",
+]
+lint.ignore = [
+  "COM812",  # conflicts with the formatter
+  "CPY",     # no copyright statements
+  "D203",    # incompatible with D211
+  "D212",    # incompatible with D213
+  "DOC",     # no support yet
+  "ISC001",  # conflicts with the formatter
+  "PLR2004", # comparing against literal numbers is clear enough on its own
+]
+lint.per-file-ignores."docs/conf.py" = [
+  "INP001", # Sphinx config is not part of a package
+]
+lint.per-file-ignores."tasks/**/*.py" = [
+  "INP001", # no implicit namespace
+  "S404",   # subprocess is required to drive git, gh and towncrier
+  "S603",   # the release script runs fixed git/gh subcommands, not external input
+  "S607",   # git and gh are resolved from PATH
+  "T201",   # progress output to the console is intentional
+]
+lint.per-file-ignores."tests/**/*.py" = [
+  "D",      # don't document tests
+  "INP001", # no implicit namespace
+  "S101",   # asserts allowed in tests
+]
+lint.per-file-ignores."tools/**/*.py" = [
+  "INP001", # no implicit namespace
+  "S404",   # generate_version.py shells out to git to derive the version
+  "S603",   # fixed git subcommands, not external input
+  "S607",   # git is resolved from PATH
+  "T201",   # print allowed in scripts
+]
+lint.isort = { known-first-party = [
+  "turbohtml",
+], required-imports = [
+  "from __future__ import annotations",
+] }
+lint.preview = true
+
+[tool.codespell]
+builtin = "clear,usage,en-GB_to_en-US"
+ignore-words-list = "caf,notin"  # "café" and the &notin; HTML entity trip the checker
+skip = "*/html_entities.h"  # generated table of HTML5 entity names
+count = true
+quiet-level = 3
+
+[tool.pyproject-fmt]
+max_supported_python = "3.15"
+
+[tool.ty]
+src.exclude = [ "tests/html5lib-tests" ]  # vendored conformance suite, not our code
+environment.python-version = "3.15"
+
+[tool.pytest]
+addopts = [
+  "--ignore=tests/html5lib-tests", # vendored conformance data, not our test modules
+]
+filterwarnings = [
+  "error",
+]
+testpaths = [
+  "tests",
+]
+
+[tool.coverage]
+run.parallel = true
+run.plugins = [
+  "covdefaults",
+]
+paths.source = [
+  "src",
+  ".tox/*/lib/*/site-packages",
+  ".tox\\*\\Lib\\site-packages",
+  "**/src",
+  "**\\src",
+]
+html.show_contexts = true
+html.skip_covered = false
+
+[tool.towncrier]
+name = "turbohtml"
+directory = "docs/changelog"
+filename = "docs/changelog.rst"
+template = "docs/changelog/template.jinja2"
+title_format = false
+issue_format = ":issue:`{issue}`"
+type = [
+  { directory = "breaking", name = "Backward incompatible changes", showcontent = true },
+  { directory = "feature", name = "Features", showcontent = true },
+  { directory = "bugfix", name = "Bug fixes", showcontent = true },
+  { directory = "doc", name = "Improved documentation", showcontent = true },
+  { directory = "packaging", name = "Packaging updates", showcontent = true },
+  { directory = "misc", name = "Miscellaneous internal changes", showcontent = true },
+]
