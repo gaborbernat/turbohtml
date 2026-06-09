@@ -7,6 +7,17 @@
 .. towncrier release notes start
 
 *********************
+ v0.1.1 (2026-06-09)
+*********************
+
+Packaging updates - 0.1.1
+=========================
+
+- Publish each wheel artifact in its own job so PEP 740 attestations finish within the Sigstore signing identity's
+  lifetime, fixing the ``sigstore.oidc.ExpiredIdentity`` failure that blocked the first PyPI upload - by
+  :user:`gaborbernat`. (:issue:`4`)
+
+*********************
  v0.1.0 (2026-06-09)
 *********************
 

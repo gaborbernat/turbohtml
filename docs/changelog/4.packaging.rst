@@ -1,3 +1,0 @@
-Publish each wheel artifact in its own job so PEP 740 attestations finish within the Sigstore signing identity's
-lifetime, fixing the ``sigstore.oidc.ExpiredIdentity`` failure that blocked the first PyPI upload - by
-:user:`gaborbernat`.
