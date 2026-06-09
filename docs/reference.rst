@@ -2,11 +2,6 @@
  Reference
 ###########
 
-.. module:: turbohtml
-
-.. autofunction:: escape
-
-.. autofunction:: unescape
-
-.. autodata:: turbohtml.__version__
-    :no-value:
+.. automodule:: turbohtml
+    :members:
+    :special-members: __version__

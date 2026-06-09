@@ -29,6 +29,7 @@ exclude_patterns = ["changelog/*"]
 intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 autodoc_member_order = "bysource"
 nitpicky = True
+always_document_param_types = True
 
 issues_github_path = "tox-dev/turbohtml"
 towncrier_draft_autoversion_mode = "draft"
