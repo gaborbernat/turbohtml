@@ -70,6 +70,11 @@ def test_escape_multiple_kinds(text: str, expected: str) -> None:
     assert turbohtml.escape(text) == expected
 
 
+def test_escape_wide_quote_false() -> None:
+    # the UCS-2/UCS-4 path with quote=False: leaves quotes alone, still escapes & < >
+    assert turbohtml.escape('☃ "x" & <b>', quote=False) == '☃ "x" &amp; &lt;b&gt;'
+
+
 def test_escape_str_subclass_returns_true_str() -> None:
     class StrSubclass(str):  # noqa: FURB189  # subclassing str is the behavior under test
         __slots__ = ()
