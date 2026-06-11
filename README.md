@@ -1,8 +1,8 @@
 # turbohtml
 
 A fast, fully typed HTML toolkit for Python, powered by a C-accelerated core. `turbohtml` provides spec-correct HTML
-escaping and unescaping that match the standard library byte for byte while running several times faster, and it is
-ready for the free-threaded build.
+escaping and unescaping that match the standard library byte for byte, and a WHATWG-conformant streaming tokenizer — all
+several times faster than their pure-Python counterparts and ready for the free-threaded build.
 
 ## Install
 
@@ -40,6 +40,28 @@ references that omit the trailing semicolon):
 `escape` and `unescape` reproduce `html.escape` and `html.unescape` exactly, so turbohtml is a drop-in replacement on
 hot paths.
 
+Tokenize markup into a stream of tokens following the WHATWG tokenization algorithm:
+
+```pycon
+>>> for token in turbohtml.tokenize('<p class="x">Tom &amp; Jerry</p>'):
+...     print(token.type.name, token.tag or token.data, token.attrs)
+START_TAG p [('class', 'x')]
+TEXT Tom & Jerry None
+END_TAG p []
+```
+
+For incremental input, `Tokenizer.feed()` returns the tokens completed by each chunk and `close()` flushes the rest:
+
+```pycon
+>>> tokenizer = turbohtml.Tokenizer()
+>>> [token.tag for token in tokenizer.feed("<div><sp")]
+['div']
+>>> [token.tag for token in tokenizer.feed("an>")]
+['span']
+>>> list(tokenizer.close())
+[]
+```
+
 ## Performance
 
 Measured on CPython 3.14 (release build) against the standard library's `html.escape` / `html.unescape`, via
@@ -62,6 +84,28 @@ Measured on CPython 3.14 (release build) against the standard library's `html.es
 `unescape` gains the most on entity-heavy input, especially numeric references, where the standard library pays a Python
 function call per match. Where the text is mostly plain, `unescape` ties the standard library, whose regex already
 short-circuits and runs in C. Numbers vary with input and hardware; reproduce them with `tox -e bench`.
+
+`tokenize` is compared against the standard library's `html.parser.HTMLParser` (driven with no-op handlers) and
+html5lib's pure-Python tokenizer, over synthetic cases and html5lib's benchmark corpus of real documents (a slice of the
+WHATWG spec source plus web-platform-tests pages of varied sizes):
+
+| input                  | turbohtml | `html.parser` | speedup | html5lib | speedup |
+| ---------------------- | --------- | ------------- | ------- | -------- | ------- |
+| typical markup         | 31.9 µs   | 438 µs        | 13.7×   | 836 µs   | 26×     |
+| text-heavy prose       | 0.87 µs   | 2.9 µs        | 3.3×    | 148 µs   | 171×    |
+| attribute-heavy        | 26.1 µs   | 353 µs        | 13.5×   | 960 µs   | 37×     |
+| script-heavy           | 12.5 µs   | 173 µs        | 13.8×   | 529 µs   | 42×     |
+| entity-heavy           | 33.6 µs   | 219 µs        | 6.5×    | 1283 µs  | 38×     |
+| wpt page (0.6 kB)      | 1.7 µs    | 19.2 µs       | 11.0×   | 54 µs    | 31×     |
+| wpt page (9.6 kB)      | 37.3 µs   | 428 µs        | 11.5×   | 1402 µs  | 38×     |
+| wpt page (92 kB)       | 483 µs    | 4432 µs       | 9.2×    | 9410 µs  | 20×     |
+| wpt page, CJK (124 kB) | 685 µs    | 9047 µs       | 13.2×   | 23136 µs | 34×     |
+| whatwg spec (235 kB)   | 805 µs    | 7954 µs       | 9.9×    | 20328 µs | 25×     |
+
+The state machine is stamped per input storage width (the CPython stringlib trick) and, like html5ever, bulk-scans plain
+text runs instead of dispatching per character, so ASCII documents stay one byte per character end to end. Run scanning
+uses the same SWAR technique as `escape`, so even a document that is almost entirely one text node — `HTMLParser`'s best
+case, a single C regex scan — comes out ahead.
 
 ## Documentation
 

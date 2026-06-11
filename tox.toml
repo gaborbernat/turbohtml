@@ -62,9 +62,10 @@ commands = [
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],
   # enforce 100% C LINE coverage everywhere gcov runs, and 100% BRANCH coverage on
-  # every version except 3.10: its pre-PEP-623 PyUnicode_DATA macro emits a ternary
-  # whose non-compact side PyUnicode_New objects can never take (5 dead branches), so
-  # 3.10 floors at 98%. 3.11+ collapsed that macro to a branchless inline function.
+  # every version except 3.10: its pre-PEP-623 PyUnicode_DATA/READ/WRITE macros emit
+  # ternaries whose non-compact sides PyUnicode_New objects can never take, so 3.10
+  # floors at 97% (gcc counts a few more of these dead branches than llvm). 3.11+
+  # collapsed those macros to branchless inline functions.
   { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [
     "python",
     "-c",
@@ -75,13 +76,13 @@ commands = [
     "--root",
     "{tox_root}",
     "--filter",
-    "src/turbohtml/.*\\.c",
+    "src/turbohtml/.*\\.(c|inc)",
     "--gcov-executable",
     "{env:COV_GCOV:xcrun llvm-cov gcov}",
     "--fail-under-line",
     "100",
     "--fail-under-branch",
-    { replace = "if", condition = "factor['3.10']", then = "98", else = "100" },
+    { replace = "if", condition = "factor['3.10']", then = "97", else = "100" },
     "--html-details",
     "{env_tmp_dir}{/}c_htmlcov.html",
     "--txt",
@@ -115,6 +116,7 @@ description = "format and lint the code base"
 skip_install = true
 dependency_groups = [ "fix" ]
 pass_env = [ "PROGRAMDATA" ]
+commands_pre = []  # drop the instrumented editable install inherited from env_run_base
 commands = [ [ "pre-commit", "run", "--all-files", "--show-diff-on-failure", { replace = "posargs", extend = true } ] ]
 
 [env.pkg_meta]
@@ -134,9 +136,9 @@ dependency_groups = [ "type" ]
 commands = [ [ "ty", "check", "--output-format", "concise", "--error-on-warning", "src", "tests", "tools" ] ]
 
 [env.bench]
-description = "benchmark escape/unescape against the standard library (not run in CI)"
+description = "benchmark escape/unescape/tokenize against the standard library and html5lib (not run in CI)"
 package = "skip"
-dependency_groups = [ "test" ]
+dependency_groups = [ "bench" ]
 commands_pre = [
   [
     "uv",
