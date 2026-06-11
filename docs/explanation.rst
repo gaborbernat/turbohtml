@@ -10,8 +10,10 @@ Escaping and unescaping sit on hot paths: HTML output escaping runs on every ren
 every chunk of text an HTML parser emits. ``turbohtml`` implements both in C so they run several times faster than an
 equivalent pure-Python implementation, with no change in behavior.
 
-Measured on CPython 3.14 (a release build, via ``tox -e bench``) against :func:`python:html.escape` and
-:func:`python:html.unescape`:
+Measured with `pyperf <https://pyperf.readthedocs.io>`_ on CPython 3.14 (a release build, Apple M-series) against
+:func:`python:html.escape` and :func:`python:html.unescape`. The multi-MiB inputs stream well past the CPU caches; the
+book and spec cases are real documents (Project Gutenberg's *War and Peace*, the WHATWG HTML spec source) referenced as
+git submodules. Reproduce with ``tox -e bench``:
 
 .. list-table::
     :header-rows: 1
@@ -23,77 +25,117 @@ Measured on CPython 3.14 (a release build, via ``tox -e bench``) against :func:`
       - stdlib
       - speedup
     - - ``escape``
-      - plain prose, no specials
-      - 0.35 µs
-      - 2.23 µs
-      - 6.3x
+      - tiny plain (64 B)
+      - 0.04 µs
+      - 0.11 µs
+      - 2.9x
     - - ``escape``
-      - typical HTML markup
-      - 4.49 µs
-      - 10.5 µs
-      - 2.3x
+      - medium markup (4 KiB)
+      - 2.38 µs
+      - 8.09 µs
+      - 3.4x
     - - ``escape``
-      - special-dense
-      - 2.99 µs
-      - 26.5 µs
-      - 8.9x
+      - no-op prose (4 MiB)
+      - 0.12 ms
+      - 2.66 ms
+      - 22.2x
     - - ``escape``
-      - non-ASCII prose (UCS-2)
-      - 0.92 µs
-      - 1.88 µs
-      - 2.0x
-    - - ``escape``
-      - astral text (UCS-4)
-      - 2.58 µs
-      - 2.65 µs
-      - 1.0x
-    - - ``unescape``
-      - named references (dense)
-      - 18.1 µs
-      - 70.2 µs
+      - book text (3 MiB)
+      - 0.72 ms
+      - 2.80 ms
       - 3.9x
+    - - ``escape``
+      - book HTML (4 MiB)
+      - 1.35 ms
+      - 4.88 ms
+      - 3.6x
+    - - ``escape``
+      - spec HTML, dense (4 MiB)
+      - 5.27 ms
+      - 13.3 ms
+      - 2.5x
+    - - ``escape``
+      - UCS-2 plain (4 MiB)
+      - 0.74 ms
+      - 2.60 ms
+      - 3.5x
+    - - ``escape``
+      - UCS-2 markup (4 MiB)
+      - 3.44 ms
+      - 11.5 ms
+      - 3.3x
+    - - ``escape``
+      - UCS-4 plain (4 MiB)
+      - 0.97 ms
+      - 5.58 ms
+      - 5.8x
+    - - ``escape``
+      - UCS-4 markup (4 MiB)
+      - 4.08 ms
+      - 20.3 ms
+      - 5.0x
     - - ``unescape``
-      - numeric references (dense)
-      - 4.16 µs
-      - 76.8 µs
-      - 18.5x
+      - tiny plain (64 B)
+      - 0.02 µs
+      - 0.03 µs
+      - 1.3x
     - - ``unescape``
-      - mixed named + numeric
-      - 8.03 µs
-      - 35.2 µs
-      - 4.4x
+      - medium dense refs (4 KiB)
+      - 8.57 µs
+      - 72.5 µs
+      - 8.5x
     - - ``unescape``
-      - prose, sparse references
-      - 3.93 µs
-      - 3.87 µs
-      - ~1x
+      - numeric refs (4 KiB)
+      - 5.24 µs
+      - 81.1 µs
+      - 15.5x
     - - ``unescape``
-      - non-ASCII with references
-      - 9.44 µs
-      - 35.2 µs
-      - 3.7x
+      - book HTML, real refs (4 MiB)
+      - 2.80 ms
+      - 8.96 ms
+      - 3.2x
+    - - ``unescape``
+      - escaped book HTML (5 MiB)
+      - 2.10 ms
+      - 21.2 ms
+      - 10.1x
+    - - ``unescape``
+      - dense refs (4 MiB)
+      - 10.4 ms
+      - 78.5 ms
+      - 7.6x
+    - - ``unescape``
+      - UCS-2 refs (4 MiB)
+      - 2.78 ms
+      - 19.4 ms
+      - 7.0x
 
-``escape`` gains the most on text that needs little escaping (the SWAR scan skips eight safe bytes at a time);
-``unescape`` gains the most on entity-heavy input, especially numeric references, where the standard library pays a
-Python call per match. On mostly-plain text ``unescape`` ties :func:`python:html.unescape`, whose regex already
-short-circuits and runs in C. Numbers vary with input and hardware; reproduce them with ``tox -e bench``.
+``escape`` gains the most on text that needs little escaping (the SIMD scan classifies sixteen bytes at a time and
+copies clean stretches wholesale); ``unescape`` gains the most on entity-heavy input, where the standard library pays a
+Python call per match. The gap is narrowest on tiny strings, where call overhead dominates, and on special-dense markup,
+where both sides spend their time writing replacements. Numbers vary with input and hardware; reproduce them with ``tox
+-e bench``.
 
 Unlike a standard-library accelerator, ``turbohtml`` ships **only** the compiled implementation. :PEP:`399` requires a
 pure-Python fallback only for the standard library; as a third-party package distributing per-interpreter wheels,
 turbohtml has no need for one, which keeps the surface small.
 
-*************************
- Word-at-a-time scanning
-*************************
+**************************
+ Block-at-a-time scanning
+**************************
 
 ``escape`` spends most of its time confirming that a string contains nothing that needs escaping. For one-byte strings
-it scans eight bytes at a time using SWAR ("SIMD within a register"): it loads eight bytes into a 64-bit integer and
-tests every lane for ``&``, ``<``, ``>`` and the quotes with the `has-zero bit trick
-<https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord>`_, advancing eight bytes whenever none match. When
-nothing needs escaping the input is returned unchanged. Wider (UCS-2 / UCS-4) strings — see :PEP:`393` for CPython's
-string representations — fall back to a straightforward scalar scan. This needs the `PyUnicode buffer API
-<https://docs.python.org/3/c-api/unicode.html>`_, which is why turbohtml cannot use the :ref:`Limited API
-<python:stable>`.
+it classifies sixteen bytes at a time with SIMD (on arm64 NEON a single low-nibble table lookup plus one comparison
+matches all five specials at once; on x86-64 SSE2 compares per special; elsewhere a 64-bit SWAR word applies the
+`has-zero bit trick <https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord>`_). The sizing pass turns each
+comparison directly into that special's output growth and sums the block branchlessly; the writing pass converts the
+comparisons into a position bitmask so clean stretches are copied wholesale and only the matched bytes are rewritten.
+When nothing needs escaping the input is returned unchanged. Wider (UCS-2 / UCS-4) strings — see :PEP:`393` for
+CPython's string representations — pack four / two code points into a 64-bit SWAR word and probe all five special
+characters in a single pass. ``unescape`` works the same way in reverse: it hops between ``&`` occurrences (``memchr``
+on one-byte text) and bulk-copies the clean spans between references instead of inspecting every character. This needs
+the `PyUnicode buffer API <https://docs.python.org/3/c-api/unicode.html>`_, which is why turbohtml cannot use the
+:ref:`Limited API <python:stable>`.
 
 *******************************
  Matching the standard library
@@ -160,69 +202,87 @@ of the WHATWG spec source plus web-platform-tests pages of varied sizes):
       - html5lib
       - speedup
     - - typical markup
-      - 47.3 µs
-      - 451 µs
-      - 9.5x
-      - 850 µs
-      - 18x
+      - 30.3 µs
+      - 449 µs
+      - 14.8x
+      - 840 µs
+      - 27.7x
     - - text-heavy prose
-      - 4.5 µs
-      - 2.9 µs
-      - 0.7x
-      - 150 µs
-      - 33x
+      - 0.55 µs
+      - 2.92 µs
+      - 5.3x
+      - 149 µs
+      - 273x
     - - attribute-heavy
-      - 33.5 µs
-      - 315 µs
-      - 9.4x
-      - 846 µs
-      - 25x
+      - 24.7 µs
+      - 330 µs
+      - 13.3x
+      - 837 µs
+      - 33.8x
     - - script-heavy
-      - 18.0 µs
-      - 165 µs
-      - 9.1x
-      - 513 µs
-      - 28x
+      - 13.0 µs
+      - 162 µs
+      - 12.5x
+      - 526 µs
+      - 40.5x
     - - entity-heavy
-      - 34.0 µs
-      - 199 µs
-      - 5.9x
-      - 1240 µs
-      - 36x
-    - - wpt page (0.6 kB)
-      - 2.5 µs
-      - 18.7 µs
-      - 7.5x
-      - 50 µs
-      - 20x
-    - - wpt page (9.6 kB)
-      - 47.7 µs
-      - 380 µs
-      - 8.0x
-      - 1208 µs
-      - 25x
-    - - wpt page (92 kB)
-      - 552 µs
-      - 4178 µs
-      - 7.6x
-      - 9185 µs
-      - 17x
-    - - wpt page, CJK (124 kB)
-      - 890 µs
-      - 9067 µs
-      - 10.2x
-      - 23293 µs
-      - 26x
+      - 22.3 µs
+      - 205 µs
+      - 9.2x
+      - 1246 µs
+      - 55.8x
+    - - wpt tiny (0.6 kB)
+      - 1.60 µs
+      - 18.2 µs
+      - 11.4x
+      - 49 µs
+      - 30.9x
+    - - wpt small (4 kB)
+      - 15.0 µs
+      - 176 µs
+      - 11.8x
+      - 434 µs
+      - 29.0x
+    - - wpt medium (9.6 kB)
+      - 34.9 µs
+      - 376 µs
+      - 10.8x
+      - 1190 µs
+      - 34.1x
+    - - wpt large (92 kB)
+      - 348 µs
+      - 4250 µs
+      - 12.2x
+      - 9311 µs
+      - 26.7x
+    - - wpt CJK (124 kB)
+      - 626 µs
+      - 8926 µs
+      - 14.3x
+      - 22844 µs
+      - 36.5x
     - - whatwg spec (235 kB)
-      - 1167 µs
-      - 8010 µs
-      - 6.9x
-      - 20481 µs
-      - 18x
+      - 701 µs
+      - 7838 µs
+      - 11.2x
+      - 20409 µs
+      - 29.1x
+    - - ecmascript spec (3 MB)
+      - 7.08 ms
+      - 57.9 ms
+      - 8.2x
+      - 192 ms
+      - 27.1x
+    - - whatwg spec source (7.9 MB)
+      - 37.0 ms
+      - 399 ms
+      - 10.8x
+      - 907 ms
+      - 24.5x
 
-The one case the standard library wins — a document that is almost entirely a single text node — is where its regex
-performs one C scan and never really tokenizes; everywhere markup actually appears, the state machine is 5–10x faster.
-Numbers vary with input and hardware; reproduce them with ``tox -e bench``.
+The closest case is a document that is almost entirely a single text node, where the standard library's regex performs
+one C scan and never really tokenizes; everywhere markup actually appears, the state machine is 8-15x faster. Numbers
+vary with input and hardware; reproduce them with ``tox -e bench``.
 
 ****************
  Free-threading

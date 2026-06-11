@@ -1,5 +1,11 @@
 # turbohtml
 
+[![PyPI](https://img.shields.io/pypi/v/turbohtml)](https://pypi.org/project/turbohtml/)
+[![Supported Python versions](https://img.shields.io/pypi/pyversions/turbohtml.svg)](https://pypi.org/project/turbohtml/)
+[![Downloads](https://static.pepy.tech/badge/turbohtml/month)](https://pepy.tech/project/turbohtml)
+[![Documentation status](https://readthedocs.org/projects/turbohtml/badge/?version=latest)](https://turbohtml.readthedocs.io/en/latest/?badge=latest)
+[![check](https://github.com/tox-dev/turbohtml/actions/workflows/check.yaml/badge.svg)](https://github.com/tox-dev/turbohtml/actions/workflows/check.yaml)
+
 A fast, fully typed HTML toolkit for Python, powered by a C-accelerated core. `turbohtml` provides spec-correct HTML
 escaping and unescaping that match the standard library byte for byte, and a WHATWG-conformant streaming tokenizer — all
 several times faster than their pure-Python counterparts and ready for the free-threaded build.
@@ -64,43 +70,56 @@ For incremental input, `Tokenizer.feed()` returns the tokens completed by each c
 
 ## Performance
 
-Measured on CPython 3.14 (release build) against the standard library's `html.escape` / `html.unescape`, via
-`tox -e bench`:
+Measured with [pyperf](https://pyperf.readthedocs.io) on CPython 3.14 (release build, Apple M-series) against the
+standard library's `html.escape` / `html.unescape`. The multi-MiB inputs stream well past the CPU caches; the book and
+spec cases are real documents (Project Gutenberg's *War and Peace*, the WHATWG HTML spec source) pulled in as git
+submodules. Reproduce with `tox -e bench`:
 
-| operation  | input                      | turbohtml | stdlib  | speedup |
-| ---------- | -------------------------- | --------- | ------- | ------- |
-| `escape`   | plain prose, no specials   | 0.35 µs   | 2.23 µs | 6.3×    |
-| `escape`   | typical HTML markup        | 4.49 µs   | 10.5 µs | 2.3×    |
-| `escape`   | special-dense              | 2.99 µs   | 26.5 µs | 8.9×    |
-| `escape`   | non-ASCII prose (UCS-2)    | 0.92 µs   | 1.88 µs | 2.0×    |
-| `escape`   | astral text (UCS-4)        | 2.58 µs   | 2.65 µs | 1.0×    |
-| `unescape` | named references (dense)   | 18.1 µs   | 70.2 µs | 3.9×    |
-| `unescape` | numeric references (dense) | 4.16 µs   | 76.8 µs | 18.5×   |
-| `unescape` | mixed named + numeric      | 8.03 µs   | 35.2 µs | 4.4×    |
-| `unescape` | prose, sparse references   | 3.93 µs   | 3.87 µs | ~1×     |
-| `unescape` | non-ASCII with references  | 9.44 µs   | 35.2 µs | 3.7×    |
+| operation  | input                        | turbohtml | stdlib  | speedup |
+| ---------- | ---------------------------- | --------- | ------- | ------- |
+| `escape`   | tiny plain (64 B)            | 0.04 µs   | 0.11 µs | 2.9×    |
+| `escape`   | medium markup (4 KiB)        | 2.38 µs   | 8.09 µs | 3.4×    |
+| `escape`   | no-op prose (4 MiB)          | 0.12 ms   | 2.66 ms | 22.2×   |
+| `escape`   | book text (3 MiB)            | 0.72 ms   | 2.80 ms | 3.9×    |
+| `escape`   | book HTML (4 MiB)            | 1.35 ms   | 4.88 ms | 3.6×    |
+| `escape`   | spec HTML, dense (4 MiB)     | 5.27 ms   | 13.3 ms | 2.5×    |
+| `escape`   | UCS-2 plain (4 MiB)          | 0.74 ms   | 2.60 ms | 3.5×    |
+| `escape`   | UCS-2 markup (4 MiB)         | 3.44 ms   | 11.5 ms | 3.3×    |
+| `escape`   | UCS-4 plain (4 MiB)          | 0.97 ms   | 5.58 ms | 5.8×    |
+| `escape`   | UCS-4 markup (4 MiB)         | 4.08 ms   | 20.3 ms | 5.0×    |
+| `unescape` | tiny plain (64 B)            | 0.02 µs   | 0.03 µs | 1.3×    |
+| `unescape` | medium dense refs (4 KiB)    | 8.57 µs   | 72.5 µs | 8.5×    |
+| `unescape` | numeric refs (4 KiB)         | 5.24 µs   | 81.1 µs | 15.5×   |
+| `unescape` | book HTML, real refs (4 MiB) | 2.80 ms   | 8.96 ms | 3.2×    |
+| `unescape` | escaped book HTML (5 MiB)    | 2.10 ms   | 21.2 ms | 10.1×   |
+| `unescape` | dense refs (4 MiB)           | 10.4 ms   | 78.5 ms | 7.6×    |
+| `unescape` | UCS-2 refs (4 MiB)           | 2.78 ms   | 19.4 ms | 7.0×    |
 
-`escape` gains the most on text that needs little escaping — the SWAR scan skips eight safe bytes at a time — and
-`unescape` gains the most on entity-heavy input, especially numeric references, where the standard library pays a Python
-function call per match. Where the text is mostly plain, `unescape` ties the standard library, whose regex already
-short-circuits and runs in C. Numbers vary with input and hardware; reproduce them with `tox -e bench`.
+`escape` gains the most on text that needs little escaping — the SIMD scan classifies sixteen bytes at a time and copies
+clean stretches wholesale — and `unescape` gains the most on entity-heavy input, where the standard library pays a
+Python function call per match. The gap is narrowest on tiny strings, where call overhead dominates, and on
+special-dense markup, where both sides spend their time writing replacements. Numbers vary with input and hardware;
+reproduce them with `tox -e bench`.
 
 `tokenize` is compared against the standard library's `html.parser.HTMLParser` (driven with no-op handlers) and
-html5lib's pure-Python tokenizer, over synthetic cases and html5lib's benchmark corpus of real documents (a slice of the
-WHATWG spec source plus web-platform-tests pages of varied sizes):
+html5lib's pure-Python tokenizer, over synthetic cases, html5lib's benchmark corpus of real documents (a slice of the
+WHATWG spec source plus web-platform-tests pages of varied sizes), and two multi-megabyte specifications:
 
-| input                  | turbohtml | `html.parser` | speedup | html5lib | speedup |
-| ---------------------- | --------- | ------------- | ------- | -------- | ------- |
-| typical markup         | 31.9 µs   | 438 µs        | 13.7×   | 836 µs   | 26×     |
-| text-heavy prose       | 0.87 µs   | 2.9 µs        | 3.3×    | 148 µs   | 171×    |
-| attribute-heavy        | 26.1 µs   | 353 µs        | 13.5×   | 960 µs   | 37×     |
-| script-heavy           | 12.5 µs   | 173 µs        | 13.8×   | 529 µs   | 42×     |
-| entity-heavy           | 33.6 µs   | 219 µs        | 6.5×    | 1283 µs  | 38×     |
-| wpt page (0.6 kB)      | 1.7 µs    | 19.2 µs       | 11.0×   | 54 µs    | 31×     |
-| wpt page (9.6 kB)      | 37.3 µs   | 428 µs        | 11.5×   | 1402 µs  | 38×     |
-| wpt page (92 kB)       | 483 µs    | 4432 µs       | 9.2×    | 9410 µs  | 20×     |
-| wpt page, CJK (124 kB) | 685 µs    | 9047 µs       | 13.2×   | 23136 µs | 34×     |
-| whatwg spec (235 kB)   | 805 µs    | 7954 µs       | 9.9×    | 20328 µs | 25×     |
+| input                       | turbohtml | `html.parser` | speedup | html5lib | speedup |
+| --------------------------- | --------- | ------------- | ------- | -------- | ------- |
+| typical markup              | 30.3 µs   | 449 µs        | 14.8×   | 840 µs   | 28×     |
+| text-heavy prose            | 0.55 µs   | 2.9 µs        | 5.3×    | 149 µs   | 273×    |
+| attribute-heavy             | 24.7 µs   | 330 µs        | 13.3×   | 837 µs   | 34×     |
+| script-heavy                | 13.0 µs   | 162 µs        | 12.5×   | 526 µs   | 41×     |
+| entity-heavy                | 22.3 µs   | 205 µs        | 9.2×    | 1246 µs  | 56×     |
+| wpt page (0.6 kB)           | 1.6 µs    | 18.2 µs       | 11.4×   | 49 µs    | 31×     |
+| wpt page (4 kB)             | 15.0 µs   | 176 µs        | 11.8×   | 434 µs   | 29×     |
+| wpt page (9.6 kB)           | 34.9 µs   | 376 µs        | 10.8×   | 1190 µs  | 34×     |
+| wpt page (92 kB)            | 348 µs    | 4250 µs       | 12.2×   | 9311 µs  | 27×     |
+| wpt page, CJK (124 kB)      | 626 µs    | 8926 µs       | 14.3×   | 22844 µs | 37×     |
+| whatwg spec (235 kB)        | 701 µs    | 7838 µs       | 11.2×   | 20409 µs | 29×     |
+| ecmascript spec (3 MB)      | 7.08 ms   | 57.9 ms       | 8.2×    | 192 ms   | 27×     |
+| whatwg spec source (7.9 MB) | 37.0 ms   | 399 ms        | 10.8×   | 907 ms   | 25×     |
 
 The state machine is stamped per input storage width (the CPython stringlib trick) and, like html5ever, bulk-scans plain
 text runs instead of dispatching per character, so ASCII documents stay one byte per character end to end. Run scanning
