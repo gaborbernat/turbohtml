@@ -5,6 +5,8 @@ IndentWidth: 4
 TabWidth: 4
 UseTab: Never
 ColumnLimit: 120
+# Keep gcovr coverage pragmas intact: never reflow or split them across lines.
+CommentPragmas: '^ *GCOVR_EXCL'
 PointerAlignment: Right
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: false

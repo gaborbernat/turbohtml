@@ -30,10 +30,15 @@ import random
 import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pyperf
 
 import turbohtml
+from turbohtml import _html  # noqa: PLC2701  # the benchmark drives the accelerator's private parse hooks directly
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CORPUS_DIR = Path(__file__).parent / "html5lib-python" / "benchmarks" / "data"
 CORPUS_FILES: list[tuple[str, str, str]] = [
@@ -237,6 +242,28 @@ def turbo_tokenize(text: str) -> None:
         pass
 
 
+def turbo_parse(text: str) -> None:
+    """Build (and free) the document tree without serializing it."""
+    _html._parse_only(text)  # noqa: SLF001  # _parse_only is the accelerator's allocate-then-free parse hook
+
+
+def lexbor_parse(payload: bytes) -> None:
+    """Parse the document with lexbor via selectolax."""
+    # selectolax is an optional comparison lib; the local import lets _has_lexbor() detect its absence, and it
+    # ships no type stubs so ty cannot resolve it
+    from selectolax.lexbor import LexborHTMLParser  # noqa: PLC0415  # ty: ignore[unresolved-import]
+
+    LexborHTMLParser(payload)
+
+
+def _has_lexbor() -> bool:
+    try:
+        lexbor_parse(b"")
+    except ImportError:
+        return False
+    return True
+
+
 def stdlib_tokenize(text: str) -> None:
     """Drive the stdlib parser with its default no-op handlers."""
     parser = HTMLParser()
@@ -245,10 +272,9 @@ def stdlib_tokenize(text: str) -> None:
 
 
 def html5lib_tokenize(text: str) -> None:
-    """Drive html5lib's tokenizer; skipped when html5lib is not installed."""
-    from html5lib._tokenizer import (  # noqa: PLC0415, PLC2701  # optional dependency; the tokenizer is internal API
-        HTMLTokenizer,
-    )
+    """Drive html5lib's tokenizer."""
+    # html5lib is an optional comparison lib; the local import lets _has_html5lib() detect its absence
+    from html5lib._tokenizer import HTMLTokenizer  # noqa: PLC0415, PLC2701  # html5lib's tokenizer is internal API
 
     for _ in HTMLTokenizer(text):
         pass
@@ -275,13 +301,39 @@ def _has_html5lib() -> bool:
     return True
 
 
+def run_parse_suite(bench: Callable[[str, object, object], None]) -> list[tuple[str, str]]:
+    """Benchmark whole-document parsing for turbohtml and lexbor; return the cases."""
+    cases = [(name, corpus_text(path, enc)) for name, path, enc in CORPUS_FILES]
+    cases += [(name, large_text(filename, url)) for name, filename, url in LARGE_FILES]
+    has_lexbor = _has_lexbor()
+    for name, arg in cases:
+        bench(f"parse {name} [turbohtml]", turbo_parse, arg)
+        if has_lexbor:
+            bench(f"parse {name} [lexbor]", lexbor_parse, arg.encode())  # lexbor's native input is UTF-8 bytes
+    return cases
+
+
+def print_parse_table(means: dict[str, float], parse_cases: list[tuple[str, str]]) -> None:
+    """Render the turbohtml-vs-lexbor parse throughput table."""
+    if not parse_cases:
+        return
+    print()
+    print(f"{'benchmark':40} {'turbohtml':>12} {'lexbor':>12} {'vs lexbor':>10}")
+    for name, _ in parse_cases:
+        turbo = means[f"parse {name} [turbohtml]"]
+        row = f"{'parse ' + name:40} {turbo * 1e6:9.2f} us"
+        if (lx := means.get(f"parse {name} [lexbor]")) is not None:
+            row += f" {lx * 1e6:9.2f} us {lx / turbo:9.2f}x"
+        print(row)
+
+
 def main() -> None:
     """Run all cases under pyperf and print the speedup table in the parent."""
     runner = pyperf.Runner()
     runner.argparser.add_argument(
         "suites",
         nargs="*",
-        choices=["escape", "unescape", "tokenize", "corpus", []],
+        choices=["escape", "unescape", "tokenize", "corpus", "parse", []],
         help="suites to run (default: all)",
     )
     args = runner.parse_args()
@@ -290,11 +342,11 @@ def main() -> None:
     if args.suites:
         os.environ["TURBOHTML_BENCH_SUITES"] = ",".join(args.suites)
         args.inherit_environ = [*(args.inherit_environ or []), "TURBOHTML_BENCH_SUITES"]
-    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus")
+    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse")
     suites = set(selection.split(","))
     means: dict[str, float] = {}
 
-    def bench(name: str, func: object, arg: str) -> None:
+    def bench(name: str, func: object, arg: object) -> None:
         if (result := runner.bench_func(name, func, arg)) is not None and result.get_nvalue():
             means[name] = result.mean()
 
@@ -312,11 +364,13 @@ def main() -> None:
         bench(f"tokenize {name} [stdlib]", stdlib_tokenize, arg)
         if has_html5lib:
             bench(f"tokenize {name} [html5lib]", html5lib_tokenize, arg)
+    parse_cases = run_parse_suite(bench) if "parse" in suites else []
     if args.worker or not means:
         return
     rows = [(op, name) for op, name, _ in CASES if op in suites]
     rows += [("tokenize", name) for name, _ in tokenize_cases]
     print_table(means, rows)
+    print_parse_table(means, parse_cases)
 
 
 if __name__ == "__main__":

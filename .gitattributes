@@ -1,0 +1,5 @@
+# This is a C extension with no C++; force GitHub Linguist to count headers as C
+# (it otherwise guesses C++ for .h) and keep the generated entity table out of
+# language stats and diffs.
+*.h linguist-language=C
+src/turbohtml/html_entities.h linguist-generated=true

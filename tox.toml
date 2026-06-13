@@ -76,7 +76,7 @@ commands = [
     "--root",
     "{tox_root}",
     "--filter",
-    "src/turbohtml/.*\\.(c|inc)",
+    "src/turbohtml/.*\\.(c|h)",
     "--gcov-executable",
     "{env:COV_GCOV:xcrun llvm-cov gcov}",
     "--fail-under-line",
@@ -161,11 +161,12 @@ dependency_groups = [ "dev" ]
 commands = [ [ "uv", "pip", "list", "--format=columns" ], [ "python", "-c", 'print(r"{env_python}")' ] ]
 
 [env.regen]
-description = "regenerate src/turbohtml/html_entities.h from the standard library"
+description = "regenerate the generated C tables (entities, tag atoms)"
 skip_install = true
 commands_pre = []
 commands = [
   [ "python", "{tox_root}{/}tools{/}generate_html_entities.py", "{tox_root}{/}src{/}turbohtml{/}html_entities.h" ],
+  [ "python", "{tox_root}{/}tools{/}generate_tags.py", "{tox_root}{/}src{/}turbohtml{/}tag_atom.h" ],
 ]
 
 [env.release]

@@ -299,7 +299,7 @@ PyObject *turbohtml_unescape(PyObject *Py_UNUSED(module), PyObject *arg) {
     Py_UCS4 *out =
         PyMem_New(Py_UCS4, length); /* GCOVR_EXCL_BR_LINE: size-overflow guard unreachable for valid lengths */
     if (out == NULL) {              /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return PyErr_NoMemory();    /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory();    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     sink_t sink = {(uint8_t *)out, out, 0, 0, kind != PyUnicode_1BYTE_KIND};
     Py_ssize_t pos = 0;
@@ -340,8 +340,8 @@ PyObject *turbohtml_unescape(PyObject *Py_UNUSED(module), PyObject *arg) {
        emitted, and everything above 0xFFFF lands in the same PyUnicode_New bin */
     PyObject *result = PyUnicode_New(count, seen > 0xFFFF ? 0x10FFFF : seen);
     if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(out);  /* GCOVR_EXCL_LINE */
-        return NULL;      /* GCOVR_EXCL_LINE */
+        PyMem_Free(out);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     void *result_data = PyUnicode_DATA(result);
     switch (PyUnicode_KIND(result)) {

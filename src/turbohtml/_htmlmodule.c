@@ -3,8 +3,8 @@
    escape()/unescape() are stateless string functions (escape.c, unescape.c).
    The tokenizer adds the Token and Tokenizer types plus tokenize(); those heap
    types live in per-module state so the module supports sub-interpreters and
-   the free-threaded build. Only public, version-portable APIs are used, so the
-   same sources build on CPython 3.10 through 3.15. */
+   the free-threaded build. These sources use only public, version-portable
+   APIs, so they build on CPython 3.10 through 3.15. */
 
 #include "turbohtml.h"
 
@@ -23,20 +23,39 @@ PyDoc_STRVAR(tokenize_doc, "tokenize(s, /)\n--\n\n"
                            "Tokenize a whole HTML string, returning an iterator of Token objects\n"
                            "following the WHATWG tokenization algorithm.");
 
+PyDoc_STRVAR(parse_doc, "parse(html, /)\n--\n\n"
+                        "Parse a whole HTML document with the WHATWG tree-construction algorithm\n"
+                        "and return a navigable Document.");
+
+PyDoc_STRVAR(parse_fragment_doc, "parse_fragment(html, context='div')\n--\n\n"
+                                 "Parse an HTML fragment as the innerHTML of a context element and return\n"
+                                 "that context Element with the parsed nodes as its children. context is a\n"
+                                 "tag name, optionally namespaced (e.g. 'td', 'svg path').");
+
 static PyMethodDef html_methods[] = {
     {"escape", (PyCFunction)(void (*)(void))turbohtml_escape, METH_VARARGS | METH_KEYWORDS, escape_doc},
     {"unescape", turbohtml_unescape, METH_O, unescape_doc},
     {"tokenize", turbohtml_tokenize, METH_O, tokenize_doc},
+    {"parse", turbohtml_parse, METH_O, parse_doc},
+    {"parse_fragment", (PyCFunction)(void (*)(void))turbohtml_tree_parse_fragment, METH_VARARGS | METH_KEYWORDS,
+     parse_fragment_doc},
     {"_tokenize_states", turbohtml_tokenize_states, METH_VARARGS, NULL},
+    {"_parse_tree", turbohtml_parse_tree, METH_O, NULL},
+    {"_parse_fragment", turbohtml_parse_fragment, METH_VARARGS, NULL},
+    {"_parse_only", turbohtml_parse_only, METH_O, NULL},
     {NULL, NULL, 0, NULL},
 };
 
 static int html_exec(PyObject *module) {
     module_state *state = PyModule_GetState(module);
-    if (token_register(module, state) < 0) { /* GCOVR_EXCL_BR_LINE */
-        return -1;                           /* GCOVR_EXCL_LINE */
+    if (token_register(module, state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return tokenizer_register(module, state);
+    /* allocation failure cannot be forced from a test */
+    if (tokenizer_register(module, state) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return tree_register(module, state);
 }
 
 static int html_traverse(PyObject *module, visitproc visit, void *arg) {
@@ -46,8 +65,20 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     Py_VISIT(state->tokenizer_type); /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->iter_type);      /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->kind_enum);      /* GCOVR_EXCL_BR_LINE: same */
-    for (int i = 0; i < 5; i++) {
-        Py_VISIT(state->kinds[i]); /* GCOVR_EXCL_BR_LINE: same */
+    for (int index = 0; index < 5; index++) {
+        Py_VISIT(state->kinds[index]); /* GCOVR_EXCL_BR_LINE: same */
+    }
+    Py_VISIT(state->node_type);      /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_type);   /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->text_type);      /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->comment_type);   /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->doctype_type);   /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->document_type);  /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->handle_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->walker_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->namespace_enum); /* GCOVR_EXCL_BR_LINE: same */
+    for (int index = 0; index < 3; index++) {
+        Py_VISIT(state->namespaces[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
     return 0;
 }
@@ -58,8 +89,20 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->tokenizer_type);
     Py_CLEAR(state->iter_type);
     Py_CLEAR(state->kind_enum);
-    for (int i = 0; i < 5; i++) {
-        Py_CLEAR(state->kinds[i]);
+    for (int index = 0; index < 5; index++) {
+        Py_CLEAR(state->kinds[index]);
+    }
+    Py_CLEAR(state->node_type);
+    Py_CLEAR(state->element_type);
+    Py_CLEAR(state->text_type);
+    Py_CLEAR(state->comment_type);
+    Py_CLEAR(state->doctype_type);
+    Py_CLEAR(state->document_type);
+    Py_CLEAR(state->handle_type);
+    Py_CLEAR(state->walker_type);
+    Py_CLEAR(state->namespace_enum);
+    for (int index = 0; index < 3; index++) {
+        Py_CLEAR(state->namespaces[index]);
     }
     return 0;
 }
@@ -91,6 +134,7 @@ static struct PyModuleDef htmlmodule = {
     .m_free = html_free,
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage): the module init must be exported under this exact name
 PyMODINIT_FUNC PyInit__html(void) {
     return PyModuleDef_Init(&htmlmodule);
 }

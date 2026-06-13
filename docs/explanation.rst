@@ -284,6 +284,41 @@ The closest case is a document that is almost entirely a single text node, where
 one C scan and never really tokenizes; everywhere markup actually appears, the state machine is 8-15x faster. Numbers
 vary with input and hardware; reproduce them with ``tox -e bench``.
 
+*********************************
+ A navigable tree without copies
+*********************************
+
+:func:`turbohtml.parse` runs the full `WHATWG tree-construction algorithm
+<https://html.spec.whatwg.org/multipage/parsing.html#tree-construction>`_ on top of the tokenizer — the insertion modes,
+the adoption agency, foreign content, and the error recovery a browser performs — and is validated against the same
+`html5lib-tests <https://github.com/html5lib/html5lib-tests>`_ tree-construction suite browsers use. The result is the
+tree a browser would build for the same bytes, not a best-effort approximation.
+
+The tree is built in C as a pointer-linked node graph in a single bump-allocated arena — the layout every fast parser
+(lexbor, Go's ``x/net/html``, html5ever) converges on — and it holds **no Python objects**. Element identity is an
+interned integer atom, so every scope and category test in the algorithm is an integer compare rather than a string
+comparison, and freeing the whole tree is one release of the arena rather than a per-node teardown.
+
+The Python :class:`~turbohtml.Node` objects are created lazily, only for the nodes you actually touch. Walking into a
+child or sibling allocates one small wrapper that points at the existing arena node; it never copies the subtree. Text
+payloads go further: a text node borrows a slice of the original input string and is materialized into its own buffer
+only when you first read its :attr:`~turbohtml.Node.text` or :attr:`~turbohtml.Text.data`. A private handle keeps the
+arena and the input string alive for exactly as long as any node reachable from them, so a node extracted from a
+document keeps working after the document itself goes out of scope. Building the navigable :class:`~turbohtml.Document`
+therefore costs essentially the same as building the raw C tree — the wrappers are pay-as-you-go.
+
+The node types are a small sealed hierarchy — :class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
+:class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype` — sharing the navigation defined on
+:class:`~turbohtml.Node`. Text is modeled as real child nodes (the WHATWG DOM shape), not the ``.text``/``.tail`` split
+that lxml-style trees use, so a node's children are its text runs and elements interleaved in document order. Each type
+sets ``__match_args__``, so structural pattern matching unpacks a node's defining field directly, and node equality is
+identity over the underlying arena node, so two wrappers for the same element compare equal and hash alike.
+
+The traversal surface is deliberately small for this first increment: navigation (parents, siblings, the lazy
+:attr:`~turbohtml.Node.descendants` and :attr:`~turbohtml.Node.ancestors` iterators), the sequence protocol over a
+node's children, and :meth:`~turbohtml.Node.find` / :meth:`~turbohtml.Node.find_all` by tag and attributes. A
+CSS-selector engine is a planned follow-up; the zero-copy node model is the foundation it will build on.
+
 ****************
  Free-threading
 ****************

@@ -1,10 +1,10 @@
 /* The Token type and the TokenType enum.
 
-   A Token owns a copy of the state machine's emitted record (the machine reuses
-   its records, so the copy is what keeps a token valid after iteration moves
-   on). The Python-visible values — the tag name, the text, the attribute list —
-   are built lazily on attribute access, so a token the caller inspects only to
-   check its kind never pays for building a string or a list. */
+   A Token copies the state machine's emitted record because the machine reuses
+   its records, and the copy keeps a token valid after iteration moves on. The
+   Python-visible values (tag name, text, attribute list) build lazily on
+   attribute access, so inspecting only a token's kind never pays to build a
+   string or a list. */
 
 #include "tokenizer_py.h"
 
@@ -49,14 +49,14 @@ static char *token_pack(th_token *dst, const th_token *src) {
     /* each buffer may need up to kind - 1 padding bytes for alignment */
     Py_ssize_t total = src->attr_count * (Py_ssize_t)sizeof(th_attr) + src->name.len * src->name.kind +
                        src->text.len * src->text.kind + src->public_id.len * src->public_id.kind +
-                       src->system_id.len * src->system_id.kind + 4 * 3;
-    for (Py_ssize_t i = 0; i < src->attr_count; i++) {
-        total += src->attrs[i].name.len * src->attrs[i].name.kind + src->attrs[i].value.len * src->attrs[i].value.kind +
-                 2 * 3;
+                       src->system_id.len * src->system_id.kind + (Py_ssize_t)4 * 3;
+    for (Py_ssize_t index = 0; index < src->attr_count; index++) {
+        total += src->attrs[index].name.len * src->attrs[index].name.kind +
+                 src->attrs[index].value.len * src->attrs[index].value.kind + (Py_ssize_t)2 * 3;
     }
     char *arena = PyMem_Malloc((size_t)total + 1);
     if (arena == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;     /* GCOVR_EXCL_LINE */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     *dst = *src;
     dst->attr_cap = src->attr_count;
@@ -65,14 +65,14 @@ static char *token_pack(th_token *dst, const th_token *src) {
     cursor += src->attr_count * (Py_ssize_t)sizeof(th_attr);
     const th_buf *from[4] = {&src->name, &src->text, &src->public_id, &src->system_id};
     th_buf *into[4] = {&dst->name, &dst->text, &dst->public_id, &dst->system_id};
-    for (int i = 0; i < 4; i++) {
-        cursor = pack_buf(into[i], from[i], cursor);
+    for (int index = 0; index < 4; index++) {
+        cursor = pack_buf(into[index], from[index], cursor);
     }
-    for (Py_ssize_t i = 0; i < src->attr_count; i++) {
-        th_attr *attr = &dst->attrs[i];
-        attr->has_value = src->attrs[i].has_value;
-        cursor = pack_buf(&attr->name, &src->attrs[i].name, cursor);
-        cursor = pack_buf(&attr->value, &src->attrs[i].value, cursor);
+    for (Py_ssize_t index = 0; index < src->attr_count; index++) {
+        th_attr *attr = &dst->attrs[index];
+        attr->has_value = src->attrs[index].has_value;
+        cursor = pack_buf(&attr->name, &src->attrs[index].name, cursor);
+        cursor = pack_buf(&attr->value, &src->attrs[index].value, cursor);
     }
     return arena;
 }
@@ -80,8 +80,8 @@ static char *token_pack(th_token *dst, const th_token *src) {
 PyObject *token_from_record(module_state *state, const th_tokenizer *sm, PyObject *source, th_token *record) {
     PyTypeObject *type = (PyTypeObject *)state->token_type;
     TokenObject *self = (TokenObject *)type->tp_alloc(type, 0);
-    if (self == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return NULL;    /* GCOVR_EXCL_LINE */
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (record->is_slice) {
         /* the run is a span of the machine's input, so no intermediate buffer
@@ -102,8 +102,8 @@ PyObject *token_from_record(module_state *state, const th_tokenizer *sm, PyObjec
             const char *data = th_tok_input_data(sm, &kind);
             self->data_str = PyUnicode_FromKindAndData(kind, data + record->src_start * kind, record->src_len);
             if (self->data_str == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                Py_DECREF(self);          /* GCOVR_EXCL_LINE */
-                return NULL;              /* GCOVR_EXCL_LINE */
+                Py_DECREF(self);          /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
             }
         }
     } else if (record->kind == TH_TEXT && record->text.len >= 512) {
@@ -117,9 +117,12 @@ PyObject *token_from_record(module_state *state, const th_tokenizer *sm, PyObjec
         record->text.data = NULL;
         record->text.len = 0;
         record->text.cap = 0;
-    } else if ((self->arena = token_pack(&self->record, record)) == NULL) { /* GCOVR_EXCL_BR_LINE */
-        Py_DECREF(self);                                                    /* GCOVR_EXCL_LINE */
-        return PyErr_NoMemory();                                            /* GCOVR_EXCL_LINE */
+    } else {
+        self->arena = token_pack(&self->record, record);
+        if (self->arena == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(self);         /* GCOVR_EXCL_LINE: alloc-failure path */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: alloc-failure path */
+        }
     }
     return (PyObject *)self;
 }
@@ -156,7 +159,7 @@ static PyObject *token_get_data(PyObject *self, void *Py_UNUSED(closure)) {
         token->data_str = PyUnicode_Substring(token->source, token->record.src_start,
                                               token->record.src_start + token->record.src_len);
         if (token->data_str == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;               /* GCOVR_EXCL_LINE */
+            return NULL;               /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         return Py_NewRef(token->data_str);
     }
@@ -182,14 +185,14 @@ static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
         Py_RETURN_NONE;
     }
     PyObject *list = PyList_New(0);
-    if (list == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return NULL;    /* GCOVR_EXCL_LINE */
+    if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    for (Py_ssize_t i = 0; i < record->attr_count; i++) {
-        const th_attr *attr = &record->attrs[i];
+    for (Py_ssize_t index = 0; index < record->attr_count; index++) {
+        const th_attr *attr = &record->attrs[index];
         int duplicate = 0;
-        for (Py_ssize_t j = 0; j < i; j++) {
-            const th_attr *prior = &record->attrs[j];
+        for (Py_ssize_t prior_index = 0; prior_index < index; prior_index++) {
+            const th_attr *prior = &record->attrs[prior_index];
             if (prior->name.len == attr->name.len && prior->name.kind == attr->name.kind &&
                 memcmp(prior->name.data, attr->name.data, (size_t)(attr->name.len * attr->name.kind)) == 0) {
                 duplicate = 1;
@@ -201,19 +204,20 @@ static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
         }
         PyObject *name = buf_to_str(&attr->name);
         PyObject *value = attr->has_value ? buf_to_str(&attr->value) : Py_NewRef(Py_None);
-        if (name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(name);                /* GCOVR_EXCL_LINE */
-            Py_XDECREF(value);               /* GCOVR_EXCL_LINE */
-            Py_DECREF(list);                 /* GCOVR_EXCL_LINE */
-            return NULL;                     /* GCOVR_EXCL_LINE */
+        if (name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_XDECREF(name);                /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(value);               /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_DECREF(list);                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         PyObject *pair = PyTuple_Pack(2, name, value);
         Py_DECREF(name);
         Py_DECREF(value);
+        /* allocation failure cannot be forced from a test */
         if (pair == NULL || PyList_Append(list, pair) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(pair);                                /* GCOVR_EXCL_LINE */
-            Py_DECREF(list);                                 /* GCOVR_EXCL_LINE */
-            return NULL;                                     /* GCOVR_EXCL_LINE */
+            Py_XDECREF(pair);                                /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_DECREF(list);                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         Py_DECREF(pair);
     }
@@ -292,14 +296,15 @@ static PyObject *token_attr(PyObject *self, PyObject *args) {
     }
     const th_token *record = &((TokenObject *)self)->record;
     if (is_tag(record)) {
-        for (Py_ssize_t i = 0; i < record->attr_count; i++) {
-            const th_attr *attr = &record->attrs[i];
+        for (Py_ssize_t index = 0; index < record->attr_count; index++) {
+            const th_attr *attr = &record->attrs[index];
             if (attr->name.len != name_len) {
                 continue;
             }
             int match = 1;
-            for (Py_ssize_t j = 0; j < name_len; j++) {
-                if (PyUnicode_READ(attr->name.kind, attr->name.data, j) != (Py_UCS4)(unsigned char)name[j]) {
+            for (Py_ssize_t char_index = 0; char_index < name_len; char_index++) {
+                if (PyUnicode_READ(attr->name.kind, attr->name.data, char_index) !=
+                    (Py_UCS4)(unsigned char)name[char_index]) {
                     match = 0;
                     break;
                 }
@@ -317,8 +322,8 @@ static PyObject *token_repr(PyObject *self) {
     const char *kind = KIND_NAMES[record->kind];
     if (is_tag(record)) {
         PyObject *name = buf_to_str(&record->name);
-        if (name == NULL) { /* GCOVR_EXCL_BR_LINE */
-            return NULL;    /* GCOVR_EXCL_LINE */
+        if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         PyObject *repr = PyUnicode_FromFormat("Token(%s, tag=%R)", kind, name);
         Py_DECREF(name);
@@ -326,16 +331,16 @@ static PyObject *token_repr(PyObject *self) {
     }
     if (record->kind == TH_DOCTYPE) {
         PyObject *name = buf_to_str(&record->name);
-        if (name == NULL) { /* GCOVR_EXCL_BR_LINE */
-            return NULL;    /* GCOVR_EXCL_LINE */
+        if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         PyObject *repr = PyUnicode_FromFormat("Token(DOCTYPE, name=%R)", name);
         Py_DECREF(name);
         return repr;
     }
     PyObject *data = token_get_data(self, NULL);
-    if (data == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return NULL;    /* GCOVR_EXCL_LINE */
+    if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *repr = PyUnicode_FromFormat("Token(%s, data=%R)", kind, data);
     Py_DECREF(data);
@@ -367,28 +372,29 @@ static PyType_Spec token_spec = {
 /* Build the TokenType IntEnum and cache its members for fast Token.type. */
 static int build_kind_enum(PyObject *module, module_state *state) {
     PyObject *members = PyDict_New();
-    if (members == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return -1;         /* GCOVR_EXCL_LINE */
+    if (members == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    for (int i = 0; i < 5; i++) {
-        PyObject *value = PyLong_FromLong(i);
-        if (value == NULL || PyDict_SetItemString(members, KIND_NAMES[i], value) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(value);                                                          /* GCOVR_EXCL_LINE */
-            Py_DECREF(members);                                                         /* GCOVR_EXCL_LINE */
-            return -1;                                                                  /* GCOVR_EXCL_LINE */
+    for (int index = 0; index < 5; index++) {
+        PyObject *value = PyLong_FromLong(index);
+        /* allocation failure cannot be forced from a test */
+        if (value == NULL || PyDict_SetItemString(members, KIND_NAMES[index], value) < 0) { /* GCOVR_EXCL_BR_LINE */
+            Py_XDECREF(value);  /* GCOVR_EXCL_LINE: alloc-failure path */
+            Py_DECREF(members); /* GCOVR_EXCL_LINE: alloc-failure path */
+            return -1;          /* GCOVR_EXCL_LINE: alloc-failure path */
         }
         Py_DECREF(value);
     }
     PyObject *enum_module = PyImport_ImportModule("enum");
-    if (enum_module == NULL) { /* GCOVR_EXCL_BR_LINE */
-        Py_DECREF(members);    /* GCOVR_EXCL_LINE */
-        return -1;             /* GCOVR_EXCL_LINE */
+    if (enum_module == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(members);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *int_enum = PyObject_GetAttrString(enum_module, "IntEnum");
     Py_DECREF(enum_module);
-    if (int_enum == NULL) { /* GCOVR_EXCL_BR_LINE */
-        Py_DECREF(members); /* GCOVR_EXCL_LINE */
-        return -1;          /* GCOVR_EXCL_LINE */
+    if (int_enum == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(members); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *args = Py_BuildValue("(sO)", "TokenType", members);
     Py_DECREF(members);
@@ -400,21 +406,22 @@ static int build_kind_enum(PyObject *module, module_state *state) {
     Py_DECREF(int_enum);
     Py_XDECREF(args);
     Py_XDECREF(kwargs);
-    if (kind_enum == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return -1;           /* GCOVR_EXCL_LINE */
+    if (kind_enum == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *doc = PyUnicode_FromString("The kind of a Token; selects which of its attributes are meaningful.");
+    /* allocation failure cannot be forced from a test */
     if (doc == NULL || PyObject_SetAttrString(kind_enum, "__doc__", doc) < 0) { /* GCOVR_EXCL_BR_LINE */
-        Py_XDECREF(doc);                                                        /* GCOVR_EXCL_LINE */
-        Py_DECREF(kind_enum);                                                   /* GCOVR_EXCL_LINE */
-        return -1;                                                              /* GCOVR_EXCL_LINE */
+        Py_XDECREF(doc);      /* GCOVR_EXCL_LINE: alloc-failure path */
+        Py_DECREF(kind_enum); /* GCOVR_EXCL_LINE: alloc-failure path */
+        return -1;            /* GCOVR_EXCL_LINE: alloc-failure path */
     }
     Py_DECREF(doc);
-    for (int i = 0; i < 5; i++) {
-        state->kinds[i] = PyObject_GetAttrString(kind_enum, KIND_NAMES[i]);
-        if (state->kinds[i] == NULL) { /* GCOVR_EXCL_BR_LINE */
-            Py_DECREF(kind_enum);      /* GCOVR_EXCL_LINE */
-            return -1;                 /* GCOVR_EXCL_LINE */
+    for (int index = 0; index < 5; index++) {
+        state->kinds[index] = PyObject_GetAttrString(kind_enum, KIND_NAMES[index]);
+        if (state->kinds[index] == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(kind_enum);          /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
     state->kind_enum = kind_enum;
@@ -422,12 +429,12 @@ static int build_kind_enum(PyObject *module, module_state *state) {
 }
 
 int token_register(PyObject *module, module_state *state) {
-    if (build_kind_enum(module, state) < 0) { /* GCOVR_EXCL_BR_LINE */
-        return -1;                            /* GCOVR_EXCL_LINE */
+    if (build_kind_enum(module, state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                            /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->token_type = PyType_FromModuleAndSpec(module, &token_spec, NULL);
-    if (state->token_type == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return -1;                   /* GCOVR_EXCL_LINE */
+    if (state->token_type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return PyModule_AddObjectRef(module, "Token", state->token_type);
 }

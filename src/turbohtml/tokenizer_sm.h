@@ -1,4 +1,4 @@
-/* WHATWG HTML tokenizer state machine — pure C, no Python objects.
+/* WHATWG HTML tokenizer state machine: pure C, no Python objects.
 
    This file is the algorithm. It reads code points from an internal buffer and
    emits token records through a small queue; it never creates PyObjects (only
@@ -104,6 +104,11 @@ void th_tok_widen_input(th_tokenizer *self, int kind);
    element's contents tokenize correctly; the spec assigns this to tree
    construction, which the state machine itself does not perform. */
 void th_tok_switch(th_tokenizer *self, enum th_initial_state state);
+
+/* Tell the tokenizer whether <![CDATA[ opens a real CDATA section (the
+   adjusted current node is a foreign element) or a bogus comment. The tree
+   builder updates this before pulling each token. */
+void th_tok_set_cdata(th_tokenizer *self, int allowed);
 
 /* Append code points read from a unicode object's storage. An allocation
    failure is reported by the next th_tok_next call as TH_STEP_ERROR. */

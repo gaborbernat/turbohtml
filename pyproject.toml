@@ -169,8 +169,8 @@ lint.preview = true
 
 [tool.codespell]
 builtin = "clear,usage,en-GB_to_en-US"
-ignore-words-list = "caf,notin"  # "café" and the &notin; HTML entity trip the checker
-skip = "*/html_entities.h"  # generated table of HTML5 entity names
+ignore-words-list = "caf,notin,afe"  # café, the &notin; entity, and afe (active formatting elements)
+skip = "*/html_entities.h,*/tag_atom.h"  # generated tables of HTML5 entity / element names
 count = true
 quiet-level = 3
 
