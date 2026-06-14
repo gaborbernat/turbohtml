@@ -33,10 +33,9 @@ static inline Py_ssize_t escape_extra(Py_UCS4 character, int quote) {
     case '<':
     case '>':
         return 3; /* "&lt;" / "&gt;" */
-    case '"':
-        return quote ? 5 : 0; /* "&quot;" */
-    case '\'':
-        return quote ? 5 : 0; /* "&#x27;" */
+    case '"':     /* "&quot;" */
+    case '\'':    /* "&#x27;" */
+        return quote ? 5 : 0;
     default:
         return 0;
     }
@@ -332,7 +331,7 @@ PyObject *turbohtml_escape(PyObject *Py_UNUSED(module), PyObject *args, PyObject
     Py_UCS4 maxchar = PyUnicode_MAX_CHAR_VALUE(text);
     PyObject *out = PyUnicode_New(length + extra, maxchar);
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;   /* GCOVR_EXCL_LINE */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int out_kind = PyUnicode_KIND(out);
     void *out_data = PyUnicode_DATA(out);

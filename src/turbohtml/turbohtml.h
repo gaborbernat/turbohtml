@@ -23,6 +23,13 @@ PyObject *turbohtml_unescape(PyObject *module, PyObject *arg);
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg);
 PyObject *turbohtml_tokenize_states(PyObject *module, PyObject *args);
 
+/* Implemented in treebuilder_py.c. The internal conformance hooks _parse_tree
+   and _parse_fragment return the html5lib "#document" serialization of a parsed
+   document / innerHTML fragment. */
+PyObject *turbohtml_parse_tree(PyObject *module, PyObject *arg);
+PyObject *turbohtml_parse_fragment(PyObject *module, PyObject *args);
+PyObject *turbohtml_parse_only(PyObject *module, PyObject *arg);
+
 /* SWAR lane probes over a 64-bit word holding four UCS-2 / two UCS-4 code
    points. The has-zero test is exact as an existence test: the subtraction can
    only borrow across a lane when that lane itself is zero, so the mask is

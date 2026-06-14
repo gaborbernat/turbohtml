@@ -1,0 +1,16 @@
+# clang-tidy for the C extension. We enable the deterministic, low-false-positive
+# diagnostic families — bug patterns, performance, portability — and turn every
+# remaining warning into an error so the gate is binary.
+#
+# Disabled sub-checks are either opinionated style (easily-swappable-parameters,
+# assignment-in-if-condition), inherent to the Python C API (reserved-identifier
+# for the _Py* names, multi-level-implicit-pointer-conversion for PyObject casts),
+# or noisy in C (narrowing-conversions). The clang-analyzer whole-program dataflow
+# family is intentionally left out of this gate: it false-positives on the
+# generated tag table and the width-tagged th_buf union, and is better run as a
+# separate scan-build pass.
+Checks: >
+  -*, bugprone-*, performance-*, portability-*, -bugprone-easily-swappable-parameters, -bugprone-reserved-identifier, -bugprone-multi-level-implicit-pointer-conversion, -bugprone-narrowing-conversions, -bugprone-assignment-in-if-condition
+
+WarningsAsErrors: "*"
+HeaderFilterRegex: "src/turbohtml/[^/]*\\.h$"

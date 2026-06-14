@@ -1,0 +1,348 @@
+"""Tree-builder paths the html5lib suite does not reach.
+
+The conformance suite is ASCII and document-shaped, so it never drives the
+private C hooks, the quirks-doctype edge identifiers, several fragment-context
+reset paths, the selectedcontent cloning corners, or the zero-copy text-span
+fallbacks. These target those directly through the private _html entry points.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+from turbohtml import _html
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def _doc(html: str) -> str:
+    return _html._parse_tree(html).rstrip("\n")
+
+
+def _frag(html: str, context: str) -> str:
+    return _html._parse_fragment(html, context).rstrip("\n")
+
+
+def test_parse_only_returns_none() -> None:
+    assert _html._parse_only("<html><body><p>hi & bye</p>") is None
+
+
+@pytest.mark.parametrize(
+    ("call"),
+    [
+        # bytes on purpose: the stub types these str-only (correct for real use), so ty flags the deliberate
+        # misuse; suppress rather than widen the stub, which would drop the very rejection this test asserts.
+        pytest.param(lambda: _html._parse_tree(b"x"), id="parse_tree"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(lambda: _html._parse_only(b"x"), id="parse_only"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(lambda: _html._parse_fragment(b"x", "div"), id="parse_fragment"),  # ty: ignore[invalid-argument-type]  # non-str
+    ],
+)
+def test_hooks_reject_non_str(call: Callable[[], object]) -> None:
+    with pytest.raises(TypeError):
+        call()
+
+
+@pytest.mark.parametrize(
+    ("html", "needle"),
+    [
+        pytest.param(
+            '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN"><p><table>',
+            "|       <table>",
+            id="quirks-4.01-frameset-no-system-id",
+        ),
+        pytest.param(
+            '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><p><table>',
+            "|       <table>",
+            id="quirks-4.01-transitional-no-system-id",
+        ),
+        pytest.param("<html a=1><html b><p>x", 'b=""', id="merge-valueless-attr"),
+        pytest.param(
+            "<select multiple><selectedcontent></selectedcontent><option>x</option></select>",
+            "<selectedcontent>",
+            id="selectedcontent-multiple-select",
+        ),
+        pytest.param(
+            "<select><selectedcontent></selectedcontent>"
+            "<option selected>pick<select><option>n</option></select></option></select>",
+            "<selectedcontent>",
+            id="selectedcontent-into-nested-select",
+        ),
+        pytest.param("<textarea>\nkept</textarea>", '"kept"', id="textarea-newline-span"),
+        pytest.param("<textarea>\r\nkept</textarea>", '"kept"', id="textarea-newline-materialized"),
+        pytest.param("<p>a&amp;b</p>", '"a&b"', id="entity-materialized"),
+        pytest.param("<body>\U0001f600\U0001f389ok</body>", "\U0001f600\U0001f389ok", id="ucs4-body-text-span"),
+        pytest.param("<body><template>in</template>after", '"after"', id="template-close-in-body"),
+        pytest.param("<body><template><template>x</template>y</template>", "content", id="nested-template-close"),
+        pytest.param(
+            "<a><b><big><code><em><font><i><nobr><s><small><strike><strong><tt><u><b><i><div></a>x",
+            '"x"',
+            id="deep-formatting-afe-growth",
+        ),
+        pytest.param(
+            "<select><selectedcontent></selectedcontent><option class=x>y</option></select>",
+            "<selectedcontent>",
+            id="node-has-attr-no-match",
+        ),
+        pytest.param("<p \U0001f600=1>x", '"x"', id="astral-attribute-name"),
+        pytest.param('<!DOCTYPE html PUBLIC "\U0001f600">x', '"x"', id="astral-doctype-public-id"),
+        pytest.param('<!DOCTYPE html PUBLIC "HTML"><p><table>', "|       <table>", id="quirks-public-id-html"),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-/W3C/DTD HTML 4.0 Transitional/EN"><p><table>',
+            "|       <table>",
+            id="quirks-public-id-4.0-transitional",
+        ),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML Strict 3.0//EN//"><p><table>',
+            "|       <table>",
+            id="quirks-public-id-w3o-strict",
+        ),
+    ],
+)
+def test_document_paths(html: str, needle: str) -> None:
+    assert needle in _doc(html)
+
+
+@pytest.mark.parametrize(
+    ("html", "needle"),
+    [
+        pytest.param("<p>" + "x" * 70000, "x" * 40, id="text-larger-than-arena-block"),
+        pytest.param("<html a=1><html ő=2>", 'a="1"', id="merge-wide-attr-name"),
+        pytest.param("<input type=HIDDEN>", "<input>", id="uppercase-hidden-input-type"),
+        pytest.param("<ruby>a<rb>b<rtc>c", "<rtc>", id="ruby-rb-rtc-in-scope"),
+        pytest.param("<pre>\nkept", '"kept"', id="pre-drops-leading-newline"),
+        pytest.param("<pre>zkept", '"zkept"', id="pre-keeps-non-newline"),
+        pytest.param("<listing>\nq", '"q"', id="listing-drops-leading-newline"),
+        pytest.param("a\x00b", '"ab"', id="nul-stripped-from-text"),
+        pytest.param("<template>" * 9 + "z", "content", id="template-stack-regrow"),
+        pytest.param("<table><thead><tr><td>z</table>", "<td>", id="thead-table-scope-cell"),
+        pytest.param("<table><tfoot><tr><td>z</table>", "<td>", id="tfoot-table-scope-cell"),
+        pytest.param("<form><div>x</form>y", '"xy"', id="form-end-tag-keeps-open-div"),
+        pytest.param("<template><form>x</form></template>", "content", id="form-inside-template"),
+        pytest.param(
+            "<b><i><u><s><tt><big><small><em><strong><code><font><nobr><a><b><i><u><s>x</a>",
+            '"x"',
+            id="formatting-list-regrow",
+        ),
+        pytest.param("<p " + " ".join(f"a{i}=1" for i in range(70)) + ">", 'a0="1"', id="element-over-64-attributes"),
+        pytest.param("<![CDATA[x]]>", "[CDATA[x]]", id="cdata-in-html-is-bogus-comment"),
+        pytest.param("<svg><![CDATA[x]]></svg>", '"x"', id="cdata-in-foreign-is-text"),
+        # the CDATA scan runs in the 2-byte and 4-byte tokenizer cores too: a wide char widens the whole input
+        pytest.param("<svg><![CDATA[Ω]]></svg>", '"Ω"', id="cdata-foreign-ucs2"),
+        pytest.param("<svg><![CDATA[\U0001f600]]></svg>", '"\U0001f600"', id="cdata-foreign-ucs4"),
+        pytest.param("<math><mi mathvariant=bold>x</mi></math>", 'mathvariant="bold"', id="mathml-attribute-adjust"),
+        pytest.param("<svg viewBox='0 0 1 1'>x</svg>", 'viewBox="0 0 1 1"', id="svg-camelcase-attribute"),
+        pytest.param("<svg><foreignObject>x</foreignObject></svg>", "<svg foreignObject>", id="svg-camelcase-tag"),
+        pytest.param(
+            "<math><annotation-xml encoding='text/html'><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="annotation-xml-html-integration",
+        ),
+        pytest.param("<svg><font color=red>x", "<font>", id="svg-font-attribute-breakout"),
+        pytest.param(
+            "<math><annotation-xml encodinğ=1><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="foreign-wide-attribute-name",
+        ),
+        pytest.param("<svg><font colőr=1>x", "<svg font>", id="svg-font-wide-attribute-no-breakout"),
+        pytest.param("<math><mtext><b>x</b></mtext></math>", "<b>", id="mathml-text-integration"),
+        pytest.param("<svg><foreignObject><b>x</b></foreignObject></svg>", "<b>", id="svg-html-integration"),
+        pytest.param("<svg><a xlink:href=x>y</a></svg>", 'xlink href="x"', id="foreign-namespaced-attribute"),
+        pytest.param(
+            "<math><mtext><svg><br></svg></mtext></math>", "<br>", id="breakout-stops-at-mathml-text-integration"
+        ),
+        pytest.param(
+            "<svg><foreignObject><math><br></math></foreignObject></svg>",
+            "<br>",
+            id="breakout-stops-at-html-integration",
+        ),
+        pytest.param("<math><mtext><svg></br>q</svg></mtext></math>", "mtext", id="end-tag-breakout-in-foreign"),
+        pytest.param(
+            "<math><annotation-xml encoding='application/xhtml+xml'><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="annotation-xml-xhtml-integration",
+        ),
+        pytest.param(
+            "<math><annotation-xml encoding='foo/bar'><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="annotation-xml-non-html-encoding",
+        ),
+        pytest.param("<math><mi><div>x</div></mi></math>", "<div>", id="mathml-mi-not-html-integration"),
+        pytest.param("<svg><font face=x>y", "<font>", id="svg-font-face-breakout"),
+        pytest.param("<svg><font size=x>y", "<font>", id="svg-font-size-breakout"),
+        pytest.param("<math><mtext><svg></p>q</svg></mtext></math>", "mtext", id="end-p-breakout-at-integration"),
+        pytest.param(
+            "<head><base><basefont><bgsound><link><meta><noframes>n</noframes></head>z", "z", id="head-elements"
+        ),
+        pytest.param(
+            "<head></head><base><basefont><bgsound><link><meta><title>t</title>"
+            "<style>s</style><script>x</script><noframes>q</noframes>y",
+            "y",
+            id="after-head-reprocesses-head-elements",
+        ),
+        pytest.param("<body>z</body><meta><link><script>x</script>", "z", id="after-body-head-elements"),
+        pytest.param("</body></html><base>x", "html", id="after-after-body-element"),
+        pytest.param("<input type=Hidden>", "<input>", id="mixed-case-hidden-type"),
+        pytest.param("<rb>x", '"x"', id="rb-without-ruby-scope"),
+        pytest.param("<rtc>x", '"x"', id="rtc-without-ruby-scope"),
+        pytest.param("<table>foo", '"foo"', id="table-fosters-leading-text"),
+        pytest.param("<table><tr><td>c</td><th>h</table>", "<th>", id="table-row-cells"),
+        pytest.param("<table><caption>c</caption><tr><td>x</table>", "<caption>", id="table-caption"),
+        pytest.param("<table><tbody><tr><td>x</tr></tbody></table>", "<tbody>", id="table-section-end"),
+        pytest.param("<form>a</form>b", "<form>", id="form-in-scope-end-tag"),
+        pytest.param("<table><form><input></table>", "<form>", id="form-inside-table"),
+        pytest.param("<div><address>a</div>b", "<address>", id="special-element-end-tag-close"),
+        pytest.param("<ruby><rt>x", "<rt>", id="ruby-rt-in-scope"),
+        pytest.param("<ruby><rp>x", "<rp>", id="ruby-rp-in-scope"),
+        pytest.param("<template><form></form></template>", "content", id="form-in-template-scope"),
+        pytest.param("<template><form><form>x</template>", "content", id="second-form-in-template"),
+        pytest.param("<template><table><tr><th>x", "<th>", id="cell-in-template-sets-row-mode"),
+        pytest.param(
+            "<select><selectedcontent readonly></selectedcontent><option>x</option></select>",
+            "<selectedcontent>",
+            id="selectedcontent-attr-same-length",
+        ),
+        pytest.param(
+            "<select><selectedcontent disabled></selectedcontent><option>x</option></select>",
+            "<selectedcontent>",
+            id="selectedcontent-disabled-attr",
+        ),
+        pytest.param("<a href=1><a href=2>x", "<a>", id="formatting-noah-ark-attrs"),
+        pytest.param("<pre>\r\nx", "<pre>", id="pre-cr-newline-materialized"),
+        pytest.param("<textarea>\rx</textarea>", "<textarea>", id="textarea-cr-materialized"),
+        pytest.param("<input typő=hidden>", "<input>", id="hidden-type-wide-attr-name"),
+        pytest.param("<input type=hiddeő>", "<input>", id="hidden-type-wide-attr-value"),
+        pytest.param("<table><tfoot><tr><td>x</td></tr><tr><td>y</table>", "<tfoot>", id="tfoot-table-scope"),
+        pytest.param(
+            "<math><annotation-xml encoding><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="annotation-xml-valueless-encoding",
+        ),
+        pytest.param(
+            "<math><annotation-xml encoding='application/foo'><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="annotation-xml-other-application-encoding",
+        ),
+        pytest.param(
+            "<template><base><basefont><bgsound><link><meta>x</template>", "content", id="template-head-elements"
+        ),
+        pytest.param(
+            "<template><title>t</title><style>s</style><script>x</script><noframes>n</noframes></template>",
+            "content",
+            id="template-rawtext-head-elements",
+        ),
+        pytest.param(
+            "<template><caption></caption><colgroup></colgroup><tbody></tbody><tfoot></tfoot><thead></thead></template>",
+            "content",
+            id="template-table-sections",
+        ),
+        pytest.param("<template><td></td><th></th></template>", "content", id="template-table-cells"),
+        pytest.param("<template><col></template>", "content", id="template-col"),
+        pytest.param("<head></foo></head>x", "<head>", id="unknown-end-tag-in-head"),
+        pytest.param("<head></br></head>x", "<head>", id="end-br-in-head"),
+        pytest.param("<template></template><html lang=en>x", "html", id="html-start-reprocess-with-template"),
+        pytest.param("<table><div>x</div></table>", "<div>", id="element-fostered-before-table"),
+        pytest.param("<template><thead>x", "content", id="template-thead-open"),
+        pytest.param("<template><td>x", "content", id="template-td-open"),
+        pytest.param("<template><tr>x", "content", id="template-tr-open"),
+        pytest.param("<template><div>x", "content", id="template-other-start-tag"),
+        pytest.param("<pre>\rx", "<pre>", id="pre-cr-only-materialized"),
+        pytest.param("<textarea>z</textarea>", "<textarea>", id="textarea-no-leading-newline"),
+        pytest.param("<template><form></form>x</template>", "content", id="form-end-tag-in-template"),
+        pytest.param("<table><thead><tr><td>x<tr>", "<thead>", id="table-section-scope-on-row"),
+        pytest.param("<table><tr><td>a</td><th>b</th>", "<th>", id="td-and-th-cells"),
+    ],
+)
+def test_document_edge_paths(html: str, needle: str) -> None:
+    assert needle in _doc(html)
+
+
+@pytest.mark.parametrize(
+    ("html", "context", "needle"),
+    [
+        pytest.param("</li>x", "div", '| "x"', id="end-li-no-scope"),
+        pytest.param("</dd>y", "div", '| "y"', id="end-dd-no-scope"),
+        pytest.param("<frame><frameset></frameset>", "frameset", "<frame>", id="frameset-context"),
+        pytest.param("<option>a<select><option>b", "select", "<option>", id="select-ignores-nested-select"),
+        pytest.param("  <col>x", "colgroup", "<col>", id="colgroup-whitespace-then-content"),
+        pytest.param("<select></select><td>next", "tr", "<td>", id="select-in-cell-resets"),
+        pytest.param("<table></table>x", "td", '"x"', id="reset-table-close-td-context"),
+        pytest.param("<table></table>x", "head", '"x"', id="reset-table-close-head-context"),
+        pytest.param("<table></table>x", "div", '"x"', id="reset-table-close-default-context"),
+        pytest.param("   ", "title", '| "   "', id="title-whitespace-text"),
+        pytest.param("", "title", "", id="empty-fragment-serializes-empty"),
+        pytest.param("x", "a" * 40, '"x"', id="context-name-longer-than-buffer"),
+        pytest.param("<br>", "svg", "<br>", id="breakout-stops-at-fragment-root"),
+    ],
+)
+def test_fragment_paths(html: str, context: str, needle: str) -> None:
+    assert needle in _frag(html, context)
+
+
+# Inputs that drive otherwise-unreached decision branches in the tree builder.
+# gcov scores each operand of a short-circuit condition separately, so these
+# pin the rarer operand value (a non-newline after <pre>, a hidden-input type
+# with a low-ASCII byte, an annotation-xml encoding that is not "text/html", an
+# attribute name long enough to fill the 128-byte serialization sort buffer, …).
+_LONG_NAME = "z" * 130
+
+
+@pytest.mark.parametrize(
+    ("html", "needle"),
+    [
+        pytest.param("<b id=a t=p><b id=b t=p>x", "<b>", id="afe-multi-attr-mismatch-first"),
+        pytest.param("<b id=x><b ie=y>z", "<b>", id="afe-same-length-different-name"),
+        pytest.param("<b id=x><b id=yy>z", "<b>", id="afe-different-value-length"),
+        pytest.param("<table>x", '"x"', id="foster-text-target-table"),
+        pytest.param("<input type>z", "<input>", id="input-valueless-type"),
+        pytest.param("<input type=hidde0>z", "<input>", id="input-hidden-type-low-byte"),
+        pytest.param("<applet>" * 20 + "x", "<applet>", id="afe-marker-stack-regrow"),
+        pytest.param("</br>x", '"x"', id="end-br-before-head"),
+        pytest.param("<template><tfoot>a", "content", id="template-tfoot-section"),
+        pytest.param("<template><caption>b", "content", id="template-caption-section"),
+        pytest.param("<template><colgroup>c", "content", id="template-colgroup-section"),
+        pytest.param("<template><tbody>d", "content", id="template-tbody-section"),
+        pytest.param("<template><thead>e", "content", id="template-thead-section"),
+        pytest.param("<template><td>f", "content", id="template-td-cell"),
+        pytest.param("<template><th>g", "content", id="template-th-cell"),
+        pytest.param("<dd><address><dt>x", "<dt>", id="dd-walk-skips-address"),
+        pytest.param("<dd><div><dt>y", "<dt>", id="dd-walk-skips-div"),
+        pytest.param("<rt>x", "<rt>", id="rt-without-ruby-scope"),
+        pytest.param("<rp>y", "<rp>", id="rp-without-ruby-scope"),
+        pytest.param("<form><template><form>x", "<form>", id="nested-form-in-template-with-form-pointer"),
+        pytest.param("<template><table><form>x", "content", id="form-in-table-under-template"),
+        pytest.param("<table><tfoot><tbody>x</table>", "<tbody>", id="table-body-after-tfoot-scope"),
+        pytest.param("<table><thead><caption>y</table>", "<caption>", id="table-caption-after-thead-scope"),
+        pytest.param(
+            "<math><annotation-xml q=1><div>x</div></annotation-xml></math>", "<div>", id="annotation-xml-short-attr"
+        ),
+        pytest.param(
+            "<math><annotation-xml encoding=txxxxxxxx><div>x</div></annotation-xml></math>",
+            "annotation-xml",
+            id="annotation-xml-nine-char-not-te",
+        ),
+        pytest.param(
+            "<math><annotation-xml encoding=texxxhxxx><div>x</div></annotation-xml></math>",
+            "<div>",
+            id="annotation-xml-te-prefix-h-at-five",
+        ),
+        pytest.param(
+            "<math><annotation-xml encoding=exxxxxxxx><div>x</div></annotation-xml></math>",
+            "annotation-xml",
+            id="annotation-xml-nine-char-not-t",
+        ),
+        pytest.param(
+            "<math><annotation-xml encoding=texxxxxxx><div>x</div></annotation-xml></math>",
+            "annotation-xml",
+            id="annotation-xml-te-prefix-no-h",
+        ),
+        pytest.param("<svg><foreignObject><svg></p>x", "foreignObject", id="end-p-breakout-stops-at-html-integration"),
+        pytest.param("<svg><desc><svg></br>y", "desc", id="end-br-breakout-stops-at-html-integration"),
+        pytest.param("<p " + _LONG_NAME + "=1 m=2>x", "z" * 40, id="attr-name-fills-sort-buffer"),
+        pytest.param("<svg " + _LONG_NAME + "=1 m=2>y</svg>", "z" * 40, id="foreign-attr-name-fills-sort-buffer"),
+    ],
+)
+def test_gcov_branch_paths(html: str, needle: str) -> None:
+    assert needle in _doc(html)

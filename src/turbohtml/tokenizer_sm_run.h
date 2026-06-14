@@ -1,9 +1,9 @@
-/* Kind-stamped tokenizer core. This file is #included three times by
-   tokenizer_sm.c — once per PyUnicode storage width — with TH_NAME, TH_CHAR
-   and TH_KIND defined, the same way CPython's stringlib specializes per kind.
-   Every input read compiles to direct indexing, so the per-character paths
-   and the run scanners carry no width dispatch. gcov attributes all three
-   instantiations to these lines, so coverage aggregates across kinds. */
+/* Kind-stamped tokenizer core. tokenizer_sm.c #includes this file three times,
+   once per PyUnicode storage width, with TH_NAME, TH_CHAR and TH_KIND defined,
+   the way CPython's stringlib specializes per kind. Every input read compiles
+   to direct indexing, so the per-character paths and run scanners carry no
+   width dispatch. gcov attributes all three instantiations to these lines, so
+   coverage aggregates across kinds. */
 
 #define TH_READ(i) ((Py_UCS4)((const TH_CHAR *)self->input.data)[(i)])
 
@@ -12,14 +12,15 @@
    (a named reference without a trailing ';' is left literal when followed by
    '=' or an ASCII alphanumeric). Returns the number of input code points to
    consume (always >= 1) or -1 to suspend for more input; allocation failures
-   land on the sticky oom flag. The numeric rules follow the tokenizer spec, which emits control and
-   noncharacter code points rather than dropping them the way unescape() does. */
+   land on the sticky oom flag. The numeric rules follow the tokenizer spec,
+   which emits control and noncharacter code points rather than dropping them
+   the way unescape() does. */
 static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int in_attr) {
     Py_ssize_t len = self->input.len;
     Py_ssize_t amp = self->pos;
-    Py_ssize_t p = amp + 1;
+    Py_ssize_t after_amp = amp + 1;
 
-    if (p >= len) {
+    if (after_amp >= len) {
         if (!self->eof) {
             return -1;
         }
@@ -27,9 +28,9 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
         return 1;
     }
 
-    Py_UCS4 first = TH_READ(p);
+    Py_UCS4 first = TH_READ(after_amp);
     if (first == '#') {
-        Py_ssize_t cursor = p + 1;
+        Py_ssize_t cursor = after_amp + 1;
         int hex = 0;
         if (cursor >= len && !self->eof) {
             return -1;
@@ -69,7 +70,7 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
             push(self, dest, '&');
             push(self, dest, '#');
             if (hex) {
-                push(self, dest, TH_READ(p + 1));
+                push(self, dest, TH_READ(after_amp + 1));
             }
             return hex ? 3 : 2;
         }
@@ -100,7 +101,7 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
     Py_UCS4 chars[HTML5_MAX_NAME_LEN];
     char ascii[HTML5_MAX_NAME_LEN + 1];
     int name_len = 0;
-    Py_ssize_t cursor = p;
+    Py_ssize_t cursor = after_amp;
     while (cursor < len && name_len < HTML5_MAX_NAME_LEN) {
         Py_UCS4 candidate = TH_READ(cursor);
         if (!is_ascii_alpha(candidate) && !(candidate >= '0' && candidate <= '9')) {
@@ -142,8 +143,8 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
     if (entity == NULL) {
         /* no match: emit '&' and the consumed name characters literally */
         push(self, dest, '&');
-        for (int i = 0; i < name_len; i++) {
-            push(self, dest, chars[i]);
+        for (int index = 0; index < name_len; index++) {
+            push(self, dest, chars[index]);
         }
         return 1 + name_len;
     }
@@ -153,8 +154,8 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
         if (after == '=' || is_ascii_alpha(after) || (after >= '0' && after <= '9')) {
             /* legacy rule: leave the reference literal inside an attribute */
             push(self, dest, '&');
-            for (int i = 0; i < name_len; i++) {
-                push(self, dest, chars[i]);
+            for (int index = 0; index < name_len; index++) {
+                push(self, dest, chars[index]);
             }
             return 1 + name_len;
         }
@@ -165,23 +166,23 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
         push(self, dest, entity->cp1);
     }
     /* characters consumed past the matched name are emitted literally */
-    for (int i = match_len; i < name_len; i++) {
-        push(self, dest, chars[i]);
+    for (int index = match_len; index < name_len; index++) {
+        push(self, dest, chars[index]);
     }
     return 1 + name_len + match_semicolon;
 }
 
-/* Compare the avail available code points against keyword: 2 = full match,
+/* Compare the available code points against keyword: 2 = full match,
    1 = a proper prefix (more input could complete it), 0 = mismatch. */
 static int TH_NAME(match_kw)(const th_tokenizer *self, const char *keyword, int klen, int fold) {
     Py_ssize_t avail = self->input.len - self->pos;
-    int n = avail < klen ? (int)avail : klen;
-    for (int i = 0; i < n; i++) {
-        Py_UCS4 c = TH_READ(self->pos + i);
+    int count = avail < klen ? (int)avail : klen;
+    for (int index = 0; index < count; index++) {
+        Py_UCS4 character = TH_READ(self->pos + index);
         if (fold) {
-            c = lower_ascii(c);
+            character = lower_ascii(character);
         }
-        if ((Py_UCS4)(unsigned char)keyword[i] != c) {
+        if ((Py_UCS4)(unsigned char)keyword[index] != character) {
             return 0;
         }
     }
@@ -208,30 +209,19 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 EOF_FLUSH();
             }
             if (ch != '&' && ch != '<' && ch != '\n') {
-#if TH_UCS1
-                Py_ssize_t stop = scan_stops_ucs1(self, self->pos + 1, '&', '<', '\n', '\n');
-#else
-                Py_ssize_t stop = self->pos + 1;
-                while (stop < self->input.len) {
-                    Py_UCS4 c = TH_READ(stop);
-                    if (c == '&' || c == '<' || c == '\n') {
-                        break;
-                    }
-                    stop++;
-                }
-#endif
+                Py_ssize_t stop = TH_SCAN(self, self->pos + 1, '&', '<', '\n', '\n');
                 text_append_run(self, stop);
                 continue;
             }
             if (ch == '&') {
                 text_begin(self);
                 text_materialize(self);
-                Py_ssize_t n = TH_NAME(consume_charref)(self, &self->text, 0);
-                if (n == -1) {
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->text, 0);
+                if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
-                self->pos += n;
-                self->col += n;
+                self->pos += consumed;
+                self->col += consumed;
                 continue;
             }
             if (ch == '<') {
@@ -249,30 +239,19 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 EOF_FLUSH();
             }
             if (ch != '&' && ch != '<' && ch != '\n' && ch != 0) {
-#if TH_UCS1
-                Py_ssize_t stop = scan_stops_ucs1(self, self->pos + 1, '&', '<', '\n', 0);
-#else
-                Py_ssize_t stop = self->pos + 1;
-                while (stop < self->input.len) {
-                    Py_UCS4 c = TH_READ(stop);
-                    if (c == '&' || c == '<' || c == '\n' || c == 0) {
-                        break;
-                    }
-                    stop++;
-                }
-#endif
+                Py_ssize_t stop = TH_SCAN(self, self->pos + 1, '&', '<', '\n', 0);
                 text_append_run(self, stop);
                 continue;
             }
             if (ch == '&') {
                 text_begin(self);
                 text_materialize(self);
-                Py_ssize_t n = TH_NAME(consume_charref)(self, &self->text, 0);
-                if (n == -1) {
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->text, 0);
+                if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
-                self->pos += n;
-                self->col += n;
+                self->pos += consumed;
+                self->col += consumed;
                 continue;
             }
             if (ch == '<') {
@@ -290,18 +269,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 EOF_FLUSH();
             }
             if (ch != '<' && ch != '\n' && ch != 0) {
-#if TH_UCS1
-                Py_ssize_t stop = scan_stops_ucs1(self, self->pos + 1, '<', '\n', 0, 0);
-#else
-                Py_ssize_t stop = self->pos + 1;
-                while (stop < self->input.len) {
-                    Py_UCS4 c = TH_READ(stop);
-                    if (c == '<' || c == '\n' || c == 0) {
-                        break;
-                    }
-                    stop++;
-                }
-#endif
+                Py_ssize_t stop = TH_SCAN(self, self->pos + 1, '<', '\n', 0, 0);
                 text_append_run(self, stop);
                 continue;
             }
@@ -320,18 +288,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 EOF_FLUSH();
             }
             if (ch != '<' && ch != '\n' && ch != 0) {
-#if TH_UCS1
-                Py_ssize_t stop = scan_stops_ucs1(self, self->pos + 1, '<', '\n', 0, 0);
-#else
-                Py_ssize_t stop = self->pos + 1;
-                while (stop < self->input.len) {
-                    Py_UCS4 c = TH_READ(stop);
-                    if (c == '<' || c == '\n' || c == 0) {
-                        break;
-                    }
-                    stop++;
-                }
-#endif
+                Py_ssize_t stop = TH_SCAN(self, self->pos + 1, '<', '\n', 0, 0);
                 text_append_run(self, stop);
                 continue;
             }
@@ -350,18 +307,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 EOF_FLUSH();
             }
             if (ch != '\n' && ch != 0) {
-#if TH_UCS1
-                Py_ssize_t stop = scan_stops_ucs1(self, self->pos + 1, '\n', 0, 0, 0);
-#else
-                Py_ssize_t stop = self->pos + 1;
-                while (stop < self->input.len) {
-                    Py_UCS4 c = TH_READ(stop);
-                    if (c == '\n' || c == 0) {
-                        break;
-                    }
-                    stop++;
-                }
-#endif
+                Py_ssize_t stop = TH_SCAN(self, self->pos + 1, '\n', 0, 0, 0);
                 text_append_run(self, stop);
                 continue;
             }
@@ -952,18 +898,27 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             if (at_eof) {
                 EOF_FLUSH();
             }
+            if (ch != '"' && ch != '&' && ch != '\n' && ch != 0) {
+                /* bulk-copy the ordinary value run; '\n' is a stop so line/col
+                   stay accurate, and &/" /NUL keep their dedicated handling */
+                Py_ssize_t stop = TH_SCAN(self, self->pos, '"', '&', '\n', 0);
+                buf_append_input(self, &self->attr->value, self->pos, stop - self->pos);
+                self->col += stop - self->pos;
+                self->pos = stop;
+                continue;
+            }
             if (ch == '"') {
                 CONSUME();
                 self->state = ST_AFTER_ATTR_VALUE_QUOTED;
                 continue;
             }
             if (ch == '&') {
-                Py_ssize_t n = TH_NAME(consume_charref)(self, &self->attr->value, 1);
-                if (n == -1) {
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1);
+                if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
-                self->pos += n;
-                self->col += n;
+                self->pos += consumed;
+                self->col += consumed;
                 continue;
             }
             push(self, &self->attr->value, ch == 0 ? REPLACEMENT : ch);
@@ -974,18 +929,25 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             if (at_eof) {
                 EOF_FLUSH();
             }
+            if (ch != '\'' && ch != '&' && ch != '\n' && ch != 0) {
+                Py_ssize_t stop = TH_SCAN(self, self->pos, '\'', '&', '\n', 0);
+                buf_append_input(self, &self->attr->value, self->pos, stop - self->pos);
+                self->col += stop - self->pos;
+                self->pos = stop;
+                continue;
+            }
             if (ch == '\'') {
                 CONSUME();
                 self->state = ST_AFTER_ATTR_VALUE_QUOTED;
                 continue;
             }
             if (ch == '&') {
-                Py_ssize_t n = TH_NAME(consume_charref)(self, &self->attr->value, 1);
-                if (n == -1) {
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1);
+                if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
-                self->pos += n;
-                self->col += n;
+                self->pos += consumed;
+                self->col += consumed;
                 continue;
             }
             push(self, &self->attr->value, ch == 0 ? REPLACEMENT : ch);
@@ -1002,12 +964,12 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '&') {
-                Py_ssize_t n = TH_NAME(consume_charref)(self, &self->attr->value, 1);
-                if (n == -1) {
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1);
+                if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
-                self->pos += n;
-                self->col += n;
+                self->pos += consumed;
+                self->col += consumed;
                 continue;
             }
             if (ch == '>') {
@@ -1067,39 +1029,43 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             continue;
 
         case ST_MARKUP_DECL_OPEN: {
-            int m = TH_NAME(match_kw)(self, "--", 2, 0);
-            if (m == 2) {
+            int match = TH_NAME(match_kw)(self, "--", 2, 0);
+            if (match == 2) {
                 self->pos += 2;
                 self->col += 2;
                 init_markup(self, TH_COMMENT);
                 self->state = ST_COMMENT_START;
                 continue;
             }
-            if (m == 1 && !self->eof) {
+            if (match == 1 && !self->eof) {
                 return RUN_NEED_MORE;
             }
-            m = TH_NAME(match_kw)(self, "doctype", 7, 1);
-            if (m == 2) {
+            match = TH_NAME(match_kw)(self, "doctype", 7, 1);
+            if (match == 2) {
                 self->pos += 7;
                 self->col += 7;
                 self->state = ST_DOCTYPE;
                 continue;
             }
-            if (m == 1 && !self->eof) {
+            if (match == 1 && !self->eof) {
                 return RUN_NEED_MORE;
             }
-            m = TH_NAME(match_kw)(self, "[CDATA[", 7, 0);
-            if (m == 2) {
+            match = TH_NAME(match_kw)(self, "[CDATA[", 7, 0);
+            if (match == 2) {
                 self->pos += 7;
                 self->col += 7;
+                if (self->cdata_ok) {
+                    self->state = ST_CDATA; /* CDATA content is a plain text run */
+                    continue;
+                }
                 init_markup(self, TH_COMMENT);
-                for (const char *k = "[CDATA["; *k; k++) {
-                    push(self, &self->tok.text, (Py_UCS4)(unsigned char)*k);
+                for (const char *cdata_char = "[CDATA["; *cdata_char; cdata_char++) {
+                    push(self, &self->tok.text, (Py_UCS4)(unsigned char)*cdata_char);
                 }
                 self->state = ST_BOGUS_COMMENT;
                 continue;
             }
-            if (m == 1 && !self->eof) {
+            if (match == 1 && !self->eof) {
                 return RUN_NEED_MORE;
             }
             init_markup(self, TH_COMMENT);
@@ -1317,24 +1283,24 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 CONSUME();
                 EMIT_MARKUP();
             }
-            int m = TH_NAME(match_kw)(self, "public", 6, 1);
-            if (m == 2) {
+            int match = TH_NAME(match_kw)(self, "public", 6, 1);
+            if (match == 2) {
                 self->pos += 6;
                 self->col += 6;
                 self->state = ST_AFTER_DOCTYPE_PUBLIC_KW;
                 continue;
             }
-            if (m == 1 && !self->eof) {
+            if (match == 1 && !self->eof) {
                 return RUN_NEED_MORE;
             }
-            m = TH_NAME(match_kw)(self, "system", 6, 1);
-            if (m == 2) {
+            match = TH_NAME(match_kw)(self, "system", 6, 1);
+            if (match == 2) {
                 self->pos += 6;
                 self->col += 6;
                 self->state = ST_AFTER_DOCTYPE_SYSTEM_KW;
                 continue;
             }
-            if (m == 1 && !self->eof) {
+            if (match == 1 && !self->eof) {
                 return RUN_NEED_MORE;
             }
             self->tok.force_quirks = 1;
@@ -1563,18 +1529,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 EOF_FLUSH();
             }
             if (ch != ']' && ch != '\n') {
-#if TH_UCS1
-                Py_ssize_t stop = scan_stops_ucs1(self, self->pos + 1, ']', '\n', '\n', '\n');
-#else
-                Py_ssize_t stop = self->pos + 1;
-                while (stop < self->input.len) {
-                    Py_UCS4 c = TH_READ(stop);
-                    if (c == ']' || c == '\n') {
-                        break;
-                    }
-                    stop++;
-                }
-#endif
+                Py_ssize_t stop = TH_SCAN(self, self->pos + 1, ']', '\n', '\n', '\n');
                 text_append_run(self, stop);
                 continue;
             }

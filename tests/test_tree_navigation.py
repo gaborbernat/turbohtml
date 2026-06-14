@@ -1,0 +1,102 @@
+"""Node navigation: parents, siblings, descendants, and the sequence protocol."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+from turbohtml import Element, Text, parse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_SAMPLE = "<body><p id=a>one<b>bold</b></p><p id=b>two</p></body>"
+
+
+@pytest.fixture
+def body(find: Callable[[str, str], Element]) -> Element:
+    return find(_SAMPLE, "body")
+
+
+def test_parent_chain(body: Element) -> None:
+    bold = body.find("b")
+    assert bold is not None
+    assert isinstance(bold.parent, Element)
+    assert bold.parent.attrs["id"] == "a"
+
+
+def test_document_has_no_parent() -> None:
+    assert parse("<p>x</p>").parent is None
+
+
+def test_children_are_a_tuple(body: Element) -> None:
+    assert isinstance(body.children, tuple)
+    assert [c.attrs["id"] for c in body.children if isinstance(c, Element)] == ["a", "b"]
+
+
+def test_siblings(body: Element) -> None:
+    first = body[0]
+    assert isinstance(first, Element)
+    second = first.next_sibling
+    assert isinstance(second, Element)
+    assert second.attrs["id"] == "b"
+    assert second.previous_sibling == first
+    assert first.previous_sibling is None
+    assert second.next_sibling is None
+
+
+def test_descendants_are_document_order(body: Element) -> None:
+    def label(node: object) -> str:
+        if isinstance(node, Element):
+            return f"Element:{node.tag}"
+        assert isinstance(node, Text)
+        return f"Text:{node.data}"
+
+    order = [label(n) for n in body.descendants]
+    assert order == ["Element:p", "Text:one", "Element:b", "Text:bold", "Element:p", "Text:two"]
+
+
+def test_descendants_is_lazy_iterator(body: Element) -> None:
+    walker = body.descendants
+    assert iter(walker) is walker
+    assert isinstance(next(walker), Element)
+
+
+def test_ancestors_reach_the_document(body: Element) -> None:
+    bold = body.find("b")
+    assert bold is not None
+    chain = [a.tag if isinstance(a, Element) else "#document" for a in bold.ancestors]
+    assert chain == ["p", "body", "html", "#document"]
+
+
+def test_len_and_indexing(body: Element) -> None:
+    paragraph = body[0]
+    assert len(paragraph) == 2
+    assert isinstance(paragraph[0], Text)
+    assert isinstance(paragraph[-1], Element)
+
+
+def test_index_out_of_range(body: Element) -> None:
+    with pytest.raises(IndexError):
+        _ = body[0][5]
+
+
+def test_iteration_yields_children(body: Element) -> None:
+    paragraph = body[0]
+    assert list(paragraph) == list(paragraph.children)
+
+
+@pytest.mark.parametrize(
+    ("html", "selector", "child_count"),
+    [
+        pytest.param("<p>x</p>", "p", 1, id="with-children"),
+        pytest.param("<br>", "br", 0, id="empty-void"),
+    ],
+)
+def test_node_is_truthy_regardless_of_children(
+    find: Callable[[str, str], Element], html: str, selector: str, child_count: int
+) -> None:
+    node = find(html, selector)
+    assert bool(node) is True
+    assert len(node) == child_count

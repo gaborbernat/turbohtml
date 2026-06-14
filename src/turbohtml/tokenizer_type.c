@@ -62,8 +62,8 @@ static int content_model_for(const th_buf *name) {
 
 static PyObject *iter_new(module_state *state, PyObject *owner) {
     IterObject *self = PyObject_GC_New(IterObject, (PyTypeObject *)state->iter_type);
-    if (self == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return NULL;    /* GCOVR_EXCL_LINE */
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     self->owner = Py_NewRef(owner);
     PyObject_GC_Track(self);
@@ -99,8 +99,8 @@ static PyObject *iter_next(PyObject *self) {
     case TH_STEP_TOKEN: {
         TokenizerObject *owner = (TokenizerObject *)((IterObject *)self)->owner;
         PyObject *token = token_from_record(state, sm, owner->source, record);
-        if (token == NULL) { /* GCOVR_EXCL_BR_LINE */
-            return NULL;     /* GCOVR_EXCL_LINE */
+        if (token == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         if (record->kind == TH_START_TAG) {
             int model = content_model_for(&record->name);
@@ -110,8 +110,8 @@ static PyObject *iter_next(PyObject *self) {
         }
         return token;
     }
-    case TH_STEP_ERROR:          /* GCOVR_EXCL_LINE */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+    case TH_STEP_ERROR:          /* GCOVR_EXCL_LINE: the only step error is an out-of-memory condition */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     default:                     /* NEED_MORE or DONE: nothing more from this iterator */
         return NULL;
     }
@@ -140,14 +140,14 @@ static PyType_Spec iter_spec = {
 
 static PyObject *tokenizer_new(PyTypeObject *type, PyObject *Py_UNUSED(args), PyObject *Py_UNUSED(kwds)) {
     TokenizerObject *self = (TokenizerObject *)type->tp_alloc(type, 0);
-    if (self == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return NULL;    /* GCOVR_EXCL_LINE */
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     self->source = NULL;
     self->sm = th_tok_new();
-    if (self->sm == NULL) {      /* GCOVR_EXCL_BR_LINE */
-        Py_DECREF(self);         /* GCOVR_EXCL_LINE */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+    if (self->sm == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return (PyObject *)self;
 }
@@ -263,6 +263,7 @@ static PyType_Spec tokenizer_spec = {
 
 /* --------------------------------------------------------------- tokenize */
 
+// NOLINTNEXTLINE(misc-use-internal-linkage): declared in turbohtml.h and called from _htmlmodule.c
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg) {
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "tokenize() argument must be str");
@@ -270,8 +271,8 @@ PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg) {
     }
     module_state *state = PyModule_GetState(module);
     PyObject *tokenizer = PyObject_CallNoArgs(state->tokenizer_type);
-    if (tokenizer == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return NULL;         /* GCOVR_EXCL_LINE */
+    if (tokenizer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_tokenizer *sm = ((TokenizerObject *)tokenizer)->sm;
     Py_ssize_t length = PyUnicode_GET_LENGTH(arg);
@@ -299,51 +300,52 @@ static PyObject *record_as_test_tuple(const th_tokenizer *sm, const th_token *re
         const char *data = th_tok_input_data(sm, &kind);
         PyObject *text = PyUnicode_FromKindAndData(kind, data + record->src_start * kind, record->src_len);
         if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;    /* GCOVR_EXCL_LINE */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         return Py_BuildValue("(sN)", "Character", text);
     }
     if (record->kind == TH_TEXT || record->kind == TH_COMMENT) {
         PyObject *data = PyUnicode_FromKindAndData(record->text.kind, record->text.data, record->text.len);
         if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;    /* GCOVR_EXCL_LINE */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         return Py_BuildValue("(sN)", record->kind == TH_TEXT ? "Character" : "Comment", data);
     }
     if (record->kind == TH_END_TAG) {
         PyObject *name = PyUnicode_FromKindAndData(record->name.kind, record->name.data, record->name.len);
         if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;    /* GCOVR_EXCL_LINE */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         return Py_BuildValue("(sN)", "EndTag", name);
     }
     if (record->kind == TH_START_TAG) {
         PyObject *name = PyUnicode_FromKindAndData(record->name.kind, record->name.data, record->name.len);
         PyObject *attrs = PyDict_New();
-        if (name == NULL || attrs == NULL) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(name);                /* GCOVR_EXCL_LINE */
-            Py_XDECREF(attrs);               /* GCOVR_EXCL_LINE */
-            return NULL;                     /* GCOVR_EXCL_LINE */
+        if (name == NULL || attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_XDECREF(name);                /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(attrs);               /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        for (Py_ssize_t i = 0; i < record->attr_count; i++) {
-            const th_attr *attr = &record->attrs[i];
+        for (Py_ssize_t index = 0; index < record->attr_count; index++) {
+            const th_attr *attr = &record->attrs[index];
             PyObject *key = PyUnicode_FromKindAndData(attr->name.kind, attr->name.data, attr->name.len);
-            if (key == NULL) {    /* GCOVR_EXCL_BR_LINE */
-                Py_DECREF(name);  /* GCOVR_EXCL_LINE */
-                Py_DECREF(attrs); /* GCOVR_EXCL_LINE */
-                return NULL;      /* GCOVR_EXCL_LINE */
+            if (key == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                Py_DECREF(name);  /* GCOVR_EXCL_LINE: allocation-failure path */
+                Py_DECREF(attrs); /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
             }
             if (PyDict_Contains(attrs, key) == 1) { /* duplicate: keep the first */
                 Py_DECREF(key);
                 continue;
             }
             PyObject *value = PyUnicode_FromKindAndData(attr->value.kind, attr->value.data, attr->value.len);
+            /* allocation failure cannot be forced from a test */
             if (value == NULL || PyDict_SetItem(attrs, key, value) < 0) { /* GCOVR_EXCL_BR_LINE */
-                Py_XDECREF(value);                                        /* GCOVR_EXCL_LINE */
-                Py_DECREF(key);                                           /* GCOVR_EXCL_LINE */
-                Py_DECREF(name);                                          /* GCOVR_EXCL_LINE */
-                Py_DECREF(attrs);                                         /* GCOVR_EXCL_LINE */
-                return NULL;                                              /* GCOVR_EXCL_LINE */
+                Py_XDECREF(value);                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+                Py_DECREF(key);                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+                Py_DECREF(name);                                          /* GCOVR_EXCL_LINE: allocation-failure path */
+                Py_DECREF(attrs);                                         /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;                                              /* GCOVR_EXCL_LINE: allocation-failure path */
             }
             Py_DECREF(key);
             Py_DECREF(value);
@@ -365,11 +367,12 @@ static PyObject *record_as_test_tuple(const th_tokenizer *sm, const th_token *re
         record->has_system_id
             ? PyUnicode_FromKindAndData(record->system_id.kind, record->system_id.data, record->system_id.len)
             : Py_NewRef(Py_None);
+    /* allocation failure cannot be forced from a test */
     if (name == NULL || public_id == NULL || system_id == NULL) { /* GCOVR_EXCL_BR_LINE */
-        Py_XDECREF(name);                                         /* GCOVR_EXCL_LINE */
-        Py_XDECREF(public_id);                                    /* GCOVR_EXCL_LINE */
-        Py_XDECREF(system_id);                                    /* GCOVR_EXCL_LINE */
-        return NULL;                                              /* GCOVR_EXCL_LINE */
+        Py_XDECREF(name);                                         /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(public_id);                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(system_id);                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                                              /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return Py_BuildValue("(sNNNO)", "DOCTYPE", name, public_id, system_id, record->force_quirks ? Py_False : Py_True);
 }
@@ -394,13 +397,7 @@ static int initial_state_from_name(const char *name, enum th_initial_state *out)
     return 0;
 }
 
-PyDoc_STRVAR(tokenize_states_doc, "_tokenize_states(text, initial_state, last_start_tag, storage_kind)\n--\n\n"
-                                  "Tokenize text from a given content-model state without the public\n"
-                                  "tokenizer's tag-driven content switching. Returns html5lib-format token\n"
-                                  "tuples. storage_kind (1, 2 or 4) forces the input buffer width so every\n"
-                                  "kind-stamped tokenizer core can be exercised with the same data.\n"
-                                  "Internal: used by the conformance test harness only.");
-
+// NOLINTNEXTLINE(misc-use-internal-linkage): declared in turbohtml.h and called from _htmlmodule.c
 PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args) {
     PyObject *text;
     const char *state_name;
@@ -419,7 +416,7 @@ PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args)
     }
     th_tokenizer *sm = th_tok_new();
     if (sm == NULL) {            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (storage_kind > PyUnicode_KIND(text)) {
         th_tok_widen_input(sm, storage_kind);
@@ -435,11 +432,11 @@ PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args)
         const void *data = PyUnicode_DATA(last_tag);
         Py_UCS4 *buffer = PyMem_New(Py_UCS4, len ? len : 1); /* GCOVR_EXCL_BR_LINE: size-overflow guard */
         if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            th_tok_free(sm);         /* GCOVR_EXCL_LINE */
-            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+            th_tok_free(sm);         /* GCOVR_EXCL_LINE: allocation-failure path */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        for (Py_ssize_t i = 0; i < len; i++) {
-            buffer[i] = PyUnicode_READ(kind, data, i);
+        for (Py_ssize_t index = 0; index < len; index++) {
+            buffer[index] = PyUnicode_READ(kind, data, index);
         }
         th_tok_set_initial(sm, initial, buffer, len);
         PyMem_Free(buffer);
@@ -450,38 +447,39 @@ PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args)
     th_tok_close(sm);
 
     PyObject *out = PyList_New(0);
-    if (out == NULL) {   /* GCOVR_EXCL_BR_LINE */
-        th_tok_free(sm); /* GCOVR_EXCL_LINE */
-        return NULL;     /* GCOVR_EXCL_LINE */
+    if (out == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tok_free(sm); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_token *record;
     enum th_step step;
     while ((step = th_tok_next(sm, &record)) == TH_STEP_TOKEN) {
         PyObject *tuple = record_as_test_tuple(sm, record);
+        /* allocation failure cannot be forced from a test */
         if (tuple == NULL || PyList_Append(out, tuple) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(tuple);                                /* GCOVR_EXCL_LINE */
-            Py_DECREF(out);                                   /* GCOVR_EXCL_LINE */
-            th_tok_free(sm);                                  /* GCOVR_EXCL_LINE */
-            return NULL;                                      /* GCOVR_EXCL_LINE */
+            Py_XDECREF(tuple);                                /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_DECREF(out);                                   /* GCOVR_EXCL_LINE: allocation-failure path */
+            th_tok_free(sm);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                                      /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         Py_DECREF(tuple);
     }
     th_tok_free(sm);
-    if (step == TH_STEP_ERROR) { /* GCOVR_EXCL_BR_LINE */
-        Py_DECREF(out);          /* GCOVR_EXCL_LINE */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+    if (step == TH_STEP_ERROR) { /* GCOVR_EXCL_BR_LINE: the only step error is an out-of-memory condition */
+        Py_DECREF(out);          /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return out;
 }
 
 int tokenizer_register(PyObject *module, module_state *state) {
     state->iter_type = PyType_FromModuleAndSpec(module, &iter_spec, NULL);
-    if (state->iter_type == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return -1;                  /* GCOVR_EXCL_LINE */
+    if (state->iter_type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                  /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->tokenizer_type = PyType_FromModuleAndSpec(module, &tokenizer_spec, NULL);
-    if (state->tokenizer_type == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return -1;                       /* GCOVR_EXCL_LINE */
+    if (state->tokenizer_type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return PyModule_AddObjectRef(module, "Tokenizer", state->tokenizer_type);
 }

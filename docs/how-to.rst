@@ -192,3 +192,92 @@ to point at the offending markup:
     >>> [f"{token.tag} at {token.line}:{token.col}" for token in turbohtml.tokenize(page)
     ...  if token.type is turbohtml.TokenType.START_TAG and token.tag == "img"]
     ['img at 2:0']
+
+************************************
+ Find elements in a parsed document
+************************************
+
+Parse the document with :func:`turbohtml.parse`, then query it with :meth:`~turbohtml.Node.find` (first match) or
+:meth:`~turbohtml.Node.find_all` (every match). A keyword argument constrains an attribute; both work from the document
+or from any element, searching its descendants:
+
+.. code-block:: pycon
+
+    >>> import turbohtml
+    >>> doc = turbohtml.parse("<form><input name=email><input name=token type=hidden></form>")
+    >>> doc.find("input", type="hidden").attrs["name"]
+    'token'
+    >>> [field.attrs["name"] for field in doc.find_all("input")]
+    ['email', 'token']
+
+************************************
+ Collect the links of a parsed page
+************************************
+
+Collect the ``href`` of every anchor by iterating :meth:`~turbohtml.Node.find_all`; a missing attribute is simply absent
+from :attr:`~turbohtml.Element.attrs`:
+
+.. code-block:: pycon
+
+    >>> page = '<p><a href="/a">one</a> and <a href="/b" download>two</a></p>'
+    >>> [link.attrs["href"] for link in turbohtml.parse(page).find_all("a")]
+    ['/a', '/b']
+
+***********************************
+ Read the text or markup of a node
+***********************************
+
+:attr:`~turbohtml.Node.text` is the concatenated character data of a node's subtree, with references decoded;
+:attr:`~turbohtml.Node.html` re-serializes the subtree back to HTML (attributes quoted, specials escaped):
+
+.. code-block:: pycon
+
+    >>> article = turbohtml.parse("<article><h1>Title</h1><p>Tom &amp; Jerry</p></article>").find("article")
+    >>> article.text
+    'TitleTom & Jerry'
+    >>> article.find("p").html
+    '<p>Tom &amp; Jerry</p>'
+
+``text`` gathers every text node in the subtree, including the contents of ``script`` and ``style`` elements when they
+sit inside it; filter those out by walking :attr:`~turbohtml.Node.descendants` yourself when you need only rendered
+text.
+
+**************************************
+ Match nodes with structural patterns
+**************************************
+
+The node types are a sealed hierarchy with :py:data:`~object.__match_args__` set, so a ``match`` statement dispatches on
+node kind and unpacks the defining field — ``tag`` for an :class:`~turbohtml.Element`, ``data`` for a
+:class:`~turbohtml.Text` or :class:`~turbohtml.Comment`:
+
+.. code-block:: pycon
+
+    >>> def summarize(node: turbohtml.Node) -> str:
+    ...     match node:
+    ...         case turbohtml.Element(tag):
+    ...             return f"<{tag}>"
+    ...         case turbohtml.Text(data):
+    ...             return repr(data)
+    ...         case turbohtml.Comment(data):
+    ...             return f"<!--{data}-->"
+    ...         case _:
+    ...             return "?"
+    ...
+    >>> [summarize(child) for child in turbohtml.parse("<p>hi<!--x--><b>bold</b></p>").find("p")]
+    ["'hi'", '<!--x-->', '<b>']
+
+************************
+ Parse an HTML fragment
+************************
+
+To parse markup that belongs inside a specific element — a table row, an SVG subtree — use
+:func:`turbohtml.parse_fragment` with the context tag. It returns that context :class:`~turbohtml.Element` with the
+parsed nodes as its children, applying the same insertion rules the element would impose in a full document:
+
+.. code-block:: pycon
+
+    >>> row = turbohtml.parse_fragment("<td>a<td>b", "tr")
+    >>> [cell.text for cell in row.find_all("td")]
+    ['a', 'b']
+    >>> row.html
+    '<tr><td>a</td><td>b</td></tr>'
