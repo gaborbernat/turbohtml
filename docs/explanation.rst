@@ -380,14 +380,15 @@ alike.
 
 The query surface builds on that node model. Navigation covers parents, siblings, and the lazy
 :attr:`~turbohtml.Node.descendants`, :attr:`~turbohtml.Node.ancestors`, and document-order
-:attr:`~turbohtml.Node.following` / :attr:`~turbohtml.Node.preceding` iterators, plus the sequence protocol over a node's
-children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen :class:`~turbohtml.Axis` by
-tag and attributes, where a filter is a string, regex, callable, or list. :meth:`~turbohtml.Node.select` and
-:meth:`~turbohtml.Node.select_one` run a native CSS matcher, and :meth:`~turbohtml.Node.matches` /
-:meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the tree, so a tag or attribute name
-resolves to the same interned atom the parser assigned and each match is an integer compare. Output runs back through
-:attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant by
-default with the escaping selectable through :class:`~turbohtml.Formatter`.
+:attr:`~turbohtml.Node.following` / :attr:`~turbohtml.Node.preceding` iterators, plus the sequence protocol over a
+node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen
+:class:`~turbohtml.Axis` by tag and attributes, where a filter is a string, regex, callable, or list.
+:meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.select_one` run a native CSS matcher, and
+:meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the
+tree, so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an integer
+compare. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and
+:meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
+:class:`~turbohtml.Formatter`.
 
 ****************
  Free-threading

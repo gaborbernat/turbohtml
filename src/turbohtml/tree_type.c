@@ -1125,9 +1125,9 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
         PyObject *wrapped = node_wrap(state, handle, node);
         /* allocation failure cannot be forced from a test */
         if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(wrapped); /* GCOVR_EXCL_LINE: allocation-failure path */
-            error = 1;           /* GCOVR_EXCL_LINE: allocation-failure path */
-            break;               /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(wrapped);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+            error = 1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;                                                /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         Py_DECREF(wrapped);
     }
@@ -1231,9 +1231,9 @@ static int resolve_indent(PyObject *indent, Py_UCS4 **out, Py_ssize_t *out_len) 
             return -1;
         }
         Py_UCS4 *buffer = PyMem_Malloc((count ? (size_t)count : 1) * sizeof(Py_UCS4));
-        if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            PyErr_NoMemory();        /* GCOVR_EXCL_LINE: allocation-failure path */
-            return -1;               /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         for (long index = 0; index < count; index++) {
             buffer[index] = ' ';
@@ -1266,7 +1266,8 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
         return NULL;
     }
     Py_ssize_t out_len;
-    Py_UCS4 *data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+    Py_UCS4 *data =
+        th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
     PyMem_Free(indent);
     if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */

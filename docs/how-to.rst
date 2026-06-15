@@ -266,9 +266,9 @@ node kind and unpacks the defining field (``tag`` for an :class:`~turbohtml.Elem
     >>> [summarize(child) for child in turbohtml.parse("<p>hi<!--x--><b>bold</b></p>").find("p")]
     ["'hi'", '<!--x-->', '<b>']
 
-*****************************
+***************************
  Query with a CSS selector
-*****************************
+***************************
 
 :meth:`~turbohtml.Node.select` returns every descendant matching a CSS selector in document order;
 :meth:`~turbohtml.Node.select_one` returns the first or ``None``. The matcher covers type, ``#id``, ``.class``, and
@@ -284,8 +284,8 @@ attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` opera
     >>> doc.select_one('a[href^="/"]').text
     'b'
 
-To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node match)
-or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
+To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node
+match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
 
 .. code-block:: pycon
 
@@ -295,13 +295,13 @@ or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
     >>> link.closest("nav").tag
     'nav'
 
-*******************************
+********************************
  Filter by attribute or pattern
-*******************************
+********************************
 
 :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` take a filter that is a string, a compiled regex, a
-callable, a ``bool`` (present or absent), or a list of those, applied to the tag or to an attribute. ``class_`` matches a
-token in the class list, and ``axis`` aims the search at something other than descendants:
+callable, a ``bool`` (present or absent), or a list of those, applied to the tag or to an attribute. ``class_`` matches
+a token in the class list, and ``axis`` aims the search at something other than descendants:
 
 .. code-block:: pycon
 
@@ -312,9 +312,9 @@ token in the class list, and ``axis`` aims the search at something other than de
     >>> doc.find("a", class_="lg").text
     'A'
 
-*********************************
+************************
  Serialize with control
-*********************************
+************************
 
 :attr:`~turbohtml.Node.html` and :attr:`~turbohtml.Node.inner_html` are the zero-config WHATWG-conformant forms (outer
 and children-only). :meth:`~turbohtml.Node.serialize` adds control: ``formatter`` selects the escaping through
@@ -333,9 +333,9 @@ does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but return
     >>> card.encode("ascii", formatter=Formatter.NAMED_ENTITIES)
     b'<div><p>caf&eacute; &amp; co</p></div>'
 
-***************************************
+************************************
  Parse bytes of an unknown encoding
-***************************************
+************************************
 
 :func:`turbohtml.parse` accepts ``bytes`` and runs the WHATWG encoding sniffing algorithm (a byte-order mark, then a
 ``<meta>`` declaration, defaulting to windows-1252). Pass ``encoding`` to override the sniff, and read

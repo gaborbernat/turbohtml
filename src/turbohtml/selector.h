@@ -18,10 +18,10 @@ typedef struct {
     uint16_t tag_atom;  /* 'e': the tag atom, TH_TAG_UNKNOWN for a name outside the table */
     uint32_t attr_atom; /* '[': the attribute atom, UINT32_MAX when no element has the name */
     enum sel_attr_op op;
-    int ci;                 /* '[': matched case-insensitively */
-    const Py_UCS4 *name;    /* class / id / unknown tag name (into the owned source copy) */
-    Py_ssize_t name_len;    /* also the attribute name for the rare unknown case */
-    const Py_UCS4 *value;   /* '[': the attribute value */
+    int ci;               /* '[': matched case-insensitively */
+    const Py_UCS4 *name;  /* class / id / unknown tag name (into the owned source copy) */
+    Py_ssize_t name_len;  /* also the attribute name for the rare unknown case */
+    const Py_UCS4 *value; /* '[': the attribute value */
     Py_ssize_t value_len;
 } sel_simple;
 
@@ -264,7 +264,7 @@ static int sel_complex_parse(sel_parser *parser, sel_complex *complex) {
             break;
         }
         sel_simple *owned = PyMem_Malloc((size_t)simple_count * sizeof(sel_simple));
-        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        if (owned == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             break;             /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -300,10 +300,10 @@ static int sel_complex_parse(sel_parser *parser, sel_complex *complex) {
         return -1;
     }
     sel_compound *owned = PyMem_Malloc((size_t)count * sizeof(sel_compound));
-    if (owned == NULL) {                  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         for (int index = 0; index < count; index++) { /* GCOVR_EXCL_LINE: allocation-failure path */
             PyMem_Free(temp[index].simples);          /* GCOVR_EXCL_LINE: allocation-failure path */
-        }                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: allocation-failure path */
         parser->error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
         return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -329,7 +329,7 @@ static void selector_free(sel_compiled *compiled) {
    ValueError set on a syntax error. */
 static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
     sel_compiled *compiled = PyMem_Calloc(1, sizeof(sel_compiled));
-    if (compiled == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    if (compiled == NULL) {              /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return (void *)PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     compiled->source = PyUnicode_AsUCS4Copy(selector_str);
@@ -371,13 +371,13 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
     compiled->alts = PyMem_Malloc((size_t)count * sizeof(sel_complex));
     if (compiled->alts == NULL) {                     /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
         for (int index = 0; index < count; index++) { /* GCOVR_EXCL_LINE: allocation-failure path */
-            for (int inner = 0; inner < temp[index].count; inner++) {    /* GCOVR_EXCL_LINE */
-                PyMem_Free(temp[index].compounds[inner].simples);        /* GCOVR_EXCL_LINE */
-            }                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+            for (int inner = 0; inner < temp[index].count; inner++) { /* GCOVR_EXCL_LINE */
+                PyMem_Free(temp[index].compounds[inner].simples);     /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE: allocation-failure path */
             PyMem_Free(temp[index].compounds); /* GCOVR_EXCL_LINE: allocation-failure path */
-        }                                 /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(compiled->source); /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(compiled);         /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(compiled->source);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(compiled);            /* GCOVR_EXCL_LINE: allocation-failure path */
         return (void *)PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     memcpy(compiled->alts, temp, (size_t)count * sizeof(sel_complex));
@@ -472,7 +472,8 @@ static int sel_match_simple(th_node *node, const sel_simple *simple) {
         return sel_eq(node->text, node->text_len, simple->name, simple->name_len, 0);
     case '#': {
         const th_node_attr *attr = sel_find_attr(node, TH_ATTR_ID);
-        return attr != NULL && attr->value != NULL && sel_eq(attr->value, attr->value_len, simple->name, simple->name_len, 0);
+        return attr != NULL && attr->value != NULL &&
+               sel_eq(attr->value, attr->value_len, simple->name, simple->name_len, 0);
     }
     case '.': {
         const th_node_attr *attr = sel_find_attr(node, TH_ATTR_CLASS);
