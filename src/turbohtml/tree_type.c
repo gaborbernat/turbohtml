@@ -523,6 +523,8 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_select(PyObject *self, PyObject *arg);
 static PyObject *node_select_one(PyObject *self, PyObject *arg);
+static PyObject *node_css_matches(PyObject *self, PyObject *arg);
+static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 
 PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
@@ -530,6 +532,14 @@ PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");
+
+PyDoc_STRVAR(matches_doc, "matches(selector, /)\n--\n\n"
+                          "Return whether this node is an Element matching the CSS selector,\n"
+                          "evaluated against its own ancestors and siblings.");
+
+PyDoc_STRVAR(closest_doc, "closest(selector, /)\n--\n\n"
+                          "Return the nearest Element matching the CSS selector, testing this node\n"
+                          "then each ancestor, or None.");
 
 PyDoc_STRVAR(find_doc, "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, **filters)\n--\n\n"
                        "Return the first Element along axis matching the tag filter and every\n"
@@ -546,6 +556,8 @@ static PyMethodDef node_methods[] = {
     {"find_all", (PyCFunction)(void (*)(void))node_find_all, METH_VARARGS | METH_KEYWORDS, find_all_doc},
     {"select", node_select, METH_O, select_doc},
     {"select_one", node_select_one, METH_O, select_one_doc},
+    {"matches", node_css_matches, METH_O, matches_doc},
+    {"closest", node_css_closest, METH_O, closest_doc},
     {NULL, NULL, 0, NULL},
 };
 
@@ -1120,6 +1132,41 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
     th_node *origin = ((NodeObject *)self)->node;
     th_node *found = NULL;
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+        if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled)) {
+            found = node;
+            break;
+        }
+    }
+    selector_free(compiled);
+    return node_wrap(state_of(self), ((NodeObject *)self)->handle, found);
+}
+
+static PyObject *node_css_matches(PyObject *self, PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "selector must be a str");
+        return NULL;
+    }
+    sel_compiled *compiled = selector_compile(tree_of(self), arg);
+    if (compiled == NULL) {
+        return NULL;
+    }
+    th_node *node = ((NodeObject *)self)->node;
+    int matched = node->type == TH_NODE_ELEMENT && selector_matches(node, compiled);
+    selector_free(compiled);
+    return PyBool_FromLong(matched);
+}
+
+static PyObject *node_css_closest(PyObject *self, PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "selector must be a str");
+        return NULL;
+    }
+    sel_compiled *compiled = selector_compile(tree_of(self), arg);
+    if (compiled == NULL) {
+        return NULL;
+    }
+    th_node *found = NULL;
+    for (th_node *node = ((NodeObject *)self)->node; node != NULL; node = node->parent) {
         if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled)) {
             found = node;
             break;
