@@ -36,7 +36,7 @@ def doc() -> Document:
     ],
 )
 def test_find(doc: Document, tag: str, attrs: dict[str, str], first_id: str | None) -> None:
-    match = doc.find(tag, **attrs)
+    match = doc.find(tag, attrs=attrs)
     if first_id == "__missing__":
         assert match is None
     else:
@@ -56,12 +56,13 @@ def test_find(doc: Document, tag: str, attrs: dict[str, str], first_id: str | No
     ],
 )
 def test_find_all(doc: Document, tag: str | None, attrs: dict[str, str], ids: list[str]) -> None:
-    assert [m.attrs.get("id") for m in doc.find_all(tag, **attrs)] == ids
+    assert [m.attrs.get("id") for m in doc.find_all(tag, attrs=attrs)] == ids
 
 
-def test_find_all_is_an_iterator(doc: Document) -> None:
+def test_find_all_returns_a_list(doc: Document) -> None:
     matches = doc.find_all("p")
-    assert next(matches).attrs["id"] == "1"
+    assert isinstance(matches, list)
+    assert matches[0].attrs["id"] == "1"
 
 
 def test_none_tag_matches_any_element() -> None:

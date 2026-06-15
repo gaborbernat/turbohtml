@@ -81,6 +81,11 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     for (int index = 0; index < 3; index++) {
         Py_VISIT(state->namespaces[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
+    Py_VISIT(state->axis_enum);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->pattern_type); /* GCOVR_EXCL_BR_LINE: same */
+    for (int index = 0; index < 7; index++) {
+        Py_VISIT(state->axes[index]); /* GCOVR_EXCL_BR_LINE: same */
+    }
     return 0;
 }
 
@@ -105,6 +110,11 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->namespace_enum);
     for (int index = 0; index < 3; index++) {
         Py_CLEAR(state->namespaces[index]);
+    }
+    Py_CLEAR(state->axis_enum);
+    Py_CLEAR(state->pattern_type);
+    for (int index = 0; index < 7; index++) {
+        Py_CLEAR(state->axes[index]);
     }
     return 0;
 }

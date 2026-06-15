@@ -1,6 +1,18 @@
-from collections.abc import Iterator, Mapping, Sequence
+import re
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from enum import Enum, IntEnum
-from typing import final
+from typing import TypeAlias, final
+
+_Filter: TypeAlias = str | re.Pattern[str] | bool | Callable[[str | None], bool] | list[_Filter]
+
+class Axis(IntEnum):
+    DESCENDANTS = 0
+    CHILDREN = 1
+    ANCESTORS = 2
+    NEXT_SIBLINGS = 3
+    PREVIOUS_SIBLINGS = 4
+    FOLLOWING = 5
+    PRECEDING = 6
 
 def escape(s: str, quote: bool = ...) -> str: ...
 def unescape(s: str, /) -> str: ...
@@ -87,8 +99,27 @@ class Node:
     def text(self) -> str: ...
     @property
     def html(self) -> str: ...
-    def find(self, tag: str | None = None, /, **attrs: str) -> Element | None: ...
-    def find_all(self, tag: str | None = None, /, **attrs: str) -> Iterator[Element]: ...
+    def find(
+        self,
+        tag: _Filter | None = None,
+        /,
+        *,
+        axis: Axis = ...,
+        attrs: Mapping[str, _Filter] | None = ...,
+        class_: _Filter | None = ...,
+        **filters: _Filter,
+    ) -> Element | None: ...
+    def find_all(
+        self,
+        tag: _Filter | None = None,
+        /,
+        *,
+        axis: Axis = ...,
+        attrs: Mapping[str, _Filter] | None = ...,
+        class_: _Filter | None = ...,
+        limit: int | None = ...,
+        **filters: _Filter,
+    ) -> list[Element]: ...
     def __iter__(self) -> Iterator[Node]: ...
     def __len__(self) -> int: ...
     def __getitem__(self, index: int) -> Node: ...

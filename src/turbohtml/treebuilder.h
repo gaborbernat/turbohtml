@@ -115,4 +115,8 @@ Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
    and a dynamic one from the tree's intern table. */
 const char *th_attr_name(th_tree *tree, uint32_t name_atom, Py_ssize_t *out_len);
 
+/* Resolve a query attribute name (UTF-8 bytes) to the atom an element in this
+   tree would carry for it, or UINT32_MAX when no element has that name. */
+uint32_t th_attr_lookup(th_tree *tree, const char *bytes, Py_ssize_t len);
+
 #endif /* TURBOHTML_TREEBUILDER_H */

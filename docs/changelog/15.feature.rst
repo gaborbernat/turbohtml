@@ -1,0 +1,5 @@
+Rework ``find()`` and ``find_all()`` into a filter grammar over a search axis. A filter is a ``str``, a compiled regex,
+a ``bool``, a callable, or a list of those, applied to the tag and to attribute filters (keyword arguments, the
+``attrs`` mapping, or ``class_``, which matches the class tokens). The ``axis`` keyword (an ``Axis`` member) selects
+descendants, children, ancestors, siblings, or document-order following/preceding. ``find_all`` takes a ``limit`` and
+now returns a ``list`` - by :user:`gaborbernat`.

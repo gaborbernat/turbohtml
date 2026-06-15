@@ -252,19 +252,28 @@ static int attr_table_reserve(th_tree *tree) {
     return 0;
 }
 
-/* Intern UTF-8 name bytes into the per-tree dynamic table, returning the atom.
-   The hash is cached for rehashing only; the name comparison is by bytes so a
-   hash collision is not a special case. */
+/* The record index + 1 for an interned name, or 0 when it is not in the table.
+   The name comparison is by bytes, so a hash collision is not a special case. */
+static uint32_t dynamic_slot(th_tree *tree, const char *bytes, Py_ssize_t len, uint32_t hash) {
+    if (tree->attr_slots == NULL) {
+        return 0;
+    }
+    uint32_t mask = tree->attr_slot_mask;
+    for (uint32_t probe = hash & mask; tree->attr_slots[probe] != 0; probe = (probe + 1) & mask) {
+        const th_attr_record *rec = &tree->attr_recs[tree->attr_slots[probe] - 1];
+        if (rec->name_len == (uint32_t)len && memcmp(rec->name, bytes, (size_t)len) == 0) {
+            return tree->attr_slots[probe];
+        }
+    }
+    return 0;
+}
+
+/* Intern UTF-8 name bytes into the per-tree dynamic table, returning the atom. */
 static uint32_t intern_attr_dynamic(th_tree *tree, const char *bytes, Py_ssize_t len) {
     uint32_t hash = fnv1a(bytes, len);
-    if (tree->attr_slots != NULL) {
-        uint32_t mask = tree->attr_slot_mask;
-        for (uint32_t probe = hash & mask; tree->attr_slots[probe] != 0; probe = (probe + 1) & mask) {
-            const th_attr_record *rec = &tree->attr_recs[tree->attr_slots[probe] - 1];
-            if (rec->name_len == (uint32_t)len && memcmp(rec->name, bytes, (size_t)len) == 0) {
-                return TH_ATTR__DYNAMIC_BASE + (tree->attr_slots[probe] - 1);
-            }
-        }
+    uint32_t found = dynamic_slot(tree, bytes, len, hash);
+    if (found != 0) {
+        return TH_ATTR__DYNAMIC_BASE + (found - 1);
     }
     if (attr_table_reserve(tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return TH_ATTR_UNKNOWN;         /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -360,6 +369,21 @@ const char *th_attr_name(th_tree *tree, uint32_t atom, Py_ssize_t *out_len) {
     const th_attr_record *rec = &tree->attr_recs[atom - TH_ATTR__DYNAMIC_BASE];
     *out_len = rec->name_len;
     return rec->name;
+}
+
+/* Resolve a query attribute name (UTF-8 bytes) to the atom an element would carry
+   for it, without interning: a static atom, a dynamic atom already seen in this
+   tree, or UINT32_MAX when no element in the tree has that name. */
+uint32_t th_attr_lookup(th_tree *tree, const char *bytes, Py_ssize_t len) {
+    if (len == 0) {
+        return UINT32_MAX;
+    }
+    uint32_t atom = th_attr_atom(bytes, (size_t)len);
+    if (atom != TH_ATTR_UNKNOWN) {
+        return atom;
+    }
+    uint32_t found = dynamic_slot(tree, bytes, len, fnv1a(bytes, len));
+    return found != 0 ? TH_ATTR__DYNAMIC_BASE + (found - 1) : UINT32_MAX;
 }
 
 /* --------------------------------------------------------------- nodes */

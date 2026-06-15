@@ -31,6 +31,9 @@ typedef struct {
     PyObject *string_walker_type; /* _StringIterator (strings / stripped_strings) */
     PyObject *namespace_enum;     /* Namespace (enum.Enum) */
     PyObject *namespaces[3];      /* cached Namespace members, indexed by enum th_ns */
+    PyObject *axis_enum;          /* Axis (enum.Enum) for find()/find_all() */
+    PyObject *axes[7];            /* cached Axis members, indexed by enum th_axis */
+    PyObject *pattern_type;       /* re.Pattern, to recognize a compiled-regex filter */
 } module_state;
 
 /* Register the types and enum into module/state. Each returns 0 or -1. */
