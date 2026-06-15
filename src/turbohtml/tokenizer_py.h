@@ -15,21 +15,22 @@
 #include "tokenizer_sm.h"
 
 typedef struct {
-    PyObject *token_type;     /* Token */
-    PyObject *tokenizer_type; /* Tokenizer */
-    PyObject *iter_type;      /* the iterator returned by feed()/close()/tokenize() */
-    PyObject *kind_enum;      /* TokenType (enum.IntEnum) */
-    PyObject *kinds[5];       /* cached TokenType members, indexed by enum th_kind */
-    PyObject *node_type;      /* Node (the sealed-hierarchy base) */
-    PyObject *element_type;   /* Element */
-    PyObject *text_type;      /* Text */
-    PyObject *comment_type;   /* Comment */
-    PyObject *doctype_type;   /* Doctype */
-    PyObject *document_type;  /* Document */
-    PyObject *handle_type;    /* _TreeHandle (owns th_tree + the input str) */
-    PyObject *walker_type;    /* _NodeIterator (descendants / ancestors) */
-    PyObject *namespace_enum; /* Namespace (enum.Enum) */
-    PyObject *namespaces[3];  /* cached Namespace members, indexed by enum th_ns */
+    PyObject *token_type;         /* Token */
+    PyObject *tokenizer_type;     /* Tokenizer */
+    PyObject *iter_type;          /* the iterator returned by feed()/close()/tokenize() */
+    PyObject *kind_enum;          /* TokenType (enum.IntEnum) */
+    PyObject *kinds[5];           /* cached TokenType members, indexed by enum th_kind */
+    PyObject *node_type;          /* Node (the sealed-hierarchy base) */
+    PyObject *element_type;       /* Element */
+    PyObject *text_type;          /* Text */
+    PyObject *comment_type;       /* Comment */
+    PyObject *doctype_type;       /* Doctype */
+    PyObject *document_type;      /* Document */
+    PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
+    PyObject *walker_type;        /* _NodeIterator (descendants / ancestors / siblings) */
+    PyObject *string_walker_type; /* _StringIterator (strings / stripped_strings) */
+    PyObject *namespace_enum;     /* Namespace (enum.Enum) */
+    PyObject *namespaces[3];      /* cached Namespace members, indexed by enum th_ns */
 } module_state;
 
 /* Register the types and enum into module/state. Each returns 0 or -1. */

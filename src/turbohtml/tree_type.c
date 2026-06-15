@@ -35,6 +35,13 @@ typedef struct {
     int mode;
 } WalkerObject;
 
+typedef struct {
+    PyObject_HEAD PyObject *handle;
+    th_node *root;    /* the subtree whose Text descendants are yielded */
+    th_node *current; /* next node to consider in pre-order, or NULL when exhausted */
+    int strip;        /* drop surrounding whitespace and skip blank runs */
+} StringWalkerObject;
+
 static module_state *state_of(PyObject *self) {
     return PyType_GetModuleState(Py_TYPE(self));
 }
@@ -138,6 +145,49 @@ static th_node *preorder_next(th_node *current, th_node *root) {
     return NULL;
 }
 
+/* The node before this one in document order: the deepest last descendant of the
+   previous sibling, else the parent. */
+static th_node *previous_element(th_node *node) {
+    if (node->prev_sibling != NULL) {
+        th_node *back = node->prev_sibling;
+        while (back->last_child != NULL) {
+            back = back->last_child;
+        }
+        return back;
+    }
+    return node->parent;
+}
+
+/* The node after this one's whole subtree in document order: the next sibling, or
+   the nearest ancestor's next sibling, or NULL at the end of the document. */
+static th_node *subtree_next(th_node *node) {
+    while (node != NULL) {
+        if (node->next_sibling != NULL) {
+            return node->next_sibling;
+        }
+        node = node->parent;
+    }
+    return NULL;
+}
+
+static int is_ancestor(th_node *candidate, th_node *node) {
+    for (th_node *parent = node->parent; parent != NULL; parent = parent->parent) {
+        if (parent == candidate) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Walk back in document order from current, skipping origin's ancestors so the
+   preceding axis stays disjoint from the ancestors axis. */
+static th_node *preceding_skip(th_node *current, th_node *origin) {
+    while (current != NULL && is_ancestor(current, origin)) {
+        current = previous_element(current);
+    }
+    return current;
+}
+
 static PyObject *walker_new(module_state *state, PyObject *handle, th_node *start, th_node *root, int mode) {
     PyTypeObject *type = (PyTypeObject *)state->walker_type;
     WalkerObject *self = (WalkerObject *)type->tp_alloc(type, 0);
@@ -164,7 +214,23 @@ static PyObject *walker_next(PyObject *self) {
         return NULL;
     }
     th_node *node = walker->current;
-    walker->current = walker->mode == WALK_ANCESTORS ? node->parent : preorder_next(node, walker->root);
+    switch (walker->mode) {
+    case WALK_ANCESTORS:
+        walker->current = node->parent;
+        break;
+    case WALK_NEXT_SIBLINGS:
+        walker->current = node->next_sibling;
+        break;
+    case WALK_PREVIOUS_SIBLINGS:
+        walker->current = node->prev_sibling;
+        break;
+    case WALK_PRECEDING:
+        walker->current = preceding_skip(previous_element(node), walker->root);
+        break;
+    default: /* WALK_DESCENDANTS, and the following axis bounded by a NULL root */
+        walker->current = preorder_next(node, walker->root);
+        break;
+    }
     return node_wrap(state_of(self), walker->handle, node);
 }
 
@@ -180,6 +246,75 @@ static PyType_Spec walker_spec = {
     .basicsize = sizeof(WalkerObject),
     .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
     .slots = walker_slots,
+};
+
+static PyObject *string_walker_new(module_state *state, PyObject *handle, th_node *node, int strip) {
+    PyTypeObject *type = (PyTypeObject *)state->string_walker_type;
+    StringWalkerObject *self = (StringWalkerObject *)type->tp_alloc(type, 0);
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->handle = Py_NewRef(handle);
+    self->root = node;
+    self->current = node->first_child;
+    self->strip = strip;
+    return (PyObject *)self;
+}
+
+static void string_walker_dealloc(PyObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    Py_DECREF(((StringWalkerObject *)self)->handle);
+    type->tp_free(self);
+    Py_DECREF(type);
+}
+
+static PyObject *string_walker_next(PyObject *self) {
+    StringWalkerObject *walker = (StringWalkerObject *)self;
+    th_tree *tree = ((HandleObject *)walker->handle)->tree;
+    while (walker->current != NULL) {
+        th_node *node = walker->current;
+        walker->current = preorder_next(node, walker->root);
+        if (node->type != TH_NODE_TEXT) {
+            continue;
+        }
+        Py_ssize_t len;
+        Py_UCS4 *buf = th_node_data(tree, node, &len);
+        if (buf == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_ssize_t start = 0;
+        Py_ssize_t stop = len;
+        if (walker->strip) {
+            while (start < stop && is_space(buf[start])) {
+                start++;
+            }
+            while (stop > start && is_space(buf[stop - 1])) {
+                stop--;
+            }
+            if (stop == start) {
+                PyMem_Free(buf);
+                continue;
+            }
+        }
+        PyObject *text = ucs4_to_str(buf + start, stop - start);
+        PyMem_Free(buf);
+        return text;
+    }
+    return NULL;
+}
+
+static PyType_Slot string_walker_slots[] = {
+    {Py_tp_dealloc, string_walker_dealloc},
+    {Py_tp_iter, PyObject_SelfIter},
+    {Py_tp_iternext, string_walker_next},
+    {0, NULL},
+};
+
+static PyType_Spec string_walker_spec = {
+    .name = "turbohtml._html._StringIterator",
+    .basicsize = sizeof(StringWalkerObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .slots = string_walker_slots,
 };
 
 /* ------------------------------------------------- shared Node behavior */
@@ -236,6 +371,37 @@ static PyObject *node_get_ancestors(PyObject *self, void *Py_UNUSED(closure)) {
     return walker_new(state_of(self), node->handle, node->node->parent, NULL, WALK_ANCESTORS);
 }
 
+static PyObject *node_get_next_siblings(PyObject *self, void *Py_UNUSED(closure)) {
+    NodeObject *node = (NodeObject *)self;
+    return walker_new(state_of(self), node->handle, node->node->next_sibling, NULL, WALK_NEXT_SIBLINGS);
+}
+
+static PyObject *node_get_previous_siblings(PyObject *self, void *Py_UNUSED(closure)) {
+    NodeObject *node = (NodeObject *)self;
+    return walker_new(state_of(self), node->handle, node->node->prev_sibling, NULL, WALK_PREVIOUS_SIBLINGS);
+}
+
+static PyObject *node_get_following(PyObject *self, void *Py_UNUSED(closure)) {
+    NodeObject *node = (NodeObject *)self;
+    return walker_new(state_of(self), node->handle, subtree_next(node->node), NULL, WALK_DESCENDANTS);
+}
+
+static PyObject *node_get_preceding(PyObject *self, void *Py_UNUSED(closure)) {
+    NodeObject *node = (NodeObject *)self;
+    th_node *start = preceding_skip(previous_element(node->node), node->node);
+    return walker_new(state_of(self), node->handle, start, node->node, WALK_PRECEDING);
+}
+
+static PyObject *node_get_strings(PyObject *self, void *Py_UNUSED(closure)) {
+    NodeObject *node = (NodeObject *)self;
+    return string_walker_new(state_of(self), node->handle, node->node, 0);
+}
+
+static PyObject *node_get_stripped_strings(PyObject *self, void *Py_UNUSED(closure)) {
+    NodeObject *node = (NodeObject *)self;
+    return string_walker_new(state_of(self), node->handle, node->node, 1);
+}
+
 static PyObject *node_get_text(PyObject *self, void *Py_UNUSED(closure)) {
     return str_from_accessor(th_node_text, tree_of(self), ((NodeObject *)self)->node);
 }
@@ -251,6 +417,16 @@ static PyGetSetDef node_getset[] = {
     {"previous_sibling", node_get_previous_sibling, NULL, "the preceding sibling node, or None", NULL},
     {"descendants", node_get_descendants, NULL, "an iterator over every descendant in document order", NULL},
     {"ancestors", node_get_ancestors, NULL, "an iterator from parent up to the document", NULL},
+    {"next_siblings", node_get_next_siblings, NULL, "an iterator over the following siblings in document order", NULL},
+    {"previous_siblings", node_get_previous_siblings, NULL, "an iterator over the preceding siblings, nearest first",
+     NULL},
+    {"following", node_get_following, NULL,
+     "an iterator over nodes after this one in document order, excluding its descendants", NULL},
+    {"preceding", node_get_preceding, NULL,
+     "an iterator over nodes before this one in document order, nearest first, excluding its ancestors", NULL},
+    {"strings", node_get_strings, NULL, "an iterator over the text of every Text descendant", NULL},
+    {"stripped_strings", node_get_stripped_strings, NULL,
+     "strings with surrounding whitespace removed and blank runs skipped", NULL},
     {"text", node_get_text, NULL, "the concatenated character data of every Text descendant", NULL},
     {"html", node_get_html, NULL, "the HTML serialization of this node and its subtree", NULL},
     {NULL, NULL, NULL, NULL, NULL},
@@ -893,10 +1069,12 @@ int tree_register(PyObject *module, module_state *state) {
         return -1;                                 /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->walker_type = PyType_FromModuleAndSpec(module, &walker_spec, NULL);
+    state->string_walker_type = PyType_FromModuleAndSpec(module, &string_walker_spec, NULL);
     state->handle_type = PyType_FromModuleAndSpec(module, &handle_spec, NULL);
     /* allocation failure cannot be forced from a test */
-    if (state->walker_type == NULL || state->handle_type == NULL) { /* GCOVR_EXCL_BR_LINE */
-        return -1;                                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (state->walker_type == NULL || state->string_walker_type == NULL || /* GCOVR_EXCL_BR_LINE */
+        state->handle_type == NULL) {                                      /* GCOVR_EXCL_BR_LINE */
+        return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->node_type = PyType_FromModuleAndSpec(module, &node_spec, NULL);
     if (state->node_type == NULL || PyModule_AddObjectRef(module, "Node", state->node_type) < 0) { /* GCOVR_EXCL_BR_LINE
