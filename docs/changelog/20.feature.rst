@@ -1,0 +1,6 @@
+Give every node a controllable serializer. ``inner_html`` returns the children only; ``serialize(formatter=...,
+indent=...)`` and ``encode(encoding=..., formatter=..., indent=...)`` expose the escape policy through the ``Formatter``
+enum (``WHATWG`` minimal-conformant, ``MINIMAL`` structural-only, ``NAMED_ENTITIES`` HTML names) and a pretty form keyed
+on ``indent`` (an int or string). The default ``html`` output stays WHATWG-conformant: minimal escaping, source-order
+double-quoted attributes, void elements without an end tag, raw-text content verbatim, and a restored leading newline in
+``pre``/``textarea``/``listing`` - by :user:`gaborbernat`.

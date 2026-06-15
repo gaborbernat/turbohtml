@@ -33,6 +33,8 @@ typedef struct {
     PyObject *namespaces[3];      /* cached Namespace members, indexed by enum th_ns */
     PyObject *axis_enum;          /* Axis (enum.Enum) for find()/find_all() */
     PyObject *axes[7];            /* cached Axis members, indexed by enum th_axis */
+    PyObject *formatter_enum;     /* Formatter (enum.Enum) for serialize()/encode() */
+    PyObject *formatters[3];      /* cached Formatter members, indexed by enum th_formatter */
     PyObject *pattern_type;       /* re.Pattern, to recognize a compiled-regex filter */
 } module_state;
 

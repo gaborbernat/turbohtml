@@ -2,6 +2,8 @@
    #included into treebuilder.c (one translation unit, so the static helpers
    here still inline against the node tree). */
 
+#include "entity_names.h"
+
 /* ---------------------------------------------------------- serialization */
 
 typedef struct {
@@ -205,21 +207,38 @@ Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
 
 /* --------------------------------------------- navigable-tree HTML output */
 
-/* Append text with the WHATWG HTML escapes; in_attr selects the attribute-value
-   set ('&', '"', nbsp) versus the text set ('&', '<', '>', nbsp). */
-static void sbuf_put_escaped(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr) {
+/* The escape policy serialize()/encode() expose through the Formatter enum. */
+enum th_formatter {
+    TH_FMT_WHATWG,  /* conformant minimal escaping: & < > nbsp in text, & " nbsp in attrs */
+    TH_FMT_MINIMAL, /* the three structural characters only, in both contexts */
+    TH_FMT_NAMED,   /* HTML named entities for every character that has one */
+};
+
+/* Append text under one formatter; in_attr selects the attribute-value context.
+   NAMED is context-independent (a character's name covers every context); the
+   other two escape the structural set, with WHATWG also folding the quote and
+   no-break space the spec calls for. */
+static void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr, int formatter) {
     for (Py_ssize_t index = 0; index < len; index++) {
         Py_UCS4 character = text[index];
-        if (character == '&') {
+        const char *name = formatter == TH_FMT_NAMED ? th_entity_name(character) : NULL;
+        int escape_angle = formatter == TH_FMT_MINIMAL || !in_attr;
+        if (name != NULL) {
+            sbuf_putc(out, '&');
+            sbuf_puts(out, name);
+            sbuf_putc(out, ';');
+        } else if (formatter == TH_FMT_NAMED) {
+            sbuf_putc(out, character);
+        } else if (character == '&') {
             sbuf_puts(out, "&amp;");
-        } else if (character == 0xA0) {
-            sbuf_puts(out, "&nbsp;");
-        } else if (in_attr && character == '"') {
-            sbuf_puts(out, "&quot;");
-        } else if (!in_attr && character == '<') {
+        } else if (character == '<' && escape_angle) {
             sbuf_puts(out, "&lt;");
-        } else if (!in_attr && character == '>') {
+        } else if (character == '>' && escape_angle) {
             sbuf_puts(out, "&gt;");
+        } else if (character == '"' && in_attr && formatter == TH_FMT_WHATWG) {
+            sbuf_puts(out, "&quot;");
+        } else if (character == 0xA0 && formatter == TH_FMT_WHATWG) {
+            sbuf_puts(out, "&nbsp;");
         } else {
             sbuf_putc(out, character);
         }
@@ -252,24 +271,57 @@ static Py_ssize_t doctype_name_len(const th_node *node) {
     return index;
 }
 
-static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
+/* A pre/textarea/listing element whose first child is a text node beginning with
+   a newline needs an extra leading newline on output: the parser drops one such
+   newline when reading, so re-emitting it keeps the round trip faithful. */
+static int ser_needs_leading_newline(th_tree *tree, th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (node->atom != TH_TAG_PRE && node->atom != TH_TAG_TEXTAREA && node->atom != TH_TAG_LISTING) {
+        return 0;
+    }
+    /* a text node always carries at least one code point (the builder never
+       inserts an empty one), so reading the first character here is safe */
+    th_node *first = node->first_child;
+    return first != NULL && first->type == TH_NODE_TEXT && need_text(tree, first)[0] == '\n';
+}
+
+/* Write an element's start tag, "<tag attrs...>", with attributes in source order
+   and double-quoted values escaped under the formatter. */
+static void ser_open_tag(sbuf *out, th_tree *tree, th_node *node, int formatter) {
+    sbuf_putc(out, '<');
+    sbuf_put_ucs4(out, node->text, node->text_len);
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        th_node_attr *attr = &node->attrs[index];
+        sbuf_putc(out, ' ');
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        sbuf_put_utf8(out, name, name_len);
+        sbuf_puts(out, "=\"");
+        sbuf_put_text(out, attr->value, attr->value_len, 1, formatter);
+        sbuf_putc(out, '"');
+    }
+    sbuf_putc(out, '>');
+}
+
+static void ser_close_tag(sbuf *out, th_node *node) {
+    sbuf_puts(out, "</");
+    sbuf_put_ucs4(out, node->text, node->text_len);
+    sbuf_putc(out, '>');
+}
+
+/* Outer serialization with no inserted whitespace (the WHATWG fragment
+   algorithm), parameterized by the escape formatter. */
+static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int formatter) {
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT: {
-        sbuf_putc(out, '<');
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-            th_node_attr *attr = &node->attrs[index];
-            sbuf_putc(out, ' ');
-            Py_ssize_t name_len;
-            const char *name = th_attr_name(tree, attr->name_atom, &name_len);
-            sbuf_put_utf8(out, name, name_len);
-            sbuf_puts(out, "=\"");
-            sbuf_put_escaped(out, attr->value, attr->value_len, 1);
-            sbuf_putc(out, '"');
-        }
-        sbuf_putc(out, '>');
+        ser_open_tag(out, tree, node, formatter);
         if (node->ns == TH_NS_HTML && is_void_atom(node->atom)) {
             break; /* void elements have no children or end tag */
+        }
+        if (ser_needs_leading_newline(tree, node)) {
+            sbuf_putc(out, '\n');
         }
         int raw = is_rawtext_element(node);
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -277,17 +329,14 @@ static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
             if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
                 sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
             } else {
-                serialize_html(out, tree, child);
+                serialize_compact(out, tree, child, formatter);
             }
         }
-        sbuf_putc(out, '<');
-        sbuf_putc(out, '/');
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        sbuf_putc(out, '>');
+        ser_close_tag(out, node);
         break;
     }
     case TH_NODE_TEXT:
-        sbuf_put_escaped(out, need_text(tree, node), node->text_len, 0);
+        sbuf_put_text(out, need_text(tree, node), node->text_len, 0, formatter);
         break;
     case TH_NODE_COMMENT:
         sbuf_puts(out, "<!--");
@@ -302,7 +351,88 @@ static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            serialize_html(out, tree, child);
+            serialize_compact(out, tree, child, formatter);
+        }
+        break;
+    }
+}
+
+/* Indentation context for the pretty form: the per-level unit and the formatter. */
+typedef struct {
+    int formatter;
+    const Py_UCS4 *indent;
+    Py_ssize_t indent_len;
+} ser_opts;
+
+static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
+    sbuf_putc(out, '\n');
+    for (int level = 0; level < depth; level++) {
+        sbuf_put_ucs4(out, opts->indent, opts->indent_len);
+    }
+}
+
+/* Pretty serialization: write node at the current position with no leading
+   whitespace; a parent emits the newline and indent before each child, so the
+   root starts at column zero. Raw-text and whitespace-significant elements
+   (script/style/pre/textarea/listing) keep their content verbatim, since
+   reflowing it would change meaning. */
+static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_opts *opts, int depth) {
+    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    case TH_NODE_ELEMENT: {
+        ser_open_tag(out, tree, node, opts->formatter);
+        if (node->ns == TH_NS_HTML && is_void_atom(node->atom)) {
+            break;
+        }
+        int raw = is_rawtext_element(node);
+        int preserve = raw || ser_needs_leading_newline(tree, node) ||
+                       (node->ns == TH_NS_HTML &&
+                        (node->atom == TH_TAG_PRE || node->atom == TH_TAG_TEXTAREA || node->atom == TH_TAG_LISTING));
+        if (preserve) {
+            if (ser_needs_leading_newline(tree, node)) {
+                sbuf_putc(out, '\n');
+            }
+            for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+                if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
+                    sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
+                } else {
+                    serialize_compact(out, tree, child, opts->formatter);
+                }
+            }
+            ser_close_tag(out, node);
+            break;
+        }
+        if (node->first_child == NULL) {
+            ser_close_tag(out, node);
+            break;
+        }
+        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+            ser_newline_indent(out, opts, depth + 1);
+            serialize_pretty(out, tree, child, opts, depth + 1);
+        }
+        ser_newline_indent(out, opts, depth);
+        ser_close_tag(out, node);
+        break;
+    }
+    case TH_NODE_TEXT:
+        sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
+        break;
+    case TH_NODE_COMMENT:
+        sbuf_puts(out, "<!--");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "-->");
+        break;
+    case TH_NODE_DOCTYPE:
+        sbuf_puts(out, "<!DOCTYPE ");
+        sbuf_put_ucs4(out, node->text, doctype_name_len(node));
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CONTENT:
+    case TH_NODE_DOCUMENT:
+        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+            if (child != node->first_child) {
+                ser_newline_indent(out, opts, depth);
+            }
+            serialize_pretty(out, tree, child, opts, depth);
         }
         break;
     }
@@ -361,6 +491,26 @@ Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
 
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
-    serialize_html(&out, tree, node);
+    serialize_compact(&out, tree, node, TH_FMT_WHATWG);
+    return sbuf_finish(&out, out_len);
+}
+
+Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
+    sbuf out = {NULL, 0, 0, 0};
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        serialize_compact(&out, tree, child, TH_FMT_WHATWG);
+    }
+    return sbuf_finish(&out, out_len);
+}
+
+Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
+                           Py_ssize_t *out_len) {
+    sbuf out = {NULL, 0, 0, 0};
+    if (indent == NULL) {
+        serialize_compact(&out, tree, node, formatter);
+    } else {
+        ser_opts opts = {formatter, indent, indent_len};
+        serialize_pretty(&out, tree, node, &opts, 0);
+    }
     return sbuf_finish(&out, out_len);
 }

@@ -110,6 +110,17 @@ Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len);
    *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 
+/* Serialize only node's children (its inner HTML), WHATWG-conformant and
+   compact. PyMem-allocated; *out_len receives the length. NULL on failure. */
+Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
+
+/* Serialize node and its subtree under a chosen escape formatter (0 WHATWG,
+   1 minimal, 2 named entities). When indent is non-NULL it is the per-level
+   whitespace unit for pretty output; NULL emits the compact form. PyMem-
+   allocated; *out_len receives the length. NULL on failure. */
+Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
+                           Py_ssize_t *out_len);
+
 /* The interned name bytes (NUL-terminated UTF-8) for an attribute's name_atom;
    *out_len receives the length. Resolves a static atom from the generated table
    and a dynamic one from the tree's intern table. */

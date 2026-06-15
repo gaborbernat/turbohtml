@@ -425,6 +425,10 @@ static PyObject *node_get_html(PyObject *self, void *Py_UNUSED(closure)) {
     return str_from_accessor(th_node_html, tree_of(self), ((NodeObject *)self)->node);
 }
 
+static PyObject *node_get_inner_html(PyObject *self, void *Py_UNUSED(closure)) {
+    return str_from_accessor(th_node_inner_html, tree_of(self), ((NodeObject *)self)->node);
+}
+
 static PyGetSetDef node_getset[] = {
     {"parent", node_get_parent, NULL, "the parent Element or Document, or None for the document root", NULL},
     {"children", node_get_children, NULL, "the child nodes as a tuple", NULL},
@@ -444,6 +448,7 @@ static PyGetSetDef node_getset[] = {
      "strings with surrounding whitespace removed and blank runs skipped", NULL},
     {"text", node_get_text, NULL, "the concatenated character data of every Text descendant", NULL},
     {"html", node_get_html, NULL, "the HTML serialization of this node and its subtree", NULL},
+    {"inner_html", node_get_inner_html, NULL, "the HTML serialization of this node's children", NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -541,6 +546,18 @@ PyDoc_STRVAR(closest_doc, "closest(selector, /)\n--\n\n"
                           "Return the nearest Element matching the CSS selector, testing this node\n"
                           "then each ancestor, or None.");
 
+static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds);
+static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds);
+
+PyDoc_STRVAR(serialize_doc, "serialize(*, formatter=Formatter.WHATWG, indent=None)\n--\n\n"
+                            "Serialize this node and its subtree to a str. formatter chooses the\n"
+                            "escape policy; indent, an int or string, switches to a pretty form that\n"
+                            "adds whitespace and so does not preserve meaning.");
+
+PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG, indent=None)\n--\n\n"
+                         "Serialize this node and its subtree to bytes in the named encoding,\n"
+                         "with the same formatter and indent controls as serialize().");
+
 PyDoc_STRVAR(find_doc, "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, **filters)\n--\n\n"
                        "Return the first Element along axis matching the tag filter and every\n"
                        "attribute filter, or None. A filter is a str, bool, compiled regex,\n"
@@ -558,6 +575,8 @@ static PyMethodDef node_methods[] = {
     {"select_one", node_select_one, METH_O, select_one_doc},
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
+    {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
+    {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
     {NULL, NULL, 0, NULL},
 };
 
@@ -1176,6 +1195,114 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg) {
     return node_wrap(state_of(self), ((NodeObject *)self)->handle, found);
 }
 
+/* Map a Formatter member to its enum th_formatter index; absent means the
+   WHATWG default. */
+static int resolve_formatter(module_state *state, PyObject *formatter, int *out) {
+    if (formatter == NULL) {
+        *out = 0;
+        return 0;
+    }
+    for (int index = 0; index < 3; index++) {
+        if (formatter == state->formatters[index]) {
+            *out = index;
+            return 0;
+        }
+    }
+    PyErr_SetString(PyExc_TypeError, "formatter must be a Formatter member");
+    return -1;
+}
+
+/* Resolve the indent argument to a per-level UCS4 unit: None for compact output,
+   an int for that many spaces, or a string used verbatim. *out is a PyMem buffer
+   the caller frees. */
+static int resolve_indent(PyObject *indent, Py_UCS4 **out, Py_ssize_t *out_len) {
+    *out = NULL;
+    *out_len = 0;
+    if (indent == NULL || indent == Py_None) {
+        return 0;
+    }
+    if (PyLong_Check(indent)) {
+        long count = PyLong_AsLong(indent);
+        if (count == -1 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: an int wider than long cannot be forced here */
+            return -1;                         /* GCOVR_EXCL_LINE: overflow path */
+        }
+        if (count < 0) {
+            PyErr_SetString(PyExc_ValueError, "indent must not be negative");
+            return -1;
+        }
+        Py_UCS4 *buffer = PyMem_Malloc((count ? (size_t)count : 1) * sizeof(Py_UCS4));
+        if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyErr_NoMemory();        /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;               /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (long index = 0; index < count; index++) {
+            buffer[index] = ' ';
+        }
+        *out = buffer;
+        *out_len = count;
+        return 0;
+    }
+    if (PyUnicode_Check(indent)) {
+        *out_len = PyUnicode_GET_LENGTH(indent);
+        *out = PyUnicode_AsUCS4Copy(indent);
+        if (*out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        return 0;
+    }
+    PyErr_SetString(PyExc_TypeError, "indent must be an int, str, or None");
+    return -1;
+}
+
+/* Serialize self to a str under the given Formatter member and indent argument. */
+static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *indent_obj) {
+    int formatter;
+    if (resolve_formatter(state_of(self), formatter_obj, &formatter) < 0) {
+        return NULL;
+    }
+    Py_UCS4 *indent;
+    Py_ssize_t indent_len;
+    if (resolve_indent(indent_obj, &indent, &indent_len) < 0) {
+        return NULL;
+    }
+    Py_ssize_t out_len;
+    Py_UCS4 *data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+    PyMem_Free(indent);
+    if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = ucs4_to_str(data, out_len);
+    PyMem_Free(data);
+    return result;
+}
+
+static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"formatter", "indent", NULL};
+    PyObject *formatter_obj = NULL;
+    PyObject *indent_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OO", keywords, &formatter_obj, &indent_obj)) {
+        return NULL;
+    }
+    return node_serialize_str(self, formatter_obj, indent_obj);
+}
+
+static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"encoding", "formatter", "indent", NULL};
+    const char *encoding = "utf-8";
+    PyObject *formatter_obj = NULL;
+    PyObject *indent_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|s$OO", keywords, &encoding, &formatter_obj, &indent_obj)) {
+        return NULL;
+    }
+    PyObject *text = node_serialize_str(self, formatter_obj, indent_obj);
+    if (text == NULL) {
+        return NULL;
+    }
+    PyObject *encoded = PyUnicode_AsEncodedString(text, encoding, NULL);
+    Py_DECREF(text);
+    return encoded;
+}
+
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.");
 
 static PyType_Slot element_slots[] = {
@@ -1535,6 +1662,58 @@ static int build_axis_enum(PyObject *module, module_state *state) {
     return PyModule_AddObjectRef(module, "Axis", axis_enum);
 }
 
+static int build_formatter_enum(PyObject *module, module_state *state) {
+    static const char *const names[3] = {"WHATWG", "MINIMAL", "NAMED_ENTITIES"};
+    static const char *const values[3] = {"whatwg", "minimal", "named"};
+    PyObject *members = PyDict_New();
+    if (members == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (int index = 0; index < 3; index++) {
+        PyObject *value = PyUnicode_FromString(values[index]);
+        /* allocation failure cannot be forced from a test */
+        if (value == NULL || PyDict_SetItemString(members, names[index], value) < 0) { /* GCOVR_EXCL_BR_LINE */
+            Py_XDECREF(value);  /* GCOVR_EXCL_LINE: alloc-failure path */
+            Py_DECREF(members); /* GCOVR_EXCL_LINE: alloc-failure path */
+            return -1;          /* GCOVR_EXCL_LINE: alloc-failure path */
+        }
+        Py_DECREF(value);
+    }
+    PyObject *enum_module = PyImport_ImportModule("enum");
+    if (enum_module == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(members);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;             /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *enum_type = PyObject_GetAttrString(enum_module, "Enum");
+    Py_DECREF(enum_module);
+    if (enum_type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(members);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *args = Py_BuildValue("(sO)", "Formatter", members);
+    Py_DECREF(members);
+    PyObject *kwargs = Py_BuildValue("{s:s,s:s}", "module", "turbohtml", "qualname", "Formatter");
+    PyObject *formatter_enum = NULL;
+    if (args != NULL && kwargs != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        formatter_enum = PyObject_Call(enum_type, args, kwargs);
+    }
+    Py_DECREF(enum_type);
+    Py_XDECREF(args);
+    Py_XDECREF(kwargs);
+    if (formatter_enum == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (int index = 0; index < 3; index++) {
+        state->formatters[index] = PyObject_GetAttrString(formatter_enum, names[index]);
+        if (state->formatters[index] == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            Py_DECREF(formatter_enum);          /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;                          /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    state->formatter_enum = formatter_enum;
+    return PyModule_AddObjectRef(module, "Formatter", formatter_enum);
+}
+
 static int cache_pattern_type(module_state *state) {
     PyObject *re_module = PyImport_ImportModule("re");
     if (re_module == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1586,6 +1765,9 @@ int tree_register(PyObject *module, module_state *state) {
     }
     if (build_axis_enum(module, state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
         return -1;                            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (build_formatter_enum(module, state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return -1;                                 /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (cache_pattern_type(state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
         return -1;                       /* GCOVR_EXCL_LINE: allocation-failure path */
