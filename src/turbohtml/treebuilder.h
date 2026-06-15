@@ -119,4 +119,9 @@ const char *th_attr_name(th_tree *tree, uint32_t name_atom, Py_ssize_t *out_len)
    tree would carry for it, or UINT32_MAX when no element has that name. */
 uint32_t th_attr_lookup(th_tree *tree, const char *bytes, Py_ssize_t len);
 
+/* Resolve a lowercased tag name (UTF-8 bytes) to its atom, or TH_TAG_UNKNOWN.
+   bytes must point at one readable byte (len >= 1); the selector parser never
+   forms an empty type name. */
+uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len);
+
 #endif /* TURBOHTML_TREEBUILDER_H */

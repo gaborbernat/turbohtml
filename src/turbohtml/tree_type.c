@@ -15,6 +15,7 @@
 
 #include "ascii.h"
 #include "encoding.h"
+#include "selector.h"
 #include "treebuilder.h"
 
 typedef struct {
@@ -520,6 +521,15 @@ static PyObject *node_repr(PyObject *self) {
    machinery, forward-declared here. */
 static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs);
+static PyObject *node_select(PyObject *self, PyObject *arg);
+static PyObject *node_select_one(PyObject *self, PyObject *arg);
+
+PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
+                         "Return the list of descendant Elements matching the CSS selector, in\n"
+                         "document order.");
+
+PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
+                             "Return the first descendant Element matching the CSS selector, or None.");
 
 PyDoc_STRVAR(find_doc, "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, **filters)\n--\n\n"
                        "Return the first Element along axis matching the tag filter and every\n"
@@ -534,6 +544,8 @@ PyDoc_STRVAR(find_all_doc,
 static PyMethodDef node_methods[] = {
     {"find", (PyCFunction)(void (*)(void))node_find, METH_VARARGS | METH_KEYWORDS, find_doc},
     {"find_all", (PyCFunction)(void (*)(void))node_find_all, METH_VARARGS | METH_KEYWORDS, find_all_doc},
+    {"select", node_select, METH_O, select_doc},
+    {"select_one", node_select_one, METH_O, select_one_doc},
     {NULL, NULL, 0, NULL},
 };
 
@@ -1055,6 +1067,66 @@ static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
     return out;
+}
+
+static PyObject *node_select(PyObject *self, PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "selector must be a str");
+        return NULL;
+    }
+    sel_compiled *compiled = selector_compile(tree_of(self), arg);
+    if (compiled == NULL) {
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        selector_free(compiled); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;             /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int error = 0;
+    for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+        if (node->type != TH_NODE_ELEMENT || !selector_matches(node, compiled)) {
+            continue;
+        }
+        PyObject *wrapped = node_wrap(state, handle, node);
+        /* allocation failure cannot be forced from a test */
+        if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE */
+            Py_XDECREF(wrapped); /* GCOVR_EXCL_LINE: allocation-failure path */
+            error = 1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;               /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_DECREF(wrapped);
+    }
+    selector_free(compiled);
+    if (error) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(out); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return out;
+}
+
+static PyObject *node_select_one(PyObject *self, PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "selector must be a str");
+        return NULL;
+    }
+    sel_compiled *compiled = selector_compile(tree_of(self), arg);
+    if (compiled == NULL) {
+        return NULL;
+    }
+    th_node *origin = ((NodeObject *)self)->node;
+    th_node *found = NULL;
+    for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+        if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled)) {
+            found = node;
+            break;
+        }
+    }
+    selector_free(compiled);
+    return node_wrap(state_of(self), ((NodeObject *)self)->handle, found);
 }
 
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.");

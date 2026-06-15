@@ -386,6 +386,20 @@ uint32_t th_attr_lookup(th_tree *tree, const char *bytes, Py_ssize_t len) {
     return found != 0 ? TH_ATTR__DYNAMIC_BASE + (found - 1) : UINT32_MAX;
 }
 
+/* Resolve a lowercased tag name (UTF-8 bytes) to its atom, or TH_TAG_UNKNOWN for
+   a name outside the table (the caller then compares the tag name as text). */
+uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len) {
+    unsigned first = (unsigned char)bytes[0];
+    int stop = th_tag_first[first + 1];
+    for (int index = th_tag_first[first]; index < stop; index++) {
+        const th_tag_entry *entry = &th_tag_table[index];
+        if (entry->name_len == len && memcmp(entry->name + 1, bytes + 1, (size_t)(len - 1)) == 0) {
+            return entry->atom;
+        }
+    }
+    return TH_TAG_UNKNOWN;
+}
+
 /* --------------------------------------------------------------- nodes */
 
 static th_node *node_new(th_tree *tree, enum th_node_type type) {
