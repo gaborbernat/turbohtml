@@ -13,6 +13,7 @@
 
 #include "tokenizer_py.h"
 
+#include "ascii.h"
 #include "treebuilder.h"
 
 typedef struct {
@@ -365,7 +366,63 @@ static PyType_Spec node_spec = {
 
 /* --------------------------------------------------------------- Element */
 
-static PyObject *build_attrs(const th_node *node) {
+/* Attribute names the HTML standard treats as space-separated token lists. They
+   surface in Element.attrs as a list[str] instead of a single string, so class
+   membership and similar reads hit a list rather than re-splitting. The set is by
+   name, not by element; invalid markup such as <div rel> is the only case where
+   that differs from a tag-specific table. */
+static int attr_is_token_list(const char *name, Py_ssize_t name_len) {
+    switch (name_len) {
+    case 3:
+        return memcmp(name, "rel", 3) == 0 || memcmp(name, "rev", 3) == 0;
+    case 5:
+        return memcmp(name, "class", 5) == 0 || memcmp(name, "sizes", 5) == 0;
+    case 7:
+        return memcmp(name, "headers", 7) == 0 || memcmp(name, "sandbox", 7) == 0 || memcmp(name, "archive", 7) == 0;
+    case 8:
+        return memcmp(name, "dropzone", 8) == 0;
+    case 9:
+        return memcmp(name, "accesskey", 9) == 0;
+    case 14:
+        return memcmp(name, "accept-charset", 14) == 0;
+    default:
+        return 0;
+    }
+}
+
+/* Split a token-list attribute value on ASCII whitespace, dropping empty runs:
+   "  a  b " yields ["a", "b"] and "" yields []. */
+static PyObject *split_token_list(const Py_UCS4 *value, Py_ssize_t value_len) {
+    PyObject *tokens = PyList_New(0);
+    if (tokens == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t cursor = 0;
+    while (cursor < value_len) {
+        while (cursor < value_len && is_space(value[cursor])) {
+            cursor++;
+        }
+        Py_ssize_t start = cursor;
+        while (cursor < value_len && !is_space(value[cursor])) {
+            cursor++;
+        }
+        if (cursor > start) {
+            PyObject *token = ucs4_to_str(&value[start], cursor - start);
+            if (token == NULL || PyList_Append(tokens, token) < 0) { /* GCOVR_EXCL_BR_LINE: alloc failure */
+                Py_XDECREF(token);                                   /* GCOVR_EXCL_LINE: alloc-failure path */
+                Py_DECREF(tokens);                                   /* GCOVR_EXCL_LINE: alloc-failure path */
+                return NULL;                                         /* GCOVR_EXCL_LINE: alloc-failure path */
+            }
+            Py_DECREF(token);
+        }
+    }
+    return tokens;
+}
+
+/* Build the attribute mapping. With split set, token-list attributes (class and
+   friends) become a list[str]; element_matches passes 0 to keep find()'s exact
+   whole-string comparison. A valueless attribute is always None. */
+static PyObject *build_attrs(const th_node *node, int split) {
     PyObject *attrs = PyDict_New();
     if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -373,7 +430,14 @@ static PyObject *build_attrs(const th_node *node) {
     for (Py_ssize_t attr_index = 0; attr_index < node->attr_count; attr_index++) {
         const th_node_attr *attr = &node->attrs[attr_index];
         PyObject *name = PyUnicode_DecodeUTF8(attr->name, attr->name_len, "strict");
-        PyObject *value = attr->value != NULL ? ucs4_to_str(attr->value, attr->value_len) : Py_NewRef(Py_None);
+        PyObject *value;
+        if (attr->value == NULL) {
+            value = Py_NewRef(Py_None);
+        } else if (split && attr_is_token_list(attr->name, attr->name_len)) {
+            value = split_token_list(attr->value, attr->value_len);
+        } else {
+            value = ucs4_to_str(attr->value, attr->value_len);
+        }
         /* allocation failure cannot be forced from a test */
         if (name == NULL || value == NULL || PyDict_SetItem(attrs, name, value) < 0) { /* GCOVR_EXCL_BR_LINE */
             Py_XDECREF(name);  /* GCOVR_EXCL_LINE: alloc-failure path */
@@ -397,13 +461,16 @@ static PyObject *element_get_namespace(PyObject *self, void *Py_UNUSED(closure))
 }
 
 static PyObject *element_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
-    return build_attrs(((NodeObject *)self)->node);
+    return build_attrs(((NodeObject *)self)->node, 1);
 }
 
 static PyGetSetDef element_getset[] = {
     {"tag", element_get_tag, NULL, "the lowercased tag name", NULL},
     {"namespace", element_get_namespace, NULL, "the element's Namespace (HTML, SVG, or MATHML)", NULL},
-    {"attrs", element_get_attrs, NULL, "the attributes as a dict; a valueless attribute maps to None", NULL},
+    {"attrs", element_get_attrs, NULL,
+     "the attributes as a dict; token-list attributes (class, rel, ...) map to a list[str], a valueless attribute "
+     "maps to None",
+     NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -427,7 +494,7 @@ static int element_matches(th_node *node, PyObject *tag, PyObject *attrs) {
     if (attrs == NULL || PyDict_GET_SIZE(attrs) == 0) {
         return 1;
     }
-    PyObject *have = build_attrs(node);
+    PyObject *have = build_attrs(node, 0);
     if (have == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
