@@ -266,6 +266,90 @@ node kind and unpacks the defining field (``tag`` for an :class:`~turbohtml.Elem
     >>> [summarize(child) for child in turbohtml.parse("<p>hi<!--x--><b>bold</b></p>").find("p")]
     ["'hi'", '<!--x-->', '<b>']
 
+*****************************
+ Query with a CSS selector
+*****************************
+
+:meth:`~turbohtml.Node.select` returns every descendant matching a CSS selector in document order;
+:meth:`~turbohtml.Node.select_one` returns the first or ``None``. The matcher covers type, ``#id``, ``.class``, and
+attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` operators, joined by the descendant, child
+(``>``), adjacent (``+``), and general-sibling (``~``) combinators, with comma groups:
+
+.. code-block:: pycon
+
+    >>> import turbohtml
+    >>> doc = turbohtml.parse('<ul><li class=on>a<li><a href="/x">b</a></ul>')
+    >>> [li.text for li in doc.select("li.on")]
+    ['a']
+    >>> doc.select_one('a[href^="/"]').text
+    'b'
+
+To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node match)
+or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
+
+.. code-block:: pycon
+
+    >>> link = turbohtml.parse('<nav><a href="/x">home</a></nav>').select_one("a")
+    >>> link.matches("nav a")
+    True
+    >>> link.closest("nav").tag
+    'nav'
+
+*******************************
+ Filter by attribute or pattern
+*******************************
+
+:meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` take a filter that is a string, a compiled regex, a
+callable, a ``bool`` (present or absent), or a list of those, applied to the tag or to an attribute. ``class_`` matches a
+token in the class list, and ``axis`` aims the search at something other than descendants:
+
+.. code-block:: pycon
+
+    >>> import re, turbohtml
+    >>> doc = turbohtml.parse('<a class="btn lg" href="/a">A</a><a href="mailto:x">B</a>')
+    >>> [a.attrs["href"] for a in doc.find_all("a", href=re.compile(r"^/"))]
+    ['/a']
+    >>> doc.find("a", class_="lg").text
+    'A'
+
+*********************************
+ Serialize with control
+*********************************
+
+:attr:`~turbohtml.Node.html` and :attr:`~turbohtml.Node.inner_html` are the zero-config WHATWG-conformant forms (outer
+and children-only). :meth:`~turbohtml.Node.serialize` adds control: ``formatter`` selects the escaping through
+:class:`~turbohtml.Formatter`, and ``indent`` (an int or string) switches to a pretty form that adds whitespace and so
+does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes:
+
+.. code-block:: pycon
+
+    >>> import turbohtml
+    >>> from turbohtml import Formatter
+    >>> card = turbohtml.parse("<div><p>café &amp; co</p></div>").select_one("div")
+    >>> card.inner_html
+    '<p>café &amp; co</p>'
+    >>> card.serialize(formatter=Formatter.NAMED_ENTITIES)
+    '<div><p>caf&eacute; &amp; co</p></div>'
+    >>> card.encode("ascii", formatter=Formatter.NAMED_ENTITIES)
+    b'<div><p>caf&eacute; &amp; co</p></div>'
+
+***************************************
+ Parse bytes of an unknown encoding
+***************************************
+
+:func:`turbohtml.parse` accepts ``bytes`` and runs the WHATWG encoding sniffing algorithm (a byte-order mark, then a
+``<meta>`` declaration, defaulting to windows-1252). Pass ``encoding`` to override the sniff, and read
+:attr:`~turbohtml.Document.encoding` for the label that was used:
+
+.. code-block:: pycon
+
+    >>> import turbohtml
+    >>> doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
+    >>> doc.encoding
+    'iso-8859-2'
+    >>> doc.find("p").text
+    'á'
+
 ************************
  Parse an HTML fragment
 ************************

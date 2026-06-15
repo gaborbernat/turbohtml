@@ -378,10 +378,16 @@ document order. Each type sets ``__match_args__``, so structural pattern matchin
 node equality is identity over the underlying arena node, so two wrappers for the same element compare equal and hash
 alike.
 
-The traversal surface is small for this first increment: navigation (parents, siblings, the lazy
-:attr:`~turbohtml.Node.descendants` and :attr:`~turbohtml.Node.ancestors` iterators), the sequence protocol over a
-node's children, and :meth:`~turbohtml.Node.find` / :meth:`~turbohtml.Node.find_all` by tag and attributes. A
-CSS-selector engine is a planned follow-up; the zero-copy node model is the foundation it will build on.
+The query surface builds on that node model. Navigation covers parents, siblings, and the lazy
+:attr:`~turbohtml.Node.descendants`, :attr:`~turbohtml.Node.ancestors`, and document-order
+:attr:`~turbohtml.Node.following` / :attr:`~turbohtml.Node.preceding` iterators, plus the sequence protocol over a node's
+children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen :class:`~turbohtml.Axis` by
+tag and attributes, where a filter is a string, regex, callable, or list. :meth:`~turbohtml.Node.select` and
+:meth:`~turbohtml.Node.select_one` run a native CSS matcher, and :meth:`~turbohtml.Node.matches` /
+:meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the tree, so a tag or attribute name
+resolves to the same interned atom the parser assigned and each match is an integer compare. Output runs back through
+:attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant by
+default with the escaping selectable through :class:`~turbohtml.Formatter`.
 
 ****************
  Free-threading

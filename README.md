@@ -8,8 +8,8 @@
 
 A fast, fully typed HTML toolkit for Python with a C-accelerated core. turbohtml escapes and unescapes HTML to match the
 standard library byte for byte, tokenizes markup with a WHATWG-conformant streaming tokenizer, and parses whole
-documents into a navigable element tree. Each operation runs several times faster than its pure-Python counterpart and
-supports the free-threaded build.
+documents into a navigable element tree you query with CSS selectors and serialize back to conformant HTML. Each
+operation runs several times faster than its pure-Python counterpart and supports the free-threaded build.
 
 ## Install
 
@@ -77,6 +77,25 @@ Parse a whole document into a tree and walk it with `find`, `find_all`, and the 
 ['one', 'two']
 >>> doc.find('ul').children[0].tag
 'li'
+```
+
+Query with a CSS selector, and serialize a node back to HTML with the escaping you choose:
+
+```pycon
+>>> from turbohtml import Formatter
+>>> doc = turbohtml.parse('<article><h1>Tea</h1><p class=note>café &amp; cake</p></article>')
+>>> doc.select_one('p.note').text
+'café & cake'
+>>> doc.select_one('p').serialize(formatter=Formatter.NAMED_ENTITIES)
+'<p class="note">caf&eacute; &amp; cake</p>'
+```
+
+Pass `bytes` to sniff the encoding the WHATWG way (byte-order mark, then a `<meta>` declaration):
+
+```pycon
+>>> doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
+>>> doc.encoding, doc.find('p').text
+('iso-8859-2', 'á')
 ```
 
 Parse a fragment as the contents of a context element, the way `innerHTML` does:
