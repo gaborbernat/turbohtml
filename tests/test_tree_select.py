@@ -251,3 +251,30 @@ def test_select_one_rejects_non_str() -> None:
 def test_select_one_rejects_invalid_selector() -> None:
     with pytest.raises(ValueError, match="selector"):
         parse(_DOC).select_one("[")
+
+
+def test_overlong_names_are_truncated_and_match_nothing() -> None:
+    # the encode buffers cap the name (60 bytes for a tag, 124 for an attribute);
+    # a longer name overruns the cap and cannot match any real element
+    assert _sel(_DOC, "z" * 130) == []
+    assert _sel(_DOC, "[" + "z" * 130 + "]") == []
+
+
+def test_id_present_but_mismatched() -> None:
+    assert _sel(_DOC, "#nope") == []  # section has an id, but not this one
+
+
+def test_dash_operator_prefix_mismatch_at_boundary() -> None:
+    # lang="en-US": the dash sits at the boundary, but the prefix is not "xx"
+    assert _sel(_DOC, '[lang|="xx"]') == []
+
+
+def test_child_chain_breaks_above_the_match() -> None:
+    # li's parent ul matches, but ul's parent is section, not div
+    assert _sel(_DOC, "div > ul > li") == []
+
+
+def test_adjacent_sibling_compound_and_chain_misses() -> None:
+    assert _sel(_DOC, "h2 + ul") == []  # ul's immediate previous element is a <p>, not h2
+    # span's previous element p matches, but p's previous element is x, not i
+    assert _sel("<x></x><p>p</p><span>s</span>", "i + p + span") == []

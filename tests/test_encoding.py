@@ -145,6 +145,7 @@ def test_unusable_argument_label_falls_through(label: str) -> None:
         pytest.param(b'</1><meta charset="utf-8">', "UTF-8", id="end-tag-non-alpha"),
         pytest.param(b"</", "windows-1252", id="bare-end-tag"),
         pytest.param(b'< <meta charset="utf-8">', "UTF-8", id="lone-angle"),
+        pytest.param(b'<br/><meta charset="utf-8">', "UTF-8", id="self-closing-tag-name"),
     ],
 )
 def test_sniffing_edge_cases(data: bytes, expected: str) -> None:
