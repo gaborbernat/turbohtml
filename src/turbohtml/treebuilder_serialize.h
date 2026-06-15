@@ -37,15 +37,41 @@ static void sbuf_put_ucs4(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
     }
 }
 
+/* Write well-formed UTF-8 bytes (an interned attribute name) as code points. */
+static void sbuf_put_utf8(sbuf *out, const char *bytes, Py_ssize_t len) {
+    Py_ssize_t index = 0;
+    while (index < len) {
+        unsigned char lead = (unsigned char)bytes[index];
+        Py_UCS4 character;
+        if (lead < 0x80) {
+            character = lead;
+            index += 1;
+        } else if (lead < 0xE0) {
+            character = (Py_UCS4)(lead & 0x1F) << 6 | ((unsigned char)bytes[index + 1] & 0x3F);
+            index += 2;
+        } else if (lead < 0xF0) {
+            character = (Py_UCS4)(lead & 0x0F) << 12 | ((unsigned char)(bytes[index + 1] & 0x3F)) << 6 |
+                        ((unsigned char)bytes[index + 2] & 0x3F);
+            index += 3;
+        } else {
+            character = (Py_UCS4)(lead & 0x07) << 18 | ((unsigned char)(bytes[index + 1] & 0x3F)) << 12 |
+                        ((unsigned char)(bytes[index + 2] & 0x3F)) << 6 | ((unsigned char)bytes[index + 3] & 0x3F);
+            index += 4;
+        }
+        sbuf_putc(out, character);
+    }
+}
+
 /* Write an attribute's displayed name (the form the #document line uses) into
    buf: namespaced foreign attributes show "prefix localname", SVG attributes
    take their mixed-case spelling, everything else is the lowercased name. */
-static void render_attr_name(const th_node *node, const th_node_attr *attr, char *buf, size_t bufsize) {
-    const char *name = attr->name;
-    const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, attr->name_len, node->ns) : NULL;
+static void render_attr_name(th_tree *tree, const th_node *node, const th_node_attr *attr, char *buf, size_t bufsize) {
+    Py_ssize_t name_len;
+    const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+    const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, name_len, node->ns) : NULL;
     const char *src = name;
     int to_space = 0;
-    if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, attr->name_len)) {
+    if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
         to_space = 1;
     } else if (mixed != NULL) {
         src = mixed;
@@ -113,9 +139,9 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     char cmp_buf[128];
     for (Py_ssize_t index = 1; index < count; index++) { /* insertion sort; attribute counts are tiny */
         Py_ssize_t key = order[index];
-        render_attr_name(node, &node->attrs[key], ke_buf, sizeof(ke_buf));
+        render_attr_name(tree, node, &node->attrs[key], ke_buf, sizeof(ke_buf));
         Py_ssize_t prev = index - 1;
-        while (prev >= 0 && (render_attr_name(node, &node->attrs[order[prev]], cmp_buf, sizeof(cmp_buf)),
+        while (prev >= 0 && (render_attr_name(tree, node, &node->attrs[order[prev]], cmp_buf, sizeof(cmp_buf)),
                              strcmp(cmp_buf, ke_buf) > 0)) {
             order[prev + 1] = order[prev];
             prev--;
@@ -130,16 +156,17 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
         }
         /* foreign attribute name adjustments: xlink:/xml:/xmlns: serialize with a
            space, and SVG/MathML attributes take their mixed-case spelling */
-        const char *name = attr->name;
-        const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, attr->name_len, node->ns) : NULL;
-        if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, attr->name_len)) {
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, name_len, node->ns) : NULL;
+        if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
             for (const char *character = name; *character; character++) {
                 sbuf_putc(out, *character == ':' ? (Py_UCS4)' ' : (Py_UCS4)*character);
             }
         } else if (mixed != NULL) {
             sbuf_puts(out, mixed);
         } else {
-            sbuf_puts(out, name);
+            sbuf_put_utf8(out, name, name_len);
         }
         sbuf_puts(out, "=\"");
         sbuf_put_ucs4(out, attr->value, attr->value_len);
@@ -233,9 +260,9 @@ static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
             th_node_attr *attr = &node->attrs[index];
             sbuf_putc(out, ' ');
-            for (const char *character = attr->name; *character != '\0'; character++) {
-                sbuf_putc(out, (Py_UCS4)(unsigned char)*character);
-            }
+            Py_ssize_t name_len;
+            const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+            sbuf_put_utf8(out, name, name_len);
             sbuf_puts(out, "=\"");
             sbuf_put_escaped(out, attr->value, attr->value_len, 1);
             sbuf_putc(out, '"');

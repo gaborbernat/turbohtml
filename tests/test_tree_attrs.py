@@ -100,6 +100,39 @@ def test_attribute_order_is_source_order() -> None:
     assert list(element.attrs) == ["id", "class", "data-z"]
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("café", id="latin1-two-byte"),
+        pytest.param("x中", id="bmp-three-byte"),
+        pytest.param("x😀", id="astral-four-byte"),
+    ],
+)
+def test_non_ascii_attribute_name_round_trips(name: str) -> None:
+    element = parse(f'<div {name}="v">').find("div")
+    assert element is not None
+    assert element.attrs[name] == "v"
+    assert element.html == f'<div {name}="v"></div>'
+
+
+def test_many_dynamic_attribute_names_grow_the_table() -> None:
+    names = [f"data-x{index}" for index in range(20)]
+    element = parse(f"<div {' '.join(names)}>").find("div")
+    assert element is not None
+    assert sorted(element.attrs) == sorted(names)
+    assert all(element.attrs[name] is None for name in names)
+
+
+def test_repeated_dynamic_attribute_name_reuses_atom() -> None:
+    doc = parse('<div data-x="1"></div><p data-x="2"></p>')
+    div = doc.find("div")
+    para = doc.find("p")
+    assert div is not None
+    assert para is not None
+    assert div.attrs["data-x"] == "1"
+    assert para.attrs["data-x"] == "2"
+
+
 def test_attrs_supports_mapping_protocol() -> None:
     element = parse('<div class="x y">').find("div")
     assert element is not None

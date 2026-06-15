@@ -27,6 +27,14 @@ typedef struct arena_block {
     char data[];
 } arena_block;
 
+/* One interned dynamic attribute name (a name outside the static attr_atom.h
+   table). The bytes are arena-owned UTF-8, NUL-terminated. */
+typedef struct {
+    const char *name;
+    uint32_t name_len;
+    uint32_t hash;
+} th_attr_record;
+
 struct th_tree {
     arena_block *arena;
     th_node *document;
@@ -55,6 +63,15 @@ struct th_tree {
     const void *data;
     Py_ssize_t length;
     int failed; /* an allocation failed; abandon the parse */
+    /* Dynamic intern table for attribute names outside attr_atom.h: the record
+       for atom d is attr_recs[d - TH_ATTR__DYNAMIC_BASE]; attr_slots maps a name
+       hash to its record. Grown only as uncommon names appear; read-only after
+       the parse, so no lock is needed under the free-threaded build. */
+    th_attr_record *attr_recs;
+    uint32_t attr_rec_count;
+    uint32_t attr_rec_cap;
+    uint32_t *attr_slots; /* slot -> record index + 1; 0 marks an empty slot */
+    uint32_t attr_slot_mask;
 };
 
 static void *arena_alloc(th_tree *tree, Py_ssize_t size) {
@@ -189,6 +206,160 @@ static uint16_t intern_atom(const th_buf *name, uint8_t *out_flags) {
         }
     }
     return TH_TAG_UNKNOWN;
+}
+
+/* ---------------------------------------------------- attribute interning */
+
+static uint32_t fnv1a(const char *bytes, Py_ssize_t len) {
+    uint32_t hash = 2166136261u;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        hash ^= (unsigned char)bytes[index];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+/* Ensure the dynamic table can take one more record: grow the record array, and
+   build or grow the hash slots past a 3/4 load factor (rehashing the records). */
+static int attr_table_reserve(th_tree *tree) {
+    if (tree->attr_rec_count == tree->attr_rec_cap) {
+        uint32_t cap = tree->attr_rec_cap ? tree->attr_rec_cap * 2 : 8;
+        th_attr_record *recs = PyMem_Realloc(tree->attr_recs, cap * sizeof(th_attr_record));
+        if (recs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        tree->attr_recs = recs;
+        tree->attr_rec_cap = cap;
+    }
+    if (tree->attr_slots == NULL || tree->attr_rec_count + 1 > (tree->attr_slot_mask + 1) * 3 / 4) {
+        uint32_t new_cap = tree->attr_slots == NULL ? 16 : (tree->attr_slot_mask + 1) * 2;
+        uint32_t *slots = PyMem_Calloc(new_cap, sizeof(uint32_t));
+        if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        uint32_t mask = new_cap - 1;
+        for (uint32_t index = 0; index < tree->attr_rec_count; index++) {
+            uint32_t probe = tree->attr_recs[index].hash & mask;
+            while (slots[probe] != 0) {
+                probe = (probe + 1) & mask;
+            }
+            slots[probe] = index + 1;
+        }
+        PyMem_Free(tree->attr_slots);
+        tree->attr_slots = slots;
+        tree->attr_slot_mask = mask;
+    }
+    return 0;
+}
+
+/* Intern UTF-8 name bytes into the per-tree dynamic table, returning the atom.
+   The hash is cached for rehashing only; the name comparison is by bytes so a
+   hash collision is not a special case. */
+static uint32_t intern_attr_dynamic(th_tree *tree, const char *bytes, Py_ssize_t len) {
+    uint32_t hash = fnv1a(bytes, len);
+    if (tree->attr_slots != NULL) {
+        uint32_t mask = tree->attr_slot_mask;
+        for (uint32_t probe = hash & mask; tree->attr_slots[probe] != 0; probe = (probe + 1) & mask) {
+            const th_attr_record *rec = &tree->attr_recs[tree->attr_slots[probe] - 1];
+            if (rec->name_len == (uint32_t)len && memcmp(rec->name, bytes, (size_t)len) == 0) {
+                return TH_ATTR__DYNAMIC_BASE + (tree->attr_slots[probe] - 1);
+            }
+        }
+    }
+    if (attr_table_reserve(tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return TH_ATTR_UNKNOWN;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    char *stored = arena_alloc(tree, len + 1);
+    if (stored == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return TH_ATTR_UNKNOWN; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(stored, bytes, (size_t)len);
+    stored[len] = '\0';
+    uint32_t index = tree->attr_rec_count++;
+    tree->attr_recs[index] = (th_attr_record){stored, (uint32_t)len, hash};
+    uint32_t mask = tree->attr_slot_mask;
+    uint32_t probe = hash & mask;
+    while (tree->attr_slots[probe] != 0) {
+        probe = (probe + 1) & mask;
+    }
+    tree->attr_slots[probe] = index + 1;
+    return TH_ATTR__DYNAMIC_BASE + index;
+}
+
+/* UTF-8 encode a non-ASCII attribute name into the arena (NUL-terminated). Only
+   the rare wide-name path needs this; ASCII names intern from their bytes. */
+static char *attr_name_utf8(th_tree *tree, const th_buf *name, Py_ssize_t *out_len) {
+    char *out = arena_alloc(tree, name->len * 4 + 1);
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t at = 0;
+    for (Py_ssize_t index = 0; index < name->len; index++) {
+        Py_UCS4 ch = buf_read(name, index);
+        if (ch < 0x80) {
+            out[at++] = (char)ch;
+        } else if (ch < 0x800) {
+            out[at++] = (char)(0xC0 | (ch >> 6));
+            out[at++] = (char)(0x80 | (ch & 0x3F));
+        } else if (ch < 0x10000) {
+            out[at++] = (char)(0xE0 | (ch >> 12));
+            out[at++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+            out[at++] = (char)(0x80 | (ch & 0x3F));
+        } else {
+            out[at++] = (char)(0xF0 | (ch >> 18));
+            out[at++] = (char)(0x80 | ((ch >> 12) & 0x3F));
+            out[at++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+            out[at++] = (char)(0x80 | (ch & 0x3F));
+        }
+    }
+    out[at] = '\0';
+    *out_len = at;
+    return out;
+}
+
+static int buf_ascii(const char *bytes, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if ((unsigned char)bytes[index] >= 0x80) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Intern an attribute name to its atom: a static compile-time id for a common
+   name, else a per-tree dynamic id. A 1-byte buffer holds Latin-1 code points,
+   so only an all-ASCII one is already UTF-8; any high byte (and every wider
+   buffer) is re-encoded so the stored name round-trips through UTF-8. */
+static uint32_t intern_attr(th_tree *tree, const th_buf *name) {
+    if (name->kind == PyUnicode_1BYTE_KIND) {
+        const char *bytes = (const char *)name->data;
+        uint32_t atom = th_attr_atom(bytes, (size_t)name->len);
+        if (atom != TH_ATTR_UNKNOWN) {
+            return atom;
+        }
+        if (buf_ascii(bytes, name->len)) {
+            return intern_attr_dynamic(tree, bytes, name->len);
+        }
+    }
+    Py_ssize_t len;
+    char *bytes = attr_name_utf8(tree, name, &len);
+    if (bytes == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return TH_ATTR_UNKNOWN; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return intern_attr_dynamic(tree, bytes, len);
+}
+
+/* The interned name's bytes for an atom: the static table for a common atom, the
+   per-tree records otherwise. NUL-terminated; *out_len receives the length. */
+const char *th_attr_name(th_tree *tree, uint32_t atom, Py_ssize_t *out_len) {
+    if (atom < TH_ATTR__DYNAMIC_BASE) {
+        const th_attr_entry *entry = &th_attr_table[atom - 1];
+        *out_len = entry->name_len;
+        return entry->name;
+    }
+    const th_attr_record *rec = &tree->attr_recs[atom - TH_ATTR__DYNAMIC_BASE];
+    *out_len = rec->name_len;
+    return rec->name;
 }
 
 /* --------------------------------------------------------------- nodes */
@@ -481,19 +652,7 @@ static th_node *insert_element(th_tree *tree, const th_token *token) {
         for (Py_ssize_t index = 0; index < token->attr_count; index++) {
             const th_attr *src = &token->attrs[index];
             th_node_attr *dst = &node->attrs[index];
-            dst->name_len = src->name.len;
-            dst->name = arena_alloc(tree, src->name.len + 1);
-            if (dst->name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-            }
-            if (src->name.kind == PyUnicode_1BYTE_KIND) {
-                memcpy(dst->name, src->name.data, (size_t)src->name.len); /* ASCII attribute name */
-            } else {
-                for (Py_ssize_t pos = 0; pos < src->name.len; pos++) {
-                    dst->name[pos] = (char)buf_read(&src->name, pos);
-                }
-            }
-            dst->name[src->name.len] = '\0';
+            dst->name_atom = intern_attr(tree, &src->name);
             dst->value = src->has_value ? buf_to_ucs4(tree, &src->value, &dst->value_len) : NULL;
             if (!src->has_value) {
                 dst->value_len = 0;
@@ -552,11 +711,10 @@ static void merge_attrs(th_tree *tree, th_node *node, const th_token *token) {
     }
     Py_ssize_t add = 0;
     for (Py_ssize_t index = 0; index < token->attr_count; index++) {
-        const th_buf *an = &token->attrs[index].name;
+        uint32_t atom = intern_attr(tree, &token->attrs[index].name);
         int present = 0;
         for (Py_ssize_t inner_index = 0; inner_index < node->attr_count; inner_index++) {
-            if (node->attrs[inner_index].name_len == an->len && an->kind == PyUnicode_1BYTE_KIND &&
-                memcmp(node->attrs[inner_index].name, an->data, (size_t)an->len) == 0) {
+            if (node->attrs[inner_index].name_atom == atom) {
                 present = 1;
                 break;
             }
@@ -576,10 +734,10 @@ static void merge_attrs(th_tree *tree, th_node *node, const th_token *token) {
     Py_ssize_t at = node->attr_count;
     for (Py_ssize_t index = 0; index < token->attr_count; index++) {
         const th_attr *src = &token->attrs[index];
+        uint32_t atom = intern_attr(tree, &src->name);
         int present = 0;
         for (Py_ssize_t inner_index = 0; inner_index < node->attr_count; inner_index++) {
-            if (node->attrs[inner_index].name_len == src->name.len && src->name.kind == PyUnicode_1BYTE_KIND &&
-                memcmp(node->attrs[inner_index].name, src->name.data, (size_t)src->name.len) == 0) {
+            if (node->attrs[inner_index].name_atom == atom) {
                 present = 1;
                 break;
             }
@@ -589,16 +747,7 @@ static void merge_attrs(th_tree *tree, th_node *node, const th_token *token) {
         }
         // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound): merged holds one slot per source attribute
         th_node_attr *dst = &merged[at++];
-        dst->name_len = src->name.len;
-        dst->name = arena_alloc(tree, src->name.len + 1);
-        if (dst->name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return;              /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        }
-        for (Py_ssize_t pos = 0; pos < src->name.len; pos++) {
-            dst->name[pos] = (char)buf_read(&src->name, pos);
-        }
-        // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound): name is allocated with room for the terminator
-        dst->name[src->name.len] = '\0';
+        dst->name_atom = atom;
         dst->value = src->has_value ? buf_to_ucs4(tree, &src->value, &dst->value_len) : NULL;
         if (!src->has_value) {
             dst->value_len = 0;
@@ -817,11 +966,10 @@ static th_node *node_clone(th_tree *tree, const th_node *src) {
     return node;
 }
 
-/* Does the element carry an attribute with this (lowercase) name? */
-static int node_has_attr(const th_node *node, const char *name) {
-    Py_ssize_t len = (Py_ssize_t)strlen(name);
+/* Does the element carry an attribute with this interned name? */
+static int node_has_attr(const th_node *node, uint32_t atom) {
     for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-        if (node->attrs[index].name_len == len && memcmp(node->attrs[index].name, name, (size_t)len) == 0) {
+        if (node->attrs[index].name_atom == atom) {
             return 1;
         }
     }
@@ -886,14 +1034,14 @@ static void maybe_clone_option(th_tree *tree, th_node *option) {
              select->atom == TH_TAG_SELECT)) {
         select = select->parent;
     }
-    if (select == NULL || node_has_attr(select, "multiple")) {
+    if (select == NULL || node_has_attr(select, TH_ATTR_MULTIPLE)) {
         return;
     }
-    if (!node_has_attr(option, "selected") && first_descendant_atom(select, TH_TAG_OPTION) != option) {
+    if (!node_has_attr(option, TH_ATTR_SELECTED) && first_descendant_atom(select, TH_TAG_OPTION) != option) {
         return;
     }
     th_node *sc = first_descendant_atom(select, TH_TAG_SELECTEDCONTENT);
-    if (sc == NULL || node_has_attr(sc, "disabled")) {
+    if (sc == NULL || node_has_attr(sc, TH_ATTR_DISABLED)) {
         return;
     }
     while (sc->first_child != NULL) {
@@ -915,8 +1063,7 @@ static int afe_push(th_tree *tree, th_node *node) {
         if (entry->atom == node->atom && entry->attr_count == node->attr_count) {
             int same = 1;
             for (Py_ssize_t aidx = 0; aidx < node->attr_count && same; aidx++) {
-                if (entry->attrs[aidx].name_len != node->attrs[aidx].name_len ||
-                    memcmp(entry->attrs[aidx].name, node->attrs[aidx].name, (size_t)node->attrs[aidx].name_len) != 0 ||
+                if (entry->attrs[aidx].name_atom != node->attrs[aidx].name_atom ||
                     entry->attrs[aidx].value_len != node->attrs[aidx].value_len ||
                     memcmp(entry->attrs[aidx].value, node->attrs[aidx].value,
                            (size_t)node->attrs[aidx].value_len * sizeof(Py_UCS4)) != 0) {
@@ -3431,6 +3578,8 @@ void th_tree_free(th_tree *tree) {
     PyMem_Free(tree->open);
     PyMem_Free(tree->afe);
     PyMem_Free(tree->tmpl);
+    PyMem_Free(tree->attr_slots);
+    PyMem_Free(tree->attr_recs);
     PyMem_Free(tree);
 }
 

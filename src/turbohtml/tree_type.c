@@ -26,7 +26,7 @@ typedef struct {
     th_node *node;
 } NodeObject;
 
-enum walk_mode { WALK_DESCENDANTS, WALK_ANCESTORS };
+enum walk_mode { WALK_DESCENDANTS, WALK_ANCESTORS, WALK_NEXT_SIBLINGS, WALK_PREVIOUS_SIBLINGS, WALK_PRECEDING };
 
 typedef struct {
     PyObject_HEAD PyObject *handle;
@@ -369,22 +369,21 @@ static PyType_Spec node_spec = {
 /* Attribute names the HTML standard treats as space-separated token lists. They
    surface in Element.attrs as a list[str] instead of a single string, so class
    membership and similar reads hit a list rather than re-splitting. The set is by
-   name, not by element; invalid markup such as <div rel> is the only case where
-   that differs from a tag-specific table. */
-static int attr_is_token_list(const char *name, Py_ssize_t name_len) {
-    switch (name_len) {
-    case 3:
-        return memcmp(name, "rel", 3) == 0 || memcmp(name, "rev", 3) == 0;
-    case 5:
-        return memcmp(name, "class", 5) == 0 || memcmp(name, "sizes", 5) == 0;
-    case 7:
-        return memcmp(name, "headers", 7) == 0 || memcmp(name, "sandbox", 7) == 0 || memcmp(name, "archive", 7) == 0;
-    case 8:
-        return memcmp(name, "dropzone", 8) == 0;
-    case 9:
-        return memcmp(name, "accesskey", 9) == 0;
-    case 14:
-        return memcmp(name, "accept-charset", 14) == 0;
+   name (its interned atom), not by element; invalid markup such as <div rel> is
+   the only case where that differs from a tag-specific table. */
+static int attr_is_token_list(uint32_t name_atom) {
+    switch (name_atom) {
+    case TH_ATTR_CLASS:
+    case TH_ATTR_REL:
+    case TH_ATTR_REV:
+    case TH_ATTR_HEADERS:
+    case TH_ATTR_ACCESSKEY:
+    case TH_ATTR_DROPZONE:
+    case TH_ATTR_SIZES:
+    case TH_ATTR_SANDBOX:
+    case TH_ATTR_ARCHIVE:
+    case TH_ATTR_ACCEPT_CHARSET:
+        return 1;
     default:
         return 0;
     }
@@ -422,18 +421,20 @@ static PyObject *split_token_list(const Py_UCS4 *value, Py_ssize_t value_len) {
 /* Build the attribute mapping. With split set, token-list attributes (class and
    friends) become a list[str]; element_matches passes 0 to keep find()'s exact
    whole-string comparison. A valueless attribute is always None. */
-static PyObject *build_attrs(const th_node *node, int split) {
+static PyObject *build_attrs(th_tree *tree, const th_node *node, int split) {
     PyObject *attrs = PyDict_New();
     if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (Py_ssize_t attr_index = 0; attr_index < node->attr_count; attr_index++) {
         const th_node_attr *attr = &node->attrs[attr_index];
-        PyObject *name = PyUnicode_DecodeUTF8(attr->name, attr->name_len, "strict");
+        Py_ssize_t name_len;
+        const char *name_bytes = th_attr_name(tree, attr->name_atom, &name_len);
+        PyObject *name = PyUnicode_DecodeUTF8(name_bytes, name_len, "strict");
         PyObject *value;
         if (attr->value == NULL) {
             value = Py_NewRef(Py_None);
-        } else if (split && attr_is_token_list(attr->name, attr->name_len)) {
+        } else if (split && attr_is_token_list(attr->name_atom)) {
             value = split_token_list(attr->value, attr->value_len);
         } else {
             value = ucs4_to_str(attr->value, attr->value_len);
@@ -461,7 +462,7 @@ static PyObject *element_get_namespace(PyObject *self, void *Py_UNUSED(closure))
 }
 
 static PyObject *element_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
-    return build_attrs(((NodeObject *)self)->node, 1);
+    return build_attrs(tree_of(self), ((NodeObject *)self)->node, 1);
 }
 
 static PyGetSetDef element_getset[] = {
@@ -476,7 +477,7 @@ static PyGetSetDef element_getset[] = {
 
 /* Whether node matches the optional tag (a str or NULL) and every name=value in
    the optional attrs dict. Returns 1/0, or -1 with an exception set. */
-static int element_matches(th_node *node, PyObject *tag, PyObject *attrs) {
+static int element_matches(th_tree *tree, th_node *node, PyObject *tag, PyObject *attrs) {
     if (node->type != TH_NODE_ELEMENT) {
         return 0;
     }
@@ -494,7 +495,7 @@ static int element_matches(th_node *node, PyObject *tag, PyObject *attrs) {
     if (attrs == NULL || PyDict_GET_SIZE(attrs) == 0) {
         return 1;
     }
-    PyObject *have = build_attrs(node, 0);
+    PyObject *have = build_attrs(tree, node, 0);
     if (have == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -518,9 +519,9 @@ static int element_matches(th_node *node, PyObject *tag, PyObject *attrs) {
     return matched;
 }
 
-static th_node *find_first(th_node *node, PyObject *tag, PyObject *attrs, int *error) {
+static th_node *find_first(th_tree *tree, th_node *node, PyObject *tag, PyObject *attrs, int *error) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        int matched = element_matches(child, tag, attrs);
+        int matched = element_matches(tree, child, tag, attrs);
         if (matched < 0) { /* GCOVR_EXCL_BR_LINE: matching fails only on an allocation error */
             *error = 1;    /* GCOVR_EXCL_LINE: matching fails only on an allocation error */
             return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -528,7 +529,7 @@ static th_node *find_first(th_node *node, PyObject *tag, PyObject *attrs, int *e
         if (matched) {
             return child;
         }
-        th_node *deeper = find_first(child, tag, attrs, error);
+        th_node *deeper = find_first(tree, child, tag, attrs, error);
         if (deeper != NULL || *error) { /* GCOVR_EXCL_BR_LINE: *error is set only on an allocation failure */
             return deeper;
         }
@@ -536,10 +537,10 @@ static th_node *find_first(th_node *node, PyObject *tag, PyObject *attrs, int *e
     return NULL;
 }
 
-static int collect_matches(module_state *state, PyObject *handle, th_node *node, PyObject *tag, PyObject *attrs,
-                           PyObject *out) {
+static int collect_matches(th_tree *tree, module_state *state, PyObject *handle, th_node *node, PyObject *tag,
+                           PyObject *attrs, PyObject *out) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        int matched = element_matches(child, tag, attrs);
+        int matched = element_matches(tree, child, tag, attrs);
         if (matched < 0) { /* GCOVR_EXCL_BR_LINE: matching fails only on an allocation error */
             return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -553,8 +554,8 @@ static int collect_matches(module_state *state, PyObject *handle, th_node *node,
             Py_DECREF(wrapped);
         }
         /* allocation failure cannot be forced from a test */
-        if (collect_matches(state, handle, child, tag, attrs, out) < 0) { /* GCOVR_EXCL_BR_LINE */
-            return -1;                                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (collect_matches(tree, state, handle, child, tag, attrs, out) < 0) { /* GCOVR_EXCL_BR_LINE */
+            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
     return 0;
@@ -582,7 +583,7 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     }
     NodeObject *node = (NodeObject *)self;
     int error = 0;
-    th_node *match = find_first(node->node, tag, kwargs, &error);
+    th_node *match = find_first(tree_of(self), node->node, tag, kwargs, &error);
     if (error) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -599,8 +600,8 @@ static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs)
     if (matches == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    /* allocation failure cannot be forced from a test */
-    if (collect_matches(state_of(self), node->handle, node->node, tag, kwargs, matches) < 0) { /* GCOVR_EXCL_BR_LINE */
+    int failed = collect_matches(tree_of(self), state_of(self), node->handle, node->node, tag, kwargs, matches);
+    if (failed < 0) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_DECREF(matches); /* GCOVR_EXCL_LINE: alloc-failure path */
         return NULL;        /* GCOVR_EXCL_LINE: alloc-failure path */
     }

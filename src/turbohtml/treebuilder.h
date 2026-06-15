@@ -17,6 +17,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "attr_atom.h"
 #include "tag_atom.h"
 #include "tokenizer_sm.h"
 
@@ -29,11 +30,13 @@ enum th_node_type {
     TH_NODE_CONTENT, /* a <template>'s content document fragment */
 };
 
-/* An attribute on an element node; name/value are NUL-terminated UTF-8 copied
-   into the arena (attribute data is tiny and rarely the hot path). */
+/* An attribute on an element node. The name is interned to an atom: a static
+   compile-time id for common names (attr_atom.h), or a per-tree dynamic id for
+   the rest. attr_record() recovers the name bytes for serialization and
+   Element.attrs, so every name match the finder and selector do is an integer
+   compare, never a strcmp. */
 typedef struct {
-    char *name;
-    Py_ssize_t name_len;
+    uint32_t name_atom;
     Py_UCS4 *value; /* code points, value_len of them; NULL when valueless */
     Py_ssize_t value_len;
 } th_node_attr;
@@ -106,5 +109,10 @@ Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len);
    For the document node this is the whole-document markup. PyMem-allocated;
    *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
+
+/* The interned name bytes (NUL-terminated UTF-8) for an attribute's name_atom;
+   *out_len receives the length. Resolves a static atom from the generated table
+   and a dynamic one from the tree's intern table. */
+const char *th_attr_name(th_tree *tree, uint32_t name_atom, Py_ssize_t *out_len);
 
 #endif /* TURBOHTML_TREEBUILDER_H */
