@@ -720,6 +720,13 @@ typedef struct {
     uint32_t *atoms;  /* resolved name atoms for the attribute filters */
     PyObject **filters;
     Py_ssize_t nattr;
+    /* Fast path for a plain-string tag filter: resolve the name to an atom once
+       so the per-node test is an integer compare instead of building a str for
+       every element. tag_plain is set when tag is a single str; tag_atom is its
+       atom, or TH_TAG_UNKNOWN for a name outside the table (then the rare
+       unknown-atom elements are compared by name). */
+    int tag_plain;
+    uint16_t tag_atom;
 } query_t;
 
 static void free_query(query_t *query) {
@@ -857,7 +864,28 @@ static int node_matches(module_state *state, th_node *node, const query_t *query
     if (node->type != TH_NODE_ELEMENT) {
         return 0;
     }
-    if (query->tag != NULL) {
+    if (query->tag_plain) {
+        /* a known name is a pure integer compare; an unknown one can only match
+           the rare unknown-atom elements, compared by name */
+        if (query->tag_atom != TH_TAG_UNKNOWN) {
+            if (node->atom != query->tag_atom) {
+                return 0;
+            }
+        } else {
+            if (node->atom != TH_TAG_UNKNOWN) {
+                return 0;
+            }
+            PyObject *name = ucs4_to_str(node->text, node->text_len);
+            if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            int equal = PyUnicode_Compare(name, query->tag) == 0;
+            Py_DECREF(name);
+            if (!equal) {
+                return 0;
+            }
+        }
+    } else if (query->tag != NULL) {
         PyObject *name = ucs4_to_str(node->text, node->text_len);
         if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -960,6 +988,8 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     query->atoms = NULL;
     query->filters = NULL;
     query->nattr = 0;
+    query->tag_plain = 0;
+    query->tag_atom = TH_TAG_UNKNOWN;
 
     PyObject *tag = NULL;
     if (!PyArg_ParseTuple(args, "|O:find", &tag)) {
@@ -967,6 +997,19 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     }
     if (tag != NULL && tag != Py_None) {
         query->tag = tag;
+        /* a plain str tag matches by interned atom; encode case-sensitively (a
+           find() name match is exact, unlike a case-insensitive CSS type) */
+        if (PyUnicode_Check(tag)) {
+            Py_ssize_t blen;
+            const char *bytes = PyUnicode_AsUTF8AndSize(tag, &blen);
+            if (bytes == NULL) {
+                /* a lone surrogate cannot encode; fall back to the str-compare path */
+                PyErr_Clear();
+            } else {
+                query->tag_plain = 1;
+                query->tag_atom = blen > 0 ? th_tag_lookup(bytes, blen) : TH_TAG_UNKNOWN;
+            }
+        }
     }
 
     PyObject *attrs_dict = NULL;

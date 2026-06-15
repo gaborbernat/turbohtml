@@ -32,6 +32,25 @@ def test_tag_string_is_exact() -> None:
     assert _tags(parse(_DOC).find_all("p")) == ["p", "p"]
 
 
+def test_tag_string_is_case_sensitive() -> None:
+    doc = parse("<div>x</div>")
+    assert _tags(doc.find_all("div")) == ["div"]
+    assert doc.find_all("DIV") == []  # tag names are lowercased, so the match is exact
+
+
+def test_tag_matches_a_custom_element() -> None:
+    html = "<my-widget>a</my-widget><other-thing>b</other-thing><my-widget>c</my-widget>"
+    assert _tags(parse(html).find_all("my-widget")) == ["my-widget", "my-widget"]
+
+
+def test_tag_with_a_lone_surrogate_matches_nothing() -> None:
+    assert parse(_DOC).find_all("\ud800") == []  # unencodable, so it falls back to a str compare
+
+
+def test_empty_tag_name_matches_nothing() -> None:
+    assert parse(_DOC).find_all("") == []  # no element has an empty name
+
+
 def test_tag_regex_searches() -> None:
     assert _tags(parse(_DOC).find_all(re.compile(r"^h"))) == ["html", "head", "h2"]
 
