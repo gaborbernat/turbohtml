@@ -1,0 +1,30 @@
+"""WHATWG encoding sniffing against the html5lib-tests encoding suite."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from turbohtml import parse
+
+_SUITE = Path(__file__).parent / "html5lib-tests" / "encoding"
+
+
+def _cases() -> list:
+    cases = []
+    for name in ("tests1.dat", "tests2.dat"):
+        path = _SUITE / name
+        for index, chunk in enumerate(path.read_bytes().split(b"#data\n")[1:]):
+            head, _, tail = chunk.partition(b"#encoding\n")
+            data = head[:-1] if head.endswith(b"\n") else head
+            encoding = tail.split(b"\n", 1)[0].decode("ascii").strip()
+            cases.append(pytest.param(data, encoding, id=f"{name}-{index}"))
+    return cases
+
+
+@pytest.mark.parametrize(("data", "expected"), _cases())
+def test_encoding_sniffing(data: bytes, expected: str) -> None:
+    encoding = parse(data).encoding
+    assert encoding is not None
+    assert encoding.lower() == expected.lower()

@@ -54,7 +54,7 @@ def test_template_content_is_a_bare_node(find: Callable[[str, str], Element]) ->
 @pytest.mark.parametrize(
     "call",
     [
-        pytest.param(lambda: parse(b"x"), id="parse"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(lambda: parse(123), id="parse"),  # ty: ignore[invalid-argument-type]  # not str or bytes-like
         pytest.param(lambda: parse_fragment(b"x"), id="parse_fragment"),  # ty: ignore[invalid-argument-type]  # non-str
     ],
 )

@@ -14,11 +14,13 @@
 #include "tokenizer_py.h"
 
 #include "ascii.h"
+#include "encoding.h"
 #include "treebuilder.h"
 
 typedef struct {
     PyObject_HEAD th_tree *tree;
-    PyObject *source; /* the input str whose storage the tree's spans borrow */
+    PyObject *source;   /* the input str whose storage the tree's spans borrow */
+    PyObject *encoding; /* the resolved encoding name for bytes input, else None */
 } HandleObject;
 
 typedef struct {
@@ -1150,8 +1152,13 @@ static PyObject *document_get_root(PyObject *self, void *Py_UNUSED(closure)) {
     Py_RETURN_NONE; /* GCOVR_EXCL_LINE: a parsed document always has an <html> element child */
 }
 
+static PyObject *document_get_encoding(PyObject *self, void *Py_UNUSED(closure)) {
+    return Py_NewRef(((HandleObject *)((NodeObject *)self)->handle)->encoding);
+}
+
 static PyGetSetDef document_getset[] = {
     {"root", document_get_root, NULL, "the root <html> element, or None", NULL},
+    {"encoding", document_get_encoding, NULL, "the resolved encoding name for bytes input, or None for str", NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -1177,6 +1184,7 @@ static void handle_dealloc(PyObject *self) {
     HandleObject *handle = (HandleObject *)self;
     th_tree_free(handle->tree);
     Py_XDECREF(handle->source);
+    Py_XDECREF(handle->encoding);
     type->tp_free(self);
     Py_DECREF(type);
 }
@@ -1193,7 +1201,7 @@ static PyType_Spec handle_spec = {
     .slots = handle_slots,
 };
 
-static PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source) {
+static PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding) {
     PyTypeObject *type = (PyTypeObject *)state->handle_type;
     HandleObject *self = (HandleObject *)type->tp_alloc(type, 0);
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1201,6 +1209,7 @@ static PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source
     }
     self->tree = tree;
     self->source = Py_NewRef(source);
+    self->encoding = Py_NewRef(encoding);
     return (PyObject *)self;
 }
 
@@ -1208,8 +1217,8 @@ static PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source
 
 /* Wrap a freshly built tree (which borrows source's storage) and return its
    document/context node. Frees the tree on wrapping failure. */
-static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *source) {
-    PyObject *handle = handle_new(state, tree, source);
+static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding) {
+    PyObject *handle = handle_new(state, tree, source, encoding);
     if (handle == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1219,16 +1228,70 @@ static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *sour
     return node;
 }
 
-PyObject *turbohtml_parse(PyObject *module, PyObject *arg) {
-    if (!PyUnicode_Check(arg)) {
-        PyErr_SetString(PyExc_TypeError, "parse() argument must be str");
-        return NULL;
+/* Parse bytes: sniff the encoding (BOM, then the encoding argument, then a <meta>
+   prescan, then windows-1252), decode with that codec replacing malformed bytes,
+   and parse the resulting str. The decoded str is retained as the tree's source. */
+static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *enc_arg, Py_ssize_t enc_len) {
+    Py_buffer view;
+    if (PyObject_GetBuffer(markup, &view, PyBUF_SIMPLE) < 0) { /* GCOVR_EXCL_BR_LINE: bytes expose a simple buffer */
+        return NULL;                                           /* GCOVR_EXCL_LINE: buffer-acquisition failure */
     }
-    th_tree *tree = th_tree_parse(PyUnicode_KIND(arg), PyUnicode_DATA(arg), PyUnicode_GET_LENGTH(arg));
+    const unsigned char *bytes = view.buf;
+    Py_ssize_t len = view.len;
+    const th_encoding_entry *entry = NULL;
+    Py_ssize_t skip = th_encoding_bom(bytes, len, &entry);
+    if (entry == NULL && enc_arg != NULL) {
+        entry = th_encoding_lookup(enc_arg, enc_len);
+    }
+    if (entry == NULL) {
+        entry = th_encoding_prescan(bytes, len);
+    }
+    if (entry == NULL) {
+        entry = th_encoding_lookup("windows-1252", 12);
+    }
+    PyObject *decoded = PyUnicode_Decode((const char *)bytes + skip, len - skip, entry->codec, "replace");
+    PyBuffer_Release(&view);
+    if (decoded == NULL) { /* GCOVR_EXCL_BR_LINE: the codec is from the table and the replace handler never fails */
+        return NULL;       /* GCOVR_EXCL_LINE: decode failure */
+    }
+    th_tree *tree = th_tree_parse(PyUnicode_KIND(decoded), PyUnicode_DATA(decoded), PyUnicode_GET_LENGTH(decoded));
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
+        Py_DECREF(decoded);      /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return tree_to_node(PyModule_GetState(module), tree, arg);
+    PyObject *canonical = PyUnicode_FromString(entry->canonical);
+    if (canonical == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_DECREF(decoded);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *node = tree_to_node(state, tree, decoded, canonical);
+    Py_DECREF(canonical);
+    Py_DECREF(decoded);
+    return node;
+}
+
+PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs) {
+    static char *keywords[] = {"markup", "encoding", NULL};
+    PyObject *markup;
+    const char *enc_arg = NULL;
+    Py_ssize_t enc_len = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|$z#:parse", keywords, &markup, &enc_arg, &enc_len)) {
+        return NULL;
+    }
+    module_state *state = PyModule_GetState(module);
+    if (PyUnicode_Check(markup)) {
+        th_tree *tree = th_tree_parse(PyUnicode_KIND(markup), PyUnicode_DATA(markup), PyUnicode_GET_LENGTH(markup));
+        if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        return tree_to_node(state, tree, markup, Py_None);
+    }
+    if (!PyObject_CheckBuffer(markup)) {
+        PyErr_SetString(PyExc_TypeError, "parse() argument must be str or a bytes-like object");
+        return NULL;
+    }
+    return parse_bytes(state, markup, enc_arg, enc_len);
 }
 
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs) {
@@ -1244,7 +1307,7 @@ PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObje
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return tree_to_node(PyModule_GetState(module), tree, text);
+    return tree_to_node(PyModule_GetState(module), tree, text, Py_None);
 }
 
 /* ----------------------------------------------------------- registration */

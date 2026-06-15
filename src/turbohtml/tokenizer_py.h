@@ -44,7 +44,7 @@ int tree_register(PyObject *module, module_state *state);
 /* Public navigable-tree entry points (tree_type.c), wired as parse() and
    parse_fragment(). parse() matches METH_O; parse_fragment() matches
    METH_VARARGS | METH_KEYWORDS. */
-PyObject *turbohtml_parse(PyObject *module, PyObject *arg);
+PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs);
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs);
 
 /* Build a Token from a freshly emitted record. Small records are copied and a
