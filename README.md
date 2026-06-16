@@ -8,8 +8,9 @@
 
 A fast, fully typed HTML toolkit for Python with a C-accelerated core. turbohtml escapes and unescapes HTML to match the
 standard library byte for byte, tokenizes markup with a WHATWG-conformant streaming tokenizer, and parses whole
-documents into a navigable element tree you query with CSS selectors and serialize back to conformant HTML. Each
-operation runs several times faster than its pure-Python counterpart and supports the free-threaded build.
+documents into a navigable element tree you query with CSS selectors, edit in place, build from scratch, and serialize
+back to conformant HTML. Each operation runs several times faster than its pure-Python counterpart and supports the
+free-threaded build.
 
 ## Install
 
@@ -106,6 +107,36 @@ Parse a fragment as the contents of a context element, the way `innerHTML` does:
 ('tr', 'data')
 ```
 
+Build a tree from scratch with the node constructors, then assemble it (a list value for a token-list attribute like
+`class` joins on a space, and the `text` setter fills an element with a single text child):
+
+```pycon
+>>> from turbohtml import Element
+>>> card = Element('article', {'class': ['card', 'lg']})
+>>> heading = Element('h2')
+>>> heading.text = 'Tea'
+>>> card.append(heading)
+>>> card.html
+'<article class="card lg"><h2>Tea</h2></article>'
+```
+
+Edit a parsed tree in place. `unwrap`, `decompose`, `wrap`, `insert_before`, `replace_with`, and the rest move nodes
+within a tree or adopt them from another, and `element.attrs` is a live mapping you assign to:
+
+```pycon
+>>> doc = turbohtml.parse('<p>keep <b>bold</b> <span>drop</span></p>')
+>>> doc.find('b').unwrap()
+Element('b')
+>>> doc.find('span').decompose()
+>>> doc.find('p').attrs['class'] = 'lead'
+>>> doc.find('p').html
+'<p class="lead">keep bold </p>'
+```
+
+The sealed node hierarchy — `Element`, `Text`, `Comment`, `Doctype`, `ProcessingInstruction`, `CData`, and `Document` —
+sets `__match_args__` for structural pattern matching, and any node deep-copies with `copy.copy`, `copy.deepcopy`, or
+`pickle`.
+
 ## Performance
 
 turbohtml's C core makes every operation several times faster than its pure-Python counterpart, and it leads the C
@@ -118,14 +149,15 @@ libraries on every read-path benchmark too. Measured with [pyperf](https://pyper
   pure-Python BeautifulSoup and html5lib.
 - `find_all` and CSS `select` outrun lxml's C XPath and cssselect at every size (2–40×) and BeautifulSoup by 100×, and
   serialization is the fastest of the four.
+- building a tree from scratch runs about twice as fast as lxml and an order of magnitude faster than BeautifulSoup.
 
 See the [performance page](https://turbohtml.readthedocs.io/en/latest/performance.html) for the full sectioned tables
 and the methodology.
 
 ## Documentation
 
-Full documentation, including tutorials, how-to guides, the API reference, and the design rationale, lives at
-[turbohtml.readthedocs.io](https://turbohtml.readthedocs.io).
+Full documentation, including tutorials, how-to guides, a BeautifulSoup migration guide, the API reference, and the
+design rationale, lives at [turbohtml.readthedocs.io](https://turbohtml.readthedocs.io).
 
 ## License
 
