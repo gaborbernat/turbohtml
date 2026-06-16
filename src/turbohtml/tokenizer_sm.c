@@ -499,25 +499,7 @@ static void buf_append_input(th_tokenizer *self, th_buf *buf, Py_ssize_t start, 
 /* Copy the input span [start, start+count) into the text buffer, widening when the
    input is at a wider width than the text. */
 static void copy_input_range(th_tokenizer *self, Py_ssize_t start, Py_ssize_t count) {
-    th_buf *buf = &self->text;
-    int promote = self->input.kind > buf->kind ? buf_promote(buf, self->input.kind) : 0;
-    /* GCOVR_EXCL_START: allocation failure cannot be forced from a test */
-    if (promote < 0 || buf_ensure(buf, (buf->len + count) * buf->kind) < 0) {
-        self->oom = 1;
-        return;
-    }
-    /* GCOVR_EXCL_STOP */
-    if (self->input.kind == buf->kind) {
-        memcpy((char *)buf->data + buf->len * buf->kind, (const char *)self->input.data + start * buf->kind,
-               (size_t)(count * buf->kind));
-        buf->len += count;
-    } else {
-        /* the span is narrower than the buffer (a wide character arrived via
-           an earlier character reference): widen while copying */
-        for (Py_ssize_t index = 0; index < count; index++) {
-            buf_write(buf, buf->len++, buf_read(&self->input, start + index));
-        }
-    }
+    buf_append_input(self, &self->text, start, count);
 }
 
 /* Copy the pending slice span into the text buffer; from here on the run is

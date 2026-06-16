@@ -127,6 +127,11 @@ static void render_attr_name(th_tree *tree, const th_node *node, const th_node_a
     buf[write_index] = '\0';
 }
 
+/* The #document attribute sort works in fixed stack buffers: at most this many
+   attributes are ordered, each rendered name capped at this many bytes. */
+#define MAX_SORTED_ATTRS 64
+#define MAX_ATTR_NAME 128
+
 static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     if (node->type == TH_NODE_TEXT) {
         need_text(tree, node); /* realize a zero-copy span before output */
@@ -186,15 +191,16 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     /* attributes: each on its own deeper line, output in lexicographic name
        order (the html5lib #document format sorts them). Only elements have
        attributes; a text node's attr_count field holds a span offset. */
-    Py_ssize_t order[64];
-    Py_ssize_t count = node->type == TH_NODE_ELEMENT ? (node->attr_count < 64 ? node->attr_count : 64) : 0;
+    Py_ssize_t order[MAX_SORTED_ATTRS];
+    Py_ssize_t count =
+        node->type == TH_NODE_ELEMENT ? (node->attr_count < MAX_SORTED_ATTRS ? node->attr_count : MAX_SORTED_ATTRS) : 0;
     for (Py_ssize_t index = 0; index < count; index++) {
         order[index] = index;
     }
     /* Sort on the displayed name so a namespaced attribute (shown as
        "prefix localname") orders by its space, which precedes a literal colon. */
-    char ke_buf[128];
-    char cmp_buf[128];
+    char ke_buf[MAX_ATTR_NAME];
+    char cmp_buf[MAX_ATTR_NAME];
     for (Py_ssize_t index = 1; index < count; index++) { /* insertion sort; attribute counts are tiny */
         Py_ssize_t key = order[index];
         render_attr_name(tree, node, &node->attrs[key], ke_buf, sizeof(ke_buf));

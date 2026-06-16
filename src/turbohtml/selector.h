@@ -249,6 +249,12 @@ static int sel_compound_parse(sel_parser *parser, sel_simple *buffer, int capaci
 
 /* Parse one complex selector (compounds joined by combinators) into *complex,
    allocating its compounds. Returns 0, or -1 with parser->error set. */
+static void free_compounds(sel_compound *compounds, int count) {
+    for (int index = 0; index < count; index++) {
+        PyMem_Free(compounds[index].simples);
+    }
+}
+
 static int sel_complex_parse(sel_parser *parser, sel_complex *complex) {
     sel_compound temp[32];
     int count = 0;
@@ -294,18 +300,14 @@ static int sel_complex_parse(sel_parser *parser, sel_complex *complex) {
         }
     }
     if (parser->error) {
-        for (int index = 0; index < count; index++) {
-            PyMem_Free(temp[index].simples);
-        }
+        free_compounds(temp, count);
         return -1;
     }
     sel_compound *owned = PyMem_Malloc((size_t)count * sizeof(sel_compound));
-    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        for (int index = 0; index < count; index++) { /* GCOVR_EXCL_LINE: allocation-failure path */
-            PyMem_Free(temp[index].simples);          /* GCOVR_EXCL_LINE: allocation-failure path */
-        } /* GCOVR_EXCL_LINE: allocation-failure path */
-        parser->error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (owned == NULL) {             /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        free_compounds(temp, count); /* GCOVR_EXCL_LINE: allocation-failure path */
+        parser->error = 1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     memcpy(owned, temp, (size_t)count * sizeof(sel_compound));
     complex->compounds = owned;
@@ -358,9 +360,7 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
     }
     if (parser.error) { /* an empty or malformed selector always sets the error */
         for (int index = 0; index < count; index++) {
-            for (int inner = 0; inner < temp[index].count; inner++) {
-                PyMem_Free(temp[index].compounds[inner].simples);
-            }
+            free_compounds(temp[index].compounds, temp[index].count);
             PyMem_Free(temp[index].compounds);
         }
         PyMem_Free(compiled->source);
@@ -371,10 +371,8 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
     compiled->alts = PyMem_Malloc((size_t)count * sizeof(sel_complex));
     if (compiled->alts == NULL) {                     /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
         for (int index = 0; index < count; index++) { /* GCOVR_EXCL_LINE: allocation-failure path */
-            for (int inner = 0; inner < temp[index].count; inner++) { /* GCOVR_EXCL_LINE */
-                PyMem_Free(temp[index].compounds[inner].simples);     /* GCOVR_EXCL_LINE */
-            } /* GCOVR_EXCL_LINE: allocation-failure path */
-            PyMem_Free(temp[index].compounds); /* GCOVR_EXCL_LINE: allocation-failure path */
+            free_compounds(temp[index].compounds, temp[index].count); /* GCOVR_EXCL_LINE */
+            PyMem_Free(temp[index].compounds);                        /* GCOVR_EXCL_LINE: allocation-failure path */
         } /* GCOVR_EXCL_LINE: allocation-failure path */
         PyMem_Free(compiled->source);    /* GCOVR_EXCL_LINE: allocation-failure path */
         PyMem_Free(compiled);            /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -401,6 +399,25 @@ static int sel_eq(const Py_UCS4 *left, Py_ssize_t alen, const Py_UCS4 *right, Py
         }
     }
     return 1;
+}
+
+/* Whether a whitespace-separated token list contains the wanted value. */
+static int contains_ws_token(const Py_UCS4 *value, Py_ssize_t value_len, const Py_UCS4 *want, Py_ssize_t want_len,
+                             int ci) {
+    Py_ssize_t cursor = 0;
+    while (cursor < value_len) {
+        while (cursor < value_len && is_space(value[cursor])) {
+            cursor++;
+        }
+        Py_ssize_t start = cursor;
+        while (cursor < value_len && !is_space(value[cursor])) {
+            cursor++;
+        }
+        if (cursor > start && sel_eq(value + start, cursor - start, want, want_len, ci)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static const th_node_attr *sel_find_attr(th_node *node, uint32_t atom) {
@@ -433,20 +450,7 @@ static int sel_match_attr_op(const sel_simple *simple, const Py_UCS4 *value, Py_
         if (want_len == 0) {
             return 0;
         }
-        Py_ssize_t cursor = 0;
-        while (cursor < value_len) {
-            while (cursor < value_len && is_space(value[cursor])) {
-                cursor++;
-            }
-            Py_ssize_t start = cursor;
-            while (cursor < value_len && !is_space(value[cursor])) {
-                cursor++;
-            }
-            if (cursor > start && sel_eq(value + start, cursor - start, want, want_len, simple->ci)) {
-                return 1;
-            }
-        }
-        return 0;
+        return contains_ws_token(value, value_len, want, want_len, simple->ci);
     }
     default: /* OP_SUBSTR */
         if (want_len == 0) {
@@ -480,20 +484,7 @@ static int sel_match_simple(th_node *node, const sel_simple *simple) {
         if (attr == NULL || attr->value == NULL) {
             return 0;
         }
-        Py_ssize_t cursor = 0;
-        while (cursor < attr->value_len) {
-            while (cursor < attr->value_len && is_space(attr->value[cursor])) {
-                cursor++;
-            }
-            Py_ssize_t start = cursor;
-            while (cursor < attr->value_len && !is_space(attr->value[cursor])) {
-                cursor++;
-            }
-            if (cursor > start && sel_eq(attr->value + start, cursor - start, simple->name, simple->name_len, 0)) {
-                return 1;
-            }
-        }
-        return 0;
+        return contains_ws_token(attr->value, attr->value_len, simple->name, simple->name_len, 0);
     }
     default: { /* '[' */
         if (simple->attr_atom == UINT32_MAX) {
