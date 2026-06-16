@@ -1,10 +1,10 @@
 Make the tree mutable. The node types are constructible - ``Element(tag, attrs=None)``, ``Text(data)``, and
-``Comment(data)`` build a standalone node that owns its data (``Element("a", {"class": ["btn", "lg"]}).html`` is
-``'<a class="btn lg"></a>'``); tag and attribute names are ASCII-lowercased to match the parser, and a name the HTML
-spec forbids raises ``ValueError``. Elements gain ``append``, ``extend``, ``insert``, ``clear``, and ``normalize``;
-every node gains ``insert_before``, ``insert_after``, ``replace_with``, ``wrap``, ``unwrap``, ``extract``, and
-``decompose``. A node already in a tree moves in place and keeps its identity; a node from another tree is adopted by
-copy, so the source tree frees on its own. Inserting a node into its own subtree raises ``ValueError``. Attributes and
-text are mutable too: ``element.attrs`` is a live mapping (``element.attrs["class"] = ["btn", "lg"]``,
-``del element.attrs["id"]``), ``Text`` and ``Comment`` gain a ``data`` setter, and ``Element`` a ``text`` setter that
-replaces its children with one ``Text`` node - by :user:`gaborbernat`.
+``Comment(data)`` build a standalone node that owns its data (``Element("a", {"class": ["btn", "lg"]}).html`` is ``'<a
+class="btn lg"></a>'``); tag and attribute names are ASCII-lowercased to match the parser, and a name the HTML spec
+forbids raises ``ValueError``. Elements gain ``append``, ``extend``, ``insert``, ``clear``, and ``normalize``; every
+node gains ``insert_before``, ``insert_after``, ``replace_with``, ``wrap``, ``unwrap``, ``extract``, and ``decompose``.
+A node already in a tree moves in place and keeps its identity; a node from another tree is adopted by copy, so the
+source tree frees on its own. Inserting a node into its own subtree raises ``ValueError``. Attributes and text are
+mutable too: ``element.attrs`` is a live mapping (``element.attrs["class"] = ["btn", "lg"]``, ``del
+element.attrs["id"]``), ``Text`` and ``Comment`` gain a ``data`` setter, and ``Element`` a ``text`` setter that replaces
+its children with one ``Text`` node - by :user:`gaborbernat`.

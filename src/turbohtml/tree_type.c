@@ -897,27 +897,27 @@ static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
             item = attr_value_obj(attr);
         } else {
             PyObject *name = attr_name_obj(tree, attr);
-            if (name == NULL) {   /* GCOVR_EXCL_BR_LINE: a stored name always decodes */
-                Py_DECREF(out);   /* GCOVR_EXCL_LINE: decode-failure path */
-                return NULL;      /* GCOVR_EXCL_LINE: decode-failure path */
+            if (name == NULL) { /* GCOVR_EXCL_BR_LINE: a stored name always decodes */
+                Py_DECREF(out); /* GCOVR_EXCL_LINE: decode-failure path */
+                return NULL;    /* GCOVR_EXCL_LINE: decode-failure path */
             }
             if (kind == ATTRS_KEYS) {
                 item = name;
             } else {
                 PyObject *value = attr_value_obj(attr);
-                if (value == NULL) {  /* GCOVR_EXCL_BR_LINE: value object build cannot be forced to fail */
-                    Py_DECREF(name);  /* GCOVR_EXCL_LINE: alloc-failure path */
-                    Py_DECREF(out);   /* GCOVR_EXCL_LINE: alloc-failure path */
-                    return NULL;      /* GCOVR_EXCL_LINE: alloc-failure path */
+                if (value == NULL) { /* GCOVR_EXCL_BR_LINE: value object build cannot be forced to fail */
+                    Py_DECREF(name); /* GCOVR_EXCL_LINE: alloc-failure path */
+                    Py_DECREF(out);  /* GCOVR_EXCL_LINE: alloc-failure path */
+                    return NULL;     /* GCOVR_EXCL_LINE: alloc-failure path */
                 }
                 item = PyTuple_Pack(2, name, value);
                 Py_DECREF(name);
                 Py_DECREF(value);
             }
         }
-        if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: item build cannot be forced to fail */
-            Py_DECREF(out);  /* GCOVR_EXCL_LINE: alloc-failure path */
-            return NULL;     /* GCOVR_EXCL_LINE: alloc-failure path */
+        if (item == NULL) { /* GCOVR_EXCL_BR_LINE: item build cannot be forced to fail */
+            Py_DECREF(out); /* GCOVR_EXCL_LINE: alloc-failure path */
+            return NULL;    /* GCOVR_EXCL_LINE: alloc-failure path */
         }
         PyList_SET_ITEM(out, index, item);
     }
