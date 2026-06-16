@@ -1,5 +1,5 @@
-Build and edit the tree, not just read it. Construct ``Element``, ``Text``, and ``Comment`` nodes and assemble them
-with ``append``, ``extend``, ``insert``, ``wrap``, ``unwrap``, ``insert_before``, ``insert_after``, ``replace_with``,
+Build and edit the tree, not just read it. Construct ``Element``, ``Text``, and ``Comment`` nodes and assemble them with
+``append``, ``extend``, ``insert``, ``wrap``, ``unwrap``, ``insert_before``, ``insert_after``, ``replace_with``,
 ``extract``, ``decompose``, and ``normalize``. ``element.attrs`` is a live mapping you assign to and delete from, and
 ``Text``/``Comment`` take a ``.data`` setter while ``Element`` takes a ``.text`` setter. Nodes move within their tree
 and are copied when adopted into another, and ``copy.copy``, ``copy.deepcopy``, and ``pickle`` duplicate a subtree

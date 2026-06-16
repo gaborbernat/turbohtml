@@ -71,9 +71,9 @@ print(list(tokenizer.close()))  # []
 Parse a whole document into a tree and walk it with `find`, `find_all`, and the navigation accessors:
 
 ```python
-doc = turbohtml.parse('<ul><li>one<li>two</ul>')
-print([li.text for li in doc.find_all('li')])  # ['one', 'two']
-print(doc.find('ul').children[0].tag)  # li
+doc = turbohtml.parse("<ul><li>one<li>two</ul>")
+print([li.text for li in doc.find_all("li")])  # ['one', 'two']
+print(doc.find("ul").children[0].tag)  # li
 ```
 
 Query with a CSS selector, and serialize a node back to HTML with the escaping you choose:
@@ -81,10 +81,10 @@ Query with a CSS selector, and serialize a node back to HTML with the escaping y
 ```python
 from turbohtml import Formatter
 
-doc = turbohtml.parse('<article><h1>Tea</h1><p class=note>café &amp; cake</p></article>')
-print(doc.select_one('p.note').text)
+doc = turbohtml.parse("<article><h1>Tea</h1><p class=note>café &amp; cake</p></article>")
+print(doc.select_one("p.note").text)
 # café & cake
-print(doc.select_one('p').serialize(formatter=Formatter.NAMED_ENTITIES))
+print(doc.select_one("p").serialize(formatter=Formatter.NAMED_ENTITIES))
 # <p class="note">caf&eacute; &amp; cake</p>
 ```
 
@@ -92,13 +92,13 @@ Pass `bytes` to sniff the encoding the WHATWG way (byte-order mark, then a `<met
 
 ```python
 doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
-print((doc.encoding, doc.find('p').text))  # ('iso-8859-2', 'á')
+print((doc.encoding, doc.find("p").text))  # ('iso-8859-2', 'á')
 ```
 
 Parse a fragment as the contents of a context element, the way `innerHTML` does:
 
 ```python
-cell = turbohtml.parse_fragment('<td>data', context='tr')
+cell = turbohtml.parse_fragment("<td>data", context="tr")
 print((cell.tag, cell.text))  # ('tr', 'data')
 ```
 
@@ -108,9 +108,9 @@ Build a tree from scratch with the node constructors, then assemble it (a list v
 ```python
 from turbohtml import Element
 
-card = Element('article', {'class': ['card', 'lg']})
-heading = Element('h2')
-heading.text = 'Tea'
+card = Element("article", {"class": ["card", "lg"]})
+heading = Element("h2")
+heading.text = "Tea"
 card.append(heading)
 print(card.html)
 # <article class="card lg"><h2>Tea</h2></article>
@@ -120,11 +120,11 @@ Edit a parsed tree in place. `unwrap`, `decompose`, `wrap`, `insert_before`, `re
 within a tree or adopt them from another, and `element.attrs` is a live mapping you assign to:
 
 ```python
-doc = turbohtml.parse('<p>keep <b>bold</b> <span>drop</span></p>')
-doc.find('b').unwrap()
-doc.find('span').decompose()
-doc.find('p').attrs['class'] = 'lead'
-print(doc.find('p').html)
+doc = turbohtml.parse("<p>keep <b>bold</b> <span>drop</span></p>")
+doc.find("b").unwrap()
+doc.find("span").decompose()
+doc.find("p").attrs["class"] = "lead"
+print(doc.find("p").html)
 # <p class="lead">keep bold </p>
 ```
 
