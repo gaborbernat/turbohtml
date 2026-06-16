@@ -7,6 +7,6 @@ A node already in a tree moves in place and keeps its identity; a node from anot
 source tree frees on its own. Inserting a node into its own subtree raises ``ValueError``. Attributes and text are
 mutable too: ``element.attrs`` is a live mapping (``element.attrs["class"] = ["btn", "lg"]``, ``del
 element.attrs["id"]``), ``Text`` and ``Comment`` gain a ``data`` setter, and ``Element`` a ``text`` setter that replaces
-its children with one ``Text`` node. ``copy.copy``, ``copy.deepcopy``, and ``pickle`` duplicate a node's subtree into
-a fresh standalone tree, exactly - even processing instructions and CDATA sections, which a serialize-and-reparse
+its children with one ``Text`` node. ``copy.copy``, ``copy.deepcopy``, and ``pickle`` duplicate a node's subtree into a
+fresh standalone tree, exactly - even processing instructions and CDATA sections, which a serialize-and-reparse
 round-trip would fold away - by :user:`gaborbernat`.

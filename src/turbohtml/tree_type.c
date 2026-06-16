@@ -2866,8 +2866,8 @@ static PyObject *node_pickle_data(PyObject *self, th_node *node) {
                              doctype_get_system_id(self, NULL));
     case TH_NODE_ELEMENT: {
         PyObject *view = element_get_attrs(self, NULL);
-        if (view == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (view == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         PyObject *attrs = PyObject_CallFunctionObjArgs((PyObject *)&PyDict_Type, view, NULL);
         Py_DECREF(view);
@@ -2911,8 +2911,8 @@ static PyObject *reconstruct_doctype(module_state *state, PyObject *data) {
     if (!PyArg_ParseTuple(data, "OOO", &name, &public_id, &system_id)) { /* GCOVR_EXCL_BR_LINE: we build this tuple */
         return NULL;                                                     /* GCOVR_EXCL_LINE: unreachable */
     }
-    PyObject *packed = public_id == Py_None ? Py_NewRef(name)
-                                            : PyUnicode_FromFormat("%U \"%U\" \"%U\"", name, public_id, system_id);
+    PyObject *packed =
+        public_id == Py_None ? Py_NewRef(name) : PyUnicode_FromFormat("%U \"%U\" \"%U\"", name, public_id, system_id);
     if (packed == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
