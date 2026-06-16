@@ -121,6 +121,11 @@ Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
                            Py_ssize_t *out_len);
 
+/* The doctype's public and system identifiers as slices of the node's own text;
+   returns 1 with the four out params set when present, 0 for a name-only doctype. */
+int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,
+                        Py_ssize_t *system_len);
+
 /* The interned name bytes (NUL-terminated UTF-8) for an attribute's name_atom;
    *out_len receives the length. Resolves a static atom from the generated table
    and a dynamic one from the tree's intern table. */

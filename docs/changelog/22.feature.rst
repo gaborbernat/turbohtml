@@ -1,0 +1,4 @@
+Expose the doctype's public and system identifiers on :class:`~turbohtml.Doctype` as ``public_id`` and ``system_id``
+(each a ``str`` that may be empty, or ``None`` when the doctype carries no identifiers), and give
+:class:`~turbohtml.Document` a ``root`` ``__match_args__`` so the whole sealed node hierarchy supports structural
+pattern matching - by :user:`gaborbernat`.

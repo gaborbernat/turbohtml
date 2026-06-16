@@ -543,6 +543,34 @@ Py_UCS4 *th_node_data(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     return out;
 }
 
+/* The doctype's public and system identifiers, parsed out of the stored
+   "name \"public\" \"system\"" text into slices of the node's own text. Returns 1
+   and sets all four out params when the doctype carries identifiers, 0 when it is
+   just a name. Either identifier may be present but empty (a SYSTEM doctype has no
+   public id, a PUBLIC doctype may omit the system id), and build_doctype_text
+   always writes both quoted strings together, so the closing quotes are
+   guaranteed and no bounds check is needed. */
+int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,
+                        Py_ssize_t *system_len) {
+    Py_ssize_t name_len = doctype_name_len(node);
+    if (name_len >= node->text_len) {
+        return 0;
+    }
+    Py_ssize_t pos = name_len + 2; /* skip the space and the opening quote */
+    *public_id = &node->text[pos];
+    while (node->text[pos] != '"') {
+        pos++;
+    }
+    *public_len = &node->text[pos] - *public_id;
+    pos += 3; /* skip the closing quote, the separating space, and the next opening quote */
+    *system_id = &node->text[pos];
+    while (node->text[pos] != '"') {
+        pos++;
+    }
+    *system_len = &node->text[pos] - *system_id;
+    return 1;
+}
+
 static void collect_text(sbuf *out, th_tree *tree, th_node *node) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         if (child->type == TH_NODE_TEXT) {

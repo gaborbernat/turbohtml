@@ -166,11 +166,17 @@ class Comment(Node):
 
 @final
 class Doctype(Node):
+    __match_args__ = ("name",)
     @property
     def name(self) -> str: ...
+    @property
+    def public_id(self) -> str | None: ...
+    @property
+    def system_id(self) -> str | None: ...
 
 @final
 class Document(Node):
+    __match_args__ = ("root",)
     @property
     def root(self) -> Element | None: ...
     @property

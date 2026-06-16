@@ -1547,8 +1547,32 @@ static PyObject *doctype_get_name(PyObject *self, void *Py_UNUSED(closure)) {
     return str_from_accessor(th_node_data, tree_of(self), ((NodeObject *)self)->node);
 }
 
+static PyObject *doctype_get_public_id(PyObject *self, void *Py_UNUSED(closure)) {
+    const Py_UCS4 *public_id;
+    const Py_UCS4 *system_id;
+    Py_ssize_t public_len;
+    Py_ssize_t system_len;
+    if (!th_node_doctype_ids(((NodeObject *)self)->node, &public_id, &public_len, &system_id, &system_len)) {
+        Py_RETURN_NONE;
+    }
+    return ucs4_to_str(public_id, public_len);
+}
+
+static PyObject *doctype_get_system_id(PyObject *self, void *Py_UNUSED(closure)) {
+    const Py_UCS4 *public_id;
+    const Py_UCS4 *system_id;
+    Py_ssize_t public_len;
+    Py_ssize_t system_len;
+    if (!th_node_doctype_ids(((NodeObject *)self)->node, &public_id, &public_len, &system_id, &system_len)) {
+        Py_RETURN_NONE;
+    }
+    return ucs4_to_str(system_id, system_len);
+}
+
 static PyGetSetDef doctype_getset[] = {
     {"name", doctype_get_name, NULL, "the document type name", NULL},
+    {"public_id", doctype_get_public_id, NULL, "the public identifier, or None when the doctype has none", NULL},
+    {"system_id", doctype_get_system_id, NULL, "the system identifier, or None when the doctype has none", NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -1911,8 +1935,8 @@ static int cache_pattern_type(module_state *state) {
     return 0;
 }
 
-/* Create a heap type subclassing Node, register it on the module, and (when
-   match_args is given) stamp its __match_args__ for structural pattern use. */
+/* Create a heap type subclassing Node, register it on the module, and stamp its
+   single-field __match_args__ for structural pattern use. */
 static PyObject *register_subtype(PyObject *module, PyType_Spec *spec, PyObject *base, const char *name,
                                   const char *match_args) {
     PyObject *bases = PyTuple_Pack(1, base);
@@ -1924,16 +1948,14 @@ static PyObject *register_subtype(PyObject *module, PyType_Spec *spec, PyObject 
     if (type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (match_args != NULL) {
-        PyObject *tuple = Py_BuildValue("(s)", match_args);
-        /* allocation failure cannot be forced from a test */
-        if (tuple == NULL || PyObject_SetAttrString(type, "__match_args__", tuple) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(tuple); /* GCOVR_EXCL_LINE: alloc-failure path */
-            Py_DECREF(type);   /* GCOVR_EXCL_LINE: alloc-failure path */
-            return NULL;       /* GCOVR_EXCL_LINE: alloc-failure path */
-        }
-        Py_DECREF(tuple);
+    PyObject *tuple = Py_BuildValue("(s)", match_args);
+    /* allocation failure cannot be forced from a test */
+    if (tuple == NULL || PyObject_SetAttrString(type, "__match_args__", tuple) < 0) { /* GCOVR_EXCL_BR_LINE */
+        Py_XDECREF(tuple); /* GCOVR_EXCL_LINE: alloc-failure path */
+        Py_DECREF(type);   /* GCOVR_EXCL_LINE: alloc-failure path */
+        return NULL;       /* GCOVR_EXCL_LINE: alloc-failure path */
     }
+    Py_DECREF(tuple);
     /* allocation failure cannot be forced from a test */
     if (PyModule_AddObjectRef(module, name, type) < 0) { /* GCOVR_EXCL_BR_LINE */
         Py_DECREF(type);                                 /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1973,7 +1995,7 @@ int tree_register(PyObject *module, module_state *state) {
     state->text_type = register_subtype(module, &text_spec, state->node_type, "Text", "data");
     state->comment_type = register_subtype(module, &comment_spec, state->node_type, "Comment", "data");
     state->doctype_type = register_subtype(module, &doctype_spec, state->node_type, "Doctype", "name");
-    state->document_type = register_subtype(module, &document_spec, state->node_type, "Document", NULL);
+    state->document_type = register_subtype(module, &document_spec, state->node_type, "Document", "root");
     /* allocation failure cannot be forced from a test */
     if (state->element_type == NULL || state->text_type == NULL || /* GCOVR_EXCL_BR_LINE */
         /* allocation failure cannot be forced from a test */
