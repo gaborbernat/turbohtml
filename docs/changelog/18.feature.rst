@@ -1,3 +1,0 @@
-Expose the HTML token-list attributes (``class``, ``rel``, ``rev``, ``headers``, ``accesskey``, ``dropzone``, ``sizes``,
-``sandbox``, ``archive``, ``accept-charset``) as a ``list[str]`` in ``Element.attrs``, split on ASCII whitespace. Every
-other attribute stays a string and a valueless attribute stays ``None`` - by :user:`gaborbernat`.

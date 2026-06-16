@@ -7,6 +7,46 @@
 .. towncrier release notes start
 
 *********************
+ v0.3.0 (2026-06-16)
+*********************
+
+Features - 0.3.0
+================
+
+- Add ``select()`` and ``select_one()`` to every node: a native CSS matcher over the common selector subset - type,
+  universal, ``#id``, ``.class``, and attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=``
+  operators (plus the ``i``/``s`` case-sensitivity flag), combined into compounds and joined by the descendant, child
+  (``>``), adjacent (``+``), and general-sibling (``~``) combinators, with comma groups returned in document order.
+  Selectors compile against the tree so names resolve to interned atoms, making each match an integer compare. An
+  invalid selector raises ``ValueError`` - by :user:`gaborbernat`. (:issue:`14`)
+- Rework ``find()`` and ``find_all()`` into a filter grammar over a search axis. A filter is a ``str``, a compiled
+  regex, a ``bool``, a callable, or a list of those, applied to the tag and to attribute filters (keyword arguments, the
+  ``attrs`` mapping, or ``class_``, which matches the class tokens). The ``axis`` keyword (an ``Axis`` member) selects
+  descendants, children, ancestors, siblings, or document-order following/preceding. ``find_all`` takes a ``limit`` and
+  now returns a ``list`` - by :user:`gaborbernat`. (:issue:`15`)
+- Add ``matches()`` and ``closest()`` to every node. ``matches()`` returns whether the node is an Element satisfying a
+  CSS selector, evaluated against its real ancestors and siblings; ``closest()`` returns the nearest Element matching
+  the selector, testing the node itself and then each ancestor, or ``None``. Both reuse the ``select()`` matcher, so an
+  invalid selector raises ``ValueError`` - by :user:`gaborbernat`. (:issue:`16`)
+- Add traversal-axis iterators to every node: ``next_siblings``, ``previous_siblings``, ``following`` (document order,
+  excluding the node's own subtree), and ``preceding`` (reverse document order, excluding the node's ancestors), plus
+  the ``strings`` and ``stripped_strings`` text iterators - by :user:`gaborbernat`. (:issue:`17`)
+- Expose the HTML token-list attributes (``class``, ``rel``, ``rev``, ``headers``, ``accesskey``, ``dropzone``,
+  ``sizes``, ``sandbox``, ``archive``, ``accept-charset``) as a ``list[str]`` in ``Element.attrs``, split on ASCII
+  whitespace. Every other attribute stays a string and a valueless attribute stays ``None`` - by :user:`gaborbernat`.
+  (:issue:`18`)
+- Give every node a controllable serializer. ``inner_html`` returns the children only; ``serialize(formatter=...,
+  indent=...)`` and ``encode(encoding=..., formatter=..., indent=...)`` expose the escape policy through the
+  ``Formatter`` enum (``WHATWG`` minimal-conformant, ``MINIMAL`` structural-only, ``NAMED_ENTITIES`` HTML names) and a
+  pretty form keyed on ``indent`` (an int or string). The default ``html`` output stays WHATWG-conformant: minimal
+  escaping, source-order double-quoted attributes, void elements without an end tag, raw-text content verbatim, and a
+  restored leading newline in ``pre``/``textarea``/``listing`` - by :user:`gaborbernat`. (:issue:`20`)
+- ``parse()`` now accepts ``bytes``. The encoding is sniffed with the WHATWG algorithm: a byte-order mark, then the
+  ``encoding`` argument, then a ``<meta>`` charset prescan, then windows-1252. The bytes are decoded with the resolved
+  codec, replacing malformed sequences with U+FFFD, and ``Document.encoding`` reports the encoding used (``None`` for
+  ``str`` input). Validated against the html5lib-tests encoding suite - by :user:`gaborbernat`. (:issue:`21`)
+
+*********************
  v0.2.0 (2026-06-11)
 *********************
 

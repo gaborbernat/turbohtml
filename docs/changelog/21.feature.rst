@@ -1,4 +1,0 @@
-``parse()`` now accepts ``bytes``. The encoding is sniffed with the WHATWG algorithm: a byte-order mark, then the
-``encoding`` argument, then a ``<meta>`` charset prescan, then windows-1252. The bytes are decoded with the resolved
-codec, replacing malformed sequences with U+FFFD, and ``Document.encoding`` reports the encoding used (``None`` for
-``str`` input). Validated against the html5lib-tests encoding suite - by :user:`gaborbernat`.

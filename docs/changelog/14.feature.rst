@@ -1,6 +1,0 @@
-Add ``select()`` and ``select_one()`` to every node: a native CSS matcher over the common selector subset - type,
-universal, ``#id``, ``.class``, and attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` operators
-(plus the ``i``/``s`` case-sensitivity flag), combined into compounds and joined by the descendant, child (``>``),
-adjacent (``+``), and general-sibling (``~``) combinators, with comma groups returned in document order. Selectors
-compile against the tree so names resolve to interned atoms, making each match an integer compare. An invalid selector
-raises ``ValueError`` - by :user:`gaborbernat`.

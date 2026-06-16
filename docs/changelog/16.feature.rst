@@ -1,4 +1,0 @@
-Add ``matches()`` and ``closest()`` to every node. ``matches()`` returns whether the node is an Element satisfying a CSS
-selector, evaluated against its real ancestors and siblings; ``closest()`` returns the nearest Element matching the
-selector, testing the node itself and then each ancestor, or ``None``. Both reuse the ``select()`` matcher, so an
-invalid selector raises ``ValueError`` - by :user:`gaborbernat`.
