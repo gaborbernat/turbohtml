@@ -1,5 +1,3 @@
-Document the write path across the Diátaxis set: a tutorial that builds and edits a tree step by step, an explanation of
-the copy-on-adopt design, and how-to recipes for building by hand, editing in place, rewriting attributes, normalizing
-text, and duplicating a subtree. New ``build`` and ``edit`` benchmark suites and their performance tables show turbohtml
-constructs trees about twice as fast as lxml and an order of magnitude faster than BeautifulSoup, and rewrites a parsed
-tree's attributes with the same lead - by :user:`gaborbernat`.
+Document and benchmark the write path: tutorial, how-to, and explanation coverage for building and editing a tree,
+plus ``build`` and ``edit`` benchmark suites showing turbohtml builds and rewrites trees about twice as fast as lxml
+and an order of magnitude faster than BeautifulSoup - by :user:`gaborbernat`.

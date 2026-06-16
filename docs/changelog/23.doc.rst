@@ -1,5 +1,3 @@
-Add a migration guide covering every library turbohtml benchmarks against - BeautifulSoup, lxml, selectolax, html5lib,
-and the standard library - each with a translation table from its idioms to the native equivalent and the behavior
-differences a porting user hits (children-not-attributes indexing, text as real child nodes, no XPath, one typed tree
-rather than a treebuilder choice, WHATWG-conformant default output). Every example runs as a doctest - by
-:user:`gaborbernat`.
+Add migration guides from every library turbohtml replaces - BeautifulSoup, lxml, selectolax, html5lib, and the
+standard library - each mapping its idioms to the turbohtml equivalent and calling out the behavior differences a
+porting user hits - by :user:`gaborbernat`.

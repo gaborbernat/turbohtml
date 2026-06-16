@@ -1,6 +1,3 @@
-Complete the node model. :class:`~turbohtml.ProcessingInstruction` (``target``, ``data``) and :class:`~turbohtml.CData`
-(``data``) join the sealed hierarchy as constructible, serializable, pattern-matchable nodes (a WHATWG-conformant parse
-folds ``<? ... >`` into a comment and foreign CDATA into text, so these are for building and editing). The doctype's
-public and system identifiers are exposed on :class:`~turbohtml.Doctype` as ``public_id`` and ``system_id`` (each a
-``str`` that may be empty, or ``None`` when the doctype carries none), and :class:`~turbohtml.Document` gains a ``root``
-``__match_args__`` so the whole hierarchy supports structural pattern matching - by :user:`gaborbernat`.
+Round out the node model: :class:`~turbohtml.ProcessingInstruction` and :class:`~turbohtml.CData` join the hierarchy
+for building, :class:`~turbohtml.Doctype` exposes its ``public_id`` and ``system_id``, and every node type now supports
+structural pattern matching - by :user:`gaborbernat`.
