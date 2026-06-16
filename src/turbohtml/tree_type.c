@@ -601,6 +601,8 @@ static PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj);
 static PyObject *node_unwrap(PyObject *self, PyObject *ignored);
 static PyObject *node_extract(PyObject *self, PyObject *ignored);
 static PyObject *node_decompose(PyObject *self, PyObject *ignored);
+static PyObject *node_copy(PyObject *self, PyObject *ignored);
+static PyObject *node_deepcopy(PyObject *self, PyObject *memo);
 
 PyDoc_STRVAR(insert_before_doc, "insert_before(*nodes)\n--\n\n"
                                 "Insert each node into this node's parent right before this node, in order.\n"
@@ -647,6 +649,8 @@ static PyMethodDef node_methods[] = {
     {"unwrap", node_unwrap, METH_NOARGS, unwrap_doc},
     {"extract", node_extract, METH_NOARGS, extract_doc},
     {"decompose", node_decompose, METH_NOARGS, decompose_doc},
+    {"__copy__", node_copy, METH_NOARGS, "Return a standalone deep copy of this node and its subtree."},
+    {"__deepcopy__", node_deepcopy, METH_O, "Return a standalone deep copy of this node and its subtree."},
     {NULL, NULL, 0, NULL},
 };
 
@@ -1916,6 +1920,37 @@ static PyObject *construct_data_node(PyTypeObject *type, int node_type, PyObject
     PyObject *wrapped = node_wrap(state, handle, node);
     Py_DECREF(handle);
     return wrapped;
+}
+
+/* Deep-copy this node and its subtree into a fresh standalone tree, the body of
+   __copy__ and __deepcopy__ (an HTML node has no meaningful shallow copy). */
+static PyObject *node_copy_impl(PyObject *self) {
+    module_state *state = state_of(self);
+    th_tree *tree = th_tree_new();
+    if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_node *copy = th_tree_copy_node(tree, tree_of(self), ((NodeObject *)self)->node);
+    if (copy == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);      /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *handle = handle_new(state, tree, Py_None, Py_None);
+    if (handle == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *wrapped = node_wrap(state, handle, copy);
+    Py_DECREF(handle);
+    return wrapped;
+}
+
+static PyObject *node_copy(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return node_copy_impl(self);
+}
+
+static PyObject *node_deepcopy(PyObject *self, PyObject *Py_UNUSED(memo)) {
+    return node_copy_impl(self);
 }
 
 static PyObject *text_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
