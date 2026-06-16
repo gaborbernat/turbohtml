@@ -44,6 +44,10 @@ import turbohtml
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from lxml.html import HtmlElement
+
+    from turbohtml import Document
+
 CORPUS_DIR = Path(__file__).parent / "html5lib-python" / "benchmarks" / "data"
 CORPUS_FILES: list[tuple[str, str, str]] = [
     ("wpt tiny (0.6 kB)", "wpt/weighted/toBlob.png.html", "utf-8"),
@@ -290,72 +294,88 @@ PARSE_COMPETITORS: tuple[tuple[str, Callable[[str], None]], ...] = (
 CSS_SELECTOR = "div a[href]"  # a descendant combinator with an attribute test, common in scrapers
 
 
-def turbo_tree(text: str) -> object:
+def turbo_tree(text: str) -> Document:
+    """Parse with turbohtml into a navigable Document."""
     return turbohtml.parse(text)
 
 
-def bs4_tree(text: str) -> object:
+def bs4_tree(text: str) -> BeautifulSoup:
+    """Parse with BeautifulSoup over its stdlib html.parser backend."""
     return BeautifulSoup(text, "html.parser")
 
 
-def lxml_tree(text: str) -> object:
+def lxml_tree(text: str) -> HtmlElement:
+    """Parse with lxml's libxml2-backed HTML parser."""
     return lxml_html.document_fromstring(text)
 
 
-def lexbor_tree(text: str) -> object:
+def lexbor_tree(text: str) -> LexborHTMLParser:
+    """Parse with lexbor through selectolax."""
     return LexborHTMLParser(text.encode())
 
 
-def turbo_find(doc: object) -> None:
+def turbo_find(doc: Document) -> None:
+    """Collect every anchor with turbohtml's find_all."""
     doc.find_all("a")
 
 
-def bs4_find(soup: object) -> None:
+def bs4_find(soup: BeautifulSoup) -> None:
+    """Collect every anchor with BeautifulSoup's find_all."""
     soup.find_all("a")
 
 
-def lxml_find(tree: object) -> None:
+def lxml_find(tree: HtmlElement) -> None:
+    """Collect every anchor with lxml's XPath findall."""
     tree.findall(".//a")
 
 
-def lexbor_find(tree: object) -> None:
+def lexbor_find(tree: LexborHTMLParser) -> None:
+    """Collect every anchor with selectolax's css."""
     tree.css("a")
 
 
-def turbo_select(doc: object) -> None:
+def turbo_select(doc: Document) -> None:
+    """Run the CSS selector with turbohtml's select."""
     doc.select(CSS_SELECTOR)
 
 
-def bs4_select(soup: object) -> None:
+def bs4_select(soup: BeautifulSoup) -> None:
+    """Run the CSS selector with BeautifulSoup's soupsieve select."""
     soup.select(CSS_SELECTOR)
 
 
-def lxml_select(tree: object) -> None:
+def lxml_select(tree: HtmlElement) -> None:
+    """Run the CSS selector with lxml's cssselect."""
     tree.cssselect(CSS_SELECTOR)
 
 
-def lexbor_select(tree: object) -> None:
+def lexbor_select(tree: LexborHTMLParser) -> None:
+    """Run the CSS selector with selectolax's css."""
     tree.css(CSS_SELECTOR)
 
 
-def turbo_serialize(doc: object) -> None:
+def turbo_serialize(doc: Document) -> None:
+    """Serialize back to HTML with turbohtml's html property."""
     _ = doc.html
 
 
-def bs4_serialize(soup: object) -> None:
+def bs4_serialize(soup: BeautifulSoup) -> None:
+    """Serialize back to HTML with BeautifulSoup's decode."""
     soup.decode()
 
 
-def lxml_serialize(tree: object) -> None:
+def lxml_serialize(tree: HtmlElement) -> None:
+    """Serialize back to HTML with lxml's tostring."""
     lxml_html.tostring(tree)
 
 
-def lexbor_serialize(tree: object) -> None:
+def lexbor_serialize(tree: LexborHTMLParser) -> None:
+    """Serialize back to HTML with selectolax's html property."""
     _ = tree.html
 
 
 # Read-path competitors, fastest-first: a tree builder plus the find/select/serialize trio. turbohtml leads each table.
-READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[[object], None], ...]], ...] = (
+READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., None], ...]], ...] = (
     ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize)),
     ("lxml", lxml_tree, (lxml_find, lxml_select, lxml_serialize)),
     ("selectolax", lexbor_tree, (lexbor_find, lexbor_select, lexbor_serialize)),
