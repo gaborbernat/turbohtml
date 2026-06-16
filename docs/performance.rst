@@ -304,7 +304,8 @@ than BeautifulSoup.
 
 Serializing a parsed document back to HTML: turbohtml's :attr:`~turbohtml.Node.html`, lxml's ``tostring``, selectolax's
 ``html``, and BeautifulSoup's ``decode``. turbohtml scans each text run for the next character that needs escaping and
-bulk-copies the clean spans, so it serializes faster than lxml, selectolax, and BeautifulSoup.
+bulk-copies the clean spans, so it serializes two to four times faster than lxml and selectolax and about forty times
+faster than BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
