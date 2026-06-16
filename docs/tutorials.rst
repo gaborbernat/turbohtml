@@ -225,4 +225,4 @@ edit without touching the original:
     False
 
 That is the whole tree API. Head to the :doc:`how-to` guides for task-focused recipes, the :doc:`migration` guide if you
-are coming from BeautifulSoup, or the :doc:`reference` for the exact signatures.
+are coming from another HTML library, or the :doc:`reference` for the exact signatures.

@@ -1,4 +1,5 @@
-Add a BeautifulSoup-to-turbohtml migration guide: a translation table from each ``bs4`` idiom to its native equivalent,
-worked before/after examples for searching, attributes, text, building, editing, and output, and the behavior
-differences a porting user hits (children-not-attributes indexing, text as real child nodes, WHATWG-conformant default
-output, identity equality). Every example runs as a doctest - by :user:`gaborbernat`.
+Add a migration guide covering every library turbohtml benchmarks against - BeautifulSoup, lxml, selectolax, html5lib,
+and the standard library - each with a translation table from its idioms to the native equivalent and the behavior
+differences a porting user hits (children-not-attributes indexing, text as real child nodes, no XPath, one typed tree
+rather than a treebuilder choice, WHATWG-conformant default output). Every example runs as a doctest - by
+:user:`gaborbernat`.
