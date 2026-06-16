@@ -3,12 +3,13 @@
 Benchmark turbohtml's escape/unescape/tokenize/parse against other libraries.
 
 Run with ``tox -e bench``; positional arguments pick the suites to run
-(``escape``, ``unescape``, ``tokenize``, ``corpus``, ``parse``; default all).
-Remaining arguments are forwarded to pyperf (pass ``--help`` to see them).
-pyperf runs every case in isolated worker processes and reports mean and
-stddev; the parent process then prints a speedup table: escape, unescape, and
-tokenize against the standard library, and parse against the other HTML tree
-builders (lexbor through selectolax, lxml, html5lib, and BeautifulSoup).
+(``escape``, ``unescape``, ``tokenize``, ``corpus``, ``parse``, ``query``,
+``serialize``; default all). Remaining arguments are forwarded to pyperf (pass
+``--help`` to see them). pyperf runs every case in isolated worker processes and
+reports mean and stddev; the parent process then prints a speedup table: escape,
+unescape, and tokenize against the standard library, parse against the other HTML
+tree builders (lxml, selectolax, html5lib, and BeautifulSoup), and the read-path
+query and serialize suites against lxml, selectolax, and BeautifulSoup.
 
 The escape and unescape inputs span tiny strings (call overhead) and multi-MiB
 documents that stream well past the CPU caches: real corpora (Project
@@ -280,6 +281,120 @@ PARSE_COMPETITORS: tuple[tuple[str, Callable[[str], None]], ...] = (
 )
 
 
+# --- read-path suites: query and serialize a pre-parsed tree --------------- #
+# Each library parses the document once (outside the timed region) into its own
+# tree, then the timed function runs one query or one serialization. The trees
+# differ per library, so the comparison is the user-level operation ("find every
+# anchor", "select a[href]", "serialize to HTML"), each library's idiomatic way.
+
+CSS_SELECTOR = "div a[href]"  # a descendant combinator with an attribute test, common in scrapers
+
+
+def turbo_tree(text: str) -> object:
+    return turbohtml.parse(text)
+
+
+def bs4_tree(text: str) -> object:
+    return BeautifulSoup(text, "html.parser")
+
+
+def lxml_tree(text: str) -> object:
+    return lxml_html.document_fromstring(text)
+
+
+def lexbor_tree(text: str) -> object:
+    return LexborHTMLParser(text.encode())
+
+
+def turbo_find(doc: object) -> None:
+    doc.find_all("a")
+
+
+def bs4_find(soup: object) -> None:
+    soup.find_all("a")
+
+
+def lxml_find(tree: object) -> None:
+    tree.findall(".//a")
+
+
+def lexbor_find(tree: object) -> None:
+    tree.css("a")
+
+
+def turbo_select(doc: object) -> None:
+    doc.select(CSS_SELECTOR)
+
+
+def bs4_select(soup: object) -> None:
+    soup.select(CSS_SELECTOR)
+
+
+def lxml_select(tree: object) -> None:
+    tree.cssselect(CSS_SELECTOR)
+
+
+def lexbor_select(tree: object) -> None:
+    tree.css(CSS_SELECTOR)
+
+
+def turbo_serialize(doc: object) -> None:
+    _ = doc.html
+
+
+def bs4_serialize(soup: object) -> None:
+    soup.decode()
+
+
+def lxml_serialize(tree: object) -> None:
+    lxml_html.tostring(tree)
+
+
+def lexbor_serialize(tree: object) -> None:
+    _ = tree.html
+
+
+# Read-path competitors, fastest-first: a tree builder plus the find/select/serialize trio. turbohtml leads each table.
+READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[[object], None], ...]], ...] = (
+    ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize)),
+    ("lxml", lxml_tree, (lxml_find, lxml_select, lxml_serialize)),
+    ("selectolax", lexbor_tree, (lexbor_find, lexbor_select, lexbor_serialize)),
+    ("BeautifulSoup", bs4_tree, (bs4_find, bs4_select, bs4_serialize)),
+)
+
+# wpt pages from 4 kB to 92 kB; the multi-MB specs are skipped here since every
+# library would re-parse them per worker, which dwarfs the timed query.
+READPATH_CASES = CORPUS_FILES[1:4]
+
+
+def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
+    """Benchmark one read-path operation (find/select/serialize) across every library."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, ops in READPATH_LIBS:
+            bench(f"{op} {name} [{label}]", ops[op_index], build(text))
+        names.append(name)
+    return names
+
+
+def print_readpath_table(means: dict[str, float], op: str, cases: list[str]) -> None:
+    """Render turbohtml beside each alternative and its slowdown factor for one read-path operation."""
+    if not cases:
+        return
+    others = [label for label, _, _ in READPATH_LIBS if label != "turbohtml"]
+    print()
+    header = f"{op + ' benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"{op} {name} [turbohtml]"]
+        row = f"{op + ' ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"{op} {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def stdlib_tokenize(text: str) -> None:
     """Drive the stdlib parser with its default no-op handlers."""
     parser = HTMLParser()
@@ -350,7 +465,7 @@ def main() -> None:
     runner.argparser.add_argument(
         "suites",
         nargs="*",
-        choices=["escape", "unescape", "tokenize", "corpus", "parse", []],
+        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", []],
         help="suites to run (default: all)",
     )
     args = runner.parse_args()
@@ -359,7 +474,7 @@ def main() -> None:
     if args.suites:
         os.environ["TURBOHTML_BENCH_SUITES"] = ",".join(args.suites)
         args.inherit_environ = [*(args.inherit_environ or []), "TURBOHTML_BENCH_SUITES"]
-    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse")
+    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize")
     suites = set(selection.split(","))
     means: dict[str, float] = {}
 
@@ -382,12 +497,18 @@ def main() -> None:
         if has_html5lib:
             bench(f"tokenize {name} [html5lib]", html5lib_tokenize, arg)
     parse_cases = run_parse_suite(bench) if "parse" in suites else []
+    find_cases = run_readpath_suite(bench, 0, "find") if "query" in suites else []
+    select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
+    serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     if args.worker or not means:
         return
     rows = [(op, name) for op, name, _ in CASES if op in suites]
     rows += [("tokenize", name) for name, _ in tokenize_cases]
     print_table(means, rows)
     print_parse_table(means, parse_cases)
+    print_readpath_table(means, "find", find_cases)
+    print_readpath_table(means, "select", select_cases)
+    print_readpath_table(means, "serialize", serialize_cases)
 
 
 if __name__ == "__main__":
