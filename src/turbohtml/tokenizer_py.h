@@ -52,6 +52,10 @@ int tree_register(PyObject *module, module_state *state);
 PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs);
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs);
 
+/* Rebuild a node and its subtree from a pickle (kind, data, children) triple,
+   wired as the private _reconstruct() the node __reduce__ points pickle at. */
+PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args);
+
 /* Build a Token from a freshly emitted record. Small records are copied and a
    large text run is moved out of the record (which then regrows). A slice
    record resolves lazily against source when the input is borrowed from it

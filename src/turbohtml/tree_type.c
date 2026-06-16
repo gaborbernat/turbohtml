@@ -603,6 +603,7 @@ static PyObject *node_extract(PyObject *self, PyObject *ignored);
 static PyObject *node_decompose(PyObject *self, PyObject *ignored);
 static PyObject *node_copy(PyObject *self, PyObject *ignored);
 static PyObject *node_deepcopy(PyObject *self, PyObject *memo);
+static PyObject *node_reduce(PyObject *self, PyObject *ignored);
 
 PyDoc_STRVAR(insert_before_doc, "insert_before(*nodes)\n--\n\n"
                                 "Insert each node into this node's parent right before this node, in order.\n"
@@ -651,6 +652,7 @@ static PyMethodDef node_methods[] = {
     {"decompose", node_decompose, METH_NOARGS, decompose_doc},
     {"__copy__", node_copy, METH_NOARGS, "Return a standalone deep copy of this node and its subtree."},
     {"__deepcopy__", node_deepcopy, METH_O, "Return a standalone deep copy of this node and its subtree."},
+    {"__reduce__", node_reduce, METH_NOARGS, "Support pickling: rebuild this node and its subtree on unpickle."},
     {NULL, NULL, 0, NULL},
 };
 
@@ -1887,15 +1889,9 @@ static PyType_Spec element_spec = {
 
 static PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding);
 
-/* Construct a standalone leaf node (Text or Comment) owning its character data in
-   a fresh single-node tree, ready to be inserted into a document. */
-static PyObject *construct_data_node(PyTypeObject *type, int node_type, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"data", NULL};
-    PyObject *data;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "U", keywords, &data)) {
-        return NULL;
-    }
-    module_state *state = PyType_GetModuleState(type);
+/* Wrap a data node (Text/Comment/CData/Doctype) holding a copy of data in a fresh
+   single-node tree, ready to be inserted into a document. */
+static PyObject *data_node_in_fresh_tree(module_state *state, int node_type, PyObject *data) {
     th_tree *tree = th_tree_new();
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1920,6 +1916,15 @@ static PyObject *construct_data_node(PyTypeObject *type, int node_type, PyObject
     PyObject *wrapped = node_wrap(state, handle, node);
     Py_DECREF(handle);
     return wrapped;
+}
+
+static PyObject *construct_data_node(PyTypeObject *type, int node_type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"data", NULL};
+    PyObject *data;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "U", keywords, &data)) {
+        return NULL;
+    }
+    return data_node_in_fresh_tree(PyType_GetModuleState(type), node_type, data);
 }
 
 /* Deep-copy this node and its subtree into a fresh standalone tree, the body of
@@ -2821,6 +2826,147 @@ PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObje
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return tree_to_node(PyModule_GetState(module), tree, text, Py_None);
+}
+
+/* ---------------------------------------------------------------- pickle */
+
+/* This node's children as a fresh list of wrappers, so pickling an element
+   recurses into each child. */
+static PyObject *node_children_list(PyObject *self) {
+    NodeObject *node = (NodeObject *)self;
+    module_state *state = state_of(self);
+    PyObject *list = PyList_New(0);
+    if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (th_node *child = node->node->first_child; child != NULL; child = child->next_sibling) {
+        PyObject *wrapped = node_wrap(state, node->handle, child);
+        if (wrapped == NULL || PyList_Append(list, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE: alloc cannot be forced */
+            Py_XDECREF(wrapped);                                   /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_DECREF(list);                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_DECREF(wrapped);
+    }
+    return list;
+}
+
+/* The pickle payload for this node: the leaf data, the element tag and attribute
+   dict, the doctype identifiers, or the document's own markup. */
+static PyObject *node_pickle_data(PyObject *self, th_node *node) {
+    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    case TH_NODE_TEXT:
+    case TH_NODE_COMMENT:
+    case TH_NODE_CDATA:
+        return str_from_accessor(th_node_data, tree_of(self), node);
+    case TH_NODE_PI:
+        return Py_BuildValue("(NN)", pi_get_target(self, NULL), pi_get_data(self, NULL));
+    case TH_NODE_DOCTYPE:
+        return Py_BuildValue("(NNN)", doctype_get_name(self, NULL), doctype_get_public_id(self, NULL),
+                             doctype_get_system_id(self, NULL));
+    case TH_NODE_ELEMENT: {
+        PyObject *view = element_get_attrs(self, NULL);
+        if (view == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *attrs = PyObject_CallFunctionObjArgs((PyObject *)&PyDict_Type, view, NULL);
+        Py_DECREF(view);
+        if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        return Py_BuildValue("(NN)", element_get_tag(self, NULL), attrs);
+    }
+    case TH_NODE_DOCUMENT:
+    case TH_NODE_CONTENT:
+        return str_from_accessor(th_node_html, tree_of(self), node);
+    }
+    Py_RETURN_NONE; /* GCOVR_EXCL_LINE: unreachable, the switch is exhaustive */
+}
+
+static PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((NodeObject *)self)->node;
+    PyObject *reconstruct = PyObject_GetAttrString(PyType_GetModule(Py_TYPE(self)), "_reconstruct");
+    if (reconstruct == NULL) { /* GCOVR_EXCL_BR_LINE: the module always carries _reconstruct */
+        return NULL;           /* GCOVR_EXCL_LINE: unreachable */
+    }
+    PyObject *data = node_pickle_data(self, node);
+    PyObject *children = node->type == TH_NODE_ELEMENT ? node_children_list(self) : PyList_New(0);
+    if (data == NULL || children == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_XDECREF(data);                   /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(children);               /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_DECREF(reconstruct);             /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = Py_BuildValue("(O(iNN))", reconstruct, (int)node->type, data, children);
+    Py_DECREF(reconstruct);
+    return result;
+}
+
+/* Rebuild a doctype from its (name, public_id, system_id) triple, repacking the
+   identifiers into the node's stored "name \"public\" \"system\"" form. */
+static PyObject *reconstruct_doctype(module_state *state, PyObject *data) {
+    PyObject *name;
+    PyObject *public_id;
+    PyObject *system_id;
+    if (!PyArg_ParseTuple(data, "OOO", &name, &public_id, &system_id)) { /* GCOVR_EXCL_BR_LINE: we build this tuple */
+        return NULL;                                                     /* GCOVR_EXCL_LINE: unreachable */
+    }
+    PyObject *packed = public_id == Py_None ? Py_NewRef(name)
+                                            : PyUnicode_FromFormat("%U \"%U\" \"%U\"", name, public_id, system_id);
+    if (packed == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *node = data_node_in_fresh_tree(state, TH_NODE_DOCTYPE, packed);
+    Py_DECREF(packed);
+    return node;
+}
+
+PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
+    int kind;
+    PyObject *data;
+    PyObject *children;
+    if (!PyArg_ParseTuple(args, "iOO", &kind, &data, &children)) {
+        return NULL;
+    }
+    module_state *state = PyModule_GetState(module);
+    PyObject *node;
+    switch (kind) {
+    case TH_NODE_TEXT:
+    case TH_NODE_COMMENT:
+    case TH_NODE_CDATA:
+        node = data_node_in_fresh_tree(state, kind, data);
+        break;
+    case TH_NODE_PI:
+        node = PyObject_CallObject(state->pi_type, data);
+        break;
+    case TH_NODE_ELEMENT:
+        node = PyObject_CallObject(state->element_type, data);
+        break;
+    case TH_NODE_DOCTYPE:
+        node = reconstruct_doctype(state, data);
+        break;
+    default: { /* TH_NODE_DOCUMENT / TH_NODE_CONTENT: data is the serialized markup */
+        PyObject *call_args = PyTuple_Pack(1, data);
+        if (call_args == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        node = turbohtml_parse(module, call_args, NULL);
+        Py_DECREF(call_args);
+        break;
+    }
+    }
+    if (node == NULL) {
+        return NULL;
+    }
+    for (Py_ssize_t index = 0; index < PyList_GET_SIZE(children); index++) {
+        PyObject *appended = PyObject_CallMethod(node, "append", "O", PyList_GET_ITEM(children, index));
+        if (appended == NULL) { /* GCOVR_EXCL_BR_LINE: a reconstructed child always appends */
+            Py_DECREF(node);    /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_DECREF(appended);
+    }
+    return node;
 }
 
 /* ----------------------------------------------------------- registration */

@@ -40,6 +40,7 @@ static PyMethodDef html_methods[] = {
     {"parse", (PyCFunction)(void (*)(void))turbohtml_parse, METH_VARARGS | METH_KEYWORDS, parse_doc},
     {"parse_fragment", (PyCFunction)(void (*)(void))turbohtml_tree_parse_fragment, METH_VARARGS | METH_KEYWORDS,
      parse_fragment_doc},
+    {"_reconstruct", turbohtml_reconstruct, METH_VARARGS, NULL},
     {"_tokenize_states", turbohtml_tokenize_states, METH_VARARGS, NULL},
     {"_parse_tree", turbohtml_parse_tree, METH_O, NULL},
     {"_parse_fragment", turbohtml_parse_fragment, METH_VARARGS, NULL},
