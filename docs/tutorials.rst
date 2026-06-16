@@ -173,5 +173,56 @@ field:
     text 'Tom & '
     element a
 
-That is the whole traversal API. Head to the :doc:`how-to` guides for task-focused recipes, or the :doc:`reference` for
-the exact signatures.
+*****************************
+ Building and editing a tree
+*****************************
+
+Everything so far read a document that already existed. You can also build one. Construct nodes from their classes and
+assemble them with :meth:`~turbohtml.Element.append`; the ``text`` setter fills an element with a single text child:
+
+.. code-block:: pycon
+
+    >>> from turbohtml import Element, Comment
+    >>> article = turbohtml.Element("article", {"class": "post"})
+    >>> title = turbohtml.Element("h1")
+    >>> title.text = "Tea"
+    >>> article.append(title)
+    >>> article.append(Comment("draft"))
+    >>> article.html
+    '<article class="post"><h1>Tea</h1><!--draft--></article>'
+
+A list value for a token-list attribute (``class``, ``rel``, ...) joins on a space, and a ``None`` value is a valueless
+attribute:
+
+.. code-block:: pycon
+
+    >>> turbohtml.Element("input", {"class": ["a", "b"], "disabled": None}).html
+    '<input class="a b" disabled="">'
+
+Editing a parsed tree uses the BeautifulSoup vocabulary - ``insert_before``, ``replace_with``, ``wrap``, ``unwrap``,
+``decompose`` - and ``element.attrs`` is a live mapping you assign to. A node already in a tree moves; a node from
+another tree is adopted by copy:
+
+.. code-block:: pycon
+
+    >>> doc = turbohtml.parse("<p>keep <b>bold</b> <span>drop</span></p>")
+    >>> doc.find("b").unwrap()
+    Element('b')
+    >>> doc.find("span").decompose()
+    >>> doc.find("p").attrs["class"] = "lead"
+    >>> doc.find("p").html
+    '<p class="lead">keep bold </p>'
+
+Duplicate a subtree with :func:`python:copy.deepcopy` (or :mod:`python:pickle`); the clone is a standalone tree you can
+edit without touching the original:
+
+.. code-block:: pycon
+
+    >>> import copy
+    >>> clone = copy.deepcopy(article)
+    >>> clone.append(turbohtml.Element("footer"))
+    >>> clone.html == article.html
+    False
+
+That is the whole tree API. Head to the :doc:`how-to` guides for task-focused recipes, the :doc:`migration` guide if
+you are coming from BeautifulSoup, or the :doc:`reference` for the exact signatures.

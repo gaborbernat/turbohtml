@@ -415,3 +415,36 @@ children and ``decompose`` drops a subtree:
     >>> del link.attrs["data-tmp"]
     >>> link.html
     '<a href="/new" class="btn primary">go</a>'
+
+***********************************
+ Merge adjacent text after editing
+***********************************
+
+Edits can leave a run of adjacent text nodes; :meth:`~turbohtml.Element.normalize` merges each run into one and drops
+empty text nodes, throughout the subtree (the DOM operation BeautifulSoup spells ``smooth``):
+
+.. code-block:: pycon
+
+    >>> from turbohtml import Text
+    >>> p = turbohtml.Element("p")
+    >>> p.extend([Text("Hello "), Text(""), Text("world")])
+    >>> p.normalize()
+    >>> len(p), p.html
+    (1, '<p>Hello world</p>')
+
+******************************
+ Duplicate or cache a subtree
+******************************
+
+Any node deep-copies into a fresh standalone tree, so a clone is independent of the original. Use
+:func:`python:copy.deepcopy` to duplicate in memory, or :mod:`python:pickle` to cross a process or cache boundary; both
+preserve processing instructions and CDATA sections exactly:
+
+.. code-block:: pycon
+
+    >>> import copy
+    >>> menu = turbohtml.parse("<ul><li>tea</li></ul>").find("ul")
+    >>> clone = copy.deepcopy(menu)
+    >>> clone.append(turbohtml.Element("li"))
+    >>> menu.html, clone.html
+    ('<ul><li>tea</li></ul>', '<ul><li>tea</li><li></li></ul>')

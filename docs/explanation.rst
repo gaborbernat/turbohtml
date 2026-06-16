@@ -119,7 +119,8 @@ BeautifulSoup and html5lib, while building the WHATWG tree that lxml's libxml2 d
 the per-document figures.
 
 The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
-:class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`) sharing the navigation defined on
+:class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`,
+:class:`~turbohtml.ProcessingInstruction`, :class:`~turbohtml.CData`) sharing the navigation defined on
 :class:`~turbohtml.Node`. turbohtml models text as real child nodes (the WHATWG DOM shape) rather than the
 ``.text``/``.tail`` split lxml-style trees use, so a node's children are its text runs and elements interleaved in
 document order. Each type sets ``__match_args__``, so structural pattern matching unpacks a node's defining field, and
@@ -137,6 +138,32 @@ tree, so a tag or attribute name resolves to the same interned atom the parser a
 compare. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and
 :meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
 :class:`~turbohtml.Formatter`.
+
+******************
+ Mutating the tree
+******************
+
+The arena that makes reading cheap is built for append-only construction, not random edits, so making the tree mutable
+took a deliberate rule rather than a writable wrapper over the read path: **mutate in place within a tree, copy on
+adopt across trees**. An edit that keeps a node in its own tree - :meth:`~turbohtml.Element.append` of a child already
+under the same root, :meth:`~turbohtml.Node.insert_before`, :meth:`~turbohtml.Node.unwrap` - is a few pointer swaps on
+the arena nodes, so the node keeps its identity and any wrapper you hold stays valid. Inserting a node from a different
+tree (a freshly constructed one, or a node lifted out of another document) deep-copies its subtree into the
+destination's arena and re-points the moved wrapper at the copy, so the two arenas never alias and the source frees on
+its own. Making a node a descendant of itself is refused.
+
+Construction reuses the same arena machinery: :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and the rest build
+a standalone single-node tree that owns its data, ready to adopt into a document, and tag and attribute names are
+ASCII-lowercased so they resolve to the same interned atoms the parser assigns. :attr:`Element.attrs
+<turbohtml.Element.attrs>` is a live mapping over the node's own attribute array - assignment and deletion edit the tree
+directly rather than a throwaway dict - and ``copy.copy``, ``copy.deepcopy``, and :mod:`python:pickle` all run through
+the same subtree copy, so a clone is always a standalone tree.
+
+:class:`~turbohtml.ProcessingInstruction` and :class:`~turbohtml.CData` round out the node model for building, but the
+parser never emits them: a WHATWG-conformant parse folds ``<? ... >`` into a comment and a foreign CDATA section into
+text, and turbohtml keeps that conformance rather than inventing nodes the algorithm does not produce. Pickling carries
+an element's children as an explicit list instead of re-serializing, so those two node types survive a round-trip that
+serialize-and-reparse would fold away.
 
 ****************
  Free-threading
