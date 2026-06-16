@@ -68,6 +68,19 @@ def test_tag_true_matches_every_element() -> None:
     assert len(parse(_DOC).find_all(True)) == 8  # noqa: FBT003
 
 
+def test_tag_with_attribute_filter_uses_the_general_path() -> None:
+    # a tag plus any other filter leaves the tag-only fast path
+    assert _tags(parse(_DOC).find_all("a", href="/x")) == ["a"]
+
+
+def test_tag_with_class_filter_uses_the_general_path() -> None:
+    assert _tags(parse(_DOC).find_all("p", class_="big")) == ["p", "p"]
+
+
+def test_tag_with_regex_class_filter_uses_the_general_path() -> None:
+    assert _tags(parse(_DOC).find_all("p", class_=re.compile(r"big"))) == ["p", "p"]
+
+
 # --- attribute filter kinds ---
 
 
@@ -236,6 +249,11 @@ def test_axis_preceding_excludes_ancestors() -> None:
 )
 def test_limit(limit: int | None, count: int) -> None:
     assert len(parse(_DOC).find_all("p", limit=limit)) == count
+
+
+def test_limit_on_the_general_path() -> None:
+    # a bool filter uses the general matcher, where the limit applies the same way
+    assert len(parse(_DOC).find_all(True, limit=1)) == 1  # noqa: FBT003
 
 
 # --- dynamic (non-common) attribute names ---

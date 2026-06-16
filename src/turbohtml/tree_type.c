@@ -1196,6 +1196,17 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     return node_wrap(state, ((NodeObject *)self)->handle, found);
 }
 
+/* Wrap node and append it to the result list; -1 on allocation failure. */
+static int append_wrapped(PyObject *out, module_state *state, PyObject *handle, th_node *node) {
+    PyObject *wrapped = node_wrap(state, handle, node);
+    if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        Py_XDECREF(wrapped); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_DECREF(wrapped);
+    return 0;
+}
+
 static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs) {
     query_t query;
     if (build_query(self, args, kwargs, 1, &query) < 0) {
@@ -1211,24 +1222,39 @@ static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int error = 0;
-    for (th_node *node = axis_first(origin, query.axis); node != NULL; node = axis_next(node, origin, query.axis)) {
-        if (query.limit >= 0 && PyList_GET_SIZE(out) >= query.limit) {
-            break;
-        }
-        int matched = node_matches(state, node, &query);
-        if (matched < 0) {
-            error = 1;
-            break;
-        }
-        if (matched) {
-            PyObject *wrapped = node_wrap(state, handle, node);
-            /* allocation failure cannot be forced from a test */
-            if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE */
-                Py_XDECREF(wrapped);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
-                error = 1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
-                break;                                                /* GCOVR_EXCL_LINE: allocation-failure path */
+    /* Fast path: a plain known tag with no other filter on the descendant axis
+       is a pre-order walk with an integer atom compare, skipping the axis
+       dispatch and the general matcher. A non-element node carries
+       TH_TAG_UNKNOWN, so the atom compare alone selects the right elements. */
+    int simple = query.tag_plain && query.tag_atom != TH_TAG_UNKNOWN && query.nattr == 0 &&
+                 query.class_ucs4 == NULL && query.class_filter == NULL && query.axis == TH_AXIS_DESCENDANTS;
+    if (simple) {
+        for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+            if (query.limit >= 0 && PyList_GET_SIZE(out) >= query.limit) {
+                break;
             }
-            Py_DECREF(wrapped);
+            if (node->atom != query.tag_atom) {
+                continue;
+            }
+            if (append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+                error = 1;                                      /* GCOVR_EXCL_LINE: allocation-failure path */
+                break;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        }
+    } else {
+        for (th_node *node = axis_first(origin, query.axis); node != NULL; node = axis_next(node, origin, query.axis)) {
+            if (query.limit >= 0 && PyList_GET_SIZE(out) >= query.limit) {
+                break;
+            }
+            int matched = node_matches(state, node, &query);
+            if (matched < 0) {
+                error = 1;
+                break;
+            }
+            if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc cannot fail */
+                error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+                break;     /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
         }
     }
     free_query(&query);

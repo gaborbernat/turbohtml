@@ -108,16 +108,16 @@ Parse a fragment as the contents of a context element, the way `innerHTML` does:
 
 ## Performance
 
-turbohtml's C core makes every operation several times faster than its pure-Python counterpart, and the parser and query
-layer hold their own against the C libraries too. Measured with [pyperf](https://pyperf.readthedocs.io) on an Apple M4:
+turbohtml's C core makes every operation several times faster than its pure-Python counterpart, and it leads the C
+libraries on every read-path benchmark too. Measured with [pyperf](https://pyperf.readthedocs.io) on an Apple M4:
 
 - `escape` and `unescape` match the standard library byte for byte while running several times faster, up to 22× on
   no-op text and 13× on entity-dense input.
 - `tokenize` is 9–16× faster than `html.parser` wherever markup appears.
 - `parse` builds a full WHATWG tree 2–5× faster than the C parsers lxml and selectolax, and 30–80× faster than the
   pure-Python BeautifulSoup and html5lib.
-- CSS `select` runs 2–40× faster than lxml and over 100× faster than BeautifulSoup, and serialization is the fastest of
-  the four.
+- `find_all` and CSS `select` outrun lxml's C XPath and cssselect at every size (2–40×) and BeautifulSoup by 100×, and
+  serialization is the fastest of the four.
 
 See the [performance page](https://turbohtml.readthedocs.io/en/latest/performance.html) for the full sectioned tables
 and the methodology.

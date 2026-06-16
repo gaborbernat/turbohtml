@@ -239,8 +239,9 @@ WHATWG tree that lxml's libxml2 does not.
 
 Each library parses the document once, then the timed call runs one query. ``find`` collects every ``<a>`` element the
 way each library reaches for it (turbohtml's :meth:`~turbohtml.Node.find_all`, lxml's XPath ``findall``, selectolax's
-and BeautifulSoup's selectors). Because turbohtml resolves the tag name to an interned atom and compares integers during
-the walk, it keeps pace with lxml's C XPath engine and runs several times ahead of selectolax and BeautifulSoup.
+and BeautifulSoup's selectors). A tag-only query resolves the name to an interned atom and walks the subtree comparing
+integers, with no per-element string built and no matcher dispatch, so it outpaces lxml's C XPath engine at every size
+and runs several times ahead of selectolax and BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
@@ -252,19 +253,19 @@ the walk, it keeps pace with lxml's C XPath engine and runs several times ahead 
       - selectolax
       - BeautifulSoup
     - - wpt page (4 kB)
-      - 0.4 µs
+      - 0.2 µs
       - 0.5 µs
       - 2.2 µs
-      - 6.0 µs
+      - 5.8 µs
     - - wpt page (9.6 kB)
-      - 0.7 µs
+      - 0.3 µs
       - 0.5 µs
       - 2.6 µs
       - 9.5 µs
     - - wpt page (92 kB)
-      - 21.4 µs
+      - 11.5 µs
       - 23.5 µs
-      - 46.7 µs
+      - 45.8 µs
       - 206 µs
 
 ``select`` runs the CSS selector ``div a[href]`` (turbohtml's :meth:`~turbohtml.Node.select`, lxml's ``cssselect``,
