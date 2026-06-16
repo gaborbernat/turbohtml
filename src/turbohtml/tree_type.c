@@ -568,6 +568,43 @@ PyDoc_STRVAR(find_all_doc,
              "Return the list of Elements along axis matching the tag filter and every\n"
              "attribute filter, up to limit results.");
 
+static PyObject *node_insert_before(PyObject *self, PyObject *nodes);
+static PyObject *node_insert_after(PyObject *self, PyObject *nodes);
+static PyObject *node_replace_with(PyObject *self, PyObject *nodes);
+static PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj);
+static PyObject *node_unwrap(PyObject *self, PyObject *ignored);
+static PyObject *node_extract(PyObject *self, PyObject *ignored);
+static PyObject *node_decompose(PyObject *self, PyObject *ignored);
+
+PyDoc_STRVAR(insert_before_doc, "insert_before(*nodes)\n--\n\n"
+                                "Insert each node into this node's parent right before this node, in order.\n"
+                                "A node already in a tree is moved; a node from another tree is adopted by\n"
+                                "copy.");
+
+PyDoc_STRVAR(insert_after_doc, "insert_after(*nodes)\n--\n\n"
+                               "Insert each node into this node's parent right after this node, in order,\n"
+                               "with the same move-or-adopt rule as insert_before().");
+
+PyDoc_STRVAR(replace_with_doc, "replace_with(*nodes)\n--\n\n"
+                               "Put nodes where this node is, in order, and detach this node, which\n"
+                               "becomes a standalone root the caller still holds. With no nodes this just\n"
+                               "removes this node.");
+
+PyDoc_STRVAR(wrap_doc, "wrap(wrapper, /)\n--\n\n"
+                       "Put this node inside wrapper, an element, in this node's place and return\n"
+                       "wrapper.");
+
+PyDoc_STRVAR(unwrap_doc, "unwrap()\n--\n\n"
+                         "Replace this node with its children and return it detached (the inverse of\n"
+                         "wrap).");
+
+PyDoc_STRVAR(extract_doc, "extract()\n--\n\n"
+                          "Detach this node from its parent and return it, leaving a standalone node\n"
+                          "the caller can reinsert elsewhere.");
+
+PyDoc_STRVAR(decompose_doc, "decompose()\n--\n\n"
+                            "Detach this node and its subtree from the document and drop it.");
+
 static PyMethodDef node_methods[] = {
     {"find", (PyCFunction)(void (*)(void))node_find, METH_VARARGS | METH_KEYWORDS, find_doc},
     {"find_all", (PyCFunction)(void (*)(void))node_find_all, METH_VARARGS | METH_KEYWORDS, find_all_doc},
@@ -577,6 +614,13 @@ static PyMethodDef node_methods[] = {
     {"closest", node_css_closest, METH_O, closest_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
     {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
+    {"insert_before", node_insert_before, METH_VARARGS, insert_before_doc},
+    {"insert_after", node_insert_after, METH_VARARGS, insert_after_doc},
+    {"replace_with", node_replace_with, METH_VARARGS, replace_with_doc},
+    {"wrap", node_wrap_in, METH_O, wrap_doc},
+    {"unwrap", node_unwrap, METH_NOARGS, unwrap_doc},
+    {"extract", node_extract, METH_NOARGS, extract_doc},
+    {"decompose", node_decompose, METH_NOARGS, decompose_doc},
     {NULL, NULL, 0, NULL},
 };
 
@@ -1490,10 +1534,44 @@ static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.");
 
 static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+static PyObject *element_append(PyObject *self, PyObject *child);
+static PyObject *element_extend(PyObject *self, PyObject *iterable);
+static PyObject *element_insert(PyObject *self, PyObject *args);
+static PyObject *element_clear(PyObject *self, PyObject *ignored);
+static PyObject *element_normalize(PyObject *self, PyObject *ignored);
+
+PyDoc_STRVAR(append_doc, "append(child, /)\n--\n\n"
+                         "Add child as the last child of this element. A node already in a tree is\n"
+                         "moved; a node from another tree is adopted by copy.");
+
+PyDoc_STRVAR(extend_doc, "extend(children, /)\n--\n\n"
+                         "Append every node from the iterable in order, each one moved or adopted\n"
+                         "like append().");
+
+PyDoc_STRVAR(insert_doc, "insert(index, child, /)\n--\n\n"
+                         "Insert child among this element's children at index, counted and clamped\n"
+                         "like list.insert.");
+
+PyDoc_STRVAR(clear_doc, "clear()\n--\n\n"
+                        "Detach every child of this element, leaving it empty.");
+
+PyDoc_STRVAR(normalize_doc, "normalize()\n--\n\n"
+                            "Merge each run of adjacent Text descendants into one node and drop empty\n"
+                            "Text nodes, throughout this element's subtree.");
+
+static PyMethodDef element_methods[] = {
+    {"append", element_append, METH_O, append_doc},
+    {"extend", element_extend, METH_O, extend_doc},
+    {"insert", element_insert, METH_VARARGS, insert_doc},
+    {"clear", element_clear, METH_NOARGS, clear_doc},
+    {"normalize", element_normalize, METH_NOARGS, normalize_doc},
+    {NULL, NULL, 0, NULL},
+};
 
 static PyType_Slot element_slots[] = {
     {Py_tp_doc, (void *)element_doc},
     {Py_tp_getset, element_getset},
+    {Py_tp_methods, element_methods},
     {Py_tp_new, element_new},
     {0, NULL},
 };
@@ -1733,6 +1811,254 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     PyObject *wrapped = node_wrap(state, handle, node);
     Py_DECREF(handle);
     return wrapped;
+}
+
+/* Prepare child_obj to become a child of dest_parent in anchor's tree and return
+   the th_node to link (already detached from any old position). A node in the same
+   tree is moved in place, its wrapper unchanged; a node from another tree is
+   deep-copied in and its wrapper re-pointed at the copy, so the source tree frees
+   on its own. NULL with an exception on a non-node, a Document, a cycle (making a
+   node a descendant of itself), or allocation failure. */
+static th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj) {
+    module_state *state = state_of((PyObject *)anchor);
+    if (!PyObject_TypeCheck(child_obj, (PyTypeObject *)state->node_type)) {
+        PyErr_SetString(PyExc_TypeError, "child must be a node");
+        return NULL;
+    }
+    NodeObject *child = (NodeObject *)child_obj;
+    if (child->node->type == TH_NODE_DOCUMENT) {
+        PyErr_SetString(PyExc_TypeError, "a Document cannot be inserted as a child");
+        return NULL;
+    }
+    th_tree *dest_tree = tree_of((PyObject *)anchor);
+    if (dest_tree == tree_of(child_obj)) {
+        if (th_node_contains(child->node, dest_parent)) {
+            PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
+            return NULL;
+        }
+        th_node_remove(child->node);
+        return child->node;
+    }
+    th_node *copy = th_tree_copy_node(dest_tree, tree_of(child_obj), child->node);
+    if (copy == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_node_remove(child->node);
+    Py_SETREF(child->handle, Py_NewRef(anchor->handle));
+    child->node = copy;
+    return copy;
+}
+
+/* Whether new_obj is a node wrapping the same C node as ref: inserting a node
+   relative to itself is a no-op the link primitives must not be handed. */
+static int is_same_node(PyObject *self, PyObject *new_obj, th_node *ref) {
+    module_state *state = state_of(self);
+    return PyObject_TypeCheck(new_obj, (PyTypeObject *)state->node_type) && ((NodeObject *)new_obj)->node == ref;
+}
+
+static PyObject *element_append(PyObject *self, PyObject *child) {
+    th_node *parent = ((NodeObject *)self)->node;
+    th_node *node = adopt_into((NodeObject *)self, parent, child);
+    if (node == NULL) {
+        return NULL;
+    }
+    th_node_append_child(parent, node);
+    Py_RETURN_NONE;
+}
+
+static PyObject *element_extend(PyObject *self, PyObject *iterable) {
+    PyObject *iterator = PyObject_GetIter(iterable);
+    if (iterator == NULL) {
+        return NULL;
+    }
+    th_node *parent = ((NodeObject *)self)->node;
+    PyObject *child;
+    while ((child = PyIter_Next(iterator)) != NULL) {
+        th_node *node = adopt_into((NodeObject *)self, parent, child);
+        Py_DECREF(child);
+        if (node == NULL) {
+            Py_DECREF(iterator);
+            return NULL;
+        }
+        th_node_append_child(parent, node);
+    }
+    Py_DECREF(iterator);
+    if (PyErr_Occurred()) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *element_insert(PyObject *self, PyObject *args) {
+    Py_ssize_t index;
+    PyObject *child;
+    if (!PyArg_ParseTuple(args, "nO", &index, &child)) {
+        return NULL;
+    }
+    th_node *parent = ((NodeObject *)self)->node;
+    Py_ssize_t count = 0;
+    for (th_node *walk = parent->first_child; walk != NULL; walk = walk->next_sibling) {
+        count++;
+    }
+    if (index < 0 && (index += count) < 0) {
+        index = 0;
+    }
+    th_node *ref = NULL;
+    if (index < count) {
+        ref = parent->first_child;
+        for (Py_ssize_t step = 0; step < index; step++) {
+            ref = ref->next_sibling;
+        }
+    }
+    th_node *node = adopt_into((NodeObject *)self, parent, child);
+    if (node == NULL) {
+        return NULL;
+    }
+    th_node_insert_before(parent, node, ref != NULL && ref->parent == parent ? ref : NULL);
+    Py_RETURN_NONE;
+}
+
+static PyObject *element_clear(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *parent = ((NodeObject *)self)->node;
+    while (parent->first_child != NULL) {
+        th_node_remove(parent->first_child);
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *element_normalize(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node_normalize(tree_of(self), ((NodeObject *)self)->node);
+    Py_RETURN_NONE;
+}
+
+/* The shared parent for a sibling edit, or NULL with a ValueError set when this
+   node stands alone and so has nowhere to place a sibling. */
+static th_node *sibling_parent(PyObject *self) {
+    th_node *parent = ((NodeObject *)self)->node->parent;
+    if (parent == NULL) {
+        PyErr_SetString(PyExc_ValueError, "node has no parent");
+    }
+    return parent;
+}
+
+static PyObject *node_insert_before(PyObject *self, PyObject *nodes) {
+    th_node *ref = ((NodeObject *)self)->node;
+    th_node *parent = sibling_parent(self);
+    if (parent == NULL) {
+        return NULL;
+    }
+    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+        PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
+        if (is_same_node(self, new_obj, ref)) {
+            continue;
+        }
+        th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
+        if (node == NULL) {
+            return NULL;
+        }
+        th_node_insert_before(parent, node, ref);
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
+    th_node *cursor = ((NodeObject *)self)->node;
+    th_node *parent = sibling_parent(self);
+    if (parent == NULL) {
+        return NULL;
+    }
+    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+        PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
+        if (is_same_node(self, new_obj, cursor)) {
+            continue;
+        }
+        th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
+        if (node == NULL) {
+            return NULL;
+        }
+        th_node_insert_before(parent, node, cursor->next_sibling);
+        cursor = node; /* keep multiple inserts in argument order after this node */
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *node_replace_with(PyObject *self, PyObject *nodes) {
+    th_node *ref = ((NodeObject *)self)->node;
+    th_node *parent = sibling_parent(self);
+    if (parent == NULL) {
+        return NULL;
+    }
+    int keep_self = 0;
+    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+        PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
+        if (is_same_node(self, new_obj, ref)) {
+            keep_self = 1; /* replacing a node with itself leaves it in place */
+            continue;
+        }
+        th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
+        if (node == NULL) {
+            return NULL;
+        }
+        th_node_insert_before(parent, node, ref);
+    }
+    if (!keep_self) {
+        th_node_remove(ref);
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
+    module_state *state = state_of(self);
+    if (!PyObject_TypeCheck(wrapper_obj, (PyTypeObject *)state->node_type) ||
+        ((NodeObject *)wrapper_obj)->node->type != TH_NODE_ELEMENT) {
+        PyErr_SetString(PyExc_TypeError, "wrapper must be an element");
+        return NULL;
+    }
+    NodeObject *node = (NodeObject *)self;
+    th_node *parent = node->node->parent;
+    if (parent != NULL) {
+        th_node *wrapper = adopt_into(node, parent, wrapper_obj);
+        if (wrapper == NULL) {
+            return NULL;
+        }
+        th_node_insert_before(parent, wrapper, node->node);
+        th_node_remove(node->node);
+        th_node_append_child(wrapper, node->node);
+    } else {
+        NodeObject *wrapper = (NodeObject *)wrapper_obj;
+        th_node *moved = adopt_into(wrapper, wrapper->node, self);
+        if (moved == NULL) {
+            return NULL;
+        }
+        th_node_append_child(wrapper->node, moved);
+    }
+    return Py_NewRef(wrapper_obj);
+}
+
+static PyObject *node_unwrap(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((NodeObject *)self)->node;
+    th_node *parent = sibling_parent(self);
+    if (parent == NULL) {
+        return NULL;
+    }
+    while (node->first_child != NULL) {
+        th_node *child = node->first_child;
+        th_node_remove(child);
+        th_node_insert_before(parent, child, node);
+    }
+    th_node_remove(node);
+    return Py_NewRef(self);
+}
+
+static PyObject *node_extract(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node_remove(((NodeObject *)self)->node);
+    return Py_NewRef(self);
+}
+
+static PyObject *node_decompose(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node_remove(((NodeObject *)self)->node);
+    Py_RETURN_NONE;
 }
 
 static PyObject *node_get_data(PyObject *self, void *Py_UNUSED(closure)) {

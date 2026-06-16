@@ -546,6 +546,124 @@ static void node_insert_before(th_node *parent, th_node *child, th_node *ref) {
     ref->prev_sibling = child;
 }
 
+/* --- structural-edit primitives for the mutable Python tree API --- */
+
+void th_node_remove(th_node *child) {
+    node_remove(child);
+}
+
+void th_node_append_child(th_node *parent, th_node *child) {
+    node_append(parent, child);
+}
+
+void th_node_insert_before(th_node *parent, th_node *child, th_node *ref) {
+    node_insert_before(parent, child, ref);
+}
+
+/* Whether ancestor is node itself or one of its ancestors, the test that rejects
+   making a node a descendant of itself. */
+int th_node_contains(th_node *ancestor, th_node *node) {
+    for (th_node *walk = node; walk != NULL; walk = walk->parent) {
+        if (walk == ancestor) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Deep-copy a node and its subtree from src into dest's arena, materializing
+   borrowed text and re-interning per-tree attribute atoms. Used to adopt a node
+   from another tree without retaining the source. NULL on allocation failure. */
+th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
+    th_node *node = node_new(dest, src_node->type);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    node->atom = src_node->atom;
+    node->ns = src_node->ns;
+    node->tag_flags = src_node->tag_flags;
+    if (src_node->text_len > 0) {
+        const Py_UCS4 *text = need_text(src, src_node);
+        Py_UCS4 *owned = arena_alloc(dest, src_node->text_len * (Py_ssize_t)sizeof(Py_UCS4));
+        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(owned, text, (size_t)src_node->text_len * sizeof(Py_UCS4));
+        node->text = owned;
+        node->text_len = src_node->text_len;
+    }
+    if (src_node->type == TH_NODE_ELEMENT && src_node->attr_count > 0) {
+        node->attrs = arena_alloc(dest, src_node->attr_count * (Py_ssize_t)sizeof(th_node_attr));
+        if (node->attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memset(node->attrs, 0, (size_t)src_node->attr_count * sizeof(th_node_attr));
+        node->attr_count = src_node->attr_count;
+        for (Py_ssize_t index = 0; index < src_node->attr_count; index++) {
+            const th_node_attr *from = &src_node->attrs[index];
+            uint32_t atom = from->name_atom;
+            if (atom >= TH_ATTR__DYNAMIC_BASE) {
+                Py_ssize_t name_len;
+                const char *name = th_attr_name(src, atom, &name_len);
+                atom = th_attr_intern_utf8(dest, name, name_len);
+            }
+            node->attrs[index].name_atom = atom;
+            if (from->value != NULL) {
+                Py_UCS4 *value = arena_alloc(dest, (from->value_len ? from->value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+                if (value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                    return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                memcpy(value, from->value, (size_t)from->value_len * sizeof(Py_UCS4));
+                node->attrs[index].value = value;
+                node->attrs[index].value_len = from->value_len;
+            }
+        }
+    }
+    for (th_node *child = src_node->first_child; child != NULL; child = child->next_sibling) {
+        th_node *copy = th_tree_copy_node(dest, src, child);
+        if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        node_append(node, copy);
+    }
+    return node;
+}
+
+/* DOM normalize: merge adjacent Text children into the first of each run and drop
+   empty Text nodes, recursing into every element. Merged runs get a fresh arena
+   buffer; on allocation failure the merge stops early, leaving a valid tree. */
+void th_node_normalize(th_tree *tree, th_node *root) {
+    for (th_node *child = root->first_child; child != NULL;) {
+        th_node *next = child->next_sibling;
+        if (child->type == TH_NODE_ELEMENT) {
+            th_node_normalize(tree, child);
+        } else if (child->type == TH_NODE_TEXT) {
+            if (child->text_len == 0) {
+                th_node_remove(child);
+                child = next;
+                continue;
+            }
+            while (next != NULL && next->type == TH_NODE_TEXT) {
+                th_node *after = next->next_sibling;
+                if (next->text_len > 0) {
+                    Py_ssize_t merged_len = child->text_len + next->text_len;
+                    Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
+                    if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                        return;          /* GCOVR_EXCL_LINE: allocation-failure path */
+                    }
+                    memcpy(merged, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
+                    memcpy(merged + child->text_len, need_text(tree, next), (size_t)next->text_len * sizeof(Py_UCS4));
+                    child->text = merged;
+                    child->text_len = merged_len;
+                }
+                th_node_remove(next);
+                next = after;
+            }
+        }
+        child = next;
+    }
+}
+
 /* A shallow element clone (same atom/name/attrs, no children) for the adoption
    agency and active-formatting-element reconstruction. */
 static th_node *node_clone(th_tree *tree, const th_node *src);
