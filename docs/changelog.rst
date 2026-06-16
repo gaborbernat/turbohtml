@@ -7,6 +7,33 @@
 .. towncrier release notes start
 
 *********************
+ v0.4.0 (2026-06-16)
+*********************
+
+Features - 0.4.0
+================
+
+- Build and edit the tree, not just read it. Construct ``Element``, ``Text``, and ``Comment`` nodes and assemble them
+  with ``append``, ``extend``, ``insert``, ``wrap``, ``unwrap``, ``insert_before``, ``insert_after``, ``replace_with``,
+  ``extract``, ``decompose``, and ``normalize``. ``element.attrs`` is a live mapping you assign to and delete from, and
+  ``Text``/``Comment`` take a ``.data`` setter while ``Element`` takes a ``.text`` setter. Nodes move within their tree
+  and are copied when adopted into another, and ``copy.copy``, ``copy.deepcopy``, and ``pickle`` duplicate a subtree
+  exactly. Invalid names and cycles raise ``ValueError`` - by :user:`gaborbernat`. (:issue:`19`)
+- Round out the node model: :class:`~turbohtml.ProcessingInstruction` and :class:`~turbohtml.CData` join the hierarchy
+  for building, :class:`~turbohtml.Doctype` exposes its ``public_id`` and ``system_id``, and every node type now
+  supports structural pattern matching - by :user:`gaborbernat`. (:issue:`22`)
+
+Improved documentation - 0.4.0
+==============================
+
+- Document and benchmark the write path: tutorial, how-to, and explanation coverage for building and editing a tree,
+  plus ``build`` and ``edit`` benchmark suites showing turbohtml builds and rewrites trees about twice as fast as lxml
+  and an order of magnitude faster than BeautifulSoup - by :user:`gaborbernat`. (:issue:`19`)
+- Add migration guides from every library turbohtml replaces - BeautifulSoup, lxml, selectolax, html5lib, and the
+  standard library - each mapping its idioms to the turbohtml equivalent and calling out the behavior differences a
+  porting user hits - by :user:`gaborbernat`. (:issue:`23`)
+
+*********************
  v0.3.0 (2026-06-16)
 *********************
 
