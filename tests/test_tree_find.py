@@ -79,6 +79,23 @@ def test_attr_regex() -> None:
     assert _el(parse(_DOC).find(id=re.compile(r"^t$"))).tag == "h2"
 
 
+def test_attr_string_near_misses() -> None:
+    doc = parse(_DOC)  # only the <h2> carries id="t"
+    assert doc.find(id="x") is None  # same length, different content
+    assert doc.find(id="tt") is None  # different length
+
+
+def test_attr_list_filter_skips_absent_attribute() -> None:
+    # a list attribute filter falls to the general matcher, where an absent
+    # attribute compares as None against each string member
+    assert _tags(parse(_DOC).find_all(id=["t", "u"])) == ["h2"]
+
+
+def test_attr_list_filter_skips_valueless_attribute() -> None:
+    # a valueless attribute compares as None against each string member too
+    assert parse("<input disabled>").find("input", disabled=["x", "y"]) is None
+
+
 def test_attr_true_is_presence() -> None:
     assert _tags(parse(_DOC).find_all(id=True)) == ["h2"]
 

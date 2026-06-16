@@ -719,6 +719,7 @@ typedef struct {
     Py_ssize_t limit; /* -1 for unlimited */
     uint32_t *atoms;  /* resolved name atoms for the attribute filters */
     PyObject **filters;
+    int *filter_plain; /* per attribute filter: 1 when it is a single str */
     Py_ssize_t nattr;
     /* Fast path for a plain-string tag filter: resolve the name to an atom once
        so the per-node test is an integer compare instead of building a str for
@@ -737,7 +738,34 @@ typedef struct {
 static void free_query(query_t *query) {
     PyMem_Free(query->atoms);
     PyMem_Free(query->filters);
+    PyMem_Free(query->filter_plain);
     PyMem_Free(query->class_ucs4);
+}
+
+/* Whether a node's UCS4 value equals a str filter's code points, with no
+   intermediate str allocation. */
+static int ucs4_equals_pystr(const Py_UCS4 *value, Py_ssize_t value_len, PyObject *filter) {
+    if (value_len != PyUnicode_GET_LENGTH(filter)) {
+        return 0;
+    }
+    int kind = PyUnicode_KIND(filter);
+    const void *data = PyUnicode_DATA(filter);
+    for (Py_ssize_t index = 0; index < value_len; index++) {
+        if (value[index] != PyUnicode_READ(kind, data, index)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The attribute carrying name_atom on a node, or NULL when absent. */
+static const th_node_attr *find_node_attr(th_node *node, uint32_t atom) {
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            return &node->attrs[index];
+        }
+    }
+    return NULL;
 }
 
 static int resolve_axis(module_state *state, PyObject *value, enum th_axis *out) {
@@ -946,6 +974,16 @@ static int node_matches(module_state *state, th_node *node, const query_t *query
         }
     }
     for (Py_ssize_t index = 0; index < query->nattr; index++) {
+        if (query->filter_plain[index]) {
+            /* a str filter matches only a present, valued attribute equal to it */
+            const th_node_attr *attr = find_node_attr(node, query->atoms[index]);
+            int equal = attr != NULL && attr->value != NULL &&
+                        ucs4_equals_pystr(attr->value, attr->value_len, query->filters[index]);
+            if (!equal) {
+                return 0;
+            }
+            continue;
+        }
         int owned;
         PyObject *value = attr_value(node, query->atoms[index], &owned);
         if (owned && value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1009,6 +1047,7 @@ static int add_attr_filter(th_tree *tree, query_t *query, PyObject *key, PyObjec
     }
     query->atoms[query->nattr] = th_attr_lookup(tree, bytes, len);
     query->filters[query->nattr] = filter;
+    query->filter_plain[query->nattr] = PyUnicode_Check(filter);
     query->nattr++;
     return 0;
 }
@@ -1030,6 +1069,7 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     query->limit = -1;
     query->atoms = NULL;
     query->filters = NULL;
+    query->filter_plain = NULL;
     query->nattr = 0;
     query->tag_plain = 0;
     query->tag_atom = TH_TAG_UNKNOWN;
@@ -1104,8 +1144,10 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     if (capacity > 0) {
         query->atoms = PyMem_Malloc((size_t)capacity * sizeof(uint32_t));
         query->filters = PyMem_Malloc((size_t)capacity * sizeof(PyObject *));
-        if (query->atoms == NULL || query->filters == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-            return -1;                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+        query->filter_plain = PyMem_Malloc((size_t)capacity * sizeof(int));
+        /* allocation failure cannot be forced from a test */
+        if (query->atoms == NULL || query->filters == NULL || query->filter_plain == NULL) { /* GCOVR_EXCL_BR_LINE */
+            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
     pos = 0;
