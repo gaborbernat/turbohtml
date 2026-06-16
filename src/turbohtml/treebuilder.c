@@ -609,7 +609,8 @@ th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
             }
             node->attrs[index].name_atom = atom;
             if (from->value != NULL) {
-                Py_UCS4 *value = arena_alloc(dest, (from->value_len ? from->value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+                Py_UCS4 *value =
+                    arena_alloc(dest, (from->value_len ? from->value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
                 if (value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                     return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
                 }
@@ -649,7 +650,7 @@ void th_node_normalize(th_tree *tree, th_node *root) {
                     Py_ssize_t merged_len = child->text_len + next->text_len;
                     Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
                     if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                        return;          /* GCOVR_EXCL_LINE: allocation-failure path */
+                        return;           /* GCOVR_EXCL_LINE: allocation-failure path */
                     }
                     memcpy(merged, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
                     memcpy(merged + child->text_len, need_text(tree, next), (size_t)next->text_len * sizeof(Py_UCS4));
