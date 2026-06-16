@@ -102,6 +102,10 @@ static PyObject *type_for_node(module_state *state, const th_node *node) {
         return state->comment_type;
     case TH_NODE_DOCTYPE:
         return state->doctype_type;
+    case TH_NODE_PI:
+        return state->pi_type;
+    case TH_NODE_CDATA:
+        return state->cdata_type;
     case TH_NODE_CONTENT:
         break; /* a template's content fragment wraps as the bare Node */
     }
@@ -508,13 +512,30 @@ static PyObject *node_repr(PyObject *self) {
     }
     case TH_NODE_TEXT:
     case TH_NODE_COMMENT:
+    case TH_NODE_CDATA:
     case TH_NODE_DOCTYPE: {
         PyObject *data = str_from_accessor(th_node_data, tree_of(self), node);
         if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        const char *label = node->type == TH_NODE_TEXT ? "Text" : node->type == TH_NODE_COMMENT ? "Comment" : "Doctype";
+        const char *label = node->type == TH_NODE_TEXT      ? "Text"
+                            : node->type == TH_NODE_COMMENT  ? "Comment"
+                            : node->type == TH_NODE_CDATA    ? "CData"
+                                                             : "Doctype";
         PyObject *repr = PyUnicode_FromFormat("%s(%R)", label, data);
+        Py_DECREF(data);
+        return repr;
+    }
+    case TH_NODE_PI: {
+        PyObject *target = ucs4_to_str(node->text, node->attr_count);
+        PyObject *data = ucs4_to_str(node->text + node->attr_count + 1, node->text_len - node->attr_count - 1);
+        if (target == NULL || data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_XDECREF(target);               /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(data);                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *repr = PyUnicode_FromFormat("ProcessingInstruction(%R, %R)", target, data);
+        Py_DECREF(target);
         Py_DECREF(data);
         return repr;
     }
@@ -1905,6 +1926,77 @@ static PyObject *comment_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return construct_data_node(type, TH_NODE_COMMENT, args, kwds);
 }
 
+static PyObject *cdata_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    return construct_data_node(type, TH_NODE_CDATA, args, kwds);
+}
+
+/* Reject a processing-instruction target the serialization could not round-trip:
+   empty, or carrying whitespace (which the target/data packing splits on) or ">"
+   (which closes the instruction). */
+static int validate_pi_target(PyObject *target) {
+    Py_ssize_t len = PyUnicode_GET_LENGTH(target);
+    if (len == 0) {
+        PyErr_SetString(PyExc_ValueError, "processing instruction target must not be empty");
+        return -1;
+    }
+    int kind = PyUnicode_KIND(target);
+    const void *data = PyUnicode_DATA(target);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 c = PyUnicode_READ(kind, data, index);
+        if (c <= ' ' || c == '>') {
+            PyObject *ch = PyUnicode_FromOrdinal((int)c);
+            if (ch != NULL) { /* GCOVR_EXCL_BR_LINE: a forbidden character is ASCII and always builds */
+                PyErr_Format(PyExc_ValueError, "processing instruction target contains an invalid character: %R", ch);
+                Py_DECREF(ch);
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static PyObject *pi_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"target", "data", NULL};
+    PyObject *target;
+    PyObject *data;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "UU", keywords, &target, &data)) {
+        return NULL;
+    }
+    if (validate_pi_target(target) < 0) {
+        return NULL;
+    }
+    module_state *state = PyType_GetModuleState(type);
+    th_tree *tree = th_tree_new();
+    if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t target_len = PyUnicode_GET_LENGTH(target);
+    Py_UCS4 *target_points = PyUnicode_AsUCS4Copy(target);
+    Py_ssize_t data_len = PyUnicode_GET_LENGTH(data);
+    Py_UCS4 *data_points = PyUnicode_AsUCS4Copy(data);
+    if (target_points == NULL || data_points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced to fail */
+        PyMem_Free(target_points);                      /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(data_points);                        /* GCOVR_EXCL_LINE: allocation-failure path */
+        th_tree_free(tree);                             /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_node *node = th_tree_make_pi(tree, target_points, target_len, data_points, data_len);
+    PyMem_Free(target_points);
+    PyMem_Free(data_points);
+    if (node == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);      /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *handle = handle_new(state, tree, Py_None, Py_None);
+    if (handle == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *wrapped = node_wrap(state, handle, node);
+    Py_DECREF(handle);
+    return wrapped;
+}
+
 /* Reject a tag or attribute name the HTML spec forbids, the way DOM
    createElement / setAttribute raise InvalidCharacterError: empty, or carrying
    whitespace, a control, "/" or ">" (none of which round-trip), plus "<" in a
@@ -2427,6 +2519,54 @@ static PyType_Spec comment_spec = {
     .slots = comment_slots,
 };
 
+PyDoc_STRVAR(cdata_doc, "A CDATA section.");
+
+static PyType_Slot cdata_slots[] = {
+    {Py_tp_doc, (void *)cdata_doc},
+    {Py_tp_getset, data_getset},
+    {Py_tp_new, cdata_new},
+    {0, NULL},
+};
+
+static PyType_Spec cdata_spec = {
+    .name = "turbohtml._html.CData",
+    .basicsize = sizeof(NodeObject),
+    .flags = Py_TPFLAGS_DEFAULT,
+    .slots = cdata_slots,
+};
+
+static PyObject *pi_get_target(PyObject *self, void *Py_UNUSED(closure)) {
+    th_node *node = ((NodeObject *)self)->node;
+    return ucs4_to_str(node->text, node->attr_count);
+}
+
+static PyObject *pi_get_data(PyObject *self, void *Py_UNUSED(closure)) {
+    th_node *node = ((NodeObject *)self)->node;
+    return ucs4_to_str(node->text + node->attr_count + 1, node->text_len - node->attr_count - 1);
+}
+
+static PyGetSetDef pi_getset[] = {
+    {"target", pi_get_target, NULL, "the instruction target (the name right after <?)", NULL},
+    {"data", pi_get_data, NULL, "the instruction data (everything after the target)", NULL},
+    {NULL, NULL, NULL, NULL, NULL},
+};
+
+PyDoc_STRVAR(pi_doc, "A processing instruction.");
+
+static PyType_Slot pi_slots[] = {
+    {Py_tp_doc, (void *)pi_doc},
+    {Py_tp_getset, pi_getset},
+    {Py_tp_new, pi_new},
+    {0, NULL},
+};
+
+static PyType_Spec pi_spec = {
+    .name = "turbohtml._html.ProcessingInstruction",
+    .basicsize = sizeof(NodeObject),
+    .flags = Py_TPFLAGS_DEFAULT,
+    .slots = pi_slots,
+};
+
 static PyObject *doctype_get_name(PyObject *self, void *Py_UNUSED(closure)) {
     return str_from_accessor(th_node_data, tree_of(self), ((NodeObject *)self)->node);
 }
@@ -2822,7 +2962,7 @@ static int cache_pattern_type(module_state *state) {
 /* Create a heap type subclassing Node, register it on the module, and stamp its
    single-field __match_args__ for structural pattern use. */
 static PyObject *register_subtype(PyObject *module, PyType_Spec *spec, PyObject *base, const char *name,
-                                  const char *match_args) {
+                                  const char *match_arg1, const char *match_arg2) {
     PyObject *bases = PyTuple_Pack(1, base);
     if (bases == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -2832,7 +2972,8 @@ static PyObject *register_subtype(PyObject *module, PyType_Spec *spec, PyObject 
     if (type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *tuple = Py_BuildValue("(s)", match_args);
+    PyObject *tuple =
+        match_arg2 != NULL ? Py_BuildValue("(ss)", match_arg1, match_arg2) : Py_BuildValue("(s)", match_arg1);
     /* allocation failure cannot be forced from a test */
     if (tuple == NULL || PyObject_SetAttrString(type, "__match_args__", tuple) < 0) { /* GCOVR_EXCL_BR_LINE */
         Py_XDECREF(tuple); /* GCOVR_EXCL_LINE: alloc-failure path */
@@ -2876,15 +3017,20 @@ int tree_register(PyObject *module, module_state *state) {
                                                                                                     */
         return -1; /* GCOVR_EXCL_LINE: alloc-failure path */
     }
-    state->element_type = register_subtype(module, &element_spec, state->node_type, "Element", "tag");
-    state->text_type = register_subtype(module, &text_spec, state->node_type, "Text", "data");
-    state->comment_type = register_subtype(module, &comment_spec, state->node_type, "Comment", "data");
-    state->doctype_type = register_subtype(module, &doctype_spec, state->node_type, "Doctype", "name");
-    state->document_type = register_subtype(module, &document_spec, state->node_type, "Document", "root");
+    state->element_type = register_subtype(module, &element_spec, state->node_type, "Element", "tag", NULL);
+    state->text_type = register_subtype(module, &text_spec, state->node_type, "Text", "data", NULL);
+    state->comment_type = register_subtype(module, &comment_spec, state->node_type, "Comment", "data", NULL);
+    state->doctype_type = register_subtype(module, &doctype_spec, state->node_type, "Doctype", "name", NULL);
+    state->pi_type =
+        register_subtype(module, &pi_spec, state->node_type, "ProcessingInstruction", "target", "data");
+    state->cdata_type = register_subtype(module, &cdata_spec, state->node_type, "CData", "data", NULL);
+    state->document_type = register_subtype(module, &document_spec, state->node_type, "Document", "root", NULL);
     /* allocation failure cannot be forced from a test */
     if (state->element_type == NULL || state->text_type == NULL || /* GCOVR_EXCL_BR_LINE */
         /* allocation failure cannot be forced from a test */
         state->comment_type == NULL || state->doctype_type == NULL || /* GCOVR_EXCL_BR_LINE */
+        /* allocation failure cannot be forced from a test */
+        state->pi_type == NULL || state->cdata_type == NULL || /* GCOVR_EXCL_BR_LINE */
         /* allocation failure cannot be forced from a test */
         state->document_type == NULL) { /* GCOVR_EXCL_BR_LINE */
         return -1;                      /* GCOVR_EXCL_LINE: allocation-failure path */

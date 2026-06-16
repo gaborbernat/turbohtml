@@ -438,6 +438,29 @@ th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py
     return node;
 }
 
+/* Construct a processing-instruction node. The target, a space, and the data are
+   packed into one buffer (target_len marks the split, kept in attr_count) so the
+   node carries both halves; serialization writes "<?" + buffer + ">". */
+th_node *th_tree_make_pi(th_tree *tree, const Py_UCS4 *target, Py_ssize_t target_len, const Py_UCS4 *data,
+                         Py_ssize_t data_len) {
+    th_node *node = node_new(tree, TH_NODE_PI);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t total = target_len + 1 + data_len;
+    Py_UCS4 *owned = arena_alloc(tree, total * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, target, (size_t)target_len * sizeof(Py_UCS4));
+    owned[target_len] = ' ';
+    memcpy(owned + target_len + 1, data, (size_t)data_len * sizeof(Py_UCS4));
+    node->text = owned;
+    node->text_len = total;
+    node->attr_count = target_len;
+    return node;
+}
+
 /* Intern a UTF-8 attribute name to its atom (static table, else the tree's
    dynamic table), the construction-side counterpart of intern_attr. */
 uint32_t th_attr_intern_utf8(th_tree *tree, const char *bytes, Py_ssize_t len) {
@@ -663,6 +686,9 @@ th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
         memcpy(owned, text, (size_t)src_node->text_len * sizeof(Py_UCS4));
         node->text = owned;
         node->text_len = src_node->text_len;
+    }
+    if (src_node->type == TH_NODE_PI) {
+        node->attr_count = src_node->attr_count; /* the packed target/data split point */
     }
     if (src_node->type == TH_NODE_ELEMENT && src_node->attr_count > 0) {
         node->attrs = arena_alloc(dest, src_node->attr_count * (Py_ssize_t)sizeof(th_node_attr));

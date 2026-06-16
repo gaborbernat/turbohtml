@@ -28,6 +28,9 @@ enum th_node_type {
     TH_NODE_COMMENT,
     TH_NODE_DOCTYPE,
     TH_NODE_CONTENT, /* a <template>'s content document fragment */
+    TH_NODE_PI,      /* a processing instruction (construction only; the parser folds
+                        <? ... > into a comment and foreign CDATA into text) */
+    TH_NODE_CDATA,   /* a CDATA section (construction only, same reason) */
 };
 
 /* An attribute on an element node. The name is interned to an atom: a static
@@ -80,9 +83,14 @@ th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length);
    allocation failure (no Python error is set). */
 th_tree *th_tree_new(void);
 
-/* Construct a text/comment/doctype node (by enum th_node_type) owning a copy of
-   the data code points in the tree's arena. NULL on allocation failure. */
+/* Construct a text/comment/doctype/cdata node (by enum th_node_type) owning a copy
+   of the data code points in the tree's arena. NULL on allocation failure. */
 th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len);
+
+/* Construct a processing-instruction node owning target and data (packed with the
+   split point in attr_count). NULL on allocation failure. */
+th_node *th_tree_make_pi(th_tree *tree, const Py_UCS4 *target, Py_ssize_t target_len, const Py_UCS4 *data,
+                         Py_ssize_t data_len);
 
 /* Construct an element owning a copy of the tag name, with attr_count empty
    attribute slots; fill each with th_tree_set_attr. NULL on allocation failure. */

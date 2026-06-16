@@ -6,6 +6,7 @@ from importlib.metadata import version
 
 from ._html import (
     Axis,
+    CData,
     Comment,
     Doctype,
     Document,
@@ -13,6 +14,7 @@ from ._html import (
     Formatter,
     Namespace,
     Node,
+    ProcessingInstruction,
     Text,
     Token,
     Tokenizer,
@@ -29,6 +31,7 @@ __version__ = version("turbohtml")
 
 __all__ = [
     "Axis",
+    "CData",
     "Comment",
     "Doctype",
     "Document",
@@ -36,6 +39,7 @@ __all__ = [
     "Formatter",
     "Namespace",
     "Node",
+    "ProcessingInstruction",
     "Text",
     "Token",
     "TokenType",

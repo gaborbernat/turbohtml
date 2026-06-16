@@ -25,6 +25,8 @@ typedef struct {
     PyObject *text_type;          /* Text */
     PyObject *comment_type;       /* Comment */
     PyObject *doctype_type;       /* Doctype */
+    PyObject *pi_type;            /* ProcessingInstruction */
+    PyObject *cdata_type;         /* CData */
     PyObject *document_type;      /* Document */
     PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
     PyObject *attrs_type;         /* _Attrs (the live mutable view of an element's attributes) */

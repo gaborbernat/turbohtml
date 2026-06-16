@@ -165,6 +165,20 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     case TH_NODE_CONTENT:
         sbuf_puts(out, "content");
         break;
+    /* GCOVR_EXCL_START: a WHATWG-conformant parse never yields a PI (folded to a
+       comment) or a CDATA section (folded to text), so the #document dumper, which
+       only serves parsed trees, never reaches these. */
+    case TH_NODE_PI:
+        sbuf_puts(out, "<?");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CDATA:
+        sbuf_puts(out, "<![CDATA[");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "]]>");
+        break;
+        /* GCOVR_EXCL_STOP */
     case TH_NODE_DOCUMENT: /* GCOVR_EXCL_LINE: the document node is the serialization root, never a line itself */
         break;             /* GCOVR_EXCL_LINE: same — the document node is never reached as a child */
     }
@@ -422,6 +436,16 @@ static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int forma
         sbuf_put_ucs4(out, node->text, doctype_name_len(node));
         sbuf_putc(out, '>');
         break;
+    case TH_NODE_PI:
+        sbuf_puts(out, "<?");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CDATA:
+        sbuf_puts(out, "<![CDATA[");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "]]>");
+        break;
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -499,6 +523,16 @@ static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_
         sbuf_puts(out, "<!DOCTYPE ");
         sbuf_put_ucs4(out, node->text, doctype_name_len(node));
         sbuf_putc(out, '>');
+        break;
+    case TH_NODE_PI:
+        sbuf_puts(out, "<?");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CDATA:
+        sbuf_puts(out, "<![CDATA[");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "]]>");
         break;
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:

@@ -188,6 +188,24 @@ class Comment(Node):
     def data(self, value: str) -> None: ...
 
 @final
+class CData(Node):
+    __match_args__ = ("data",)
+    def __init__(self, data: str) -> None: ...
+    @property
+    def data(self) -> str: ...
+    @data.setter
+    def data(self, value: str) -> None: ...
+
+@final
+class ProcessingInstruction(Node):
+    __match_args__ = ("target", "data")
+    def __init__(self, target: str, data: str) -> None: ...
+    @property
+    def target(self) -> str: ...
+    @property
+    def data(self) -> str: ...
+
+@final
 class Doctype(Node):
     __match_args__ = ("name",)
     @property
