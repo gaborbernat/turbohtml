@@ -577,4 +577,15 @@ static int selector_matches(th_node *node, const sel_compiled *compiled) {
     return 0;
 }
 
+/* The lone simple selector of a selector that is one group, one compound, one
+   simple (such as "a", ".x", or "#id"), or NULL otherwise. The caller can then
+   test each element with sel_match_simple directly, skipping the group and
+   combinator machinery. */
+static const sel_simple *sel_single_simple(const sel_compiled *compiled) {
+    if (compiled->count == 1 && compiled->alts[0].count == 1 && compiled->alts[0].compounds[0].count == 1) {
+        return &compiled->alts[0].compounds[0].simples[0];
+    }
+    return NULL;
+}
+
 #endif /* TURBOHTML_SELECTOR_H */

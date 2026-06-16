@@ -1296,19 +1296,19 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
         selector_free(compiled); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    /* a single simple selector (one group, one compound, one simple) is tested
+       with sel_match_simple directly, skipping the group/combinator machinery */
+    const sel_simple *single = sel_single_simple(compiled);
     int error = 0;
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
-        if (node->type != TH_NODE_ELEMENT || !selector_matches(node, compiled)) {
+        if (node->type != TH_NODE_ELEMENT) {
             continue;
         }
-        PyObject *wrapped = node_wrap(state, handle, node);
-        /* allocation failure cannot be forced from a test */
-        if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(wrapped);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
-            error = 1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
-            break;                                                /* GCOVR_EXCL_LINE: allocation-failure path */
+        int matched = single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled);
+        if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc cannot fail */
+            error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        Py_DECREF(wrapped);
     }
     selector_free(compiled);
     if (error) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1328,9 +1328,13 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
         return NULL;
     }
     th_node *origin = ((NodeObject *)self)->node;
+    const sel_simple *single = sel_single_simple(compiled);
     th_node *found = NULL;
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
-        if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled)) {
+        if (node->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        if (single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled)) {
             found = node;
             break;
         }
