@@ -391,12 +391,12 @@ static Py_UCS4 sel_fold(Py_UCS4 ch, int ci) {
     return (ci && ch >= 'A' && ch <= 'Z') ? ch + 32 : ch;
 }
 
-static int sel_eq(const Py_UCS4 *a, Py_ssize_t alen, const Py_UCS4 *b, Py_ssize_t blen, int ci) {
+static int sel_eq(const Py_UCS4 *left, Py_ssize_t alen, const Py_UCS4 *right, Py_ssize_t blen, int ci) {
     if (alen != blen) {
         return 0;
     }
     for (Py_ssize_t index = 0; index < alen; index++) {
-        if (sel_fold(a[index], ci) != sel_fold(b[index], ci)) {
+        if (sel_fold(left[index], ci) != sel_fold(right[index], ci)) {
             return 0;
         }
     }

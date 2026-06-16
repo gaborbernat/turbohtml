@@ -2603,8 +2603,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     tree->drop_newline = 0;
                     reconstruct_afe(tree);
                     for (Py_ssize_t index = 0; index < len; index++) {
-                        Py_UCS4 c = input_read(tree, off + index);
-                        if (!is_space(c)) {
+                        Py_UCS4 character = input_read(tree, off + index);
+                        if (!is_space(character)) {
                             tree->frameset_ok = 0;
                             break;
                         }
@@ -2624,8 +2624,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 /* a U+0000 is dropped and, like whitespace, does not clear
                    frameset-ok; only a real visible character does */
                 for (Py_ssize_t index = 0; index < len; index++) {
-                    Py_UCS4 c = text[index];
-                    if (!is_space(c) && c != 0) {
+                    Py_UCS4 character = text[index];
+                    if (!is_space(character) && character != 0) {
                         tree->frameset_ok = 0;
                         break;
                     }
@@ -2748,14 +2748,14 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 if (atom == TH_TAG_LI) {
                     /* html bounds the stack walk */
                     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
-                        uint16_t a = tree->open[index]->atom;
-                        if (a == TH_TAG_LI) {
+                        uint16_t open_atom = tree->open[index]->atom;
+                        if (open_atom == TH_TAG_LI) {
                             generate_implied_end_tags(tree, TH_TAG_LI);
                             pop_until_atom(tree, TH_TAG_LI);
                             break;
                         }
-                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && a != TH_TAG_ADDRESS && a != TH_TAG_DIV &&
-                            a != TH_TAG_P) {
+                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && open_atom != TH_TAG_ADDRESS &&
+                            open_atom != TH_TAG_DIV && open_atom != TH_TAG_P) {
                             break;
                         }
                     }
@@ -2772,14 +2772,14 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 if (atom == TH_TAG_DD || atom == TH_TAG_DT) {
                     /* html bounds the stack walk */
                     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
-                        uint16_t a = tree->open[index]->atom;
-                        if (a == TH_TAG_DD || a == TH_TAG_DT) {
-                            generate_implied_end_tags(tree, a);
-                            pop_until_atom(tree, a);
+                        uint16_t open_atom = tree->open[index]->atom;
+                        if (open_atom == TH_TAG_DD || open_atom == TH_TAG_DT) {
+                            generate_implied_end_tags(tree, open_atom);
+                            pop_until_atom(tree, open_atom);
                             break;
                         }
-                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && a != TH_TAG_ADDRESS && a != TH_TAG_DIV &&
-                            a != TH_TAG_P) {
+                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && open_atom != TH_TAG_ADDRESS &&
+                            open_atom != TH_TAG_DIV && open_atom != TH_TAG_P) {
                             break;
                         }
                     }
@@ -3661,16 +3661,16 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
         has_cr = memchr(data, '\r', (size_t)length) != NULL;
         tree->has_nul = memchr(data, '\0', (size_t)length) != NULL;
     } else if (kind == PyUnicode_2BYTE_KIND) {
-        const uint16_t *d = (const uint16_t *)data;
+        const uint16_t *units = (const uint16_t *)data;
         for (Py_ssize_t index = 0; index < length; index++) {
-            has_cr |= d[index] == '\r';
-            tree->has_nul |= d[index] == 0;
+            has_cr |= units[index] == '\r';
+            tree->has_nul |= units[index] == 0;
         }
     } else {
-        const uint32_t *d = (const uint32_t *)data;
+        const uint32_t *units = (const uint32_t *)data;
         for (Py_ssize_t index = 0; index < length; index++) {
-            has_cr |= d[index] == '\r';
-            tree->has_nul |= d[index] == 0;
+            has_cr |= units[index] == '\r';
+            tree->has_nul |= units[index] == 0;
         }
     }
     if (has_cr) {
@@ -3687,9 +3687,9 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
 
 /* The first element child of parent with this atom, or NULL. */
 static th_node *child_with_atom(th_node *parent, uint16_t atom) {
-    for (th_node *c = parent->first_child; c != NULL; c = c->next_sibling) {
-        if (c->type == TH_NODE_ELEMENT && c->atom == atom) {
-            return c;
+    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT && child->atom == atom) {
+            return child;
         }
     }
     return NULL;
@@ -3839,8 +3839,8 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     char lower[32];
     Py_ssize_t lower_len = local_len < (Py_ssize_t)sizeof(lower) ? local_len : (Py_ssize_t)sizeof(lower);
     for (Py_ssize_t index = 0; index < lower_len; index++) {
-        char c = local[index];
-        lower[index] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+        char character = local[index];
+        lower[index] = character >= 'A' && character <= 'Z' ? (char)(character + 32) : character;
     }
     th_buf ctx_name = {lower, lower_len, 0, PyUnicode_1BYTE_KIND};
     uint8_t ctx_flags;

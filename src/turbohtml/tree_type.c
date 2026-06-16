@@ -1982,9 +1982,9 @@ static int validate_pi_target(PyObject *target) {
     int kind = PyUnicode_KIND(target);
     const void *data = PyUnicode_DATA(target);
     for (Py_ssize_t index = 0; index < len; index++) {
-        Py_UCS4 c = PyUnicode_READ(kind, data, index);
-        if (c <= ' ' || c == '>') {
-            PyObject *ch = PyUnicode_FromOrdinal((int)c);
+        Py_UCS4 character = PyUnicode_READ(kind, data, index);
+        if (character <= ' ' || character == '>') {
+            PyObject *ch = PyUnicode_FromOrdinal((int)character);
             if (ch != NULL) { /* GCOVR_EXCL_BR_LINE: a forbidden character is ASCII and always builds */
                 PyErr_Format(PyExc_ValueError, "processing instruction target contains an invalid character: %R", ch);
                 Py_DECREF(ch);
@@ -2050,10 +2050,11 @@ static int validate_name(PyObject *name, int is_attr) {
     int kind = PyUnicode_KIND(name);
     const void *data = PyUnicode_DATA(name);
     for (Py_ssize_t index = 0; index < len; index++) {
-        Py_UCS4 c = PyUnicode_READ(kind, data, index);
-        int bad = c <= ' ' || c == '/' || c == '>' || (is_attr ? (c == '=' || c == '"' || c == '\'') : c == '<');
+        Py_UCS4 character = PyUnicode_READ(kind, data, index);
+        int bad = character <= ' ' || character == '/' || character == '>' ||
+                  (is_attr ? (character == '=' || character == '"' || character == '\'') : character == '<');
         if (bad) {
-            PyObject *ch = PyUnicode_FromOrdinal((int)c);
+            PyObject *ch = PyUnicode_FromOrdinal((int)character);
             if (ch != NULL) { /* GCOVR_EXCL_BR_LINE: a forbidden character is ASCII and always builds */
                 PyErr_Format(PyExc_ValueError, "%s name contains an invalid character: %R",
                              is_attr ? "attribute" : "tag", ch);
