@@ -94,6 +94,18 @@ th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_
 int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char *name, Py_ssize_t name_len,
                      const Py_UCS4 *value, Py_ssize_t value_len, int has_value);
 
+/* Upsert an attribute by name (replace value or append a slot); has_value 0 makes
+   it valueless. Returns 0, or -1 on allocation failure. */
+int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                     Py_ssize_t value_len, int has_value);
+
+/* Remove the named attribute; returns 1 if one was removed, else 0. */
+int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len);
+
+/* Replace a node's character data with a copy of len code points. Returns 0, or -1
+   on allocation failure. */
+int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize_t len);
+
 /* Structural-edit primitives. remove detaches a node from its parent; append and
    insert_before link it (ref==NULL appends); contains reports whether ancestor is
    node or one of its ancestors; copy_node deep-copies a subtree into another tree

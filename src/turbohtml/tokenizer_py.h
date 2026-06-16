@@ -27,6 +27,7 @@ typedef struct {
     PyObject *doctype_type;       /* Doctype */
     PyObject *document_type;      /* Document */
     PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
+    PyObject *attrs_type;         /* _Attrs (the live mutable view of an element's attributes) */
     PyObject *walker_type;        /* _NodeIterator (descendants / ancestors / siblings) */
     PyObject *string_walker_type; /* _StringIterator (strings / stripped_strings) */
     PyObject *namespace_enum;     /* Namespace (enum.Enum) */

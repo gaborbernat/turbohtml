@@ -76,6 +76,7 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     Py_VISIT(state->doctype_type);       /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->document_type);      /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->handle_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->attrs_type);         /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->walker_type);        /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->string_walker_type); /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->namespace_enum);     /* GCOVR_EXCL_BR_LINE: same */
@@ -110,6 +111,7 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->doctype_type);
     Py_CLEAR(state->document_type);
     Py_CLEAR(state->handle_type);
+    Py_CLEAR(state->attrs_type);
     Py_CLEAR(state->walker_type);
     Py_CLEAR(state->string_walker_type);
     Py_CLEAR(state->namespace_enum);

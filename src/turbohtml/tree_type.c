@@ -57,6 +57,11 @@ typedef struct {
     int strip;        /* drop surrounding whitespace and skip blank runs */
 } StringWalkerObject;
 
+typedef struct {
+    PyObject_HEAD PyObject *handle;
+    th_node *node; /* the element whose live attributes this view exposes */
+} AttrsObject;
+
 static module_state *state_of(PyObject *self) {
     return PyType_GetModuleState(Py_TYPE(self));
 }
@@ -699,36 +704,301 @@ static PyObject *split_token_list(const Py_UCS4 *value, Py_ssize_t value_len) {
 
 /* Build the Element.attrs mapping: token-list attributes (class and friends)
    become a list[str], a valueless attribute is None, everything else is a str. */
-static PyObject *build_attrs(th_tree *tree, const th_node *node) {
-    PyObject *attrs = PyDict_New();
-    if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+/* One attribute's name as a str. */
+static PyObject *attr_name_obj(th_tree *tree, const th_node_attr *attr) {
+    Py_ssize_t name_len;
+    const char *bytes = th_attr_name(tree, attr->name_atom, &name_len);
+    return PyUnicode_DecodeUTF8(bytes, name_len, "strict");
+}
+
+/* One attribute's value as the public object: None when valueless, a list[str] for
+   a token-list attribute (class, rel, ...), else the str. */
+static PyObject *attr_value_obj(const th_node_attr *attr) {
+    if (attr->value == NULL) {
+        return Py_NewRef(Py_None);
+    }
+    if (attr_is_token_list(attr->name_atom)) {
+        return split_token_list(attr->value, attr->value_len);
+    }
+    return ucs4_to_str(attr->value, attr->value_len);
+}
+
+static int validate_name(PyObject *name, int is_attr);
+static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len, int *has_value);
+
+/* ASCII-lowercase a str key into a freshly allocated UTF-8 buffer so a lookup
+   matches the parser's lowercased names; *out_len its length. NULL with TypeError
+   when the key is not a str. Caller frees with PyMem_Free. */
+static char *attr_key_utf8(PyObject *key, Py_ssize_t *out_len) {
+    if (!PyUnicode_Check(key)) {
+        PyErr_SetString(PyExc_TypeError, "attribute name must be a str");
+        return NULL;
+    }
+    Py_ssize_t len;
+    const char *utf8 = PyUnicode_AsUTF8AndSize(key, &len);
+    if (utf8 == NULL) { /* GCOVR_EXCL_BR_LINE: a lone-surrogate name cannot encode, hard to force */
+        return NULL;    /* GCOVR_EXCL_LINE: surrogate path */
+    }
+    char *lower = PyMem_Malloc((size_t)(len ? len : 1));
+    if (lower == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    for (Py_ssize_t attr_index = 0; attr_index < node->attr_count; attr_index++) {
-        const th_node_attr *attr = &node->attrs[attr_index];
-        Py_ssize_t name_len;
-        const char *name_bytes = th_attr_name(tree, attr->name_atom, &name_len);
-        PyObject *name = PyUnicode_DecodeUTF8(name_bytes, name_len, "strict");
-        PyObject *value;
-        if (attr->value == NULL) {
-            value = Py_NewRef(Py_None);
-        } else if (attr_is_token_list(attr->name_atom)) {
-            value = split_token_list(attr->value, attr->value_len);
-        } else {
-            value = ucs4_to_str(attr->value, attr->value_len);
-        }
-        /* allocation failure cannot be forced from a test */
-        if (name == NULL || value == NULL || PyDict_SetItem(attrs, name, value) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(name);  /* GCOVR_EXCL_LINE: alloc-failure path */
-            Py_XDECREF(value); /* GCOVR_EXCL_LINE: alloc-failure path */
-            Py_DECREF(attrs);  /* GCOVR_EXCL_LINE: alloc-failure path */
-            return NULL;       /* GCOVR_EXCL_LINE: alloc-failure path */
-        }
-        Py_DECREF(name);
-        Py_DECREF(value);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        char ch = utf8[index];
+        lower[index] = ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
     }
-    return attrs;
+    *out_len = len;
+    return lower;
 }
+
+/* The index of the attribute named name in node, or -1 when it has none. */
+static Py_ssize_t find_attr_index(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    uint32_t atom = th_attr_lookup(tree, name, name_len);
+    if (atom == UINT32_MAX) {
+        return -1;
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+/* The live mutable view of an element's attributes: a mapping name -> value over
+   the node's own attribute array, so reads and edits go straight to the tree. */
+static PyObject *attrs_new(module_state *state, PyObject *handle, th_node *node) {
+    PyTypeObject *type = (PyTypeObject *)state->attrs_type;
+    AttrsObject *self = (AttrsObject *)type->tp_alloc(type, 0);
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->handle = Py_NewRef(handle);
+    self->node = node;
+    return (PyObject *)self;
+}
+
+static void attrs_dealloc(PyObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    Py_DECREF(((AttrsObject *)self)->handle);
+    type->tp_free(self);
+    Py_DECREF(type);
+}
+
+static Py_ssize_t attrs_length(PyObject *self) {
+    return ((AttrsObject *)self)->node->attr_count;
+}
+
+static PyObject *attrs_subscript(PyObject *self, PyObject *key) {
+    Py_ssize_t len;
+    char *name = attr_key_utf8(key, &len);
+    if (name == NULL) {
+        return NULL;
+    }
+    th_node *node = ((AttrsObject *)self)->node;
+    Py_ssize_t index = find_attr_index(tree_of(self), node, name, len);
+    PyMem_Free(name);
+    if (index < 0) {
+        PyErr_SetObject(PyExc_KeyError, key);
+        return NULL;
+    }
+    return attr_value_obj(&node->attrs[index]);
+}
+
+static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
+    th_node *node = ((AttrsObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    if (value == NULL) {
+        Py_ssize_t len;
+        char *name = attr_key_utf8(key, &len);
+        if (name == NULL) {
+            return -1;
+        }
+        int removed = th_node_attr_del(tree, node, name, len);
+        PyMem_Free(name);
+        if (!removed) {
+            PyErr_SetObject(PyExc_KeyError, key);
+            return -1;
+        }
+        return 0;
+    }
+    if (!PyUnicode_Check(key)) {
+        PyErr_SetString(PyExc_TypeError, "attribute name must be a str");
+        return -1;
+    }
+    if (validate_name(key, 1) < 0) {
+        return -1;
+    }
+    Py_ssize_t len;
+    char *name = attr_key_utf8(key, &len);
+    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: a validated name is a str that encodes */
+        return -1;      /* GCOVR_EXCL_LINE: unreachable after validate_name */
+    }
+    Py_UCS4 *points;
+    Py_ssize_t value_len;
+    int has_value;
+    int bad = element_attr_value(value, &points, &value_len, &has_value) < 0;
+    int rc = bad ? -1 : th_node_attr_set(tree, node, name, len, points, value_len, has_value);
+    PyMem_Free(name);
+    if (!bad) {
+        PyMem_Free(points);
+    }
+    return rc < 0 ? -1 : 0;
+}
+
+static int attrs_contains(PyObject *self, PyObject *key) {
+    if (!PyUnicode_Check(key)) {
+        return 0; /* a non-str key is never an attribute name */
+    }
+    Py_ssize_t len;
+    char *name = attr_key_utf8(key, &len);
+    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here, so this cannot fail */
+        return -1;      /* GCOVR_EXCL_LINE: unreachable */
+    }
+    Py_ssize_t index = find_attr_index(tree_of(self), ((AttrsObject *)self)->node, name, len);
+    PyMem_Free(name);
+    return index >= 0;
+}
+
+static PyObject *attrs_iter(PyObject *self) {
+    th_node *node = ((AttrsObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    PyObject *names = PyList_New(node->attr_count);
+    if (names == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        PyObject *name = attr_name_obj(tree, &node->attrs[index]);
+        if (name == NULL) {   /* GCOVR_EXCL_BR_LINE: a stored name always decodes */
+            Py_DECREF(names); /* GCOVR_EXCL_LINE: decode-failure path */
+            return NULL;      /* GCOVR_EXCL_LINE: decode-failure path */
+        }
+        PyList_SET_ITEM(names, index, name);
+    }
+    PyObject *iterator = PyObject_GetIter(names);
+    Py_DECREF(names);
+    return iterator;
+}
+
+enum attrs_view { ATTRS_KEYS, ATTRS_VALUES, ATTRS_ITEMS };
+
+/* Materialize the attribute names, values, or (name, value) pairs as a list. */
+static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
+    th_node *node = ((AttrsObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    PyObject *out = PyList_New(node->attr_count);
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        const th_node_attr *attr = &node->attrs[index];
+        PyObject *item;
+        if (kind == ATTRS_VALUES) {
+            item = attr_value_obj(attr);
+        } else {
+            PyObject *name = attr_name_obj(tree, attr);
+            if (name == NULL) {   /* GCOVR_EXCL_BR_LINE: a stored name always decodes */
+                Py_DECREF(out);   /* GCOVR_EXCL_LINE: decode-failure path */
+                return NULL;      /* GCOVR_EXCL_LINE: decode-failure path */
+            }
+            if (kind == ATTRS_KEYS) {
+                item = name;
+            } else {
+                PyObject *value = attr_value_obj(attr);
+                if (value == NULL) {  /* GCOVR_EXCL_BR_LINE: value object build cannot be forced to fail */
+                    Py_DECREF(name);  /* GCOVR_EXCL_LINE: alloc-failure path */
+                    Py_DECREF(out);   /* GCOVR_EXCL_LINE: alloc-failure path */
+                    return NULL;      /* GCOVR_EXCL_LINE: alloc-failure path */
+                }
+                item = PyTuple_Pack(2, name, value);
+                Py_DECREF(name);
+                Py_DECREF(value);
+            }
+        }
+        if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: item build cannot be forced to fail */
+            Py_DECREF(out);  /* GCOVR_EXCL_LINE: alloc-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: alloc-failure path */
+        }
+        PyList_SET_ITEM(out, index, item);
+    }
+    return out;
+}
+
+static PyObject *attrs_keys(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return attrs_collect(self, ATTRS_KEYS);
+}
+
+static PyObject *attrs_values(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return attrs_collect(self, ATTRS_VALUES);
+}
+
+static PyObject *attrs_items(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return attrs_collect(self, ATTRS_ITEMS);
+}
+
+static PyObject *attrs_get(PyObject *self, PyObject *args) {
+    PyObject *key;
+    PyObject *fallback = Py_None;
+    if (!PyArg_ParseTuple(args, "O|O", &key, &fallback)) {
+        return NULL;
+    }
+    if (PyUnicode_Check(key)) {
+        Py_ssize_t len;
+        char *name = attr_key_utf8(key, &len);
+        if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here */
+            return NULL;    /* GCOVR_EXCL_LINE: unreachable */
+        }
+        th_node *node = ((AttrsObject *)self)->node;
+        Py_ssize_t index = find_attr_index(tree_of(self), node, name, len);
+        PyMem_Free(name);
+        if (index >= 0) {
+            return attr_value_obj(&node->attrs[index]);
+        }
+    }
+    return Py_NewRef(fallback);
+}
+
+static PyObject *attrs_repr(PyObject *self) {
+    PyObject *items = attrs_collect(self, ATTRS_ITEMS);
+    if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *mapping = PyObject_CallFunctionObjArgs((PyObject *)&PyDict_Type, items, NULL);
+    Py_DECREF(items);
+    if (mapping == NULL) { /* GCOVR_EXCL_BR_LINE: dict() over a name/value list cannot fail */
+        return NULL;       /* GCOVR_EXCL_LINE: alloc-failure path */
+    }
+    PyObject *repr = PyObject_Repr(mapping);
+    Py_DECREF(mapping);
+    return repr;
+}
+
+static PyMethodDef attrs_methods[] = {
+    {"get", attrs_get, METH_VARARGS, "get(name, default=None) -> the value, or default when absent"},
+    {"keys", attrs_keys, METH_NOARGS, "keys() -> the attribute names in source order"},
+    {"values", attrs_values, METH_NOARGS, "values() -> the attribute values in source order"},
+    {"items", attrs_items, METH_NOARGS, "items() -> the (name, value) pairs in source order"},
+    {NULL, NULL, 0, NULL},
+};
+
+static PyType_Slot attrs_slots[] = {
+    {Py_tp_dealloc, attrs_dealloc},
+    {Py_tp_repr, attrs_repr},
+    {Py_mp_length, attrs_length},
+    {Py_mp_subscript, attrs_subscript},
+    {Py_mp_ass_subscript, attrs_ass_subscript},
+    {Py_sq_contains, attrs_contains},
+    {Py_tp_iter, attrs_iter},
+    {Py_tp_methods, attrs_methods},
+    {0, NULL},
+};
+
+static PyType_Spec attrs_spec = {
+    .name = "turbohtml._html._Attrs",
+    .basicsize = sizeof(AttrsObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .slots = attrs_slots,
+};
 
 static PyObject *element_get_tag(PyObject *self, void *Py_UNUSED(closure)) {
     th_node *node = ((NodeObject *)self)->node;
@@ -740,16 +1010,21 @@ static PyObject *element_get_namespace(PyObject *self, void *Py_UNUSED(closure))
 }
 
 static PyObject *element_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
-    return build_attrs(tree_of(self), ((NodeObject *)self)->node);
+    return attrs_new(state_of(self), ((NodeObject *)self)->handle, ((NodeObject *)self)->node);
 }
+
+static PyObject *node_get_text(PyObject *self, void *closure);
+static int element_set_text(PyObject *self, PyObject *value, void *closure);
 
 static PyGetSetDef element_getset[] = {
     {"tag", element_get_tag, NULL, "the lowercased tag name", NULL},
     {"namespace", element_get_namespace, NULL, "the element's Namespace (HTML, SVG, or MATHML)", NULL},
     {"attrs", element_get_attrs, NULL,
-     "the attributes as a dict; token-list attributes (class, rel, ...) map to a list[str], a valueless attribute "
-     "maps to None",
+     "the live mutable attribute mapping; token-list attributes (class, rel, ...) map to a list[str], a valueless "
+     "attribute maps to None",
      NULL},
+    {"text", node_get_text, element_set_text,
+     "the element's text; assigning replaces all children with a single Text node", NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -2065,8 +2340,58 @@ static PyObject *node_get_data(PyObject *self, void *Py_UNUSED(closure)) {
     return str_from_accessor(th_node_data, tree_of(self), ((NodeObject *)self)->node);
 }
 
+/* The str a data/text setter assigns: rejects deletion and a non-str, then copies
+   the code points (caller frees with PyMem_Free). *len is the length; NULL on
+   error. */
+static Py_UCS4 *assigned_str(PyObject *value, const char *what, Py_ssize_t *len) {
+    if (value == NULL) {
+        PyErr_Format(PyExc_TypeError, "cannot delete %s", what);
+        return NULL;
+    }
+    if (!PyUnicode_Check(value)) {
+        PyErr_Format(PyExc_TypeError, "%s must be a str", what);
+        return NULL;
+    }
+    *len = PyUnicode_GET_LENGTH(value);
+    return PyUnicode_AsUCS4Copy(value);
+}
+
+static int node_set_data(PyObject *self, PyObject *value, void *Py_UNUSED(closure)) {
+    Py_ssize_t len;
+    Py_UCS4 *points = assigned_str(value, "data", &len);
+    if (points == NULL) {
+        return -1;
+    }
+    int rc = th_node_set_data(tree_of(self), ((NodeObject *)self)->node, points, len);
+    PyMem_Free(points);
+    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on OOM */
+}
+
+static int element_set_text(PyObject *self, PyObject *value, void *Py_UNUSED(closure)) {
+    Py_ssize_t len;
+    Py_UCS4 *points = assigned_str(value, "text", &len);
+    if (points == NULL) {
+        return -1;
+    }
+    th_node *node = ((NodeObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    while (node->first_child != NULL) {
+        th_node_remove(node->first_child);
+    }
+    if (len > 0) {
+        th_node *text = th_tree_make_data_node(tree, TH_NODE_TEXT, points, len);
+        if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(points); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        th_node_append_child(node, text);
+    }
+    PyMem_Free(points);
+    return 0;
+}
+
 static PyGetSetDef data_getset[] = {
-    {"data", node_get_data, NULL, "the character data of this node", NULL},
+    {"data", node_get_data, node_set_data, "the character data of this node", NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -2540,9 +2865,10 @@ int tree_register(PyObject *module, module_state *state) {
     state->walker_type = PyType_FromModuleAndSpec(module, &walker_spec, NULL);
     state->string_walker_type = PyType_FromModuleAndSpec(module, &string_walker_spec, NULL);
     state->handle_type = PyType_FromModuleAndSpec(module, &handle_spec, NULL);
+    state->attrs_type = PyType_FromModuleAndSpec(module, &attrs_spec, NULL);
     /* allocation failure cannot be forced from a test */
     if (state->walker_type == NULL || state->string_walker_type == NULL || /* GCOVR_EXCL_BR_LINE */
-        state->handle_type == NULL) {                                      /* GCOVR_EXCL_BR_LINE */
+        state->handle_type == NULL || state->attrs_type == NULL) {         /* GCOVR_EXCL_BR_LINE */
         return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->node_type = PyType_FromModuleAndSpec(module, &node_spec, NULL);

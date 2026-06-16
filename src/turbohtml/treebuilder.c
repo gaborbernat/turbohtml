@@ -495,6 +495,78 @@ int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char 
     return 0;
 }
 
+/* Upsert an attribute by name: replace the value of the existing attribute with
+   that atom, or append a new slot (growing the arena array by one). has_value 0
+   stores a valueless attribute; an empty value stays distinct from valueless.
+   Returns 0, or -1 on allocation failure. */
+int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                     Py_ssize_t value_len, int has_value) {
+    uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
+    Py_UCS4 *owned = NULL;
+    if (has_value) {
+        owned = arena_alloc(tree, (value_len ? value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            node->attrs[index].value = owned;
+            node->attrs[index].value_len = has_value ? value_len : 0;
+            return 0;
+        }
+    }
+    th_node_attr *grown = arena_alloc(tree, (node->attr_count + 1) * (Py_ssize_t)sizeof(th_node_attr));
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(grown, node->attrs, (size_t)node->attr_count * sizeof(th_node_attr));
+    grown[node->attr_count].name_atom = atom;
+    grown[node->attr_count].value = owned;
+    grown[node->attr_count].value_len = has_value ? value_len : 0;
+    node->attrs = grown;
+    node->attr_count++;
+    return 0;
+}
+
+/* Replace a node's character data with a copy of len code points (an empty buffer
+   is stored as none). Returns 0, or -1 on allocation failure. */
+int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize_t len) {
+    if (len == 0) {
+        node->text = NULL;
+        node->text_len = 0;
+        return 0;
+    }
+    Py_UCS4 *owned = arena_alloc(tree, len * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, data, (size_t)len * sizeof(Py_UCS4));
+    node->text = owned;
+    node->text_len = len;
+    return 0;
+}
+
+/* Remove the attribute with this name, shifting the rest down. Returns 1 when one
+   was removed, 0 when the element had no such attribute. */
+int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    uint32_t atom = th_attr_lookup(tree, name, name_len);
+    if (atom == UINT32_MAX) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            for (Py_ssize_t shift = index; shift + 1 < node->attr_count; shift++) {
+                node->attrs[shift] = node->attrs[shift + 1];
+            }
+            node->attr_count--;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void node_append(th_node *parent, th_node *child) {
     child->parent = parent;
     child->prev_sibling = parent->last_child;
