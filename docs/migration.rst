@@ -109,11 +109,11 @@ attribute; ``class_`` and ``attrs`` match the rest; ``axis`` replaces the direct
     'section'
 
 Attributes and text
-====================
+===================
 
 ``.attrs`` is the single access point - there is no ``tag["x"]`` shortcut, because ``node[i]`` indexes child nodes.
-Multi-valued attributes (``class``, ``rel``, ...) read back as a ``list[str]``, and text is real child nodes (the
-WHATWG DOM shape), so there is no ``.string`` shortcut and no ``lxml``-style ``text``/``tail`` split:
+Multi-valued attributes (``class``, ``rel``, ...) read back as a ``list[str]``, and text is real child nodes (the WHATWG
+DOM shape), so there is no ``.string`` shortcut and no ``lxml``-style ``text``/``tail`` split:
 
 .. code-block:: pycon
 
@@ -144,20 +144,19 @@ attribute order, and ``<br>`` versus ``<br/>``. Choose ``Formatter.NAMED_ENTITIE
 Pitfalls
 ========
 
--  ``node[i]`` indexes children; attributes are reached through ``.attrs``, never ``node["attr"]``.
--  Text is real child nodes, so there is no ``.string`` shortcut and no ``text``/``tail``; iterate the children.
--  Default output is WHATWG-conformant; pick ``Formatter.NAMED_ENTITIES`` to come close to ``bs4``'s ``html``
-   formatter.
--  Equality is identity, not structural. Where ``bs4`` code leaned on ``==`` between trees, compare serializations
-   (``a.html == b.html``) or walk the nodes.
+- ``node[i]`` indexes children; attributes are reached through ``.attrs``, never ``node["attr"]``.
+- Text is real child nodes, so there is no ``.string`` shortcut and no ``text``/``tail``; iterate the children.
+- Default output is WHATWG-conformant; pick ``Formatter.NAMED_ENTITIES`` to come close to ``bs4``'s ``html`` formatter.
+- Equality is identity, not structural. Where ``bs4`` code leaned on ``==`` between trees, compare serializations
+  (``a.html == b.html``) or walk the nodes.
 
 ***********
  From lxml
 ***********
 
 :func:`turbohtml.parse` replaces ``lxml.html.document_fromstring`` and returns a :class:`~turbohtml.Document`;
-:func:`turbohtml.parse_fragment` replaces ``lxml.html.fromstring`` for a fragment. The biggest change is the tree
-shape: lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtml models it as real child
+:func:`turbohtml.parse_fragment` replaces ``lxml.html.fromstring`` for a fragment. The biggest change is the tree shape:
+lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtml models it as real child
 :class:`~turbohtml.Text` nodes, so you iterate children instead of reading two string fields.
 
 .. list-table::
@@ -200,19 +199,19 @@ shape: lxml stores text as an element's ``.text`` and ``.tail`` strings, while t
 Pitfalls
 ========
 
--  No XPath. Use the ``find``/``find_all`` filter grammar (an ``axis``, ``attrs``, and string, regex, or callable
-   filters) or CSS :meth:`~turbohtml.Node.select`.
--  No ``text``/``tail``. A node's children are its text runs and elements interleaved; read :attr:`~turbohtml.Node.text`
-   for the concatenation.
--  lxml parses with libxml2, which is not WHATWG-conformant, so malformed input lands in a different tree than the one
-   turbohtml (and a browser) builds.
+- No XPath. Use the ``find``/``find_all`` filter grammar (an ``axis``, ``attrs``, and string, regex, or callable
+  filters) or CSS :meth:`~turbohtml.Node.select`.
+- No ``text``/``tail``. A node's children are its text runs and elements interleaved; read :attr:`~turbohtml.Node.text`
+  for the concatenation.
+- lxml parses with libxml2, which is not WHATWG-conformant, so malformed input lands in a different tree than the one
+  turbohtml (and a browser) builds.
 
 *****************
  From selectolax
 *****************
 
-selectolax wraps the same lexbor engine turbohtml benchmarks against, so the speed is comparable; the move is mostly
-API surface. selectolax searches with CSS only and exposes ``text()`` as a method, while turbohtml adds the
+selectolax wraps the same lexbor engine turbohtml benchmarks against, so the speed is comparable; the move is mostly API
+surface. selectolax searches with CSS only and exposes ``text()`` as a method, while turbohtml adds the
 ``find``/``find_all`` filter grammar and makes :attr:`~turbohtml.Node.text` a property.
 
 .. list-table::
@@ -245,19 +244,19 @@ API surface. selectolax searches with CSS only and exposes ``text()`` as a metho
 Pitfalls
 ========
 
--  selectolax queries are CSS-only; turbohtml adds the ``find``/``find_all`` filter grammar with axes and regex or
-   callable filters.
--  ``node.text`` is a property, not a method - drop the parentheses.
--  selectolax mutation is limited; turbohtml's edit surface (``append``, ``insert``, ``wrap``, ``unwrap``,
-   ``replace_with``, and the rest) is full.
+- selectolax queries are CSS-only; turbohtml adds the ``find``/``find_all`` filter grammar with axes and regex or
+  callable filters.
+- ``node.text`` is a property, not a method - drop the parentheses.
+- selectolax mutation is limited; turbohtml's edit surface (``append``, ``insert``, ``wrap``, ``unwrap``,
+  ``replace_with``, and the rest) is full.
 
-****************
+***************
  From html5lib
-****************
+***************
 
-html5lib runs the same WHATWG algorithm turbohtml does, so the *tree* it produces matches; what changes is that
-html5lib hands you a generic tree you select with a treebuilder (an :mod:`xml.etree.ElementTree` element by default, or
-DOM, or lxml), while turbohtml has one typed hierarchy with navigation, search, and serialization built in.
+html5lib runs the same WHATWG algorithm turbohtml does, so the *tree* it produces matches; what changes is that html5lib
+hands you a generic tree you select with a treebuilder (an :mod:`xml.etree.ElementTree` element by default, or DOM, or
+lxml), while turbohtml has one typed hierarchy with navigation, search, and serialization built in.
 
 .. list-table::
     :header-rows: 1
@@ -287,10 +286,10 @@ DOM, or lxml), while turbohtml has one typed hierarchy with navigation, search, 
 Pitfalls
 ========
 
--  html5lib gives you a foreign tree (ElementTree, DOM, or lxml) and you pick a treebuilder; turbohtml has one typed
-   tree, so there is nothing to choose and the node types are sealed and pattern-matchable.
--  html5lib's ElementTree output namespaces names; turbohtml keeps ``tag`` plain and carries the namespace separately
-   as :attr:`~turbohtml.Element.namespace`.
+- html5lib gives you a foreign tree (ElementTree, DOM, or lxml) and you pick a treebuilder; turbohtml has one typed
+  tree, so there is nothing to choose and the node types are sealed and pattern-matchable.
+- html5lib's ElementTree output namespaces names; turbohtml keeps ``tag`` plain and carries the namespace separately as
+  :attr:`~turbohtml.Element.namespace`.
 
 ***************************
  From the standard library
@@ -310,5 +309,5 @@ Pitfalls
 
 In place of subclassing :class:`python:html.parser.HTMLParser` with ``handle_starttag`` and ``handle_data`` callbacks,
 take the token stream from :func:`turbohtml.tokenize` (or :meth:`turbohtml.Tokenizer.feed` for incremental input), or
-skip tokens entirely and :func:`turbohtml.parse` straight to a tree. Unlike ``html.parser``, both are
-WHATWG-conformant. The :doc:`how-to` guide has a worked port.
+skip tokens entirely and :func:`turbohtml.parse` straight to a tree. Unlike ``html.parser``, both are WHATWG-conformant.
+The :doc:`how-to` guide has a worked port.

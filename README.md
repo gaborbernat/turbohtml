@@ -157,8 +157,8 @@ and the methodology.
 
 ## Documentation
 
-Full documentation, including tutorials, how-to guides, migration guides from BeautifulSoup, lxml, selectolax,
-html5lib, and the standard library, the API reference, and the design rationale, lives at
+Full documentation, including tutorials, how-to guides, migration guides from BeautifulSoup, lxml, selectolax, html5lib,
+and the standard library, the API reference, and the design rationale, lives at
 [turbohtml.readthedocs.io](https://turbohtml.readthedocs.io).
 
 ## License
