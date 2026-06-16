@@ -224,5 +224,5 @@ edit without touching the original:
     >>> clone.html == article.html
     False
 
-That is the whole tree API. Head to the :doc:`how-to` guides for task-focused recipes, the :doc:`migration` guide if
-you are coming from BeautifulSoup, or the :doc:`reference` for the exact signatures.
+That is the whole tree API. Head to the :doc:`how-to` guides for task-focused recipes, the :doc:`migration` guide if you
+are coming from BeautifulSoup, or the :doc:`reference` for the exact signatures.

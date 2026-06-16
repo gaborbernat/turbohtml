@@ -139,18 +139,18 @@ compare. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtm
 :meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
 :class:`~turbohtml.Formatter`.
 
-******************
+*******************
  Mutating the tree
-******************
+*******************
 
 The arena that makes reading cheap is built for append-only construction, not random edits, so making the tree mutable
-took a deliberate rule rather than a writable wrapper over the read path: **mutate in place within a tree, copy on
-adopt across trees**. An edit that keeps a node in its own tree - :meth:`~turbohtml.Element.append` of a child already
-under the same root, :meth:`~turbohtml.Node.insert_before`, :meth:`~turbohtml.Node.unwrap` - is a few pointer swaps on
-the arena nodes, so the node keeps its identity and any wrapper you hold stays valid. Inserting a node from a different
-tree (a freshly constructed one, or a node lifted out of another document) deep-copies its subtree into the
-destination's arena and re-points the moved wrapper at the copy, so the two arenas never alias and the source frees on
-its own. Making a node a descendant of itself is refused.
+took a deliberate rule rather than a writable wrapper over the read path: **mutate in place within a tree, copy on adopt
+across trees**. An edit that keeps a node in its own tree - :meth:`~turbohtml.Element.append` of a child already under
+the same root, :meth:`~turbohtml.Node.insert_before`, :meth:`~turbohtml.Node.unwrap` - is a few pointer swaps on the
+arena nodes, so the node keeps its identity and any wrapper you hold stays valid. Inserting a node from a different tree
+(a freshly constructed one, or a node lifted out of another document) deep-copies its subtree into the destination's
+arena and re-points the moved wrapper at the copy, so the two arenas never alias and the source frees on its own. Making
+a node a descendant of itself is refused.
 
 Construction reuses the same arena machinery: :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and the rest build
 a standalone single-node tree that owns its data, ready to adopt into a document, and tag and attribute names are
