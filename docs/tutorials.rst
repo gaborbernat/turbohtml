@@ -126,9 +126,9 @@ to a navigable tree of nodes.
 
 .. important::
 
-    The one rule worth learning first: turbohtml models text as real **child nodes** (the WHATWG DOM shape), not
-    lxml's ``text``/``tail`` or BeautifulSoup's ``.string``. So ``node[i]`` indexes a node's children, and attributes
-    are reached through ``node.attrs``, never ``node["attr"]``.
+    The one rule worth learning first: turbohtml models text as real **child nodes** (the WHATWG DOM shape), not lxml's
+    ``text``/``tail`` or BeautifulSoup's ``.string``. So ``node[i]`` indexes a node's children, and attributes are
+    reached through ``node.attrs``, never ``node["attr"]``.
 
 Hand a whole document to :func:`turbohtml.parse`. It applies the full WHATWG tree-construction algorithm (the same one
 browsers run, including the error recovery that inserts the missing ``html``, ``head`` and ``body``) and returns a
