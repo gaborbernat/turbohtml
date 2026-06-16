@@ -167,6 +167,7 @@ commands_pre = []
 commands = [
   [ "python", "{tox_root}{/}tools{/}generate_html_entities.py", "{tox_root}{/}src{/}turbohtml{/}html_entities.h" ],
   [ "python", "{tox_root}{/}tools{/}generate_tags.py", "{tox_root}{/}src{/}turbohtml{/}tag_atom.h" ],
+  [ "python", "{tox_root}{/}tools{/}generate_attrs.py", "{tox_root}{/}src{/}turbohtml{/}attr_atom.h" ],
 ]
 
 [env.release]

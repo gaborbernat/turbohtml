@@ -5,10 +5,12 @@ from __future__ import annotations
 from importlib.metadata import version
 
 from ._html import (
+    Axis,
     Comment,
     Doctype,
     Document,
     Element,
+    Formatter,
     Namespace,
     Node,
     Text,
@@ -26,10 +28,12 @@ __version__ = version("turbohtml")
 """The installed package version."""
 
 __all__ = [
+    "Axis",
     "Comment",
     "Doctype",
     "Document",
     "Element",
+    "Formatter",
     "Namespace",
     "Node",
     "Text",

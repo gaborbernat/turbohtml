@@ -23,9 +23,10 @@ PyDoc_STRVAR(tokenize_doc, "tokenize(s, /)\n--\n\n"
                            "Tokenize a whole HTML string, returning an iterator of Token objects\n"
                            "following the WHATWG tokenization algorithm.");
 
-PyDoc_STRVAR(parse_doc, "parse(html, /)\n--\n\n"
+PyDoc_STRVAR(parse_doc, "parse(markup, *, encoding=None)\n--\n\n"
                         "Parse a whole HTML document with the WHATWG tree-construction algorithm\n"
-                        "and return a navigable Document.");
+                        "and return a navigable Document. markup is a str, or bytes whose encoding\n"
+                        "is sniffed (the encoding argument, a <meta> charset, then windows-1252).");
 
 PyDoc_STRVAR(parse_fragment_doc, "parse_fragment(html, context='div')\n--\n\n"
                                  "Parse an HTML fragment as the innerHTML of a context element and return\n"
@@ -36,7 +37,7 @@ static PyMethodDef html_methods[] = {
     {"escape", (PyCFunction)(void (*)(void))turbohtml_escape, METH_VARARGS | METH_KEYWORDS, escape_doc},
     {"unescape", turbohtml_unescape, METH_O, unescape_doc},
     {"tokenize", turbohtml_tokenize, METH_O, tokenize_doc},
-    {"parse", turbohtml_parse, METH_O, parse_doc},
+    {"parse", (PyCFunction)(void (*)(void))turbohtml_parse, METH_VARARGS | METH_KEYWORDS, parse_doc},
     {"parse_fragment", (PyCFunction)(void (*)(void))turbohtml_tree_parse_fragment, METH_VARARGS | METH_KEYWORDS,
      parse_fragment_doc},
     {"_tokenize_states", turbohtml_tokenize_states, METH_VARARGS, NULL},
@@ -68,17 +69,27 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     for (int index = 0; index < 5; index++) {
         Py_VISIT(state->kinds[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
-    Py_VISIT(state->node_type);      /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->element_type);   /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->text_type);      /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->comment_type);   /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->doctype_type);   /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->document_type);  /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->handle_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->walker_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->namespace_enum); /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->node_type);          /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_type);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->text_type);          /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->comment_type);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->doctype_type);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->document_type);      /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->handle_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->walker_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->string_walker_type); /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->namespace_enum);     /* GCOVR_EXCL_BR_LINE: same */
     for (int index = 0; index < 3; index++) {
         Py_VISIT(state->namespaces[index]); /* GCOVR_EXCL_BR_LINE: same */
+    }
+    Py_VISIT(state->axis_enum);      /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->formatter_enum); /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->pattern_type);   /* GCOVR_EXCL_BR_LINE: same */
+    for (int index = 0; index < 7; index++) {
+        Py_VISIT(state->axes[index]); /* GCOVR_EXCL_BR_LINE: same */
+    }
+    for (int index = 0; index < 3; index++) {
+        Py_VISIT(state->formatters[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
     return 0;
 }
@@ -100,9 +111,19 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->document_type);
     Py_CLEAR(state->handle_type);
     Py_CLEAR(state->walker_type);
+    Py_CLEAR(state->string_walker_type);
     Py_CLEAR(state->namespace_enum);
     for (int index = 0; index < 3; index++) {
         Py_CLEAR(state->namespaces[index]);
+    }
+    Py_CLEAR(state->axis_enum);
+    Py_CLEAR(state->formatter_enum);
+    Py_CLEAR(state->pattern_type);
+    for (int index = 0; index < 7; index++) {
+        Py_CLEAR(state->axes[index]);
+    }
+    for (int index = 0; index < 3; index++) {
+        Py_CLEAR(state->formatters[index]);
     }
     return 0;
 }

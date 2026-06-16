@@ -2,6 +2,8 @@
    #included into treebuilder.c (one translation unit, so the static helpers
    here still inline against the node tree). */
 
+#include "entity_names.h"
+
 /* ---------------------------------------------------------- serialization */
 
 typedef struct {
@@ -11,41 +13,109 @@ typedef struct {
     int failed;
 } sbuf;
 
+/* Grow the buffer so at least extra more code points fit, doubling so a run of
+   appends stays amortized O(1). */
+static void sbuf_reserve(sbuf *out, Py_ssize_t extra) {
+    if (out->len + extra <= out->cap) {
+        return;
+    }
+    Py_ssize_t cap = out->cap ? out->cap : 256;
+    while (cap < out->len + extra) {
+        cap *= 2;
+    }
+    Py_UCS4 *grown = PyMem_Realloc(out->data, (size_t)cap * sizeof(Py_UCS4));
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    out->data = grown;
+    out->cap = cap;
+}
+
 static void sbuf_putc(sbuf *out, Py_UCS4 character) {
-    if (out->len == out->cap) {
-        Py_ssize_t cap = out->cap ? out->cap * 2 : 256;
-        Py_UCS4 *grown = PyMem_Realloc(out->data, (size_t)cap * sizeof(Py_UCS4));
-        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-            return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        }
-        out->data = grown;
-        out->cap = cap;
+    sbuf_reserve(out, 1);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     out->data[out->len++] = character;
 }
 
-static void sbuf_puts(sbuf *out, const char *str) {
-    for (; *str; str++) {
-        sbuf_putc(out, (Py_UCS4)*str);
+/* Append a run of code points in one bulk copy after a single capacity check. */
+static void sbuf_put_run(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
+    sbuf_reserve(out, len);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
+    memcpy(out->data + out->len, text, (size_t)len * sizeof(Py_UCS4));
+    out->len += len;
+}
+
+static void sbuf_puts(sbuf *out, const char *str) {
+    Py_ssize_t len = (Py_ssize_t)strlen(str);
+    sbuf_reserve(out, len);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        out->data[out->len + index] = (Py_UCS4)(unsigned char)str[index];
+    }
+    out->len += len;
 }
 
 static void sbuf_put_ucs4(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
-    for (Py_ssize_t index = 0; index < len; index++) {
-        sbuf_putc(out, text[index]);
+    sbuf_put_run(out, text, len);
+}
+
+/* Write well-formed UTF-8 bytes (an interned attribute name) as code points. The
+   common all-ASCII name is copied in bulk; only a name with a byte >= 0x80
+   (a foreign mixed-case attribute) takes the per-code-point decoder. */
+static void sbuf_put_utf8(sbuf *out, const char *bytes, Py_ssize_t len) {
+    Py_ssize_t index = 0;
+    while (index < len && (unsigned char)bytes[index] < 0x80) {
+        index++;
+    }
+    if (index > 0) {
+        sbuf_reserve(out, index);
+        if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (Py_ssize_t ascii = 0; ascii < index; ascii++) {
+            out->data[out->len + ascii] = (Py_UCS4)(unsigned char)bytes[ascii];
+        }
+        out->len += index;
+    }
+    while (index < len) {
+        unsigned char lead = (unsigned char)bytes[index];
+        Py_UCS4 character;
+        if (lead < 0x80) {
+            character = lead;
+            index += 1;
+        } else if (lead < 0xE0) {
+            character = (Py_UCS4)(lead & 0x1F) << 6 | ((unsigned char)bytes[index + 1] & 0x3F);
+            index += 2;
+        } else if (lead < 0xF0) {
+            character = (Py_UCS4)(lead & 0x0F) << 12 | ((unsigned char)(bytes[index + 1] & 0x3F)) << 6 |
+                        ((unsigned char)bytes[index + 2] & 0x3F);
+            index += 3;
+        } else {
+            character = (Py_UCS4)(lead & 0x07) << 18 | ((unsigned char)(bytes[index + 1] & 0x3F)) << 12 |
+                        ((unsigned char)(bytes[index + 2] & 0x3F)) << 6 | ((unsigned char)bytes[index + 3] & 0x3F);
+            index += 4;
+        }
+        sbuf_putc(out, character);
     }
 }
 
 /* Write an attribute's displayed name (the form the #document line uses) into
    buf: namespaced foreign attributes show "prefix localname", SVG attributes
    take their mixed-case spelling, everything else is the lowercased name. */
-static void render_attr_name(const th_node *node, const th_node_attr *attr, char *buf, size_t bufsize) {
-    const char *name = attr->name;
-    const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, attr->name_len, node->ns) : NULL;
+static void render_attr_name(th_tree *tree, const th_node *node, const th_node_attr *attr, char *buf, size_t bufsize) {
+    Py_ssize_t name_len;
+    const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+    const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, name_len, node->ns) : NULL;
     const char *src = name;
     int to_space = 0;
-    if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, attr->name_len)) {
+    if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
         to_space = 1;
     } else if (mixed != NULL) {
         src = mixed;
@@ -113,9 +183,9 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     char cmp_buf[128];
     for (Py_ssize_t index = 1; index < count; index++) { /* insertion sort; attribute counts are tiny */
         Py_ssize_t key = order[index];
-        render_attr_name(node, &node->attrs[key], ke_buf, sizeof(ke_buf));
+        render_attr_name(tree, node, &node->attrs[key], ke_buf, sizeof(ke_buf));
         Py_ssize_t prev = index - 1;
-        while (prev >= 0 && (render_attr_name(node, &node->attrs[order[prev]], cmp_buf, sizeof(cmp_buf)),
+        while (prev >= 0 && (render_attr_name(tree, node, &node->attrs[order[prev]], cmp_buf, sizeof(cmp_buf)),
                              strcmp(cmp_buf, ke_buf) > 0)) {
             order[prev + 1] = order[prev];
             prev--;
@@ -130,16 +200,17 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
         }
         /* foreign attribute name adjustments: xlink:/xml:/xmlns: serialize with a
            space, and SVG/MathML attributes take their mixed-case spelling */
-        const char *name = attr->name;
-        const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, attr->name_len, node->ns) : NULL;
-        if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, attr->name_len)) {
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, name_len, node->ns) : NULL;
+        if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
             for (const char *character = name; *character; character++) {
                 sbuf_putc(out, *character == ':' ? (Py_UCS4)' ' : (Py_UCS4)*character);
             }
         } else if (mixed != NULL) {
             sbuf_puts(out, mixed);
         } else {
-            sbuf_puts(out, name);
+            sbuf_put_utf8(out, name, name_len);
         }
         sbuf_puts(out, "=\"");
         sbuf_put_ucs4(out, attr->value, attr->value_len);
@@ -178,23 +249,72 @@ Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
 
 /* --------------------------------------------- navigable-tree HTML output */
 
-/* Append text with the WHATWG HTML escapes; in_attr selects the attribute-value
-   set ('&', '"', nbsp) versus the text set ('&', '<', '>', nbsp). */
-static void sbuf_put_escaped(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr) {
-    for (Py_ssize_t index = 0; index < len; index++) {
-        Py_UCS4 character = text[index];
-        if (character == '&') {
-            sbuf_puts(out, "&amp;");
-        } else if (character == 0xA0) {
-            sbuf_puts(out, "&nbsp;");
-        } else if (in_attr && character == '"') {
-            sbuf_puts(out, "&quot;");
-        } else if (!in_attr && character == '<') {
-            sbuf_puts(out, "&lt;");
-        } else if (!in_attr && character == '>') {
-            sbuf_puts(out, "&gt;");
-        } else {
-            sbuf_putc(out, character);
+/* The escape policy serialize()/encode() expose through the Formatter enum. */
+enum th_formatter {
+    TH_FMT_WHATWG,  /* conformant minimal escaping: & < > nbsp in text, & " nbsp in attrs */
+    TH_FMT_MINIMAL, /* the three structural characters only, in both contexts */
+    TH_FMT_NAMED,   /* HTML named entities for every character that has one */
+};
+
+/* Whether a character must be rewritten under the formatter. NAMED rewrites any
+   character with a named reference (the ASCII ones are exactly & " < >, so the
+   table is only consulted past 0x7F); the others escape the structural set, with
+   WHATWG also folding the quote and no-break space the spec calls for. */
+static int sbuf_text_special(Py_UCS4 character, int in_attr, int formatter) {
+    if (formatter == TH_FMT_NAMED) {
+        if (character < 0x80) {
+            return character == '&' || character == '"' || character == '<' || character == '>';
+        }
+        return th_entity_name(character) != NULL;
+    }
+    int escape_angle = formatter == TH_FMT_MINIMAL || !in_attr;
+    if (character == '&') {
+        return 1;
+    }
+    if ((character == '<' || character == '>') && escape_angle) {
+        return 1;
+    }
+    if (character == '"' && in_attr && formatter == TH_FMT_WHATWG) {
+        return 1;
+    }
+    return character == 0xA0 && formatter == TH_FMT_WHATWG;
+}
+
+/* Emit the replacement for a character sbuf_text_special flagged. */
+static void sbuf_put_special(sbuf *out, Py_UCS4 character, int formatter) {
+    const char *name = formatter == TH_FMT_NAMED ? th_entity_name(character) : NULL;
+    if (name != NULL) {
+        sbuf_putc(out, '&');
+        sbuf_puts(out, name);
+        sbuf_putc(out, ';');
+    } else if (character == '&') {
+        sbuf_puts(out, "&amp;");
+    } else if (character == '<') {
+        sbuf_puts(out, "&lt;");
+    } else if (character == '>') {
+        sbuf_puts(out, "&gt;");
+    } else if (character == '"') {
+        sbuf_puts(out, "&quot;");
+    } else {
+        sbuf_puts(out, "&nbsp;"); /* the only remaining flagged character is U+00A0 */
+    }
+}
+
+/* Append text under one formatter, bulk-copying each run with nothing to escape
+   and rewriting only the flagged characters in between. */
+static void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr, int formatter) {
+    Py_ssize_t index = 0;
+    while (index < len) {
+        Py_ssize_t start = index;
+        while (index < len && !sbuf_text_special(text[index], in_attr, formatter)) {
+            index++;
+        }
+        if (index > start) {
+            sbuf_put_run(out, &text[start], index - start);
+        }
+        if (index < len) {
+            sbuf_put_special(out, text[index], formatter);
+            index++;
         }
     }
 }
@@ -225,24 +345,57 @@ static Py_ssize_t doctype_name_len(const th_node *node) {
     return index;
 }
 
-static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
+/* A pre/textarea/listing element whose first child is a text node beginning with
+   a newline needs an extra leading newline on output: the parser drops one such
+   newline when reading, so re-emitting it keeps the round trip faithful. */
+static int ser_needs_leading_newline(th_tree *tree, th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (node->atom != TH_TAG_PRE && node->atom != TH_TAG_TEXTAREA && node->atom != TH_TAG_LISTING) {
+        return 0;
+    }
+    /* a text node always carries at least one code point (the builder never
+       inserts an empty one), so reading the first character here is safe */
+    th_node *first = node->first_child;
+    return first != NULL && first->type == TH_NODE_TEXT && need_text(tree, first)[0] == '\n';
+}
+
+/* Write an element's start tag, "<tag attrs...>", with attributes in source order
+   and double-quoted values escaped under the formatter. */
+static void ser_open_tag(sbuf *out, th_tree *tree, th_node *node, int formatter) {
+    sbuf_putc(out, '<');
+    sbuf_put_ucs4(out, node->text, node->text_len);
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        th_node_attr *attr = &node->attrs[index];
+        sbuf_putc(out, ' ');
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        sbuf_put_utf8(out, name, name_len);
+        sbuf_puts(out, "=\"");
+        sbuf_put_text(out, attr->value, attr->value_len, 1, formatter);
+        sbuf_putc(out, '"');
+    }
+    sbuf_putc(out, '>');
+}
+
+static void ser_close_tag(sbuf *out, th_node *node) {
+    sbuf_puts(out, "</");
+    sbuf_put_ucs4(out, node->text, node->text_len);
+    sbuf_putc(out, '>');
+}
+
+/* Outer serialization with no inserted whitespace (the WHATWG fragment
+   algorithm), parameterized by the escape formatter. */
+static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int formatter) {
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT: {
-        sbuf_putc(out, '<');
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-            th_node_attr *attr = &node->attrs[index];
-            sbuf_putc(out, ' ');
-            for (const char *character = attr->name; *character != '\0'; character++) {
-                sbuf_putc(out, (Py_UCS4)(unsigned char)*character);
-            }
-            sbuf_puts(out, "=\"");
-            sbuf_put_escaped(out, attr->value, attr->value_len, 1);
-            sbuf_putc(out, '"');
-        }
-        sbuf_putc(out, '>');
+        ser_open_tag(out, tree, node, formatter);
         if (node->ns == TH_NS_HTML && is_void_atom(node->atom)) {
             break; /* void elements have no children or end tag */
+        }
+        if (ser_needs_leading_newline(tree, node)) {
+            sbuf_putc(out, '\n');
         }
         int raw = is_rawtext_element(node);
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -250,17 +403,14 @@ static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
             if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
                 sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
             } else {
-                serialize_html(out, tree, child);
+                serialize_compact(out, tree, child, formatter);
             }
         }
-        sbuf_putc(out, '<');
-        sbuf_putc(out, '/');
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        sbuf_putc(out, '>');
+        ser_close_tag(out, node);
         break;
     }
     case TH_NODE_TEXT:
-        sbuf_put_escaped(out, need_text(tree, node), node->text_len, 0);
+        sbuf_put_text(out, need_text(tree, node), node->text_len, 0, formatter);
         break;
     case TH_NODE_COMMENT:
         sbuf_puts(out, "<!--");
@@ -275,7 +425,88 @@ static void serialize_html(sbuf *out, th_tree *tree, th_node *node) {
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            serialize_html(out, tree, child);
+            serialize_compact(out, tree, child, formatter);
+        }
+        break;
+    }
+}
+
+/* Indentation context for the pretty form: the per-level unit and the formatter. */
+typedef struct {
+    int formatter;
+    const Py_UCS4 *indent;
+    Py_ssize_t indent_len;
+} ser_opts;
+
+static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
+    sbuf_putc(out, '\n');
+    for (int level = 0; level < depth; level++) {
+        sbuf_put_ucs4(out, opts->indent, opts->indent_len);
+    }
+}
+
+/* Pretty serialization: write node at the current position with no leading
+   whitespace; a parent emits the newline and indent before each child, so the
+   root starts at column zero. Raw-text and whitespace-significant elements
+   (script/style/pre/textarea/listing) keep their content verbatim, since
+   reflowing it would change meaning. */
+static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_opts *opts, int depth) {
+    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    case TH_NODE_ELEMENT: {
+        ser_open_tag(out, tree, node, opts->formatter);
+        if (node->ns == TH_NS_HTML && is_void_atom(node->atom)) {
+            break;
+        }
+        int raw = is_rawtext_element(node);
+        int preserve = raw || ser_needs_leading_newline(tree, node) ||
+                       (node->ns == TH_NS_HTML &&
+                        (node->atom == TH_TAG_PRE || node->atom == TH_TAG_TEXTAREA || node->atom == TH_TAG_LISTING));
+        if (preserve) {
+            if (ser_needs_leading_newline(tree, node)) {
+                sbuf_putc(out, '\n');
+            }
+            for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+                if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
+                    sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
+                } else {
+                    serialize_compact(out, tree, child, opts->formatter);
+                }
+            }
+            ser_close_tag(out, node);
+            break;
+        }
+        if (node->first_child == NULL) {
+            ser_close_tag(out, node);
+            break;
+        }
+        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+            ser_newline_indent(out, opts, depth + 1);
+            serialize_pretty(out, tree, child, opts, depth + 1);
+        }
+        ser_newline_indent(out, opts, depth);
+        ser_close_tag(out, node);
+        break;
+    }
+    case TH_NODE_TEXT:
+        sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
+        break;
+    case TH_NODE_COMMENT:
+        sbuf_puts(out, "<!--");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "-->");
+        break;
+    case TH_NODE_DOCTYPE:
+        sbuf_puts(out, "<!DOCTYPE ");
+        sbuf_put_ucs4(out, node->text, doctype_name_len(node));
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CONTENT:
+    case TH_NODE_DOCUMENT:
+        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+            if (child != node->first_child) {
+                ser_newline_indent(out, opts, depth);
+            }
+            serialize_pretty(out, tree, child, opts, depth);
         }
         break;
     }
@@ -334,6 +565,26 @@ Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
 
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
-    serialize_html(&out, tree, node);
+    serialize_compact(&out, tree, node, TH_FMT_WHATWG);
+    return sbuf_finish(&out, out_len);
+}
+
+Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
+    sbuf out = {NULL, 0, 0, 0};
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        serialize_compact(&out, tree, child, TH_FMT_WHATWG);
+    }
+    return sbuf_finish(&out, out_len);
+}
+
+Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
+                           Py_ssize_t *out_len) {
+    sbuf out = {NULL, 0, 0, 0};
+    if (indent == NULL) {
+        serialize_compact(&out, tree, node, formatter);
+    } else {
+        ser_opts opts = {formatter, indent, indent_len};
+        serialize_pretty(&out, tree, node, &opts, 0);
+    }
     return sbuf_finish(&out, out_len);
 }

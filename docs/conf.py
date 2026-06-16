@@ -30,6 +30,9 @@ intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 autodoc_member_order = "bysource"
 nitpicky = True
 always_document_param_types = True
+# _Filter is the private recursive alias for find()/find_all() filters; the
+# typehints extension expands it inline, so the bare name is never a doc target.
+nitpick_ignore = [("py:type", "_Filter")]
 
 issues_github_path = "tox-dev/turbohtml"
 towncrier_draft_autoversion_mode = "draft"

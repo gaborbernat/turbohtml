@@ -10,111 +10,11 @@ Escaping and unescaping sit on hot paths: HTML output escaping runs on every ren
 every chunk of text an HTML parser emits. ``turbohtml`` implements both in C so they run several times faster than an
 equivalent pure-Python implementation, with no change in behavior.
 
-Measured with `pyperf <https://pyperf.readthedocs.io>`_ on CPython 3.14 (a release build, Apple M-series) against
-:func:`python:html.escape` and :func:`python:html.unescape`. The multi-MiB inputs stream past the CPU caches; the book
-and spec cases are real documents (Project Gutenberg's *War and Peace*, the WHATWG HTML spec source) referenced as git
-submodules. Reproduce with ``tox -e bench``:
-
-.. list-table::
-    :header-rows: 1
-    :widths: 12 34 14 14 12
-
-    - - operation
-      - input
-      - turbohtml
-      - stdlib
-      - speedup
-    - - ``escape``
-      - tiny plain (64 B)
-      - 0.04 µs
-      - 0.11 µs
-      - 2.9x
-    - - ``escape``
-      - medium markup (4 KiB)
-      - 2.25 µs
-      - 7.17 µs
-      - 3.2x
-    - - ``escape``
-      - no-op prose (4 MiB)
-      - 0.11 ms
-      - 2.51 ms
-      - 22.0x
-    - - ``escape``
-      - book text (3 MiB)
-      - 0.66 ms
-      - 2.56 ms
-      - 3.9x
-    - - ``escape``
-      - book HTML (4 MiB)
-      - 1.25 ms
-      - 4.54 ms
-      - 3.6x
-    - - ``escape``
-      - spec HTML, dense (4 MiB)
-      - 4.93 ms
-      - 12.8 ms
-      - 2.6x
-    - - ``escape``
-      - UCS-2 plain (4 MiB)
-      - 0.70 ms
-      - 2.41 ms
-      - 3.4x
-    - - ``escape``
-      - UCS-2 markup (4 MiB)
-      - 3.33 ms
-      - 10.9 ms
-      - 3.3x
-    - - ``escape``
-      - UCS-4 plain (4 MiB)
-      - 0.91 ms
-      - 5.29 ms
-      - 5.8x
-    - - ``escape``
-      - UCS-4 markup (4 MiB)
-      - 3.95 ms
-      - 19.3 ms
-      - 4.9x
-    - - ``unescape``
-      - tiny plain (64 B)
-      - 0.02 µs
-      - 0.03 µs
-      - 1.3x
-    - - ``unescape``
-      - medium dense refs (4 KiB)
-      - 8.22 µs
-      - 69.0 µs
-      - 8.4x
-    - - ``unescape``
-      - numeric refs (4 KiB)
-      - 5.83 µs
-      - 78.7 µs
-      - 13.5x
-    - - ``unescape``
-      - book HTML, real refs (4 MiB)
-      - 2.44 ms
-      - 7.87 ms
-      - 3.2x
-    - - ``unescape``
-      - escaped book HTML (5 MiB)
-      - 1.90 ms
-      - 19.5 ms
-      - 10.3x
-    - - ``unescape``
-      - dense refs (4 MiB)
-      - 9.89 ms
-      - 73.0 ms
-      - 7.4x
-    - - ``unescape``
-      - UCS-2 refs (4 MiB)
-      - 2.51 ms
-      - 18.1 ms
-      - 7.2x
-
-``escape`` gains the most on text that needs little escaping (the SIMD scan classifies sixteen bytes at a time and
-copies clean stretches in bulk); ``unescape`` gains the most on entity-heavy input, where the standard library pays a
-Python call per match. The gap is narrowest on tiny strings, where call overhead dominates, and on special-dense markup,
-where both sides spend their time writing replacements. Numbers vary with input and hardware; reproduce them with ``tox
--e bench``.
+The :doc:`performance` page measures both against :func:`python:html.escape` and :func:`python:html.unescape` over real
+corpora. ``escape`` gains the most on text that needs little escaping (the SIMD scan classifies sixteen bytes at a time
+and copies clean stretches in bulk); ``unescape`` gains the most on entity-heavy input, where the standard library pays
+a Python call per match. The gap is narrowest on tiny strings, where call overhead dominates, and on special-dense
+markup, where both sides spend their time writing replacements.
 
 Unlike a standard-library accelerator, ``turbohtml`` ships **only** the compiled implementation. :PEP:`399` requires a
 pure-Python fallback only for the standard library; as a third-party package distributing per-interpreter wheels,
@@ -187,102 +87,9 @@ bulk-scan to the next special character the way `html5ever <https://github.com/s
 dispatching the state machine per character. For the ASCII documents that dominate real traffic, a text run travels from
 input to the final ``str`` as one-byte copies.
 
-Measured on CPython 3.14 (a release build, via ``tox -e bench``) against :class:`python:html.parser.HTMLParser` driven
-with no-op handlers and html5lib's pure-Python tokenizer, over synthetic cases and html5lib's benchmark corpus (a slice
-of the WHATWG spec source plus web-platform-tests pages of varied sizes):
-
-.. list-table::
-    :header-rows: 1
-    :widths: 26 14 16 12 14 12
-
-    - - input
-      - turbohtml
-      - ``html.parser``
-      - speedup
-      - html5lib
-      - speedup
-    - - typical markup
-      - 29.3 µs
-      - 435 µs
-      - 14.8x
-      - 810 µs
-      - 27.6x
-    - - text-heavy prose
-      - 0.54 µs
-      - 2.81 µs
-      - 5.2x
-      - 143 µs
-      - 263x
-    - - attribute-heavy
-      - 19.2 µs
-      - 298 µs
-      - 15.5x
-      - 807 µs
-      - 42.0x
-    - - script-heavy
-      - 12.1 µs
-      - 156 µs
-      - 12.9x
-      - 488 µs
-      - 40.4x
-    - - entity-heavy
-      - 20.4 µs
-      - 197 µs
-      - 9.6x
-      - 1.20 ms
-      - 58.9x
-    - - wpt tiny (0.6 kB)
-      - 1.41 µs
-      - 17.5 µs
-      - 12.5x
-      - 47.7 µs
-      - 34.0x
-    - - wpt small (4 kB)
-      - 12.1 µs
-      - 165 µs
-      - 13.7x
-      - 422 µs
-      - 34.8x
-    - - wpt medium (9.6 kB)
-      - 29.2 µs
-      - 360 µs
-      - 12.4x
-      - 1.16 ms
-      - 39.8x
-    - - wpt large (92 kB)
-      - 324 µs
-      - 4.03 ms
-      - 12.4x
-      - 8.93 ms
-      - 27.5x
-    - - wpt CJK (124 kB)
-      - 584 µs
-      - 8.45 ms
-      - 14.5x
-      - 22.6 ms
-      - 38.6x
-    - - whatwg spec (235 kB)
-      - 645 µs
-      - 7.39 ms
-      - 11.5x
-      - 19.3 ms
-      - 30.0x
-    - - ecmascript spec (3 MB)
-      - 5.88 ms
-      - 55.0 ms
-      - 9.4x
-      - 181 ms
-      - 30.8x
-    - - whatwg spec source (7.9 MB)
-      - 35.0 ms
-      - 389 ms
-      - 11.1x
-      - 853 ms
-      - 24.4x
-
-The closest case is a document dominated by a single text node, where the standard library's regex performs one C scan
-and never tokenizes; everywhere markup appears, the state machine is 9-16x faster. Numbers vary with input and hardware;
-reproduce them with ``tox -e bench``.
+The :doc:`performance` page measures the tokenizer against :class:`python:html.parser.HTMLParser` and html5lib's
+pure-Python tokenizer. The closest case is a document dominated by a single text node, where the standard library's
+regex performs one C scan and never tokenizes; everywhere markup appears, the state machine is roughly ten times faster.
 
 *********************************
  A navigable tree without copies
@@ -308,67 +115,8 @@ the document goes out of scope. Building the navigable :class:`~turbohtml.Docume
 raw C tree, and the wrappers add cost only for the nodes you touch.
 
 turbohtml parses faster than the C parsers lxml and selectolax, and 30 to 80 times faster than the pure-Python
-BeautifulSoup and html5lib, while building the WHATWG tree that lxml's libxml2 does not. Measured on the same
-web-platform-tests pages and specification sources via ``tox -e bench parse``:
-
-.. list-table::
-    :header-rows: 1
-    :widths: 26 12 11 11 14 11
-
-    - - input
-      - turbohtml
-      - lxml
-      - selectolax
-      - BeautifulSoup
-      - html5lib
-    - - wpt page (0.6 kB)
-      - 1.3 µs
-      - 3.3 µs
-      - 6.8 µs
-      - 61.6 µs
-      - 101 µs
-    - - wpt page (4 kB)
-      - 10.6 µs
-      - 26.7 µs
-      - 42.1 µs
-      - 443 µs
-      - 616 µs
-    - - wpt page (9.6 kB)
-      - 25.4 µs
-      - 72.6 µs
-      - 107 µs
-      - 849 µs
-      - 1.44 ms
-    - - wpt page (92 kB)
-      - 268 µs
-      - 629 µs
-      - 920 µs
-      - 15.5 ms
-      - 17.0 ms
-    - - wpt CJK (124 kB)
-      - 584 µs
-      - 8.45 ms
-      - 14.5x
-      - 22.6 ms
-      - 38.6x
-    - - whatwg spec (235 kB)
-      - 645 µs
-      - 7.39 ms
-      - 11.5x
-      - 19.3 ms
-      - 30.0x
-    - - ecmascript spec (3 MB)
-      - 5.88 ms
-      - 55.0 ms
-      - 9.4x
-      - 181 ms
-      - 30.8x
-    - - whatwg spec source (7.9 MB)
-      - 35.0 ms
-      - 389 ms
-      - 11.1x
-      - 853 ms
-      - 24.4x
+BeautifulSoup and html5lib, while building the WHATWG tree that lxml's libxml2 does not; the :doc:`performance` page has
+the per-document figures.
 
 The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
 :class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`) sharing the navigation defined on
@@ -378,10 +126,17 @@ document order. Each type sets ``__match_args__``, so structural pattern matchin
 node equality is identity over the underlying arena node, so two wrappers for the same element compare equal and hash
 alike.
 
-The traversal surface is small for this first increment: navigation (parents, siblings, the lazy
-:attr:`~turbohtml.Node.descendants` and :attr:`~turbohtml.Node.ancestors` iterators), the sequence protocol over a
-node's children, and :meth:`~turbohtml.Node.find` / :meth:`~turbohtml.Node.find_all` by tag and attributes. A
-CSS-selector engine is a planned follow-up; the zero-copy node model is the foundation it will build on.
+The query surface builds on that node model. Navigation covers parents, siblings, and the lazy
+:attr:`~turbohtml.Node.descendants`, :attr:`~turbohtml.Node.ancestors`, and document-order
+:attr:`~turbohtml.Node.following` / :attr:`~turbohtml.Node.preceding` iterators, plus the sequence protocol over a
+node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen
+:class:`~turbohtml.Axis` by tag and attributes, where a filter is a string, regex, callable, or list.
+:meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.select_one` run a native CSS matcher, and
+:meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the
+tree, so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an integer
+compare. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and
+:meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
+:class:`~turbohtml.Formatter`.
 
 ****************
  Free-threading

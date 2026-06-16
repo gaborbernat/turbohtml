@@ -180,7 +180,7 @@ static int is_html_integration(const th_node *node) {
     if (node->ns == TH_NS_MATHML /* GCOVR_EXCL_BR_LINE */ && node->atom == TH_TAG_ANNOTATION_XML) {
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
             const th_node_attr *attr = &node->attrs[index];
-            if (attr->name_len == 8 && memcmp(attr->name, "encoding", 8) == 0 && attr->value != NULL) {
+            if (attr->name_atom == TH_ATTR_ENCODING && attr->value != NULL) {
                 if ((attr->value_len == 9 && /* "text/html" case-insensitively */
                      (attr->value[0] | 32) == 't' && (attr->value[1] | 32) == 'e' && (attr->value[5] | 32) == 'h') ||
                     attr->value_len == 21) { /* application/xhtml+xml */

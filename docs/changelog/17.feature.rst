@@ -1,0 +1,3 @@
+Add traversal-axis iterators to every node: ``next_siblings``, ``previous_siblings``, ``following`` (document order,
+excluding the node's own subtree), and ``preceding`` (reverse document order, excluding the node's ancestors), plus the
+``strings`` and ``stripped_strings`` text iterators - by :user:`gaborbernat`.

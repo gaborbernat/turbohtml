@@ -3,12 +3,13 @@
 Benchmark turbohtml's escape/unescape/tokenize/parse against other libraries.
 
 Run with ``tox -e bench``; positional arguments pick the suites to run
-(``escape``, ``unescape``, ``tokenize``, ``corpus``, ``parse``; default all).
-Remaining arguments are forwarded to pyperf (pass ``--help`` to see them).
-pyperf runs every case in isolated worker processes and reports mean and
-stddev; the parent process then prints a speedup table: escape, unescape, and
-tokenize against the standard library, and parse against the other HTML tree
-builders (lexbor through selectolax, lxml, html5lib, and BeautifulSoup).
+(``escape``, ``unescape``, ``tokenize``, ``corpus``, ``parse``, ``query``,
+``serialize``; default all). Remaining arguments are forwarded to pyperf (pass
+``--help`` to see them). pyperf runs every case in isolated worker processes and
+reports mean and stddev; the parent process then prints a speedup table: escape,
+unescape, and tokenize against the standard library, parse against the other HTML
+tree builders (lxml, selectolax, html5lib, and BeautifulSoup), and the read-path
+query and serialize suites against lxml, selectolax, and BeautifulSoup.
 
 The escape and unescape inputs span tiny strings (call overhead) and multi-MiB
 documents that stream well past the CPU caches: real corpora (Project
@@ -42,6 +43,10 @@ import turbohtml
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from lxml.html import HtmlElement
+
+    from turbohtml import Document
 
 CORPUS_DIR = Path(__file__).parent / "html5lib-python" / "benchmarks" / "data"
 CORPUS_FILES: list[tuple[str, str, str]] = [
@@ -280,6 +285,136 @@ PARSE_COMPETITORS: tuple[tuple[str, Callable[[str], None]], ...] = (
 )
 
 
+# --- read-path suites: query and serialize a pre-parsed tree --------------- #
+# Each library parses the document once (outside the timed region) into its own
+# tree, then the timed function runs one query or one serialization. The trees
+# differ per library, so the comparison is the user-level operation ("find every
+# anchor", "select a[href]", "serialize to HTML"), each library's idiomatic way.
+
+CSS_SELECTOR = "div a[href]"  # a descendant combinator with an attribute test, common in scrapers
+
+
+def turbo_tree(text: str) -> Document:
+    """Parse with turbohtml into a navigable Document."""
+    return turbohtml.parse(text)
+
+
+def bs4_tree(text: str) -> BeautifulSoup:
+    """Parse with BeautifulSoup over its stdlib html.parser backend."""
+    return BeautifulSoup(text, "html.parser")
+
+
+def lxml_tree(text: str) -> HtmlElement:
+    """Parse with lxml's libxml2-backed HTML parser."""
+    return lxml_html.document_fromstring(text)
+
+
+def lexbor_tree(text: str) -> LexborHTMLParser:
+    """Parse with lexbor through selectolax."""
+    return LexborHTMLParser(text.encode())
+
+
+def turbo_find(doc: Document) -> None:
+    """Collect every anchor with turbohtml's find_all."""
+    doc.find_all("a")
+
+
+def bs4_find(soup: BeautifulSoup) -> None:
+    """Collect every anchor with BeautifulSoup's find_all."""
+    soup.find_all("a")
+
+
+def lxml_find(tree: HtmlElement) -> None:
+    """Collect every anchor with lxml's XPath findall."""
+    tree.findall(".//a")
+
+
+def lexbor_find(tree: LexborHTMLParser) -> None:
+    """Collect every anchor with selectolax's css."""
+    tree.css("a")
+
+
+def turbo_select(doc: Document) -> None:
+    """Run the CSS selector with turbohtml's select."""
+    doc.select(CSS_SELECTOR)
+
+
+def bs4_select(soup: BeautifulSoup) -> None:
+    """Run the CSS selector with BeautifulSoup's soupsieve select."""
+    soup.select(CSS_SELECTOR)
+
+
+def lxml_select(tree: HtmlElement) -> None:
+    """Run the CSS selector with lxml's cssselect."""
+    tree.cssselect(CSS_SELECTOR)
+
+
+def lexbor_select(tree: LexborHTMLParser) -> None:
+    """Run the CSS selector with selectolax's css."""
+    tree.css(CSS_SELECTOR)
+
+
+def turbo_serialize(doc: Document) -> None:
+    """Serialize back to HTML with turbohtml's html property."""
+    _ = doc.html
+
+
+def bs4_serialize(soup: BeautifulSoup) -> None:
+    """Serialize back to HTML with BeautifulSoup's decode."""
+    soup.decode()
+
+
+def lxml_serialize(tree: HtmlElement) -> None:
+    """Serialize back to HTML with lxml's tostring."""
+    lxml_html.tostring(tree)
+
+
+def lexbor_serialize(tree: LexborHTMLParser) -> None:
+    """Serialize back to HTML with selectolax's html property."""
+    _ = tree.html
+
+
+# Read-path competitors, fastest-first: a tree builder plus the find/select/serialize trio. turbohtml leads each table.
+READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., None], ...]], ...] = (
+    ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize)),
+    ("lxml", lxml_tree, (lxml_find, lxml_select, lxml_serialize)),
+    ("selectolax", lexbor_tree, (lexbor_find, lexbor_select, lexbor_serialize)),
+    ("BeautifulSoup", bs4_tree, (bs4_find, bs4_select, bs4_serialize)),
+)
+
+# wpt pages from 4 kB to 92 kB; the multi-MB specs are skipped here since every
+# library would re-parse them per worker, which dwarfs the timed query.
+READPATH_CASES = CORPUS_FILES[1:4]
+
+
+def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
+    """Benchmark one read-path operation (find/select/serialize) across every library."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, ops in READPATH_LIBS:
+            bench(f"{op} {name} [{label}]", ops[op_index], build(text))
+        names.append(name)
+    return names
+
+
+def print_readpath_table(means: dict[str, float], op: str, cases: list[str]) -> None:
+    """Render turbohtml beside each alternative and its slowdown factor for one read-path operation."""
+    if not cases:
+        return
+    others = [label for label, _, _ in READPATH_LIBS if label != "turbohtml"]
+    print()
+    header = f"{op + ' benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"{op} {name} [turbohtml]"]
+        row = f"{op + ' ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"{op} {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def stdlib_tokenize(text: str) -> None:
     """Drive the stdlib parser with its default no-op handlers."""
     parser = HTMLParser()
@@ -350,7 +485,7 @@ def main() -> None:
     runner.argparser.add_argument(
         "suites",
         nargs="*",
-        choices=["escape", "unescape", "tokenize", "corpus", "parse", []],
+        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", []],
         help="suites to run (default: all)",
     )
     args = runner.parse_args()
@@ -359,7 +494,7 @@ def main() -> None:
     if args.suites:
         os.environ["TURBOHTML_BENCH_SUITES"] = ",".join(args.suites)
         args.inherit_environ = [*(args.inherit_environ or []), "TURBOHTML_BENCH_SUITES"]
-    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse")
+    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize")
     suites = set(selection.split(","))
     means: dict[str, float] = {}
 
@@ -382,12 +517,18 @@ def main() -> None:
         if has_html5lib:
             bench(f"tokenize {name} [html5lib]", html5lib_tokenize, arg)
     parse_cases = run_parse_suite(bench) if "parse" in suites else []
+    find_cases = run_readpath_suite(bench, 0, "find") if "query" in suites else []
+    select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
+    serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     if args.worker or not means:
         return
     rows = [(op, name) for op, name, _ in CASES if op in suites]
     rows += [("tokenize", name) for name, _ in tokenize_cases]
     print_table(means, rows)
     print_parse_table(means, parse_cases)
+    print_readpath_table(means, "find", find_cases)
+    print_readpath_table(means, "select", select_cases)
+    print_readpath_table(means, "serialize", serialize_cases)
 
 
 if __name__ == "__main__":
