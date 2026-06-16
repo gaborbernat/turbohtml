@@ -54,6 +54,12 @@ typedef struct {
     Py_ssize_t src_start;
     Py_ssize_t src_len;
     th_buf name; /* tag name (lowercased) or DOCTYPE name */
+    /* The tree builder interns name to an atom once per tag token and caches it
+       here, so the insertion-mode dispatch and insert_element read a field
+       instead of re-interning the same name. Set by the builder, not the
+       tokenizer; meaningful only for start/end tags. */
+    uint16_t atom;
+    uint8_t tag_flags;
     th_buf text; /* TEXT run or COMMENT data */
     th_attr *attrs;
     Py_ssize_t attr_count;

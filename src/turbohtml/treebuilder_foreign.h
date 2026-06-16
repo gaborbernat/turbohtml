@@ -360,8 +360,7 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         return 1; /* ignored in foreign content */
     }
     if (token->kind == TH_START_TAG) {
-        uint8_t flags;
-        uint16_t atom = intern_atom(&token->name, &flags);
+        uint16_t atom = token->atom;
         int breakout = is_foreign_breakout(atom) ||
                        (atom == TH_TAG_FONT && (token_has_attr(token, "color") || token_has_attr(token, "face") ||
                                                 token_has_attr(token, "size")));

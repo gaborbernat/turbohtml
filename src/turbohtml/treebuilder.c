@@ -208,11 +208,10 @@ static uint16_t intern_atom(const th_buf *name, uint8_t *out_flags) {
     return TH_TAG_UNKNOWN;
 }
 
-/* Intern a token's tag name when its category flags are not needed (the common
-   "which tag is this" comparison), discarding the out-flags. */
+/* The token's interned tag atom, cached on the token by the run loop once per
+   token so every "which tag is this" comparison is a field read, not a re-intern. */
 static uint16_t tok_atom(const th_token *tok) {
-    uint8_t ignored;
-    return intern_atom(&tok->name, &ignored);
+    return tok->atom;
 }
 
 /* ---------------------------------------------------- attribute interning */
@@ -985,7 +984,8 @@ static th_node *insert_element(th_tree *tree, const th_token *token) {
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
-    node->atom = intern_atom(&token->name, &node->tag_flags);
+    node->atom = token->atom;
+    node->tag_flags = token->tag_flags;
     node->text = buf_to_ucs4(tree, &token->name, &node->text_len);
     if (token->attr_count > 0) {
         node->attrs = arena_alloc(tree, token->attr_count * (Py_ssize_t)sizeof(th_node_attr));
@@ -2112,6 +2112,14 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
         table_origin = M_IN_TABLE;
         tree->text_offset = 0; /* a fresh token: any consumed-prefix offset is stale */
     reprocess:;
+        /* Intern the tag name once; every comparison and insert below reads
+           tok->atom / tok->tag_flags instead of re-interning the same name. */
+        if (tok->kind == TH_START_TAG || tok->kind == TH_END_TAG) {
+            tok->atom = intern_atom(&tok->name, &tok->tag_flags);
+        } else {
+            tok->atom = TH_TAG_UNKNOWN;
+            tok->tag_flags = 0;
+        }
         if (use_foreign_rules(tree, tok) && foreign_step(tree, tok)) {
             continue; /* handled under foreign-content rules */
         }
@@ -2263,8 +2271,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 /* only the head's own raw-text/RCDATA elements switch to text
                    mode here; textarea/xmp/iframe/etc belong in the body */
                 if (atom == TH_TAG_TITLE || atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT || atom == TH_TAG_NOFRAMES) {
@@ -2413,8 +2421,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 /* head-content tags re-enter the head element, are processed
                    there, and leave the head off the stack again */
                 if (atom == TH_TAG_BASE || atom == TH_TAG_BASEFONT || atom == TH_TAG_BGSOUND || atom == TH_TAG_LINK ||
@@ -2472,8 +2480,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break; /* </template> is handled by the dispatcher above; other end tags are ignored */
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 if (atom == TH_TAG_TEMPLATE) {
                     th_node *node = insert_template(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
@@ -2656,8 +2664,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 if (atom_breaks_frameset(atom) || (atom == TH_TAG_INPUT && !input_is_hidden(tok))) {
                     tree->frameset_ok = 0;
                 }
@@ -3009,8 +3017,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_END_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 if (atom == TH_TAG_BODY || atom == TH_TAG_HTML) {
                     mode = M_AFTER_BODY;
                     if (atom == TH_TAG_HTML) {
@@ -3178,8 +3186,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint16_t atom = tok->atom;
                 if (atom == TH_TAG_CAPTION) {
                     clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
                     afe_push_marker(tree);
@@ -3241,8 +3248,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break;
                 }
                 if (atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT) {
-                    uint8_t f2;
-                    uint16_t a2 = intern_atom(&tok->name, &f2);
+                    uint8_t f2 = tok->tag_flags;
+                    uint16_t a2 = tok->atom;
                     int model = content_model_for(a2, f2);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
