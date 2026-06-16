@@ -8,8 +8,8 @@ documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/
 source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
-suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, or ``serialize``. Numbers vary with input
-and hardware.
+suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``serialize``, or ``build``. Numbers vary
+with input and hardware.
 
 **********
  Escaping
@@ -330,3 +330,33 @@ bulk-copies the clean spans, so it is the fastest of the four by a wide margin.
       - 383 µs
       - 340 µs
       - 5.94 ms
+
+**********
+ Building
+**********
+
+The write path: construct a ``<ul>`` of ``N`` ``<li>`` rows from scratch - each with a ``class``, a ``data``
+attribute, and a text child - then serialize it, the work an editor or template engine does. turbohtml's arena
+allocation and interned attribute names make construction cheaper than lxml's libxml2 nodes and far cheaper than
+BeautifulSoup's Python objects. selectolax is parse-only, so it has no entry.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 24 24 24
+
+    - - build a list
+      - turbohtml
+      - lxml
+      - BeautifulSoup
+    - - 100 rows
+      - 54.8 µs
+      - 143 µs
+      - 720 µs
+    - - 1\ 000 rows
+      - 557 µs
+      - 1.38 ms
+      - 7.43 ms
+    - - 10\ 000 rows
+      - 5.70 ms
+      - 13.2 ms
+      - 77.0 ms

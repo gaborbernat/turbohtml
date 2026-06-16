@@ -365,3 +365,53 @@ parsed nodes as its children, applying the same insertion rules the element woul
     ['a', 'b']
     >>> row.html
     '<tr><td>a</td><td>b</td></tr>'
+
+**********************
+ Build a tree by hand
+**********************
+
+Construct nodes with :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and :class:`~turbohtml.Comment`, then
+assemble them. A list value for a token-list attribute (``class``, ``rel``, ...) joins on a space, and the ``text``
+setter fills an element with a single text child:
+
+.. code-block:: pycon
+
+    >>> from turbohtml import Element
+    >>> card = Element("article", {"class": ["card", "lg"]})
+    >>> heading = Element("h2")
+    >>> heading.text = "Title"
+    >>> card.append(heading)
+    >>> card.html
+    '<article class="card lg"><h2>Title</h2></article>'
+
+******************************
+ Edit a parsed tree in place
+******************************
+
+The structural edits move nodes within a tree and adopt nodes from another. ``unwrap`` replaces an element with its
+children and ``decompose`` drops a subtree:
+
+.. code-block:: pycon
+
+    >>> doc = turbohtml.parse("<p>keep <b>bold</b> <span>drop me</span></p>")
+    >>> p = doc.find("p")
+    >>> doc.find("b").unwrap()  # doctest: +ELLIPSIS
+    Element('b')
+    >>> doc.find("span").decompose()
+    >>> p.html
+    '<p>keep bold </p>'
+
+**********************************
+ Rewrite an element's attributes
+**********************************
+
+``element.attrs`` is a live mapping, so assignment and deletion rewrite the element directly:
+
+.. code-block:: pycon
+
+    >>> link = turbohtml.parse('<a href="/old" class="x" data-tmp="1">go</a>').find("a")
+    >>> link.attrs["href"] = "/new"
+    >>> link.attrs["class"] = ["btn", "primary"]
+    >>> del link.attrs["data-tmp"]
+    >>> link.html
+    '<a href="/new" class="btn primary">go</a>'

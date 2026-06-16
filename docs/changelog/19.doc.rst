@@ -1,0 +1,3 @@
+Document the write path: how-to recipes for building a tree by hand, editing a parsed tree in place, and rewriting an
+element's attributes, plus a ``build`` benchmark suite and a performance table showing turbohtml constructs trees
+about twice as fast as lxml and an order of magnitude faster than BeautifulSoup - by :user:`gaborbernat`.
