@@ -30,32 +30,32 @@ narrows on tiny strings, where call overhead dominates.
       - 0.04 µs
       - 0.11 µs
     - - medium markup (4 KiB)
-      - 2.25 µs
-      - 7.17 µs
+      - 2.18 µs
+      - 7.19 µs
     - - no-op prose (4 MiB)
       - 0.11 ms
-      - 2.51 ms
+      - 2.52 ms
     - - book text (3 MiB)
-      - 0.66 ms
-      - 2.56 ms
+      - 0.60 ms
+      - 2.55 ms
     - - book HTML (4 MiB)
-      - 1.25 ms
-      - 4.54 ms
+      - 1.20 ms
+      - 4.52 ms
     - - spec HTML, dense (4 MiB)
-      - 4.93 ms
-      - 12.8 ms
+      - 4.87 ms
+      - 12.7 ms
     - - UCS-2 plain (4 MiB)
       - 0.70 ms
-      - 2.41 ms
+      - 2.68 ms
     - - UCS-2 markup (4 MiB)
-      - 3.33 ms
-      - 10.9 ms
+      - 3.59 ms
+      - 11.3 ms
     - - UCS-4 plain (4 MiB)
-      - 0.91 ms
-      - 5.29 ms
+      - 0.93 ms
+      - 5.33 ms
     - - UCS-4 markup (4 MiB)
-      - 3.95 ms
-      - 19.3 ms
+      - 3.91 ms
+      - 19.7 ms
 
 ************
  Unescaping
@@ -76,23 +76,23 @@ between references.
       - 0.02 µs
       - 0.03 µs
     - - medium dense refs (4 KiB)
-      - 8.22 µs
+      - 8.26 µs
       - 69.0 µs
     - - numeric refs (4 KiB)
-      - 5.83 µs
-      - 78.7 µs
+      - 6.00 µs
+      - 78.9 µs
     - - book HTML, real refs (4 MiB)
-      - 2.44 ms
-      - 7.87 ms
+      - 2.50 ms
+      - 7.91 ms
     - - escaped book HTML (5 MiB)
-      - 1.90 ms
-      - 19.5 ms
+      - 1.87 ms
+      - 19.3 ms
     - - dense refs (4 MiB)
-      - 9.89 ms
-      - 73.0 ms
+      - 10.1 ms
+      - 73.2 ms
     - - UCS-2 refs (4 MiB)
-      - 2.51 ms
-      - 18.1 ms
+      - 2.67 ms
+      - 18.0 ms
 
 ************
  Tokenizing
@@ -112,57 +112,57 @@ times faster.
       - html.parser
       - html5lib
     - - typical markup
-      - 29.3 µs
-      - 435 µs
-      - 810 µs
+      - 31.6 µs
+      - 441 µs
+      - 815 µs
     - - text-heavy prose
       - 0.54 µs
       - 2.8 µs
       - 143 µs
     - - attribute-heavy
-      - 19.2 µs
+      - 19.4 µs
       - 298 µs
-      - 807 µs
+      - 809 µs
     - - script-heavy
-      - 12.1 µs
+      - 12.2 µs
       - 156 µs
-      - 488 µs
+      - 486 µs
     - - entity-heavy
-      - 20.4 µs
-      - 197 µs
-      - 1.20 ms
+      - 20.8 µs
+      - 196 µs
+      - 1.21 ms
     - - wpt page (0.6 kB)
-      - 1.4 µs
-      - 17.5 µs
-      - 47.7 µs
+      - 1.5 µs
+      - 17.7 µs
+      - 47.5 µs
     - - wpt page (4 kB)
-      - 12.1 µs
-      - 165 µs
-      - 422 µs
+      - 12.9 µs
+      - 169 µs
+      - 421 µs
     - - wpt page (9.6 kB)
-      - 29.2 µs
-      - 360 µs
+      - 30.0 µs
+      - 359 µs
       - 1.16 ms
     - - wpt page (92 kB)
-      - 324 µs
-      - 4.03 ms
-      - 8.93 ms
+      - 336 µs
+      - 4.02 ms
+      - 9.02 ms
     - - wpt page, CJK (124 kB)
-      - 584 µs
-      - 8.45 ms
-      - 22.6 ms
+      - 586 µs
+      - 8.43 ms
+      - 22.4 ms
     - - whatwg spec (235 kB)
-      - 645 µs
-      - 7.39 ms
+      - 685 µs
+      - 7.46 ms
       - 19.3 ms
     - - ecmascript spec (3 MB)
-      - 5.88 ms
-      - 55.0 ms
-      - 181 ms
+      - 6.10 ms
+      - 54.9 ms
+      - 180 ms
     - - whatwg spec source (7.9 MB)
-      - 35.0 ms
-      - 389 ms
-      - 853 ms
+      - 36.6 ms
+      - 390 ms
+      - 856 ms
 
 *********
  Parsing
@@ -188,50 +188,50 @@ WHATWG tree that lxml's libxml2 does not.
       - 1.3 µs
       - 3.3 µs
       - 6.8 µs
-      - 61.6 µs
+      - 61.3 µs
       - 101 µs
     - - wpt page (4 kB)
       - 10.6 µs
-      - 26.7 µs
-      - 42.1 µs
-      - 443 µs
-      - 616 µs
+      - 27.1 µs
+      - 42.0 µs
+      - 438 µs
+      - 615 µs
     - - wpt page (9.6 kB)
-      - 25.4 µs
-      - 72.6 µs
-      - 107 µs
-      - 849 µs
-      - 1.44 ms
+      - 27.5 µs
+      - 73.2 µs
+      - 106 µs
+      - 836 µs
+      - 1.45 ms
     - - wpt page (92 kB)
-      - 268 µs
-      - 629 µs
-      - 920 µs
-      - 15.5 ms
-      - 17.0 ms
+      - 254 µs
+      - 633 µs
+      - 917 µs
+      - 15.1 ms
+      - 16.6 ms
     - - wpt page, CJK (124 kB)
-      - 483 µs
-      - 1.44 ms
-      - 2.30 ms
-      - 21.5 ms
-      - 28.0 ms
+      - 505 µs
+      - 1.43 ms
+      - 2.29 ms
+      - 20.7 ms
+      - 29.5 ms
     - - whatwg spec (235 kB)
-      - 504 µs
+      - 498 µs
       - 1.23 ms
       - 1.78 ms
-      - 26.4 ms
-      - 31.9 ms
+      - 25.3 ms
+      - 31.0 ms
     - - ecmascript spec (3 MB)
-      - 4.42 ms
-      - 17.5 ms
-      - 15.8 ms
-      - 183 ms
-      - 254 ms
+      - 4.31 ms
+      - 17.4 ms
+      - 15.7 ms
+      - 193 ms
+      - 260 ms
     - - whatwg spec source (7.9 MB)
-      - 27.6 ms
-      - 83.8 ms
-      - 94.8 ms
-      - 1.66 s
-      - 1.73 s
+      - 26.8 ms
+      - 83.1 ms
+      - 94.0 ms
+      - 1.63 s
+      - 1.55 s
 
 **********
  Querying
@@ -255,23 +255,23 @@ several times ahead of selectolax and BeautifulSoup.
     - - wpt page (4 kB)
       - 0.2 µs
       - 0.5 µs
-      - 2.2 µs
-      - 5.8 µs
+      - 2.4 µs
+      - 5.9 µs
     - - wpt page (9.6 kB)
       - 0.3 µs
-      - 0.5 µs
-      - 2.6 µs
+      - 0.6 µs
+      - 2.8 µs
       - 9.5 µs
     - - wpt page (92 kB)
-      - 11.5 µs
-      - 23.5 µs
-      - 45.8 µs
+      - 15.7 µs
+      - 24.6 µs
+      - 46.3 µs
       - 206 µs
 
 ``select`` runs the CSS selector ``div a[href]`` (turbohtml's :meth:`~turbohtml.Node.select`, lxml's ``cssselect``,
 selectolax's ``css``, BeautifulSoup's soupsieve). Because turbohtml compiles the selector against the tree once and then
-compares interned integer atoms, it runs from twice to forty times faster than lxml and over a hundred times faster than
-BeautifulSoup.
+compares interned integer atoms, it runs from twice to over forty times faster than lxml and over a hundred times faster
+than BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
@@ -283,20 +283,20 @@ BeautifulSoup.
       - selectolax
       - BeautifulSoup
     - - wpt page (4 kB)
-      - 0.4 µs
-      - 15.6 µs
+      - 0.3 µs
+      - 15.1 µs
       - 2.5 µs
-      - 42.9 µs
+      - 41.9 µs
     - - wpt page (9.6 kB)
-      - 0.5 µs
-      - 16.4 µs
+      - 0.4 µs
+      - 16.9 µs
       - 3.0 µs
-      - 65.0 µs
+      - 64.3 µs
     - - wpt page (92 kB)
-      - 14.2 µs
-      - 33.6 µs
-      - 45.8 µs
-      - 2.13 ms
+      - 12.7 µs
+      - 33.2 µs
+      - 47.4 µs
+      - 2.12 ms
 
 *************
  Serializing
@@ -316,20 +316,20 @@ bulk-copies the clean spans, so it serializes faster than lxml, selectolax, and 
       - selectolax
       - BeautifulSoup
     - - wpt page (4 kB)
-      - 4.6 µs
-      - 18.6 µs
-      - 12.3 µs
-      - 197 µs
+      - 4.7 µs
+      - 18.5 µs
+      - 12.4 µs
+      - 198 µs
     - - wpt page (9.6 kB)
-      - 12.9 µs
-      - 50.9 µs
-      - 29.8 µs
-      - 471 µs
+      - 13.0 µs
+      - 50.6 µs
+      - 29.7 µs
+      - 475 µs
     - - wpt page (92 kB)
       - 151 µs
       - 383 µs
-      - 340 µs
-      - 5.94 ms
+      - 337 µs
+      - 5.95 ms
 
 **********
  Building
@@ -349,17 +349,17 @@ objects. selectolax is parse-only, so it has no entry.
       - lxml
       - BeautifulSoup
     - - 100 rows
-      - 54.8 µs
-      - 143 µs
-      - 720 µs
+      - 56.2 µs
+      - 133 µs
+      - 782 µs
     - - 1000 rows
-      - 557 µs
-      - 1.38 ms
-      - 7.43 ms
+      - 556 µs
+      - 1.36 ms
+      - 7.55 ms
     - - 10000 rows
-      - 5.70 ms
-      - 13.2 ms
-      - 77.0 ms
+      - 5.27 ms
+      - 13.7 ms
+      - 83.0 ms
 
 *********
  Editing
@@ -379,14 +379,14 @@ selectolax mutation is limited, so it has no entry.
       - lxml
       - BeautifulSoup
     - - wpt page (4 kB)
-      - 243 ns
-      - 772 ns
-      - 5.98 µs
+      - 195 ns
+      - 688 ns
+      - 5.82 µs
     - - wpt page (9.6 kB)
-      - 368 ns
-      - 766 ns
-      - 10.0 µs
+      - 295 ns
+      - 760 ns
+      - 9.58 µs
     - - wpt page (92 kB)
-      - 17.5 µs
-      - 41.5 µs
-      - 210 µs
+      - 18.4 µs
+      - 40.9 µs
+      - 215 µs
