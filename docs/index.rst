@@ -29,6 +29,7 @@ The documentation follows the `Diátaxis <https://diataxis.fr>`_ framework.
 
     tutorials
     how-to
+    migration
     reference
     explanation
     performance

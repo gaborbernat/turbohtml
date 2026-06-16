@@ -1,0 +1,4 @@
+Add a BeautifulSoup-to-turbohtml migration guide: a translation table from each ``bs4`` idiom to its native
+equivalent, worked before/after examples for searching, attributes, text, building, editing, and output, and the
+behavior differences a porting user hits (children-not-attributes indexing, text as real child nodes,
+WHATWG-conformant default output, identity equality). Every example runs as a doctest - by :user:`gaborbernat`.
