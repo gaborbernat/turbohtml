@@ -384,9 +384,9 @@ setter fills an element with a single text child:
     >>> card.html
     '<article class="card lg"><h2>Title</h2></article>'
 
-******************************
+*****************************
  Edit a parsed tree in place
-******************************
+*****************************
 
 The structural edits move nodes within a tree and adopt nodes from another. ``unwrap`` replaces an element with its
 children and ``decompose`` drops a subtree:
@@ -401,9 +401,9 @@ children and ``decompose`` drops a subtree:
     >>> p.html
     '<p>keep bold </p>'
 
-**********************************
+*********************************
  Rewrite an element's attributes
-**********************************
+*********************************
 
 ``element.attrs`` is a live mapping, so assignment and deletion rewrite the element directly:
 

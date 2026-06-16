@@ -335,10 +335,10 @@ bulk-copies the clean spans, so it is the fastest of the four by a wide margin.
  Building
 **********
 
-The write path: construct a ``<ul>`` of ``N`` ``<li>`` rows from scratch - each with a ``class``, a ``data``
-attribute, and a text child - then serialize it, the work an editor or template engine does. turbohtml's arena
-allocation and interned attribute names make construction cheaper than lxml's libxml2 nodes and far cheaper than
-BeautifulSoup's Python objects. selectolax is parse-only, so it has no entry.
+The write path: construct a ``<ul>`` of ``N`` ``<li>`` rows from scratch - each with a ``class``, a ``data`` attribute,
+and a text child - then serialize it, the work an editor or template engine does. turbohtml's arena allocation and
+interned attribute names make construction cheaper than lxml's libxml2 nodes and far cheaper than BeautifulSoup's Python
+objects. selectolax is parse-only, so it has no entry.
 
 .. list-table::
     :header-rows: 1
@@ -352,11 +352,11 @@ BeautifulSoup's Python objects. selectolax is parse-only, so it has no entry.
       - 54.8 µs
       - 143 µs
       - 720 µs
-    - - 1\ 000 rows
+    - - 1000 rows
       - 557 µs
       - 1.38 ms
       - 7.43 ms
-    - - 10\ 000 rows
+    - - 10000 rows
       - 5.70 ms
       - 13.2 ms
       - 77.0 ms
