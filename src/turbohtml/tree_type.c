@@ -727,11 +727,17 @@ typedef struct {
        unknown-atom elements are compared by name). */
     int tag_plain;
     uint16_t tag_atom;
+    /* Fast path for a plain-string class_ filter: its code points are copied
+       once so each element's class tokens are compared without building a str
+       per token. class_ucs4 is NULL unless class_filter is a single str. */
+    Py_UCS4 *class_ucs4;
+    Py_ssize_t class_len;
 } query_t;
 
 static void free_query(query_t *query) {
     PyMem_Free(query->atoms);
     PyMem_Free(query->filters);
+    PyMem_Free(query->class_ucs4);
 }
 
 static int resolve_axis(module_state *state, PyObject *value, enum th_axis *out) {
@@ -858,6 +864,39 @@ static int class_matches(module_state *state, th_node *node, PyObject *filter) {
     return 0;
 }
 
+/* class_matches for a plain-string filter: compare the filter's code points to
+   the whole class value and then each token directly, allocating nothing. */
+static int class_matches_plain(th_node *node, const Py_UCS4 *want, Py_ssize_t want_len) {
+    const th_node_attr *attr = NULL;
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == TH_ATTR_CLASS) {
+            attr = &node->attrs[index];
+            break;
+        }
+    }
+    if (attr == NULL || attr->value == NULL) {
+        return 0; /* a string filter never matches an absent or valueless class */
+    }
+    size_t bytes = (size_t)want_len * sizeof(Py_UCS4);
+    if (attr->value_len == want_len && memcmp(attr->value, want, bytes) == 0) {
+        return 1; /* the whole value equals the filter */
+    }
+    Py_ssize_t cursor = 0;
+    while (cursor < attr->value_len) {
+        while (cursor < attr->value_len && is_space(attr->value[cursor])) {
+            cursor++;
+        }
+        Py_ssize_t start = cursor;
+        while (cursor < attr->value_len && !is_space(attr->value[cursor])) {
+            cursor++;
+        }
+        if (cursor - start == want_len && memcmp(&attr->value[start], want, bytes) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Whether an element matches the whole query. Returns 1/0, or -1 with an
    exception set. */
 static int node_matches(module_state *state, th_node *node, const query_t *query) {
@@ -896,7 +935,11 @@ static int node_matches(module_state *state, th_node *node, const query_t *query
             return matched;
         }
     }
-    if (query->class_filter != NULL) {
+    if (query->class_ucs4 != NULL) {
+        if (class_matches_plain(node, query->class_ucs4, query->class_len) == 0) {
+            return 0;
+        }
+    } else if (query->class_filter != NULL) {
         int matched = class_matches(state, node, query->class_filter);
         if (matched <= 0) {
             return matched;
@@ -990,6 +1033,8 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     query->nattr = 0;
     query->tag_plain = 0;
     query->tag_atom = TH_TAG_UNKNOWN;
+    query->class_ucs4 = NULL;
+    query->class_len = 0;
 
     PyObject *tag = NULL;
     if (!PyArg_ParseTuple(args, "|O:find", &tag)) {
@@ -1043,6 +1088,15 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
             }
         } else {
             named++;
+        }
+    }
+
+    if (query->class_filter != NULL && PyUnicode_Check(query->class_filter)) {
+        /* a plain str class_ filter matches by code-point compare, no per-token str */
+        query->class_len = PyUnicode_GET_LENGTH(query->class_filter);
+        query->class_ucs4 = PyUnicode_AsUCS4Copy(query->class_filter);
+        if (query->class_ucs4 == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced from a test */
+            return -1;                   /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
 

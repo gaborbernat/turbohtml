@@ -105,6 +105,28 @@ def test_class_matches_the_whole_value() -> None:
     assert _el(parse(_DOC).find(class_="lead big")).text == "one"
 
 
+def test_class_regex_matches_a_token_not_the_whole_value() -> None:
+    # an anchored regex matches the "big" token of "lead big" but not the whole value
+    doc = parse('<p class="lead big">x</p><p class="big">y</p>')
+    assert len(doc.find_all("p", class_=re.compile(r"^big$"))) == 2
+
+
+def test_class_equal_length_token_mismatch() -> None:
+    # a class value the same length as the filter but different content
+    assert parse('<p class="xyz">x</p>').find("p", class_="big") is None
+
+
+def test_class_regex_scans_surrounding_whitespace() -> None:
+    # a non-matching regex walks every token of a whitespace-padded value, including
+    # the trailing run that yields no token
+    assert parse('<p class=" a b ">x</p>').find("p", class_=re.compile(r"zzz")) is None
+
+
+def test_string_attr_filter_on_valueless_attribute() -> None:
+    # a str attribute filter never matches a valueless attribute
+    assert parse("<input disabled>").find("input", disabled="x") is None
+
+
 def test_class_regex_matches_a_token() -> None:
     assert _el(parse(_DOC).find(class_=re.compile(r"^lea"))).text == "one"
 
