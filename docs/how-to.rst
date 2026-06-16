@@ -8,12 +8,15 @@
 
 When you interpolate user-supplied text into HTML, escape it first so it cannot break out of its context:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import turbohtml
-    >>> comment = '<script>alert("xss")</script>'
-    >>> f"<p>{turbohtml.escape(comment)}</p>"
-    '<p>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</p>'
+    import turbohtml
+    comment = '<script>alert("xss")</script>'
+    print(f"<p>{turbohtml.escape(comment)}</p>")
+
+.. testoutput::
+
+    <p>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</p>
 
 ************************************************
  Escape for a text node without touching quotes
@@ -22,10 +25,13 @@ When you interpolate user-supplied text into HTML, escape it first so it cannot 
 Inside element text (not an attribute) the quote characters are safe, so pass ``quote=False`` to leave them untouched
 and keep the output smaller:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> turbohtml.escape('He said "hi" & left', quote=False)
-    'He said "hi" &amp; left'
+    print(turbohtml.escape('He said "hi" & left', quote=False))
+
+.. testoutput::
+
+    He said "hi" &amp; left
 
 **********************************
  Decode HTML character references
@@ -33,17 +39,23 @@ and keep the output smaller:
 
 Convert named and numeric references from scraped or stored HTML back into text:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> turbohtml.unescape("&pound;10 &copy; &#127881;")
-    '£10 © 🎉'
+    print(turbohtml.unescape("&pound;10 &copy; &#127881;"))
+
+.. testoutput::
+
+    £10 © 🎉
 
 Unescaping follows the HTML5 rules, including longest-match for references that omit the trailing semicolon:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> turbohtml.unescape("&notit;")
-    '¬it;'
+    print(turbohtml.unescape("&notit;"))
+
+.. testoutput::
+
+    ¬it;
 
 **************************
  Migrate from html.parser
@@ -117,11 +129,14 @@ foreign content). Code ported from ``html.parser`` sees the same tokens a browse
 Iterate the token stream and pull the ``href`` of every anchor start tag; :meth:`turbohtml.Token.attr` returns ``None``
 for a valueless attribute and your fallback when the attribute is missing:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> page = '<p><a href="/a">one</a> and <a href="/b" download>two</a></p>'
-    >>> [token.attr("href") for token in turbohtml.tokenize(page)
-    ...  if token.type is turbohtml.TokenType.START_TAG and token.tag == "a"]
+    page = '<p><a href="/a">one</a> and <a href="/b" download>two</a></p>'
+    print([token.attr("href") for token in turbohtml.tokenize(page)
+     if token.type is turbohtml.TokenType.START_TAG and token.tag == "a"])
+
+.. testoutput::
+
     ['/a', '/b']
 
 **********************************
@@ -132,21 +147,23 @@ Collect the text tokens while skipping the contents of elements the browser does
 ``style``. The tokenizer hands you script and style bodies as text tokens (that is what they are to the algorithm), so
 track the enclosing tag yourself:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> from collections.abc import Iterator
-    >>> def visible_text(page: str) -> Iterator[str]:
-    ...     hidden = 0
-    ...     for token in turbohtml.tokenize(page):
-    ...         if token.type is turbohtml.TokenType.START_TAG and token.tag in {"script", "style"}:
-    ...             hidden += 1
-    ...         elif token.type is turbohtml.TokenType.END_TAG and token.tag in {"script", "style"}:
-    ...             hidden -= 1
-    ...         elif token.type is turbohtml.TokenType.TEXT and not hidden:
-    ...             yield token.data
-    ...
-    >>> "".join(visible_text("<style>p{}</style><p>Tom &amp; Jerry</p>"))
-    'Tom & Jerry'
+    from collections.abc import Iterator
+    def visible_text(page: str) -> Iterator[str]:
+        hidden = 0
+        for token in turbohtml.tokenize(page):
+            if token.type is turbohtml.TokenType.START_TAG and token.tag in {"script", "style"}:
+                hidden += 1
+            elif token.type is turbohtml.TokenType.END_TAG and token.tag in {"script", "style"}:
+                hidden -= 1
+            elif token.type is turbohtml.TokenType.TEXT and not hidden:
+                yield token.data
+    print("".join(visible_text("<style>p{}</style><p>Tom &amp; Jerry</p>")))
+
+.. testoutput::
+
+    Tom & Jerry
 
 ***********************************
  Tokenize a document incrementally
@@ -156,24 +173,30 @@ When the input arrives in chunks, feed each chunk to a :class:`turbohtml.Tokeniz
 text and unfinished tags stay buffered until they are complete, so the result is identical to tokenizing the whole
 string at once:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> tokenizer = turbohtml.Tokenizer()
-    >>> tokens = []
-    >>> for chunk in ("<ul><li>on", "e<li>two</", "ul>"):
-    ...     tokens += tokenizer.feed(chunk)
-    >>> tokens += tokenizer.close()
-    >>> [token.tag or token.data for token in tokens]
+    tokenizer = turbohtml.Tokenizer()
+    tokens = []
+    for chunk in ("<ul><li>on", "e<li>two</", "ul>"):
+        tokens += tokenizer.feed(chunk)
+    tokens += tokenizer.close()
+    print([token.tag or token.data for token in tokens])
+
+.. testoutput::
+
     ['ul', 'li', 'one', 'li', 'two', 'ul']
 
 As a context manager the tokenizer signals end of input when the block exits, so forgetting ``close()`` cannot leave the
 final tokens stuck behind an unfinished construct; iterate the tokenizer itself to drain what remains:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> with turbohtml.Tokenizer() as tokenizer:
-    ...     tokens = [token for chunk in ("<ul><li>on", "e") for token in tokenizer.feed(chunk)]
-    >>> [token.tag or token.data for token in tokenizer]
+    with turbohtml.Tokenizer() as tokenizer:
+        tokens = [token for chunk in ("<ul><li>on", "e") for token in tokenizer.feed(chunk)]
+    print([token.tag or token.data for token in tokenizer])
+
+.. testoutput::
+
     ['one']
 
 Call ``reset()`` to reuse the same tokenizer for an unrelated document.
@@ -186,11 +209,14 @@ Every token remembers where it began: :attr:`turbohtml.Token.line` is the 1-base
 :attr:`turbohtml.Token.col` the 0-based column (the convention :mod:`python:html.parser` shares), so you can point at
 the offending markup:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> page = "<h1>title</h1>\n<img src='a.png'>"
-    >>> [f"{token.tag} at {token.line}:{token.col}" for token in turbohtml.tokenize(page)
-    ...  if token.type is turbohtml.TokenType.START_TAG and token.tag == "img"]
+    page = "<h1>title</h1>\n<img src='a.png'>"
+    print([f"{token.tag} at {token.line}:{token.col}" for token in turbohtml.tokenize(page)
+     if token.type is turbohtml.TokenType.START_TAG and token.tag == "img"])
+
+.. testoutput::
+
     ['img at 2:0']
 
 ************************************
@@ -201,13 +227,16 @@ Parse the document with :func:`turbohtml.parse`, then query it with :meth:`~turb
 :meth:`~turbohtml.Node.find_all` (every match). A keyword argument constrains an attribute; both work from the document
 or from any element, searching its descendants:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import turbohtml
-    >>> doc = turbohtml.parse("<form><input name=email><input name=token type=hidden></form>")
-    >>> doc.find("input", type="hidden").attrs["name"]
-    'token'
-    >>> [field.attrs["name"] for field in doc.find_all("input")]
+    import turbohtml
+    doc = turbohtml.parse("<form><input name=email><input name=token type=hidden></form>")
+    print(doc.find("input", type="hidden").attrs["name"])
+    print([field.attrs["name"] for field in doc.find_all("input")])
+
+.. testoutput::
+
+    token
     ['email', 'token']
 
 ************************************
@@ -217,10 +246,13 @@ or from any element, searching its descendants:
 Collect the ``href`` of every anchor by iterating :meth:`~turbohtml.Node.find_all`; a missing attribute does not appear
 in :attr:`~turbohtml.Element.attrs`:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> page = '<p><a href="/a">one</a> and <a href="/b" download>two</a></p>'
-    >>> [link.attrs["href"] for link in turbohtml.parse(page).find_all("a")]
+    page = '<p><a href="/a">one</a> and <a href="/b" download>two</a></p>'
+    print([link.attrs["href"] for link in turbohtml.parse(page).find_all("a")])
+
+.. testoutput::
+
     ['/a', '/b']
 
 ***********************************
@@ -230,13 +262,16 @@ in :attr:`~turbohtml.Element.attrs`:
 :attr:`~turbohtml.Node.text` is the concatenated character data of a node's subtree, with references decoded;
 :attr:`~turbohtml.Node.html` re-serializes the subtree back to HTML (attributes quoted, specials escaped):
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> article = turbohtml.parse("<article><h1>Title</h1><p>Tom &amp; Jerry</p></article>").find("article")
-    >>> article.text
-    'TitleTom & Jerry'
-    >>> article.find("p").html
-    '<p>Tom &amp; Jerry</p>'
+    article = turbohtml.parse("<article><h1>Title</h1><p>Tom &amp; Jerry</p></article>").find("article")
+    print(article.text)
+    print(article.find("p").html)
+
+.. testoutput::
+
+    TitleTom & Jerry
+    <p>Tom &amp; Jerry</p>
 
 ``text`` gathers every text node in the subtree, including the contents of ``script`` and ``style`` elements when they
 sit inside it; filter those out by walking :attr:`~turbohtml.Node.descendants` yourself when you need only rendered
@@ -250,20 +285,22 @@ The node types are a sealed hierarchy with :py:data:`~object.__match_args__` set
 node kind and unpacks the defining field (``tag`` for an :class:`~turbohtml.Element`, ``data`` for a
 :class:`~turbohtml.Text` or :class:`~turbohtml.Comment`):
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> def summarize(node: turbohtml.Node) -> str:
-    ...     match node:
-    ...         case turbohtml.Element(tag):
-    ...             return f"<{tag}>"
-    ...         case turbohtml.Text(data):
-    ...             return repr(data)
-    ...         case turbohtml.Comment(data):
-    ...             return f"<!--{data}-->"
-    ...         case _:
-    ...             return "?"
-    ...
-    >>> [summarize(child) for child in turbohtml.parse("<p>hi<!--x--><b>bold</b></p>").find("p")]
+    def summarize(node: turbohtml.Node) -> str:
+        match node:
+            case turbohtml.Element(tag):
+                return f"<{tag}>"
+            case turbohtml.Text(data):
+                return repr(data)
+            case turbohtml.Comment(data):
+                return f"<!--{data}-->"
+            case _:
+                return "?"
+    print([summarize(child) for child in turbohtml.parse("<p>hi<!--x--><b>bold</b></p>").find("p")])
+
+.. testoutput::
+
     ["'hi'", '<!--x-->', '<b>']
 
 ***************************
@@ -275,25 +312,31 @@ node kind and unpacks the defining field (``tag`` for an :class:`~turbohtml.Elem
 attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` operators, joined by the descendant, child
 (``>``), adjacent (``+``), and general-sibling (``~``) combinators, with comma groups:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import turbohtml
-    >>> doc = turbohtml.parse('<ul><li class=on>a<li><a href="/x">b</a></ul>')
-    >>> [li.text for li in doc.select("li.on")]
+    import turbohtml
+    doc = turbohtml.parse('<ul><li class=on>a<li><a href="/x">b</a></ul>')
+    print([li.text for li in doc.select("li.on")])
+    print(doc.select_one('a[href^="/"]').text)
+
+.. testoutput::
+
     ['a']
-    >>> doc.select_one('a[href^="/"]').text
-    'b'
+    b
 
 To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node
 match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> link = turbohtml.parse('<nav><a href="/x">home</a></nav>').select_one("a")
-    >>> link.matches("nav a")
+    link = turbohtml.parse('<nav><a href="/x">home</a></nav>').select_one("a")
+    print(link.matches("nav a"))
+    print(link.closest("nav").tag)
+
+.. testoutput::
+
     True
-    >>> link.closest("nav").tag
-    'nav'
+    nav
 
 ********************************
  Filter by attribute or pattern
@@ -303,14 +346,17 @@ match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor
 callable, a ``bool`` (present or absent), or a list of those, applied to the tag or to an attribute. ``class_`` matches
 a token in the class list, and ``axis`` aims the search at something other than descendants:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import re, turbohtml
-    >>> doc = turbohtml.parse('<a class="btn lg" href="/a">A</a><a href="mailto:x">B</a>')
-    >>> [a.attrs["href"] for a in doc.find_all("a", href=re.compile(r"^/"))]
+    import re, turbohtml
+    doc = turbohtml.parse('<a class="btn lg" href="/a">A</a><a href="mailto:x">B</a>')
+    print([a.attrs["href"] for a in doc.find_all("a", href=re.compile(r"^/"))])
+    print(doc.find("a", class_="lg").text)
+
+.. testoutput::
+
     ['/a']
-    >>> doc.find("a", class_="lg").text
-    'A'
+    A
 
 ************************
  Serialize with control
@@ -321,16 +367,19 @@ and children-only). :meth:`~turbohtml.Node.serialize` adds control: ``formatter`
 :class:`~turbohtml.Formatter`, and ``indent`` (an int or string) switches to a pretty form that adds whitespace and so
 does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import turbohtml
-    >>> from turbohtml import Formatter
-    >>> card = turbohtml.parse("<div><p>café &amp; co</p></div>").select_one("div")
-    >>> card.inner_html
-    '<p>café &amp; co</p>'
-    >>> card.serialize(formatter=Formatter.NAMED_ENTITIES)
-    '<div><p>caf&eacute; &amp; co</p></div>'
-    >>> card.encode("ascii", formatter=Formatter.NAMED_ENTITIES)
+    import turbohtml
+    from turbohtml import Formatter
+    card = turbohtml.parse("<div><p>café &amp; co</p></div>").select_one("div")
+    print(card.inner_html)
+    print(card.serialize(formatter=Formatter.NAMED_ENTITIES))
+    print(card.encode("ascii", formatter=Formatter.NAMED_ENTITIES))
+
+.. testoutput::
+
+    <p>café &amp; co</p>
+    <div><p>caf&eacute; &amp; co</p></div>
     b'<div><p>caf&eacute; &amp; co</p></div>'
 
 ************************************
@@ -341,14 +390,17 @@ does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but return
 ``<meta>`` declaration, defaulting to windows-1252). Pass ``encoding`` to override the sniff, and read
 :attr:`~turbohtml.Document.encoding` for the label that was used:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import turbohtml
-    >>> doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
-    >>> doc.encoding
-    'iso-8859-2'
-    >>> doc.find("p").text
-    'á'
+    import turbohtml
+    doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
+    print(doc.encoding)
+    print(doc.find("p").text)
+
+.. testoutput::
+
+    iso-8859-2
+    á
 
 ************************
  Parse an HTML fragment
@@ -358,13 +410,16 @@ To parse markup that belongs inside a specific element (a table row, an SVG subt
 :func:`turbohtml.parse_fragment` with the context tag. It returns that context :class:`~turbohtml.Element` with the
 parsed nodes as its children, applying the same insertion rules the element would impose in a full document:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> row = turbohtml.parse_fragment("<td>a<td>b", "tr")
-    >>> [cell.text for cell in row.find_all("td")]
+    row = turbohtml.parse_fragment("<td>a<td>b", "tr")
+    print([cell.text for cell in row.find_all("td")])
+    print(row.html)
+
+.. testoutput::
+
     ['a', 'b']
-    >>> row.html
-    '<tr><td>a</td><td>b</td></tr>'
+    <tr><td>a</td><td>b</td></tr>
 
 **********************
  Build a tree by hand
@@ -374,15 +429,18 @@ Construct nodes with :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and 
 assemble them. A list value for a token-list attribute (``class``, ``rel``, ...) joins on a space, and the ``text``
 setter fills an element with a single text child:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> from turbohtml import Element
-    >>> card = Element("article", {"class": ["card", "lg"]})
-    >>> heading = Element("h2")
-    >>> heading.text = "Title"
-    >>> card.append(heading)
-    >>> card.html
-    '<article class="card lg"><h2>Title</h2></article>'
+    from turbohtml import Element
+    card = Element("article", {"class": ["card", "lg"]})
+    heading = Element("h2")
+    heading.text = "Title"
+    card.append(heading)
+    print(card.html)
+
+.. testoutput::
+
+    <article class="card lg"><h2>Title</h2></article>
 
 *****************************
  Edit a parsed tree in place
@@ -391,15 +449,18 @@ setter fills an element with a single text child:
 The structural edits move nodes within a tree and adopt nodes from another. ``unwrap`` replaces an element with its
 children and ``decompose`` drops a subtree:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> doc = turbohtml.parse("<p>keep <b>bold</b> <span>drop me</span></p>")
-    >>> p = doc.find("p")
-    >>> doc.find("b").unwrap()  # doctest: +ELLIPSIS
+    doc = turbohtml.parse("<p>keep <b>bold</b> <span>drop me</span></p>")
+    p = doc.find("p")
+    print(doc.find("b").unwrap())
+    doc.find("span").decompose()
+    print(p.html)
+
+.. testoutput::
+
     Element('b')
-    >>> doc.find("span").decompose()
-    >>> p.html
-    '<p>keep bold </p>'
+    <p>keep bold </p>
 
 *********************************
  Rewrite an element's attributes
@@ -407,14 +468,17 @@ children and ``decompose`` drops a subtree:
 
 ``element.attrs`` is a live mapping, so assignment and deletion rewrite the element directly:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> link = turbohtml.parse('<a href="/old" class="x" data-tmp="1">go</a>').find("a")
-    >>> link.attrs["href"] = "/new"
-    >>> link.attrs["class"] = ["btn", "primary"]
-    >>> del link.attrs["data-tmp"]
-    >>> link.html
-    '<a href="/new" class="btn primary">go</a>'
+    link = turbohtml.parse('<a href="/old" class="x" data-tmp="1">go</a>').find("a")
+    link.attrs["href"] = "/new"
+    link.attrs["class"] = ["btn", "primary"]
+    del link.attrs["data-tmp"]
+    print(link.html)
+
+.. testoutput::
+
+    <a href="/new" class="btn primary">go</a>
 
 ***********************************
  Merge adjacent text after editing
@@ -423,13 +487,16 @@ children and ``decompose`` drops a subtree:
 Edits can leave a run of adjacent text nodes; :meth:`~turbohtml.Element.normalize` merges each run into one and drops
 empty text nodes, throughout the subtree (the DOM operation BeautifulSoup spells ``smooth``):
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> from turbohtml import Text
-    >>> p = turbohtml.Element("p")
-    >>> p.extend([Text("Hello "), Text(""), Text("world")])
-    >>> p.normalize()
-    >>> len(p), p.html
+    from turbohtml import Text
+    p = turbohtml.Element("p")
+    p.extend([Text("Hello "), Text(""), Text("world")])
+    p.normalize()
+    print((len(p), p.html))
+
+.. testoutput::
+
     (1, '<p>Hello world</p>')
 
 ******************************
@@ -440,11 +507,14 @@ Any node deep-copies into a fresh standalone tree, so a clone is independent of 
 :func:`python:copy.deepcopy` to duplicate in memory, or :mod:`python:pickle` to cross a process or cache boundary; both
 preserve processing instructions and CDATA sections exactly:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import copy
-    >>> menu = turbohtml.parse("<ul><li>tea</li></ul>").find("ul")
-    >>> clone = copy.deepcopy(menu)
-    >>> clone.append(turbohtml.Element("li"))
-    >>> menu.html, clone.html
+    import copy
+    menu = turbohtml.parse("<ul><li>tea</li></ul>").find("ul")
+    clone = copy.deepcopy(menu)
+    clone.append(turbohtml.Element("li"))
+    print((menu.html, clone.html))
+
+.. testoutput::
+
     ('<ul><li>tea</li></ul>', '<ul><li>tea</li><li></li></ul>')

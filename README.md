@@ -24,25 +24,26 @@ Wheels ship per interpreter for CPython 3.10–3.15 (including free-threading), 
 
 Escape text before interpolating it into HTML so it cannot break out of its context:
 
-```pycon
->>> import turbohtml
->>> turbohtml.escape('<a href="?x=1&y=2">Tom & Jerry</a>')
-'&lt;a href=&quot;?x=1&amp;y=2&quot;&gt;Tom &amp; Jerry&lt;/a&gt;'
+```python
+import turbohtml
+
+print(turbohtml.escape('<a href="?x=1&y=2">Tom & Jerry</a>'))
+# &lt;a href=&quot;?x=1&amp;y=2&quot;&gt;Tom &amp; Jerry&lt;/a&gt;
 ```
 
 Inside a text node the quotes are safe, so pass `quote=False` to keep the output smaller:
 
-```pycon
->>> turbohtml.escape('He said "hi" & left', quote=False)
-'He said "hi" &amp; left'
+```python
+print(turbohtml.escape('He said "hi" & left', quote=False))
+# He said "hi" &amp; left
 ```
 
 Turn HTML character references back into text, following the full HTML5 rules (named, numeric, and longest-match
 references that omit the trailing semicolon):
 
-```pycon
->>> turbohtml.unescape("caf&eacute; &amp; r&eacute;sum&eacute; &#127881;")
-'café & résumé 🎉'
+```python
+print(turbohtml.unescape("caf&eacute; &amp; r&eacute;sum&eacute; &#127881;"))
+# café & résumé 🎉
 ```
 
 `escape` and `unescape` reproduce `html.escape` and `html.unescape` exactly, so turbohtml is a drop-in replacement on
@@ -50,87 +51,81 @@ hot paths.
 
 Tokenize markup into a stream of tokens that follows the WHATWG tokenization algorithm:
 
-```pycon
->>> for token in turbohtml.tokenize('<p class="x">Tom &amp; Jerry</p>'):
-...     print(token.type.name, token.tag or token.data, token.attrs)
-START_TAG p [('class', 'x')]
-TEXT Tom & Jerry None
-END_TAG p []
+```python
+for token in turbohtml.tokenize('<p class="x">Tom &amp; Jerry</p>'):
+    print(token.type.name, token.tag or token.data, token.attrs)
+# START_TAG p [('class', 'x')]
+# TEXT Tom & Jerry None
+# END_TAG p []
 ```
 
 For incremental input, `Tokenizer.feed()` returns the tokens completed by each chunk and `close()` flushes the rest:
 
-```pycon
->>> tokenizer = turbohtml.Tokenizer()
->>> [token.tag for token in tokenizer.feed("<div><sp")]
-['div']
->>> [token.tag for token in tokenizer.feed("an>")]
-['span']
->>> list(tokenizer.close())
-[]
+```python
+tokenizer = turbohtml.Tokenizer()
+print([token.tag for token in tokenizer.feed("<div><sp")])  # ['div']
+print([token.tag for token in tokenizer.feed("an>")])  # ['span']
+print(list(tokenizer.close()))  # []
 ```
 
 Parse a whole document into a tree and walk it with `find`, `find_all`, and the navigation accessors:
 
-```pycon
->>> doc = turbohtml.parse('<ul><li>one<li>two</ul>')
->>> [li.text for li in doc.find_all('li')]
-['one', 'two']
->>> doc.find('ul').children[0].tag
-'li'
+```python
+doc = turbohtml.parse('<ul><li>one<li>two</ul>')
+print([li.text for li in doc.find_all('li')])  # ['one', 'two']
+print(doc.find('ul').children[0].tag)  # li
 ```
 
 Query with a CSS selector, and serialize a node back to HTML with the escaping you choose:
 
-```pycon
->>> from turbohtml import Formatter
->>> doc = turbohtml.parse('<article><h1>Tea</h1><p class=note>café &amp; cake</p></article>')
->>> doc.select_one('p.note').text
-'café & cake'
->>> doc.select_one('p').serialize(formatter=Formatter.NAMED_ENTITIES)
-'<p class="note">caf&eacute; &amp; cake</p>'
+```python
+from turbohtml import Formatter
+
+doc = turbohtml.parse('<article><h1>Tea</h1><p class=note>café &amp; cake</p></article>')
+print(doc.select_one('p.note').text)
+# café & cake
+print(doc.select_one('p').serialize(formatter=Formatter.NAMED_ENTITIES))
+# <p class="note">caf&eacute; &amp; cake</p>
 ```
 
 Pass `bytes` to sniff the encoding the WHATWG way (byte-order mark, then a `<meta>` declaration):
 
-```pycon
->>> doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
->>> doc.encoding, doc.find('p').text
-('iso-8859-2', 'á')
+```python
+doc = turbohtml.parse(b'<meta charset="iso-8859-2"><p>\xe1</p>')
+print((doc.encoding, doc.find('p').text))  # ('iso-8859-2', 'á')
 ```
 
 Parse a fragment as the contents of a context element, the way `innerHTML` does:
 
-```pycon
->>> cell = turbohtml.parse_fragment('<td>data', context='tr')
->>> cell.tag, cell.text
-('tr', 'data')
+```python
+cell = turbohtml.parse_fragment('<td>data', context='tr')
+print((cell.tag, cell.text))  # ('tr', 'data')
 ```
 
 Build a tree from scratch with the node constructors, then assemble it (a list value for a token-list attribute like
 `class` joins on a space, and the `text` setter fills an element with a single text child):
 
-```pycon
->>> from turbohtml import Element
->>> card = Element('article', {'class': ['card', 'lg']})
->>> heading = Element('h2')
->>> heading.text = 'Tea'
->>> card.append(heading)
->>> card.html
-'<article class="card lg"><h2>Tea</h2></article>'
+```python
+from turbohtml import Element
+
+card = Element('article', {'class': ['card', 'lg']})
+heading = Element('h2')
+heading.text = 'Tea'
+card.append(heading)
+print(card.html)
+# <article class="card lg"><h2>Tea</h2></article>
 ```
 
 Edit a parsed tree in place. `unwrap`, `decompose`, `wrap`, `insert_before`, `replace_with`, and the rest move nodes
 within a tree or adopt them from another, and `element.attrs` is a live mapping you assign to:
 
-```pycon
->>> doc = turbohtml.parse('<p>keep <b>bold</b> <span>drop</span></p>')
->>> doc.find('b').unwrap()
-Element('b')
->>> doc.find('span').decompose()
->>> doc.find('p').attrs['class'] = 'lead'
->>> doc.find('p').html
-'<p class="lead">keep bold </p>'
+```python
+doc = turbohtml.parse('<p>keep <b>bold</b> <span>drop</span></p>')
+doc.find('b').unwrap()
+doc.find('span').decompose()
+doc.find('p').attrs['class'] = 'lead'
+print(doc.find('p').html)
+# <p class="lead">keep bold </p>
 ```
 
 The sealed node hierarchy — `Element`, `Text`, `Comment`, `Doctype`, `ProcessingInstruction`, `CData`, and `Document` —

@@ -21,23 +21,29 @@ pass - turbohtml is always the WHATWG algorithm:
 
     soup = BeautifulSoup(markup, "html.parser")
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> from turbohtml import parse
-    >>> doc = parse("<p id=intro>Hello</p>")
-    >>> doc.find("p").attrs["id"]
-    'intro'
+    from turbohtml import parse
+    doc = parse("<p id=intro>Hello</p>")
+    print(doc.find("p").attrs["id"])
+
+.. testoutput::
+
+    intro
 
 Bytes work too; pass the raw response and read the resolved encoding back from :attr:`Document.encoding
 <turbohtml.Document.encoding>`:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> doc = parse(b'<meta charset="latin-1"><p>caf\xe9</p>')
-    >>> doc.find("p").text
-    'café'
-    >>> doc.encoding  # the WHATWG label latin-1 resolves to
-    'windows-1252'
+    doc = parse(b'<meta charset="latin-1"><p>caf\xe9</p>')
+    print(doc.find("p").text)
+    print(doc.encoding)  # the WHATWG label latin-1 resolves to
+
+.. testoutput::
+
+    café
+    windows-1252
 
 The renames
 ===========
@@ -87,26 +93,32 @@ Searching
 The ``find``/``find_all`` filter grammar covers what ``bs4`` spread across many methods. A keyword filter matches an
 attribute; ``class_`` and ``attrs`` match the rest; ``axis`` replaces the directional finders and ``recursive=False``:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> from turbohtml import Axis
-    >>> doc = parse('<ul><li class="x">a</li><li class="y">b</li></ul>')
-    >>> [li.text for li in doc.find_all("li")]
+    from turbohtml import Axis
+    doc = parse('<ul><li class="x">a</li><li class="y">b</li></ul>')
+    print([li.text for li in doc.find_all("li")])
+    print(doc.find("li", class_="y").text)
+    print(doc.find("ul").find_all("li", axis=Axis.CHILDREN, attrs={"class": "x"}))
+
+.. testoutput::
+
     ['a', 'b']
-    >>> doc.find("li", class_="y").text
-    'b'
-    >>> doc.find("ul").find_all("li", axis=Axis.CHILDREN, attrs={"class": "x"})
+    b
     [Element('li')]
 
 ``Axis`` reaches every direction a ``bs4`` directional finder did:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> deep = parse("<section><p><b>hi</b></p></section>").find("b")
-    >>> deep.find("section", axis=Axis.ANCESTORS).tag
-    'section'
-    >>> deep.closest("section").tag
-    'section'
+    deep = parse("<section><p><b>hi</b></p></section>").find("b")
+    print(deep.find("section", axis=Axis.ANCESTORS).tag)
+    print(deep.closest("section").tag)
+
+.. testoutput::
+
+    section
+    section
 
 Attributes and text
 ===================
@@ -115,15 +127,18 @@ Attributes and text
 Multi-valued attributes (``class``, ``rel``, ...) read back as a ``list[str]``, and text is real child nodes (the WHATWG
 DOM shape), so there is no ``.string`` shortcut and no ``lxml``-style ``text``/``tail`` split:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> a = parse('<a class="btn lg" href="/x">go</a>').find("a")
-    >>> a.attrs["class"]
+    a = parse('<a class="btn lg" href="/x">go</a>').find("a")
+    print(a.attrs["class"])
+    print(a[0])  # indexing reaches children, never attributes
+    p = parse("<p>Hello <b>bold</b> world</p>").find("p")
+    print((p.text, list(p.stripped_strings)))
+
+.. testoutput::
+
     ['btn', 'lg']
-    >>> a[0]  # indexing reaches children, never attributes
     Text('go')
-    >>> p = parse("<p>Hello <b>bold</b> world</p>").find("p")
-    >>> p.text, list(p.stripped_strings)
     ('Hello bold world', ['Hello', 'bold', 'world'])
 
 Output
@@ -132,14 +147,17 @@ Output
 The default serialization is WHATWG-conformant, so it differs from ``bs4``'s ``html`` formatter on named entities,
 attribute order, and ``<br>`` versus ``<br/>``. Choose ``Formatter.NAMED_ENTITIES`` to approximate ``bs4``:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> from turbohtml import Formatter
-    >>> node = parse("<p>café &amp; co</p>").find("p")
-    >>> node.html
-    '<p>café &amp; co</p>'
-    >>> node.serialize(formatter=Formatter.NAMED_ENTITIES)
-    '<p>caf&eacute; &amp; co</p>'
+    from turbohtml import Formatter
+    node = parse("<p>café &amp; co</p>").find("p")
+    print(node.html)
+    print(node.serialize(formatter=Formatter.NAMED_ENTITIES))
+
+.. testoutput::
+
+    <p>café &amp; co</p>
+    <p>caf&eacute; &amp; co</p>
 
 Pitfalls
 ========
@@ -188,13 +206,16 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
     - - ``lxml.html.tostring(el)``
       - ``el.html``
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> doc = parse('<div><a href="/x">go</a></div>')
-    >>> doc.find_all("a", attrs={"href": True})
+    doc = parse('<div><a href="/x">go</a></div>')
+    print(doc.find_all("a", attrs={"href": True}))
+    print(doc.select_one("div a").attrs["href"])
+
+.. testoutput::
+
     [Element('a')]
-    >>> doc.select_one("div a").attrs["href"]
-    '/x'
+    /x
 
 Pitfalls
 ========
@@ -235,10 +256,13 @@ surface. selectolax searches with CSS only and exposes ``text()`` as a method, w
     - - ``node.html``, ``node.decompose()``, ``node.unwrap()``
       - the same names
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> doc = parse("<ul><li>a</li><li>b</li></ul>")
-    >>> [li.text for li in doc.select("li")]
+    doc = parse("<ul><li>a</li><li>b</li></ul>")
+    print([li.text for li in doc.select("li")])
+
+.. testoutput::
+
     ['a', 'b']
 
 Pitfalls
@@ -277,11 +301,14 @@ lxml), while turbohtml has one typed hierarchy with navigation, search, and seri
     - - the treebuilder's own walk and ``el.attrib``
       - ``el.children``, ``el.find``/``el.select``, ``el.attrs``
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> doc = parse("<table><tr><td>x")  # the same tree html5lib and a browser build
-    >>> doc.find("td").text
-    'x'
+    doc = parse("<table><tr><td>x")  # the same tree html5lib and a browser build
+    print(doc.find("td").text)
+
+.. testoutput::
+
+    x
 
 Pitfalls
 ========
@@ -298,13 +325,16 @@ Pitfalls
 :func:`turbohtml.escape` and :func:`turbohtml.unescape` reproduce :func:`python:html.escape` and
 :func:`python:html.unescape` byte for byte, so they are a drop-in:
 
-.. code-block:: pycon
+.. testcode::
 
-    >>> import html
-    >>> from turbohtml import escape, unescape
-    >>> escape('<a href="x">') == html.escape('<a href="x">')
+    import html
+    from turbohtml import escape, unescape
+    print(escape('<a href="x">') == html.escape('<a href="x">'))
+    print(unescape("caf&eacute; &#127881;") == html.unescape("caf&eacute; &#127881;"))
+
+.. testoutput::
+
     True
-    >>> unescape("caf&eacute; &#127881;") == html.unescape("caf&eacute; &#127881;")
     True
 
 In place of subclassing :class:`python:html.parser.HTMLParser` with ``handle_starttag`` and ``handle_data`` callbacks,
