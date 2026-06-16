@@ -2,17 +2,17 @@
  Migrating to turbohtml
 ########################
 
-turbohtml is a native replacement for the HTML libraries it benchmarks against, not a drop-in for any of them. It picks
-one name per concept and a typed shape where those libraries spread the work across aliases, methods, and treebuilder
-choices, so porting is a translation. This page maps each one to turbohtml, library by library; BeautifulSoup gets the
-deepest treatment because it shares the most surface.
+turbohtml replaces the HTML libraries it benchmarks against. None is API-compatible, so porting is a translation:
+turbohtml uses one name per concept and a typed shape where those libraries spread the work across aliases, methods, and
+treebuilder choices. This page maps each library to turbohtml; BeautifulSoup gets the deepest treatment because it
+shares the most surface.
 
 ********************
  From BeautifulSoup
 ********************
 
-Parsing returns a :class:`~turbohtml.Document` instead of a ``BeautifulSoup`` object, and there is no parser name to
-pass - turbohtml is always the WHATWG algorithm:
+Parsing returns a :class:`~turbohtml.Document` instead of a ``BeautifulSoup`` object. There is no parser name to pass,
+since turbohtml always runs the WHATWG algorithm:
 
 .. code-block:: python
 
@@ -123,7 +123,7 @@ attribute; ``class_`` and ``attrs`` match the rest; ``axis`` replaces the direct
 Attributes and text
 ===================
 
-``.attrs`` is the single access point - there is no ``tag["x"]`` shortcut, because ``node[i]`` indexes child nodes.
+``.attrs`` is the single access point; there is no ``tag["x"]`` shortcut, because ``node[i]`` indexes child nodes.
 Multi-valued attributes (``class``, ``rel``, ...) read back as a ``list[str]``, and text is real child nodes (the WHATWG
 DOM shape), so there is no ``.string`` shortcut and no ``lxml``-style ``text``/``tail`` split:
 
@@ -165,8 +165,8 @@ Pitfalls
 - ``node[i]`` indexes children; attributes are reached through ``.attrs``, never ``node["attr"]``.
 - Text is real child nodes, so there is no ``.string`` shortcut and no ``text``/``tail``; iterate the children.
 - Default output is WHATWG-conformant; pick ``Formatter.NAMED_ENTITIES`` to come close to ``bs4``'s ``html`` formatter.
-- Equality is identity, not structural. Where ``bs4`` code leaned on ``==`` between trees, compare serializations
-  (``a.html == b.html``) or walk the nodes.
+- ``==`` compares identity, so two trees with the same markup are unequal. Where ``bs4`` code leaned on ``==`` between
+  trees, compare serializations (``a.html == b.html``) or walk the nodes.
 
 ***********
  From lxml
@@ -270,7 +270,7 @@ Pitfalls
 
 - selectolax queries are CSS-only; turbohtml adds the ``find``/``find_all`` filter grammar with axes and regex or
   callable filters.
-- ``node.text`` is a property, not a method - drop the parentheses.
+- ``node.text`` is a property; drop the parentheses.
 - selectolax mutation is limited; turbohtml's edit surface (``append``, ``insert``, ``wrap``, ``unwrap``,
   ``replace_with``, and the rest) is full.
 

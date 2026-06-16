@@ -128,22 +128,22 @@ print(doc.find("p").html)
 # <p class="lead">keep bold </p>
 ```
 
-The sealed node hierarchy — `Element`, `Text`, `Comment`, `Doctype`, `ProcessingInstruction`, `CData`, and `Document` —
+The sealed node hierarchy (`Element`, `Text`, `Comment`, `Doctype`, `ProcessingInstruction`, `CData`, and `Document`)
 sets `__match_args__` for structural pattern matching, and any node deep-copies with `copy.copy`, `copy.deepcopy`, or
 `pickle`.
 
 ## Performance
 
-turbohtml's C core makes every operation several times faster than its pure-Python counterpart, and it leads the C
-libraries on every read-path benchmark too. Measured with [pyperf](https://pyperf.readthedocs.io) on an Apple M4:
+turbohtml's C core makes every operation several times faster than its pure-Python counterpart, and it runs faster than
+the other C libraries on the read-path benchmarks. Measured with [pyperf](https://pyperf.readthedocs.io) on an Apple M4:
 
 - `escape` and `unescape` match the standard library byte for byte while running several times faster, up to 22× on
   no-op text and 13× on entity-dense input.
 - `tokenize` is 9–16× faster than `html.parser` wherever markup appears.
 - `parse` builds a full WHATWG tree 2–5× faster than the C parsers lxml and selectolax, and 30–80× faster than the
   pure-Python BeautifulSoup and html5lib.
-- `find_all` and CSS `select` outrun lxml's C XPath and cssselect at every size (2–40×) and BeautifulSoup by 100×, and
-  serialization is the fastest of the four.
+- `find_all` and CSS `select` run 2–40× faster than lxml's C XPath and cssselect at every size and 100× faster than
+  BeautifulSoup, and serialization is faster than lxml, selectolax, and BeautifulSoup.
 - building a tree from scratch and editing a parsed one both run about twice as fast as lxml and an order of magnitude
   faster than BeautifulSoup.
 

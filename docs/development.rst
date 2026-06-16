@@ -2,7 +2,7 @@
  Development
 #############
 
-This page onboards contributors and records how we build and maintain turbohtml.
+This page covers how we build, test, and maintain turbohtml.
 
 ****************
  Getting set up
@@ -71,7 +71,7 @@ build the matrix.
 **No pure-Python fallback.** :PEP:`399` scopes its pure-Python fallback requirement to standard-library modules. As a
 third-party package distributing per-interpreter wheels, turbohtml ships the compiled implementation and nothing else.
 
-**SIMD / SWAR for escape.** ``escape`` confirms most strings need no escaping, so it classifies one-byte strings sixteen
+**SIMD / SWAR for escape.** Most strings need no escaping, so ``escape`` classifies one-byte strings sixteen
 bytes at a time: on NEON a single low-nibble table lookup plus one comparison matches all five specials at once (each
 has a unique low nibble, the PSHUFB trick used by pulldown-cmark), on x86-64 SSE2 compares per special, and on other
 targets a SWAR word applies the `bit-twiddling "has-zero" trick

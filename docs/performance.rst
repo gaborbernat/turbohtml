@@ -240,8 +240,8 @@ WHATWG tree that lxml's libxml2 does not.
 Each library parses the document once, then the timed call runs one query. ``find`` collects every ``<a>`` element the
 way each library reaches for it (turbohtml's :meth:`~turbohtml.Node.find_all`, lxml's XPath ``findall``, selectolax's
 and BeautifulSoup's selectors). A tag-only query resolves the name to an interned atom and walks the subtree comparing
-integers, with no per-element string built and no matcher dispatch, so it outpaces lxml's C XPath engine at every size
-and runs several times ahead of selectolax and BeautifulSoup.
+integers, with no per-element string built and no matcher dispatch, so it runs ahead of lxml's C XPath engine and
+several times ahead of selectolax and BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
@@ -304,7 +304,7 @@ BeautifulSoup.
 
 Serializing a parsed document back to HTML: turbohtml's :attr:`~turbohtml.Node.html`, lxml's ``tostring``, selectolax's
 ``html``, and BeautifulSoup's ``decode``. turbohtml scans each text run for the next character that needs escaping and
-bulk-copies the clean spans, so it is the fastest of the four by a wide margin.
+bulk-copies the clean spans, so it serializes faster than lxml, selectolax, and BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
@@ -335,8 +335,8 @@ bulk-copies the clean spans, so it is the fastest of the four by a wide margin.
  Building
 **********
 
-The write path: construct a ``<ul>`` of ``N`` ``<li>`` rows from scratch - each with a ``class``, a ``data`` attribute,
-and a text child - then serialize it, the work an editor or template engine does. turbohtml's arena allocation and
+The write path: construct a ``<ul>`` of ``N`` ``<li>`` rows from scratch (each with a ``class``, a ``data`` attribute,
+and a text child), then serialize it, the work an editor or template engine does. turbohtml's arena allocation and
 interned attribute names make construction cheaper than lxml's libxml2 nodes and far cheaper than BeautifulSoup's Python
 objects. selectolax is parse-only, so it has no entry.
 
@@ -366,8 +366,8 @@ objects. selectolax is parse-only, so it has no entry.
 *********
 
 Editing a parsed tree: tag every ``<a>`` with ``rel="nofollow"``, a link-rewriting pass. Each library parses once
-outside the timed region, then the timed call walks its links and sets the attribute - turbohtml through the live
-:attr:`~turbohtml.Element.attrs` mapping, lxml through ``Element.set``, BeautifulSoup through item assignment.
+outside the timed region, then the timed call walks its links and sets the attribute (turbohtml through the live
+:attr:`~turbohtml.Element.attrs` mapping, lxml through ``Element.set``, BeautifulSoup through item assignment).
 selectolax mutation is limited, so it has no entry.
 
 .. list-table::

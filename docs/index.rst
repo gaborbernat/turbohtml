@@ -29,9 +29,9 @@ counterpart and supports the free-threaded build.
 
 .. important::
 
-    The one rule worth learning first: turbohtml models text as real **child nodes** (the WHATWG DOM shape), not lxml's
-    ``text``/``tail`` or BeautifulSoup's ``.string``. So ``node[i]`` indexes a node's children, and attributes are
-    reached through ``node.attrs`` - never ``node["attr"]``.
+    Learn this rule first: turbohtml models text as real **child nodes** following the WHATWG DOM shape, where lxml
+    uses ``text``/``tail`` and BeautifulSoup uses ``.string``. So ``node[i]`` indexes a node's children, and attributes
+    are reached through ``node.attrs``, never ``node["attr"]``.
 
 The documentation follows the `Diátaxis <https://diataxis.fr>`_ framework.
 

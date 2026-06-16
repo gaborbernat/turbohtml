@@ -362,7 +362,7 @@ a token in the class list, and ``axis`` aims the search at something other than 
  Serialize with control
 ************************
 
-:attr:`~turbohtml.Node.html` and :attr:`~turbohtml.Node.inner_html` are the zero-config WHATWG-conformant forms (outer
+:attr:`~turbohtml.Node.html` and :attr:`~turbohtml.Node.inner_html` are the default WHATWG-conformant forms (outer
 and children-only). :meth:`~turbohtml.Node.serialize` adds control: ``formatter`` selects the escaping through
 :class:`~turbohtml.Formatter`, and ``indent`` (an int or string) switches to a pretty form that adds whitespace and so
 does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes:
