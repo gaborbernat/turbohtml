@@ -1,0 +1,3 @@
+Add migration guides from every library turbohtml replaces - BeautifulSoup, lxml, selectolax, html5lib, and the standard
+library - each mapping its idioms to the turbohtml equivalent and calling out the behavior differences a porting user
+hits - by :user:`gaborbernat`.

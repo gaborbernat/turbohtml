@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from turbohtml import parse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from turbohtml import Element
 
 
 @pytest.mark.parametrize(
@@ -34,10 +41,10 @@ from turbohtml import parse
         ),
     ],
 )
-def test_token_list_attributes_split(html: str, tag: str, attr: str, expected: list[str]) -> None:
-    element = parse(html).find(tag)
-    assert element is not None
-    assert element.attrs[attr] == expected
+def test_token_list_attributes_split(
+    find: Callable[[str, str], Element], html: str, tag: str, attr: str, expected: list[str]
+) -> None:
+    assert find(html, tag).attrs[attr] == expected
 
 
 @pytest.mark.parametrize(
@@ -52,10 +59,8 @@ def test_token_list_attributes_split(html: str, tag: str, attr: str, expected: l
         pytest.param('<div id="main">', "div", "id", id="default-length"),
     ],
 )
-def test_non_token_attributes_stay_string(html: str, tag: str, attr: str) -> None:
-    element = parse(html).find(tag)
-    assert element is not None
-    assert isinstance(element.attrs[attr], str)
+def test_non_token_attributes_stay_string(find: Callable[[str, str], Element], html: str, tag: str, attr: str) -> None:
+    assert isinstance(find(html, tag).attrs[attr], str)
 
 
 @pytest.mark.parametrize(
@@ -68,10 +73,8 @@ def test_non_token_attributes_stay_string(html: str, tag: str, attr: str) -> Non
         pytest.param("a\tb\nc\x0cd", ["a", "b", "c", "d"], id="every-ascii-whitespace"),
     ],
 )
-def test_class_whitespace_splitting(value: str, expected: list[str]) -> None:
-    element = parse(f'<div class="{value}">').find("div")
-    assert element is not None
-    assert element.attrs["class"] == expected
+def test_class_whitespace_splitting(find: Callable[[str, str], Element], value: str, expected: list[str]) -> None:
+    assert find(f'<div class="{value}">', "div").attrs["class"] == expected
 
 
 @pytest.mark.parametrize(
@@ -82,10 +85,8 @@ def test_class_whitespace_splitting(value: str, expected: list[str]) -> None:
         pytest.param("<input checked>", "input", "checked", id="valueless-plain-name"),
     ],
 )
-def test_valueless_attribute_is_none(html: str, tag: str, attr: str) -> None:
-    element = parse(html).find(tag)
-    assert element is not None
-    assert element.attrs[attr] is None
+def test_valueless_attribute_is_none(find: Callable[[str, str], Element], html: str, tag: str, attr: str) -> None:
+    assert find(html, tag).attrs[attr] is None
 
 
 def test_find_matches_token_attribute_by_whole_string() -> None:
@@ -94,10 +95,8 @@ def test_find_matches_token_attribute_by_whole_string() -> None:
     assert parse('<a rel="next">').find("a", rel="nope") is None
 
 
-def test_attribute_order_is_source_order() -> None:
-    element = parse('<div id="a" class="x" data-z="1">').find("div")
-    assert element is not None
-    assert list(element.attrs) == ["id", "class", "data-z"]
+def test_attribute_order_is_source_order(find: Callable[[str, str], Element]) -> None:
+    assert list(find('<div id="a" class="x" data-z="1">', "div").attrs) == ["id", "class", "data-z"]
 
 
 @pytest.mark.parametrize(
@@ -108,35 +107,27 @@ def test_attribute_order_is_source_order() -> None:
         pytest.param("x😀", id="astral-four-byte"),
     ],
 )
-def test_non_ascii_attribute_name_round_trips(name: str) -> None:
-    element = parse(f'<div {name}="v">').find("div")
-    assert element is not None
+def test_non_ascii_attribute_name_round_trips(find: Callable[[str, str], Element], name: str) -> None:
+    element = find(f'<div {name}="v">', "div")
     assert element.attrs[name] == "v"
     assert element.html == f'<div {name}="v"></div>'
 
 
-def test_many_dynamic_attribute_names_grow_the_table() -> None:
+def test_many_dynamic_attribute_names_grow_the_table(find: Callable[[str, str], Element]) -> None:
     names = [f"data-x{index}" for index in range(20)]
-    element = parse(f"<div {' '.join(names)}>").find("div")
-    assert element is not None
+    element = find(f"<div {' '.join(names)}>", "div")
     assert sorted(element.attrs) == sorted(names)
     assert all(element.attrs[name] is None for name in names)
 
 
-def test_repeated_dynamic_attribute_name_reuses_atom() -> None:
-    doc = parse('<div data-x="1"></div><p data-x="2"></p>')
-    div = doc.find("div")
-    para = doc.find("p")
-    assert div is not None
-    assert para is not None
-    assert div.attrs["data-x"] == "1"
-    assert para.attrs["data-x"] == "2"
+def test_repeated_dynamic_attribute_name_reuses_atom(find: Callable[[str, str], Element]) -> None:
+    markup = '<div data-x="1"></div><p data-x="2"></p>'
+    assert find(markup, "div").attrs["data-x"] == "1"
+    assert find(markup, "p").attrs["data-x"] == "2"
 
 
-def test_attrs_supports_mapping_protocol() -> None:
-    element = parse('<div class="x y">').find("div")
-    assert element is not None
-    attrs = element.attrs
+def test_attrs_supports_mapping_protocol(find: Callable[[str, str], Element]) -> None:
+    attrs = find('<div class="x y">', "div").attrs
     assert attrs.get("class") == ["x", "y"]
     assert attrs.get("missing") is None
     assert "class" in attrs

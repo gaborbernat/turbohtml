@@ -5,21 +5,27 @@ import pytest
 import turbohtml
 
 
-def test_escape_basic() -> None:
-    assert turbohtml.escape("'<script>\"&foo;\"</script>'") == (
-        "&#x27;&lt;script&gt;&quot;&amp;foo;&quot;&lt;/script&gt;&#x27;"
-    )
-
-
-def test_escape_quote_false() -> None:
-    assert turbohtml.escape("'<script>\"&foo;\"</script>'", quote=False) == (
-        "'&lt;script&gt;\"&amp;foo;\"&lt;/script&gt;'"
-    )
-    assert turbohtml.escape("\"'", quote=False) == "\"'"
-
-
-def test_escape_quote_default_true() -> None:
-    assert turbohtml.escape("\"'") == "&quot;&#x27;"
+@pytest.mark.parametrize(
+    ("text", "kwargs", "expected"),
+    [
+        pytest.param(
+            "'<script>\"&foo;\"</script>'",
+            {},
+            "&#x27;&lt;script&gt;&quot;&amp;foo;&quot;&lt;/script&gt;&#x27;",
+            id="default-quotes-on",
+        ),
+        pytest.param(
+            "'<script>\"&foo;\"</script>'",
+            {"quote": False},
+            "'&lt;script&gt;\"&amp;foo;\"&lt;/script&gt;'",
+            id="quote-false",
+        ),
+        pytest.param("\"'", {"quote": False}, "\"'", id="quote-false-bare-quotes"),
+        pytest.param("\"'", {}, "&quot;&#x27;", id="default-escapes-quotes"),
+    ],
+)
+def test_escape_quote_modes(text: str, kwargs: dict[str, bool], expected: str) -> None:
+    assert turbohtml.escape(text, **kwargs) == expected
 
 
 @pytest.mark.parametrize(

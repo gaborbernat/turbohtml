@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 import pytest
 
 from turbohtml import Axis, Element, parse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import TypeAlias
+
+    Filter: TypeAlias = "str | re.Pattern[str] | bool | Callable[[str | None], bool] | list[Filter]"
 
 # document order of elements: html, head, body, section, h2, p, p, a
 _DOC = '<section><h2 id="t">T</h2><p class="lead big">one</p><p class="big">two</p><a href="/x">l</a></section>'
@@ -28,8 +35,19 @@ def _raise(_value: str | None) -> bool:
 # --- tag filter kinds ---
 
 
-def test_tag_string_is_exact() -> None:
-    assert _tags(parse(_DOC).find_all("p")) == ["p", "p"]
+@pytest.mark.parametrize(
+    ("tag_filter", "tags"),
+    [
+        pytest.param("p", ["p", "p"], id="string-exact"),
+        pytest.param(re.compile(r"^h"), ["html", "head", "h2"], id="regex-search"),
+        pytest.param(lambda name: name in {"h2", "a"}, ["h2", "a"], id="callable-receives-name"),
+        pytest.param(["h2", "a"], ["h2", "a"], id="list-any-member"),
+        pytest.param("\ud800", [], id="lone-surrogate-unencodable"),  # falls back to a str compare
+        pytest.param("", [], id="empty-name"),  # no element has an empty name
+    ],
+)
+def test_tag_filter(tag_filter: Filter, tags: list[str]) -> None:
+    assert _tags(parse(_DOC).find_all(tag_filter)) == tags
 
 
 def test_tag_string_is_case_sensitive() -> None:
@@ -41,26 +59,6 @@ def test_tag_string_is_case_sensitive() -> None:
 def test_tag_matches_a_custom_element() -> None:
     html = "<my-widget>a</my-widget><other-thing>b</other-thing><my-widget>c</my-widget>"
     assert _tags(parse(html).find_all("my-widget")) == ["my-widget", "my-widget"]
-
-
-def test_tag_with_a_lone_surrogate_matches_nothing() -> None:
-    assert parse(_DOC).find_all("\ud800") == []  # unencodable, so it falls back to a str compare
-
-
-def test_empty_tag_name_matches_nothing() -> None:
-    assert parse(_DOC).find_all("") == []  # no element has an empty name
-
-
-def test_tag_regex_searches() -> None:
-    assert _tags(parse(_DOC).find_all(re.compile(r"^h"))) == ["html", "head", "h2"]
-
-
-def test_tag_callable_receives_the_name() -> None:
-    assert _tags(parse(_DOC).find_all(lambda name: name in {"h2", "a"})) == ["h2", "a"]
-
-
-def test_tag_list_matches_any_member() -> None:
-    assert _tags(parse(_DOC).find_all(["h2", "a"])) == ["h2", "a"]
 
 
 def test_tag_true_matches_every_element() -> None:
@@ -77,44 +75,41 @@ def test_tag_with_attribute_filter_uses_the_general_path() -> None:
     assert _tags(parse(_DOC).find_all("a", href="/x")) == ["a"]
 
 
-def test_tag_with_class_filter_uses_the_general_path() -> None:
-    assert _tags(parse(_DOC).find_all("p", class_="big")) == ["p", "p"]
-
-
-def test_tag_with_regex_class_filter_uses_the_general_path() -> None:
-    assert _tags(parse(_DOC).find_all("p", class_=re.compile(r"big"))) == ["p", "p"]
+@pytest.mark.parametrize(
+    "class_filter", [pytest.param("big", id="string"), pytest.param(re.compile(r"big"), id="regex")]
+)
+def test_tag_with_class_filter_uses_the_general_path(class_filter: Filter) -> None:
+    assert _tags(parse(_DOC).find_all("p", class_=class_filter)) == ["p", "p"]
 
 
 # --- attribute filter kinds ---
 
 
-def test_attr_exact_string() -> None:
-    assert _el(parse(_DOC).find(id="t")).tag == "h2"
+@pytest.mark.parametrize(
+    "id_filter", [pytest.param("t", id="exact-string"), pytest.param(re.compile(r"^t$"), id="regex")]
+)
+def test_attr_matches_h2(id_filter: Filter) -> None:
+    assert _el(parse(_DOC).find(id=id_filter)).tag == "h2"
 
 
-def test_attr_regex() -> None:
-    assert _el(parse(_DOC).find(id=re.compile(r"^t$"))).tag == "h2"
+@pytest.mark.parametrize(
+    "id_value",
+    [pytest.param("x", id="same-length-different-content"), pytest.param("tt", id="different-length")],
+)
+def test_attr_string_near_miss(id_value: str) -> None:
+    assert parse(_DOC).find(id=id_value) is None  # only the <h2> carries id="t"
 
 
-def test_attr_string_near_misses() -> None:
-    doc = parse(_DOC)  # only the <h2> carries id="t"
-    assert doc.find(id="x") is None  # same length, different content
-    assert doc.find(id="tt") is None  # different length
-
-
-def test_attr_list_filter_skips_absent_attribute() -> None:
-    # a list attribute filter falls to the general matcher, where an absent
-    # attribute compares as None against each string member
-    assert _tags(parse(_DOC).find_all(id=["t", "u"])) == ["h2"]
-
-
-def test_attr_list_filter_skips_valueless_attribute() -> None:
-    # a valueless attribute compares as None against each string member too
-    assert parse("<input disabled>").find("input", disabled=["x", "y"]) is None
-
-
-def test_attr_true_is_presence() -> None:
-    assert _tags(parse(_DOC).find_all(id=True)) == ["h2"]
+@pytest.mark.parametrize(
+    "id_filter",
+    [
+        # an absent attribute compares as None against each string member of the list
+        pytest.param(["t", "u"], id="list-skips-absent-attribute"),
+        pytest.param(True, id="true-is-presence"),
+    ],
+)
+def test_attr_selects_h2(id_filter: Filter) -> None:
+    assert _tags(parse(_DOC).find_all(id=id_filter)) == ["h2"]
 
 
 def test_attr_false_is_absence() -> None:
@@ -131,42 +126,27 @@ def test_attr_callable_on_absent_value_gets_none() -> None:
 # --- class_ is member-wise with a whole-value fallback ---
 
 
-def test_class_matches_a_token() -> None:
-    assert _tags(parse(_DOC).find_all(class_="big")) == ["p", "p"]
+@pytest.mark.parametrize("class_filter", [pytest.param("big", id="token"), pytest.param(True, id="true-is-presence")])
+def test_class_selects_paragraphs(class_filter: Filter) -> None:
+    assert _tags(parse(_DOC).find_all(class_=class_filter)) == ["p", "p"]
 
 
-def test_class_matches_the_whole_value() -> None:
-    assert _el(parse(_DOC).find(class_="lead big")).text == "one"
+@pytest.mark.parametrize(
+    "class_filter",
+    [
+        pytest.param("lead big", id="whole-value"),
+        # an anchored regex matches the leading "lead" token of "lead big"
+        pytest.param(re.compile(r"^lea"), id="regex-token"),
+    ],
+)
+def test_class_finds_the_lead(class_filter: Filter) -> None:
+    assert _el(parse(_DOC).find(class_=class_filter)).text == "one"
 
 
 def test_class_regex_matches_a_token_not_the_whole_value() -> None:
     # an anchored regex matches the "big" token of "lead big" but not the whole value
     doc = parse('<p class="lead big">x</p><p class="big">y</p>')
     assert len(doc.find_all("p", class_=re.compile(r"^big$"))) == 2
-
-
-def test_class_equal_length_token_mismatch() -> None:
-    # a class value the same length as the filter but different content
-    assert parse('<p class="xyz">x</p>').find("p", class_="big") is None
-
-
-def test_class_regex_scans_surrounding_whitespace() -> None:
-    # a non-matching regex walks every token of a whitespace-padded value, including
-    # the trailing run that yields no token
-    assert parse('<p class=" a b ">x</p>').find("p", class_=re.compile(r"zzz")) is None
-
-
-def test_string_attr_filter_on_valueless_attribute() -> None:
-    # a str attribute filter never matches a valueless attribute
-    assert parse("<input disabled>").find("input", disabled="x") is None
-
-
-def test_class_regex_matches_a_token() -> None:
-    assert _el(parse(_DOC).find(class_=re.compile(r"^lea"))).text == "one"
-
-
-def test_class_true_is_presence() -> None:
-    assert _tags(parse(_DOC).find_all(class_=True)) == ["p", "p"]
 
 
 def test_class_false_is_absence() -> None:
@@ -190,15 +170,38 @@ def test_class_token_scan_handles_surrounding_whitespace() -> None:
     assert parse('<p class=" a b ">').find("p", class_="c") is None
 
 
-# --- valueless attributes ---
+# --- filters that resolve to no match return None ---
+
+
+@pytest.mark.parametrize(
+    ("html", "class_filter"),
+    [
+        # a class value the same length as the filter but different content
+        pytest.param('<p class="xyz">x</p>', "big", id="equal-length-mismatch"),
+        # a non-matching regex walks every token of a whitespace-padded value,
+        # including the trailing run that yields no token
+        pytest.param('<p class=" a b ">x</p>', re.compile(r"zzz"), id="regex-no-token"),
+    ],
+)
+def test_class_filter_no_match(html: str, class_filter: Filter) -> None:
+    assert parse(html).find("p", class_=class_filter) is None
+
+
+@pytest.mark.parametrize(
+    "disabled_filter",
+    [
+        pytest.param("x", id="string"),
+        pytest.param(re.compile(r"x"), id="regex"),
+        # a valueless attribute compares as None against each list member
+        pytest.param(["x", "y"], id="list"),
+    ],
+)
+def test_filter_on_valueless_attribute_no_match(disabled_filter: Filter) -> None:
+    assert parse("<input disabled>").find("input", disabled=disabled_filter) is None
 
 
 def test_filter_on_present_valueless_attribute() -> None:
     assert _el(parse("<input disabled>").find("input", disabled=True)).tag == "input"
-
-
-def test_regex_on_valueless_attribute_does_not_match() -> None:
-    assert parse("<input disabled>").find("input", disabled=re.compile(r"x")) is None
 
 
 # --- axes ---
@@ -209,14 +212,12 @@ def test_axis_children() -> None:
     assert _tags(section.find_all("p", axis=Axis.CHILDREN)) == ["p", "p"]
 
 
-def test_axis_ancestors() -> None:
+@pytest.mark.parametrize(
+    "target", [pytest.param("section", id="nearest"), pytest.param("body", id="walks-past-the-nearest")]
+)
+def test_axis_ancestors(target: str) -> None:
     h2 = _el(parse(_DOC).find("h2"))
-    assert _el(h2.find("section", axis=Axis.ANCESTORS)).tag == "section"
-
-
-def test_axis_ancestors_walks_past_the_nearest() -> None:
-    h2 = _el(parse(_DOC).find("h2"))
-    assert _el(h2.find("body", axis=Axis.ANCESTORS)).tag == "body"
+    assert _el(h2.find(target, axis=Axis.ANCESTORS)).tag == target
 
 
 def test_axis_next_siblings() -> None:
@@ -267,55 +268,50 @@ def test_dynamic_attr_name() -> None:
     assert _el(parse('<div data-x="v">').find("div", attrs={"data-x": "v"})).tag == "div"
 
 
-def test_dynamic_attr_name_unseen_in_tree_matches_nothing() -> None:
-    assert parse("<div>").find_all("div", attrs={"data-missing": True}) == []
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        pytest.param({"data-missing": True}, id="name-unseen-in-tree"),
+        pytest.param({"": True}, id="empty-name"),
+    ],
+)
+def test_attrs_dict_matches_nothing(attrs: dict[str, Filter]) -> None:
+    assert parse("<div>").find_all("div", attrs=attrs) == []
 
 
-def test_empty_attr_name_matches_nothing() -> None:
-    assert parse("<div>").find_all("div", attrs={"": True}) == []
+# --- a list filter propagates an error from a member, as does a direct callable ---
 
 
-# --- list filter propagates an error from a member ---
-
-
-def test_list_filter_propagates_callable_error() -> None:
+@pytest.mark.parametrize(
+    "id_filter",
+    [
+        pytest.param(_raise, id="direct-callable"),
+        pytest.param([re.compile(r"z"), _raise], id="callable-in-list"),
+    ],
+)
+def test_callable_error_propagates(id_filter: Filter) -> None:
     with pytest.raises(ZeroDivisionError):
-        parse("<p>").find(id=[re.compile(r"z"), _raise])
+        parse("<p>").find(id=id_filter)
 
 
 # --- argument errors ---
 
 
-def test_bad_axis_type() -> None:
-    with pytest.raises(TypeError):
+@pytest.mark.parametrize(
+    "call",
+    [
         # axis must be an Axis member; a str is rejected at runtime
-        parse(_DOC).find("p", axis="descendants")  # ty: ignore[invalid-argument-type]
-
-
-def test_bad_limit_type() -> None:
-    with pytest.raises(TypeError):
+        pytest.param(lambda: parse(_DOC).find("p", axis="descendants"), id="bad-axis-type"),  # ty: ignore[invalid-argument-type]
         # limit must be an int or None; a str is rejected at runtime
-        parse(_DOC).find_all("p", limit="lots")  # ty: ignore[invalid-argument-type]
-
-
-def test_attrs_must_be_a_dict() -> None:
-    with pytest.raises(TypeError):
+        pytest.param(lambda: parse(_DOC).find_all("p", limit="lots"), id="bad-limit-type"),  # ty: ignore[invalid-argument-type]
         # attrs must be a Mapping; a list is rejected at runtime
-        parse(_DOC).find("p", attrs=["id"])  # ty: ignore[invalid-argument-type]
-
-
-def test_attr_name_must_be_a_str() -> None:
-    with pytest.raises(TypeError):
+        pytest.param(lambda: parse(_DOC).find("p", attrs=["id"]), id="attrs-not-a-mapping"),  # ty: ignore[invalid-argument-type]
         # a non-str attribute name is rejected at runtime
-        parse(_DOC).find("p", attrs={1: "x"})  # ty: ignore[invalid-argument-type]
-
-
-def test_unknown_filter_type() -> None:
+        pytest.param(lambda: parse(_DOC).find("p", attrs={1: "x"}), id="attr-name-not-a-str"),  # ty: ignore[invalid-argument-type]
+        # an int is not a valid filter type
+        pytest.param(lambda: parse("<p>").find(id=123), id="unknown-filter-type"),  # ty: ignore[invalid-argument-type]
+    ],
+)
+def test_type_errors(call: Callable[[], object]) -> None:
     with pytest.raises(TypeError):
-        # an int is not a valid filter; the type is rejected at runtime
-        parse("<p>").find(id=123)  # ty: ignore[invalid-argument-type]
-
-
-def test_callable_error_propagates() -> None:
-    with pytest.raises(ZeroDivisionError):
-        parse("<p>").find(id=_raise)
+        call()

@@ -2,7 +2,7 @@
  Development
 #############
 
-This page onboards contributors and records how we build and maintain turbohtml.
+This page covers how we build, test, and maintain turbohtml.
 
 ****************
  Getting set up
@@ -71,14 +71,13 @@ build the matrix.
 **No pure-Python fallback.** :PEP:`399` scopes its pure-Python fallback requirement to standard-library modules. As a
 third-party package distributing per-interpreter wheels, turbohtml ships the compiled implementation and nothing else.
 
-**SIMD / SWAR for escape.** ``escape`` confirms most strings need no escaping, so it classifies one-byte strings sixteen
-bytes at a time: on NEON a single low-nibble table lookup plus one comparison matches all five specials at once (each
-has a unique low nibble, the PSHUFB trick used by pulldown-cmark), on x86-64 SSE2 compares per special, and on other
-targets a SWAR word applies the `bit-twiddling "has-zero" trick
-<https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord>`_. The sizing pass accumulates the growth of all
-matches without branches, and the writing pass copies clean stretches in bulk, limiting rewrites to the positions a
-match bitmask singles out. One SWAR pass over a 64-bit word probes UCS-2 / UCS-4 strings (see :PEP:`393` for the
-representations) for all five special characters.
+**SIMD / SWAR for escape.** Most strings need no escaping, so ``escape`` classifies one-byte strings sixteen bytes at a
+time: on NEON a single low-nibble table lookup plus one comparison matches all five specials at once (each has a unique
+low nibble, the PSHUFB trick used by pulldown-cmark), on x86-64 SSE2 compares per special, and on other targets a SWAR
+word applies the `bit-twiddling "has-zero" trick <https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord>`_.
+The sizing pass accumulates the growth of all matches without branches, and the writing pass copies clean stretches in
+bulk, limiting rewrites to the positions a match bitmask singles out. One SWAR pass over a 64-bit word probes UCS-2 /
+UCS-4 strings (see :PEP:`393` for the representations) for all five special characters.
 
 **Free-threading ready.** The module has no mutable state (immutable ``str`` inputs, read-only tables), so it declares
 ``Py_MOD_GIL_NOT_USED`` and per-interpreter GIL support on interpreters that support them. See the `free-threading

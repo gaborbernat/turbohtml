@@ -2,6 +2,29 @@
  Explanation
 #############
 
+*******************************************
+ When to reach for turbohtml, and when not
+*******************************************
+
+turbohtml parses, queries, edits, and serializes HTML through a fast, typed, WHATWG-conformant core. Reach for it when
+you parse real-world markup and want the tree a browser builds (the html5lib suite passes, so malformed input recovers
+the way it does in a browser rather than the way libxml2 guesses); when speed matters (the :doc:`performance` page has
+the figures); when you want a modern typed API with one name per concept, ``__match_args__`` on every node, and full
+type stubs, alongside the free-threaded build; or when you escape, unescape, or tokenize on a hot path and want a
+drop-in several times faster than the standard library.
+
+It is the wrong tool in a few honest cases:
+
+- **You need XPath, XSLT, schema validation, or C14N.** turbohtml gives CSS selectors and the ``find`` filter grammar,
+  not XPath, and none of lxml's XML toolchain. Code that leans on those should stay on lxml.
+- **You depend on BeautifulSoup's ecosystem or its forgiving, duck-typed API.** ``bs4`` swaps parser backends,
+  integrates with a long tail of tools, and accepts almost any shape; turbohtml is one conformant parser with a sealed,
+  typed hierarchy. Code written to ``bs4``'s contract needs the :doc:`migration` guide, not a drop-in import.
+- **You need a decades-hardened dependency.** lxml and BeautifulSoup have been battle-tested for years across every
+  platform and corner case; turbohtml is young.
+- **HTML is not your bottleneck.** If parsing is a rounding error in your workload, the library you already use is fine.
+  turbohtml's advantage is speed and a typed API; if you need neither, switching costs more than it saves.
+
 **************
  Why a C core
 **************
@@ -119,7 +142,8 @@ BeautifulSoup and html5lib, while building the WHATWG tree that lxml's libxml2 d
 the per-document figures.
 
 The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
-:class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`) sharing the navigation defined on
+:class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`,
+:class:`~turbohtml.ProcessingInstruction`, :class:`~turbohtml.CData`) sharing the navigation defined on
 :class:`~turbohtml.Node`. turbohtml models text as real child nodes (the WHATWG DOM shape) rather than the
 ``.text``/``.tail`` split lxml-style trees use, so a node's children are its text runs and elements interleaved in
 document order. Each type sets ``__match_args__``, so structural pattern matching unpacks a node's defining field, and
@@ -137,6 +161,32 @@ tree, so a tag or attribute name resolves to the same interned atom the parser a
 compare. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and
 :meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
 :class:`~turbohtml.Formatter`.
+
+*******************
+ Mutating the tree
+*******************
+
+The arena that makes reading cheap is built for append-only construction, not random edits, so making the tree mutable
+took a deliberate rule rather than a writable wrapper over the read path: **mutate in place within a tree, copy on adopt
+across trees**. An edit that keeps a node in its own tree (:meth:`~turbohtml.Element.append` of a child already under
+the same root, :meth:`~turbohtml.Node.insert_before`, :meth:`~turbohtml.Node.unwrap`) is a few pointer swaps on the
+arena nodes, so the node keeps its identity and any wrapper you hold stays valid. Inserting a node from a different tree
+(a freshly constructed one, or a node lifted out of another document) deep-copies its subtree into the destination's
+arena and re-points the moved wrapper at the copy, so the two arenas never alias and the source frees on its own. Making
+a node a descendant of itself is refused.
+
+Construction reuses the same arena machinery: :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and the rest build
+a standalone single-node tree that owns its data, ready to adopt into a document, and tag and attribute names are
+ASCII-lowercased so they resolve to the same interned atoms the parser assigns. :attr:`Element.attrs
+<turbohtml.Element.attrs>` is a live mapping over the node's own attribute array (assignment and deletion edit the tree
+directly rather than a throwaway dict), and ``copy.copy``, ``copy.deepcopy``, and :mod:`python:pickle` all run through
+the same subtree copy, so a clone is always a standalone tree.
+
+:class:`~turbohtml.ProcessingInstruction` and :class:`~turbohtml.CData` round out the node model for building, but the
+parser never emits them: a WHATWG-conformant parse folds ``<? ... >`` into a comment and a foreign CDATA section into
+text, and turbohtml keeps that conformance rather than inventing nodes the algorithm does not produce. Pickling carries
+an element's children as an explicit list instead of re-serializing, so those two node types survive a round-trip that
+serialize-and-reparse would fold away.
 
 ****************
  Free-threading

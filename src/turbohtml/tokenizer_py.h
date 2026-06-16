@@ -25,8 +25,11 @@ typedef struct {
     PyObject *text_type;          /* Text */
     PyObject *comment_type;       /* Comment */
     PyObject *doctype_type;       /* Doctype */
+    PyObject *pi_type;            /* ProcessingInstruction */
+    PyObject *cdata_type;         /* CData */
     PyObject *document_type;      /* Document */
     PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
+    PyObject *attrs_type;         /* _Attrs (the live mutable view of an element's attributes) */
     PyObject *walker_type;        /* _NodeIterator (descendants / ancestors / siblings) */
     PyObject *string_walker_type; /* _StringIterator (strings / stripped_strings) */
     PyObject *namespace_enum;     /* Namespace (enum.Enum) */
@@ -48,6 +51,10 @@ int tree_register(PyObject *module, module_state *state);
    METH_VARARGS | METH_KEYWORDS. */
 PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs);
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs);
+
+/* Rebuild a node and its subtree from a pickle (kind, data, children) triple,
+   wired as the private _reconstruct() the node __reduce__ points pickle at. */
+PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args);
 
 /* Build a Token from a freshly emitted record. Small records are copied and a
    large text run is moved out of the record (which then regrows). A slice

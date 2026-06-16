@@ -245,6 +245,10 @@ static int is_foreign_breakout(uint16_t atom) {
     }
 }
 
+/* The case-folding buffer for an SVG element name; names longer than this skip
+   the mixed-case adjustment (every adjusted SVG name is well under the cap). */
+#define MAX_SVG_NAME 64
+
 /* Insert an element into a foreign (SVG/MathML) namespace, adjusting an SVG
    element's name to its mixed-case spelling. */
 static th_node *insert_foreign(th_tree *tree, const th_token *token, uint8_t ns) {
@@ -262,7 +266,7 @@ static th_node *insert_foreign(th_tree *tree, const th_token *token, uint8_t ns)
                    (node->atom == TH_TAG_FOREIGNOBJECT || node->atom == TH_TAG_DESC || node->atom == TH_TAG_TITLE));
     node->tag_flags = special ? TH_TAG_SPECIAL : 0;
     if (ns == TH_NS_SVG && node->text != NULL) { /* GCOVR_EXCL_BR_LINE: an SVG element always has a tag name */
-        char lower[64];
+        char lower[MAX_SVG_NAME];
         if (node->text_len < (Py_ssize_t)sizeof(lower)) { /* GCOVR_EXCL_BR_LINE: SVG names are under 64 chars */
             for (Py_ssize_t index = 0; index < node->text_len; index++) {
                 lower[index] = (char)node->text[index];
@@ -310,14 +314,14 @@ static int use_foreign_rules(th_tree *tree, const th_token *token) {
             return 0;
         }
         if (token->kind == TH_START_TAG) {
-            uint16_t atom = intern_atom(&token->name, &(uint8_t){0});
+            uint16_t atom = tok_atom(token);
             if (atom != TH_TAG_MGLYPH && atom != TH_TAG_MALIGNMARK) {
                 return 0; /* HTML rules, except mglyph/malignmark which stay foreign */
             }
         }
     }
     if (cur->ns == TH_NS_MATHML && cur->atom == TH_TAG_ANNOTATION_XML && token->kind == TH_START_TAG &&
-        intern_atom(&token->name, &(uint8_t){0}) == TH_TAG_SVG) {
+        tok_atom(token) == TH_TAG_SVG) {
         return 0;
     }
     if (is_html_integration(cur) && (token->kind == TH_START_TAG || token->kind == TH_TEXT)) {
@@ -356,8 +360,7 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         return 1; /* ignored in foreign content */
     }
     if (token->kind == TH_START_TAG) {
-        uint8_t flags;
-        uint16_t atom = intern_atom(&token->name, &flags);
+        uint16_t atom = token->atom;
         int breakout = is_foreign_breakout(atom) ||
                        (atom == TH_TAG_FONT && (token_has_attr(token, "color") || token_has_attr(token, "face") ||
                                                 token_has_attr(token, "size")));
@@ -382,7 +385,7 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         return 1;
     }
     /* end tag: </br> and </p> are breakout tags like their start-tag forms */
-    uint16_t atom = intern_atom(&token->name, &(uint8_t){0});
+    uint16_t atom = tok_atom(token);
     if (atom == TH_TAG_BR || atom == TH_TAG_P) {
         /* html is never foreign, so the breakout loop never empties the stack */
         while (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE */

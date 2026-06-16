@@ -45,6 +45,14 @@ def test_hooks_reject_non_str(call: Callable[[], object]) -> None:
         call()
 
 
+# Several cases below pin otherwise-unreached decision branches in the tree builder.
+# gcov scores each operand of a short-circuit condition separately, so they pin the
+# rarer operand value (a non-newline after <pre>, a hidden-input type with a low-ASCII
+# byte, an annotation-xml encoding that is not "text/html", an attribute name long
+# enough to fill the 128-byte serialization sort buffer, ...).
+_LONG_NAME = "z" * 130
+
+
 @pytest.mark.parametrize(
     ("html", "needle"),
     [
@@ -99,15 +107,6 @@ def test_hooks_reject_non_str(call: Callable[[], object]) -> None:
             "|       <table>",
             id="quirks-public-id-w3o-strict",
         ),
-    ],
-)
-def test_document_paths(html: str, needle: str) -> None:
-    assert needle in _doc(html)
-
-
-@pytest.mark.parametrize(
-    ("html", "needle"),
-    [
         pytest.param("<p>" + "x" * 70000, "x" * 40, id="text-larger-than-arena-block"),
         pytest.param("<html a=1><html ő=2>", 'a="1"', id="merge-wide-attr-name"),
         pytest.param("<input type=HIDDEN>", "<input>", id="uppercase-hidden-input-type"),
@@ -126,7 +125,9 @@ def test_document_paths(html: str, needle: str) -> None:
             '"x"',
             id="formatting-list-regrow",
         ),
-        pytest.param("<p " + " ".join(f"a{i}=1" for i in range(70)) + ">", 'a0="1"', id="element-over-64-attributes"),
+        pytest.param(
+            "<p " + " ".join(f"a{index}=1" for index in range(70)) + ">", 'a0="1"', id="element-over-64-attributes"
+        ),
         pytest.param("<![CDATA[x]]>", "[CDATA[x]]", id="cdata-in-html-is-bogus-comment"),
         pytest.param("<svg><![CDATA[x]]></svg>", '"x"', id="cdata-in-foreign-is-text"),
         # the CDATA scan runs in the 2-byte and 4-byte tokenizer cores too: a wide char widens the whole input
@@ -253,45 +254,6 @@ def test_document_paths(html: str, needle: str) -> None:
         pytest.param("<template><form></form>x</template>", "content", id="form-end-tag-in-template"),
         pytest.param("<table><thead><tr><td>x<tr>", "<thead>", id="table-section-scope-on-row"),
         pytest.param("<table><tr><td>a</td><th>b</th>", "<th>", id="td-and-th-cells"),
-    ],
-)
-def test_document_edge_paths(html: str, needle: str) -> None:
-    assert needle in _doc(html)
-
-
-@pytest.mark.parametrize(
-    ("html", "context", "needle"),
-    [
-        pytest.param("</li>x", "div", '| "x"', id="end-li-no-scope"),
-        pytest.param("</dd>y", "div", '| "y"', id="end-dd-no-scope"),
-        pytest.param("<frame><frameset></frameset>", "frameset", "<frame>", id="frameset-context"),
-        pytest.param("<option>a<select><option>b", "select", "<option>", id="select-ignores-nested-select"),
-        pytest.param("  <col>x", "colgroup", "<col>", id="colgroup-whitespace-then-content"),
-        pytest.param("<select></select><td>next", "tr", "<td>", id="select-in-cell-resets"),
-        pytest.param("<table></table>x", "td", '"x"', id="reset-table-close-td-context"),
-        pytest.param("<table></table>x", "head", '"x"', id="reset-table-close-head-context"),
-        pytest.param("<table></table>x", "div", '"x"', id="reset-table-close-default-context"),
-        pytest.param("   ", "title", '| "   "', id="title-whitespace-text"),
-        pytest.param("", "title", "", id="empty-fragment-serializes-empty"),
-        pytest.param("x", "a" * 40, '"x"', id="context-name-longer-than-buffer"),
-        pytest.param("<br>", "svg", "<br>", id="breakout-stops-at-fragment-root"),
-    ],
-)
-def test_fragment_paths(html: str, context: str, needle: str) -> None:
-    assert needle in _frag(html, context)
-
-
-# Inputs that drive otherwise-unreached decision branches in the tree builder.
-# gcov scores each operand of a short-circuit condition separately, so these
-# pin the rarer operand value (a non-newline after <pre>, a hidden-input type
-# with a low-ASCII byte, an annotation-xml encoding that is not "text/html", an
-# attribute name long enough to fill the 128-byte serialization sort buffer, …).
-_LONG_NAME = "z" * 130
-
-
-@pytest.mark.parametrize(
-    ("html", "needle"),
-    [
         pytest.param("<b id=a t=p><b id=b t=p>x", "<b>", id="afe-multi-attr-mismatch-first"),
         pytest.param("<b id=x><b ie=y>z", "<b>", id="afe-same-length-different-name"),
         pytest.param("<b id=x><b id=yy>z", "<b>", id="afe-different-value-length"),
@@ -344,5 +306,27 @@ _LONG_NAME = "z" * 130
         pytest.param("<svg " + _LONG_NAME + "=1 m=2>y</svg>", "z" * 40, id="foreign-attr-name-fills-sort-buffer"),
     ],
 )
-def test_gcov_branch_paths(html: str, needle: str) -> None:
+def test_document_paths(html: str, needle: str) -> None:
     assert needle in _doc(html)
+
+
+@pytest.mark.parametrize(
+    ("html", "context", "needle"),
+    [
+        pytest.param("</li>x", "div", '| "x"', id="end-li-no-scope"),
+        pytest.param("</dd>y", "div", '| "y"', id="end-dd-no-scope"),
+        pytest.param("<frame><frameset></frameset>", "frameset", "<frame>", id="frameset-context"),
+        pytest.param("<option>a<select><option>b", "select", "<option>", id="select-ignores-nested-select"),
+        pytest.param("  <col>x", "colgroup", "<col>", id="colgroup-whitespace-then-content"),
+        pytest.param("<select></select><td>next", "tr", "<td>", id="select-in-cell-resets"),
+        pytest.param("<table></table>x", "td", '"x"', id="reset-table-close-td-context"),
+        pytest.param("<table></table>x", "head", '"x"', id="reset-table-close-head-context"),
+        pytest.param("<table></table>x", "div", '"x"', id="reset-table-close-default-context"),
+        pytest.param("   ", "title", '| "   "', id="title-whitespace-text"),
+        pytest.param("", "title", "", id="empty-fragment-serializes-empty"),
+        pytest.param("x", "a" * 40, '"x"', id="context-name-longer-than-buffer"),
+        pytest.param("<br>", "svg", "<br>", id="breakout-stops-at-fragment-root"),
+    ],
+)
+def test_fragment_paths(html: str, context: str, needle: str) -> None:
+    assert needle in _frag(html, context)

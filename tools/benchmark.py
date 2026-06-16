@@ -374,6 +374,78 @@ def lexbor_serialize(tree: LexborHTMLParser) -> None:
     _ = tree.html
 
 
+# --- write-path suite: build and serialize a tree from scratch ------------- #
+# Each function constructs a <ul> of count <li> rows (a class, a data attribute,
+# and a text child apiece) and serializes it, the construction work an editor or
+# template engine does. selectolax/lexbor is parse-only, so it has no row here.
+
+
+def turbo_build(count: int) -> None:
+    """Build a list with turbohtml's constructors, attribute mapping, and text setter."""
+    ul = turbohtml.Element("ul")
+    for index in range(count):
+        li = turbohtml.Element("li", {"class": "item", "data-i": str(index)})
+        li.text = f"item {index}"
+        ul.append(li)
+    _ = ul.html
+
+
+def bs4_build(count: int) -> None:
+    """Build the same list with BeautifulSoup's new_tag and string assignment."""
+    soup = BeautifulSoup("", "html.parser")
+    ul = soup.new_tag("ul")
+    for index in range(count):
+        li = soup.new_tag("li", attrs={"class": "item", "data-i": str(index)})
+        li.string = f"item {index}"
+        ul.append(li)
+    _ = ul.decode()
+
+
+def lxml_build(count: int) -> None:
+    """Build the same list with lxml's Element factory and .text."""
+    ul = lxml_html.Element("ul")
+    for index in range(count):
+        li = lxml_html.Element("li", {"class": "item", "data-i": str(index)})
+        li.text = f"item {index}"
+        ul.append(li)
+    _ = lxml_html.tostring(ul)
+
+
+# Write-path competitors; selectolax is parse-only and so absent.
+BUILD_LIBS: tuple[tuple[str, Callable[[int], None]], ...] = (
+    ("turbohtml", turbo_build),
+    ("lxml", lxml_build),
+    ("BeautifulSoup", bs4_build),
+)
+
+BUILD_CASES: tuple[tuple[str, int], ...] = (("100 rows", 100), ("1k rows", 1_000), ("10k rows", 10_000))
+
+
+def run_build_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark programmatic tree construction across every library; return the case names."""
+    for name, count in BUILD_CASES:
+        for label, build in BUILD_LIBS:
+            bench(f"build {name} [{label}]", build, count)
+    return [name for name, _ in BUILD_CASES]
+
+
+def print_build_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml beside each alternative and its slowdown factor for tree construction."""
+    if not cases:
+        return
+    others = [label for label, _ in BUILD_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'build benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"build {name} [turbohtml]"]
+        row = f"{'build ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"build {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 # Read-path competitors, fastest-first: a tree builder plus the find/select/serialize trio. turbohtml leads each table.
 READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., None], ...]], ...] = (
     ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize)),
@@ -385,6 +457,66 @@ READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., Non
 # wpt pages from 4 kB to 92 kB; the multi-MB specs are skipped here since every
 # library would re-parse them per worker, which dwarfs the timed query.
 READPATH_CASES = CORPUS_FILES[1:4]
+
+
+# --- edit suite: rewrite attributes across a pre-parsed tree --------------- #
+# Each library parses once (outside the timed region), then the timed function
+# tags every <a> with rel=nofollow, a classic link-rewriting pass. Setting the
+# same value is idempotent, so pyperf's repeated calls do equal work each time.
+
+
+def turbo_edit(doc: Document) -> None:
+    """Tag every link with turbohtml's live attribute mapping."""
+    for anchor in doc.find_all("a"):
+        anchor.attrs["rel"] = "nofollow"
+
+
+def bs4_edit(soup: BeautifulSoup) -> None:
+    """Tag every link with BeautifulSoup's item assignment."""
+    for anchor in soup.find_all("a"):
+        anchor["rel"] = "nofollow"
+
+
+def lxml_edit(tree: HtmlElement) -> None:
+    """Tag every link with lxml's Element.set."""
+    for anchor in tree.findall(".//a"):
+        anchor.set("rel", "nofollow")
+
+
+# Write-on-parsed-tree competitors; selectolax mutation is limited, so it is absent.
+EDIT_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
+    ("turbohtml", turbo_tree, turbo_edit),
+    ("lxml", lxml_tree, lxml_edit),
+    ("BeautifulSoup", bs4_tree, bs4_edit),
+)
+
+
+def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark a link-rewriting edit across every library; return the case names."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, edit in EDIT_LIBS:
+            bench(f"edit {name} [{label}]", edit, build(text))
+        names.append(name)
+    return names
+
+
+def print_edit_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml beside each alternative and its slowdown factor for editing a parsed tree."""
+    if not cases:
+        return
+    others = [label for label, _, _ in EDIT_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'edit benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"edit {name} [turbohtml]"]
+        row = f"{'edit ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"edit {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
 
 
 def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
@@ -485,7 +617,7 @@ def main() -> None:
     runner.argparser.add_argument(
         "suites",
         nargs="*",
-        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", []],
+        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", "build", "edit", []],
         help="suites to run (default: all)",
     )
     args = runner.parse_args()
@@ -494,7 +626,9 @@ def main() -> None:
     if args.suites:
         os.environ["TURBOHTML_BENCH_SUITES"] = ",".join(args.suites)
         args.inherit_environ = [*(args.inherit_environ or []), "TURBOHTML_BENCH_SUITES"]
-    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize")
+    selection = os.environ.get(
+        "TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit"
+    )
     suites = set(selection.split(","))
     means: dict[str, float] = {}
 
@@ -520,6 +654,8 @@ def main() -> None:
     find_cases = run_readpath_suite(bench, 0, "find") if "query" in suites else []
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
+    build_cases = run_build_suite(bench) if "build" in suites else []
+    edit_cases = run_edit_suite(bench) if "edit" in suites else []
     if args.worker or not means:
         return
     rows = [(op, name) for op, name, _ in CASES if op in suites]
@@ -529,6 +665,8 @@ def main() -> None:
     print_readpath_table(means, "find", find_cases)
     print_readpath_table(means, "select", select_cases)
     print_readpath_table(means, "serialize", serialize_cases)
+    print_build_table(means, build_cases)
+    print_edit_table(means, edit_cases)
 
 
 if __name__ == "__main__":

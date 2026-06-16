@@ -361,15 +361,17 @@ void th_tok_set_initial(th_tokenizer *self, enum th_initial_state state, const P
 /* Append chunk[from..to) to the input buffer, widening either side as needed. */
 static void input_append(th_tokenizer *self, int kind, const void *data, Py_ssize_t from, Py_ssize_t to) {
     th_buf *buf = &self->input;
-    Py_ssize_t n = to - from; /* kept short: longer names push the marker line below past clang-format's 120 limit */
+    Py_ssize_t count = to - from;
     int promote = kind > buf->kind ? buf_promote(buf, kind) : 0;
-    if (promote < 0 || buf_ensure(buf, (buf->len + n) * buf->kind) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        self->oom = 1;                                                    /* GCOVR_EXCL_LINE: alloc-failure path */
-        return;                                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+    /* GCOVR_EXCL_START: allocation failure cannot be forced from a test */
+    if (promote < 0 || buf_ensure(buf, (buf->len + count) * buf->kind) < 0) {
+        self->oom = 1;
+        return;
     }
+    /* GCOVR_EXCL_STOP */
     if (kind == buf->kind) {
-        memcpy((char *)buf->data + buf->len * kind, (const char *)data + from * kind, (size_t)(n * kind));
-        buf->len += n;
+        memcpy((char *)buf->data + buf->len * kind, (const char *)data + from * kind, (size_t)(count * kind));
+        buf->len += count;
     } else {
         /* a narrow chunk into a buffer a wider chunk promoted earlier */
         for (Py_ssize_t index = from; index < to; index++) {
@@ -472,47 +474,32 @@ static void flush_text(th_tokenizer *self) {
     enqueue(self, rec);
 }
 
-/* Append the input span [start, start+n) to an arbitrary buffer with one bulk
+/* Append the input span [start, start+count) to an arbitrary buffer with one bulk
    copy (or a widening loop), used to scan quoted attribute values in blocks
-   rather than character by character. n stays short: a longer name pushes the
-   marker line below past clang-format's 120-column limit. */
-static void buf_append_input(th_tokenizer *self, th_buf *buf, Py_ssize_t start, Py_ssize_t n) {
+   rather than character by character. */
+static void buf_append_input(th_tokenizer *self, th_buf *buf, Py_ssize_t start, Py_ssize_t count) {
     int promote = self->input.kind > buf->kind ? buf_promote(buf, self->input.kind) : 0;
-    if (promote < 0 || buf_ensure(buf, (buf->len + n) * buf->kind) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        self->oom = 1;                                                    /* GCOVR_EXCL_LINE: alloc-failure path */
-        return;                                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+    /* GCOVR_EXCL_START: allocation failure cannot be forced from a test */
+    if (promote < 0 || buf_ensure(buf, (buf->len + count) * buf->kind) < 0) {
+        self->oom = 1;
+        return;
     }
+    /* GCOVR_EXCL_STOP */
     if (self->input.kind == buf->kind) {
         memcpy((char *)buf->data + buf->len * buf->kind, (const char *)self->input.data + start * buf->kind,
-               (size_t)(n * buf->kind));
-        buf->len += n;
+               (size_t)(count * buf->kind));
+        buf->len += count;
     } else {
-        for (Py_ssize_t index = 0; index < n; index++) {
+        for (Py_ssize_t index = 0; index < count; index++) {
             buf_write(buf, buf->len++, buf_read(&self->input, start + index));
         }
     }
 }
 
-/* n stays short: a longer name pushes the marker line below past clang-format's
-   120-column limit. */
-static void copy_input_range(th_tokenizer *self, Py_ssize_t start, Py_ssize_t n) {
-    th_buf *buf = &self->text;
-    int promote = self->input.kind > buf->kind ? buf_promote(buf, self->input.kind) : 0;
-    if (promote < 0 || buf_ensure(buf, (buf->len + n) * buf->kind) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        self->oom = 1;                                                    /* GCOVR_EXCL_LINE: alloc-failure path */
-        return;                                                           /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    if (self->input.kind == buf->kind) {
-        memcpy((char *)buf->data + buf->len * buf->kind, (const char *)self->input.data + start * buf->kind,
-               (size_t)(n * buf->kind));
-        buf->len += n;
-    } else {
-        /* the span is narrower than the buffer (a wide character arrived via
-           an earlier character reference): widen while copying */
-        for (Py_ssize_t index = 0; index < n; index++) {
-            buf_write(buf, buf->len++, buf_read(&self->input, start + index));
-        }
-    }
+/* Copy the input span [start, start+count) into the text buffer, widening when the
+   input is at a wider width than the text. */
+static void copy_input_range(th_tokenizer *self, Py_ssize_t start, Py_ssize_t count) {
+    buf_append_input(self, &self->text, start, count);
 }
 
 /* Copy the pending slice span into the text buffer; from here on the run is

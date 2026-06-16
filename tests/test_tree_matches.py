@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import parse
+from turbohtml import Element, parse
 
 _DOC = (
     '<section id="s" class="box">'
@@ -13,43 +13,31 @@ _DOC = (
 )
 
 
-def test_matches_self() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
-    assert a.matches("a")
-    assert a.matches('[href="/x"]')
-    assert not a.matches("p")
+@pytest.fixture
+def link() -> Element:
+    element = parse(_DOC).select_one("a")
+    assert element is not None
+    return element
 
 
-def test_matches_considers_ancestors_and_siblings() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
-    assert a.matches("section a")  # a has a section ancestor
-    assert a.matches("article p > a")  # full chain holds
-    assert not a.matches("h2 a")  # no h2 ancestor
+def test_matches_self(link: Element) -> None:
+    assert link.matches("a")
+    assert link.matches('[href="/x"]')
+    assert not link.matches("p")
+
+
+def test_matches_considers_ancestors_and_siblings(link: Element) -> None:
+    assert link.matches("section a")  # a section ancestor exists
+    assert link.matches("article p > a")  # the full chain holds
+    assert not link.matches("h2 a")  # no h2 ancestor
 
 
 def test_matches_non_element_is_false() -> None:
     document = parse(_DOC)
     assert not document.matches("section")  # the Document node is not an element
-    h2 = document.select_one("h2")
-    assert h2 is not None
-    text = h2.children[0]
-    assert not text.matches("h2")  # a Text node never matches
-
-
-def test_matches_rejects_non_str() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
-    with pytest.raises(TypeError):
-        a.matches(123)  # ty: ignore[invalid-argument-type]  # not a str
-
-
-def test_matches_rejects_invalid_selector() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
-    with pytest.raises(ValueError, match="selector"):
-        a.matches("[")
+    heading = document.select_one("h2")
+    assert heading is not None
+    assert not heading.children[0].matches("h2")  # a Text node never matches
 
 
 def test_closest_returns_self_when_it_matches() -> None:
@@ -60,41 +48,34 @@ def test_closest_returns_self_when_it_matches() -> None:
     assert closest.tag == "article"
 
 
-def test_closest_walks_up_to_an_ancestor() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
-    section = a.closest("section")
+def test_closest_walks_up_to_an_ancestor(link: Element) -> None:
+    section = link.closest("section")
     assert section is not None
     assert section.tag == "section"
-    article = a.closest(".post")
+    article = link.closest(".post")
     assert article is not None
     assert article.tag == "article"
 
 
-def test_closest_returns_none_when_nothing_matches() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
-    assert a.closest("table") is None
+def test_closest_returns_none_when_nothing_matches(link: Element) -> None:
+    assert link.closest("table") is None
 
 
 def test_closest_from_a_text_node() -> None:
-    p = parse(_DOC).select_one("p.lead")
-    assert p is not None
-    text = p.children[0]
-    nearest = text.closest("p")  # a Text node's nearest matching ancestor
+    paragraph = parse(_DOC).select_one("p.lead")
+    assert paragraph is not None
+    nearest = paragraph.children[0].closest("p")  # a Text node's nearest matching ancestor
     assert nearest is not None
     assert nearest.tag == "p"
 
 
-def test_closest_rejects_non_str() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
+@pytest.mark.parametrize("method", [pytest.param("matches", id="matches"), pytest.param("closest", id="closest")])
+def test_rejects_non_str(link: Element, method: str) -> None:
     with pytest.raises(TypeError):
-        a.closest(123)  # ty: ignore[invalid-argument-type]  # not a str
+        getattr(link, method)(123)
 
 
-def test_closest_rejects_invalid_selector() -> None:
-    a = parse(_DOC).select_one("a")
-    assert a is not None
+@pytest.mark.parametrize("method", [pytest.param("matches", id="matches"), pytest.param("closest", id="closest")])
+def test_rejects_invalid_selector(link: Element, method: str) -> None:
     with pytest.raises(ValueError, match="selector"):
-        a.closest("[")
+        getattr(link, method)("[")

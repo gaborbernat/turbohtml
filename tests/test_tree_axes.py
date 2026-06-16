@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from turbohtml import Element, Text, parse
 
 if TYPE_CHECKING:
@@ -24,14 +26,17 @@ def _find(html: str, tag: str) -> Element:
     return element
 
 
-def test_next_siblings_are_forward_only() -> None:
-    assert _tags(_find(_DOC, "h2").next_siblings) == ["p", "ul"]
-    assert _tags(_find(_DOC, "ul").next_siblings) == []
-
-
-def test_previous_siblings_are_nearest_first() -> None:
-    assert _tags(_find(_DOC, "ul").previous_siblings) == ["p", "h2"]
-    assert _tags(_find(_DOC, "h2").previous_siblings) == []
+@pytest.mark.parametrize(
+    ("tag", "axis", "expected"),
+    [
+        pytest.param("h2", "next_siblings", ["p", "ul"], id="next-forward"),
+        pytest.param("ul", "next_siblings", [], id="next-at-end"),
+        pytest.param("ul", "previous_siblings", ["p", "h2"], id="previous-nearest-first"),
+        pytest.param("h2", "previous_siblings", [], id="previous-at-start"),
+    ],
+)
+def test_sibling_axes(tag: str, axis: str, expected: list[str]) -> None:
+    assert _tags(getattr(_find(_DOC, tag), axis)) == expected
 
 
 def test_following_excludes_own_subtree() -> None:
@@ -57,11 +62,13 @@ def test_preceding_of_root_is_empty() -> None:
     assert list(root.preceding) == []
 
 
-def test_strings_yields_every_text_node_in_order() -> None:
+@pytest.mark.parametrize(
+    ("axis", "expected"),
+    [
+        pytest.param("strings", [" hi ", "  ", "bye"], id="strings-verbatim"),
+        pytest.param("stripped_strings", ["hi", "bye"], id="stripped-skips-blank-runs"),
+    ],
+)
+def test_text_iterators(axis: str, expected: list[str]) -> None:
     div = _find("<div><p> hi </p><p>  </p><p>bye</p></div>", "div")
-    assert list(div.strings) == [" hi ", "  ", "bye"]
-
-
-def test_stripped_strings_trims_and_skips_blank_runs() -> None:
-    div = _find("<div><p> hi </p><p>  </p><p>bye</p></div>", "div")
-    assert list(div.stripped_strings) == ["hi", "bye"]
+    assert list(getattr(div, axis)) == expected

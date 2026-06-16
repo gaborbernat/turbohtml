@@ -208,6 +208,12 @@ static uint16_t intern_atom(const th_buf *name, uint8_t *out_flags) {
     return TH_TAG_UNKNOWN;
 }
 
+/* The token's interned tag atom, cached on the token by the run loop once per
+   token so every "which tag is this" comparison is a field read, not a re-intern. */
+static uint16_t tok_atom(const th_token *tok) {
+    return tok->atom;
+}
+
 /* ---------------------------------------------------- attribute interning */
 
 static uint32_t fnv1a(const char *bytes, Py_ssize_t len) {
@@ -413,6 +419,183 @@ static th_node *node_new(th_tree *tree, enum th_node_type type) {
     return node;
 }
 
+/* An empty tree for programmatically constructed nodes: the arena grows on the
+   first allocation and can_span stays 0, so a node's text is always owned rather
+   than a borrowed span. */
+th_tree *th_tree_new(void) {
+    return PyMem_Calloc(1, sizeof(th_tree));
+}
+
+/* Construct a text/comment/doctype node owning a copy of data in tree's arena. */
+th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len) {
+    th_node *node = node_new(tree, (enum th_node_type)type);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (len > 0) {
+        Py_UCS4 *owned = arena_alloc(tree, len * (Py_ssize_t)sizeof(Py_UCS4));
+        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(owned, data, (size_t)len * sizeof(Py_UCS4));
+        node->text = owned;
+        node->text_len = len;
+    }
+    return node;
+}
+
+/* Construct a processing-instruction node. The target, a space, and the data are
+   packed into one buffer (target_len marks the split, kept in attr_count) so the
+   node carries both halves; serialization writes "<?" + buffer + ">". */
+th_node *th_tree_make_pi(th_tree *tree, const Py_UCS4 *target, Py_ssize_t target_len, const Py_UCS4 *data,
+                         Py_ssize_t data_len) {
+    th_node *node = node_new(tree, TH_NODE_PI);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t total = target_len + 1 + data_len;
+    Py_UCS4 *owned = arena_alloc(tree, total * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, target, (size_t)target_len * sizeof(Py_UCS4));
+    owned[target_len] = ' ';
+    memcpy(owned + target_len + 1, data, (size_t)data_len * sizeof(Py_UCS4));
+    node->text = owned;
+    node->text_len = total;
+    node->attr_count = target_len;
+    return node;
+}
+
+/* Intern a UTF-8 attribute name to its atom (static table, else the tree's
+   dynamic table), the construction-side counterpart of intern_attr. */
+uint32_t th_attr_intern_utf8(th_tree *tree, const char *bytes, Py_ssize_t len) {
+    uint32_t atom = th_attr_atom(bytes, (size_t)len);
+    if (atom != TH_ATTR_UNKNOWN) {
+        return atom;
+    }
+    return intern_attr_dynamic(tree, bytes, len);
+}
+
+/* Construct an element node owning a copy of the tag name, with attr_count empty
+   attribute slots to fill with th_tree_set_attr. */
+th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_len, uint16_t atom,
+                              Py_ssize_t attr_count) {
+    th_node *node = node_new(tree, TH_NODE_ELEMENT);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    node->atom = atom;
+    Py_UCS4 *owned = arena_alloc(tree, tag_len * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, tag, (size_t)tag_len * sizeof(Py_UCS4));
+    node->text = owned;
+    node->text_len = tag_len;
+    if (attr_count > 0) {
+        node->attrs = arena_alloc(tree, attr_count * (Py_ssize_t)sizeof(th_node_attr));
+        if (node->attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memset(node->attrs, 0, (size_t)attr_count * sizeof(th_node_attr));
+        node->attr_count = attr_count;
+    }
+    return node;
+}
+
+/* Fill attribute slot index on a constructed element. has_value 0 makes a
+   valueless attribute (value NULL); otherwise the value is owned in the arena,
+   with an empty value kept distinct from a valueless one. */
+int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char *name, Py_ssize_t name_len,
+                     const Py_UCS4 *value, Py_ssize_t value_len, int has_value) {
+    th_node_attr *attr = &node->attrs[index];
+    attr->name_atom = th_attr_intern_utf8(tree, name, name_len);
+    if (!has_value) {
+        return 0;
+    }
+    Py_UCS4 *owned = arena_alloc(tree, (value_len ? value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
+    attr->value = owned;
+    attr->value_len = value_len;
+    return 0;
+}
+
+/* Upsert an attribute by name: replace the value of the existing attribute with
+   that atom, or append a new slot (growing the arena array by one). has_value 0
+   stores a valueless attribute; an empty value stays distinct from valueless.
+   Returns 0, or -1 on allocation failure. */
+int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                     Py_ssize_t value_len, int has_value) {
+    uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
+    Py_UCS4 *owned = NULL;
+    if (has_value) {
+        owned = arena_alloc(tree, (value_len ? value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            node->attrs[index].value = owned;
+            node->attrs[index].value_len = has_value ? value_len : 0;
+            return 0;
+        }
+    }
+    th_node_attr *grown = arena_alloc(tree, (node->attr_count + 1) * (Py_ssize_t)sizeof(th_node_attr));
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(grown, node->attrs, (size_t)node->attr_count * sizeof(th_node_attr));
+    grown[node->attr_count].name_atom = atom;
+    grown[node->attr_count].value = owned;
+    grown[node->attr_count].value_len = has_value ? value_len : 0;
+    node->attrs = grown;
+    node->attr_count++;
+    return 0;
+}
+
+/* Replace a node's character data with a copy of len code points (an empty buffer
+   is stored as none). Returns 0, or -1 on allocation failure. */
+int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize_t len) {
+    if (len == 0) {
+        node->text = NULL;
+        node->text_len = 0;
+        return 0;
+    }
+    Py_UCS4 *owned = arena_alloc(tree, len * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, data, (size_t)len * sizeof(Py_UCS4));
+    node->text = owned;
+    node->text_len = len;
+    return 0;
+}
+
+/* Remove the attribute with this name, shifting the rest down. Returns 1 when one
+   was removed, 0 when the element had no such attribute. */
+int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    uint32_t atom = th_attr_lookup(tree, name, name_len);
+    if (atom == UINT32_MAX) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            for (Py_ssize_t shift = index; shift + 1 < node->attr_count; shift++) {
+                node->attrs[shift] = node->attrs[shift + 1];
+            }
+            node->attr_count--;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void node_append(th_node *parent, th_node *child) {
     child->parent = parent;
     child->prev_sibling = parent->last_child;
@@ -462,6 +645,128 @@ static void node_insert_before(th_node *parent, th_node *child, th_node *ref) {
         parent->first_child = child;
     }
     ref->prev_sibling = child;
+}
+
+/* --- structural-edit primitives for the mutable Python tree API --- */
+
+void th_node_remove(th_node *child) {
+    node_remove(child);
+}
+
+void th_node_append_child(th_node *parent, th_node *child) {
+    node_append(parent, child);
+}
+
+void th_node_insert_before(th_node *parent, th_node *child, th_node *ref) {
+    node_insert_before(parent, child, ref);
+}
+
+/* Whether ancestor is node itself or one of its ancestors, the test that rejects
+   making a node a descendant of itself. */
+int th_node_contains(th_node *ancestor, th_node *node) {
+    for (th_node *walk = node; walk != NULL; walk = walk->parent) {
+        if (walk == ancestor) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Deep-copy a node and its subtree from src into dest's arena, materializing
+   borrowed text and re-interning per-tree attribute atoms. Used to adopt a node
+   from another tree without retaining the source. NULL on allocation failure. */
+th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
+    th_node *node = node_new(dest, src_node->type);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    node->atom = src_node->atom;
+    node->ns = src_node->ns;
+    node->tag_flags = src_node->tag_flags;
+    if (src_node->text_len > 0) {
+        const Py_UCS4 *text = need_text(src, src_node);
+        Py_UCS4 *owned = arena_alloc(dest, src_node->text_len * (Py_ssize_t)sizeof(Py_UCS4));
+        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(owned, text, (size_t)src_node->text_len * sizeof(Py_UCS4));
+        node->text = owned;
+        node->text_len = src_node->text_len;
+    }
+    if (src_node->type == TH_NODE_PI) {
+        node->attr_count = src_node->attr_count; /* the packed target/data split point */
+    }
+    if (src_node->type == TH_NODE_ELEMENT && src_node->attr_count > 0) {
+        node->attrs = arena_alloc(dest, src_node->attr_count * (Py_ssize_t)sizeof(th_node_attr));
+        if (node->attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memset(node->attrs, 0, (size_t)src_node->attr_count * sizeof(th_node_attr));
+        node->attr_count = src_node->attr_count;
+        for (Py_ssize_t index = 0; index < src_node->attr_count; index++) {
+            const th_node_attr *from = &src_node->attrs[index];
+            uint32_t atom = from->name_atom;
+            if (atom >= TH_ATTR__DYNAMIC_BASE) {
+                Py_ssize_t name_len;
+                const char *name = th_attr_name(src, atom, &name_len);
+                atom = th_attr_intern_utf8(dest, name, name_len);
+            }
+            node->attrs[index].name_atom = atom;
+            if (from->value != NULL) {
+                Py_UCS4 *value =
+                    arena_alloc(dest, (from->value_len ? from->value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+                if (value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                    return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                memcpy(value, from->value, (size_t)from->value_len * sizeof(Py_UCS4));
+                node->attrs[index].value = value;
+                node->attrs[index].value_len = from->value_len;
+            }
+        }
+    }
+    for (th_node *child = src_node->first_child; child != NULL; child = child->next_sibling) {
+        th_node *copy = th_tree_copy_node(dest, src, child);
+        if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        node_append(node, copy);
+    }
+    return node;
+}
+
+/* DOM normalize: merge adjacent Text children into the first of each run and drop
+   empty Text nodes, recursing into every element. Merged runs get a fresh arena
+   buffer; on allocation failure the merge stops early, leaving a valid tree. */
+void th_node_normalize(th_tree *tree, th_node *root) {
+    for (th_node *child = root->first_child; child != NULL;) {
+        th_node *next = child->next_sibling;
+        if (child->type == TH_NODE_ELEMENT) {
+            th_node_normalize(tree, child);
+        } else if (child->type == TH_NODE_TEXT) {
+            if (child->text_len == 0) {
+                th_node_remove(child);
+                child = next;
+                continue;
+            }
+            while (next != NULL && next->type == TH_NODE_TEXT) {
+                th_node *after = next->next_sibling;
+                if (next->text_len > 0) {
+                    Py_ssize_t merged_len = child->text_len + next->text_len;
+                    Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
+                    if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                        return;           /* GCOVR_EXCL_LINE: allocation-failure path */
+                    }
+                    memcpy(merged, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
+                    memcpy(merged + child->text_len, need_text(tree, next), (size_t)next->text_len * sizeof(Py_UCS4));
+                    child->text = merged;
+                    child->text_len = merged_len;
+                }
+                th_node_remove(next);
+                next = after;
+            }
+        }
+        child = next;
+    }
 }
 
 /* A shallow element clone (same atom/name/attrs, no children) for the adoption
@@ -679,7 +984,8 @@ static th_node *insert_element(th_tree *tree, const th_token *token) {
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
-    node->atom = intern_atom(&token->name, &node->tag_flags);
+    node->atom = token->atom;
+    node->tag_flags = token->tag_flags;
     node->text = buf_to_ucs4(tree, &token->name, &node->text_len);
     if (token->attr_count > 0) {
         node->attrs = arena_alloc(tree, token->attr_count * (Py_ssize_t)sizeof(th_node_attr));
@@ -1088,6 +1394,18 @@ static void maybe_clone_option(th_tree *tree, th_node *option) {
     deep_copy_children(tree, option, sc);
 }
 
+/* Remove the active-formatting-elements entry at index, shifting the tail down. */
+static void afe_remove_at(th_tree *tree, Py_ssize_t index) {
+    memmove(&tree->afe[index], &tree->afe[index + 1], (size_t)(tree->afe_len - index - 1) * sizeof(th_node *));
+    tree->afe_len--;
+}
+
+/* Remove the open-elements-stack entry at index, shifting the tail down. */
+static void stack_remove_at(th_tree *tree, Py_ssize_t index) {
+    memmove(&tree->open[index], &tree->open[index + 1], (size_t)(tree->open_len - index - 1) * sizeof(th_node *));
+    tree->open_len--;
+}
+
 static int afe_push(th_tree *tree, th_node *node) {
     /* Noah's Ark: at most three earlier entries with the same name+attributes
        may precede a new one before the oldest is dropped. */
@@ -1115,9 +1433,7 @@ static int afe_push(th_tree *tree, th_node *node) {
         }
     }
     if (matches >= 3) {
-        memmove(&tree->afe[earliest], &tree->afe[earliest + 1],
-                (size_t)(tree->afe_len - earliest - 1) * sizeof(th_node *));
-        tree->afe_len--;
+        afe_remove_at(tree, earliest);
     }
     if (tree->afe_len == tree->afe_cap) {
         Py_ssize_t cap = tree->afe_cap ? tree->afe_cap * 2 : 16;
@@ -1255,8 +1571,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         if (fmt_stack < 0) {
             /* not on the stack: parse error, remove from the list */
             Py_ssize_t fi = afe_index_of(tree, fmt);
-            memmove(&tree->afe[fi], &tree->afe[fi + 1], (size_t)(tree->afe_len - fi - 1) * sizeof(th_node *));
-            tree->afe_len--;
+            afe_remove_at(tree, fi);
             return 1;
         }
         /* in scope? */
@@ -1290,8 +1605,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
                 stack_pop(tree);
             }
             Py_ssize_t fi = afe_index_of(tree, fmt);
-            memmove(&tree->afe[fi], &tree->afe[fi + 1], (size_t)(tree->afe_len - fi - 1) * sizeof(th_node *));
-            tree->afe_len--;
+            afe_remove_at(tree, fi);
             return 1;
         }
         th_node *common = tree->open[fmt_stack - 1];
@@ -1313,9 +1627,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
             }
             Py_ssize_t node_afe = afe_index_of(tree, node);
             if (inner_counter > 3 && node_afe >= 0) {
-                memmove(&tree->afe[node_afe], &tree->afe[node_afe + 1],
-                        (size_t)(tree->afe_len - node_afe - 1) * sizeof(th_node *));
-                tree->afe_len--;
+                afe_remove_at(tree, node_afe);
                 if (node_afe < bookmark) {
                     bookmark--;
                 }
@@ -1323,9 +1635,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
             }
             if (node_afe < 0) {
                 /* not in the list: remove from the stack and continue */
-                memmove(&tree->open[node_idx], &tree->open[node_idx + 1],
-                        (size_t)(tree->open_len - node_idx - 1) * sizeof(th_node *));
-                tree->open_len--;
+                stack_remove_at(tree, node_idx);
                 continue;
             }
             th_node *clone = node_clone(tree, node);
@@ -1368,8 +1678,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         if (fi < bookmark) {
             bookmark--;
         }
-        memmove(&tree->afe[fi], &tree->afe[fi + 1], (size_t)(tree->afe_len - fi - 1) * sizeof(th_node *));
-        tree->afe_len--;
+        afe_remove_at(tree, fi);
         /* GCOVR_EXCL_START: the list just shrank by one (fmt removed) before this single
            re-insert, so afe_len < afe_cap here and the grow never fires */
         if (tree->afe_len == tree->afe_cap) {
@@ -1396,8 +1705,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         tree->afe_len++;
         /* remove fmt from the stack, insert the clone below furthest */
         Py_ssize_t fs = stack_index_of(tree, fmt);
-        memmove(&tree->open[fs], &tree->open[fs + 1], (size_t)(tree->open_len - fs - 1) * sizeof(th_node *));
-        tree->open_len--;
+        stack_remove_at(tree, fs);
         Py_ssize_t furthest_now = stack_index_of(tree, furthest);
         if (!stack_push(tree, NULL)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return 1;                  /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
@@ -1423,6 +1731,15 @@ static int has_in_button_scope(th_tree *tree, uint16_t atom) {
         }
     }
     return 0;
+}
+
+/* The spec's "close a p element" step: when a p is in button scope, generate
+   implied end tags (except p) and pop the stack through that p. */
+static void close_p_in_button_scope(th_tree *tree) {
+    if (has_in_button_scope(tree, TH_TAG_P)) {
+        generate_implied_end_tags(tree, TH_TAG_P);
+        pop_until_atom(tree, TH_TAG_P);
+    }
 }
 
 static int is_heading_atom(uint16_t atom) {
@@ -1795,13 +2112,21 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
         table_origin = M_IN_TABLE;
         tree->text_offset = 0; /* a fresh token: any consumed-prefix offset is stale */
     reprocess:;
+        /* Intern the tag name once; every comparison and insert below reads
+           tok->atom / tok->tag_flags instead of re-interning the same name. */
+        if (tok->kind == TH_START_TAG || tok->kind == TH_END_TAG) {
+            tok->atom = intern_atom(&tok->name, &tok->tag_flags);
+        } else {
+            tok->atom = TH_TAG_UNKNOWN;
+            tok->tag_flags = 0;
+        }
         if (use_foreign_rules(tree, tok) && foreign_step(tree, tok)) {
             continue; /* handled under foreign-content rules */
         }
         /* template tags are handled uniformly across the table/select modes (the
            spec routes them through in-head); in-body/in-head/in-template keep
            their own handlers for the active-formatting interactions */
-        if (tok->kind == TH_END_TAG && mode >= M_IN_HEAD && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TEMPLATE) {
+        if (tok->kind == TH_END_TAG && mode >= M_IN_HEAD && tok_atom(tok) == TH_TAG_TEMPLATE) {
             if (stack_index_of_atom(tree, TH_TAG_TEMPLATE) >= 0) {
                 generate_implied_end_tags(tree, TH_TAG_UNKNOWN);
                 pop_until_atom(tree, TH_TAG_TEMPLATE);
@@ -1814,7 +2139,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
         if (tok->kind == TH_START_TAG &&
             (mode == M_IN_TABLE || mode == M_IN_TABLE_BODY || mode == M_IN_ROW || mode == M_IN_CELL ||
              mode == M_IN_COLUMN_GROUP || mode == M_IN_CAPTION) &&
-            intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TEMPLATE) {
+            tok_atom(tok) == TH_TAG_TEMPLATE) {
             th_node *node = insert_template(tree, tok);
             if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                 stack_push(tree, node);
@@ -1867,7 +2192,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break;
                 }
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_HTML) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HTML) {
                 th_node *html = insert_element(tree, tok);
                 if (html != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                     stack_push(tree, html);
@@ -1901,7 +2226,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 tree->text_offset += ws; /* the whitespace prefix is dropped, not moved */
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_HEAD) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HEAD) {
                 th_node *head = insert_element(tree, tok);
                 if (head != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                     stack_push(tree, head);
@@ -1911,7 +2236,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t end_atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t end_atom = tok_atom(tok);
                 if (end_atom != TH_TAG_HEAD && end_atom != TH_TAG_BODY && end_atom != TH_TAG_HTML &&
                     end_atom != TH_TAG_BR) {
                     break; /* any other end tag before head is a parse error and ignored */
@@ -1946,8 +2271,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 /* only the head's own raw-text/RCDATA elements switch to text
                    mode here; textarea/xmp/iframe/etc belong in the body */
                 if (atom == TH_TAG_TITLE || atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT || atom == TH_TAG_NOFRAMES) {
@@ -1990,7 +2315,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 goto reprocess;
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t end_atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t end_atom = tok_atom(tok);
                 if (end_atom == TH_TAG_HEAD) {
                     stack_pop(tree);
                     mode = M_AFTER_HEAD;
@@ -2009,7 +2334,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break; /* parse error, ignored */
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t end_atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t end_atom = tok_atom(tok);
                 if (end_atom == TH_TAG_NOSCRIPT) {
                     stack_pop(tree); /* pop noscript */
                     mode = M_IN_HEAD;
@@ -2019,7 +2344,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break; /* any other end tag is a parse error, ignored */
                 }
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_HTML) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HTML) {
                 /* process via the in-body rules (merges attributes) */
                 /* open stack always holds html at index 0 */
                 if (tree->open_len > 0 && tree->open[0]->atom == TH_TAG_HTML && /* GCOVR_EXCL_BR_LINE */
@@ -2041,7 +2366,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
             }
             if (tok->kind == TH_START_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_BASEFONT || atom == TH_TAG_BGSOUND || atom == TH_TAG_LINK || atom == TH_TAG_META) {
                     insert_element(tree, tok); /* void metadata */
                     break;
@@ -2078,7 +2403,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 insert_comment(tree, tok, NULL);
                 break;
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_BODY) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_BODY) {
                 th_node *body = insert_element(tree, tok);
                 if (body != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                     stack_push(tree, body);
@@ -2087,7 +2412,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 mode = M_IN_BODY;
                 break;
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_FRAMESET) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_FRAMESET) {
                 th_node *fs = insert_element(tree, tok);
                 if (fs != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                     stack_push(tree, fs);
@@ -2096,8 +2421,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 /* head-content tags re-enter the head element, are processed
                    there, and leave the head off the stack again */
                 if (atom == TH_TAG_BASE || atom == TH_TAG_BASEFONT || atom == TH_TAG_BGSOUND || atom == TH_TAG_LINK ||
@@ -2136,7 +2461,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t end_atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t end_atom = tok_atom(tok);
                 if (end_atom != TH_TAG_BODY && end_atom != TH_TAG_HTML && end_atom != TH_TAG_BR) {
                     break; /* any other end tag after head is a parse error, ignored */
                 }
@@ -2155,8 +2480,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break; /* </template> is handled by the dispatcher above; other end tags are ignored */
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 if (atom == TH_TAG_TEMPLATE) {
                     th_node *node = insert_template(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
@@ -2228,7 +2553,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_FRAMESET) {
                     th_node *fs = insert_element(tree, tok);
                     if (fs != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
@@ -2252,7 +2577,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 break;
             }
-            if (tok->kind == TH_END_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_FRAMESET) {
+            if (tok->kind == TH_END_TAG && tok_atom(tok) == TH_TAG_FRAMESET) {
                 if (current_node(tree)->atom != TH_TAG_HTML) {
                     stack_pop(tree);
                 }
@@ -2274,7 +2599,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 insert_comment(tree, tok, NULL);
                 break;
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_NOFRAMES) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_NOFRAMES) {
                 th_node *node = insert_element(tree, tok);
                 if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                     stack_push(tree, node);
@@ -2284,7 +2609,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 mode = M_TEXT;
                 break;
             }
-            if (tok->kind == TH_END_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_HTML) {
+            if (tok->kind == TH_END_TAG && tok_atom(tok) == TH_TAG_HTML) {
                 mode = M_AFTER_AFTER_FRAMESET; /* only comments and whitespace remain */
             }
             break;
@@ -2304,8 +2629,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     tree->drop_newline = 0;
                     reconstruct_afe(tree);
                     for (Py_ssize_t index = 0; index < len; index++) {
-                        Py_UCS4 c = input_read(tree, off + index);
-                        if (!is_space(c)) {
+                        Py_UCS4 character = input_read(tree, off + index);
+                        if (!is_space(character)) {
                             tree->frameset_ok = 0;
                             break;
                         }
@@ -2325,8 +2650,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 /* a U+0000 is dropped and, like whitespace, does not clear
                    frameset-ok; only a real visible character does */
                 for (Py_ssize_t index = 0; index < len; index++) {
-                    Py_UCS4 c = text[index];
-                    if (!is_space(c) && c != 0) {
+                    Py_UCS4 character = text[index];
+                    if (!is_space(character) && character != 0) {
                         tree->frameset_ok = 0;
                         break;
                     }
@@ -2339,8 +2664,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 if (atom_breaks_frameset(atom) || (atom == TH_TAG_INPUT && !input_is_hidden(tok))) {
                     tree->frameset_ok = 0;
                 }
@@ -2382,10 +2707,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 /* block and heading elements close an open p and are inserted
                    WITHOUT reconstructing the active formatting elements */
                 if (is_heading_atom(atom)) {
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     if (is_heading_atom(current_node(tree)->atom)) {
                         stack_pop(tree); /* nested headings don't stack */
                     }
@@ -2397,10 +2719,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 if (is_p_closing_block(atom) && atom != TH_TAG_PLAINTEXT && atom != TH_TAG_PRE &&
                     atom != TH_TAG_LISTING) { /* pre/listing also drop a leading newline below */
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         stack_push(tree, node);
@@ -2449,21 +2768,18 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 if (atom == TH_TAG_LI) {
                     /* html bounds the stack walk */
                     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
-                        uint16_t a = tree->open[index]->atom;
-                        if (a == TH_TAG_LI) {
+                        uint16_t open_atom = tree->open[index]->atom;
+                        if (open_atom == TH_TAG_LI) {
                             generate_implied_end_tags(tree, TH_TAG_LI);
                             pop_until_atom(tree, TH_TAG_LI);
                             break;
                         }
-                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && a != TH_TAG_ADDRESS && a != TH_TAG_DIV &&
-                            a != TH_TAG_P) {
+                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && open_atom != TH_TAG_ADDRESS &&
+                            open_atom != TH_TAG_DIV && open_atom != TH_TAG_P) {
                             break;
                         }
                     }
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         stack_push(tree, node);
@@ -2473,21 +2789,18 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 if (atom == TH_TAG_DD || atom == TH_TAG_DT) {
                     /* html bounds the stack walk */
                     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
-                        uint16_t a = tree->open[index]->atom;
-                        if (a == TH_TAG_DD || a == TH_TAG_DT) {
-                            generate_implied_end_tags(tree, a);
-                            pop_until_atom(tree, a);
+                        uint16_t open_atom = tree->open[index]->atom;
+                        if (open_atom == TH_TAG_DD || open_atom == TH_TAG_DT) {
+                            generate_implied_end_tags(tree, open_atom);
+                            pop_until_atom(tree, open_atom);
                             break;
                         }
-                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && a != TH_TAG_ADDRESS && a != TH_TAG_DIV &&
-                            a != TH_TAG_P) {
+                        if ((tree->open[index]->tag_flags & TH_TAG_SPECIAL) && open_atom != TH_TAG_ADDRESS &&
+                            open_atom != TH_TAG_DIV && open_atom != TH_TAG_P) {
                             break;
                         }
                     }
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         stack_push(tree, node);
@@ -2495,10 +2808,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break;
                 }
                 if (atom == TH_TAG_HR) {
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     if (has_in_scope(tree, TH_TAG_SELECT)) {
                         generate_implied_end_tags(tree, TH_TAG_UNKNOWN); /* closes open option/optgroup */
                     }
@@ -2562,10 +2872,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     if (tree->form != NULL && !in_template) {
                         break; /* a nested form is ignored */
                     }
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         stack_push(tree, node);
@@ -2606,10 +2913,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break; /* img is void */
                 }
                 if (atom == TH_TAG_PLAINTEXT) {
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         stack_push(tree, node);
@@ -2620,10 +2924,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 int model = content_model_for(atom, flags);
                 if (model >= 0) { /* rawtext / rcdata / script: no reconstruction */
                     if (atom == TH_TAG_XMP) {
-                        if (has_in_button_scope(tree, TH_TAG_P)) {
-                            generate_implied_end_tags(tree, TH_TAG_P);
-                            pop_until_atom(tree, TH_TAG_P);
-                        }
+                        close_p_in_button_scope(tree);
                         reconstruct_afe(tree);
                         tree->frameset_ok = 0;
                     }
@@ -2640,10 +2941,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break;
                 }
                 if (atom == TH_TAG_PRE || atom == TH_TAG_LISTING) {
-                    if (has_in_button_scope(tree, TH_TAG_P)) {
-                        generate_implied_end_tags(tree, TH_TAG_P);
-                        pop_until_atom(tree, TH_TAG_P);
-                    }
+                    close_p_in_button_scope(tree);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         stack_push(tree, node);
@@ -2658,15 +2956,11 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                         adoption_agency(tree, TH_TAG_A);
                         Py_ssize_t ai = afe_index_of(tree, existing);
                         if (ai >= 0) {
-                            memmove(&tree->afe[ai], &tree->afe[ai + 1],
-                                    (size_t)(tree->afe_len - ai - 1) * sizeof(th_node *));
-                            tree->afe_len--;
+                            afe_remove_at(tree, ai);
                         }
                         Py_ssize_t si = stack_index_of(tree, existing);
                         if (si >= 0) {
-                            memmove(&tree->open[si], &tree->open[si + 1],
-                                    (size_t)(tree->open_len - si - 1) * sizeof(th_node *));
-                            tree->open_len--;
+                            stack_remove_at(tree, si);
                         }
                     }
                 }
@@ -2723,8 +3017,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_END_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint8_t flags = tok->tag_flags;
+                uint16_t atom = tok->atom;
                 if (atom == TH_TAG_BODY || atom == TH_TAG_HTML) {
                     mode = M_AFTER_BODY;
                     if (atom == TH_TAG_HTML) {
@@ -2797,9 +3091,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                         /* the form element is on the stack when this runs, so it */
                         for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
                             if (tree->open[index] == node) {
-                                memmove(&tree->open[index], &tree->open[index + 1],
-                                        (size_t)(tree->open_len - index - 1) * sizeof(th_node *));
-                                tree->open_len--;
+                                stack_remove_at(tree, index);
                                 break;
                             }
                         }
@@ -2894,8 +3186,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint8_t flags;
-                uint16_t atom = intern_atom(&tok->name, &flags);
+                uint16_t atom = tok->atom;
                 if (atom == TH_TAG_CAPTION) {
                     clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
                     afe_push_marker(tree);
@@ -2957,8 +3248,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break;
                 }
                 if (atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT) {
-                    uint8_t f2;
-                    uint16_t a2 = intern_atom(&tok->name, &f2);
+                    uint8_t f2 = tok->tag_flags;
+                    uint16_t a2 = tok->atom;
                     int model = content_model_for(a2, f2);
                     th_node *node = insert_element(tree, tok);
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
@@ -2991,7 +3282,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 goto reprocess;
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TABLE) {
                     if (has_in_table_scope(tree, TH_TAG_TABLE)) {
                         pop_until_atom(tree, TH_TAG_TABLE);
@@ -3015,8 +3306,9 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             }
             break;
 
-        case M_IN_CAPTION:
-            if (tok->kind == TH_END_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_CAPTION) {
+        case M_IN_CAPTION: {
+            uint16_t atom = tok_atom(tok);
+            if (tok->kind == TH_END_TAG && atom == TH_TAG_CAPTION) {
                 if (has_in_table_scope(tree, TH_TAG_CAPTION)) {
                     generate_implied_end_tags(tree, TH_TAG_UNKNOWN);
                     pop_until_atom(tree, TH_TAG_CAPTION);
@@ -3025,16 +3317,11 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 break;
             }
-            if ((tok->kind == TH_START_TAG && (intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_CAPTION ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_COL ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_COLGROUP ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TBODY ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TD ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TFOOT ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TH ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_THEAD ||
-                                               intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TR)) ||
-                (tok->kind == TH_END_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_TABLE)) {
+            if ((tok->kind == TH_START_TAG &&
+                 (atom == TH_TAG_CAPTION || atom == TH_TAG_COL || atom == TH_TAG_COLGROUP || atom == TH_TAG_TBODY ||
+                  atom == TH_TAG_TD || atom == TH_TAG_TFOOT || atom == TH_TAG_TH || atom == TH_TAG_THEAD ||
+                  atom == TH_TAG_TR)) ||
+                (tok->kind == TH_END_TAG && atom == TH_TAG_TABLE)) {
                 if (has_in_table_scope(tree, TH_TAG_CAPTION)) {
                     generate_implied_end_tags(tree, TH_TAG_UNKNOWN);
                     pop_until_atom(tree, TH_TAG_CAPTION);
@@ -3048,6 +3335,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             foster_return = M_IN_CAPTION;
             mode = M_IN_BODY;
             goto reprocess;
+        }
 
         case M_IN_COLUMN_GROUP:
             if (tok->kind == TH_TEXT) {
@@ -3069,11 +3357,11 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 insert_comment(tree, tok, NULL);
                 break;
             }
-            if (tok->kind == TH_START_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_COL) {
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_COL) {
                 insert_element(tree, tok); /* col is void */
                 break;
             }
-            if (tok->kind == TH_END_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_COLGROUP) {
+            if (tok->kind == TH_END_TAG && tok_atom(tok) == TH_TAG_COLGROUP) {
                 if (current_node(tree)->atom == TH_TAG_COLGROUP) {
                     stack_pop(tree);
                     mode = M_IN_TABLE;
@@ -3091,7 +3379,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
 
         case M_IN_TABLE_BODY:
             if (tok->kind == TH_START_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TR) {
                     clear_to(tree, TH_TAG_TBODY, TH_TAG_TFOOT, TH_TAG_THEAD);
                     th_node *node = insert_element(tree, tok);
@@ -3125,7 +3413,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TBODY || atom == TH_TAG_THEAD || atom == TH_TAG_TFOOT) {
                     if (has_in_table_scope(tree, atom)) {
                         clear_to(tree, TH_TAG_TBODY, TH_TAG_TFOOT, TH_TAG_THEAD);
@@ -3155,7 +3443,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
 
         case M_IN_ROW:
             if (tok->kind == TH_START_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TD || atom == TH_TAG_TH) {
                     clear_to(tree, TH_TAG_TR, TH_TAG_TR, TH_TAG_TR);
                     th_node *node = insert_element(tree, tok);
@@ -3178,7 +3466,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
             }
             if (tok->kind == TH_END_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TR) {
                     if (has_in_table_scope(tree, TH_TAG_TR)) {
                         clear_to(tree, TH_TAG_TR, TH_TAG_TR, TH_TAG_TR);
@@ -3216,7 +3504,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
 
         case M_IN_CELL:
             if (tok->kind == TH_END_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TD || atom == TH_TAG_TH) {
                     if (has_in_table_scope(tree, atom)) {
                         generate_implied_end_tags(tree, TH_TAG_UNKNOWN);
@@ -3244,7 +3532,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
             }
             if (tok->kind == TH_START_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_CAPTION || atom == TH_TAG_COL || atom == TH_TAG_COLGROUP || atom == TH_TAG_TBODY ||
                     atom == TH_TAG_TD || atom == TH_TAG_TFOOT || atom == TH_TAG_TH || atom == TH_TAG_THEAD ||
                     atom == TH_TAG_TR) {
@@ -3282,7 +3570,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     goto reprocess;
                 }
             }
-            if (tok->kind == TH_END_TAG && intern_atom(&tok->name, &(uint8_t){0}) == TH_TAG_HTML) {
+            if (tok->kind == TH_END_TAG && tok_atom(tok) == TH_TAG_HTML) {
                 mode = M_AFTER_AFTER_BODY;
                 break;
             }
@@ -3321,7 +3609,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 break;
             }
             if (tok->kind == TH_START_TAG) {
-                uint16_t atom = intern_atom(&tok->name, &(uint8_t){0});
+                uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_HTML) {
                     /* in-body rules: merge attributes into the existing html */
                     /* open stack always holds html at index 0 */
@@ -3362,16 +3650,16 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
         has_cr = memchr(data, '\r', (size_t)length) != NULL;
         tree->has_nul = memchr(data, '\0', (size_t)length) != NULL;
     } else if (kind == PyUnicode_2BYTE_KIND) {
-        const uint16_t *d = (const uint16_t *)data;
+        const uint16_t *units = (const uint16_t *)data;
         for (Py_ssize_t index = 0; index < length; index++) {
-            has_cr |= d[index] == '\r';
-            tree->has_nul |= d[index] == 0;
+            has_cr |= units[index] == '\r';
+            tree->has_nul |= units[index] == 0;
         }
     } else {
-        const uint32_t *d = (const uint32_t *)data;
+        const uint32_t *units = (const uint32_t *)data;
         for (Py_ssize_t index = 0; index < length; index++) {
-            has_cr |= d[index] == '\r';
-            tree->has_nul |= d[index] == 0;
+            has_cr |= units[index] == '\r';
+            tree->has_nul |= units[index] == 0;
         }
     }
     if (has_cr) {
@@ -3388,9 +3676,9 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
 
 /* The first element child of parent with this atom, or NULL. */
 static th_node *child_with_atom(th_node *parent, uint16_t atom) {
-    for (th_node *c = parent->first_child; c != NULL; c = c->next_sibling) {
-        if (c->type == TH_NODE_ELEMENT && c->atom == atom) {
-            return c;
+    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT && child->atom == atom) {
+            return child;
         }
     }
     return NULL;
@@ -3506,6 +3794,10 @@ static enum mode fragment_mode(uint16_t ctx) {
     }
 }
 
+/* The case-folding buffer for a fragment context element name; a longer name is
+   truncated, which only affects the interned atom (every real context name fits). */
+#define MAX_CONTEXT_NAME 32
+
 th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, const char *context,
                                 Py_ssize_t context_len) {
     th_tree *tree = PyMem_Calloc(1, sizeof(th_tree));
@@ -3537,11 +3829,11 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     }
     /* intern on the lowercased name: a context of "svg foreignObject" must
        resolve to the foreignobject atom for the integration-point checks */
-    char lower[32];
+    char lower[MAX_CONTEXT_NAME];
     Py_ssize_t lower_len = local_len < (Py_ssize_t)sizeof(lower) ? local_len : (Py_ssize_t)sizeof(lower);
     for (Py_ssize_t index = 0; index < lower_len; index++) {
-        char c = local[index];
-        lower[index] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+        char character = local[index];
+        lower[index] = character >= 'A' && character <= 'Z' ? (char)(character + 32) : character;
     }
     th_buf ctx_name = {lower, lower_len, 0, PyUnicode_1BYTE_KIND};
     uint8_t ctx_flags;

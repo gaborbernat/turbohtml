@@ -32,7 +32,7 @@ def test_document_has_no_parent() -> None:
 
 def test_children_are_a_tuple(body: Element) -> None:
     assert isinstance(body.children, tuple)
-    assert [c.attrs["id"] for c in body.children if isinstance(c, Element)] == ["a", "b"]
+    assert [child.attrs["id"] for child in body.children if isinstance(child, Element)] == ["a", "b"]
 
 
 def test_siblings(body: Element) -> None:
@@ -53,7 +53,7 @@ def test_descendants_are_document_order(body: Element) -> None:
         assert isinstance(node, Text)
         return f"Text:{node.data}"
 
-    order = [label(n) for n in body.descendants]
+    order = [label(node) for node in body.descendants]
     assert order == ["Element:p", "Text:one", "Element:b", "Text:bold", "Element:p", "Text:two"]
 
 
@@ -66,7 +66,7 @@ def test_descendants_is_lazy_iterator(body: Element) -> None:
 def test_ancestors_reach_the_document(body: Element) -> None:
     bold = body.find("b")
     assert bold is not None
-    chain = [a.tag if isinstance(a, Element) else "#document" for a in bold.ancestors]
+    chain = [node.tag if isinstance(node, Element) else "#document" for node in bold.ancestors]
     assert chain == ["p", "body", "html", "#document"]
 
 

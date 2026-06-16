@@ -28,6 +28,9 @@ enum th_node_type {
     TH_NODE_COMMENT,
     TH_NODE_DOCTYPE,
     TH_NODE_CONTENT, /* a <template>'s content document fragment */
+    TH_NODE_PI,      /* a processing instruction (construction only; the parser folds
+                        <? ... > into a comment and foreign CDATA into text) */
+    TH_NODE_CDATA,   /* a CDATA section (construction only, same reason) */
 };
 
 /* An attribute on an element node. The name is interned to an atom: a static
@@ -76,6 +79,55 @@ typedef struct th_tree th_tree;
    only on allocation failure (no Python error is set). */
 th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length);
 
+/* Create an empty tree to own programmatically constructed nodes. Returns NULL on
+   allocation failure (no Python error is set). */
+th_tree *th_tree_new(void);
+
+/* Construct a text/comment/doctype/cdata node (by enum th_node_type) owning a copy
+   of the data code points in the tree's arena. NULL on allocation failure. */
+th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len);
+
+/* Construct a processing-instruction node owning target and data (packed with the
+   split point in attr_count). NULL on allocation failure. */
+th_node *th_tree_make_pi(th_tree *tree, const Py_UCS4 *target, Py_ssize_t target_len, const Py_UCS4 *data,
+                         Py_ssize_t data_len);
+
+/* Construct an element owning a copy of the tag name, with attr_count empty
+   attribute slots; fill each with th_tree_set_attr. NULL on allocation failure. */
+th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_len, uint16_t atom,
+                              Py_ssize_t attr_count);
+
+/* Fill attribute slot index on a constructed element (has_value 0 means a
+   valueless attribute). Returns 0, or -1 on allocation failure. */
+int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char *name, Py_ssize_t name_len,
+                     const Py_UCS4 *value, Py_ssize_t value_len, int has_value);
+
+/* Upsert an attribute by name (replace value or append a slot); has_value 0 makes
+   it valueless. Returns 0, or -1 on allocation failure. */
+int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                     Py_ssize_t value_len, int has_value);
+
+/* Remove the named attribute; returns 1 if one was removed, else 0. */
+int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len);
+
+/* Replace a node's character data with a copy of len code points. Returns 0, or -1
+   on allocation failure. */
+int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize_t len);
+
+/* Structural-edit primitives. remove detaches a node from its parent; append and
+   insert_before link it (ref==NULL appends); contains reports whether ancestor is
+   node or one of its ancestors; copy_node deep-copies a subtree into another tree
+   (NULL on allocation failure). */
+void th_node_remove(th_node *child);
+void th_node_append_child(th_node *parent, th_node *child);
+void th_node_insert_before(th_node *parent, th_node *child, th_node *ref);
+int th_node_contains(th_node *ancestor, th_node *node);
+th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
+
+/* DOM normalize over a subtree: merge each run of adjacent Text children into one
+   node and drop empty Text nodes, recursing into every element. */
+void th_node_normalize(th_tree *tree, th_node *root);
+
 /* Parse an HTML fragment as if set as the innerHTML of the given context element
    (e.g. "td", or "svg path"). The returned tree serializes the context root's
    children. context is a NUL-free ASCII name; context_len its length. */
@@ -120,6 +172,11 @@ Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
    allocated; *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
                            Py_ssize_t *out_len);
+
+/* The doctype's public and system identifiers as slices of the node's own text;
+   returns 1 with the four out params set when present, 0 for a name-only doctype. */
+int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,
+                        Py_ssize_t *system_len);
 
 /* The interned name bytes (NUL-terminated UTF-8) for an attribute's name_atom;
    *out_len receives the length. Resolves a static atom from the generated table

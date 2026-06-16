@@ -56,7 +56,7 @@ def test_find(doc: Document, tag: str, attrs: dict[str, str], first_id: str | No
     ],
 )
 def test_find_all(doc: Document, tag: str | None, attrs: dict[str, str], ids: list[str]) -> None:
-    assert [m.attrs.get("id") for m in doc.find_all(tag, attrs=attrs)] == ids
+    assert [match.attrs.get("id") for match in doc.find_all(tag, attrs=attrs)] == ids
 
 
 def test_find_all_returns_a_list(doc: Document) -> None:
@@ -67,7 +67,7 @@ def test_find_all_returns_a_list(doc: Document) -> None:
 
 def test_none_tag_matches_any_element() -> None:
     everything = parse("<a><b><c>").find_all(None)
-    assert [e.tag for e in everything] == ["html", "head", "body", "a", "b", "c"]
+    assert [element.tag for element in everything] == ["html", "head", "body", "a", "b", "c"]
 
 
 def test_no_argument_matches_the_first_element(doc: Document) -> None:

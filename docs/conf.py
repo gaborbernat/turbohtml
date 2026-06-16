@@ -13,6 +13,7 @@ version = ".".join(release.split(".")[:2])
 
 extensions = [
     "sphinx.ext.autodoc",
+    "sphinx.ext.doctest",  # run the testcode/testoutput examples so the docs cannot drift from the code
     "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",

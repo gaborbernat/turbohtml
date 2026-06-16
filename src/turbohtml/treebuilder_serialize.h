@@ -127,6 +127,11 @@ static void render_attr_name(th_tree *tree, const th_node *node, const th_node_a
     buf[write_index] = '\0';
 }
 
+/* The #document attribute sort works in fixed stack buffers: at most this many
+   attributes are ordered, each rendered name capped at this many bytes. */
+#define MAX_SORTED_ATTRS 64
+#define MAX_ATTR_NAME 128
+
 static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     if (node->type == TH_NODE_TEXT) {
         need_text(tree, node); /* realize a zero-copy span before output */
@@ -165,6 +170,20 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     case TH_NODE_CONTENT:
         sbuf_puts(out, "content");
         break;
+    /* GCOVR_EXCL_START: a WHATWG-conformant parse never yields a PI (folded to a
+       comment) or a CDATA section (folded to text), so the #document dumper, which
+       only serves parsed trees, never reaches these. */
+    case TH_NODE_PI:
+        sbuf_puts(out, "<?");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CDATA:
+        sbuf_puts(out, "<![CDATA[");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "]]>");
+        break;
+        /* GCOVR_EXCL_STOP */
     case TH_NODE_DOCUMENT: /* GCOVR_EXCL_LINE: the document node is the serialization root, never a line itself */
         break;             /* GCOVR_EXCL_LINE: same — the document node is never reached as a child */
     }
@@ -172,15 +191,16 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
     /* attributes: each on its own deeper line, output in lexicographic name
        order (the html5lib #document format sorts them). Only elements have
        attributes; a text node's attr_count field holds a span offset. */
-    Py_ssize_t order[64];
-    Py_ssize_t count = node->type == TH_NODE_ELEMENT ? (node->attr_count < 64 ? node->attr_count : 64) : 0;
+    Py_ssize_t order[MAX_SORTED_ATTRS];
+    Py_ssize_t count =
+        node->type == TH_NODE_ELEMENT ? (node->attr_count < MAX_SORTED_ATTRS ? node->attr_count : MAX_SORTED_ATTRS) : 0;
     for (Py_ssize_t index = 0; index < count; index++) {
         order[index] = index;
     }
     /* Sort on the displayed name so a namespaced attribute (shown as
        "prefix localname") orders by its space, which precedes a literal colon. */
-    char ke_buf[128];
-    char cmp_buf[128];
+    char ke_buf[MAX_ATTR_NAME];
+    char cmp_buf[MAX_ATTR_NAME];
     for (Py_ssize_t index = 1; index < count; index++) { /* insertion sort; attribute counts are tiny */
         Py_ssize_t key = order[index];
         render_attr_name(tree, node, &node->attrs[key], ke_buf, sizeof(ke_buf));
@@ -422,6 +442,16 @@ static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int forma
         sbuf_put_ucs4(out, node->text, doctype_name_len(node));
         sbuf_putc(out, '>');
         break;
+    case TH_NODE_PI:
+        sbuf_puts(out, "<?");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CDATA:
+        sbuf_puts(out, "<![CDATA[");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "]]>");
+        break;
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -500,6 +530,16 @@ static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_
         sbuf_put_ucs4(out, node->text, doctype_name_len(node));
         sbuf_putc(out, '>');
         break;
+    case TH_NODE_PI:
+        sbuf_puts(out, "<?");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_putc(out, '>');
+        break;
+    case TH_NODE_CDATA:
+        sbuf_puts(out, "<![CDATA[");
+        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_puts(out, "]]>");
+        break;
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -541,6 +581,34 @@ Py_UCS4 *th_node_data(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
         memcpy(out, need_text(tree, node), (size_t)len * sizeof(Py_UCS4));
     }
     return out;
+}
+
+/* The doctype's public and system identifiers, parsed out of the stored
+   "name \"public\" \"system\"" text into slices of the node's own text. Returns 1
+   and sets all four out params when the doctype carries identifiers, 0 when it is
+   just a name. Either identifier may be present but empty (a SYSTEM doctype has no
+   public id, a PUBLIC doctype may omit the system id), and build_doctype_text
+   always writes both quoted strings together, so the closing quotes are
+   guaranteed and no bounds check is needed. */
+int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,
+                        Py_ssize_t *system_len) {
+    Py_ssize_t name_len = doctype_name_len(node);
+    if (name_len >= node->text_len) {
+        return 0;
+    }
+    Py_ssize_t pos = name_len + 2; /* skip the space and the opening quote */
+    *public_id = &node->text[pos];
+    while (node->text[pos] != '"') {
+        pos++;
+    }
+    *public_len = &node->text[pos] - *public_id;
+    pos += 3; /* skip the closing quote, the separating space, and the next opening quote */
+    *system_id = &node->text[pos];
+    while (node->text[pos] != '"') {
+        pos++;
+    }
+    *system_len = &node->text[pos] - *system_id;
+    return 1;
 }
 
 static void collect_text(sbuf *out, th_tree *tree, th_node *node) {
