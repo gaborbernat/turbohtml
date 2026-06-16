@@ -1172,8 +1172,8 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
    descendant axis: the shape the tag-only fast path handles with a pre-order
    walk and an integer atom compare, skipping the general matcher. */
 static int query_is_simple_tag(const query_t *query) {
-    return query->tag_plain && query->tag_atom != TH_TAG_UNKNOWN && query->nattr == 0 &&
-           query->class_ucs4 == NULL && query->class_filter == NULL && query->axis == TH_AXIS_DESCENDANTS;
+    return query->tag_plain && query->tag_atom != TH_TAG_UNKNOWN && query->nattr == 0 && query->class_ucs4 == NULL &&
+           query->class_filter == NULL && query->axis == TH_AXIS_DESCENDANTS;
 }
 
 static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1218,8 +1218,8 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
 static int append_wrapped(PyObject *out, module_state *state, PyObject *handle, th_node *node) {
     PyObject *wrapped = node_wrap(state, handle, node);
     if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-        Py_XDECREF(wrapped); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(wrapped);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_DECREF(wrapped);
     return 0;
@@ -1306,8 +1306,8 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
         }
         int matched = single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled);
         if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc cannot fail */
-            error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-            break;     /* GCOVR_EXCL_LINE: allocation-failure path */
+            error = 1;                                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;                                                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
     selector_free(compiled);
