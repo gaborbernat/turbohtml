@@ -1504,6 +1504,51 @@ static PyType_Spec element_spec = {
 
 /* ------------------------------------------- Text / Comment / Doctype --- */
 
+static PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding);
+
+/* Construct a standalone leaf node (Text or Comment) owning its character data in
+   a fresh single-node tree, ready to be inserted into a document. */
+static PyObject *construct_data_node(PyTypeObject *type, int node_type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"data", NULL};
+    PyObject *data;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "U", keywords, &data)) {
+        return NULL;
+    }
+    module_state *state = PyType_GetModuleState(type);
+    th_tree *tree = th_tree_new();
+    if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t len = PyUnicode_GET_LENGTH(data);
+    Py_UCS4 *points = PyUnicode_AsUCS4Copy(data);
+    if (points == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_node *node = th_tree_make_data_node(tree, node_type, points, len);
+    PyMem_Free(points);
+    if (node == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);      /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *handle = handle_new(state, tree, Py_None, Py_None);
+    if (handle == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *wrapped = node_wrap(state, handle, node);
+    Py_DECREF(handle);
+    return wrapped;
+}
+
+static PyObject *text_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    return construct_data_node(type, TH_NODE_TEXT, args, kwds);
+}
+
+static PyObject *comment_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    return construct_data_node(type, TH_NODE_COMMENT, args, kwds);
+}
+
 static PyObject *node_get_data(PyObject *self, void *Py_UNUSED(closure)) {
     return str_from_accessor(th_node_data, tree_of(self), ((NodeObject *)self)->node);
 }
@@ -1518,13 +1563,14 @@ PyDoc_STRVAR(text_doc, "A run of character data.");
 static PyType_Slot text_slots[] = {
     {Py_tp_doc, (void *)text_doc},
     {Py_tp_getset, data_getset},
+    {Py_tp_new, text_new},
     {0, NULL},
 };
 
 static PyType_Spec text_spec = {
     .name = "turbohtml._html.Text",
     .basicsize = sizeof(NodeObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT,
     .slots = text_slots,
 };
 
@@ -1533,13 +1579,14 @@ PyDoc_STRVAR(comment_doc, "An HTML comment.");
 static PyType_Slot comment_slots[] = {
     {Py_tp_doc, (void *)comment_doc},
     {Py_tp_getset, data_getset},
+    {Py_tp_new, comment_new},
     {0, NULL},
 };
 
 static PyType_Spec comment_spec = {
     .name = "turbohtml._html.Comment",
     .basicsize = sizeof(NodeObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT,
     .slots = comment_slots,
 };
 

@@ -76,6 +76,14 @@ typedef struct th_tree th_tree;
    only on allocation failure (no Python error is set). */
 th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length);
 
+/* Create an empty tree to own programmatically constructed nodes. Returns NULL on
+   allocation failure (no Python error is set). */
+th_tree *th_tree_new(void);
+
+/* Construct a text/comment/doctype node (by enum th_node_type) owning a copy of
+   the data code points in the tree's arena. NULL on allocation failure. */
+th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len);
+
 /* Parse an HTML fragment as if set as the innerHTML of the given context element
    (e.g. "td", or "svg path"). The returned tree serializes the context root's
    children. context is a NUL-free ASCII name; context_len its length. */

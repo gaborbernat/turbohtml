@@ -1,0 +1,4 @@
+Make :class:`~turbohtml.Text` and :class:`~turbohtml.Comment` constructible: ``Text(data)`` and ``Comment(data)`` build
+a standalone node that owns its character data and serializes on its own (``Text("a & b").html`` is ``"a &amp; b"``).
+This is the first piece of the mutable tree; constructed nodes become insertable once the structural edits land - by
+:user:`gaborbernat`.

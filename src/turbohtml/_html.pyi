@@ -155,12 +155,14 @@ class Element(Node):
 @final
 class Text(Node):
     __match_args__ = ("data",)
+    def __init__(self, data: str) -> None: ...
     @property
     def data(self) -> str: ...
 
 @final
 class Comment(Node):
     __match_args__ = ("data",)
+    def __init__(self, data: str) -> None: ...
     @property
     def data(self) -> str: ...
 

@@ -413,6 +413,31 @@ static th_node *node_new(th_tree *tree, enum th_node_type type) {
     return node;
 }
 
+/* An empty tree for programmatically constructed nodes: the arena grows on the
+   first allocation and can_span stays 0, so a node's text is always owned rather
+   than a borrowed span. */
+th_tree *th_tree_new(void) {
+    return PyMem_Calloc(1, sizeof(th_tree));
+}
+
+/* Construct a text/comment/doctype node owning a copy of data in tree's arena. */
+th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len) {
+    th_node *node = node_new(tree, (enum th_node_type)type);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (len > 0) {
+        Py_UCS4 *owned = arena_alloc(tree, len * (Py_ssize_t)sizeof(Py_UCS4));
+        if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(owned, data, (size_t)len * sizeof(Py_UCS4));
+        node->text = owned;
+        node->text_len = len;
+    }
+    return node;
+}
+
 static void node_append(th_node *parent, th_node *child) {
     child->parent = parent;
     child->prev_sibling = parent->last_child;
