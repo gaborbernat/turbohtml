@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import gc
 from html.parser import HTMLParser
+from typing import TYPE_CHECKING
 
 import pytest
 
 from turbohtml import Token, Tokenizer, TokenType, _html, tokenize
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _shape(token: Token) -> tuple[object, ...]:
@@ -43,16 +47,6 @@ def test_tokenize_empty_input() -> None:
     assert list(tokenize("")) == []
 
 
-def test_tokenize_rejects_non_str() -> None:
-    with pytest.raises(TypeError):
-        tokenize(123)  # ty: ignore[invalid-argument-type]  # non-str on purpose to exercise the TypeError path
-
-
-def test_feed_rejects_non_str() -> None:
-    with pytest.raises(TypeError):
-        Tokenizer().feed(b"<p>")  # ty: ignore[invalid-argument-type]  # non-str on purpose
-
-
 def test_comment_token() -> None:
     (comment,) = list(tokenize("<!-- hi -->"))
     assert comment.type is TokenType.COMMENT
@@ -61,30 +55,22 @@ def test_comment_token() -> None:
     assert comment.attrs is None
 
 
-def test_doctype_token_full() -> None:
-    (doctype,) = list(tokenize("<!DOCTYPE HTML PUBLIC \"pub\" 'sys'>"))
-    assert doctype.type is TokenType.DOCTYPE
-    assert doctype.name == "html"
-    assert doctype.public_id == "pub"
-    assert doctype.system_id == "sys"
-    assert doctype.force_quirks is False
-    assert doctype.data is None
-
-
-def test_doctype_token_bare() -> None:
-    (doctype,) = list(tokenize("<!DOCTYPE>"))
-    assert doctype.name == ""  # noqa: PLC1901  # must be exactly the empty string, None would also be falsey
-    assert doctype.public_id is None
-    assert doctype.system_id is None
-    assert doctype.force_quirks is True
-
-
-def test_non_doctype_has_no_doctype_fields() -> None:
-    (tag,) = list(tokenize("<p>"))
-    assert tag.name is None
-    assert tag.public_id is None
-    assert tag.system_id is None
-    assert tag.force_quirks is False
+# each expected tuple is (type, name, public_id, system_id, force_quirks)
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        pytest.param(
+            "<!DOCTYPE HTML PUBLIC \"pub\" 'sys'>", (TokenType.DOCTYPE, "html", "pub", "sys", False), id="full"
+        ),
+        pytest.param("<!DOCTYPE>", (TokenType.DOCTYPE, "", None, None, True), id="bare"),
+        # a non-doctype token still exposes the doctype fields, all empty
+        pytest.param("<p>", (TokenType.START_TAG, None, None, None, False), id="non-doctype"),
+    ],
+)
+def test_doctype_fields(document: str, expected: tuple[object, ...]) -> None:
+    (token,) = list(tokenize(document))
+    assert (token.type, token.name, token.public_id, token.system_id, token.force_quirks) == expected
+    assert token.data is None
 
 
 def test_self_closing_tag() -> None:
@@ -92,25 +78,23 @@ def test_self_closing_tag() -> None:
     assert tag.self_closing is True
 
 
-def test_duplicate_attributes_keep_first() -> None:
-    (tag,) = list(tokenize("<a x=1 y x=2 z=''>"))
-    assert tag.attrs == [("x", "1"), ("y", None), ("z", "")]
+@pytest.mark.parametrize(
+    ("document", "tag_name", "attrs"),
+    [
+        pytest.param("<a x=1 y x=2 z=''>", "a", [("x", "1"), ("y", None), ("z", "")], id="duplicates-keep-first"),
+        pytest.param("<a xy=1 xő=2>", "a", [("xy", "1"), ("xő", "2")], id="same-length-mixed-width-names"),
+        pytest.param("<ab xyz=ő q=🎉>", "ab", [("xyz", "ő"), ("q", "🎉")], id="wide-buffer-after-narrow"),
+    ],
+)
+def test_tag_attrs(document: str, tag_name: str, attrs: list[tuple[str, str | None]]) -> None:
+    (tag,) = list(tokenize(document))
+    assert tag.tag == tag_name
+    assert tag.attrs == attrs
 
 
 def test_non_latin1_tag_name() -> None:
     tokens = list(tokenize("<xmő>x</xmő>"))
     assert [token.tag for token in tokens if token.tag] == ["xmő", "xmő"]
-
-
-def test_wide_buffers_after_odd_length_narrow_ones() -> None:
-    (tag,) = list(tokenize("<ab xyz=ő q=🎉>"))
-    assert tag.tag == "ab"
-    assert tag.attrs == [("xyz", "ő"), ("q", "🎉")]
-
-
-def test_same_length_attribute_names_of_different_widths() -> None:
-    (tag,) = list(tokenize("<a xy=1 xő=2>"))
-    assert tag.attrs == [("xy", "1"), ("xő", "2")]
 
 
 def test_attr_lookup() -> None:
@@ -126,12 +110,6 @@ def test_attr_lookup() -> None:
 def test_attr_on_non_tag_returns_default() -> None:
     (text,) = list(tokenize("plain"))
     assert text.attr("x", "fallback") == "fallback"
-
-
-def test_attr_rejects_non_str_name() -> None:
-    (tag,) = list(tokenize("<p>"))
-    with pytest.raises(TypeError):
-        tag.attr(123)  # ty: ignore[invalid-argument-type]  # non-str on purpose
 
 
 def test_token_repr() -> None:
@@ -301,9 +279,11 @@ def test_streaming_crlf_across_feeds() -> None:
         pytest.param("\U0001f600\r\n\U0001f600\rz", "\U0001f600\n\U0001f600\nz", id="crlf-ucs4"),
         pytest.param("ő\nő", "ő\nő", id="bare-lf-ucs2"),
         pytest.param("\U0001f600\n\U0001f600", "\U0001f600\n\U0001f600", id="bare-lf-ucs4"),
+        pytest.param("a<div", "a", id="dropped-tag-at-eof-flushes-text"),
+        pytest.param("a<", "a<", id="lt-at-eof-is-text"),
     ],
 )
-def test_newline_normalization(text: str, expected: str) -> None:
+def test_single_text_token(text: str, expected: str) -> None:
     assert [token.data for token in tokenize(text)] == [expected]
 
 
@@ -496,14 +476,6 @@ def test_positions_match_html_parser() -> None:
     assert [(token.line, token.col) for token in tokenize(document)] == recorder.positions
 
 
-def test_dropped_tag_at_eof_flushes_text() -> None:
-    assert [token.data for token in tokenize("a<div")] == ["a"]
-
-
-def test_lt_at_eof_is_text() -> None:
-    assert [token.data for token in tokenize("a<")] == ["a<"]
-
-
 def test_garbage_collection_traversal() -> None:
     tokenizer = Tokenizer()
     iterator = tokenizer.feed("<p><b>")
@@ -514,36 +486,48 @@ def test_garbage_collection_traversal() -> None:
     assert [token.tag for token in iterator] == ["b"]
 
 
-def test_tokenize_states_rejects_non_str_text() -> None:
-    with pytest.raises(TypeError):
-        _html._tokenize_states(123, "Data state")  # ty: ignore[invalid-argument-type]  # non-str on purpose
+@pytest.mark.parametrize(
+    ("call", "exc", "match"),
+    [
+        pytest.param(lambda: tokenize(123), TypeError, None, id="tokenize-non-str"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(lambda: Tokenizer().feed(b"<p>"), TypeError, None, id="feed-non-str"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(lambda: next(iter(tokenize("<p>"))).attr(123), TypeError, None, id="attr-non-str-name"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(lambda: _html._tokenize_states(123, "Data state"), TypeError, None, id="states-non-str-text"),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+        pytest.param(
+            lambda: _html._tokenize_states("x", "Bogus state", None),
+            ValueError,
+            "unknown initial state",
+            id="states-unknown-state",
+        ),
+        pytest.param(
+            lambda: _html._tokenize_states("x", "Data state", 5),  # ty: ignore[invalid-argument-type]  # non-str on purpose
+            TypeError,
+            "last_start_tag",
+            id="states-non-str-last-tag",
+        ),
+        pytest.param(
+            lambda: _html._tokenize_states("x", "Data state", None, 3),
+            ValueError,
+            "storage_kind",
+            id="states-bad-storage-kind",
+        ),
+    ],
+)
+def test_api_rejects_bad_arguments(call: Callable[[], object], exc: type[Exception], match: str | None) -> None:
+    with pytest.raises(exc, match=match):
+        call()
 
 
-def test_tokenize_states_rejects_unknown_state() -> None:
-    with pytest.raises(ValueError, match="unknown initial state"):
-        _html._tokenize_states("x", "Bogus state", None)
-
-
-def test_tokenize_states_rejects_non_str_last_tag() -> None:
-    with pytest.raises(TypeError, match="last_start_tag"):
-        _html._tokenize_states("x", "Data state", 5)  # ty: ignore[invalid-argument-type]  # non-str on purpose
-
-
-def test_tokenize_states_rejects_bad_storage_kind() -> None:
-    with pytest.raises(ValueError, match="storage_kind"):
-        _html._tokenize_states("x", "Data state", None, 3)
-
-
-def test_tokenize_states_default_last_tag() -> None:
-    assert _html._tokenize_states("x", "Data state") == [("Character", "x")]
-
-
-def test_tokenize_states_empty_last_tag() -> None:
-    assert _html._tokenize_states("x", "RCDATA state", "") == [("Character", "x")]
-
-
-def test_rcdata_end_tag_name_width_mismatch() -> None:
-    assert _html._tokenize_states("</xy>", "RCDATA state", "xő") == [("Character", "</xy>")]
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        pytest.param(("x", "Data state"), "x", id="default-last-tag"),
+        pytest.param(("x", "RCDATA state", ""), "x", id="empty-last-tag"),
+        pytest.param(("</xy>", "RCDATA state", "xő"), "</xy>", id="rcdata-end-tag-name-width-mismatch"),
+    ],
+)
+def test_tokenize_states_returns_characters(args: tuple[str, ...], expected: str) -> None:
+    assert _html._tokenize_states(*args) == [("Character", expected)]  # ty: ignore[invalid-argument-type]  # variadic str args
 
 
 def test_tag_names_are_lowercased() -> None:

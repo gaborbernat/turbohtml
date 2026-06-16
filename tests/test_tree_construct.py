@@ -42,7 +42,10 @@ def test_constructed_node_matches_structurally() -> None:
             pytest.fail("did not match")
 
 
-@pytest.mark.parametrize("node_type", [Text, Comment])
+@pytest.mark.parametrize(
+    "node_type",
+    [pytest.param(Text, id="text"), pytest.param(Comment, id="comment")],
+)
 def test_data_must_be_a_str(node_type: type[Text | Comment]) -> None:
     with pytest.raises(TypeError):
         node_type(123)  # ty: ignore[invalid-argument-type]  # data must be a str
@@ -63,10 +66,10 @@ def test_element_tag_is_lowercased() -> None:
 
 
 def test_element_with_attributes() -> None:
-    a = Element("a", {"href": "/x", "class": "btn lg"})
-    assert a.html == '<a href="/x" class="btn lg"></a>'  # attributes in insertion order
-    assert a.attrs["href"] == "/x"
-    assert a.attrs["class"] == ["btn", "lg"]  # the class token list reads back as a list
+    anchor = Element("a", {"href": "/x", "class": "btn lg"})
+    assert anchor.html == '<a href="/x" class="btn lg"></a>'  # attributes in insertion order
+    assert anchor.attrs["href"] == "/x"
+    assert anchor.attrs["class"] == ["btn", "lg"]  # the class token list reads back as a list
 
 
 def test_element_list_valued_attribute_joins_on_space() -> None:
@@ -103,42 +106,54 @@ def test_element_attribute_name_is_lowercased() -> None:
     assert Element("div", {"DATA-X": "1"}).attrs["data-x"] == "1"
 
 
-def test_element_empty_tag_is_rejected() -> None:
-    with pytest.raises(ValueError, match="empty"):
-        Element("")
-
-
-@pytest.mark.parametrize("tag", ["a b", "a/b", "a>b", "a<b"])
-def test_element_tag_with_invalid_character_is_rejected(tag: str) -> None:
-    # a name carrying these characters could not round-trip, so the spec forbids it
-    with pytest.raises(ValueError, match="invalid character"):
+@pytest.mark.parametrize(
+    "tag",
+    # an empty name has nothing to write; the others could not round-trip if written
+    [
+        pytest.param("", id="empty"),
+        pytest.param("a b", id="space"),
+        pytest.param("a/b", id="slash"),
+        pytest.param("a>b", id="gt"),
+        pytest.param("a<b", id="lt"),
+    ],
+)
+def test_element_tag_is_rejected(tag: str) -> None:
+    with pytest.raises(ValueError, match=r"empty|invalid character"):
         Element(tag)
 
 
-@pytest.mark.parametrize("name", ["a b", "a/b", "a>b", "a=b", 'a"b', "a'b"])
-def test_element_attribute_name_with_invalid_character_is_rejected(name: str) -> None:
-    with pytest.raises(ValueError, match="invalid character"):
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("a b", id="space"),
+        pytest.param("a/b", id="slash"),
+        pytest.param("a>b", id="gt"),
+        pytest.param("a=b", id="eq"),
+        pytest.param('a"b', id="dquote"),
+        pytest.param("a'b", id="squote"),
+    ],
+)
+def test_element_attribute_name_is_rejected(name: str) -> None:
+    with pytest.raises(ValueError, match=r"empty|invalid character"):
         Element("div", {name: "x"})
 
 
-def test_element_bad_attribute_value() -> None:
-    with pytest.raises(TypeError, match="attribute value"):
-        Element("div", {"x": 1})  # ty: ignore[invalid-argument-type]  # value must be str/list/None
+@pytest.mark.parametrize(
+    ("attrs", "message"),
+    [
+        pytest.param({"x": 1}, "attribute value", id="non-str-value"),
+        pytest.param({1: "x"}, "attribute name", id="non-str-name"),
+    ],
+)
+def test_element_rejects_non_str_attribute(attrs: dict[object, object], message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        Element("div", attrs)  # ty: ignore[invalid-argument-type]  # name and value must be str/list/None
 
 
 def test_element_list_member_must_be_str() -> None:
     with pytest.raises(TypeError):
         Element("div", {"class": [1, 2]})  # ty: ignore[invalid-argument-type]  # members must be str
-
-
-def test_element_attribute_name_must_be_str() -> None:
-    with pytest.raises(TypeError, match="attribute name"):
-        Element("div", {1: "x"})  # ty: ignore[invalid-argument-type]  # names must be str
-
-
-def test_element_attribute_name_must_not_be_empty() -> None:
-    with pytest.raises(ValueError, match="empty"):
-        Element("div", {"": "x"})
 
 
 def test_element_attrs_must_be_a_mapping() -> None:

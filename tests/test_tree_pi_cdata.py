@@ -39,25 +39,22 @@ def test_pi_matches_structurally() -> None:
             pytest.fail("did not match")
 
 
-def test_pi_empty_target_is_rejected() -> None:
-    with pytest.raises(ValueError, match="target must not be empty"):
-        ProcessingInstruction("", "d")
-
-
-@pytest.mark.parametrize("target", ["a b", "a>b"])
-def test_pi_invalid_target_is_rejected(target: str) -> None:
-    with pytest.raises(ValueError, match="invalid character"):
+@pytest.mark.parametrize(
+    "target",
+    [pytest.param("", id="empty"), pytest.param("a b", id="space"), pytest.param("a>b", id="gt")],
+)
+def test_pi_rejects_bad_target(target: str) -> None:
+    with pytest.raises(ValueError, match=r"empty|invalid character"):
         ProcessingInstruction(target, "d")
 
 
-def test_pi_target_must_be_str() -> None:
+@pytest.mark.parametrize(
+    ("target", "data"),
+    [pytest.param(1, "d", id="target"), pytest.param("t", 1, id="data")],
+)
+def test_pi_rejects_non_str_field(target: object, data: object) -> None:
     with pytest.raises(TypeError):
-        ProcessingInstruction(1, "d")  # ty: ignore[invalid-argument-type]  # target must be a str
-
-
-def test_pi_data_must_be_str() -> None:
-    with pytest.raises(TypeError):
-        ProcessingInstruction("t", 1)  # ty: ignore[invalid-argument-type]  # data must be a str
+        ProcessingInstruction(target, data)  # ty: ignore[invalid-argument-type]  # target and data must be str
 
 
 def test_cdata_carries_data() -> None:
@@ -101,9 +98,8 @@ def test_pi_and_cdata_embed_in_a_tree() -> None:
 
 
 def test_pi_adopts_across_trees_keeping_both_halves() -> None:
-    pi = ProcessingInstruction("xml", 'version="1.0"')
     box = Element("section")
-    box.append(pi)  # a cross-tree adopt must preserve the packed target/data split
+    box.append(ProcessingInstruction("xml", 'version="1.0"'))  # adopt must preserve the packed target/data split
     held = box.children[0]
     assert isinstance(held, ProcessingInstruction)
     assert held.target == "xml"

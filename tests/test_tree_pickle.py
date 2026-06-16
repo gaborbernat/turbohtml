@@ -57,23 +57,26 @@ def test_document_round_trips() -> None:
     assert clone.html == doc.html
 
 
-def test_doctype_name_only_round_trips() -> None:
-    doctype = parse("<!DOCTYPE html>").children[0]
-    assert isinstance(doctype, Doctype)
-    clone = _roundtrip(doctype)
-    assert isinstance(clone, Doctype)
-    assert clone.name == "html"
-    assert clone.public_id is None
-
-
-def test_doctype_with_identifiers_round_trips() -> None:
-    markup = '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">'
+@pytest.mark.parametrize(
+    ("markup", "public_id", "system_id"),
+    [
+        pytest.param("<!DOCTYPE html>", None, None, id="name-only"),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
+            "-//W3C//DTD HTML 4.01//EN",
+            "http://www.w3.org/TR/html4/strict.dtd",
+            id="public-and-system",
+        ),
+    ],
+)
+def test_doctype_round_trips(markup: str, public_id: str | None, system_id: str | None) -> None:
     doctype = parse(markup).children[0]
     assert isinstance(doctype, Doctype)
     clone = _roundtrip(doctype)
     assert isinstance(clone, Doctype)
-    assert clone.public_id == "-//W3C//DTD HTML 4.01//EN"
-    assert clone.system_id == "http://www.w3.org/TR/html4/strict.dtd"
+    assert clone.name == "html"
+    assert clone.public_id == public_id
+    assert clone.system_id == system_id
 
 
 def test_pickled_element_is_independent() -> None:

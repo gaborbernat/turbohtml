@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 import copy
+from typing import TYPE_CHECKING
+
+import pytest
 
 from turbohtml import Element, Text, parse
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-def test_copy_duplicates_the_subtree() -> None:
+
+@pytest.mark.parametrize(
+    "duplicate",
+    [pytest.param(copy.copy, id="shallow"), pytest.param(copy.deepcopy, id="deep")],
+)
+def test_duplicates_a_standalone_subtree(duplicate: Callable[[Element], Element]) -> None:
     div = parse('<div id="a"><b>x</b>y</div>').find("div")
     assert div is not None
-    clone = copy.copy(div)
+    clone = duplicate(div)
     assert clone is not div
     assert clone.html == '<div id="a"><b>x</b>y</div>'
-    assert clone.parent is None  # the copy is a standalone root
-
-
-def test_deepcopy_duplicates_the_subtree() -> None:
-    div = parse('<div id="a"><b>x</b>y</div>').find("div")
-    assert div is not None
-    clone = copy.deepcopy(div)
-    assert clone.html == '<div id="a"><b>x</b>y</div>'
+    assert clone.parent is None  # both shallow and deep yield a detached root, not a view
 
 
 def test_copy_is_independent_of_the_original() -> None:

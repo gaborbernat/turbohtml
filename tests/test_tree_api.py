@@ -39,7 +39,7 @@ def test_root_skips_leading_non_elements() -> None:
 )
 def test_repr(html: str, expected: str) -> None:
     doc = parse(html)
-    node = next((n for n in doc.descendants if repr(n) == expected), doc)
+    node = next((candidate for candidate in doc.descendants if repr(candidate) == expected), doc)
     assert repr(node) == expected
 
 
@@ -76,7 +76,7 @@ def test_parse_fragment(html: str, context: str, tag: str, child_tags: list[str]
     root = parse_fragment(html, context)
     assert isinstance(root, Element)
     assert root.tag == tag
-    assert [c.tag for c in root if isinstance(c, Element)] == child_tags
+    assert [child.tag for child in root if isinstance(child, Element)] == child_tags
     assert root.text == text
 
 
@@ -114,11 +114,21 @@ def test_subtree_outlives_its_document(find: Callable[[str, str], Element]) -> N
     assert paragraph.text == "kept"
 
 
-@pytest.mark.parametrize("cls", [Node, Element, Text, Comment, Doctype, Document])
-def test_types_are_not_constructible(cls: type) -> None:
+@pytest.mark.parametrize(
+    "node_type",
+    [
+        pytest.param(Node, id="Node"),
+        pytest.param(Element, id="Element"),
+        pytest.param(Text, id="Text"),
+        pytest.param(Comment, id="Comment"),
+        pytest.param(Doctype, id="Doctype"),
+        pytest.param(Document, id="Document"),
+    ],
+)
+def test_types_are_not_constructible(node_type: type) -> None:
     with pytest.raises(TypeError):
-        cls()
+        node_type()
 
 
 def test_namespace_values() -> None:
-    assert {n.value for n in Namespace} == {"html", "svg", "math"}
+    assert {member.value for member in Namespace} == {"html", "svg", "math"}

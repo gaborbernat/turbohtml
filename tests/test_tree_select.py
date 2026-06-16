@@ -21,42 +21,17 @@ def _sel(html: str, selector: str) -> list[str]:
     return [element.tag for element in parse(html).select(selector)]
 
 
-# --- simple selectors ---
-
-
-def test_type() -> None:
-    assert _sel(_DOC, "li") == ["li", "li"]
-
-
-def test_universal_under_a_root() -> None:
-    section = parse(_DOC).select_one("section")
-    assert section is not None
-    assert len(section.select("*")) == 8  # h2, p, a, p, ul, li, li, my-widget
-
-
-def test_class() -> None:
-    assert _sel(_DOC, ".item") == ["li", "li"]
-
-
-def test_id() -> None:
-    assert _sel(_DOC, "#s") == ["section"]
-
-
-def test_unknown_tag_matches_by_name() -> None:
-    assert _sel(_DOC, "my-widget") == ["my-widget"]
-
-
-def test_compound() -> None:
-    assert _sel(_DOC, "li.sel") == ["li"]
-    assert _sel(_DOC, "p.lead.first") == ["p"]
-
-
-# --- attribute operators ---
-
-
 @pytest.mark.parametrize(
     ("selector", "tags"),
     [
+        # simple selectors
+        pytest.param("li", ["li", "li"], id="type"),
+        pytest.param(".item", ["li", "li"], id="class"),
+        pytest.param("#s", ["section"], id="id"),
+        pytest.param("my-widget", ["my-widget"], id="unknown-tag-by-name"),
+        pytest.param("li.sel", ["li"], id="compound-type-class"),
+        pytest.param("p.lead.first", ["p"], id="compound-two-classes"),
+        # attribute operators
         pytest.param("[rel]", ["a"], id="exists"),
         pytest.param('[href="/x"]', ["a"], id="equals"),
         pytest.param('[class~="wide"]', ["section"], id="includes"),
@@ -70,7 +45,7 @@ def test_compound() -> None:
         pytest.param("[rel=nope]", [], id="value-mismatch"),
         pytest.param("[rel='next']", ["a"], id="single-quoted"),
         pytest.param("[CLASS]", ["section", "h2", "p", "li", "li"], id="uppercase-name"),
-        # operator near misses
+        # attribute operator near misses
         pytest.param('[href^="z"]', [], id="prefix-miss"),
         pytest.param('[href^="/xyz"]', [], id="prefix-too-long"),
         pytest.param('[href$="z"]', [], id="suffix-miss"),
@@ -79,6 +54,7 @@ def test_compound() -> None:
         pytest.param('[lang|="en-US"]', ["my-widget"], id="dash-exact"),
         pytest.param('[lang|="en-U"]', [], id="dash-no-boundary"),
         pytest.param('[lang|="en-US-x"]', [], id="dash-prefix-too-long"),
+        pytest.param('[lang|="xx"]', [], id="dash-prefix-mismatch-at-boundary"),
         pytest.param('[class~="zzz"]', [], id="includes-miss"),
         # empty operand never matches the prefix/suffix/substring/includes ops
         pytest.param('[href^=""]', [], id="prefix-empty"),
@@ -89,121 +65,94 @@ def test_compound() -> None:
         pytest.param("[café]", [], id="latin1-name"),
         pytest.param("[中]", [], id="bmp-name"),
         pytest.param("[😀]", [], id="astral-name"),
+        # combinators
+        pytest.param("section a", ["a"], id="descendant"),
+        pytest.param("ul > li", ["li", "li"], id="child"),
+        pytest.param("section > a", [], id="child-not-direct"),
+        pytest.param("h2 + p", ["p"], id="adjacent-sibling"),
+        pytest.param("p + h2", [], id="adjacent-no-preceding-element"),
+        pytest.param("h2 ~ p", ["p", "p"], id="general-sibling"),
+        pytest.param("table ~ p", [], id="general-sibling-no-preceding"),
+        pytest.param("h2 ~ ul", ["ul"], id="general-sibling-scans-past-non-matches"),
+        pytest.param("div > ul > li", [], id="child-chain-breaks-above-match"),
+        pytest.param("h2 + ul", [], id="adjacent-compound-miss"),
+        # grouping
+        pytest.param("h2, a", ["h2", "a"], id="comma-group-in-document-order"),
+        pytest.param("#nope", [], id="id-present-but-mismatched"),
+        # the encode buffers cap tag names at 60 bytes and attribute names at 124;
+        # a longer name overruns the cap and cannot match any real element
+        pytest.param("z" * 130, [], id="overlong-tag-name"),
+        pytest.param("[" + "z" * 130 + "]", [], id="overlong-attr-name"),
     ],
 )
-def test_attribute_operators(selector: str, tags: list[str]) -> None:
+def test_select_over_doc(selector: str, tags: list[str]) -> None:
     assert _sel(_DOC, selector) == tags
 
 
-def test_valueless_attribute() -> None:
-    assert _sel("<input disabled>", "[disabled]") == ["input"]
-    assert _sel("<input disabled>", '[disabled=""]') == ["input"]  # empty equals an empty value
-    assert _sel("<input disabled>", "[disabled=x]") == []
+@pytest.mark.parametrize(
+    ("html", "selector", "tags"),
+    [
+        pytest.param("<div></div>text<p>x</p>", "div + p", ["p"], id="adjacent-skips-text-node"),
+        # the nearest <div> ancestor has no matching <i>, but a higher one does
+        pytest.param(
+            "<div class=x><i><div class=y><b>hit</b></div></i></div>", ".x i b", ["b"], id="descendant-backtracks-hit"
+        ),
+        pytest.param(
+            "<div class=x><i><div class=y><b>hit</b></div></i></div>", ".y i b", [], id="descendant-backtracks-miss"
+        ),
+        # span's preceding p siblings: pick one whose own preceding sibling is an h1
+        pytest.param(
+            "<h1>a</h1><p class=x>b</p><h1>c</h1><p>d</p><span>e</span>",
+            "p ~ span",
+            ["span"],
+            id="general-sibling-backtracks",
+        ),
+        # the near <p> fails its left context (an <a> sits before it); the scan
+        # continues to the far <p>, whose preceding element is the <i>
+        pytest.param(
+            "<i></i><p>1</p><a></a><p>2</p><span>x</span>",
+            "i + p ~ span",
+            ["span"],
+            id="general-sibling-backtracks-left-context",
+        ),
+        # span's previous element p matches, but p's previous element is x, not i
+        pytest.param("<x></x><p>p</p><span>s</span>", "i + p + span", [], id="adjacent-chain-misses"),
+        pytest.param("<input disabled>", "[disabled]", ["input"], id="valueless-exists"),
+        pytest.param("<input disabled>", '[disabled=""]', ["input"], id="valueless-empty-equals"),
+        pytest.param("<input disabled>", "[disabled=x]", [], id="valueless-value-mismatch"),
+        pytest.param("<div id>", "#x", [], id="valueless-id-matches-nothing"),
+        pytest.param("<div class>", ".x", [], id="valueless-class-matches-nothing"),
+        pytest.param("<DIV></DIV>", "DIV", ["div"], id="type-folds-case"),
+        pytest.param('<div class="a_b">', ".a_b", ["div"], id="class-underscore"),
+        pytest.param('<div class="café">', ".café", ["div"], id="class-non-ascii"),
+        pytest.param("<café>x", "café", ["café"], id="type-non-ascii"),
+        # a token followed by whitespace running to the end of the value still matches
+        pytest.param('<div class="a ">', ".a", ["div"], id="trailing-whitespace-class-hit"),
+        pytest.param('<div data-x="a ">', '[data-x~="a"]', ["div"], id="trailing-whitespace-attr-hit"),
+        # a trailing whitespace run is consumed without yielding an empty token, so
+        # the scan reaches the end with no match, exercising the loop-exit branches
+        pytest.param('<div class="a ">', ".zzz", [], id="trailing-whitespace-class-miss"),
+        pytest.param('<div data-x="a ">', '[data-x~="zzz"]', [], id="trailing-whitespace-attr-miss"),
+    ],
+)
+def test_select_over_custom_html(html: str, selector: str, tags: list[str]) -> None:
+    assert _sel(html, selector) == tags
 
 
-def test_valueless_id_and_class_match_nothing() -> None:
-    assert _sel("<div id>", "#x") == []
-    assert _sel("<div class>", ".x") == []
-
-
-def test_uppercase_and_non_ascii_names() -> None:
-    assert _sel("<DIV></DIV>", "DIV") == ["div"]  # type selectors fold case
-    assert _sel('<div class="a_b">', ".a_b") == ["div"]
-    assert _sel('<div class="café">', ".café") == ["div"]
-    assert _sel("<café>x", "café") == ["café"]  # an unknown non-ASCII type name
-
-
-def test_token_scan_skips_trailing_whitespace() -> None:
-    # a token followed by whitespace running to the end of the value still matches
-    assert _sel('<div class="a ">', ".a") == ["div"]
-    assert _sel('<div data-x="a ">', '[data-x~="a"]') == ["div"]
-    # a trailing run of whitespace is consumed without yielding an empty token: the
-    # scan reaches the end with no match, exercising the loop-exit branches
-    assert _sel('<div class="a ">', ".zzz") == []
-    assert _sel('<div data-x="a ">', '[data-x~="zzz"]') == []
-
-
-# --- combinators ---
-
-
-def test_descendant() -> None:
-    assert _sel(_DOC, "section a") == ["a"]
-
-
-def test_child() -> None:
-    assert _sel(_DOC, "ul > li") == ["li", "li"]
-    assert _sel(_DOC, "section > a") == []  # a is not a direct child of section
-
-
-def test_adjacent_sibling() -> None:
-    assert _sel(_DOC, "h2 + p") == ["p"]
-
-
-def test_adjacent_sibling_skips_text_node() -> None:
-    # the text between </div> and <p> is skipped when finding the preceding element
-    assert _sel("<div></div>text<p>x</p>", "div + p") == ["p"]
-
-
-def test_adjacent_sibling_no_preceding_element() -> None:
-    # h2 is the first child of section, so it has no preceding sibling element
-    assert _sel(_DOC, "p + h2") == []
-
-
-def test_general_sibling() -> None:
-    assert _sel(_DOC, "h2 ~ p") == ["p", "p"]
-
-
-def test_general_sibling_no_match_in_preceding() -> None:
-    assert _sel(_DOC, "table ~ p") == []  # no preceding <table> sibling exists
-
-
-def test_general_sibling_scans_past_non_matches() -> None:
-    # ul's preceding siblings are p, p, h2; the scan walks past both <p> to the <h2>
-    assert _sel(_DOC, "h2 ~ ul") == ["ul"]
-
-
-def test_descendant_backtracks() -> None:
-    # the nearest <div> ancestor of the <b> has no matching <i>, a higher one does
-    html = "<div class=x><i><div class=y><b>hit</b></div></i></div>"
-    assert _sel(html, ".x i b") == ["b"]
-    assert _sel(html, ".y i b") == []
-
-
-def test_general_sibling_backtracks() -> None:
-    html = "<h1>a</h1><p class=x>b</p><h1>c</h1><p>d</p><span>e</span>"
-    # span's preceding p siblings: pick one whose own preceding sibling is an h1
-    assert _sel(html, "p ~ span") == ["span"]
-
-
-def test_general_sibling_backtracks_past_failed_left_context() -> None:
-    # span ~ p finds the near <p> first, but its left context (i + p) fails because
-    # an <a> sits before it; the scan continues to the far <p>, whose preceding
-    # element is the <i>, satisfying the whole chain
-    html = "<i></i><p>1</p><a></a><p>2</p><span>x</span>"
-    assert _sel(html, "i + p ~ span") == ["span"]
-
-
-# --- grouping and select_one ---
-
-
-def test_comma_groups_in_document_order() -> None:
-    assert _sel(_DOC, "h2, a") == ["h2", "a"]
-
-
-def test_select_one() -> None:
-    match = parse(_DOC).select_one("p.lead")
-    assert match is not None
-    assert match.text.startswith("one")
-    assert parse(_DOC).select_one("table") is None
+def test_universal_under_a_root() -> None:
+    assert (section := parse(_DOC).select_one("section")) is not None
+    assert len(section.select("*")) == 8  # h2, p, a, p, ul, li, li, my-widget
 
 
 def test_select_is_scoped_to_descendants() -> None:
-    section = parse(_DOC).select_one("section")
-    assert section is not None
+    assert (section := parse(_DOC).select_one("section")) is not None
     assert section.select("section") == []  # the receiver itself is not a descendant
 
 
-# --- syntax errors ---
+def test_select_one() -> None:
+    assert (match := parse(_DOC).select_one("p.lead")) is not None
+    assert match.text.startswith("one")
+    assert parse(_DOC).select_one("table") is None
 
 
 @pytest.mark.parametrize(
@@ -238,43 +187,12 @@ def test_invalid_selectors_raise(selector: str) -> None:
         parse(_DOC).select(selector)
 
 
-def test_selector_must_be_a_str() -> None:
-    with pytest.raises(TypeError):
-        parse(_DOC).select(123)  # ty: ignore[invalid-argument-type]  # not a str
-
-
-def test_select_one_rejects_non_str() -> None:
-    with pytest.raises(TypeError):
-        parse(_DOC).select_one(123)  # ty: ignore[invalid-argument-type]  # not a str
-
-
 def test_select_one_rejects_invalid_selector() -> None:
     with pytest.raises(ValueError, match="selector"):
         parse(_DOC).select_one("[")
 
 
-def test_overlong_names_are_truncated_and_match_nothing() -> None:
-    # the encode buffers cap the name (60 bytes for a tag, 124 for an attribute);
-    # a longer name overruns the cap and cannot match any real element
-    assert _sel(_DOC, "z" * 130) == []
-    assert _sel(_DOC, "[" + "z" * 130 + "]") == []
-
-
-def test_id_present_but_mismatched() -> None:
-    assert _sel(_DOC, "#nope") == []  # section has an id, but not this one
-
-
-def test_dash_operator_prefix_mismatch_at_boundary() -> None:
-    # lang="en-US": the dash sits at the boundary, but the prefix is not "xx"
-    assert _sel(_DOC, '[lang|="xx"]') == []
-
-
-def test_child_chain_breaks_above_the_match() -> None:
-    # li's parent ul matches, but ul's parent is section, not div
-    assert _sel(_DOC, "div > ul > li") == []
-
-
-def test_adjacent_sibling_compound_and_chain_misses() -> None:
-    assert _sel(_DOC, "h2 + ul") == []  # ul's immediate previous element is a <p>, not h2
-    # span's previous element p matches, but p's previous element is x, not i
-    assert _sel("<x></x><p>p</p><span>s</span>", "i + p + span") == []
+@pytest.mark.parametrize("method", [pytest.param("select", id="select"), pytest.param("select_one", id="select_one")])
+def test_rejects_non_str(method: str) -> None:
+    with pytest.raises(TypeError):
+        getattr(parse(_DOC), method)(123)

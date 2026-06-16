@@ -57,15 +57,14 @@ def test_attrs_delete() -> None:
     assert element.html == '<div class="x y"></div>'
 
 
-def test_attrs_delete_missing_dynamic_name_raises() -> None:
+@pytest.mark.parametrize(
+    "name",
+    # a dynamic name and a known atom hit different lookup tables, both must miss
+    [pytest.param("never-seen-name", id="dynamic"), pytest.param("title", id="known-atom")],
+)
+def test_attrs_delete_missing_name_raises(name: str) -> None:
     with pytest.raises(KeyError):
-        del _div().attrs["never-seen-name"]
-
-
-def test_attrs_delete_missing_known_name_raises() -> None:
-    # "title" is a known attribute atom but absent on this element
-    with pytest.raises(KeyError):
-        del _div().attrs["title"]
+        del _div().attrs[name]
 
 
 def test_attrs_set_rejects_non_str_name() -> None:
@@ -78,7 +77,10 @@ def test_attrs_delete_rejects_non_str_name() -> None:
         del _div().attrs[5]  # ty: ignore[invalid-argument-type]  # names must be str
 
 
-@pytest.mark.parametrize("name", ["", "a b", "a=b"])
+@pytest.mark.parametrize(
+    "name",
+    [pytest.param("", id="empty"), pytest.param("a b", id="space"), pytest.param("a=b", id="eq")],
+)
 def test_attrs_set_rejects_invalid_name(name: str) -> None:
     with pytest.raises(ValueError, match=r"empty|invalid character"):
         _div().attrs[name] = "x"
@@ -89,14 +91,14 @@ def test_attrs_set_rejects_bad_value() -> None:
         _div().attrs["x"] = 1  # ty: ignore[invalid-assignment]  # value must be str/list/None
 
 
-def test_attrs_getitem_missing_raises_keyerror() -> None:
+@pytest.mark.parametrize(
+    "name",
+    # "title" is a known atom that happens to be absent; "" can never be a stored name
+    [pytest.param("title", id="known-atom-absent"), pytest.param("", id="empty")],
+)
+def test_attrs_getitem_missing_raises_keyerror(name: str) -> None:
     with pytest.raises(KeyError):
-        _ = _div().attrs["title"]  # a known atom, absent here
-
-
-def test_attrs_getitem_empty_name_raises_keyerror() -> None:
-    with pytest.raises(KeyError):
-        _ = _div().attrs[""]
+        _ = _div().attrs[name]
 
 
 def test_attrs_getitem_rejects_non_str_name() -> None:

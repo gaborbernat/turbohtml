@@ -32,60 +32,36 @@ def _body_text(html: str) -> str:
         pytest.param(f"<p>{CJK}&amp;{CJK}</p>", f'"{CJK}&{CJK}"', id="ucs2-text-with-ref"),
         pytest.param(f"<!--{CJK}-->", f"<!-- {CJK} -->", id="ucs2-comment"),
         pytest.param(f"<!--{EMOJI}-->", f"<!-- {EMOJI} -->", id="ucs4-comment"),
+        pytest.param(f'<p title="{CJK}{EMOJI}">x</p>', f'title="{CJK}{EMOJI}"', id="double-quoted-attr"),
+        # single quotes serialize back as double quotes
+        pytest.param(f"<p title='{EMOJI}{CJK}'>x</p>", f'title="{EMOJI}{CJK}"', id="single-quoted-attr"),
+        # an ASCII-led name carrying wide chars is a non-1-byte buffer, so it never interns to a
+        # known atom and stays a plain element (a bare "<東" is not a tag - names must open ASCII)
+        pytest.param(f"<a{CJK}>x</a{CJK}>", f"<a{CJK}>", id="non-ascii-tag-name"),
+        # title is RCDATA, style is RAWTEXT; both take the wide run-scan
+        pytest.param(f"<title>{CJK}{EMOJI}</title>", CJK, id="rcdata-wide-run"),
+        pytest.param(f"<style>{EMOJI}{CJK}</style>", EMOJI, id="rawtext-wide-run"),
+        # plaintext consumes the rest of the input through the wide run-scan
+        pytest.param(f"<plaintext>{CJK}{EMOJI}", f"{CJK}{EMOJI}", id="plaintext-wide-run"),
     ],
 )
 def test_wide_character_data(html: str, needle: str) -> None:
     assert needle in _body_text(html)
 
 
-def test_wide_double_quoted_attribute_value() -> None:
-    out = _body_text(f'<p title="{CJK}{EMOJI}">x</p>')
-    assert f'title="{CJK}{EMOJI}"' in out
-
-
-def test_wide_single_quoted_attribute_value() -> None:
-    out = _body_text(f"<p title='{EMOJI}{CJK}'>x</p>")
-    assert f'title="{EMOJI}{CJK}"' in out
-
-
-def test_non_ascii_tag_name_is_unknown_atom() -> None:
-    # a tag name that starts ASCII but carries wide characters is a non-1-byte
-    # buffer, so it never interns to a known atom; it stays a plain element.
-    # (a bare "<東" is not a tag at all - the name must open with an ASCII letter)
-    name = f"a{CJK}"
-    out = _body_text(f"<{name}>x</{name}>")
-    assert f"<{name}>" in out
-
-
-def test_non_ascii_attribute_name() -> None:
-    # an attribute whose name is not 1-byte takes the per-character copy path;
-    # the name is stored as bytes (a known limitation) but the element and its
-    # value still parse, and the text after it lands in the body
-    out = _body_text(f'<p {CJK}="1">x</p>')
-    assert '="1"' in out
-    assert '"x"' in out
-
-
-def test_wide_input_with_carriage_return() -> None:
-    # a CR in wide input forces the copy-and-normalize path; the CR becomes LF
-    out = _body_text(f"<pre>{CJK}\r\n{EMOJI}</pre>")
-    assert "\r" not in out
-    assert CJK in out
-
-
-def test_wide_input_with_nul() -> None:
-    # a NUL in wide input sets the document NUL flag and is dropped from text
-    out = _body_text(f"<p>{CJK}\x00{EMOJI}</p>")
-    assert "\x00" not in out
-    assert f"{CJK}{EMOJI}" in out
-
-
-def test_rawtext_and_rcdata_wide_runs() -> None:
-    # title is RCDATA, style is RAWTEXT; both take the wide run-scan
-    assert CJK in _body_text(f"<title>{CJK}{EMOJI}</title>")
-    assert EMOJI in _body_text(f"<style>{EMOJI}{CJK}</style>")
-
-
-def test_plaintext_wide_run() -> None:
-    # plaintext consumes the rest of the input through the wide run-scan
-    assert f"{CJK}{EMOJI}" in _body_text(f"<plaintext>{CJK}{EMOJI}")
+@pytest.mark.parametrize(
+    ("html", "present", "absent"),
+    [
+        # a non-1-byte attribute name takes the per-character copy path; the element and value
+        # still parse and the trailing text lands in the body
+        pytest.param(f'<p {CJK}="1">x</p>', ['="1"', '"x"'], [], id="non-ascii-attr-name"),
+        # a CR in wide input forces the copy-and-normalize path; the CR becomes LF
+        pytest.param(f"<pre>{CJK}\r\n{EMOJI}</pre>", [CJK], ["\r"], id="wide-carriage-return"),
+        # a NUL in wide input sets the document NUL flag and is dropped from text
+        pytest.param(f"<p>{CJK}\x00{EMOJI}</p>", [f"{CJK}{EMOJI}"], ["\x00"], id="wide-nul"),
+    ],
+)
+def test_wide_present_and_absent(html: str, present: list[str], absent: list[str]) -> None:
+    out = _body_text(html)
+    assert all(needle in out for needle in present)
+    assert all(needle not in out for needle in absent)

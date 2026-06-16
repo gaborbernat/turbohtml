@@ -39,20 +39,32 @@ def test_bom_is_detected_and_stripped(data: bytes, encoding: str) -> None:
     assert element is not None  # the byte-order mark did not leak into the tree
 
 
-def test_encoding_argument_is_used() -> None:
-    assert parse(b"<p>x", encoding="iso-8859-2").encoding == "iso-8859-2"
+@pytest.mark.parametrize(
+    ("data", "encoding_arg", "expected"),
+    [
+        pytest.param(b"<p>x", "iso-8859-2", "iso-8859-2", id="argument-used"),
+        pytest.param(b"\xef\xbb\xbf<p>x", "iso-8859-2", "UTF-8", id="bom-overrides-argument"),
+        # the argument outranks a <meta>; a <meta> is used only without an argument
+        pytest.param(b'<meta charset="utf-8"><p>x', "iso-8859-2", "iso-8859-2", id="argument-outranks-meta"),
+        pytest.param(b"<p>x", "not-a-real-encoding", "windows-1252", id="unknown-label-falls-through"),
+        pytest.param(b"<p>x", "  ISO-8859-2  ", "iso-8859-2", id="whitespace-and-case-insensitive"),
+        pytest.param(b"<p>x", "", "windows-1252", id="empty-label"),
+        pytest.param(b"<p>x", "   ", "windows-1252", id="whitespace-label"),
+        pytest.param(b"<p>x", "x" * 80, "windows-1252", id="overlong-label"),
+    ],
+)
+def test_encoding_argument(data: bytes, encoding_arg: str, expected: str) -> None:
+    assert parse(data, encoding=encoding_arg).encoding == expected
 
 
-def test_bom_overrides_the_encoding_argument() -> None:
-    assert parse(b"\xef\xbb\xbf<p>x", encoding="iso-8859-2").encoding == "UTF-8"
-
-
-def test_meta_overrides_the_argument_only_when_no_argument() -> None:
-    # the argument outranks a <meta>; a <meta> is used only without an argument
-    assert parse(b'<meta charset="utf-8"><p>x', encoding="iso-8859-2").encoding == "iso-8859-2"
-
-
-@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview], ids=["bytes", "bytearray", "memoryview"])
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        pytest.param(bytes, id="bytes"),
+        pytest.param(bytearray, id="bytearray"),
+        pytest.param(memoryview, id="memoryview"),
+    ],
+)
 def test_bytes_like_inputs(wrap: type) -> None:
     assert parse(wrap(b'<meta charset="iso-8859-2"><p>x')).encoding == "iso-8859-2"
 
@@ -63,19 +75,6 @@ def test_invalid_bytes_become_replacement_characters() -> None:
     element = doc.find("p")
     assert element is not None
     assert element.text == "�"
-
-
-def test_unknown_argument_label_falls_through_to_default() -> None:
-    assert parse(b"<p>x", encoding="not-a-real-encoding").encoding == "windows-1252"
-
-
-def test_argument_label_is_whitespace_and_case_insensitive() -> None:
-    assert parse(b"<p>x", encoding="  ISO-8859-2  ").encoding == "iso-8859-2"
-
-
-@pytest.mark.parametrize("label", ["", "   ", "x" * 80], ids=["empty", "whitespace", "overlong"])
-def test_unusable_argument_label_falls_through(label: str) -> None:
-    assert parse(b"<p>x", encoding=label).encoding == "windows-1252"
 
 
 @pytest.mark.parametrize(
