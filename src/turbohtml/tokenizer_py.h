@@ -39,6 +39,7 @@ typedef struct {
     PyObject *formatter_enum;     /* Formatter (enum.Enum) for serialize()/encode() */
     PyObject *formatters[3];      /* cached Formatter members, indexed by enum th_formatter */
     PyObject *pattern_type;       /* re.Pattern, to recognize a compiled-regex filter */
+    PyObject *markup_type;        /* turbohtml.markup.Markup, stamped onto escape() results */
 } module_state;
 
 /* Register the types and enum into module/state. Each returns 0 or -1. */

@@ -20,6 +20,7 @@ py.extension_module(
         'src/turbohtml/_htmlmodule.c',
         'src/turbohtml/charref.c',
         'src/turbohtml/escape.c',
+        'src/turbohtml/markup.c',
         'src/turbohtml/token_type.c',
         'src/turbohtml/tokenizer_sm.c',
         'src/turbohtml/tokenizer_type.c',
@@ -37,6 +38,7 @@ py.install_sources(
     [
         'src/turbohtml/__init__.py',
         'src/turbohtml/_html.pyi',
+        'src/turbohtml/markup.py',
         'src/turbohtml/py.typed',
     ],
     subdir: 'turbohtml',

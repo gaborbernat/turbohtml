@@ -34,12 +34,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import html5lib
+import markupsafe
 import pyperf
 from bs4 import BeautifulSoup
 from lxml import html as lxml_html
 from selectolax.lexbor import LexborHTMLParser
 
 import turbohtml
+from turbohtml.markup import escape as turbo_markup_escape
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -519,6 +521,62 @@ def print_edit_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- markup suite: markupsafe-compatible escape on autoescape-realistic input #
+# turbohtml.markup.escape against markupsafe's own C escape. The inputs are the
+# small, mostly-clean strings a template engine interpolates under autoescape
+# (markupsafe's hottest path), plus an escape-heavy fragment. Both return Markup,
+# so the comparison includes the safe-string construction each pays per call.
+
+
+def turbo_markup(text: str) -> None:
+    """Escape with turbohtml.markup.escape, returning a Markup."""
+    turbo_markup_escape(text)
+
+
+def markupsafe_escape(text: str) -> None:
+    """Escape with markupsafe's C-accelerated escape, returning a Markup."""
+    markupsafe.escape(text)
+
+
+MARKUP_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_markup),
+    ("markupsafe", markupsafe_escape),
+)
+
+MARKUP_CASES: tuple[tuple[str, str], ...] = (
+    ("clean 8 B", "a value!"),
+    ("clean 32 B", "The quick brown fox jumped ok"),
+    ("clean 256 B", "The quick brown fox jumps over the lazy dog. " * 6),
+    ("name", "O'Brien & Sons"),
+    ("escape-heavy", '<a href="/x?a=1&b=2">click & go</a>' * 2),
+)
+
+
+def run_markup_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark markupsafe-compatible escaping against markupsafe; return the case names."""
+    for name, text in MARKUP_CASES:
+        for label, escape in MARKUP_LIBS:
+            bench(f"markup {name} [{label}]", escape, text)
+    return [name for name, _ in MARKUP_CASES]
+
+
+def print_markup_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's escape beside markupsafe and its speedup; values are tens of ns."""
+    if not cases:
+        return
+    others = [label for label, _ in MARKUP_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'markup benchmark':28} {'turbohtml':>12}" + "".join(f"{label:>20}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"markup {name} [turbohtml]"]
+        row = f"{'markup ' + name:28} {turbo * 1e9:8.1f} ns"
+        for label in others:
+            other = means.get(f"markup {name} [{label}]")
+            row += f" {other * 1e9:9.1f} ns {other / turbo:4.1f}x" if other is not None else f"{'-':>20}"
+        print(row)
+
+
 def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
     """Benchmark one read-path operation (find/select/serialize) across every library."""
     names: list[str] = []
@@ -617,7 +675,19 @@ def main() -> None:
     runner.argparser.add_argument(
         "suites",
         nargs="*",
-        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", "build", "edit", []],
+        choices=[
+            "escape",
+            "unescape",
+            "tokenize",
+            "corpus",
+            "parse",
+            "query",
+            "serialize",
+            "build",
+            "edit",
+            "markup",
+            [],
+        ],
         help="suites to run (default: all)",
     )
     args = runner.parse_args()
@@ -627,7 +697,7 @@ def main() -> None:
         os.environ["TURBOHTML_BENCH_SUITES"] = ",".join(args.suites)
         args.inherit_environ = [*(args.inherit_environ or []), "TURBOHTML_BENCH_SUITES"]
     selection = os.environ.get(
-        "TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit"
+        "TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit,markup"
     )
     suites = set(selection.split(","))
     means: dict[str, float] = {}
@@ -656,6 +726,7 @@ def main() -> None:
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     build_cases = run_build_suite(bench) if "build" in suites else []
     edit_cases = run_edit_suite(bench) if "edit" in suites else []
+    markup_cases = run_markup_suite(bench) if "markup" in suites else []
     if args.worker or not means:
         return
     rows = [(op, name) for op, name, _ in CASES if op in suites]
@@ -667,6 +738,7 @@ def main() -> None:
     print_readpath_table(means, "serialize", serialize_cases)
     print_build_table(means, build_cases)
     print_edit_table(means, edit_cases)
+    print_markup_table(means, markup_cases)
 
 
 if __name__ == "__main__":

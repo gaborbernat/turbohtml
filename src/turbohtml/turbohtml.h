@@ -18,6 +18,13 @@ PyObject *turbohtml_escape(PyObject *module, PyObject *args, PyObject *kwds);
 /* Implemented in unescape.c. Signature matches METH_O. */
 PyObject *turbohtml_unescape(PyObject *module, PyObject *arg);
 
+/* Implemented in markup.c, the markupsafe-compatible escape surface. escape,
+   escape_silent, soft_str, and _register_markup all match METH_O. */
+PyObject *turbohtml_markup_escape(PyObject *module, PyObject *s);
+PyObject *turbohtml_markup_escape_silent(PyObject *module, PyObject *s);
+PyObject *turbohtml_markup_soft_str(PyObject *module, PyObject *s);
+PyObject *turbohtml_register_markup(PyObject *module, PyObject *type);
+
 /* Implemented in tokenizer_type.c. tokenize() matches METH_O; the internal
    conformance hook _tokenize_states matches METH_VARARGS. */
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg);
