@@ -11,9 +11,9 @@ source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript spec
 suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, or ``serialize``. Numbers vary with input
 and hardware.
 
-***********
+**********
  Escaping
-***********
+**********
 
 :func:`turbohtml.escape` against the standard library's :func:`python:html.escape`. It gains the most on text that needs
 little escaping, where the SIMD scan classifies sixteen bytes at a time and copies clean stretches in bulk; the gap
@@ -57,9 +57,9 @@ narrows on tiny strings, where call overhead dominates.
       - 3.95 ms
       - 19.3 ms
 
-*************
+************
  Unescaping
-*************
+************
 
 :func:`turbohtml.unescape` against :func:`python:html.unescape`. It gains the most on entity-heavy input, where the
 standard library pays a Python call per match; turbohtml hops between ``&`` occurrences and bulk-copies the clean spans
@@ -94,14 +94,14 @@ between references.
       - 2.51 ms
       - 18.1 ms
 
-*************
+************
  Tokenizing
-*************
+************
 
-:func:`turbohtml.tokenize` against :class:`python:html.parser.HTMLParser` (driven with no-op handlers) and
-`html5lib <https://html5lib.readthedocs.io>`_'s pure-Python tokenizer. The closest case is a document dominated by a
-single text node, where the standard library's regex performs one C scan; wherever markup appears, the state machine is
-roughly ten times faster.
+:func:`turbohtml.tokenize` against :class:`python:html.parser.HTMLParser` (driven with no-op handlers) and `html5lib
+<https://html5lib.readthedocs.io>`_'s pure-Python tokenizer. The closest case is a document dominated by a single text
+node, where the standard library's regex performs one C scan; wherever markup appears, the state machine is roughly ten
+times faster.
 
 .. list-table::
     :header-rows: 1
@@ -164,9 +164,9 @@ roughly ten times faster.
       - 389 ms
       - 853 ms
 
-**********
+*********
  Parsing
-**********
+*********
 
 :func:`turbohtml.parse` builds a full WHATWG document tree, against the other Python tree builders: `lxml
 <https://lxml.de>`_, `selectolax <https://github.com/rushter/selectolax>`_ (lexbor), `BeautifulSoup
@@ -233,14 +233,14 @@ WHATWG tree that lxml's libxml2 does not.
       - 1.66 s
       - 1.73 s
 
-***********
+**********
  Querying
-***********
+**********
 
 Each library parses the document once, then the timed call runs one query. ``find`` collects every ``<a>`` element the
 way each library reaches for it (turbohtml's :meth:`~turbohtml.Node.find_all`, lxml's XPath ``findall``, selectolax's
-and BeautifulSoup's selectors). Because turbohtml resolves the tag name to an interned atom and compares integers
-during the walk, it keeps pace with lxml's C XPath engine and runs several times ahead of selectolax and BeautifulSoup.
+and BeautifulSoup's selectors). Because turbohtml resolves the tag name to an interned atom and compares integers during
+the walk, it keeps pace with lxml's C XPath engine and runs several times ahead of selectolax and BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
