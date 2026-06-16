@@ -519,9 +519,9 @@ static PyObject *node_repr(PyObject *self) {
             return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         const char *label = node->type == TH_NODE_TEXT      ? "Text"
-                            : node->type == TH_NODE_COMMENT  ? "Comment"
-                            : node->type == TH_NODE_CDATA    ? "CData"
-                                                             : "Doctype";
+                            : node->type == TH_NODE_COMMENT ? "Comment"
+                            : node->type == TH_NODE_CDATA   ? "CData"
+                                                            : "Doctype";
         PyObject *repr = PyUnicode_FromFormat("%s(%R)", label, data);
         Py_DECREF(data);
         return repr;
@@ -3021,8 +3021,7 @@ int tree_register(PyObject *module, module_state *state) {
     state->text_type = register_subtype(module, &text_spec, state->node_type, "Text", "data", NULL);
     state->comment_type = register_subtype(module, &comment_spec, state->node_type, "Comment", "data", NULL);
     state->doctype_type = register_subtype(module, &doctype_spec, state->node_type, "Doctype", "name", NULL);
-    state->pi_type =
-        register_subtype(module, &pi_spec, state->node_type, "ProcessingInstruction", "target", "data");
+    state->pi_type = register_subtype(module, &pi_spec, state->node_type, "ProcessingInstruction", "target", "data");
     state->cdata_type = register_subtype(module, &cdata_spec, state->node_type, "CData", "data", NULL);
     state->document_type = register_subtype(module, &document_spec, state->node_type, "Document", "root", NULL);
     /* allocation failure cannot be forced from a test */
