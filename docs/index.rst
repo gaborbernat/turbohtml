@@ -31,6 +31,7 @@ The documentation follows the `Diátaxis <https://diataxis.fr>`_ framework.
     how-to
     reference
     explanation
+    performance
     development
     changelog
     license
