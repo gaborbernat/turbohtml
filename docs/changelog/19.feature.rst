@@ -1,6 +1,5 @@
 Make the node types constructible, the first piece of the mutable tree. ``Element(tag, attrs=None)``, ``Text(data)``,
-and ``Comment(data)`` build a standalone node that owns its data and serializes on its own
-(``Element("a", {"class": ["btn", "lg"]}).html`` is ``'<a class="btn lg"></a>'``). Tag and attribute names are
-ASCII-lowercased to match the parser, and a name the HTML spec forbids (empty, or carrying whitespace, ``/``, ``>`` and
-the like) raises ``ValueError``. Constructed nodes become insertable once the structural edits land - by
-:user:`gaborbernat`.
+and ``Comment(data)`` build a standalone node that owns its data and serializes on its own (``Element("a", {"class":
+["btn", "lg"]}).html`` is ``'<a class="btn lg"></a>'``). Tag and attribute names are ASCII-lowercased to match the
+parser, and a name the HTML spec forbids (empty, or carrying whitespace, ``/``, ``>`` and the like) raises
+``ValueError``. Constructed nodes become insertable once the structural edits land - by :user:`gaborbernat`.

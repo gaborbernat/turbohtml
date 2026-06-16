@@ -1594,8 +1594,8 @@ static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len
         as_str = Py_NewRef(value);
     } else if (PyList_Check(value)) {
         PyObject *space = PyUnicode_FromOrdinal(' ');
-        if (space == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (space == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         as_str = PyUnicode_Join(space, value); /* a non-str member raises TypeError */
         Py_DECREF(space);
@@ -1654,7 +1654,7 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
         int rc = th_tree_set_attr(tree, node, index, lower, name_len, points, value_len, has_value);
         PyMem_Free(lower);
         PyMem_Free(points);
-        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
