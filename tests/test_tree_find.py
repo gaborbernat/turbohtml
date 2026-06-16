@@ -68,6 +68,10 @@ def test_tag_true_matches_every_element() -> None:
     assert len(parse(_DOC).find_all(True)) == 8  # noqa: FBT003
 
 
+def test_find_known_tag_absent_returns_none() -> None:
+    assert parse(_DOC).find("table") is None  # fast path walks the subtree and finds nothing
+
+
 def test_tag_with_attribute_filter_uses_the_general_path() -> None:
     # a tag plus any other filter leaves the tag-only fast path
     assert _tags(parse(_DOC).find_all("a", href="/x")) == ["a"]

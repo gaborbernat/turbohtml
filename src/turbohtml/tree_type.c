@@ -1168,6 +1168,14 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     return 0;
 }
 
+/* Whether the query is a plain known tag with no other constraint on the
+   descendant axis: the shape the tag-only fast path handles with a pre-order
+   walk and an integer atom compare, skipping the general matcher. */
+static int query_is_simple_tag(const query_t *query) {
+    return query->tag_plain && query->tag_atom != TH_TAG_UNKNOWN && query->nattr == 0 &&
+           query->class_ucs4 == NULL && query->class_filter == NULL && query->axis == TH_AXIS_DESCENDANTS;
+}
+
 static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     query_t query;
     if (build_query(self, args, kwargs, 0, &query) < 0) {
@@ -1178,15 +1186,25 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     th_node *origin = ((NodeObject *)self)->node;
     th_node *found = NULL;
     int error = 0;
-    for (th_node *node = axis_first(origin, query.axis); node != NULL; node = axis_next(node, origin, query.axis)) {
-        int matched = node_matches(state, node, &query);
-        if (matched < 0) {
-            error = 1;
-            break;
+    if (query_is_simple_tag(&query)) {
+        /* the first element whose atom matches, found with an integer compare */
+        for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+            if (node->atom == query.tag_atom) {
+                found = node;
+                break;
+            }
         }
-        if (matched) {
-            found = node;
-            break;
+    } else {
+        for (th_node *node = axis_first(origin, query.axis); node != NULL; node = axis_next(node, origin, query.axis)) {
+            int matched = node_matches(state, node, &query);
+            if (matched < 0) {
+                error = 1;
+                break;
+            }
+            if (matched) {
+                found = node;
+                break;
+            }
         }
     }
     free_query(&query);
@@ -1222,13 +1240,9 @@ static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int error = 0;
-    /* Fast path: a plain known tag with no other filter on the descendant axis
-       is a pre-order walk with an integer atom compare, skipping the axis
-       dispatch and the general matcher. A non-element node carries
-       TH_TAG_UNKNOWN, so the atom compare alone selects the right elements. */
-    int simple = query.tag_plain && query.tag_atom != TH_TAG_UNKNOWN && query.nattr == 0 &&
-                 query.class_ucs4 == NULL && query.class_filter == NULL && query.axis == TH_AXIS_DESCENDANTS;
-    if (simple) {
+    /* a non-element node carries TH_TAG_UNKNOWN, so the atom compare alone
+       selects the right elements on the fast path */
+    if (query_is_simple_tag(&query)) {
         for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
             if (query.limit >= 0 && PyList_GET_SIZE(out) >= query.limit) {
                 break;
