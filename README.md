@@ -9,8 +9,8 @@
 A fast, fully typed HTML toolkit for Python with a C-accelerated core. turbohtml escapes and unescapes HTML to match the
 standard library byte for byte, tokenizes markup with a WHATWG-conformant streaming tokenizer, and parses whole
 documents into a navigable element tree you query with CSS selectors, edit in place, build from scratch, and serialize
-back to conformant HTML. Each operation runs several times faster than its pure-Python counterpart and supports the
-free-threaded build.
+back to conformant HTML. A markupsafe-compatible `turbohtml.markup` covers template autoescaping. Each operation runs
+several times faster than its pure-Python counterpart and supports the free-threaded build.
 
 ## Install
 
@@ -48,6 +48,18 @@ print(turbohtml.unescape("caf&eacute; &amp; r&eacute;sum&eacute; &#127881;"))
 
 `escape` and `unescape` reproduce `html.escape` and `html.unescape` exactly, so turbohtml is a drop-in replacement on
 hot paths.
+
+For template output, `turbohtml.markup` is a markupsafe drop-in: `Markup` marks trusted HTML, and combining it with
+untrusted values escapes them. Swap `from markupsafe import ...` for `from turbohtml.markup import ...`:
+
+```python
+from turbohtml.markup import Markup, escape
+
+print(Markup("<li>{}</li>").format("<script>alert(1)</script>"))
+# <li>&lt;script&gt;alert(1)&lt;/script&gt;</li>
+print(escape("Tom & Jerry"))
+# Tom &amp; Jerry
+```
 
 Tokenize markup into a stream of tokens that follows the WHATWG tokenization algorithm:
 
@@ -139,6 +151,7 @@ the other C libraries on the read-path benchmarks. Measured with [pyperf](https:
 
 - `escape` and `unescape` match the standard library byte for byte while running several times faster, up to 22× on
   no-op text and 13× on entity-dense input.
+- `turbohtml.markup.escape` matches markupsafe and runs 2–3× faster on the small strings template autoescaping escapes.
 - `tokenize` is 9–16× faster than `html.parser` wherever markup appears.
 - `parse` builds a full WHATWG tree 2–5× faster than the C parsers lxml and selectolax, and 30–80× faster than the
   pure-Python BeautifulSoup and html5lib.

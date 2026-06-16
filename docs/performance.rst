@@ -57,6 +57,38 @@ narrows on tiny strings, where call overhead dominates.
       - 3.91 ms
       - 19.7 ms
 
+*******************
+ Markup (escaping)
+*******************
+
+:func:`turbohtml.markup.escape` against `markupsafe <https://markupsafe.palletsprojects.com>`_'s own C escape, both
+returning a ``Markup``. The inputs are the small, mostly-clean strings a template engine interpolates under autoescape,
+markupsafe's hottest path. turbohtml builds the safe string in C in a single call, where markupsafe pays a Python
+``escape`` frame and ``Markup`` construction per call, so it runs roughly two to three times faster.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20
+
+    - - input
+      - turbohtml
+      - markupsafe
+    - - clean (8 B)
+      - 63 ns
+      - 188 ns
+    - - clean (32 B)
+      - 71 ns
+      - 207 ns
+    - - clean (256 B)
+      - 138 ns
+      - 458 ns
+    - - name with ``'`` and ``&``
+      - 87 ns
+      - 218 ns
+    - - escape-heavy markup
+      - 147 ns
+      - 358 ns
+
 ************
  Unescaping
 ************

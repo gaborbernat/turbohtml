@@ -341,3 +341,49 @@ In place of subclassing :class:`python:html.parser.HTMLParser` with ``handle_sta
 take the token stream from :func:`turbohtml.tokenize` (or :meth:`turbohtml.Tokenizer.feed` for incremental input), or
 skip tokens entirely and :func:`turbohtml.parse` straight to a tree. Unlike ``html.parser``, both are WHATWG-conformant.
 The :doc:`how-to` guide has a worked port.
+
+*****************
+ From markupsafe
+*****************
+
+``turbohtml.markup`` is a drop-in for markupsafe's public surface, so a Jinja2, WTForms, or Werkzeug project changes
+only the import line:
+
+.. code-block:: python
+
+    # markupsafe
+    from markupsafe import Markup, escape, escape_silent, soft_str, EscapeFormatter
+
+    # turbohtml
+    from turbohtml.markup import Markup, escape, escape_silent, soft_str, EscapeFormatter
+
+``escape`` returns a :class:`~turbohtml.markup.Markup` with the same numeric quote references markupsafe emits, honors
+the ``__html__`` protocol, and leaves an existing ``Markup`` untouched. ``Markup`` overrides the full :class:`str`
+method surface, so a value that flows through a template filter such as ``upper`` or ``replace`` stays a ``Markup`` and
+autoescaping does not escape it a second time. The operations that combine text (``+``, ``%``,
+:meth:`~turbohtml.markup.Markup.format`, :meth:`~turbohtml.markup.Markup.join`, ``replace``, ...) escape their untrusted
+operands:
+
+.. testcode::
+
+    from turbohtml.markup import Markup, escape, escape_silent
+
+    print(escape('<a href="x">Tom & Jerry</a>'))
+    print(Markup("<b>{}</b>").format("<i>"))
+    print(Markup("<b>safe</b>").upper())  # str methods keep the Markup, so it is not re-escaped
+    print(escape_silent(None) == Markup(""))
+
+.. testoutput::
+
+    &lt;a href=&#34;x&#34;&gt;Tom &amp; Jerry&lt;/a&gt;
+    <b>&lt;i&gt;</b>
+    <B>SAFE</B>
+    True
+
+Two methods are upgrades rather than reimplementations: :meth:`~turbohtml.markup.Markup.striptags` and
+:meth:`~turbohtml.markup.Markup.unescape` run on turbohtml's tokenizer and HTML5 reference resolution, so they are
+faster and resolve references markupsafe's regex-based stripping can miss.
+
+These differences from markupsafe do not affect migration: the escape runs in C, every ``Markup`` method runs faster
+than markupsafe's, the ``soft_unicode`` alias that markupsafe 3.0 removed is absent here too, and turbohtml does not
+register itself as ``markupsafe``, so adoption stays an explicit per-project import.

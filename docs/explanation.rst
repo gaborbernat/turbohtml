@@ -71,6 +71,14 @@ longest-prefix matching, numeric references, the Windows-1252 remaps, and the in
 ``U+FFFD`` or the empty string. The test suite checks the C output against the standard library over a large fuzzed
 corpus.
 
+Template engines need a different contract: markupsafe's, where escaping produces a ``Markup`` safe-string that records
+"this is already HTML" and combining it with untrusted text escapes that text. :mod:`turbohtml.markup` is a drop-in for
+markupsafe's public surface, down to the numeric ``&#34;``/``&#39;`` quote references, so a Jinja2 or WTForms project
+migrates by changing the import. It lives in a module apart from :func:`turbohtml.escape` so each stays byte-exact with
+its own target: ``turbohtml.escape`` with the standard library, ``turbohtml.markup.escape`` with markupsafe. turbohtml
+builds the ``Markup`` in C in one call, where markupsafe pays a Python call and a ``Markup`` construction on every
+interpolation, so it runs faster.
+
 ************************
  A spec-exact tokenizer
 ************************

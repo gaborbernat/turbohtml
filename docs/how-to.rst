@@ -33,6 +33,28 @@ and keep the output smaller:
 
     He said "hi" &amp; left
 
+****************************************
+ Build safe HTML strings for a template
+****************************************
+
+When you assemble HTML from a mix of trusted markup and untrusted values, use :mod:`turbohtml.markup`. Wrapping a value
+in :class:`~turbohtml.markup.Markup` declares it safe; combining it with plain text escapes that text, so a forgotten
+escape cannot inject markup. It is a drop-in for markupsafe, so a Jinja2 project migrates by changing the import:
+
+.. testcode::
+
+    from turbohtml.markup import Markup, escape
+
+    user = "<script>alert(1)</script>"
+    row = Markup("<li>{}</li>").format(user)
+    print(row)
+    print(Markup(", ").join(["<b>", escape("a & b")]))
+
+.. testoutput::
+
+    <li>&lt;script&gt;alert(1)&lt;/script&gt;</li>
+    &lt;b&gt;, a &amp; b
+
 **********************************
  Decode HTML character references
 **********************************

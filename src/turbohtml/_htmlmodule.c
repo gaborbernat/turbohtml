@@ -19,6 +19,19 @@ PyDoc_STRVAR(unescape_doc, "unescape(s, /)\n--\n\n"
                            "Convert all named and numeric character references in s to the\n"
                            "corresponding Unicode characters, following the HTML5 rules.");
 
+PyDoc_STRVAR(markup_escape_doc, "escape(s, /)\n--\n\n"
+                                "Replace &, <, >, ', and \" with HTML-safe sequences and return a Markup.\n\n"
+                                "An object with an __html__ method is trusted as already safe; any other\n"
+                                "object is converted to a string first. Matches markupsafe.escape, including\n"
+                                "the numeric &#34; and &#39; quote references.");
+
+PyDoc_STRVAR(markup_escape_silent_doc, "escape_silent(s, /)\n--\n\n"
+                                       "Like escape, but None becomes the empty Markup rather than 'None'.");
+
+PyDoc_STRVAR(markup_soft_str_doc, "soft_str(s, /)\n--\n\n"
+                                  "Convert s to str only if it is not already one, preserving a Markup so\n"
+                                  "already-safe text is not escaped a second time.");
+
 PyDoc_STRVAR(tokenize_doc, "tokenize(s, /)\n--\n\n"
                            "Tokenize a whole HTML string, returning an iterator of Token objects\n"
                            "following the WHATWG tokenization algorithm.");
@@ -36,6 +49,10 @@ PyDoc_STRVAR(parse_fragment_doc, "parse_fragment(html, context='div')\n--\n\n"
 static PyMethodDef html_methods[] = {
     {"escape", (PyCFunction)(void (*)(void))turbohtml_escape, METH_VARARGS | METH_KEYWORDS, escape_doc},
     {"unescape", turbohtml_unescape, METH_O, unescape_doc},
+    {"_markup_escape", turbohtml_markup_escape, METH_O, markup_escape_doc},
+    {"_markup_escape_silent", turbohtml_markup_escape_silent, METH_O, markup_escape_silent_doc},
+    {"_markup_soft_str", turbohtml_markup_soft_str, METH_O, markup_soft_str_doc},
+    {"_register_markup", turbohtml_register_markup, METH_O, NULL},
     {"tokenize", turbohtml_tokenize, METH_O, tokenize_doc},
     {"parse", (PyCFunction)(void (*)(void))turbohtml_parse, METH_VARARGS | METH_KEYWORDS, parse_doc},
     {"parse_fragment", (PyCFunction)(void (*)(void))turbohtml_tree_parse_fragment, METH_VARARGS | METH_KEYWORDS,
@@ -89,6 +106,7 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     Py_VISIT(state->axis_enum);      /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->formatter_enum); /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->pattern_type);   /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->markup_type);    /* GCOVR_EXCL_BR_LINE: same */
     for (int index = 0; index < 7; index++) {
         Py_VISIT(state->axes[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
@@ -126,6 +144,7 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->axis_enum);
     Py_CLEAR(state->formatter_enum);
     Py_CLEAR(state->pattern_type);
+    Py_CLEAR(state->markup_type);
     for (int index = 0; index < 7; index++) {
         Py_CLEAR(state->axes[index]);
     }
