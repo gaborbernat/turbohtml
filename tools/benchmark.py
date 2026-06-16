@@ -459,6 +459,66 @@ READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., Non
 READPATH_CASES = CORPUS_FILES[1:4]
 
 
+# --- edit suite: rewrite attributes across a pre-parsed tree --------------- #
+# Each library parses once (outside the timed region), then the timed function
+# tags every <a> with rel=nofollow, a classic link-rewriting pass. Setting the
+# same value is idempotent, so pyperf's repeated calls do equal work each time.
+
+
+def turbo_edit(doc: Document) -> None:
+    """Tag every link with turbohtml's live attribute mapping."""
+    for anchor in doc.find_all("a"):
+        anchor.attrs["rel"] = "nofollow"
+
+
+def bs4_edit(soup: BeautifulSoup) -> None:
+    """Tag every link with BeautifulSoup's item assignment."""
+    for anchor in soup.find_all("a"):
+        anchor["rel"] = "nofollow"
+
+
+def lxml_edit(tree: HtmlElement) -> None:
+    """Tag every link with lxml's Element.set."""
+    for anchor in tree.findall(".//a"):
+        anchor.set("rel", "nofollow")
+
+
+# Write-on-parsed-tree competitors; selectolax mutation is limited, so it is absent.
+EDIT_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
+    ("turbohtml", turbo_tree, turbo_edit),
+    ("lxml", lxml_tree, lxml_edit),
+    ("BeautifulSoup", bs4_tree, bs4_edit),
+)
+
+
+def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark a link-rewriting edit across every library; return the case names."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, edit in EDIT_LIBS:
+            bench(f"edit {name} [{label}]", edit, build(text))
+        names.append(name)
+    return names
+
+
+def print_edit_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml beside each alternative and its slowdown factor for editing a parsed tree."""
+    if not cases:
+        return
+    others = [label for label, _, _ in EDIT_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'edit benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"edit {name} [turbohtml]"]
+        row = f"{'edit ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"edit {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
     """Benchmark one read-path operation (find/select/serialize) across every library."""
     names: list[str] = []
@@ -557,7 +617,7 @@ def main() -> None:
     runner.argparser.add_argument(
         "suites",
         nargs="*",
-        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", "build", []],
+        choices=["escape", "unescape", "tokenize", "corpus", "parse", "query", "serialize", "build", "edit", []],
         help="suites to run (default: all)",
     )
     args = runner.parse_args()
@@ -566,7 +626,9 @@ def main() -> None:
     if args.suites:
         os.environ["TURBOHTML_BENCH_SUITES"] = ",".join(args.suites)
         args.inherit_environ = [*(args.inherit_environ or []), "TURBOHTML_BENCH_SUITES"]
-    selection = os.environ.get("TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize,build")
+    selection = os.environ.get(
+        "TURBOHTML_BENCH_SUITES", "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit"
+    )
     suites = set(selection.split(","))
     means: dict[str, float] = {}
 
@@ -593,6 +655,7 @@ def main() -> None:
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     build_cases = run_build_suite(bench) if "build" in suites else []
+    edit_cases = run_edit_suite(bench) if "edit" in suites else []
     if args.worker or not means:
         return
     rows = [(op, name) for op, name, _ in CASES if op in suites]
@@ -603,6 +666,7 @@ def main() -> None:
     print_readpath_table(means, "select", select_cases)
     print_readpath_table(means, "serialize", serialize_cases)
     print_build_table(means, build_cases)
+    print_edit_table(means, edit_cases)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/
 source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
-suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``serialize``, or ``build``. Numbers vary
-with input and hardware.
+suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``serialize``, ``build``, or ``edit``.
+Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -360,3 +360,33 @@ objects. selectolax is parse-only, so it has no entry.
       - 5.70 ms
       - 13.2 ms
       - 77.0 ms
+
+*********
+ Editing
+*********
+
+Editing a parsed tree: tag every ``<a>`` with ``rel="nofollow"``, a link-rewriting pass. Each library parses once
+outside the timed region, then the timed call walks its links and sets the attribute - turbohtml through the live
+:attr:`~turbohtml.Element.attrs` mapping, lxml through ``Element.set``, BeautifulSoup through item assignment.
+selectolax mutation is limited, so it has no entry.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 24 24 24
+
+    - - tag every link
+      - turbohtml
+      - lxml
+      - BeautifulSoup
+    - - wpt page (4 kB)
+      - 243 ns
+      - 772 ns
+      - 5.98 µs
+    - - wpt page (9.6 kB)
+      - 368 ns
+      - 766 ns
+      - 10.0 µs
+    - - wpt page (92 kB)
+      - 17.5 µs
+      - 41.5 µs
+      - 210 µs

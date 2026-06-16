@@ -149,7 +149,8 @@ libraries on every read-path benchmark too. Measured with [pyperf](https://pyper
   pure-Python BeautifulSoup and html5lib.
 - `find_all` and CSS `select` outrun lxml's C XPath and cssselect at every size (2–40×) and BeautifulSoup by 100×, and
   serialization is the fastest of the four.
-- building a tree from scratch runs about twice as fast as lxml and an order of magnitude faster than BeautifulSoup.
+- building a tree from scratch and editing a parsed one both run about twice as fast as lxml and an order of magnitude
+  faster than BeautifulSoup.
 
 See the [performance page](https://turbohtml.readthedocs.io/en/latest/performance.html) for the full sectioned tables
 and the methodology.
