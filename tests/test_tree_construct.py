@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import Comment, Text
+from turbohtml import Comment, Element, Text
 
 
 def test_text_carries_its_data() -> None:
@@ -46,3 +46,113 @@ def test_constructed_node_matches_structurally() -> None:
 def test_data_must_be_a_str(node_type: type[Text | Comment]) -> None:
     with pytest.raises(TypeError):
         node_type(123)  # ty: ignore[invalid-argument-type]  # data must be a str
+
+
+# --- Element ---
+
+
+def test_element_bare() -> None:
+    div = Element("div")
+    assert div.tag == "div"
+    assert div.html == "<div></div>"
+    assert div.parent is None
+
+
+def test_element_tag_is_lowercased() -> None:
+    assert Element("DIV").tag == "div"  # matches what the parser stores
+
+
+def test_element_with_attributes() -> None:
+    a = Element("a", {"href": "/x", "class": "btn lg"})
+    assert a.html == '<a href="/x" class="btn lg"></a>'  # attributes in insertion order
+    assert a.attrs["href"] == "/x"
+    assert a.attrs["class"] == ["btn", "lg"]  # the class token list reads back as a list
+
+
+def test_element_list_valued_attribute_joins_on_space() -> None:
+    assert Element("p", {"class": ["a", "b"]}).html == '<p class="a b"></p>'
+
+
+def test_element_valueless_attribute() -> None:
+    # a None value is a valueless attribute, which serializes empty per the spec
+    assert Element("input", {"disabled": None}).html == '<input disabled="">'
+
+
+def test_element_empty_attribute_value() -> None:
+    # an empty string value is present but empty, distinct from a valueless None
+    value = Element("input", {"value": ""}).attrs["value"]
+    assert value is not None  # present, unlike a valueless attribute
+    assert not value  # but empty
+
+
+def test_element_attrs_none_is_no_attributes() -> None:
+    assert Element("div", None).html == "<div></div>"
+
+
+def test_element_void_has_no_end_tag() -> None:
+    assert Element("br").html == "<br>"
+
+
+def test_element_unknown_tag_constructs() -> None:
+    assert Element("my-widget").html == "<my-widget></my-widget>"
+    assert Element("x" * 70).tag == "x" * 70  # a tag too long for the atom table
+    assert Element("\ud800").tag == "\ud800"  # a tag that cannot encode to UTF-8
+
+
+def test_element_attribute_name_is_lowercased() -> None:
+    assert Element("div", {"DATA-X": "1"}).attrs["data-x"] == "1"
+
+
+def test_element_empty_tag_is_rejected() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        Element("")
+
+
+@pytest.mark.parametrize("tag", ["a b", "a/b", "a>b", "a<b"])
+def test_element_tag_with_invalid_character_is_rejected(tag: str) -> None:
+    # a name carrying these characters could not round-trip, so the spec forbids it
+    with pytest.raises(ValueError, match="invalid character"):
+        Element(tag)
+
+
+@pytest.mark.parametrize("name", ["a b", "a/b", "a>b", "a=b", 'a"b', "a'b"])
+def test_element_attribute_name_with_invalid_character_is_rejected(name: str) -> None:
+    with pytest.raises(ValueError, match="invalid character"):
+        Element("div", {name: "x"})
+
+
+def test_element_bad_attribute_value() -> None:
+    with pytest.raises(TypeError, match="attribute value"):
+        Element("div", {"x": 1})  # ty: ignore[invalid-argument-type]  # value must be str/list/None
+
+
+def test_element_list_member_must_be_str() -> None:
+    with pytest.raises(TypeError):
+        Element("div", {"class": [1, 2]})  # ty: ignore[invalid-argument-type]  # members must be str
+
+
+def test_element_attribute_name_must_be_str() -> None:
+    with pytest.raises(TypeError, match="attribute name"):
+        Element("div", {1: "x"})  # ty: ignore[invalid-argument-type]  # names must be str
+
+
+def test_element_attribute_name_must_not_be_empty() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        Element("div", {"": "x"})
+
+
+def test_element_attrs_must_be_a_mapping() -> None:
+    with pytest.raises((TypeError, AttributeError)):
+        Element("div", 5)  # ty: ignore[invalid-argument-type]  # attrs must be a mapping
+
+
+def test_element_mapping_getitem_failure_propagates() -> None:
+    class BadMapping:
+        def keys(self) -> list[str]:  # noqa: PLR6301  # a mapping protocol method must be an instance method
+            return ["x"]
+
+        def __getitem__(self, key: str) -> str:
+            raise KeyError(key)
+
+    with pytest.raises(KeyError):
+        Element("div", BadMapping())  # ty: ignore[invalid-argument-type]  # a deliberately broken mapping

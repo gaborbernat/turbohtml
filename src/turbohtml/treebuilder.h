@@ -84,6 +84,16 @@ th_tree *th_tree_new(void);
    the data code points in the tree's arena. NULL on allocation failure. */
 th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len);
 
+/* Construct an element owning a copy of the tag name, with attr_count empty
+   attribute slots; fill each with th_tree_set_attr. NULL on allocation failure. */
+th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_len, uint16_t atom,
+                              Py_ssize_t attr_count);
+
+/* Fill attribute slot index on a constructed element (has_value 0 means a
+   valueless attribute). Returns 0, or -1 on allocation failure. */
+int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char *name, Py_ssize_t name_len,
+                     const Py_UCS4 *value, Py_ssize_t value_len, int has_value);
+
 /* Parse an HTML fragment as if set as the innerHTML of the given context element
    (e.g. "td", or "svg path"). The returned tree serializes the context root's
    children. context is a NUL-free ASCII name; context_len its length. */

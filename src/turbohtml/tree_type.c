@@ -1489,16 +1489,19 @@ static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
 
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.");
 
+static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+
 static PyType_Slot element_slots[] = {
     {Py_tp_doc, (void *)element_doc},
     {Py_tp_getset, element_getset},
+    {Py_tp_new, element_new},
     {0, NULL},
 };
 
 static PyType_Spec element_spec = {
     .name = "turbohtml._html.Element",
     .basicsize = sizeof(NodeObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT,
     .slots = element_slots,
 };
 
@@ -1547,6 +1550,189 @@ static PyObject *text_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 
 static PyObject *comment_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     return construct_data_node(type, TH_NODE_COMMENT, args, kwds);
+}
+
+/* Reject a tag or attribute name the HTML spec forbids, the way DOM
+   createElement / setAttribute raise InvalidCharacterError: empty, or carrying
+   whitespace, a control, "/" or ">" (none of which round-trip), plus "<" in a
+   tag name and "=" or a quote in an attribute name. */
+static int validate_name(PyObject *name, int is_attr) {
+    Py_ssize_t len = PyUnicode_GET_LENGTH(name);
+    if (len == 0) {
+        PyErr_SetString(PyExc_ValueError, is_attr ? "attribute name must not be empty" : "tag must not be empty");
+        return -1;
+    }
+    int kind = PyUnicode_KIND(name);
+    const void *data = PyUnicode_DATA(name);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 c = PyUnicode_READ(kind, data, index);
+        int bad = c <= ' ' || c == '/' || c == '>' || (is_attr ? (c == '=' || c == '"' || c == '\'') : c == '<');
+        if (bad) {
+            PyObject *ch = PyUnicode_FromOrdinal((int)c);
+            if (ch != NULL) { /* GCOVR_EXCL_BR_LINE: a forbidden character is ASCII and always builds */
+                PyErr_Format(PyExc_ValueError, "%s name contains an invalid character: %R",
+                             is_attr ? "attribute" : "tag", ch);
+                Py_DECREF(ch);
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Resolve one attribute value to code points: None is valueless (points stays
+   NULL, has_value 0); a str is itself; a list of str joins on a space. */
+static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len, int *has_value) {
+    *points = NULL;
+    *len = 0;
+    *has_value = 0;
+    if (value == Py_None) {
+        return 0;
+    }
+    PyObject *as_str;
+    if (PyUnicode_Check(value)) {
+        as_str = Py_NewRef(value);
+    } else if (PyList_Check(value)) {
+        PyObject *space = PyUnicode_FromOrdinal(' ');
+        if (space == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        as_str = PyUnicode_Join(space, value); /* a non-str member raises TypeError */
+        Py_DECREF(space);
+        if (as_str == NULL) {
+            return -1;
+        }
+    } else {
+        PyErr_SetString(PyExc_TypeError, "attribute value must be a str, a list of str, or None");
+        return -1;
+    }
+    *len = PyUnicode_GET_LENGTH(as_str);
+    *points = PyUnicode_AsUCS4Copy(as_str);
+    Py_DECREF(as_str);
+    if (*points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    *has_value = 1;
+    return 0;
+}
+
+/* Fill a constructed element's attribute slots from the keys of attrs. */
+static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyObject *keys) {
+    Py_ssize_t count = PyList_GET_SIZE(keys);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *name = PyList_GET_ITEM(keys, index);
+        if (!PyUnicode_Check(name)) {
+            PyErr_SetString(PyExc_TypeError, "attribute name must be a str");
+            return -1;
+        }
+        if (validate_name(name, 1) < 0) {
+            return -1;
+        }
+        Py_ssize_t name_len;
+        const char *name_utf8 = PyUnicode_AsUTF8AndSize(name, &name_len);
+        if (name_utf8 == NULL) { /* GCOVR_EXCL_BR_LINE: a lone-surrogate name cannot encode, hard to force */
+            return -1;           /* GCOVR_EXCL_LINE: surrogate path */
+        }
+        char *lower = PyMem_Malloc((size_t)name_len);
+        if (lower == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (Py_ssize_t byte = 0; byte < name_len; byte++) {
+            char ch = name_utf8[byte];
+            lower[byte] = ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
+        }
+        PyObject *value = PyObject_GetItem(attrs, name);
+        Py_UCS4 *points;
+        Py_ssize_t value_len;
+        int has_value;
+        int bad = value == NULL || element_attr_value(value, &points, &value_len, &has_value) < 0;
+        Py_XDECREF(value);
+        if (bad) {
+            PyMem_Free(lower);
+            return -1;
+        }
+        int rc = th_tree_set_attr(tree, node, index, lower, name_len, points, value_len, has_value);
+        PyMem_Free(lower);
+        PyMem_Free(points);
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return 0;
+}
+
+static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"tag", "attrs", NULL};
+    PyObject *tag;
+    PyObject *attrs = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "U|O", keywords, &tag, &attrs)) {
+        return NULL;
+    }
+    if (validate_name(tag, 0) < 0) {
+        return NULL;
+    }
+    Py_ssize_t tag_len = PyUnicode_GET_LENGTH(tag);
+    PyObject *keys = NULL;
+    Py_ssize_t attr_count = 0;
+    if (attrs != NULL && attrs != Py_None) {
+        keys = PyMapping_Keys(attrs); /* raises if attrs is not a mapping */
+        if (keys == NULL) {
+            return NULL;
+        }
+        attr_count = PyList_GET_SIZE(keys);
+    }
+    module_state *state = PyType_GetModuleState(type);
+    th_tree *tree = th_tree_new();
+    if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_XDECREF(keys);        /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_UCS4 *tag_points = PyUnicode_AsUCS4Copy(tag);
+    if (tag_points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);   /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(keys);     /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    /* tag and attribute names are ASCII-lowercased to match what the parser
+       stores, so a constructed and a parsed element compare and serialize alike */
+    for (Py_ssize_t index = 0; index < tag_len; index++) {
+        if (tag_points[index] >= 'A' && tag_points[index] <= 'Z') {
+            tag_points[index] += 32;
+        }
+    }
+    Py_ssize_t utf8_len;
+    const char *utf8 = PyUnicode_AsUTF8AndSize(tag, &utf8_len);
+    uint16_t atom = TH_TAG_UNKNOWN;
+    char stack[64];
+    if (utf8 != NULL && utf8_len <= (Py_ssize_t)sizeof(stack)) {
+        for (Py_ssize_t byte = 0; byte < utf8_len; byte++) {
+            stack[byte] = utf8[byte] >= 'A' && utf8[byte] <= 'Z' ? (char)(utf8[byte] + 32) : utf8[byte];
+        }
+        atom = th_tag_lookup(stack, utf8_len);
+    } else {
+        PyErr_Clear(); /* a surrogate or very long custom tag is simply not in the table */
+    }
+    th_node *node = th_tree_make_element(tree, tag_points, tag_len, atom, attr_count);
+    PyMem_Free(tag_points);
+    if (node == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);      /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(keys);        /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (keys != NULL && fill_element_attrs(tree, node, attrs, keys) < 0) {
+        th_tree_free(tree);
+        Py_DECREF(keys);
+        return NULL;
+    }
+    Py_XDECREF(keys);
+    PyObject *handle = handle_new(state, tree, Py_None, Py_None);
+    if (handle == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *wrapped = node_wrap(state, handle, node);
+    Py_DECREF(handle);
+    return wrapped;
 }
 
 static PyObject *node_get_data(PyObject *self, void *Py_UNUSED(closure)) {

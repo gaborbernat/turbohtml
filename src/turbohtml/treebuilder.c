@@ -438,6 +438,63 @@ th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py
     return node;
 }
 
+/* Intern a UTF-8 attribute name to its atom (static table, else the tree's
+   dynamic table), the construction-side counterpart of intern_attr. */
+uint32_t th_attr_intern_utf8(th_tree *tree, const char *bytes, Py_ssize_t len) {
+    uint32_t atom = th_attr_atom(bytes, (size_t)len);
+    if (atom != TH_ATTR_UNKNOWN) {
+        return atom;
+    }
+    return intern_attr_dynamic(tree, bytes, len);
+}
+
+/* Construct an element node owning a copy of the tag name, with attr_count empty
+   attribute slots to fill with th_tree_set_attr. */
+th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_len, uint16_t atom,
+                              Py_ssize_t attr_count) {
+    th_node *node = node_new(tree, TH_NODE_ELEMENT);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    node->atom = atom;
+    Py_UCS4 *owned = arena_alloc(tree, tag_len * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, tag, (size_t)tag_len * sizeof(Py_UCS4));
+    node->text = owned;
+    node->text_len = tag_len;
+    if (attr_count > 0) {
+        node->attrs = arena_alloc(tree, attr_count * (Py_ssize_t)sizeof(th_node_attr));
+        if (node->attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memset(node->attrs, 0, (size_t)attr_count * sizeof(th_node_attr));
+        node->attr_count = attr_count;
+    }
+    return node;
+}
+
+/* Fill attribute slot index on a constructed element. has_value 0 makes a
+   valueless attribute (value NULL); otherwise the value is owned in the arena,
+   with an empty value kept distinct from a valueless one. */
+int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char *name, Py_ssize_t name_len,
+                     const Py_UCS4 *value, Py_ssize_t value_len, int has_value) {
+    th_node_attr *attr = &node->attrs[index];
+    attr->name_atom = th_attr_intern_utf8(tree, name, name_len);
+    if (!has_value) {
+        return 0;
+    }
+    Py_UCS4 *owned = arena_alloc(tree, (value_len ? value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
+    attr->value = owned;
+    attr->value_len = value_len;
+    return 0;
+}
+
 static void node_append(th_node *parent, th_node *child) {
     child->parent = parent;
     child->prev_sibling = parent->last_child;
