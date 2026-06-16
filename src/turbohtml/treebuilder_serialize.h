@@ -13,35 +13,77 @@ typedef struct {
     int failed;
 } sbuf;
 
+/* Grow the buffer so at least extra more code points fit, doubling so a run of
+   appends stays amortized O(1). */
+static void sbuf_reserve(sbuf *out, Py_ssize_t extra) {
+    if (out->len + extra <= out->cap) {
+        return;
+    }
+    Py_ssize_t cap = out->cap ? out->cap : 256;
+    while (cap < out->len + extra) {
+        cap *= 2;
+    }
+    Py_UCS4 *grown = PyMem_Realloc(out->data, (size_t)cap * sizeof(Py_UCS4));
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    out->data = grown;
+    out->cap = cap;
+}
+
 static void sbuf_putc(sbuf *out, Py_UCS4 character) {
-    if (out->len == out->cap) {
-        Py_ssize_t cap = out->cap ? out->cap * 2 : 256;
-        Py_UCS4 *grown = PyMem_Realloc(out->data, (size_t)cap * sizeof(Py_UCS4));
-        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-            return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        }
-        out->data = grown;
-        out->cap = cap;
+    sbuf_reserve(out, 1);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     out->data[out->len++] = character;
 }
 
-static void sbuf_puts(sbuf *out, const char *str) {
-    for (; *str; str++) {
-        sbuf_putc(out, (Py_UCS4)*str);
+/* Append a run of code points in one bulk copy after a single capacity check. */
+static void sbuf_put_run(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
+    sbuf_reserve(out, len);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
+    memcpy(out->data + out->len, text, (size_t)len * sizeof(Py_UCS4));
+    out->len += len;
+}
+
+static void sbuf_puts(sbuf *out, const char *str) {
+    Py_ssize_t len = (Py_ssize_t)strlen(str);
+    sbuf_reserve(out, len);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        out->data[out->len + index] = (Py_UCS4)(unsigned char)str[index];
+    }
+    out->len += len;
 }
 
 static void sbuf_put_ucs4(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
-    for (Py_ssize_t index = 0; index < len; index++) {
-        sbuf_putc(out, text[index]);
-    }
+    sbuf_put_run(out, text, len);
 }
 
-/* Write well-formed UTF-8 bytes (an interned attribute name) as code points. */
+/* Write well-formed UTF-8 bytes (an interned attribute name) as code points. The
+   common all-ASCII name is copied in bulk; only a name with a byte >= 0x80
+   (a foreign mixed-case attribute) takes the per-code-point decoder. */
 static void sbuf_put_utf8(sbuf *out, const char *bytes, Py_ssize_t len) {
     Py_ssize_t index = 0;
+    while (index < len && (unsigned char)bytes[index] < 0x80) {
+        index++;
+    }
+    if (index > 0) {
+        sbuf_reserve(out, index);
+        if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (Py_ssize_t ascii = 0; ascii < index; ascii++) {
+            out->data[out->len + ascii] = (Py_UCS4)(unsigned char)bytes[ascii];
+        }
+        out->len += index;
+    }
     while (index < len) {
         unsigned char lead = (unsigned char)bytes[index];
         Py_UCS4 character;
@@ -214,33 +256,65 @@ enum th_formatter {
     TH_FMT_NAMED,   /* HTML named entities for every character that has one */
 };
 
-/* Append text under one formatter; in_attr selects the attribute-value context.
-   NAMED is context-independent (a character's name covers every context); the
-   other two escape the structural set, with WHATWG also folding the quote and
-   no-break space the spec calls for. */
+/* Whether a character must be rewritten under the formatter. NAMED rewrites any
+   character with a named reference (the ASCII ones are exactly & " < >, so the
+   table is only consulted past 0x7F); the others escape the structural set, with
+   WHATWG also folding the quote and no-break space the spec calls for. */
+static int sbuf_text_special(Py_UCS4 character, int in_attr, int formatter) {
+    if (formatter == TH_FMT_NAMED) {
+        if (character < 0x80) {
+            return character == '&' || character == '"' || character == '<' || character == '>';
+        }
+        return th_entity_name(character) != NULL;
+    }
+    int escape_angle = formatter == TH_FMT_MINIMAL || !in_attr;
+    if (character == '&') {
+        return 1;
+    }
+    if ((character == '<' || character == '>') && escape_angle) {
+        return 1;
+    }
+    if (character == '"' && in_attr && formatter == TH_FMT_WHATWG) {
+        return 1;
+    }
+    return character == 0xA0 && formatter == TH_FMT_WHATWG;
+}
+
+/* Emit the replacement for a character sbuf_text_special flagged. */
+static void sbuf_put_special(sbuf *out, Py_UCS4 character, int formatter) {
+    const char *name = formatter == TH_FMT_NAMED ? th_entity_name(character) : NULL;
+    if (name != NULL) {
+        sbuf_putc(out, '&');
+        sbuf_puts(out, name);
+        sbuf_putc(out, ';');
+    } else if (character == '&') {
+        sbuf_puts(out, "&amp;");
+    } else if (character == '<') {
+        sbuf_puts(out, "&lt;");
+    } else if (character == '>') {
+        sbuf_puts(out, "&gt;");
+    } else if (character == '"') {
+        sbuf_puts(out, "&quot;");
+    } else {
+        sbuf_puts(out, "&nbsp;"); /* the only remaining flagged character is U+00A0 */
+    }
+}
+
+/* Append text under one formatter, bulk-copying each run with nothing to escape
+   and rewriting only the flagged characters in between. */
 static void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr, int formatter) {
-    for (Py_ssize_t index = 0; index < len; index++) {
-        Py_UCS4 character = text[index];
-        const char *name = formatter == TH_FMT_NAMED ? th_entity_name(character) : NULL;
-        int escape_angle = formatter == TH_FMT_MINIMAL || !in_attr;
-        if (name != NULL) {
-            sbuf_putc(out, '&');
-            sbuf_puts(out, name);
-            sbuf_putc(out, ';');
-        } else if (formatter == TH_FMT_NAMED) {
-            sbuf_putc(out, character);
-        } else if (character == '&') {
-            sbuf_puts(out, "&amp;");
-        } else if (character == '<' && escape_angle) {
-            sbuf_puts(out, "&lt;");
-        } else if (character == '>' && escape_angle) {
-            sbuf_puts(out, "&gt;");
-        } else if (character == '"' && in_attr && formatter == TH_FMT_WHATWG) {
-            sbuf_puts(out, "&quot;");
-        } else if (character == 0xA0 && formatter == TH_FMT_WHATWG) {
-            sbuf_puts(out, "&nbsp;");
-        } else {
-            sbuf_putc(out, character);
+    Py_ssize_t index = 0;
+    while (index < len) {
+        Py_ssize_t start = index;
+        while (index < len && !sbuf_text_special(text[index], in_attr, formatter)) {
+            index++;
+        }
+        if (index > start) {
+            sbuf_put_run(out, &text[start], index - start);
+        }
+        if (index < len) {
+            sbuf_put_special(out, text[index], formatter);
+            index++;
         }
     }
 }

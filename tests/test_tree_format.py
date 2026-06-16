@@ -85,6 +85,18 @@ def test_named_entities_keeps_characters_without_a_name() -> None:
     assert _one("<p>ab12</p>", "p").serialize(formatter=Formatter.NAMED_ENTITIES) == "<p>ab12</p>"
 
 
+def test_named_entities_escapes_structural_ascii() -> None:
+    p = _one("<p>a&lt;b&gt;c&quot;d&amp;e</p>", "p")
+    assert p.serialize(formatter=Formatter.NAMED_ENTITIES) == "<p>a&lt;b&gt;c&quot;d&amp;e</p>"
+
+
+def test_named_entities_passes_through_unnamed_non_ascii() -> None:
+    # a C1 control below the table and an astral emoji above it have no named
+    # reference, so they stay literal (and exercise both ends of the table search)
+    p = _one("<p>\x85\U0001f600</p>", "p")
+    assert p.serialize(formatter=Formatter.NAMED_ENTITIES) == "<p>\x85\U0001f600</p>"
+
+
 # --- pretty printing via indent ---
 
 

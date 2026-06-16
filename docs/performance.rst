@@ -302,8 +302,8 @@ BeautifulSoup.
 *************
 
 Serializing a parsed document back to HTML: turbohtml's :attr:`~turbohtml.Node.html`, lxml's ``tostring``, selectolax's
-``html``, and BeautifulSoup's ``decode``. turbohtml's SIMD-assisted escape and bulk span copies make it the fastest of
-the four.
+``html``, and BeautifulSoup's ``decode``. turbohtml scans each text run for the next character that needs escaping and
+bulk-copies the clean spans, so it is the fastest of the four by a wide margin.
 
 .. list-table::
     :header-rows: 1
@@ -315,17 +315,17 @@ the four.
       - selectolax
       - BeautifulSoup
     - - wpt page (4 kB)
-      - 8.5 µs
-      - 18.9 µs
-      - 12.5 µs
-      - 203 µs
+      - 4.6 µs
+      - 18.6 µs
+      - 12.3 µs
+      - 197 µs
     - - wpt page (9.6 kB)
-      - 21.2 µs
-      - 51.2 µs
-      - 30.0 µs
-      - 478 µs
+      - 12.9 µs
+      - 50.9 µs
+      - 29.8 µs
+      - 471 µs
     - - wpt page (92 kB)
-      - 200 µs
-      - 389 µs
-      - 344 µs
-      - 5.97 ms
+      - 151 µs
+      - 383 µs
+      - 340 µs
+      - 5.94 ms
