@@ -89,6 +89,37 @@ markupsafe's hottest path. turbohtml builds the safe string in C in a single cal
       - 147 ns
       - 358 ns
 
+*********
+ Linkify
+*********
+
+:func:`turbohtml.linkify.linkify` against `bleach <https://bleach.readthedocs.io>`_'s ``linkify``, the HTML-aware
+linkifier it succeeds, and `linkify-it-py <https://github.com/tsutsu3/linkify-it-py>`_, the pure-Python scanner
+markdown-it-py pulls in. bleach and turbohtml both parse the HTML and rewrite it; linkify-it-py only finds the matches
+and does not rewrite, so it does strictly less work, yet turbohtml is faster than both. The C candidate scan and
+turbohtml's own tree carry it past bleach's html5lib pass by five to twenty times.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 22 22 22
+
+    - - input
+      - turbohtml
+      - bleach
+      - linkify-it-py
+    - - comment (1 link, 1 email)
+      - 2.6 µs
+      - 53 µs
+      - 29 µs
+    - - prose (1 KiB)
+      - 48 µs
+      - 269 µs
+      - 310 µs
+    - - markup (4 KiB)
+      - 120 µs
+      - 1580 µs
+      - 723 µs
+
 ************
  Unescaping
 ************
@@ -201,10 +232,10 @@ times faster.
 *********
 
 :func:`turbohtml.parse` builds a full WHATWG document tree, against the other Python tree builders: `lxml
-<https://lxml.de>`_, `selectolax <https://github.com/rushter/selectolax>`_ (lexbor), `BeautifulSoup
-<https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ over ``html.parser``, and html5lib. turbohtml runs roughly
-two to five times faster than the C parsers and 30 to 80 times faster than the pure-Python ones, while building the
-WHATWG tree that lxml's libxml2 does not.
+<https://lxml.de>`_, `selectolax <https://github.com/rushter/selectolax>`_ (`lexbor <https://lexbor.com>`_),
+`BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ over ``html.parser``, and html5lib. turbohtml
+runs roughly two to five times faster than the C parsers and 30 to 80 times faster than the pure-Python ones, while
+building the WHATWG tree that lxml's libxml2 does not.
 
 .. list-table::
     :header-rows: 1
@@ -300,8 +331,9 @@ several times ahead of selectolax and BeautifulSoup.
       - 46.3 µs
       - 206 µs
 
-``select`` runs the CSS selector ``div a[href]`` (turbohtml's :meth:`~turbohtml.Node.select`, lxml's ``cssselect``,
-selectolax's ``css``, BeautifulSoup's soupsieve). Because turbohtml compiles the selector against the tree once and then
+``select`` runs the CSS selector ``div a[href]`` (turbohtml's :meth:`~turbohtml.Node.select`, lxml's `cssselect
+<https://github.com/scrapy/cssselect>`_, selectolax's ``css``, BeautifulSoup's `soupsieve
+<https://github.com/facelessuser/soupsieve>`_). Because turbohtml compiles the selector against the tree once and then
 compares interned integer atoms, it runs from twice to over forty times faster than lxml and over a hundred times faster
 than BeautifulSoup.
 
