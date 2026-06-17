@@ -466,3 +466,65 @@ Because turbohtml parses the input as HTML, it leaves alone a URL already inside
 linkify-it-py, working on the raw string, would match again. linkify-it-py is configurable down to custom schemes and
 fuzzy IP matching; turbohtml covers the common web, ``mailto:``, and bare-domain cases and trades that breadth for being
 HTML-aware and several times faster.
+
+*********************
+ From bleach (clean)
+*********************
+
+bleach is end of life and has no maintained successor for its sanitizer, so ``turbohtml.sanitizer`` takes its place. The
+bleach-compatible shim keeps ``clean``'s signature so the import is the only change:
+
+.. code-block:: python
+
+    # bleach
+    from bleach import clean
+
+    # turbohtml
+    from turbohtml.bleach_compat import clean
+
+``clean(text, tags=..., attributes=..., protocols=..., strip=..., strip_comments=...)`` maps onto a
+:class:`~turbohtml.sanitizer.Policy`. ``attributes`` accepts bleach's list, per-tag dict, or callable forms; ``strip``
+chooses between dropping a disallowed tag and keeping its children (``True``) and escaping it (``False``, the default):
+
+.. testcode::
+
+    from turbohtml.bleach_compat import clean
+
+    print(clean("<p>Hi <a href='http://x'>link</a></p><script>evil()</script>"))
+
+.. testoutput::
+
+    &lt;p&gt;Hi <a href="http://x">link</a>&lt;/p&gt;&lt;script&gt;evil()&lt;/script&gt;
+
+For new code prefer the native :class:`~turbohtml.sanitizer.Policy`/:class:`~turbohtml.sanitizer.Sanitizer` API: a
+frozen, thread-safe policy (bleach's ``clean`` had a documented thread-safety footgun), an
+:class:`~turbohtml.sanitizer.OnDisallowed` enum that names escape/strip/remove where bleach overloaded two booleans, and
+an ``attribute_filter`` that rewrites or drops a value where bleach's callable only returned a bool. One difference is
+deliberate and load-bearing: turbohtml's safety baseline (``<script>``, ``on*`` handlers, ``javascript:`` URLs) is not
+configurable, so even a permissive ``attributes`` callable cannot re-admit them, where bleach faithfully kept whatever
+you allowed. CSS sanitizing (bleach's ``css_sanitizer``) is not yet ported; ``clean`` raises if you pass it.
+
+**********
+ From nh3
+**********
+
+`nh3 <https://github.com/messense/nh3>`_, the Rust ammonia binding, is the other bleach-refugee target, but it declined
+bleach feature parity: it has no escape-instead-of-strip mode, no attribute-rewriting callable, and no linkifier.
+``turbohtml.sanitizer`` covers those while staying in the same performance tier:
+
+.. code-block:: python
+
+    # nh3
+    import nh3
+
+    nh3.clean(text, tags={"a"}, attributes={"a": {"href"}})
+
+    # turbohtml
+    from turbohtml.sanitizer import sanitize, Policy
+
+    sanitize(text, Policy(tags=frozenset({"a"}), attributes={"a": frozenset({"href"})}))
+
+nh3's ``link_rel`` maps to ``Policy.add_link_rel``, its ``url_schemes`` to ``url_schemes``, and its ``attribute_filter``
+to ``attribute_filter`` (turbohtml's may rewrite a value, not only drop it). turbohtml escapes disallowed tags by
+default (``OnDisallowed.ESCAPE``), the mode ammonia blocked upstream; pass ``OnDisallowed.STRIP`` or
+``OnDisallowed.REMOVE`` for nh3-style dropping.

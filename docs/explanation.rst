@@ -90,6 +90,17 @@ expands outward from each, rather than backtracking a regex. A bare domain count
 TLD, matched against a generated IANA table the same way the tag and entity tables are built. The Python layer owns the
 tree walk and the callbacks; the C layer owns the byte scan.
 
+Sanitizing untrusted HTML needs the tree, not the tokens. :mod:`turbohtml.sanitizer` parses the input, walks the tree
+dropping everything not on an allowlist, and serializes once. The single most important property is that there is no
+serialize-then-reparse round trip: that round trip is where mutation XSS lives, because the second parse can read the
+"safe" string differently than the first (foreign-content and raw-text confusion), and a sanitizer that filters the same
+tree it will serialize cannot be fooled that way. A non-overridable baseline removes ``<script>``, ``on*`` handlers, and
+``javascript:`` URLs below the configurable allowlist, so a policy cannot route around the unsafe set, and the test
+suite asserts the property directly: ``sanitize(sanitize(x)) == sanitize(x)`` across an adversarial corpus, so any input
+whose cleaned form cleans differently a second time fails the build. Only the :class:`~turbohtml.sanitizer.Policy`
+facade is Python; the filtering walk -- the allowlist checks, the URL-scheme parsing, the escape/strip/remove of each
+node -- runs in C against the parsed tree, which is why it sanitizes faster than the Rust nh3.
+
 ************************
  A spec-exact tokenizer
 ************************

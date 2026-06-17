@@ -22,6 +22,7 @@ py.extension_module(
         'src/turbohtml/escape.c',
         'src/turbohtml/linkify.c',
         'src/turbohtml/markup.c',
+        'src/turbohtml/sanitize.c',
         'src/turbohtml/token_type.c',
         'src/turbohtml/tokenizer_sm.c',
         'src/turbohtml/tokenizer_type.c',
@@ -39,8 +40,10 @@ py.install_sources(
     [
         'src/turbohtml/__init__.py',
         'src/turbohtml/_html.pyi',
+        'src/turbohtml/bleach_compat.py',
         'src/turbohtml/linkify.py',
         'src/turbohtml/markup.py',
+        'src/turbohtml/sanitizer.py',
         'src/turbohtml/py.typed',
     ],
     subdir: 'turbohtml',

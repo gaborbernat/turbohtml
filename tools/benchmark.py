@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 import bleach
 import html5lib
 import markupsafe
+import nh3
 import pyperf
 from bs4 import BeautifulSoup
 from linkify_it import LinkifyIt
@@ -43,8 +44,11 @@ from lxml import html as lxml_html
 from selectolax.lexbor import LexborHTMLParser
 
 import turbohtml
+from turbohtml import sanitizer as turbo_sanitizer
 from turbohtml.linkify import linkify as turbo_linkify_html
 from turbohtml.markup import escape as turbo_markup_escape
+
+_SANITIZER = turbo_sanitizer.Sanitizer(turbo_sanitizer.Policy.relaxed())
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -646,6 +650,73 @@ def print_linkify_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- sanitize suite: allowlist HTML sanitizing against bleach and nh3 --------#
+# turbohtml.sanitizer against bleach (its end-of-life predecessor, on html5lib)
+# and nh3 (the Rust ammonia binding). All three parse, filter to an allowlist,
+# and reserialize; the inputs are realistic user-generated content with a few
+# disallowed tags and a dangerous attribute mixed in.
+
+
+def turbo_sanitize(text: str) -> None:
+    """Sanitize with turbohtml's relaxed policy, reusing a prebuilt Sanitizer."""
+    _SANITIZER.sanitize(text)
+
+
+def bleach_sanitize(text: str) -> None:
+    """Sanitize with bleach's html5lib-based clean."""
+    bleach.clean(text)
+
+
+def nh3_sanitize(text: str) -> None:
+    """Sanitize with nh3, the Rust ammonia binding."""
+    nh3.clean(text)
+
+
+SANITIZE_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_sanitize),
+    ("nh3", nh3_sanitize),
+    ("bleach", bleach_sanitize),
+)
+
+SANITIZE_CASES: tuple[tuple[str, str], ...] = (
+    ("comment", "<p>Thanks for the <a href='http://example.com'>link</a>! <script>evil()</script></p>"),
+    (
+        "post 4 KiB",
+        (
+            "<div class=post><h1>Title</h1><p>Some <a href='http://example.com'>link</a> and <b>bold</b> text with "
+            "<img src=http://x/i.png onerror=alert(1)> and <script>evil()</script>.</p><ul><li>one</li><li>two</li>"
+            "</ul></div>"
+        )
+        * 20,
+    ),
+)
+
+
+def run_sanitize_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark allowlist sanitizing against bleach and nh3; return the case names."""
+    for name, text in SANITIZE_CASES:
+        for label, run in SANITIZE_LIBS:
+            bench(f"sanitize {name} [{label}]", run, text)
+    return [name for name, _ in SANITIZE_CASES]
+
+
+def print_sanitize_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's sanitizer beside nh3 and bleach and their speedup factors."""
+    if not cases:
+        return
+    others = [label for label, _ in SANITIZE_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'sanitize benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"sanitize {name} [turbohtml]"]
+        row = f"{'sanitize ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"sanitize {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
     """Benchmark one read-path operation (find/select/serialize) across every library."""
     names: list[str] = []
@@ -778,6 +849,7 @@ def main() -> None:
             "edit",
             "markup",
             "linkify",
+            "sanitize",
             [],
         ],
         help="suites to run (default: all)",
@@ -791,7 +863,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit,markup,linkify",
+            "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit,markup,linkify,sanitize",
         ).split(",")
     )
     means: dict[str, float] = {}
@@ -810,6 +882,8 @@ def main() -> None:
     markup_cases = run_markup_suite(bench) if "markup" in suites else []
     if "linkify" in suites:
         run_linkify_suite(bench)
+    if "sanitize" in suites:
+        run_sanitize_suite(bench)
     if args.worker or not means:
         return
     print_table(means, rows)
@@ -821,6 +895,7 @@ def main() -> None:
     print_edit_table(means, edit_cases)
     print_markup_table(means, markup_cases)
     print_linkify_table(means, LINKIFY_CASE_NAMES if "linkify" in suites else [])
+    print_sanitize_table(means, [n for n, _ in SANITIZE_CASES] if "sanitize" in suites else [])
 
 
 if __name__ == "__main__":

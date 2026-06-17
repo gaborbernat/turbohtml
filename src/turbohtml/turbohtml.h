@@ -29,6 +29,14 @@ PyObject *turbohtml_register_markup(PyObject *module, PyObject *type);
    signature matches METH_VARARGS. */
 PyObject *turbohtml_linkify_scan(PyObject *module, PyObject *args);
 
+/* Implemented in sanitize.c. _sanitize filters a parsed fragment in place against
+   a policy; signature matches METH_VARARGS. turbohtml_node_borrow is implemented
+   in tree_type.c and lends sanitize.c the tree+node a Python element wraps. */
+struct th_tree;
+struct th_node;
+int turbohtml_node_borrow(PyObject *module, PyObject *obj, struct th_tree **tree, struct th_node **node);
+PyObject *turbohtml_sanitize(PyObject *module, PyObject *args);
+
 /* Implemented in tokenizer_type.c. tokenize() matches METH_O; the internal
    conformance hook _tokenize_states matches METH_VARARGS. */
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg);
