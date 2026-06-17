@@ -2944,7 +2944,10 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                         tree->drop_newline = 1; /* a leading LF in a textarea is ignored */
                     }
                     th_tok_switch(sm, (enum th_initial_state)model);
-                    original_mode = M_IN_BODY;
+                    /* when fostered out of a table the in-body rules run but the real insertion
+                       mode is still the table mode, so the text mode must return there, not to
+                       in body, or the table's later rows would be dropped */
+                    original_mode = foster_pending ? foster_return : M_IN_BODY;
                     mode = M_TEXT;
                     break;
                 }

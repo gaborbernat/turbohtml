@@ -322,6 +322,17 @@ def test_document_paths(html: str, needle: str) -> None:
     assert needle in _doc(html)
 
 
+@pytest.mark.parametrize("element", ["textarea", "title", "xmp"])
+def test_rawtext_in_table_restores_table_mode(element: str) -> None:
+    # a fostered RCDATA/RAWTEXT element's end tag must return to "in table", not "in body",
+    # or the following rows are dropped and trailing text lands directly in the table
+    doc = _doc(f"<table><{element}></{element}><tr><td>x")
+    assert doc == (
+        f"| <html>\n|   <head>\n|   <body>\n|     <{element}>\n|     <table>\n"
+        '|       <tbody>\n|         <tr>\n|           <td>\n|             "x"'
+    )
+
+
 @pytest.mark.parametrize(
     "html",
     [
