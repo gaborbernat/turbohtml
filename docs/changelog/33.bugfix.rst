@@ -1,0 +1,3 @@
+Serialize ``frame`` as a void element, emitting only its start tag. The WHATWG fragment-serialization algorithm lists
+``frame`` among the void elements that take no end tag, so ``turbohtml.parse('<frameset><frame>').serialize()`` no
+longer appends a spurious ``</frame>``.

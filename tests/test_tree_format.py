@@ -112,6 +112,7 @@ def test_formatter_serialize(html: str, selector: str, formatter: Formatter, exp
         pytest.param("<div><p>x</p></div>", "div", 0, "<div>\n<p>\nx\n</p>\n</div>", id="zero-newlines-no-indent"),
         pytest.param("<div></div>", "div", 2, "<div></div>", id="empty-element-one-line"),
         pytest.param("<p><br></p>", "p", 2, "<p>\n  <br>\n</p>", id="void-element"),
+        pytest.param("<frameset><frame>", "frameset", 2, "<frameset>\n  <frame>\n</frameset>", id="void-frame"),
         pytest.param("<div><pre>\n\nkeep</pre></div>", "div", 2, "<div>\n  <pre>\n\nkeep</pre>\n</div>", id="raw-pre"),
         pytest.param(
             "<div><script>a<b</script></div>", "div", 2, "<div>\n  <script>a<b</script>\n</div>", id="raw-script"
