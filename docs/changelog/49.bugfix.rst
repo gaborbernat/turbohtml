@@ -1,0 +1,5 @@
+Ignore a stray ``<!DOCTYPE>`` encountered after the "initial" insertion mode without changing the insertion mode, per
+the WHATWG tree-construction rules. A second DOCTYPE previously drove the parser into the "in body" mode, fabricating a
+``<p>``, leaking leading whitespace into ``<body>``, and misplacing a leading comment inside ``<body>``;
+``parse("<!doctype html><!doctype><!--c-->")`` now keeps the comment before ``<html>`` with an empty body, matching
+html5lib.

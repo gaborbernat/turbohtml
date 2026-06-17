@@ -354,6 +354,32 @@ def test_formatting_end_tag_ignored_across_foreign_scope_boundary(html: str, inn
     assert body.inner_html == inner
 
 
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param(
+            "<!doctype html><!doctype></p>",
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+            id="stray-end-tag-after",
+        ),
+        pytest.param(
+            "<!doctype html><!doctype> x",
+            "<!DOCTYPE html><html><head></head><body>x</body></html>",
+            id="leading-space-not-leaked",
+        ),
+        pytest.param(
+            "<!doctype html><!doctype><!--c-->",
+            "<!DOCTYPE html><!--c--><html><head></head><body></body></html>",
+            id="comment-stays-before-html",
+        ),
+    ],
+)
+def test_stray_doctype_after_initial_is_ignored(html: str, expected: str) -> None:
+    # a DOCTYPE in any insertion mode other than "initial" is a parse error, ignored without
+    # changing the insertion mode, so a second DOCTYPE must not advance the parser into "in body"
+    assert parse(html).html == expected
+
+
 @pytest.mark.parametrize("element", ["textarea", "title", "xmp"])
 def test_rawtext_in_table_restores_table_mode(element: str) -> None:
     # a fostered RCDATA/RAWTEXT element's end tag must return to "in table", not "in body",
