@@ -265,6 +265,19 @@ static th_node *insert_foreign(th_tree *tree, const th_token *token, uint8_t ns)
                   (ns == TH_NS_SVG &&
                    (node->atom == TH_TAG_FOREIGNOBJECT || node->atom == TH_TAG_DESC || node->atom == TH_TAG_TITLE));
     node->tag_flags = special ? TH_TAG_SPECIAL : 0;
+    /* "adjust MathML attributes": definitionurl -> definitionURL. Done here, at
+       construction, so the cased name lands in the tree (node.attrs) and every
+       serializer emits it, not only the #document debug format. */
+    if (ns == TH_NS_MATHML) {
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            Py_ssize_t name_len;
+            const char *name = th_attr_name(tree, node->attrs[index].name_atom, &name_len);
+            const char *mixed = foreign_adjust_attr(name, name_len, ns);
+            if (mixed != NULL) {
+                node->attrs[index].name_atom = intern_attr_dynamic(tree, mixed, (Py_ssize_t)strlen(mixed));
+            }
+        }
+    }
     if (ns == TH_NS_SVG && node->text != NULL) { /* GCOVR_EXCL_BR_LINE: an SVG element always has a tag name */
         char lower[MAX_SVG_NAME];
         if (node->text_len < (Py_ssize_t)sizeof(lower)) { /* GCOVR_EXCL_BR_LINE: SVG names are under 64 chars */

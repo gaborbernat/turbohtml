@@ -107,6 +107,11 @@ int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char 
 int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
                      Py_ssize_t value_len, int has_value);
 
+/* The index of node's attribute named `name` (UTF-8, caller-lowercased), or -1.
+   Foreign elements can store a case-adjusted name (e.g. MathML definitionURL), so
+   a missed atom match falls back to a case-insensitive scan for non-HTML nodes. */
+Py_ssize_t th_node_attr_find(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len);
+
 /* Remove the named attribute; returns 1 if one was removed, else 0. */
 int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len);
 

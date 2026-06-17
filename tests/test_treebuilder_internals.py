@@ -134,6 +134,8 @@ _LONG_NAME = "z" * 130
         pytest.param("<svg><![CDATA[Ω]]></svg>", '"Ω"', id="cdata-foreign-ucs2"),
         pytest.param("<svg><![CDATA[\U0001f600]]></svg>", '"\U0001f600"', id="cdata-foreign-ucs4"),
         pytest.param("<math><mi mathvariant=bold>x</mi></math>", 'mathvariant="bold"', id="mathml-attribute-adjust"),
+        pytest.param("<math definitionurl=x></math>", 'definitionURL="x"', id="mathml-definitionurl-cased"),
+        pytest.param("<svg definitionurl=x></svg>", 'definitionurl="x"', id="svg-definitionurl-stays-lower"),
         pytest.param("<svg viewBox='0 0 1 1'>x</svg>", 'viewBox="0 0 1 1"', id="svg-camelcase-attribute"),
         pytest.param("<svg><foreignObject>x</foreignObject></svg>", "<svg foreignObject>", id="svg-camelcase-tag"),
         pytest.param(

@@ -799,16 +799,7 @@ static char *attr_key_utf8(PyObject *key, Py_ssize_t *out_len) {
 
 /* The index of the attribute named name in node, or -1 when it has none. */
 static Py_ssize_t find_attr_index(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
-    uint32_t atom = th_attr_lookup(tree, name, name_len);
-    if (atom == UINT32_MAX) {
-        return -1;
-    }
-    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-        if (node->attrs[index].name_atom == atom) {
-            return index;
-        }
-    }
-    return -1;
+    return th_node_attr_find(tree, node, name, name_len);
 }
 
 /* The live mutable view of an element's attributes: a mapping name -> value over
