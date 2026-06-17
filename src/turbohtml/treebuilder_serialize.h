@@ -132,7 +132,101 @@ static void render_attr_name(th_tree *tree, const th_node *node, const th_node_a
 #define MAX_SORTED_ATTRS 64
 #define MAX_ATTR_NAME 128
 
-static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
+/* A frame on the explicit serialization stack: a node whose open output was
+   already written, with `child` the next child to visit, `depth` the node's own
+   depth and `child_depth` the depth to hand its children (pretty keeps container
+   children at the same level, so the two can differ). */
+typedef struct {
+    th_node *node;
+    th_node *child;
+    int depth;
+    int child_depth;
+} ser_frame;
+
+typedef int (*ser_open_fn)(void *, th_node *, th_node *, int);
+typedef void (*ser_close_fn)(void *, th_node *, int);
+
+/* Visit one node: run on_open, then either descend (push a frame for its
+   children) or finish it now (on_close for an empty descendable node, nothing for
+   a node on_open already emitted whole). A single definition keeps the push
+   branches covered by the root and child calls alike. Returns -1 if the stack
+   cannot grow. */
+static int ser_enter(ser_frame **stack, Py_ssize_t *len, Py_ssize_t *cap, th_node *node, th_node *parent, int depth,
+                     void *ctx, ser_open_fn on_open, ser_close_fn on_close) {
+    int child_depth = on_open(ctx, node, parent, depth);
+    if (child_depth < 0) {
+        return 0; /* on_open emitted the whole node (leaf, void, or raw-text element) */
+    }
+    if (node->first_child == NULL) {
+        on_close(ctx, node, depth); /* a descendable but empty node opens and closes at once */
+        return 0;
+    }
+    if (*len == *cap) {
+        Py_ssize_t grow = *cap ? *cap * 2 : 16;
+        ser_frame *grown = PyMem_Resize(*stack, ser_frame, (size_t)grow); /* GCOVR_EXCL_BR_LINE: allocation failure */
+        if (grown == NULL) {                                              /* GCOVR_EXCL_START: allocation failure */
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        *stack = grown;
+        *cap = grow;
+    }
+    (*stack)[*len].node = node;
+    (*stack)[*len].child = node->first_child;
+    (*stack)[*len].depth = depth;
+    (*stack)[*len].child_depth = child_depth;
+    (*len)++;
+    return 0;
+}
+
+/* Iterative depth-first serialization. on_open fires in pre-order, receiving the
+   node, its parent (NULL at the root) and its depth, and returns the depth to
+   hand the node's children (>= 0) to descend, or a negative value once it has
+   already emitted the whole node; on_close then fires in post-order for every
+   descended node. Walking with this heap stack instead of C recursion keeps a
+   pathologically deep document from overflowing the call stack. A stack-growth
+   failure sets out->failed and stops. */
+static void ser_walk(sbuf *out, th_node *root, void *ctx, ser_open_fn on_open, ser_close_fn on_close) {
+    ser_frame *stack = NULL;
+    Py_ssize_t len = 0, cap = 0;
+    if (ser_enter(&stack, &len, &cap, root, NULL, 0, ctx, on_open, on_close) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+        out->failed = 1;                                                            /* GCOVR_EXCL_LINE */
+        PyMem_Free(stack);                                                          /* GCOVR_EXCL_LINE */
+        return;                                                                     /* GCOVR_EXCL_LINE */
+    }
+    while (len > 0) {
+        ser_frame *frame = &stack[len - 1];
+        if (frame->child != NULL) {
+            th_node *child = frame->child;
+            frame->child = child->next_sibling;
+            /* GCOVR_EXCL_START: the only failure is a stack-growth allocation failure */
+            if (ser_enter(&stack, &len, &cap, child, frame->node, frame->child_depth, ctx, on_open, on_close) < 0) {
+                out->failed = 1;
+                PyMem_Free(stack);
+                return;
+            }
+            /* GCOVR_EXCL_STOP */
+        } else {
+            on_close(ctx, frame->node, frame->depth);
+            len--;
+        }
+    }
+    PyMem_Free(stack);
+#undef SER_ENTER
+}
+
+typedef struct {
+    sbuf *out;
+    th_tree *tree;
+} ser_node_ctx;
+
+/* The #document dump has no closing markup, so every node emits its whole line in
+   pre-order and always descends; the post-order step does nothing. */
+static void ser_node_close(void *Py_UNUSED(vctx), th_node *Py_UNUSED(node), int Py_UNUSED(depth)) {
+}
+
+static int ser_node_open(void *vctx, th_node *node, th_node *Py_UNUSED(parent), int depth) {
+    sbuf *out = ((ser_node_ctx *)vctx)->out;
+    th_tree *tree = ((ser_node_ctx *)vctx)->tree;
     if (node->type == TH_NODE_TEXT) {
         need_text(tree, node); /* realize a zero-copy span before output */
     }
@@ -237,9 +331,12 @@ static void serialize_node(sbuf *out, th_tree *tree, th_node *node, int depth) {
         sbuf_putc(out, '"');
         sbuf_putc(out, '\n');
     }
-    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        serialize_node(out, tree, child, depth + 1);
-    }
+    return depth + 1;
+}
+
+static void serialize_node(sbuf *out, th_tree *tree, th_node *node) {
+    ser_node_ctx ctx = {out, tree};
+    ser_walk(out, node, &ctx, ser_node_open, ser_node_close);
 }
 
 Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
@@ -248,7 +345,7 @@ Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
        the document node's children */
     th_node *top = tree->fragment_root != NULL ? tree->fragment_root : tree->document;
     for (th_node *child = top->first_child; child != NULL; child = child->next_sibling) {
-        serialize_node(&out, tree, child, 0);
+        serialize_node(&out, tree, child);
     }
     if (out.failed) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(out.data); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
@@ -471,58 +568,79 @@ static void ser_close_tag(sbuf *out, th_node *node) {
 
 /* Outer serialization with no inserted whitespace (the WHATWG fragment
    algorithm), parameterized by the escape formatter. */
-static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int formatter) {
+typedef struct {
+    sbuf *out;
+    th_tree *tree;
+    int formatter;
+} ser_compact_ctx;
+
+/* Pre-order step: write the node and return 0 to descend (the matching close tag
+   comes from ser_compact_close) or -1 once the whole node is emitted. Compact
+   output has no indentation, so the child depth is always 0. */
+static int ser_compact_open(void *vctx, th_node *node, th_node *Py_UNUSED(parent), int Py_UNUSED(depth)) {
+    ser_compact_ctx *ctx = vctx;
+    sbuf *out = ctx->out;
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
-    case TH_NODE_ELEMENT: {
-        ser_open_tag(out, tree, node, formatter);
+    case TH_NODE_ELEMENT:
+        ser_open_tag(out, ctx->tree, node, ctx->formatter);
         if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
-            break; /* void elements have no children or end tag */
+            return -1; /* void elements have no children or end tag */
         }
-        if (ser_needs_leading_newline(tree, node)) {
+        if (ser_needs_leading_newline(ctx->tree, node)) {
             sbuf_putc(out, '\n');
         }
-        int raw = is_rawtext_element(node);
-        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            /* a rawtext element's children are always text nodes */
-            if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
-                sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
-            } else {
-                serialize_compact(out, tree, child, formatter);
+        if (is_rawtext_element(node)) {
+            for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+                /* a rawtext element's children are always text nodes */
+                if (child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
+                    sbuf_put_ucs4(out, need_text(ctx->tree, child), child->text_len);
+                }
             }
+            ser_close_tag(out, node);
+            return -1;
         }
-        ser_close_tag(out, node);
-        break;
-    }
+        return 0;
     case TH_NODE_TEXT:
-        sbuf_put_text(out, need_text(tree, node), node->text_len, 0, formatter);
-        break;
+        sbuf_put_text(out, need_text(ctx->tree, node), node->text_len, 0, ctx->formatter);
+        return -1;
     case TH_NODE_COMMENT:
         sbuf_puts(out, "<!--");
         sbuf_put_ucs4(out, node->text, node->text_len);
         sbuf_puts(out, "-->");
-        break;
+        return -1;
     case TH_NODE_DOCTYPE:
         sbuf_puts(out, "<!DOCTYPE ");
         sbuf_put_ucs4(out, node->text, doctype_name_len(node));
         sbuf_putc(out, '>');
-        break;
+        return -1;
     case TH_NODE_PI:
         sbuf_puts(out, "<?");
         sbuf_put_ucs4(out, node->text, node->text_len);
         sbuf_putc(out, '>');
-        break;
+        return -1;
     case TH_NODE_CDATA:
         sbuf_puts(out, "<![CDATA[");
         sbuf_put_ucs4(out, node->text, node->text_len);
         sbuf_puts(out, "]]>");
-        break;
+        return -1;
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
-        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            serialize_compact(out, tree, child, formatter);
-        }
-        break;
+        return 0; /* a container descends into its children with no markup of its own */
     }
+    return -1; /* GCOVR_EXCL_LINE: the switch above is exhaustive over th_node_type */
+}
+
+/* Post-order step: close the element opened by ser_compact_open. Containers
+   (content, document) descend but emit nothing here. */
+static void ser_compact_close(void *vctx, th_node *node, int Py_UNUSED(depth)) {
+    if (node->type == TH_NODE_ELEMENT) {
+        ser_close_tag(((ser_compact_ctx *)vctx)->out, node);
+    }
+}
+
+static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int formatter) {
+    ser_compact_ctx ctx = {out, tree, formatter};
+    ser_walk(out, node, &ctx, ser_compact_open, ser_compact_close);
 }
 
 /* Indentation context for the pretty form: the per-level unit and the formatter. */
@@ -544,76 +662,97 @@ static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
    root starts at column zero. Raw-text and whitespace-significant elements
    (script/style/pre/textarea/listing) keep their content verbatim, since
    reflowing it would change meaning. */
-static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_opts *opts, int depth) {
+typedef struct {
+    sbuf *out;
+    th_tree *tree;
+    const ser_opts *opts;
+} ser_pretty_ctx;
+
+/* Pre-order step for the pretty form: a child of an element starts on its own
+   indented line, a child of a container does too except the first, and the root
+   keeps column zero. Returns the child depth to descend (an element indents its
+   children one level deeper, a container keeps the level), or -1 once the node is
+   fully emitted (leaf, void, raw-text/whitespace-preserving, or empty element). */
+static int ser_pretty_open(void *vctx, th_node *node, th_node *parent, int depth) {
+    ser_pretty_ctx *ctx = vctx;
+    sbuf *out = ctx->out;
+    const ser_opts *opts = ctx->opts;
+    if (parent != NULL && (parent->type == TH_NODE_ELEMENT || node != parent->first_child)) {
+        ser_newline_indent(out, opts, depth);
+    }
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT: {
-        ser_open_tag(out, tree, node, opts->formatter);
+        ser_open_tag(out, ctx->tree, node, opts->formatter);
         if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
-            break;
+            return -1;
         }
         int raw = is_rawtext_element(node);
-        int preserve = raw || ser_needs_leading_newline(tree, node) ||
+        int preserve = raw || ser_needs_leading_newline(ctx->tree, node) ||
                        (node->ns == TH_NS_HTML &&
                         (node->atom == TH_TAG_PRE || node->atom == TH_TAG_TEXTAREA || node->atom == TH_TAG_LISTING));
         if (preserve) {
-            if (ser_needs_leading_newline(tree, node)) {
+            if (ser_needs_leading_newline(ctx->tree, node)) {
                 sbuf_putc(out, '\n');
             }
             for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
                 if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
-                    sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
+                    sbuf_put_ucs4(out, need_text(ctx->tree, child), child->text_len);
                 } else {
-                    serialize_compact(out, tree, child, opts->formatter);
+                    serialize_compact(out, ctx->tree, child, opts->formatter);
                 }
             }
             ser_close_tag(out, node);
-            break;
+            return -1;
         }
         if (node->first_child == NULL) {
             ser_close_tag(out, node);
-            break;
+            return -1;
         }
-        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            ser_newline_indent(out, opts, depth + 1);
-            serialize_pretty(out, tree, child, opts, depth + 1);
-        }
-        ser_newline_indent(out, opts, depth);
-        ser_close_tag(out, node);
-        break;
+        return depth + 1;
     }
     case TH_NODE_TEXT:
-        sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
-        break;
+        sbuf_put_text(out, need_text(ctx->tree, node), node->text_len, 0, opts->formatter);
+        return -1;
     case TH_NODE_COMMENT:
         sbuf_puts(out, "<!--");
         sbuf_put_ucs4(out, node->text, node->text_len);
         sbuf_puts(out, "-->");
-        break;
+        return -1;
     case TH_NODE_DOCTYPE:
         sbuf_puts(out, "<!DOCTYPE ");
         sbuf_put_ucs4(out, node->text, doctype_name_len(node));
         sbuf_putc(out, '>');
-        break;
+        return -1;
     case TH_NODE_PI:
         sbuf_puts(out, "<?");
         sbuf_put_ucs4(out, node->text, node->text_len);
         sbuf_putc(out, '>');
-        break;
+        return -1;
     case TH_NODE_CDATA:
         sbuf_puts(out, "<![CDATA[");
         sbuf_put_ucs4(out, node->text, node->text_len);
         sbuf_puts(out, "]]>");
-        break;
+        return -1;
     case TH_NODE_CONTENT:
     case TH_NODE_DOCUMENT:
-        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            if (child != node->first_child) {
-                ser_newline_indent(out, opts, depth);
-            }
-            serialize_pretty(out, tree, child, opts, depth);
-        }
-        break;
+        return depth;
     }
+    return -1; /* GCOVR_EXCL_LINE: the switch above is exhaustive over th_node_type */
+}
+
+/* Post-order step: an element closes on its own indented line; a container emits
+   nothing of its own. */
+static void ser_pretty_close(void *vctx, th_node *node, int depth) {
+    if (node->type == TH_NODE_ELEMENT) {
+        ser_pretty_ctx *ctx = vctx;
+        ser_newline_indent(ctx->out, ctx->opts, depth);
+        ser_close_tag(ctx->out, node);
+    }
+}
+
+static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_opts *opts, int Py_UNUSED(depth)) {
+    ser_pretty_ctx ctx = {out, tree, opts};
+    ser_walk(out, node, &ctx, ser_pretty_open, ser_pretty_close);
 }
 
 /* Hand a filled sbuf back to the caller, normalizing an empty result to a real

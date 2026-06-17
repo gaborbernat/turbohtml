@@ -1,0 +1,4 @@
+Serialize the tree with an explicit heap stack instead of C recursion, so a pathologically deep document (tens of
+thousands of nested elements) serializes in linear time through :attr:`~turbohtml.Node.html`,
+:meth:`~turbohtml.Node.serialize`, and the ``#document`` dump instead of overflowing the call stack and crashing the
+interpreter.

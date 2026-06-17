@@ -145,3 +145,12 @@ def test_template_content_serializes_and_collects_text(find: Callable[[str, str]
     template = find("<template>inner</template>", "template")
     assert template.html == "<template>inner</template>"
     assert template.text == "inner"
+
+
+def test_deeply_nested_tree_serializes_without_stack_overflow() -> None:
+    # serialization walks an explicit heap stack, so a tree far deeper than any C call stack
+    # could hold serializes in linear time instead of overflowing and crashing (issue #40).
+    depth = 50_000
+    serialized = parse("<div>" * depth).html
+    assert serialized.count("<div>") == depth
+    assert serialized.count("</div>") == depth
