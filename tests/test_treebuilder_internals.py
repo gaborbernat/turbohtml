@@ -311,6 +311,38 @@ def test_document_paths(html: str, needle: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "html",
+    [
+        pytest.param("</x><!--c-->", id="stray-unknown-end-tag"),
+        pytest.param("</div><!--c-->", id="stray-known-end-tag"),
+    ],
+)
+def test_before_html_ignored_end_tag_keeps_comment_at_document_level(html: str) -> None:
+    # in "before html", an "any other end tag" is ignored without opening <html>, so a
+    # following comment stays a Document-level child before <html> rather than nested inside it
+    assert _doc(html) == "| <!-- c -->\n| <html>\n|   <head>\n|   <body>"
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        pytest.param("</head>x", id="head"),
+        pytest.param("</body>x", id="body"),
+        pytest.param("</html>x", id="html"),
+    ],
+)
+def test_before_html_allowed_end_tag_opens_html(html: str) -> None:
+    # head/body/html/br end tags in "before html" act as "anything else": they open
+    # <html> and are reprocessed, so following text lands in the body
+    assert _doc(html) == '| <html>\n|   <head>\n|   <body>\n|     "x"'
+
+
+def test_before_html_end_br_synthesizes_br() -> None:
+    # </br> in "before html" also acts as "anything else" and is later turned into a <br>
+    assert _doc("</br>x") == '| <html>\n|   <head>\n|   <body>\n|     <br>\n|     "x"'
+
+
+@pytest.mark.parametrize(
     ("html", "context", "needle"),
     [
         pytest.param("</li>x", "div", '| "x"', id="end-li-no-scope"),
