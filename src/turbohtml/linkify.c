@@ -259,20 +259,27 @@ static int match_url(int kind, const void *data, Py_ssize_t colon, Py_ssize_t st
     if (scheme_start < 0 || blocked_on_left(kind, data, scheme_start)) {
         return 0;
     }
-    /* skip an optional userinfo prefix (user[:password]@) so http://user:pass@host links the whole URL, not the email
-     */
+    /* Most URLs have no userinfo, so scan the host directly and only hunt for a
+       user[:password]@ prefix when that host fails or is followed by ':' or '@';
+       the common case stays a single host scan. The last '@' before the path wins,
+       so http://user:pass@host links the host, not the embedded email. */
     Py_ssize_t host_start = colon + 3;
-    for (Py_ssize_t scan = host_start; scan < len; scan++) {
-        Py_UCS4 c = READ(scan);
-        if (c == '@') {
-            host_start = scan + 1;
-            break;
+    Py_ssize_t host_end = scan_host(kind, data, host_start, len, 0);
+    if (host_end < 0 || (host_end < len && (READ(host_end) == ':' || READ(host_end) == '@'))) {
+        Py_ssize_t userinfo_end = -1;
+        for (Py_ssize_t scan = host_start; scan < len; scan++) {
+            Py_UCS4 c = READ(scan);
+            if (c == '@') {
+                userinfo_end = scan;
+            } else if (c == '/' || c == '?' || c == '#' || !is_url_tail_char(c)) {
+                break;
+            }
         }
-        if (c == '/' || c == '?' || c == '#' || !is_url_tail_char(c)) {
-            break;
+        if (userinfo_end >= 0) {
+            host_start = userinfo_end + 1;
+            host_end = scan_host(kind, data, host_start, len, 0);
         }
     }
-    Py_ssize_t host_end = scan_host(kind, data, host_start, len, 0);
     if (host_end < 0) {
         return 0;
     }

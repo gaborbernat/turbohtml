@@ -259,9 +259,13 @@ def test_bare_domain_path_with_embedded_scheme_keeps_http_prefix() -> None:
         pytest.param("http://example.com/a\x7fb", False, False, [(0, 20, 0)], id="tail-stops-at-del"),
         pytest.param("http://user:pass@host.com/x", True, False, [(0, 27, 0)], id="userinfo-url"),
         pytest.param("http://u@example.com", False, False, [(0, 20, 0)], id="userinfo-at-only"),
+        pytest.param("http://a.b@example.com", False, False, [(0, 22, 0)], id="userinfo-is-a-valid-host"),
         pytest.param("http://1.2.3.4/path", False, False, [(0, 19, 0)], id="schemeful-ipv4"),
         pytest.param("at 1.2.3.4 here", False, True, [], id="bare-ipv4-needs-tld"),
         pytest.param("http://example.com#frag", False, False, [(0, 23, 0)], id="fragment-after-host"),
+        pytest.param("http://example.com:8080?q=1", False, False, [(0, 27, 0)], id="port-then-query-no-userinfo"),
+        pytest.param("http://example.com:8080#f", False, False, [(0, 25, 0)], id="port-then-fragment-no-userinfo"),
+        pytest.param("http://example.com:8080 x", False, False, [(0, 23, 0)], id="port-then-space-no-userinfo"),
         pytest.param("see EXAMPLE.COM here", False, True, [(4, 15, 0)], id="bare-domain-uppercase-tld"),
     ],
 )
