@@ -540,12 +540,11 @@ int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
         }
         memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
     }
-    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-        if (node->attrs[index].name_atom == atom) {
-            node->attrs[index].value = owned;
-            node->attrs[index].value_len = has_value ? value_len : 0;
-            return 0;
-        }
+    Py_ssize_t existing = th_node_attr_find(tree, node, name, name_len);
+    if (existing >= 0) {
+        node->attrs[existing].value = owned;
+        node->attrs[existing].value_len = has_value ? value_len : 0;
+        return 0;
     }
     th_node_attr *grown = arena_alloc(tree, (node->attr_count + 1) * (Py_ssize_t)sizeof(th_node_attr));
     if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -580,21 +579,47 @@ int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize
 
 /* Remove the attribute with this name, shifting the rest down. Returns 1 when one
    was removed, 0 when the element had no such attribute. */
-int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+Py_ssize_t th_node_attr_find(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
     uint32_t atom = th_attr_lookup(tree, name, name_len);
-    if (atom == UINT32_MAX) {
-        return 0;
-    }
-    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-        if (node->attrs[index].name_atom == atom) {
-            for (Py_ssize_t shift = index; shift + 1 < node->attr_count; shift++) {
-                node->attrs[shift] = node->attrs[shift + 1];
+    if (atom != UINT32_MAX) {
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            if (node->attrs[index].name_atom == atom) {
+                return index;
             }
-            node->attr_count--;
-            return 1;
         }
     }
-    return 0;
+    /* A foreign element can store a case-adjusted attribute name (definitionURL)
+       whose atom differs from the lowercased probe, so match case-insensitively
+       against the stored names; the probe is already lowercased by the caller. */
+    if (node->ns != TH_NS_HTML) {
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            Py_ssize_t stored_len;
+            const char *stored = th_attr_name(tree, node->attrs[index].name_atom, &stored_len);
+            if (stored_len != name_len) {
+                continue;
+            }
+            Py_ssize_t offset = 0;
+            while (offset < name_len && lower_ascii((Py_UCS4)(unsigned char)stored[offset]) == (Py_UCS4)name[offset]) {
+                offset++;
+            }
+            if (offset == name_len) {
+                return index;
+            }
+        }
+    }
+    return -1;
+}
+
+int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    Py_ssize_t index = th_node_attr_find(tree, node, name, name_len);
+    if (index < 0) {
+        return 0;
+    }
+    for (Py_ssize_t shift = index; shift + 1 < node->attr_count; shift++) {
+        node->attrs[shift] = node->attrs[shift + 1];
+    }
+    node->attr_count--;
+    return 1;
 }
 
 static void node_append(th_node *parent, th_node *child) {

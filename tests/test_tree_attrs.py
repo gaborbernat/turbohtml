@@ -160,3 +160,28 @@ def test_duplicate_attributes_drop_to_first(
     element = find(html, tag)
     assert dict(element.attrs) == attrs
     assert element.html == markup
+
+
+def test_mathml_definitionurl_attribute_name_is_cased(find: Callable[[str, str], Element]) -> None:
+    # WHATWG "adjust MathML attributes": definitionurl -> definitionURL, applied at construction
+    # so the cased name lands in the tree and serialization, not only the #document debug format
+    math = find("<math definitionURL='x'></math>", "math")
+    assert dict(math.attrs) == {"definitionURL": "x"}
+    assert math.html == '<math definitionURL="x"></math>'
+    assert math.attrs["definitionURL"] == "x"
+    assert math.attrs.get("definitionurl") == "x"  # foreign lookup stays case-insensitive
+    assert "nope" not in math.attrs  # length mismatch in the foreign scan
+    assert "abcdefghijklm" not in math.attrs  # same length as definitionURL, different name
+
+
+def test_mathml_definitionurl_can_be_set_and_deleted_by_either_case(find: Callable[[str, str], Element]) -> None:
+    math = find("<math definitionURL='x'></math>", "math")
+    math.attrs["definitionURL"] = "y"  # updates the existing slot, no duplicate
+    assert math.html == '<math definitionURL="y"></math>'
+    del math.attrs["definitionurl"]
+    assert math.html == "<math></math>"
+
+
+def test_svg_definitionurl_attribute_stays_lowercase(find: Callable[[str, str], Element]) -> None:
+    # definitionurl is only in the MathML adjust table, so on an SVG element it stays as written
+    assert dict(find("<svg definitionURL='x'></svg>", "svg").attrs) == {"definitionurl": "x"}
