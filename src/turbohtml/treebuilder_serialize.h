@@ -106,22 +106,15 @@ static void sbuf_put_utf8(sbuf *out, const char *bytes, Py_ssize_t len) {
     }
 }
 
-/* Write an attribute's displayed name (the form the #document line uses) into
-   buf: namespaced foreign attributes show "prefix localname", SVG attributes
-   take their mixed-case spelling, everything else is the lowercased name. */
+/* Write an attribute's displayed name (the form the #document line uses) into buf:
+   namespaced foreign attributes show "prefix localname", everything else is the
+   stored name (foreign attribute case adjustments are applied at construction). */
 static void render_attr_name(th_tree *tree, const th_node *node, const th_node_attr *attr, char *buf, size_t bufsize) {
     Py_ssize_t name_len;
     const char *name = th_attr_name(tree, attr->name_atom, &name_len);
-    const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, name_len, node->ns) : NULL;
-    const char *src = name;
-    int to_space = 0;
-    if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
-        to_space = 1;
-    } else if (mixed != NULL) {
-        src = mixed;
-    }
+    int to_space = node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len);
     size_t write_index = 0;
-    for (const char *character = src; *character != '\0' && write_index + 1 < bufsize; character++) {
+    for (const char *character = name; *character != '\0' && write_index + 1 < bufsize; character++) {
         buf[write_index++] = (to_space && *character == ':') ? ' ' : *character;
     }
     buf[write_index] = '\0';
@@ -220,17 +213,14 @@ static void serialize_node_line(sbuf *out, th_tree *tree, th_node *node, int dep
         for (int level = 0; level <= depth; level++) {
             sbuf_puts(out, "  ");
         }
-        /* foreign attribute name adjustments: xlink:/xml:/xmlns: serialize with a
-           space, and SVG/MathML attributes take their mixed-case spelling */
+        /* xlink:/xml:/xmlns: serialize with a space; the mixed-case spelling of an
+           SVG/MathML attribute is already stored, applied at construction */
         Py_ssize_t name_len;
         const char *name = th_attr_name(tree, attr->name_atom, &name_len);
-        const char *mixed = node->ns != TH_NS_HTML ? foreign_adjust_attr(name, name_len, node->ns) : NULL;
         if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
             for (const char *character = name; *character; character++) {
                 sbuf_putc(out, *character == ':' ? (Py_UCS4)' ' : (Py_UCS4)*character);
             }
-        } else if (mixed != NULL) {
-            sbuf_puts(out, mixed);
         } else {
             sbuf_put_utf8(out, name, name_len);
         }
