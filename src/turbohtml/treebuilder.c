@@ -2201,6 +2201,13 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 mode = M_BEFORE_HEAD;
                 break;
             }
+            if (tok->kind == TH_END_TAG) {
+                uint16_t end_atom = tok_atom(tok);
+                if (end_atom != TH_TAG_HEAD && end_atom != TH_TAG_BODY && end_atom != TH_TAG_HTML &&
+                    end_atom != TH_TAG_BR) {
+                    break; /* any other end tag before html is a parse error and ignored */
+                }
+            }
             {
                 th_node *html = insert_implicit(tree, "html", TH_TAG_HTML, TH_TAG_SPECIAL | TH_TAG_SCOPING);
                 if (html != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
