@@ -127,6 +127,24 @@ def test_every_url_attribute_is_scheme_checked(attr: str) -> None:
     assert sanitize(f'<x {attr}="javascript:alert(1)">t</x>', policy) == "<x>t</x>"
 
 
+@pytest.mark.parametrize(
+    "html",
+    [
+        pytest.param("<a href='http://ok' href='javascript:alert(1)'>x</a>", id="bad-scheme-second"),
+        pytest.param("<a href='javascript:alert(1)' href='http://ok'>x</a>", id="bad-scheme-first"),
+    ],
+)
+def test_duplicate_url_attribute_with_bad_scheme_drops_all(html: str) -> None:
+    # a duplicate href keeps only one value in the serialized output; if either value fails the
+    # scheme policy the whole attribute is dropped, so no disallowed scheme can survive the desync
+    assert sanitize(html, Policy.relaxed()) == "<a>x</a>"
+
+
+def test_duplicate_url_attribute_all_allowed_is_kept() -> None:
+    out = sanitize("<a href='http://a' href='http://b'>x</a>", Policy.relaxed())
+    assert out == '<a href="http://a" href="http://b" rel="noopener noreferrer">x</a>'
+
+
 def test_non_url_attribute_value_is_not_scheme_checked() -> None:
     policy = _allow_all({"x"}, {"title"})
     assert sanitize('<x title="javascript:not-a-url">t</x>', policy) == '<x title="javascript:not-a-url">t</x>'

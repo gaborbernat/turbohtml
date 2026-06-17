@@ -80,6 +80,10 @@ XSS_CORPUS = [
     pytest.param("<b><i></b></i><img src=x onerror=alert(1)>", id="misnested-adoption"),
     pytest.param('<a href="javascript:alert(1)" onmouseover=alert(2)>x</a>', id="js-url-plus-handler"),
     pytest.param("<p title='\"><img src=x onerror=alert(1)>'>safe</p>", id="attr-value-breakout"),
+    pytest.param("<a href='http://ok' href='javascript:alert(1)'>x</a>", id="dup-href-js-second"),
+    pytest.param("<a href='javascript:alert(1)' href='http://ok'>x</a>", id="dup-href-js-first"),
+    pytest.param("<a href='http://ok' href='data:text/html,<script>alert(1)</script>'>x</a>", id="dup-href-data"),
+    pytest.param('<a href="http://ok" href="vbscript:msgbox(1)">x</a>', id="dup-href-vbscript"),
 ]
 
 _MODES = [

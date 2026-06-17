@@ -240,7 +240,18 @@ static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag) {
             if (ok < 0) {  /* GCOVR_EXCL_BR_LINE: scheme_allowed only fails on allocation failure */
                 return -1; /* GCOVR_EXCL_LINE */
             }
-            drop = !ok;
+            if (!ok) {
+                /* A duplicate URL attribute desyncs the per-value scheme check from the
+                   single value a re-parsing browser keeps (WHATWG keeps the first): dropping
+                   only this occurrence deletes the first match by name, which may be a benign
+                   sibling, leaving the disallowed value as the lone attribute. Drop every
+                   occurrence of the name so no disallowed scheme survives, then rescan from
+                   the start because removing an earlier slot shifts the rest down. */
+                while (th_node_attr_del(s->tree, element, name, name_len)) {
+                }
+                index = 0;
+                continue;
+            }
         }
         if (drop) {
             th_node_attr_del(s->tree, element, name, name_len);
