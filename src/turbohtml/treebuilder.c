@@ -2259,6 +2259,15 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 tree->text_offset += ws; /* the whitespace prefix is dropped, not moved */
             }
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HTML) {
+                /* a redundant html start tag is processed via the in-body rules
+                   (merge attributes onto the open html), leaving the mode intact */
+                if (tree->open_len > 0 && tree->open[0]->atom == TH_TAG_HTML && /* GCOVR_EXCL_BR_LINE */
+                    stack_index_of_atom(tree, TH_TAG_TEMPLATE) < 0) {
+                    merge_attrs(tree, tree->open[0], tok);
+                }
+                break;
+            }
             if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HEAD) {
                 th_node *head = insert_element(tree, tok);
                 if (head != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
@@ -2306,6 +2315,18 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             if (tok->kind == TH_START_TAG) {
                 uint8_t flags = tok->tag_flags;
                 uint16_t atom = tok->atom;
+                if (atom == TH_TAG_HTML) {
+                    /* a redundant html start tag merges attributes via the in-body
+                       rules; the head insertion mode is left untouched */
+                    if (tree->open_len > 0 && tree->open[0]->atom == TH_TAG_HTML && /* GCOVR_EXCL_BR_LINE */
+                        stack_index_of_atom(tree, TH_TAG_TEMPLATE) < 0) {
+                        merge_attrs(tree, tree->open[0], tok);
+                    }
+                    break;
+                }
+                if (atom == TH_TAG_HEAD) {
+                    break; /* a duplicate head start tag is a parse error, ignored */
+                }
                 /* only the head's own raw-text/RCDATA elements switch to text
                    mode here; textarea/xmp/iframe/etc belong in the body */
                 if (atom == TH_TAG_TITLE || atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT || atom == TH_TAG_NOFRAMES) {
