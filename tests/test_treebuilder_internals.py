@@ -319,6 +319,14 @@ _LONG_NAME = "z" * 130
         pytest.param("<svg><desc><svg></br>y", "desc", id="end-br-breakout-stops-at-html-integration"),
         pytest.param("<p " + _LONG_NAME + "=1 m=2>x", "z" * 40, id="attr-name-fills-sort-buffer"),
         pytest.param("<svg " + _LONG_NAME + "=1 m=2>y</svg>", "z" * 40, id="foreign-attr-name-fills-sort-buffer"),
+        # a redundant <html> start tag before/in head keeps the head insertion
+        # mode, so following head-only content stays in <head> (issue #46)
+        pytest.param("<html><html><style>x", "<head>\n|     <style>", id="redundant-html-in-head-keeps-style"),
+        pytest.param("<html><html><meta>", "<head>\n|     <meta>", id="redundant-html-before-head-keeps-meta"),
+        pytest.param("<html a><html b>", '|   a=""\n|   b=""', id="redundant-html-merges-attributes"),
+        # a duplicate <head> start tag is an ignored parse error, not a mode change
+        pytest.param("<head><head><meta>", "<head>\n|     <meta>", id="duplicate-head-keeps-meta"),
+        pytest.param("<head><head><title>t", "<head>\n|     <title>", id="duplicate-head-keeps-title"),
     ],
 )
 def test_document_paths(html: str, needle: str) -> None:
