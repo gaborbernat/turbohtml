@@ -334,10 +334,7 @@ static PyObject *record_as_test_tuple(const th_tokenizer *sm, const th_token *re
                 Py_DECREF(attrs); /* GCOVR_EXCL_LINE: allocation-failure path */
                 return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
             }
-            if (PyDict_Contains(attrs, key) == 1) { /* duplicate: keep the first */
-                Py_DECREF(key);
-                continue;
-            }
+            /* the tokenizer already dropped duplicate attribute names, so each key is unique */
             PyObject *value = PyUnicode_FromKindAndData(attr->value.kind, attr->value.data, attr->value.len);
             /* allocation failure cannot be forced from a test */
             if (value == NULL || PyDict_SetItem(attrs, key, value) < 0) { /* GCOVR_EXCL_BR_LINE */

@@ -121,7 +121,9 @@ Two decisions bound the tokenizer's scope:
   (a ``<b>`` inside a script body is text, not a tag).
 - The machine recovers from parse errors instead of reporting them. The spec defines a recovery transition for every
   error and the machine takes it, so malformed input produces the same tokens a browser would see; the error stream is
-  not part of the API.
+  not part of the API. A duplicate attribute name is one such recovery: the spec keeps the first occurrence and drops
+  the rest at tokenization, so ``<a href=x href=y>`` carries a single ``href`` of ``x`` everywhere it is observed — in
+  the token, the parsed tree, and the serialized output alike.
 
 Where behavior could drift, more than the suite pins it: a fuzz comparison runs the token stream against html5lib's
 tokenizer, and source positions use the same 1-based-line, 0-based-column convention as :mod:`python:html.parser`, so
