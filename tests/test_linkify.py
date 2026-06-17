@@ -159,6 +159,7 @@ def test_default_callbacks_is_nofollow() -> None:
         pytest.param("https://x.com", {}, {"rel": "nofollow"}, id="https-too"),
         pytest.param("http://x.com", {"rel": "noopener"}, {"rel": "noopener nofollow"}, id="appends-to-existing-rel"),
         pytest.param("http://x.com", {"rel": "nofollow"}, {"rel": "nofollow"}, id="idempotent"),
+        pytest.param("HTTP://X.COM", {}, {"rel": "nofollow"}, id="uppercase-scheme"),
         pytest.param("mailto:a@b.com", {}, {}, id="skips-non-web"),
     ],
 )
@@ -256,6 +257,12 @@ def test_bare_domain_path_with_embedded_scheme_keeps_http_prefix() -> None:
         pytest.param("http://example.com/a`b", False, False, [(0, 20, 0)], id="tail-stops-at-backtick"),
         pytest.param("http://example.com/a b", False, False, [(0, 20, 0)], id="tail-stops-at-space"),
         pytest.param("http://example.com/a\x7fb", False, False, [(0, 20, 0)], id="tail-stops-at-del"),
+        pytest.param("http://user:pass@host.com/x", True, False, [(0, 27, 0)], id="userinfo-url"),
+        pytest.param("http://u@example.com", False, False, [(0, 20, 0)], id="userinfo-at-only"),
+        pytest.param("http://1.2.3.4/path", False, False, [(0, 19, 0)], id="schemeful-ipv4"),
+        pytest.param("at 1.2.3.4 here", False, True, [], id="bare-ipv4-needs-tld"),
+        pytest.param("http://example.com#frag", False, False, [(0, 23, 0)], id="fragment-after-host"),
+        pytest.param("see EXAMPLE.COM here", False, True, [(4, 15, 0)], id="bare-domain-uppercase-tld"),
     ],
 )
 def test_scanner_spans(

@@ -129,9 +129,11 @@ static int is_known_tld(int kind, const void *data, Py_ssize_t start, Py_ssize_t
 }
 
 /* Scan a host of dot-separated labels starting at `start`, requiring at least
-   one dot and a final label that is a known TLD. Returns the index past the host
-   on success, or -1. Hyphens are allowed inside a label, not at its edges. */
-static Py_ssize_t scan_host(int kind, const void *data, Py_ssize_t start, Py_ssize_t len) {
+   one dot. With require_tld the final label must be a known TLD (the bare-domain
+   rule); a scheme URL passes 0 so a numeric host like 1.2.3.4 is accepted. Returns
+   the index past the host on success, or -1. Hyphens are allowed inside a label,
+   not at its edges. */
+static Py_ssize_t scan_host(int kind, const void *data, Py_ssize_t start, Py_ssize_t len, int require_tld) {
     Py_ssize_t pos = start;
     Py_ssize_t last_label_start = start;
     Py_ssize_t host_end = start;
@@ -166,7 +168,7 @@ static Py_ssize_t scan_host(int kind, const void *data, Py_ssize_t start, Py_ssi
     if (dots < 1 || label_ended_with_hyphen) {
         return -1;
     }
-    if (!is_known_tld(kind, data, last_label_start, host_end)) {
+    if (require_tld && !is_known_tld(kind, data, last_label_start, host_end)) {
         return -1;
     }
     return host_end;
@@ -186,7 +188,7 @@ static Py_ssize_t scan_url_tail(int kind, const void *data, Py_ssize_t host_end,
             pos = port;
         }
     }
-    if (pos >= len || (READ(pos) != '/' && READ(pos) != '?')) {
+    if (pos >= len || (READ(pos) != '/' && READ(pos) != '?' && READ(pos) != '#')) {
         return pos;
     }
     Py_ssize_t end = pos;
@@ -257,7 +259,20 @@ static int match_url(int kind, const void *data, Py_ssize_t colon, Py_ssize_t st
     if (scheme_start < 0 || blocked_on_left(kind, data, scheme_start)) {
         return 0;
     }
-    Py_ssize_t host_end = scan_host(kind, data, colon + 3, len);
+    /* skip an optional userinfo prefix (user[:password]@) so http://user:pass@host links the whole URL, not the email
+     */
+    Py_ssize_t host_start = colon + 3;
+    for (Py_ssize_t scan = host_start; scan < len; scan++) {
+        Py_UCS4 c = READ(scan);
+        if (c == '@') {
+            host_start = scan + 1;
+            break;
+        }
+        if (c == '/' || c == '?' || c == '#' || !is_url_tail_char(c)) {
+            break;
+        }
+    }
+    Py_ssize_t host_end = scan_host(kind, data, host_start, len, 0);
     if (host_end < 0) {
         return 0;
     }
@@ -285,7 +300,7 @@ static int match_domain(int kind, const void *data, Py_ssize_t dot, Py_ssize_t s
     if (pos == dot || blocked_on_left(kind, data, pos)) {
         return 0;
     }
-    Py_ssize_t host_end = scan_host(kind, data, pos, len);
+    Py_ssize_t host_end = scan_host(kind, data, pos, len, 1);
     if (host_end < 0) {
         return 0;
     }
@@ -311,7 +326,7 @@ static int match_email(int kind, const void *data, Py_ssize_t at, Py_ssize_t sta
     if (pos == at || (pos > start && READ(pos - 1) == '@')) {
         return 0;
     }
-    Py_ssize_t host_end = scan_host(kind, data, at + 1, len);
+    Py_ssize_t host_end = scan_host(kind, data, at + 1, len, 1);
     if (host_end < 0) {
         return 0;
     }

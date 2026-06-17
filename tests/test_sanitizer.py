@@ -144,6 +144,16 @@ def test_unusual_scheme_characters_are_treated_as_relative(url: str) -> None:
     assert sanitize(f'<a href="{url}">t</a>') == f'<a href="{url}">t</a>'
 
 
+@pytest.mark.parametrize(
+    "char",
+    [chr(0x00AD), chr(0x200B), chr(0x200C), chr(0x200D), chr(0x2060), chr(0xFEFF)],
+    ids=["soft-hyphen", "zwsp", "zwnj", "zwj", "word-joiner", "bom"],
+)
+def test_zero_width_characters_cannot_obfuscate_a_scheme(char: str) -> None:
+    # soft hyphen, zero-width, and BOM characters are stripped before the scheme is read, like browsers ignore them
+    assert sanitize(f'<a href="java{char}script:alert(1)">x</a>') == "<a>x</a>"
+
+
 def test_relative_url_dropped_when_disallowed() -> None:
     policy = Policy(allow_relative_urls=False)
     assert sanitize('<a href="/path">x</a>', policy) == "<a>x</a>"

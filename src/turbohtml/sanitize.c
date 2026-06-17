@@ -103,6 +103,22 @@ static int is_scheme_char(Py_UCS4 c) {
     return (lower >= 'a' && lower <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.';
 }
 
+/* Bytes to ignore when reading a URL scheme: the control characters and whitespace browsers strip, plus the
+   zero-width and soft-hyphen format characters that obfuscate a scheme, so java&zwsp;script: is still caught. */
+static int is_url_ignorable(Py_UCS4 c) {
+    switch (c) {
+    case 0x00AD: /* soft hyphen */
+    case 0x200B: /* zero-width space */
+    case 0x200C: /* zero-width non-joiner */
+    case 0x200D: /* zero-width joiner */
+    case 0x2060: /* word joiner */
+    case 0xFEFF: /* zero-width no-break space / BOM */
+        return 1;
+    default:
+        return c <= 0x20 || c == 0x7F;
+    }
+}
+
 /* Read the URL's scheme the way a browser does -- skipping the whitespace and control bytes it ignores -- and allow the
    attribute only if that scheme is on the allowlist, or there is no scheme and relative URLs are allowed. The parser
    has already resolved entity references, so the value arrives decoded. Returns 1 allow, 0 drop, -1 error. */
@@ -112,7 +128,7 @@ static int scheme_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t len) {
     int started = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
         Py_UCS4 c = value[index];
-        if (c <= 0x20 || c == 0x7F) {
+        if (is_url_ignorable(c)) {
             continue;
         }
         if (c == ':' && started) {
