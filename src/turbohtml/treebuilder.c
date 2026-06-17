@@ -2177,6 +2177,12 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             mode = M_IN_TEMPLATE;
             continue;
         }
+        /* a DOCTYPE in any insertion mode other than "initial" is a parse error that is
+           ignored without changing the insertion mode (foreign content already handled
+           its own DOCTYPE above); only the initial mode builds the doctype node */
+        if (tok->kind == TH_DOCTYPE && mode != M_INITIAL) {
+            continue;
+        }
         /* every insertion mode has an explicit case, so the compiler default arm is unreachable */
         switch (mode) /* GCOVR_EXCL_BR_LINE */ {
         case M_INITIAL:
@@ -2370,7 +2376,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 mode = M_AFTER_HEAD;
                 goto reprocess;
             }
-            if (tok->kind == TH_END_TAG) {
+            /* only an end tag reaches here: text/comment/start break above, a DOCTYPE is ignored before the switch */
+            if (tok->kind == TH_END_TAG) { /* GCOVR_EXCL_BR_LINE: the non-end-tag branch is unreachable */
                 uint16_t end_atom = tok_atom(tok);
                 if (end_atom == TH_TAG_HEAD) {
                     stack_pop(tree);
@@ -2386,9 +2393,6 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             goto reprocess;
 
         case M_IN_HEAD_NOSCRIPT:
-            if (tok->kind == TH_DOCTYPE) {
-                break; /* parse error, ignored */
-            }
             if (tok->kind == TH_END_TAG) {
                 uint16_t end_atom = tok_atom(tok);
                 if (end_atom == TH_TAG_NOSCRIPT) {
@@ -2633,7 +2637,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 break;
             }
-            if (tok->kind == TH_END_TAG && tok_atom(tok) == TH_TAG_FRAMESET) {
+            /* a DOCTYPE is ignored before the switch, so the kind!=end-tag branch here is dead */
+            if (tok->kind == TH_END_TAG && tok_atom(tok) == TH_TAG_FRAMESET) { /* GCOVR_EXCL_BR_LINE */
                 if (current_node(tree)->atom != TH_TAG_HTML) {
                     stack_pop(tree);
                 }
@@ -3075,7 +3080,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 }
                 break;
             }
-            if (tok->kind == TH_END_TAG) {
+            /* only an end tag reaches here: text/comment/start break above, a DOCTYPE is ignored before the switch */
+            if (tok->kind == TH_END_TAG) { /* GCOVR_EXCL_BR_LINE: the non-end-tag branch is unreachable */
                 uint8_t flags = tok->tag_flags;
                 uint16_t atom = tok->atom;
                 if (atom == TH_TAG_BODY || atom == TH_TAG_HTML) {
@@ -3190,7 +3196,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 any_other_end_tag(tree, atom, tok);
                 break;
             }
-            break;
+            break; /* GCOVR_EXCL_LINE: in body handles every text/comment/start/end token in a branch
+                      that breaks, and a DOCTYPE is ignored before the switch, so nothing reaches here */
 
         case M_TEXT:
             if (tok->kind == TH_TEXT) {
@@ -3340,7 +3347,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 mode = M_IN_BODY;
                 goto reprocess;
             }
-            if (tok->kind == TH_END_TAG) {
+            /* only an end tag reaches here: text/comment/start break or foster above, a DOCTYPE is ignored before it */
+            if (tok->kind == TH_END_TAG) { /* GCOVR_EXCL_BR_LINE: the non-end-tag branch is unreachable */
                 uint16_t atom = tok_atom(tok);
                 if (atom == TH_TAG_TABLE) {
                     if (has_in_table_scope(tree, TH_TAG_TABLE)) {
@@ -3363,7 +3371,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 mode = M_IN_BODY;
                 goto reprocess;
             }
-            break;
+            break; /* GCOVR_EXCL_LINE: in table handles every text/comment/start/end token in a branch
+                      that breaks, and a DOCTYPE is ignored before the switch, so nothing reaches here */
 
         case M_IN_CAPTION: {
             uint16_t atom = tok_atom(tok);
