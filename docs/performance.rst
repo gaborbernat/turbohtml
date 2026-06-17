@@ -394,9 +394,11 @@ than BeautifulSoup.
 *************
 
 Serializing a parsed document back to HTML: turbohtml's :attr:`~turbohtml.Node.html`, lxml's ``tostring``, selectolax's
-``html``, and BeautifulSoup's ``decode``. turbohtml scans each text run for the next character that needs escaping and
-bulk-copies the clean spans, so it serializes two to four times faster than lxml and selectolax and about forty times
-faster than BeautifulSoup.
+``html``, and BeautifulSoup's ``decode``. turbohtml scans each text run for the next character that needs escaping --
+two code points at a time with the same SWAR lane probes :func:`~turbohtml.escape` uses -- and bulk-copies the clean
+spans, recovering each special's position from the lane mask, and reserves the whole-document buffer up front so the
+output grows in one allocation. It serializes three to six times faster than lxml, over three times faster than
+selectolax, and fifty to sixty times faster than BeautifulSoup.
 
 .. list-table::
     :header-rows: 1
@@ -408,20 +410,20 @@ faster than BeautifulSoup.
       - selectolax
       - BeautifulSoup
     - - wpt page (4 kB)
-      - 4.7 µs
-      - 18.5 µs
-      - 12.4 µs
-      - 198 µs
+      - 3.7 µs
+      - 19.1 µs
+      - 12.6 µs
+      - 204 µs
     - - wpt page (9.6 kB)
-      - 13.0 µs
-      - 50.6 µs
-      - 29.7 µs
-      - 475 µs
+      - 9.5 µs
+      - 53.2 µs
+      - 30.6 µs
+      - 481 µs
     - - wpt page (92 kB)
-      - 151 µs
-      - 383 µs
-      - 337 µs
-      - 5.95 ms
+      - 105 µs
+      - 385 µs
+      - 339 µs
+      - 6.30 ms
 
 **********
  Building

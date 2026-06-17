@@ -276,31 +276,34 @@ enum th_formatter {
     TH_FMT_NAMED,   /* HTML named entities for every character that has one */
 };
 
-/* Whether a character must be rewritten under the formatter. NAMED rewrites any
-   character with a named reference (the ASCII ones are exactly & " < >, so the
-   table is only consulted past 0x7F); the others escape the structural set, with
-   WHATWG also folding the quote and no-break space the spec calls for. */
-static int sbuf_text_special(Py_UCS4 character, int in_attr, int formatter) {
-    if (formatter == TH_FMT_NAMED) {
-        if (character < 0x80) {
-            return character == '&' || character == '"' || character == '<' || character == '>';
-        }
-        return th_entity_name(character) != NULL;
+/* Whether a character has a named reference under the NAMED formatter. The ASCII
+   ones are exactly & " < >, so the generated table is only consulted past 0x7F. */
+static int sbuf_named_special(Py_UCS4 character) {
+    if (character < 0x80) {
+        return character == '&' || character == '"' || character == '<' || character == '>';
     }
-    int escape_angle = formatter == TH_FMT_MINIMAL || !in_attr;
-    if (character == '&') {
-        return 1;
-    }
-    if ((character == '<' || character == '>') && escape_angle) {
-        return 1;
-    }
-    if (character == '"' && in_attr && formatter == TH_FMT_WHATWG) {
-        return 1;
-    }
-    return character == 0xA0 && formatter == TH_FMT_WHATWG;
+    return th_entity_name(character) != NULL;
 }
 
-/* Emit the replacement for a character sbuf_text_special flagged. */
+/* The WHATWG/MINIMAL special set tested over a 64-bit word of two UCS-4 code
+   points: & always, < > when angle brackets escape (text, or any MINIMAL), " in
+   a WHATWG attribute value, and the no-break space WHATWG folds. Each probe sets
+   the matching lane's high bit; a nonzero result means a special is in the pair. */
+static inline uint64_t sbuf_special_mask(uint64_t word, int escape_angle, int escape_quote, int escape_nbsp) {
+    uint64_t mask = swar_haslane32(word, '&');
+    if (escape_angle) {
+        mask |= swar_haslane32(word, '<') | swar_haslane32(word, '>');
+    }
+    if (escape_quote) {
+        mask |= swar_haslane32(word, '"');
+    }
+    if (escape_nbsp) {
+        mask |= swar_haslane32(word, 0xA0);
+    }
+    return mask;
+}
+
+/* Emit the replacement for a flagged character. */
 static void sbuf_put_special(sbuf *out, Py_UCS4 character, int formatter) {
     const char *name = formatter == TH_FMT_NAMED ? th_entity_name(character) : NULL;
     if (name != NULL) {
@@ -320,22 +323,73 @@ static void sbuf_put_special(sbuf *out, Py_UCS4 character, int formatter) {
     }
 }
 
-/* Append text under one formatter, bulk-copying each run with nothing to escape
-   and rewriting only the flagged characters in between. */
-static void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr, int formatter) {
+/* Append NAMED-formatter text: bulk-copy each run with no named reference and
+   rewrite the rest. NAMED consults a table past 0x7F, so it stays scalar. */
+static void sbuf_put_named_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
     Py_ssize_t index = 0;
     while (index < len) {
         Py_ssize_t start = index;
-        while (index < len && !sbuf_text_special(text[index], in_attr, formatter)) {
+        while (index < len && !sbuf_named_special(text[index])) {
             index++;
         }
         if (index > start) {
             sbuf_put_run(out, &text[start], index - start);
         }
         if (index < len) {
-            sbuf_put_special(out, text[index], formatter);
+            sbuf_put_special(out, text[index], TH_FMT_NAMED);
             index++;
         }
+    }
+}
+
+/* Append text under the WHATWG or MINIMAL formatter, bulk-copying each run with
+   nothing to escape and rewriting only the specials between. The tree stores
+   text as UCS-4, so the clean-run scan tests two code points per 64-bit word
+   with the same SWAR lane probes escape.c uses, hopping over the long unescaped
+   spans real documents are made of instead of classifying every character. When
+   a pair holds a special, its exact code point is recovered from the lane mask
+   over a word built low-lane-first, so the position is independent of byte order
+   and of which character class matched. */
+static void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr, int formatter) {
+    if (formatter == TH_FMT_NAMED) {
+        sbuf_put_named_text(out, text, len);
+        return;
+    }
+    int escape_angle = formatter == TH_FMT_MINIMAL || !in_attr;
+    int escape_quote = in_attr && formatter == TH_FMT_WHATWG;
+    int escape_nbsp = formatter == TH_FMT_WHATWG;
+    Py_ssize_t index = 0;
+    while (index < len) {
+        Py_ssize_t start = index;
+        Py_ssize_t special = -1;
+        while (index + UCS4_LANES <= len) {
+            uint64_t word;
+            memcpy(&word, &text[index], sizeof(word));
+            if (sbuf_special_mask(word, escape_angle, escape_quote, escape_nbsp) != 0) {
+                uint64_t ordered = (uint64_t)text[index] | ((uint64_t)text[index + 1] << 32);
+                uint64_t omask = sbuf_special_mask(ordered, escape_angle, escape_quote, escape_nbsp);
+                special = index + (Py_ssize_t)((omask & 0x80000000ULL) == 0);
+                break;
+            }
+            index += UCS4_LANES;
+        }
+        if (special < 0 && index < len) {
+            /* one code point trails the last full pair; pad with a non-special
+               lane so the same mask probe classifies it without a buffer overread */
+            uint64_t word = (uint64_t)text[index];
+            if (sbuf_special_mask(word, escape_angle, escape_quote, escape_nbsp) != 0) {
+                special = index;
+            }
+        }
+        Py_ssize_t stop = special < 0 ? len : special;
+        if (stop > start) {
+            sbuf_put_run(out, &text[start], stop - start);
+        }
+        if (special < 0) {
+            break;
+        }
+        sbuf_put_special(out, text[special], formatter);
+        index = special + 1;
     }
 }
 
@@ -631,8 +685,22 @@ Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     return sbuf_finish(&out, out_len);
 }
 
+/* When serializing a whole parsed document, the output length tracks the input
+   length closely, so reserve it up front. That turns the buffer's geometric
+   doubling (about ten reallocs and ~2x the output in memmoves for a 235 kB page)
+   into a single allocation. A subtree serialize keeps the default growth, since
+   the input length would wildly over-reserve. */
+static void sbuf_presize_for_root(sbuf *out, th_tree *tree, th_node *node) {
+    if (node == th_tree_document(tree)) {
+        /* reserving the input length is a no-op for an empty or programmatic
+           tree (length 0), so no separate guard is needed */
+        sbuf_reserve(out, tree->length);
+    }
+}
+
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
+    sbuf_presize_for_root(&out, tree, node);
     serialize_compact(&out, tree, node, TH_FMT_WHATWG);
     return sbuf_finish(&out, out_len);
 }
@@ -648,6 +716,7 @@ Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
 Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
                            Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
+    sbuf_presize_for_root(&out, tree, node);
     if (indent == NULL) {
         serialize_compact(&out, tree, node, formatter);
     } else {
