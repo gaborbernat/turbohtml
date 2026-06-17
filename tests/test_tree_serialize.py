@@ -35,6 +35,7 @@ def test_text_concatenates_descendant_character_data(
         pytest.param("<p class='a b'>x</p>", "p", '<p class="a b">x</p>', id="attribute-quoting"),
         pytest.param("<input disabled>", "input", '<input disabled="">', id="void-no-end-tag"),
         pytest.param("<br>", "br", "<br>", id="void-br"),
+        pytest.param("<frameset><frame>", "frameset", "<frameset><frame></frameset>", id="void-frame"),
         pytest.param("<p>a<b>c</b>d</p>", "p", "<p>a<b>c</b>d</p>", id="nested"),
         pytest.param("<style>a > b { x }</style>", "style", "<style>a > b { x }</style>", id="rawtext-style"),
         pytest.param("<script>1 < 2 && 3</script>", "script", "<script>1 < 2 && 3</script>", id="rawtext-script"),

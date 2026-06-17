@@ -409,6 +409,16 @@ static int is_rawtext_element(const th_node *node) {
     return (node->tag_flags & TH_TAG_RAWTEXT) && node->atom != TH_TAG_NOSCRIPT;
 }
 
+/* The WHATWG fragment-serialization void set extends the parser's void elements
+   with `frame`: it is emitted as a start tag only, never an end tag. `frame` is
+   absent from is_void_atom because, unlike a true void element, it is a normal
+   open element during parsing (in frameset mode it is inserted childless), so
+   widening is_void_atom would wrongly make a stray in-body <frame> swallow no
+   following content. */
+static int is_serialize_void_atom(uint16_t atom) {
+    return atom == TH_TAG_FRAME || is_void_atom(atom);
+}
+
 /* The doctype name length: build_doctype_text stores "name" optionally followed
    by ` "public" "system"`, but HTML serialization emits only the name. */
 static Py_ssize_t doctype_name_len(const th_node *node) {
@@ -465,7 +475,7 @@ static void serialize_compact(sbuf *out, th_tree *tree, th_node *node, int forma
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT: {
         ser_open_tag(out, tree, node, formatter);
-        if (node->ns == TH_NS_HTML && is_void_atom(node->atom)) {
+        if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
             break; /* void elements have no children or end tag */
         }
         if (ser_needs_leading_newline(tree, node)) {
@@ -538,7 +548,7 @@ static void serialize_pretty(sbuf *out, th_tree *tree, th_node *node, const ser_
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT: {
         ser_open_tag(out, tree, node, opts->formatter);
-        if (node->ns == TH_NS_HTML && is_void_atom(node->atom)) {
+        if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
             break;
         }
         int raw = is_rawtext_element(node);
