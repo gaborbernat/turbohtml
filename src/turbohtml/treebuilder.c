@@ -3711,19 +3711,13 @@ static th_node *make_named(th_tree *tree, const char *name, Py_ssize_t len, uint
     return node;
 }
 
-/* At EOF a document always has html, head and body (the missing-element rules of
-   the early insertion modes), so synthesize any the parse left out. */
-static void finalize_document(th_tree *tree) {
-    th_node *html = child_with_atom(tree->document, TH_TAG_HTML);
-    if (html == NULL) {
-        html = make_named(tree, "html", 4, TH_TAG_HTML, TH_TAG_SPECIAL | TH_TAG_SCOPING);
-        if (html == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        }
-        node_append(tree->document, html);
-    }
+/* At EOF the early insertion modes give an html element a head and a body unless a
+   frameset took the body's place; synthesize whichever the parse left out. The html
+   element is the document's <html> child or, for an html-context fragment, the
+   fragment root that stands in for it. */
+static void ensure_head_body(th_tree *tree, th_node *html) {
     if (child_with_atom(html, TH_TAG_FRAMESET) != NULL) {
-        return; /* a frameset document has no body */
+        return; /* a frameset takes the place of the body */
     }
     th_node *head = child_with_atom(html, TH_TAG_HEAD);
     if (head == NULL) {
@@ -3741,6 +3735,20 @@ static void finalize_document(th_tree *tree) {
         }
         node_append(html, body);
     }
+}
+
+/* At EOF a document always has html, head and body (the missing-element rules of
+   the early insertion modes), so synthesize any the parse left out. */
+static void finalize_document(th_tree *tree) {
+    th_node *html = child_with_atom(tree->document, TH_TAG_HTML);
+    if (html == NULL) {
+        html = make_named(tree, "html", 4, TH_TAG_HTML, TH_TAG_SPECIAL | TH_TAG_SCOPING);
+        if (html == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        }
+        node_append(tree->document, html);
+    }
+    ensure_head_body(tree, html);
 }
 
 th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length) {
@@ -3898,6 +3906,13 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     setup_input(tree, sm, kind, data, length);
     run(tree, sm, ctx_ns == TH_NS_HTML ? fragment_mode(ctx_atom) : M_IN_BODY);
     th_tok_free(sm);
+
+    /* an html-context fragment starts in "before head"; at EOF the same
+       missing-element rules a document runs synthesize the head and body, with
+       the fragment root standing in for the <html> element */
+    if (ctx_atom == TH_TAG_HTML) {
+        ensure_head_body(tree, tree->fragment_root);
+    }
 
     if (tree->failed) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */

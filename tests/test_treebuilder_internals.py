@@ -370,6 +370,11 @@ def test_before_html_end_br_synthesizes_br() -> None:
         pytest.param("", "title", "", id="empty-fragment-serializes-empty"),
         pytest.param("x", "a" * 40, '"x"', id="context-name-longer-than-buffer"),
         pytest.param("<br>", "svg", "<br>", id="breakout-stops-at-fragment-root"),
+        # an html-context fragment starts in "before head" and synthesizes the
+        # implicit head and body at EOF even when no token forces them (issue #42)
+        pytest.param("", "html", "| <head>\n| <body>", id="html-fragment-empty-synthesizes-head-body"),
+        pytest.param("<title>t</title>", "html", '|     "t"\n| <body>', id="html-fragment-head-only-adds-body"),
+        pytest.param("<!--c-->", "html", "| <!-- c -->\n| <head>\n| <body>", id="html-fragment-comment-then-head-body"),
     ],
 )
 def test_fragment_paths(html: str, context: str, needle: str) -> None:
