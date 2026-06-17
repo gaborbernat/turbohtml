@@ -1600,7 +1600,9 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
             afe_remove_at(tree, fi);
             return 1;
         }
-        /* in scope? */
+        /* in scope? The scope set includes the MathML/SVG integration points, so a
+           foreign scope boundary between the current node and fmt keeps fmt out of
+           scope and the end tag is ignored rather than running adoption. */
         int in_scope = 0;
         /* The html element bounds the stack walk. */
         for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
@@ -1608,7 +1610,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
                 in_scope = 1;
                 break;
             }
-            if (tree->open[index]->tag_flags & TH_TAG_SCOPING) {
+            if (is_scope_boundary(tree->open[index])) {
                 break;
             }
         }
