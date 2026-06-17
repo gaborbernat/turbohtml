@@ -325,6 +325,27 @@ def test_document_paths(html: str, needle: str) -> None:
     assert needle in _doc(html)
 
 
+@pytest.mark.parametrize(
+    ("html", "inner"),
+    [
+        pytest.param("<b><math><mi></b>", "<b><math><mi></mi></math></b>", id="mathml-mi"),
+        pytest.param("<i><math><mo></i>", "<i><math><mo></mo></math></i>", id="mathml-mo"),
+        pytest.param(
+            "<b><svg><foreignObject><p></b>",
+            "<b><svg><foreignObject><p></p></foreignObject></svg></b>",
+            id="svg-foreignobject",
+        ),
+        pytest.param("<b><svg><desc></b>", "<b><svg><desc></desc></svg></b>", id="svg-desc"),
+    ],
+)
+def test_formatting_end_tag_ignored_across_foreign_scope_boundary(html: str, inner: str) -> None:
+    # a MathML/SVG integration point is a scope boundary, so the formatting element is not in
+    # scope and the end tag is ignored instead of running adoption and splitting the subtree
+    body = parse(html).find("body")
+    assert body is not None
+    assert body.inner_html == inner
+
+
 @pytest.mark.parametrize("element", ["textarea", "title", "xmp"])
 def test_rawtext_in_table_restores_table_mode(element: str) -> None:
     # a fostered RCDATA/RAWTEXT element's end tag must return to "in table", not "in body",
