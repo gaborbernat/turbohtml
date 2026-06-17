@@ -185,3 +185,24 @@ def test_mathml_definitionurl_can_be_set_and_deleted_by_either_case(find: Callab
 def test_svg_definitionurl_attribute_stays_lowercase(find: Callable[[str, str], Element]) -> None:
     # definitionurl is only in the MathML adjust table, so on an SVG element it stays as written
     assert dict(find("<svg definitionURL='x'></svg>", "svg").attrs) == {"definitionurl": "x"}
+
+
+def test_svg_attributes_are_cased(find: Callable[[str, str], Element]) -> None:
+    # WHATWG "adjust SVG attributes": viewbox -> viewBox etc., applied at construction so the
+    # cased name lands in the tree and serialization, not only the #document debug format
+    svg = find("<svg viewBox='0' attributeName='y'></svg>", "svg")
+    assert dict(svg.attrs) == {"viewBox": "0", "attributeName": "y"}
+    assert svg.html == '<svg viewBox="0" attributeName="y"></svg>'
+    assert svg.attrs["viewBox"] == "0"  # exact match
+    assert svg.attrs.get("viewbox") == "0"  # foreign lookup stays case-insensitive
+    assert "nope" not in svg.attrs  # length mismatch in the foreign scan
+    assert "abcdefg" not in svg.attrs  # same length as viewBox, different name
+    assert "class" not in svg.attrs  # interned atom, absent, falls through the foreign scan
+
+
+def test_svg_attribute_can_be_set_and_deleted_by_either_case(find: Callable[[str, str], Element]) -> None:
+    svg = find("<svg viewBox='0'></svg>", "svg")
+    svg.attrs["viewbox"] = "9"  # updates the existing cased slot, no duplicate
+    assert svg.html == '<svg viewBox="9"></svg>'
+    del svg.attrs["viewbox"]
+    assert svg.html == "<svg></svg>"
