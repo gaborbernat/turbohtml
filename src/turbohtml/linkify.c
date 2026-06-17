@@ -34,10 +34,12 @@ static inline int is_ascii_digit(Py_UCS4 c) {
     return c >= '0' && c <= '9';
 }
 
-/* A host label character: ASCII alphanumeric, or any non-ASCII code point so an
-   internationalized domain stays in one piece (the IRI case). */
+/* A host label character: ASCII alphanumeric, underscore (an RFC 3986 unreserved
+   character, valid anywhere in a reg-name host, as in ``_dmarc``/``cdn_1``), or
+   any non-ASCII code point so an internationalized domain stays in one piece (the
+   IRI case). */
 static inline int is_label_char(Py_UCS4 c) {
-    return is_ascii_alpha(c) || is_ascii_digit(c) || c >= 0x80;
+    return is_ascii_alpha(c) || is_ascii_digit(c) || c == '_' || c >= 0x80;
 }
 
 /* Email local-part atext, per the addr-spec dot-atom plus the characters real

@@ -66,6 +66,16 @@ def _no_callbacks() -> list[Callback]:
             'trailing dot <a href="http://example.com">http://example.com</a>. end',
             id="trailing-dot-trimmed",
         ),
+        pytest.param(
+            "https://cdn_1.example.org/x",
+            '<a href="https://cdn_1.example.org/x">https://cdn_1.example.org/x</a>',
+            id="underscore-in-host-label-kept",
+        ),
+        pytest.param(
+            "http://_dmarc.example.com/",
+            '<a href="http://_dmarc.example.com/">http://_dmarc.example.com/</a>',
+            id="underscore-leading-host-label-kept",
+        ),
     ],
 )
 def test_linkify_plain(text: str, expected: str) -> None:
@@ -267,6 +277,10 @@ def test_bare_domain_path_with_embedded_scheme_keeps_http_prefix() -> None:
         pytest.param("http://example.com:8080#f", False, False, [(0, 25, 0)], id="port-then-fragment-no-userinfo"),
         pytest.param("http://example.com:8080 x", False, False, [(0, 23, 0)], id="port-then-space-no-userinfo"),
         pytest.param("see EXAMPLE.COM here", False, True, [(4, 15, 0)], id="bare-domain-uppercase-tld"),
+        pytest.param("https://cdn_1.example.org/x", False, False, [(0, 27, 0)], id="underscore-in-scheme-host"),
+        pytest.param("http://_dmarc.example.com/", False, False, [(0, 26, 0)], id="underscore-leading-scheme-host"),
+        pytest.param("cdn_1.example.org/x", False, True, [(0, 19, 0)], id="underscore-in-bare-host"),
+        pytest.param("_dmarc.example.com here", False, True, [(0, 18, 0)], id="underscore-leading-bare-host"),
     ],
 )
 def test_scanner_spans(
