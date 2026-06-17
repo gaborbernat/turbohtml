@@ -1,0 +1,3 @@
+Report a nameless ``<!DOCTYPE>``'s name as ``None`` from the public ``Token.name`` instead of an empty string. The
+WHATWG tokenizer treats a DOCTYPE name as "missing", a state distinct from the empty string, so a DOCTYPE that never
+enters the name state now surfaces ``None``, matching the internal tuple path and the html5lib-tests oracle.
