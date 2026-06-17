@@ -44,6 +44,14 @@ def test_clean_attributes_as_per_tag_callable() -> None:
     assert out == '<a href="http://x">y</a><b data-z="1">z</b>'
 
 
+def test_clean_attributes_as_wildcard_callable() -> None:
+    # a "*" callable applies to every tag; it must drop the disallowed attribute, not fail open
+    out = clean(
+        '<a href="/foo" title="t">x</a>', tags=["a"], attributes={"*": lambda _tag, name, _val: name == "title"}
+    )
+    assert out == '<a title="t">x</a>'
+
+
 def test_clean_protocols() -> None:
     assert clean('<a href="ftp://x">y</a>', tags=["a"], attributes={"a": ["href"]}, protocols=["ftp"]) == (
         '<a href="ftp://x">y</a>'

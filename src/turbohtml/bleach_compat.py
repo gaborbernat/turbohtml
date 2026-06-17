@@ -81,10 +81,11 @@ def _convert_attributes(
 def _per_tag_filter(
     predicates: dict[str, Callable[[str, str, str], bool]],
 ) -> Callable[[str, str, str], str | None]:
-    """Fold per-tag bleach predicates into one value-rewriting filter that leaves other tags' attributes alone."""
+    """Fold per-tag bleach predicates into one value-rewriting filter, with the ``"*"`` predicate as the fallback."""
 
     def attribute_filter(tag: str, name: str, value: str) -> str | None:
-        predicate = predicates.get(tag)
+        # a tag-specific predicate wins; otherwise the "*" predicate applies, so a wildcard callable does not fail open
+        predicate = predicates.get(tag) or predicates.get("*")
         if predicate is None:
             return value
         return value if predicate(tag, name, value) else None

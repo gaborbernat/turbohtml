@@ -53,9 +53,14 @@ class Link:
 Callback: TypeAlias = "Callable[[Link], Link | None]"
 
 
+def _is_web_url(url: str) -> bool:
+    """Is this an ``http``/``https`` URL? The scheme is matched case-insensitively, so ``HTTP://`` counts."""
+    return url[:6].lower().startswith(("http:", "https:"))
+
+
 def nofollow(link: Link) -> Link | None:
     """Add ``rel="nofollow"`` to a web link so search engines skip it; leave ``mailto:`` and other links alone."""
-    if link.url.startswith(("http:", "https:")):
+    if _is_web_url(link.url):
         rels = link.attrs.get("rel", "").split()
         if "nofollow" not in rels:
             rels.append("nofollow")
@@ -65,7 +70,7 @@ def nofollow(link: Link) -> Link | None:
 
 def target_blank(link: Link) -> Link | None:
     """Open a web link in a new tab; strip a stale ``target`` from a non-web link so it cannot leak through."""
-    if link.url.startswith(("http:", "https:")):
+    if _is_web_url(link.url):
         link.attrs["target"] = "_blank"
     else:
         link.attrs.pop("target", None)
