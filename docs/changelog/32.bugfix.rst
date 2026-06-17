@@ -1,0 +1,4 @@
+Place the implied ``<p>`` from an unmatched ``</p>`` end tag in foreign (SVG or MathML) content inside the foreign
+element rather than as a sibling under ``<body>``. The WHATWG tree construction algorithm's "any other end tag" rule for
+foreign content pops nothing and reprocesses the token in the current insertion mode with the foreign element still
+current, so ``<svg></p>`` now builds ``<svg><p></p></svg>``, matching lexbor and html5lib.

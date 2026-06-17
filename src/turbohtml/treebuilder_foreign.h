@@ -384,9 +384,12 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         }
         return 1;
     }
-    /* end tag: </br> and </p> are breakout tags like their start-tag forms */
+    /* end tag: </br> is a breakout tag like its start-tag form. </p> is not: it
+       is "any other end tag", which walks the stack without popping the foreign
+       element and processes the token under HTML rules, so the implied <p> lands
+       inside the foreign root rather than as a sibling. */
     uint16_t atom = tok_atom(token);
-    if (atom == TH_TAG_BR || atom == TH_TAG_P) {
+    if (atom == TH_TAG_BR) {
         /* html is never foreign, so the breakout loop never empties the stack */
         while (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE */
             th_node *cur = current_node(tree);
@@ -398,22 +401,25 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         }
         return 0; /* reprocess under HTML rules */
     }
-    /* otherwise match by (case-insensitive) name up the stack, stopping at the
-       first HTML element; never pop the fragment context root */
-    /* the html element at the stack bottom is a scope boundary */
+    /* otherwise walk up the stack: stop at the first HTML element and run the
+       HTML rules there (the token is reprocessed with the foreign element still
+       current), or match a foreign element by (case-insensitive) name and pop to
+       it; never pop the fragment context root */
     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
         th_node *node = tree->open[index];
-        if (node == tree->fragment_root) {
-            return 1; /* the context root's own end tag is ignored */
+        if (node->ns == TH_NS_HTML) {
+            /* an HTML element, including an HTML-namespace fragment root, is where
+               the walk hands the token back to the current insertion mode */
+            return 0;
         }
-        if (node->ns != TH_NS_HTML && name_matches(node, token, 1)) {
+        if (node == tree->fragment_root) {
+            return 1; /* a foreign context root: its own end tag is ignored, never popped */
+        }
+        if (name_matches(node, token, 1)) {
             while (tree->open_len > index) {
                 stack_pop(tree);
             }
             return 1;
-        }
-        if (node->ns == TH_NS_HTML) {
-            return 0; /* process the end tag under HTML rules */
         }
     } /* GCOVR_EXCL_BR_LINE: the walk always reaches the fragment root or an html element first */
     return 1; /* GCOVR_EXCL_LINE: same — the foreign end-tag walk never falls through */
