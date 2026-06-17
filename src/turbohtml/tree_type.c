@@ -179,7 +179,9 @@ static th_node *preorder_next(th_node *current, th_node *root) {
     if (current->first_child != NULL) {
         return current->first_child;
     }
-    while (current != root) {
+    /* current can be NULL here if the cursor node was detached (extract()) mid-walk:
+       its parent chain no longer reaches root, so end the walk instead of dereferencing. */
+    while (current != NULL && current != root) {
         if (current->next_sibling != NULL) {
             return current->next_sibling;
         }

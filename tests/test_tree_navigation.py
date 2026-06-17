@@ -63,6 +63,22 @@ def test_descendants_is_lazy_iterator(body: Element) -> None:
     assert isinstance(next(walker), Element)
 
 
+def test_descendants_survives_extracting_the_cached_next_node() -> None:
+    # extracting the node the cursor has cached as "next" must not crash the walk (issue #81):
+    # its parent chain no longer reaches the root, so the iteration ends instead of dereferencing NULL.
+    div = parse("<div><a></a><b></b></div>").find("div")
+    assert div is not None
+    walker = iter(div.descendants)
+    first = next(walker)  # yields <a>; the cursor now caches <b> as the next node
+    assert isinstance(first, Element)
+    assert first.tag == "a"
+    cached_next = div.find("b")
+    assert cached_next is not None
+    cached_next.extract()
+    tags = [node.tag for node in walker if isinstance(node, Element)]  # completes without segfaulting
+    assert tags in ([], ["b"])  # ends at once, or yields the now-detached <b> once and then stops
+
+
 def test_ancestors_reach_the_document(body: Element) -> None:
     bold = body.find("b")
     assert bold is not None
