@@ -76,6 +76,19 @@ static th_tree *tree_of(PyObject *self) {
     return ((HandleObject *)((NodeObject *)self)->handle)->tree;
 }
 
+/* Borrow the (tree, node) a Python tree node wraps, for the in-C sanitizer in sanitize.c. Sets a TypeError and
+   returns -1 if obj is not one of this module's tree nodes. */
+int turbohtml_node_borrow(PyObject *module, PyObject *obj, th_tree **tree, th_node **node) {
+    module_state *state = PyModule_GetState(module);
+    if (!PyObject_TypeCheck(obj, (PyTypeObject *)state->node_type)) {
+        PyErr_SetString(PyExc_TypeError, "sanitize expected a turbohtml element");
+        return -1;
+    }
+    *node = ((NodeObject *)obj)->node;
+    *tree = ((HandleObject *)((NodeObject *)obj)->handle)->tree;
+    return 0;
+}
+
 static PyObject *ucs4_to_str(const Py_UCS4 *data, Py_ssize_t len) {
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, data, len);
 }

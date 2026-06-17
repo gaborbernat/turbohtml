@@ -120,6 +120,33 @@ turbohtml's own tree carry it past bleach's html5lib pass by five to twenty time
       - 1580 µs
       - 723 µs
 
+**********
+ Sanitize
+**********
+
+:func:`turbohtml.sanitizer.sanitize` against `bleach <https://bleach.readthedocs.io>`_'s ``clean`` (its end-of-life
+predecessor, on html5lib) and `nh3 <https://nh3.readthedocs.io>`_ (the Rust ammonia binding). All three parse, filter to
+an allowlist, and reserialize; the inputs are realistic user-generated content with a few disallowed tags and a
+dangerous attribute mixed in. turbohtml runs the whole filtering walk in C, so it beats even nh3, and it leaves bleach
+far behind.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 22 22 22
+
+    - - input
+      - turbohtml
+      - nh3
+      - bleach
+    - - comment (1 link, 1 script)
+      - 1.8 µs
+      - 6.9 µs
+      - 107 µs
+    - - post (4 KiB)
+      - 52 µs
+      - 152 µs
+      - 2570 µs
+
 ************
  Unescaping
 ************

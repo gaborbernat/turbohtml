@@ -21,6 +21,18 @@ def _markup_escape_silent(s: object, /) -> str: ...
 def _markup_soft_str(s: object, /) -> str: ...
 def _register_markup(markup_type: type, /) -> None: ...
 def _linkify_scan(text: str, parse_email: bool, bare_domains: bool, /) -> list[tuple[int, int, int]]: ...
+def _sanitize(
+    element: Element,
+    tags: frozenset[str],
+    attributes: Mapping[str, frozenset[str]],
+    url_schemes: frozenset[str],
+    allow_relative: bool,
+    on_disallowed: int,
+    strip_comments: bool,
+    add_link_rel: str | None,
+    attribute_filter: Callable[[str, str, str], str | None] | None,
+    /,
+) -> None: ...
 
 class TokenType(IntEnum):
     TEXT = 0

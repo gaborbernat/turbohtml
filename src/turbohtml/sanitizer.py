@@ -1,0 +1,151 @@
+"""
+Sanitize untrusted HTML against an allowlist, the way bleach.clean did.
+
+bleach is the last maintained Python sanitizer and it is end of life, deprecated for sitting on the unmaintained
+html5lib; turbohtml owns a maintained WHATWG tree builder, so this rebuilds the sanitizer on it. The model is the one
+every safe sanitizer converged on: parse the input into a real tree, drop everything not on the allowlist while walking
+it, and serialize once. There is no serialize-then-reparse round trip, which is the step that lets mutation XSS slip
+back in, and a :class:`Policy` baseline removes ``<script>``, event-handler attributes, and ``javascript:`` URLs even
+when a caller's allowlist would admit them, so a no-argument :func:`sanitize` is safe by construction.
+
+This module is the policy facade only; the walk that keeps, escapes, strips, or removes each node runs in C
+(``turbohtml._html._sanitize``), so the safety baseline lives below the configurable surface.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+from ._html import _sanitize, parse_fragment
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+
+class OnDisallowed(Enum):
+    """
+    What to do with an element the policy does not allow.
+
+    ``ESCAPE`` renders the tag as visible text (``<x>`` becomes ``&lt;x&gt;``), the safe bleach default that keeps the
+    content readable; ``STRIP`` drops the tag but keeps its children; ``REMOVE`` drops the tag and its whole subtree.
+    """
+
+    ESCAPE = 0
+    STRIP = 1
+    REMOVE = 2
+
+
+#: bleach's default allowed tags, the migration baseline.
+DEFAULT_TAGS = frozenset({"a", "abbr", "acronym", "b", "blockquote", "code", "em", "i", "li", "ol", "strong", "ul"})
+#: bleach's default allowed attributes, keyed by tag (``"*"`` would match every tag).
+DEFAULT_ATTRIBUTES: Mapping[str, frozenset[str]] = MappingProxyType({
+    "a": frozenset({"href", "title"}),
+    "abbr": frozenset({"title"}),
+    "acronym": frozenset({"title"}),
+})
+#: bleach's default URL schemes.
+DEFAULT_SCHEMES = frozenset({"http", "https", "mailto"})
+
+# A roomier set for the relaxed preset: typical user-generated content (headings, tables, images, figures).
+_RELAXED_TAGS = DEFAULT_TAGS | {
+    "p", "br", "hr", "span", "div", "pre", "h1", "h2", "h3", "h4", "h5", "h6",
+    "dl", "dt", "dd", "sub", "sup", "del", "ins", "mark", "small", "u", "s", "q", "cite", "img",
+    "figure", "figcaption", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "colgroup", "col",
+}  # fmt: skip
+_RELAXED_ATTRIBUTES: Mapping[str, frozenset[str]] = MappingProxyType({
+    "*": frozenset({"title", "lang", "dir"}),
+    "a": frozenset({"href", "title", "name"}),
+    "img": frozenset({"src", "alt", "title", "width", "height"}),
+    "td": frozenset({"colspan", "rowspan"}),
+    "th": frozenset({"colspan", "rowspan", "scope"}),
+    "col": frozenset({"span"}),
+    "colgroup": frozenset({"span"}),
+})
+
+
+@dataclass(frozen=True)
+class Policy:
+    """
+    An immutable, thread-safe description of what sanitizing keeps.
+
+    Build one and reuse it across threads. ``tags`` is the allowed element set and ``attributes`` maps a tag (or
+    ``"*"`` for every tag) to its allowed attribute names (a ``"*"`` inside a set allows every name). ``url_schemes`` is
+    the allowlist for URL-bearing attributes; ``attribute_filter`` is an optional last word over every surviving
+    attribute, returning a replacement value or ``None`` to drop it. The baseline-unsafe set and the event-handler and
+    bad-scheme stripping are not configurable, so any policy is safe.
+    """
+
+    tags: frozenset[str] = DEFAULT_TAGS
+    # default_factory, not a plain default: dataclasses before 3.12 reject a MappingProxyType default as "mutable"
+    attributes: Mapping[str, frozenset[str]] = field(default_factory=lambda: DEFAULT_ATTRIBUTES)
+    url_schemes: frozenset[str] = DEFAULT_SCHEMES
+    allow_relative_urls: bool = True
+    on_disallowed_tag: OnDisallowed = OnDisallowed.ESCAPE
+    strip_comments: bool = True
+    add_link_rel: frozenset[str] = frozenset()
+    attribute_filter: Callable[[str, str, str], str | None] | None = None
+
+    @classmethod
+    def strict(cls) -> Policy:
+        """Allow no markup at all: every tag is escaped to text and every attribute dropped."""
+        return cls(tags=frozenset(), attributes=MappingProxyType({}))
+
+    @classmethod
+    def basic(cls) -> Policy:
+        """Allow bleach's default 12-tag set, for migration parity."""
+        return cls()
+
+    @classmethod
+    def relaxed(cls) -> Policy:
+        """Allow the richer set typical user-generated content needs: headings, tables, images, and figures."""
+        return cls(
+            tags=frozenset(_RELAXED_TAGS),
+            attributes=_RELAXED_ATTRIBUTES,
+            add_link_rel=frozenset({"noopener", "noreferrer"}),
+        )
+
+
+class Sanitizer:
+    """A reusable sanitizer; build it once from a :class:`Policy` and call :meth:`sanitize` from any thread."""
+
+    def __init__(self, policy: Policy | None = None) -> None:
+        """Compile a policy into the form the C walk consumes, defaulting to bleach's allowlist."""
+        self.policy = policy if policy is not None else Policy()
+        self._attributes = dict(self.policy.attributes)
+        self._link_rel = " ".join(sorted(self.policy.add_link_rel)) or None
+
+    def sanitize(self, html: str) -> str:
+        """Sanitize an HTML fragment and return safe HTML."""
+        policy = self.policy
+        root = parse_fragment(html)
+        _sanitize(
+            root,
+            policy.tags,
+            self._attributes,
+            policy.url_schemes,
+            policy.allow_relative_urls,
+            policy.on_disallowed_tag.value,
+            policy.strip_comments,
+            self._link_rel,
+            policy.attribute_filter,
+        )
+        return root.inner_html
+
+
+def sanitize(html: str, policy: Policy | None = None) -> str:
+    """Sanitize an HTML fragment against ``policy`` (bleach's allowlist by default) and return safe HTML."""
+    return Sanitizer(policy).sanitize(html)
+
+
+__all__ = [
+    "DEFAULT_ATTRIBUTES",
+    "DEFAULT_SCHEMES",
+    "DEFAULT_TAGS",
+    "OnDisallowed",
+    "Policy",
+    "Sanitizer",
+    "sanitize",
+]
