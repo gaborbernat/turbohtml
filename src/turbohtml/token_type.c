@@ -220,7 +220,11 @@ static PyObject *token_get_self_closing(PyObject *self, void *Py_UNUSED(closure)
 
 static PyObject *token_get_name(PyObject *self, void *Py_UNUSED(closure)) {
     const th_token *record = &((TokenObject *)self)->record;
-    if (record->kind == TH_DOCTYPE) {
+    /* A DOCTYPE name is "missing" (distinct from the empty string) until the name
+       state appends a character, so it is either absent or at least one byte; an
+       empty buffer is the missing sentinel and surfaces as None, matching the
+       tuple builder and the html5lib-tests oracle. */
+    if (record->kind == TH_DOCTYPE && record->name.len > 0) {
         return buf_to_str(&record->name);
     }
     Py_RETURN_NONE;
