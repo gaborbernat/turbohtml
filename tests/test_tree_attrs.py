@@ -132,3 +132,31 @@ def test_attrs_supports_mapping_protocol(find: Callable[[str, str], Element]) ->
     assert attrs.get("missing") is None
     assert "class" in attrs
     assert "missing" not in attrs
+
+
+@pytest.mark.parametrize(
+    ("html", "tag", "attrs", "markup"),
+    [
+        pytest.param(
+            '<a href="1" href="2" href="3">x</a>',
+            "a",
+            {"href": "1"},
+            '<a href="1">x</a>',
+            id="repeated-value-first-wins",
+        ),
+        pytest.param(
+            "<p id=first id=second>z</p>", "p", {"id": "first"}, '<p id="first">z</p>', id="unquoted-first-wins"
+        ),
+        pytest.param(
+            "<span data-x data-x>w</span>", "span", {"data-x": None}, '<span data-x="">w</span>', id="valueless"
+        ),
+    ],
+)
+def test_duplicate_attributes_drop_to_first(
+    find: Callable[[str, str], Element], html: str, tag: str, attrs: dict[str, str | None], markup: str
+) -> None:
+    # WHATWG discards a later duplicate attribute name during tokenization, so the tree keeps
+    # only the first occurrence (in storage, not just a view) and serializes a single copy.
+    element = find(html, tag)
+    assert dict(element.attrs) == attrs
+    assert element.html == markup

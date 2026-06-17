@@ -1,0 +1,3 @@
+Discard a duplicate attribute name during tokenization, keeping the first occurrence as the WHATWG specification
+requires, so ``<a href=x href=y>`` now carries a single ``href`` of ``x`` in the token, the parsed tree, and the
+serialized output.

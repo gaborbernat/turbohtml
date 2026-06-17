@@ -573,6 +573,32 @@ static void new_attr(th_tokenizer *self) {
     self->attr = attr;
 }
 
+/* Two attribute names are the same when they hold identical code points;
+   minimal-kind storage means equal content always shares a width, so the kind
+   guard both keeps the memcmp well-defined and rejects same-length-different-width
+   names that cannot be equal. */
+static int attr_name_dup(const th_attr *a, const th_attr *b) {
+    return a->name.len == b->name.len && a->name.kind == b->name.kind &&
+           memcmp(a->name.data, b->name.data, (size_t)(a->name.len * a->name.kind)) == 0;
+}
+
+/* Per WHATWG, on leaving the attribute name state: if the token already carries
+   an attribute with this exact name it is a duplicate-attribute parse error and
+   the new attribute is dropped, so the first occurrence wins. The dropped slot's
+   value is routed to the oom sink so the value states keep writing into valid
+   storage. */
+static void finish_attr_name(th_tokenizer *self) {
+    th_token *tok = &self->tok;
+    Py_ssize_t cur = tok->attr_count - 1;
+    for (Py_ssize_t index = 0; index < cur; index++) {
+        if (attr_name_dup(&tok->attrs[index], &tok->attrs[cur])) {
+            tok->attr_count = cur;
+            self->attr = &self->oom_attr;
+            return;
+        }
+    }
+}
+
 /* When a start tag is emitted, remember its name for appropriate-end-tag
    checks; spec discards attributes on end tags but we keep the structure. */
 static void remember_start_tag(th_tokenizer *self) {

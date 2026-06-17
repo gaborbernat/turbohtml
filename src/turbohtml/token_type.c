@@ -177,8 +177,9 @@ static PyObject *token_get_tag(PyObject *self, void *Py_UNUSED(closure)) {
     Py_RETURN_NONE;
 }
 
-/* Build the attribute list, keeping the first occurrence of each name (the spec
-   discards later duplicates) and mapping a valueless attribute to None. */
+/* Build the attribute list (the tokenizer already dropped duplicate names, so
+   the first occurrence is the only one left), mapping a valueless attribute to
+   None. */
 static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
     const th_token *record = &((TokenObject *)self)->record;
     if (!is_tag(record)) {
@@ -190,18 +191,6 @@ static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
     }
     for (Py_ssize_t index = 0; index < record->attr_count; index++) {
         const th_attr *attr = &record->attrs[index];
-        int duplicate = 0;
-        for (Py_ssize_t prior_index = 0; prior_index < index; prior_index++) {
-            const th_attr *prior = &record->attrs[prior_index];
-            if (prior->name.len == attr->name.len && prior->name.kind == attr->name.kind &&
-                memcmp(prior->name.data, attr->name.data, (size_t)(attr->name.len * attr->name.kind)) == 0) {
-                duplicate = 1;
-                break;
-            }
-        }
-        if (duplicate) {
-            continue;
-        }
         PyObject *name = buf_to_str(&attr->name);
         PyObject *value = attr->has_value ? buf_to_str(&attr->value) : Py_NewRef(Py_None);
         if (name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */

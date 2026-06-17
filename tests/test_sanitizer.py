@@ -128,21 +128,26 @@ def test_every_url_attribute_is_scheme_checked(attr: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "html",
+    ("html", "expected"),
     [
-        pytest.param("<a href='http://ok' href='javascript:alert(1)'>x</a>", id="bad-scheme-second"),
-        pytest.param("<a href='javascript:alert(1)' href='http://ok'>x</a>", id="bad-scheme-first"),
+        pytest.param(
+            "<a href='http://ok' href='javascript:alert(1)'>x</a>",
+            '<a href="http://ok" rel="noopener noreferrer">x</a>',
+            id="safe-first-survives",
+        ),
+        pytest.param("<a href='javascript:alert(1)' href='http://ok'>x</a>", "<a>x</a>", id="unsafe-first-dropped"),
     ],
 )
-def test_duplicate_url_attribute_with_bad_scheme_drops_all(html: str) -> None:
-    # a duplicate href keeps only one value in the serialized output; if either value fails the
-    # scheme policy the whole attribute is dropped, so no disallowed scheme can survive the desync
-    assert sanitize(html, Policy.relaxed()) == "<a>x</a>"
+def test_duplicate_url_attribute_collapses_to_first(html: str, expected: str) -> None:
+    # the tokenizer drops a duplicate attribute name, keeping the first occurrence (WHATWG), so the
+    # sanitizer only ever sees one href: a safe first value survives the scheme check, an unsafe one
+    # is dropped, and no disallowed scheme can reach the output.
+    assert sanitize(html, Policy.relaxed()) == expected
 
 
-def test_duplicate_url_attribute_all_allowed_is_kept() -> None:
+def test_duplicate_url_attribute_keeps_only_the_first() -> None:
     out = sanitize("<a href='http://a' href='http://b'>x</a>", Policy.relaxed())
-    assert out == '<a href="http://a" href="http://b" rel="noopener noreferrer">x</a>'
+    assert out == '<a href="http://a" rel="noopener noreferrer">x</a>'
 
 
 def test_non_url_attribute_value_is_not_scheme_checked() -> None:

@@ -858,10 +858,12 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
 
         case ST_ATTR_NAME:
             if (at_eof || is_space(ch) || ch == '/' || ch == '>') {
+                finish_attr_name(self);
                 self->state = ST_AFTER_ATTR_NAME;
                 continue;
             }
             if (ch == '=') {
+                finish_attr_name(self);
                 CONSUME();
                 self->state = ST_BEFORE_ATTR_VALUE;
                 continue;
