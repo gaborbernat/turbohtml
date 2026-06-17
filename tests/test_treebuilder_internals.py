@@ -8,11 +8,12 @@ fallbacks. These target those directly through the private _html entry points.
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import _html
+from turbohtml import _html, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -374,3 +375,32 @@ def test_before_html_end_br_synthesizes_br() -> None:
 )
 def test_fragment_paths(html: str, context: str, needle: str) -> None:
     assert needle in _frag(html, context)
+
+
+def test_deeply_nested_serializers_are_iterative() -> None:
+    # Each serializer (compact .html, pretty indent, #document dump) recursed one
+    # C stack frame per tree level and aborted (exit 134) on a deep tree. Running
+    # them on a 4k nesting under a 256 KiB stack overflows any reintroduced
+    # recursion while staying cheap: compact output is linear, and the
+    # depth-indented pretty/dump forms stay small at this depth.
+    depth = 4_000
+    source = "<div>" * depth
+    captured: dict[str, str] = {}
+
+    def run() -> None:
+        document = parse(source)
+        captured["compact"] = document.html
+        captured["pretty"] = document.serialize(indent=2)
+        captured["dump"] = _html._parse_tree(source)
+
+    previous = threading.stack_size(256 * 1024)
+    try:
+        worker = threading.Thread(target=run)
+        worker.start()
+        worker.join()
+    finally:
+        threading.stack_size(previous)
+    assert captured["compact"].count("<div>") == depth
+    assert captured["compact"].count("</div>") == depth
+    assert captured["pretty"].count("<div>") == depth
+    assert captured["dump"].count("<div>") == depth

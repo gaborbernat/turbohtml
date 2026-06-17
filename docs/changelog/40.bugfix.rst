@@ -1,0 +1,4 @@
+Serialize arbitrarily deep trees without overflowing the C stack. The compact, pretty, and ``#document`` serializers
+each recursed once per tree level, so reading ``.html`` (or ``serialize()``) on a tree nested past roughly 130k levels
+aborted the process instead of raising. The walks now descend through child pointers and ascend through parent pointers
+iteratively, using constant stack regardless of depth.
