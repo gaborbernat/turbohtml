@@ -7,7 +7,7 @@ import pickle  # noqa: S403  # round-tripping our own trusted payloads
 import pytest
 
 from turbohtml import CData, Comment, Doctype, Document, Element, Node, ProcessingInstruction, Text, parse
-from turbohtml._html import _reconstruct  # ty: ignore[unresolved-import]  # the private pickle hook
+from turbohtml._html import _reconstruct  # the private pickle hook
 
 
 def _roundtrip(node: Node) -> Node:
@@ -106,7 +106,7 @@ def test_pickled_element_is_independent() -> None:
 
 def test_reconstruct_rejects_malformed_arguments() -> None:
     with pytest.raises(TypeError):
-        _reconstruct("not a triple")
+        _reconstruct("not a triple")  # ty: ignore[missing-argument, invalid-argument-type]  # deliberately malformed
 
 
 def test_reconstruct_accepts_names_the_constructor_rejects() -> None:
@@ -116,6 +116,7 @@ def test_reconstruct_accepts_names_the_constructor_rejects() -> None:
     # _reconstruct is the trusted pickle hook, so it rebuilds whatever the parser stored,
     # including a tag name like "a<b" that the validating public Element() rejects (issue #83)
     node = _reconstruct(kind, ("a<b", {}), [])
+    assert isinstance(node, Element)
     assert node.tag == "a<b"
 
 
@@ -125,4 +126,4 @@ def test_reconstruct_propagates_a_construction_failure() -> None:
     # a genuinely broken payload still fails: a non-mapping attrs value cannot build an element,
     # and reconstruction surfaces that TypeError instead of returning a half-built node
     with pytest.raises(TypeError):
-        _reconstruct(kind, ("div", 123), [])
+        _reconstruct(kind, ("div", 123), [])  # ty: ignore[invalid-argument-type]  # malformed attrs payload
