@@ -79,6 +79,15 @@ EXPRS = [
     "//tr/td[1]",
     "//tr/td[last()]",
     "//p[position()=last()]",
+    # following / preceding axes
+    "//main/following::nav",
+    "//nav/preceding::article",
+    "//article[1]/following::h2",
+    "//article[2]/preceding::h2",
+    "//h2/following::p",
+    "//td/following::td",
+    "//tbody/preceding::th",
+    "//thead/following::td",
     # unions
     "//p | //h2",
     "//th | //td",

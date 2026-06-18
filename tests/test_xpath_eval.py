@@ -1,9 +1,8 @@
 """Evaluation of XPath location paths through ``Node.xpath`` / ``Node.xpath_one``.
 
-Phase 2 implements location paths (the forward and reverse structural axes, name/
-``*``/``node()``/``text()``/``comment()`` tests, attribute access) returning node-sets;
-predicates, operators, functions, unions, and filter expressions raise
-``NotImplementedError`` until later phases.
+Covers the structural axes, the name/``*``/``node()``/``text()``/``comment()`` node
+tests, and attribute access. Only the ``namespace`` axis is unimplemented and raises
+``NotImplementedError``.
 """
 
 from __future__ import annotations
@@ -145,6 +144,24 @@ def test_following_and_preceding_sibling(doc: turbohtml.Node) -> None:
     assert tags(one(doc, "//ul").xpath("preceding-sibling::div")) == ["div", "div"]
 
 
+def test_following_axis(doc: turbohtml.Node) -> None:
+    # everything after the first span's subtree, in document order
+    span = one(doc, "//span")
+    assert tags(span.xpath("following::a")) == ["a", "a"]
+    assert tags(span.xpath("following::*")) == ["span", "ul", "li", "li", "a", "a", "input", "my-widget"]
+
+
+def test_preceding_axis_excludes_ancestors(doc: turbohtml.Node) -> None:
+    # elements before <ul>, minus its ancestors (html/body), in document order
+    assert tags(one(doc, "//ul").xpath("preceding::div")) == ["div", "div"]
+    assert tags(one(doc, "//ul").xpath("preceding::p")) == ["p", "p"]
+
+
+def test_preceding_axis_proximity_order_in_predicate(doc: turbohtml.Node) -> None:
+    # preceding is a reverse axis: [1] is the nearest preceding element
+    assert tags(one(doc, "//ul").xpath("preceding::span[1]")) == ["span"]
+
+
 def test_results_are_deduplicated(doc: turbohtml.Node) -> None:
     # both spans share the same ancestor div, which must appear once
     assert tags(doc.xpath("//span/ancestor::div")) == ["div"]
@@ -176,8 +193,8 @@ def test_xpath_iter_supports_partial_consumption(doc: turbohtml.Node) -> None:
 
 
 def test_xpath_iter_propagates_errors(doc: turbohtml.Node) -> None:
-    with pytest.raises(NotImplementedError, match="following/preceding/namespace"):
-        doc.xpath_iter("//following::x")
+    with pytest.raises(NotImplementedError, match="the namespace axis"):
+        doc.xpath_iter("//namespace::x")
     with pytest.raises(TypeError, match="must be a str"):
         doc.xpath_iter(123)  # ty: ignore[invalid-argument-type]  # non-str exercises the TypeError path
 
@@ -185,19 +202,19 @@ def test_xpath_iter_propagates_errors(doc: turbohtml.Node) -> None:
 @pytest.mark.parametrize(
     "expr",
     [
-        pytest.param("//following::x", id="following"),
-        pytest.param("//preceding::x", id="preceding"),
-        pytest.param("//namespace::x", id="namespace"),
+        pytest.param("//namespace::x", id="namespace-a"),
+        pytest.param("//namespace::y", id="namespace-b"),
+        pytest.param("//namespace::x", id="namespace-c"),
     ],
 )
 def test_unsupported_axes_raise(doc: turbohtml.Node, expr: str) -> None:
-    with pytest.raises(NotImplementedError, match="following/preceding/namespace"):
+    with pytest.raises(NotImplementedError, match="the namespace axis"):
         doc.xpath(expr)
 
 
 def test_xpath_one_unsupported_raises(doc: turbohtml.Node) -> None:
-    with pytest.raises(NotImplementedError, match="following/preceding/namespace"):
-        doc.xpath_one("//following::x")
+    with pytest.raises(NotImplementedError, match="the namespace axis"):
+        doc.xpath_one("//namespace::x")
 
 
 def test_invalid_expression_raises_value_error(doc: turbohtml.Node) -> None:

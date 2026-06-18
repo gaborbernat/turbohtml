@@ -1296,7 +1296,39 @@ static struct th_node *descendant_next(struct th_node *node, struct th_node *roo
     return node == root ? NULL : node->next_sibling;
 }
 
-/* Emit, into out, the nodes on ctx's `step` axis that pass the node test. */
+/* Pre-order successor over the whole tree, or NULL past the last node. */
+static struct th_node *document_next(struct th_node *node) {
+    if (node->first_child != NULL) {
+        return node->first_child;
+    }
+    while (node->parent != NULL && node->next_sibling == NULL) {
+        node = node->parent;
+    }
+    return node->next_sibling;
+}
+
+static int is_ancestor_of(struct th_node *candidate, struct th_node *node) {
+    for (struct th_node *parent = node->parent; parent != NULL; parent = parent->parent) {
+        if (parent == candidate) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Reverse the items in [from, out->len) in place (turns the document-order run a
+   forward walk produced into the reverse-document proximity order). */
+static void reverse_items(xp_nodeset *out, Py_ssize_t from) {
+    Py_ssize_t high = out->len - 1;
+    while (from < high) {
+        xp_item swap = out->items[from];
+        out->items[from] = out->items[high];
+        out->items[high] = swap;
+        from++;
+        high--;
+    }
+}
+
 /* Push node when it passes the step's node test. Returns 0, or -1 on allocation
    failure (which cannot be forced from a test). */
 static int emit_if_match(xp_nodeset *out, struct th_node *node, const xn *step, uint16_t atom) {
@@ -1361,6 +1393,38 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint
             }
         }
         return 0;
+    case AX_FOLLOWING: {
+        /* everything after ctx's whole subtree, in document order */
+        struct th_node *start = NULL;
+        for (struct th_node *up = ctx; up != NULL && start == NULL; up = up->parent) {
+            start = up->next_sibling;
+        }
+        for (struct th_node *node = start; node != NULL; node = document_next(node)) {
+            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                  /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    }
+    case AX_PRECEDING: {
+        /* everything before ctx in document order except its ancestors; collected
+           forward then reversed into the axis's reverse-document proximity order */
+        struct th_node *root = ctx;
+        while (root->parent != NULL) {
+            root = root->parent;
+        }
+        Py_ssize_t from = out->len;
+        for (struct th_node *node = root; node != ctx; node = document_next(node)) {
+            if (is_ancestor_of(node, ctx)) {
+                continue;
+            }
+            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                  /* GCOVR_EXCL_LINE */
+            }
+        }
+        reverse_items(out, from);
+        return 0;
+    }
     default: /* AX_PRECEDING_SIBLING */
         for (struct th_node *node = ctx->prev_sibling; node != NULL; node = node->prev_sibling) {
             if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
@@ -1433,7 +1497,7 @@ static void sort_unique(xp_nodeset *ns) {
 }
 
 static int axis_supported(uint8_t axis) {
-    return axis != AX_FOLLOWING && axis != AX_PRECEDING && axis != AX_NAMESPACE;
+    return axis != AX_NAMESPACE;
 }
 
 /* --------------------------------------------------------- value model */
@@ -1686,7 +1750,7 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
     for (int32_t si = root->first; si >= 0; si = prog->nodes[si].next) {
         const xn *step = &prog->nodes[si];
         if (!axis_supported(step->axis)) {
-            *ctx->feature = "the following/preceding/namespace axes";
+            *ctx->feature = "the namespace axis";
             xp_nodeset_free(&cur);
             xp_nodeset_free(&next);
             return -2;
