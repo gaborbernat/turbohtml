@@ -205,4 +205,7 @@ uint32_t th_attr_lookup(th_tree *tree, const char *bytes, Py_ssize_t len);
    forms an empty type name. */
 uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len);
 
+/* The tree-construction category bitmask for an atom (0 for TH_TAG_UNKNOWN). */
+uint8_t th_tag_flags(uint16_t atom);
+
 #endif /* TURBOHTML_TREEBUILDER_H */

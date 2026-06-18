@@ -407,6 +407,17 @@ uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len) {
     return TH_TAG_UNKNOWN;
 }
 
+/* The category bitmask for an atom (0 for TH_TAG_UNKNOWN), so a constructed or
+   reconstructed element carries the same flags the parser derives from the name. */
+uint8_t th_tag_flags(uint16_t atom) {
+    for (int index = 0; index < th_tag_count; index++) {
+        if (th_tag_table[index].atom == atom) {
+            return th_tag_table[index].flags;
+        }
+    }
+    return 0;
+}
+
 /* --------------------------------------------------------------- nodes */
 
 static th_node *node_new(th_tree *tree, enum th_node_type type) {
@@ -487,6 +498,7 @@ th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     node->atom = atom;
+    node->tag_flags = th_tag_flags(atom); /* so a constructed/unpickled raw-text element serializes literally */
     Py_UCS4 *owned = arena_alloc(tree, tag_len * (Py_ssize_t)sizeof(Py_UCS4));
     if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */

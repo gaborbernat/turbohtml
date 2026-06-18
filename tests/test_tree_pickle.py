@@ -61,6 +61,15 @@ def test_nested_pi_and_cdata_survive_pickling() -> None:
     assert _roundtrip(host).html == "<host><?t d><![CDATA[raw]]></host>"
 
 
+@pytest.mark.parametrize("tag", ["style", "xmp", "iframe"])
+def test_rawtext_element_keeps_literal_text_across_pickle(tag: str) -> None:
+    # a raw-text element serializes its text verbatim; the round-trip must not start escaping it (issue #86)
+    element = parse(f"<{tag}>x < y</{tag}>").find(tag)
+    assert isinstance(element, Element)
+    assert element.html == f"<{tag}>x < y</{tag}>"
+    assert _roundtrip(element).html == element.html
+
+
 def test_document_round_trips() -> None:
     doc = parse("<!DOCTYPE html><title>Hi</title><p id=a>x</p><!--c-->")
     clone = _roundtrip(doc)

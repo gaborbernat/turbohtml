@@ -96,6 +96,13 @@ def test_element_void_has_no_end_tag() -> None:
     assert Element("br").html == "<br>"
 
 
+def test_element_rawtext_serializes_text_literally() -> None:
+    # a constructed raw-text element carries the atom's flags, so its text is not escaped (issue #86)
+    style = Element("style")
+    style.text = "a < b"
+    assert style.html == "<style>a < b</style>"
+
+
 def test_element_unknown_tag_constructs() -> None:
     assert Element("my-widget").html == "<my-widget></my-widget>"
     assert Element("x" * 70).tag == "x" * 70  # a tag too long for the atom table
