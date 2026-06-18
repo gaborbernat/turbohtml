@@ -88,6 +88,15 @@ commands = [
     "--txt",
     "-",
   ] },
+  # free-threaded build only: re-run the thread-safety tests with one thread per core
+  # (pytest-run-parallel) to surface data races the single-threaded coverage run hides
+  { replace = "if", condition = "factor['3.14t'] or factor['3.15t']", then = [
+    "pytest",
+    "{tox_root}{/}tests{/}test_tree_freethread.py",
+    "--no-cov",
+    "--parallel-threads=auto",
+    "--iterations=20",
+  ], else = [ "python", "-c", "print('free-threaded parallel stress skipped (GIL build)')" ] },
 ]
 
 [env.docs]
@@ -189,3 +198,37 @@ dependency_groups = [ "release" ]
 pass_env = [ "GH_TOKEN" ]
 commands_pre = []
 commands = [ [ "python", "{tox_root}{/}tasks{/}release.py", "--version", "{posargs}" ] ]
+
+[env.tsan]
+description = "detect data races with ThreadSanitizer; run inside ghcr.io/nascheme/cpython-tsan:3.14t"
+# the no-GIL TSan interpreter is the container's own python, not a uv-managed one
+base_python = [ "python3.14t" ]
+package = "skip"
+dependency_groups = [ "test" ]
+set_env = { UV_PYTHON_PREFERENCE = "only-system", CC = "clang", CXX = "clang++", TSAN_OPTIONS = "halt_on_error=0 allocator_may_return_null=1 suppressions={tox_root}{/}tools{/}tsan-suppressions.txt" }
+commands_pre = [
+  # build the extension with TSan instrumentation against the container's TSan interpreter
+  [
+    "uv",
+    "pip",
+    "install",
+    "--reinstall",
+    "--no-deps",
+    "--no-build-isolation",
+    "--editable",
+    "{tox_root}",
+    "--config-settings=build-dir={env_dir}{/}cbuild",
+    "--config-settings=setup-args=-Db_sanitize=thread",
+    "--config-settings=setup-args=-Dbuildtype=debugoptimized",
+  ],
+]
+commands = [
+  [
+    "pytest",
+    "-s",                                           # let TSan reports reach the console; pytest otherwise captures them
+    "--no-cov",
+    "--parallel-threads=auto",
+    "--iterations=20",
+    "{tox_root}{/}tests{/}test_tree_freethread.py",
+  ],
+]

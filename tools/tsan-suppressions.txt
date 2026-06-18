@@ -1,0 +1,9 @@
+# ThreadSanitizer suppressions for the free-threaded `tox -e tsan` run.
+#
+# Format: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+# Each entry MUST carry a comment linking a GitHub issue with a reproducer and
+# the TSan output, so a suppression can be revisited and removed.
+#
+# There are no active suppressions. CPython's own free-threaded suppression list
+# is empty on the supported branches, so any race TSan reports against the `_html`
+# extension is almost certainly a real bug in our C code, not interpreter noise.

@@ -4,6 +4,8 @@ width, so width-sensitive tests run under all three kinds.
 
 from __future__ import annotations
 
+import sys
+import sysconfig
 from typing import TYPE_CHECKING, TypeVar
 
 import pytest
@@ -14,6 +16,20 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _N = TypeVar("_N", bound=Node)
+
+_FREE_THREADED = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+_gil_enabled_at_start = sys._is_gil_enabled() if _FREE_THREADED else True
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Fail the run if a C extension silently re-enabled the GIL on a free-threaded build.
+
+    ``_html`` declares ``Py_MOD_GIL_NOT_USED``; importing any extension that forgets that slot
+    flips the GIL back on and quietly masks every free-threaded race we test for (issue #84).
+    """
+    # untestable without building a deliberately GIL-re-enabling extension to import mid-run
+    if _FREE_THREADED and not _gil_enabled_at_start and sys._is_gil_enabled():  # pragma: no cover
+        session.exitstatus = 1
 
 
 @pytest.fixture(params=[1, 2, 4], ids=["ucs1", "ucs2", "ucs4"])
