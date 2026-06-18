@@ -1900,7 +1900,8 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
             Py_ssize_t end = handle_obj->index_offsets[subject + 1];
             for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
                 th_node *node = handle_obj->index_nodes[pos];
-                int matched = single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled);
+                int matched = single != NULL ? sel_match_simple(node, single, compiled->quirks)
+                                             : selector_matches(node, compiled);
                 if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
                     break;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1911,7 +1912,8 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
                 if (node->type != TH_NODE_ELEMENT) {
                     continue;
                 }
-                int matched = single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled);
+                int matched = single != NULL ? sel_match_simple(node, single, compiled->quirks)
+                                             : selector_matches(node, compiled);
                 if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
                     break;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1947,7 +1949,8 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
             Py_ssize_t end = handle_obj->index_offsets[subject + 1];
             for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
                 th_node *node = handle_obj->index_nodes[pos];
-                if (single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled)) {
+                if (single != NULL ? sel_match_simple(node, single, compiled->quirks)
+                                   : selector_matches(node, compiled)) {
                     found = node;
                     break;
                 }
@@ -1957,7 +1960,8 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
                 if (node->type != TH_NODE_ELEMENT) {
                     continue;
                 }
-                if (single != NULL ? sel_match_simple(node, single) : selector_matches(node, compiled)) {
+                if (single != NULL ? sel_match_simple(node, single, compiled->quirks)
+                                   : selector_matches(node, compiled)) {
                     found = node;
                     break;
                 }

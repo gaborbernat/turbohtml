@@ -191,9 +191,10 @@ node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_al
 attribute, the four combinators, and the ``:is()``/``:where()``/``:has()`` functional pseudo-classes -- and
 :meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the
 tree, so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an integer
-compare. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and
-:meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
-:class:`~turbohtml.Formatter`.
+compare. Compiling against the tree also captures its document mode, so ``#id`` and ``.class`` fold ASCII case in a
+quirks-mode document and compare exactly otherwise, as the Selectors standard requires. Output runs back through
+:attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant
+by default with the escaping selectable through :class:`~turbohtml.Formatter`.
 
 *******************
  Mutating the tree

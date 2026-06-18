@@ -397,6 +397,10 @@ uint32_t th_tree_attr_generation(const th_tree *tree) {
     return tree->attr_rec_count;
 }
 
+int th_tree_quirks(const th_tree *tree) {
+    return tree->quirks;
+}
+
 /* Resolve a lowercased tag name (UTF-8 bytes) to its atom, or TH_TAG_UNKNOWN for
    a name outside the table (the caller then compares the tag name as text). */
 uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len) {
