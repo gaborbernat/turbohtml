@@ -1,0 +1,4 @@
+Reject bytes passed where a ``str`` is documented — the ``context`` of :func:`~turbohtml.parse_fragment` and the
+``name`` of :meth:`turbohtml.Token.attr` — with a ``TypeError`` that names ``str``, instead of silently decoding the
+bytes as latin-1 into a garbage tag or attribute name. Wrong types other than bytes now also report that ``str`` is
+required rather than a bytes-like object.
