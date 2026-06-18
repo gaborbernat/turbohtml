@@ -1,30 +1,16 @@
 requires = [ "tox>=4.55.1", "tox-uv>=1.35.2" ]
-env_list = [
-  "3.15",
-  "3.14",
-  "3.13",
-  "3.12",
-  "3.11",
-  "3.10",
-  "3.13t",
-  "3.14t",
-  "3.15t",
-  "docs",
-  "fix",
-  "pkg_meta",
-  "type"
-]
+env_list = [ "3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.14t", "3.15t", "docs", "fix", "pkg_meta", "type" ]
 skip_missing_interpreters = true
 
 [env_run_base]
-description = { replace = "if", condition = "factor['3.15'] or factor['3.13t'] or factor['3.14t'] or factor['3.15t']", then = "run the test suite under {env_name} with the Python coverage gate (no gcov for this interpreter)", else = "run the test suite under {env_name} with the Python and C coverage gates" }
+description = { replace = "if", condition = "factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = "run the test suite under {env_name} with the Python coverage gate (no gcov for this interpreter)", else = "run the test suite under {env_name} with the Python and C coverage gates" }
 package = "skip"  # we install an instrumented editable build ourselves below
 # gcovr (via lxml) has no wheels for 3.15 or the free-threaded builds, and there is
 # no gcov on Windows, so pull it in only where the coverage gate actually runs
 deps = [
-  { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.13t'] or factor['3.14t'] or factor['3.15t']", then = [
-
-  ], else = [ "gcovr>=8.4" ], extend = true },
+  { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [], else = [
+    "gcovr>=8.4"
+  ], extend = true },
 ]
 dependency_groups = [ "test" ]
 pass_env = [ "COV_GCOV", "PYTEST_*" ]
@@ -48,9 +34,7 @@ commands_pre = [
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
     # instrument for C coverage except where gcov/gcovr are unavailable (Windows, 3.15, free-threaded)
-    { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.13t'] or factor['3.14t'] or factor['3.15t']", then = [
-
-    ], else = [
+    { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [], else = [
       "--config-settings=setup-args=-Dbuildtype=debug",
       "--config-settings=setup-args=-Db_ndebug=true",
       "--config-settings=setup-args=-Db_coverage=true",
@@ -82,7 +66,7 @@ commands = [
   # ternaries whose non-compact sides PyUnicode_New objects can never take, so 3.10
   # floors at 97% (gcc counts a few more of these dead branches than llvm). 3.11+
   # collapsed those macros to branchless inline functions.
-  { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.13t'] or factor['3.14t'] or factor['3.15t']", then = [
+  { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [
     "python",
     "-c",
     "print('C coverage gate skipped on this interpreter (no gcov/gcovr)')",
@@ -104,6 +88,15 @@ commands = [
     "--txt",
     "-",
   ] },
+  # free-threaded build only: re-run the thread-safety tests with one thread per core
+  # (pytest-run-parallel) to surface data races the single-threaded coverage run hides
+  { replace = "if", condition = "factor['3.14t'] or factor['3.15t']", then = [
+    "pytest",
+    "{tox_root}{/}tests{/}test_tree_freethread.py",
+    "--no-cov",
+    "--parallel-threads=auto",
+    "--iterations=20",
+  ], else = [ "python", "-c", "print('free-threaded parallel stress skipped (GIL build)')" ] },
 ]
 
 [env.docs]
@@ -205,3 +198,38 @@ dependency_groups = [ "release" ]
 pass_env = [ "GH_TOKEN" ]
 commands_pre = []
 commands = [ [ "python", "{tox_root}{/}tasks{/}release.py", "--version", "{posargs}" ] ]
+
+[env.tsan]
+description = "detect data races with ThreadSanitizer; run inside ghcr.io/nascheme/cpython-tsan:3.14t"
+# the no-GIL TSan interpreter is the container's own python, not a uv-managed one
+base_python = [ "python3.14t" ]
+package = "skip"
+dependency_groups = [ "test" ]
+# let meson autodetect the container's TSan-capable compiler (the one CPython was built with); do not force CC=clang
+set_env = { UV_PYTHON_PREFERENCE = "only-system", TSAN_OPTIONS = "halt_on_error=0 allocator_may_return_null=1 suppressions={tox_root}{/}tools{/}tsan-suppressions.txt" }
+commands_pre = [
+  # build the extension with TSan instrumentation against the container's TSan interpreter
+  [
+    "uv",
+    "pip",
+    "install",
+    "--reinstall",
+    "--no-deps",
+    "--no-build-isolation",
+    "--editable",
+    "{tox_root}",
+    "--config-settings=build-dir={env_dir}{/}cbuild",
+    "--config-settings=setup-args=-Db_sanitize=thread",
+    "--config-settings=setup-args=-Dbuildtype=debugoptimized",
+  ],
+]
+commands = [
+  [
+    "pytest",
+    "-s",                                           # let TSan reports reach the console; pytest otherwise captures them
+    "--no-cov",
+    "--parallel-threads=auto",
+    "--iterations=20",
+    "{tox_root}{/}tests{/}test_tree_freethread.py",
+  ],
+]
