@@ -33,4 +33,30 @@ void xp_free(xp_program *prog);
    NULL on allocation failure. */
 Py_UCS4 *xp_dump(const xp_program *prog, Py_ssize_t *out_len);
 
+/* A member of an evaluated node-set: a tree node, or one of its attributes when
+   attr >= 0 (the index into node->attrs). attr == -1 means the node itself. */
+struct th_node;
+typedef struct {
+    struct th_node *node;
+    Py_ssize_t attr;
+} xp_item;
+
+typedef struct {
+    xp_item *items;
+    Py_ssize_t len;
+    Py_ssize_t cap;
+} xp_nodeset;
+
+void xp_nodeset_free(xp_nodeset *ns);
+
+/* Evaluate a location-path program against a context node, collecting the result
+   node-set (document-ordered, duplicate-free) into *out. Returns 0 on success.
+   Returns -2 for a construct this phase does not implement yet (predicates,
+   operators, functions, unions, filter expressions, the following/preceding/
+   namespace axes), with *feature set to a short name for the message. Returns -1
+   on allocation failure. */
+struct th_tree;
+int xp_eval_nodeset(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_nodeset *out,
+                    const char **feature);
+
 #endif /* TURBOHTML_XPATH_H */

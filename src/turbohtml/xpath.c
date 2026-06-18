@@ -14,6 +14,7 @@
    test but a multiply operator after a node test or value. */
 
 #include "turbohtml.h"
+#include "treebuilder.h"
 #include "xpath.h"
 
 #include <math.h>
@@ -674,43 +675,37 @@ static int32_t parse_primary(parser *ps) {
         lex_next(lx);
         return num;
     }
-    if (lx->kind ==
-        TK_NAME) { /* GCOVR_EXCL_BR_LINE: starts_filter() guarantees a NAME once the other primaries are ruled out */
-        int32_t fn = xn_new(ps->p, XN_FUNC);
-        if (fn < 0) {                  /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-            return -1;                 /* GCOVR_EXCL_LINE */
-        }
-        if (copy_text(ps->p, fn, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory");                        /* GCOVR_EXCL_LINE */
-        }
-        lex_next(lx);
-        expect(ps, TK_LPAREN, "expected '(' after function name");
-        int32_t arg_head = -1;
-        int32_t arg_tail = -1;
-        if (lx->kind != TK_RPAREN) {
-            for (;;) {
-                int32_t arg = parse_expr(ps);
-                if (arg_head < 0) {
-                    arg_head = arg;
-                } else {
-                    ps->p->nodes[arg_tail].next = arg;
-                }
-                arg_tail = arg;
-                if (!accept(ps, TK_COMMA)) {
-                    break;
-                }
+    /* The only remaining primary is a FunctionCall: starts_filter() guarantees a
+       NAME here once '(', a literal, and a number have been ruled out above. */
+    int32_t fn = xn_new(ps->p, XN_FUNC);
+    if (fn < 0) {                  /* GCOVR_EXCL_BR_LINE: alloc */
+        fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
+        return -1;                 /* GCOVR_EXCL_LINE */
+    }
+    if (copy_text(ps->p, fn, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        fail(ps, "out of memory");                        /* GCOVR_EXCL_LINE */
+    }
+    lex_next(lx);
+    expect(ps, TK_LPAREN, "expected '(' after function name");
+    int32_t arg_head = -1;
+    int32_t arg_tail = -1;
+    if (lx->kind != TK_RPAREN) {
+        for (;;) {
+            int32_t arg = parse_expr(ps);
+            if (arg_head < 0) {
+                arg_head = arg;
+            } else {
+                ps->p->nodes[arg_tail].next = arg;
+            }
+            arg_tail = arg;
+            if (!accept(ps, TK_COMMA)) {
+                break;
             }
         }
-        expect(ps, TK_RPAREN, "expected ')'");
-        ps->p->nodes[fn].a = arg_head;
-        return fn;
     }
-    /* GCOVR_EXCL_START: parse_primary is only entered through starts_filter(), which
-       guarantees the current token starts a primary, so this is defensive. */
-    fail(ps, "expected an expression");
-    return -1;
-    /* GCOVR_EXCL_STOP */
+    expect(ps, TK_RPAREN, "expected ')'");
+    ps->p->nodes[fn].a = arg_head;
+    return fn;
 }
 
 /* A FilterExpr begins with a literal, number, '(', or a function call (a NAME
@@ -1206,6 +1201,281 @@ Py_UCS4 *xp_dump(const xp_program *prog, Py_ssize_t *out_len) {
     }
     *out_len = d.len;
     return d.buf;
+}
+
+/* ---------------------------------------------------------- evaluation */
+
+static int ns_push(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr) {
+    if (ns->len == ns->cap) {
+        Py_ssize_t cap = ns->cap ? ns->cap * 2 : 8;
+        xp_item *grown = PyMem_Realloc(ns->items, (size_t)cap * sizeof(xp_item));
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            return -1;       /* GCOVR_EXCL_LINE */
+        }
+        ns->items = grown;
+        ns->cap = cap;
+    }
+    ns->items[ns->len].node = node;
+    ns->items[ns->len].attr = attr;
+    ns->len++;
+    return 0;
+}
+
+void xp_nodeset_free(xp_nodeset *ns) {
+    PyMem_Free(ns->items);
+    ns->items = NULL;
+    ns->len = ns->cap = 0;
+}
+
+/* Resolve a name test to a static tag atom, or TH_TAG_UNKNOWN for a name no known
+   HTML tag carries (non-ASCII, mixed case, or simply unknown); such a name then
+   matches only unknown-atom elements with that exact spelling. */
+static uint16_t resolve_tag_atom(const Py_UCS4 *name, Py_ssize_t len) {
+    char buf[64];
+    if (len >= (Py_ssize_t)sizeof(buf)) { /* a name this long is no known tag; the parser never makes an empty one */
+        return TH_TAG_UNKNOWN;
+    }
+    for (Py_ssize_t i = 0; i < len; i++) {
+        if (name[i] >= 0x80) {
+            return TH_TAG_UNKNOWN;
+        }
+        buf[i] = (char)name[i];
+    }
+    return th_tag_lookup(buf, len);
+}
+
+static uint32_t resolve_attr_atom(struct th_tree *tree, const Py_UCS4 *name, Py_ssize_t len) {
+    char buf[128];
+    if (len >= (Py_ssize_t)sizeof(buf)) { /* no attribute name is this long; the parser never makes an empty one */
+        return UINT32_MAX;
+    }
+    for (Py_ssize_t i = 0; i < len; i++) {
+        if (name[i] >= 0x80) {
+            return UINT32_MAX;
+        }
+        buf[i] = (char)name[i];
+    }
+    return th_attr_lookup(tree, buf, len);
+}
+
+static int element_name_matches(struct th_node *node, const xn *step, uint16_t atom) {
+    if (atom != TH_TAG_UNKNOWN) {
+        return node->atom == atom;
+    }
+    if (node->atom != TH_TAG_UNKNOWN || node->text_len != step->str_len) {
+        return 0;
+    }
+    return memcmp(node->text, step->str, (size_t)step->str_len * sizeof(Py_UCS4)) == 0;
+}
+
+/* Whether a node satisfies a step's node test on an element-principal axis. */
+static int node_test_matches(struct th_node *node, const xn *step, uint16_t atom) {
+    switch (step->test) {
+    case NT_NAME:
+        return node->type == TH_NODE_ELEMENT && element_name_matches(node, step, atom);
+    case NT_STAR:
+        return node->type == TH_NODE_ELEMENT;
+    case NT_TEXT:
+        return node->type == TH_NODE_TEXT;
+    case NT_COMMENT:
+        return node->type == TH_NODE_COMMENT;
+    case NT_PI:
+        return node->type == TH_NODE_PI;
+    default: /* NT_NODE */
+        return 1;
+    }
+}
+
+static struct th_node *descendant_next(struct th_node *n, struct th_node *root) {
+    if (n->first_child != NULL) {
+        return n->first_child;
+    }
+    while (n != root && n->next_sibling == NULL) {
+        n = n->parent;
+    }
+    return n == root ? NULL : n->next_sibling;
+}
+
+/* Emit, into out, the nodes on ctx's `step` axis that pass the node test. */
+static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint16_t atom, uint32_t attr_atom) {
+    switch (step->axis) {
+    case AX_ATTRIBUTE:
+        /* node() and * both match every attribute; a name test matches by atom;
+           text()/comment()/processing-instruction() match no attribute. */
+        for (Py_ssize_t i = 0; i < ctx->attr_count; i++) {
+            int hit = step->test == NT_STAR || step->test == NT_NODE ||
+                      (step->test == NT_NAME && ctx->attrs[i].name_atom == attr_atom);
+            if (hit && ns_push(out, ctx, i) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                return -1;                         /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    case AX_SELF:
+        return node_test_matches(ctx, step, atom) ? ns_push(out, ctx, -1) : 0;
+    case AX_CHILD:
+        for (struct th_node *c = ctx->first_child; c != NULL; c = c->next_sibling) {
+            if (node_test_matches(c, step, atom) && ns_push(out, c, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    case AX_DESCENDANT_OR_SELF:
+        if (node_test_matches(ctx, step, atom) && ns_push(out, ctx, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                                         /* GCOVR_EXCL_LINE */
+        }
+        /* FALLTHROUGH: descendant-or-self is self plus the descendant walk */
+    case AX_DESCENDANT:
+        for (struct th_node *d = ctx->first_child; d != NULL; d = descendant_next(d, ctx)) {
+            if (node_test_matches(d, step, atom) && ns_push(out, d, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    case AX_PARENT:
+        if (ctx->parent != NULL && node_test_matches(ctx->parent, step, atom)) {
+            return ns_push(out, ctx->parent, -1);
+        }
+        return 0;
+    case AX_ANCESTOR_OR_SELF:
+        if (node_test_matches(ctx, step, atom) && ns_push(out, ctx, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                                         /* GCOVR_EXCL_LINE */
+        }
+        /* FALLTHROUGH: ancestor-or-self is self plus the ancestor walk */
+    case AX_ANCESTOR:
+        for (struct th_node *a = ctx->parent; a != NULL; a = a->parent) {
+            if (node_test_matches(a, step, atom) && ns_push(out, a, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    case AX_FOLLOWING_SIBLING:
+        for (struct th_node *s = ctx->next_sibling; s != NULL; s = s->next_sibling) {
+            if (node_test_matches(s, step, atom) && ns_push(out, s, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    default: /* AX_PRECEDING_SIBLING */
+        for (struct th_node *s = ctx->prev_sibling; s != NULL; s = s->prev_sibling) {
+            if (node_test_matches(s, step, atom) && ns_push(out, s, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+        return 0;
+    }
+}
+
+static Py_ssize_t node_depth(struct th_node *n) {
+    Py_ssize_t d = 0;
+    while (n->parent != NULL) {
+        n = n->parent;
+        d++;
+    }
+    return d;
+}
+
+/* Negative when x precedes y in document (pre-order); positive otherwise. Never
+   called with x == y. */
+static int node_before(struct th_node *x, struct th_node *y) {
+    Py_ssize_t dx = node_depth(x);
+    Py_ssize_t dy = node_depth(y);
+    struct th_node *a = x;
+    struct th_node *b = y;
+    for (Py_ssize_t i = dx; i > dy; i--) {
+        a = a->parent;
+    }
+    for (Py_ssize_t i = dy; i > dx; i--) {
+        b = b->parent;
+    }
+    if (a == b) {
+        return dx < dy ? -1 : 1; /* the shallower original node is an ancestor of the other */
+    }
+    while (a->parent != b->parent) {
+        a = a->parent;
+        b = b->parent;
+    }
+    for (struct th_node *s = a->next_sibling; s != NULL; s = s->next_sibling) {
+        if (s == b) {
+            return -1;
+        }
+    }
+    return 1;
+}
+
+static int item_cmp(const void *pa, const void *pb) {
+    const xp_item *a = pa;
+    const xp_item *b = pb;
+    if (a->node == b->node) {
+        return a->attr < b->attr ? -1 : 1; /* same node: the node (-1) sorts before its attributes */
+    }
+    return node_before(a->node, b->node);
+}
+
+static void sort_unique(xp_nodeset *ns) {
+    if (ns->len < 2) {
+        return;
+    }
+    qsort(ns->items, (size_t)ns->len, sizeof(xp_item), item_cmp);
+    Py_ssize_t w = 1;
+    for (Py_ssize_t r = 1; r < ns->len; r++) {
+        if (ns->items[r].node != ns->items[w - 1].node || ns->items[r].attr != ns->items[w - 1].attr) {
+            ns->items[w++] = ns->items[r];
+        }
+    }
+    ns->len = w;
+}
+
+static int axis_supported(uint8_t axis) {
+    return axis != AX_FOLLOWING && axis != AX_PRECEDING && axis != AX_NAMESPACE;
+}
+
+int xp_eval_nodeset(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_nodeset *out,
+                    const char **feature) {
+    const xn *root = &prog->nodes[prog->root];
+    if (root->kind != XN_PATH) {
+        *feature = "operators, functions, and unions";
+        return -2;
+    }
+    if (root->b >= 0) {
+        *feature = "filter expressions";
+        return -2;
+    }
+    xp_nodeset cur = {0};
+    xp_nodeset next = {0};
+    if (ns_push(&cur, root->absolute ? th_tree_document(tree) : context, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;                                                                  /* GCOVR_EXCL_LINE */
+    }
+    for (int32_t si = root->a; si >= 0; si = prog->nodes[si].next) {
+        const xn *step = &prog->nodes[si];
+        if (step->a >= 0 || !axis_supported(step->axis)) {
+            *feature = step->a >= 0 ? "predicates" : "the following/preceding/namespace axes";
+            xp_nodeset_free(&cur);
+            xp_nodeset_free(&next);
+            return -2;
+        }
+        int name_test = step->test == NT_NAME;
+        uint16_t atom = name_test && step->axis != AX_ATTRIBUTE ? resolve_tag_atom(step->str, step->str_len) : 0;
+        uint32_t attr_atom =
+            name_test && step->axis == AX_ATTRIBUTE ? resolve_attr_atom(tree, step->str, step->str_len) : UINT32_MAX;
+        next.len = 0;
+        for (Py_ssize_t i = 0; i < cur.len; i++) {
+            if (cur.items[i].attr >= 0) {
+                continue; /* an attribute has no axes of its own in this phase */
+            }
+            if (apply_step(&next, cur.items[i].node, step, atom, attr_atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                xp_nodeset_free(&cur);                                             /* GCOVR_EXCL_LINE */
+                xp_nodeset_free(&next);                                            /* GCOVR_EXCL_LINE */
+                return -1;                                                         /* GCOVR_EXCL_LINE */
+            }
+        }
+        xp_nodeset swap = cur;
+        cur = next;
+        next = swap;
+        sort_unique(&cur);
+    }
+    xp_nodeset_free(&next);
+    *out = cur;
+    return 0;
 }
 
 /* --------------------------------------------------- Python test hook */

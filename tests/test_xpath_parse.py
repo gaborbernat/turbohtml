@@ -238,4 +238,4 @@ def test_rejects(expr: str, message: str) -> None:
 
 def test_non_string_argument() -> None:
     with pytest.raises(TypeError, match="must be a str"):
-        parse(123)
+        parse(123)  # ty: ignore[invalid-argument-type]  # non-str exercises the TypeError path

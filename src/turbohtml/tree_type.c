@@ -17,6 +17,7 @@
 #include "encoding.h"
 #include "selector.h"
 #include "treebuilder.h"
+#include "xpath.h"
 
 /* A per-tree cache of compiled CSS selectors. A repeated select()/select_one()
    with the same selector string then reuses the parse instead of re-running the
@@ -618,6 +619,9 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_select(PyObject *self, PyObject *arg);
 static PyObject *node_select_one(PyObject *self, PyObject *arg);
+static PyObject *node_xpath(PyObject *self, PyObject *arg);
+static PyObject *node_xpath_iter(PyObject *self, PyObject *arg);
+static PyObject *node_xpath_one(PyObject *self, PyObject *arg);
 static PyObject *node_css_matches(PyObject *self, PyObject *arg);
 static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 
@@ -629,6 +633,17 @@ PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");
+
+PyDoc_STRVAR(xpath_doc, "xpath(expression, /)\n--\n\n"
+                        "Evaluate an XPath expression relative to this node and return the result:\n"
+                        "a list of Elements (and attribute/text values as str) in document order for\n"
+                        "a node-set. Absolute paths start at the document root.");
+
+PyDoc_STRVAR(xpath_iter_doc, "xpath_iter(expression, /)\n--\n\n"
+                             "Like xpath, but return an iterator over the results in document order.");
+
+PyDoc_STRVAR(xpath_one_doc, "xpath_one(expression, /)\n--\n\n"
+                            "Return the first result of the XPath expression in document order, or None.");
 
 PyDoc_STRVAR(matches_doc, "matches(selector, /)\n--\n\n"
                           "Return whether this node is an Element matching the CSS selector,\n"
@@ -705,6 +720,9 @@ static PyMethodDef node_methods[] = {
     {"find_all", (PyCFunction)(void (*)(void))node_find_all, METH_VARARGS | METH_KEYWORDS, find_all_doc},
     {"select", node_select, METH_O, select_doc},
     {"select_one", node_select_one, METH_O, select_one_doc},
+    {"xpath", node_xpath, METH_O, xpath_doc},
+    {"xpath_iter", node_xpath_iter, METH_O, xpath_iter_doc},
+    {"xpath_one", node_xpath_one, METH_O, xpath_one_doc},
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
@@ -1975,6 +1993,141 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
         return NULL;
     }
     return node_wrap(state_of(self), handle, found);
+}
+
+/* Compile arg (a str) to an XPath program, or NULL with a Python error set. */
+static xp_program *xpath_compile_arg(PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
+        return NULL;
+    }
+    Py_ssize_t len = PyUnicode_GET_LENGTH(arg);
+    Py_UCS4 *src = PyUnicode_AsUCS4Copy(arg);
+    if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+    char err[128];
+    xp_program *prog = xp_compile(src, len, err, sizeof(err));
+    PyMem_Free(src);
+    if (prog == NULL) {
+        PyErr_SetString(PyExc_ValueError, err);
+    }
+    return prog;
+}
+
+/* Marshal one evaluated node-set item: an attribute to its value as str, a text
+   node to its data as str, any other node to its element/comment/... wrapper. */
+static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
+    if (item.attr >= 0) {
+        const th_node_attr *attr = &item.node->attrs[item.attr];
+        return attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);
+    }
+    if (item.node->type == TH_NODE_TEXT) {
+        return str_from_accessor(th_node_data, tree, item.node);
+    }
+    return node_wrap(state, handle, item.node);
+}
+
+/* Translate an xp_eval_nodeset status (-2 unsupported, -1 OOM) into a Python error. */
+static void *xpath_raise_status(int rc, const char *feature) {
+    if (rc == -2) { /* GCOVR_EXCL_BR_LINE: the only other status, -1, is an allocation failure */
+        PyErr_Format(PyExc_NotImplementedError, "xpath: %s are not implemented yet", feature);
+        return NULL;
+    }
+    return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: rc == -1 is an allocation failure that cannot be forced */
+}
+
+static PyObject *xpath_eval_list(PyObject *self, PyObject *arg) {
+    xp_program *prog = xpath_compile_arg(arg);
+    if (prog == NULL) {
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    xp_nodeset result = {0};
+    const char *feature = NULL;
+    PyObject *out = NULL;
+    int rc;
+    int marshal_error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: the eval reads the tree */
+    th_tree *tree = ((HandleObject *)handle)->tree;
+    rc = xp_eval_nodeset(prog, tree, origin, &result, &feature);
+    if (rc == 0) {
+        out = PyList_New(result.len);
+        if (out == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            marshal_error = 1; /* GCOVR_EXCL_LINE */
+        } else {
+            for (Py_ssize_t i = 0; i < result.len; i++) {
+                PyObject *obj = xpath_item_to_py(state, handle, tree, result.items[i]);
+                if (obj == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+                    marshal_error = 1; /* GCOVR_EXCL_LINE */
+                    break;             /* GCOVR_EXCL_LINE */
+                }
+                PyList_SET_ITEM(out, i, obj);
+            }
+        }
+    }
+    xp_nodeset_free(&result);
+    Py_END_CRITICAL_SECTION();
+    xp_free(prog);
+    if (rc < 0) {
+        return xpath_raise_status(rc, feature);
+    }
+    if (marshal_error) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        Py_XDECREF(out); /* GCOVR_EXCL_LINE */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    return out;
+}
+
+static PyObject *node_xpath(PyObject *self, PyObject *arg) {
+    return xpath_eval_list(self, arg);
+}
+
+static PyObject *node_xpath_iter(PyObject *self, PyObject *arg) {
+    PyObject *list = xpath_eval_list(self, arg);
+    if (list == NULL) {
+        return NULL;
+    }
+    PyObject *iter = PyObject_GetIter(list);
+    Py_DECREF(list);
+    return iter;
+}
+
+static PyObject *node_xpath_one(PyObject *self, PyObject *arg) {
+    xp_program *prog = xpath_compile_arg(arg);
+    if (prog == NULL) {
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    xp_nodeset result = {0};
+    const char *feature = NULL;
+    PyObject *out = NULL;
+    int rc;
+    int had_item = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: the eval reads the tree */
+    th_tree *tree = ((HandleObject *)handle)->tree;
+    rc = xp_eval_nodeset(prog, tree, origin, &result, &feature);
+    if (rc == 0 && result.len > 0) {
+        had_item = 1;
+        out = xpath_item_to_py(state, handle, tree, result.items[0]);
+    }
+    xp_nodeset_free(&result);
+    Py_END_CRITICAL_SECTION();
+    xp_free(prog);
+    if (rc < 0) {
+        return xpath_raise_status(rc, feature);
+    }
+    if (had_item && out == NULL) { /* GCOVR_EXCL_BR_LINE: marshal allocation failure cannot be forced */
+        return NULL;               /* GCOVR_EXCL_LINE */
+    }
+    if (out == NULL) {
+        Py_RETURN_NONE;
+    }
+    return out;
 }
 
 static PyObject *node_css_matches(PyObject *self, PyObject *arg) {
