@@ -154,6 +154,17 @@ _LONG_NAME = "z" * 130
         pytest.param("<math><mtext><b>x</b></mtext></math>", "<b>", id="mathml-text-integration"),
         pytest.param("<svg><foreignObject><b>x</b></foreignObject></svg>", "<b>", id="svg-html-integration"),
         pytest.param("<svg><a xlink:href=x>y</a></svg>", 'xlink href="x"', id="foreign-namespaced-attribute"),
+        # plain xmlns on a foreign element belongs to the xmlns namespace, rendered "xmlns xmlns" (issue #64)
+        pytest.param(
+            '<svg xmlns="http://www.w3.org/2000/svg">',
+            'xmlns xmlns="http://www.w3.org/2000/svg"',
+            id="foreign-plain-xmlns",
+        ),
+        pytest.param(
+            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">',
+            '|       xmlns xlink="http://www.w3.org/1999/xlink"\n|       xmlns xmlns="http://www.w3.org/2000/svg"',
+            id="foreign-plain-and-prefixed-xmlns-sorted",
+        ),
         pytest.param(
             "<math><mtext><svg><br></svg></mtext></math>", "<br>", id="breakout-stops-at-mathml-text-integration"
         ),

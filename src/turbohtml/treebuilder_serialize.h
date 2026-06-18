@@ -114,6 +114,13 @@ static void render_attr_name(th_tree *tree, const th_node *node, const th_node_a
     const char *name = th_attr_name(tree, attr->name_atom, &name_len);
     int to_space = node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len);
     size_t write_index = 0;
+    if (to_space && memchr(name, ':', (size_t)name_len) == NULL) {
+        /* the only namespaced attribute without a prefix to split on is plain xmlns,
+           which belongs to the xmlns namespace and renders as "xmlns xmlns"; the
+           6-byte prefix always fits the 128-byte buffer, so no bound check is needed */
+        memcpy(buf, "xmlns ", 6);
+        write_index = 6;
+    }
     for (const char *character = name; *character != '\0' && write_index + 1 < bufsize; character++) {
         buf[write_index++] = (to_space && *character == ':') ? ' ' : *character;
     }
@@ -218,6 +225,9 @@ static void serialize_node_line(sbuf *out, th_tree *tree, th_node *node, int dep
         Py_ssize_t name_len;
         const char *name = th_attr_name(tree, attr->name_atom, &name_len);
         if (node->ns != TH_NS_HTML && foreign_attr_namespaced(name, name_len)) {
+            if (memchr(name, ':', (size_t)name_len) == NULL) {
+                sbuf_puts(out, "xmlns "); /* plain xmlns (no prefix to split on) renders with its namespace prefix */
+            }
             for (const char *character = name; *character; character++) {
                 sbuf_putc(out, *character == ':' ? (Py_UCS4)' ' : (Py_UCS4)*character);
             }
