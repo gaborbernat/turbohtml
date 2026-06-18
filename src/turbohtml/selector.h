@@ -576,7 +576,9 @@ static int sel_match_simple(th_node *node, const sel_simple *simple) {
         if (simple->tag_atom != TH_TAG_UNKNOWN) {
             return node->atom == simple->tag_atom;
         }
-        return sel_eq(node->text, node->text_len, simple->name, simple->name_len, 0);
+        /* a custom/unknown tag is stored lowercased; type selectors are ASCII case-insensitive
+           in HTML, so match it case-insensitively like the builtin-atom path above does */
+        return sel_eq(node->text, node->text_len, simple->name, simple->name_len, 1);
     case '#': {
         const th_node_attr *attr = sel_find_attr(node, TH_ATTR_ID);
         return attr != NULL && attr->value != NULL &&
