@@ -172,6 +172,11 @@ uint32_t th_tree_attr_generation(const th_tree *tree);
    (Selectors-4 §6.1/§6.2); programmatic trees default to no-quirks. */
 int th_tree_quirks(const th_tree *tree);
 
+/* Whether a text node holds only HTML ASCII whitespace (or nothing), realizing a
+   zero-copy span on demand. The :empty selector uses it to ignore the document
+   white space Selectors-4 §13.2 permits inside an otherwise empty element. */
+int th_node_text_is_blank(th_tree *tree, th_node *node);
+
 /* Materialize one text/comment/doctype node's own character data (realizing a
    zero-copy span on demand) into a freshly PyMem-allocated UCS4 buffer.
    *out_len receives the length; returns NULL on allocation failure. */

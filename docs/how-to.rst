@@ -388,6 +388,18 @@ the comparison exact:
     div
     None
 
+``:empty`` follows Selectors Level 4: an element counts as empty when its only children are comments or document white
+space, so a blank item matches while one holding a non-breaking space (``&nbsp;`` is not white space) does not:
+
+.. testcode::
+
+    items = turbohtml.parse("<ul><li> </li><li>&nbsp;</li><li><!--TODO--></li><li>x</li></ul>")
+    print([li.text for li in items.select("li:empty")])
+
+.. testoutput::
+
+    [' ', '']
+
 To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node
 match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
 
