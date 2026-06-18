@@ -403,7 +403,11 @@ static PyObject *node_children_tuple(PyObject *self) {
 }
 
 static PyObject *node_get_children(PyObject *self, void *Py_UNUSED(closure)) {
-    return node_children_tuple(self);
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle); /* walks the child list */
+    result = node_children_tuple(self);
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 static PyObject *node_get_descendants(PyObject *self, void *Py_UNUSED(closure)) {
@@ -447,16 +451,30 @@ static PyObject *node_get_stripped_strings(PyObject *self, void *Py_UNUSED(closu
     return string_walker_new(state_of(self), node->handle, node->node, 1);
 }
 
+/* .text/.html/.inner_html walk the whole subtree, so hold the per-tree lock so a
+   concurrent mutate cannot rewire it mid-walk (a no-op on the GIL build). */
 static PyObject *node_get_text(PyObject *self, void *Py_UNUSED(closure)) {
-    return str_from_accessor(th_node_text, tree_of(self), ((NodeObject *)self)->node);
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    result = str_from_accessor(th_node_text, tree_of(self), ((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 static PyObject *node_get_html(PyObject *self, void *Py_UNUSED(closure)) {
-    return str_from_accessor(th_node_html, tree_of(self), ((NodeObject *)self)->node);
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    result = str_from_accessor(th_node_html, tree_of(self), ((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 static PyObject *node_get_inner_html(PyObject *self, void *Py_UNUSED(closure)) {
-    return str_from_accessor(th_node_inner_html, tree_of(self), ((NodeObject *)self)->node);
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    result = str_from_accessor(th_node_inner_html, tree_of(self), ((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 static PyGetSetDef node_getset[] = {
@@ -834,13 +852,22 @@ static PyObject *attrs_subscript(PyObject *self, PyObject *key) {
         return NULL;
     }
     th_node *node = ((AttrsObject *)self)->node;
-    Py_ssize_t index = find_attr_index(tree_of(self), node, name, len);
+    Py_ssize_t index;
+    PyObject *result = NULL;
+    /* hold the per-tree lock across the lookup and the value read so a concurrent attr
+       set/del cannot resize the attribute array between them (a no-op on the GIL build) */
+    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    index = find_attr_index(tree_of(self), node, name, len);
+    if (index >= 0) {
+        result = attr_value_obj(&node->attrs[index]);
+    }
+    Py_END_CRITICAL_SECTION();
     PyMem_Free(name);
     if (index < 0) {
         PyErr_SetObject(PyExc_KeyError, key);
         return NULL;
     }
-    return attr_value_obj(&node->attrs[index]);
+    return result;
 }
 
 static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
@@ -852,7 +879,10 @@ static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
         if (name == NULL) {
             return -1;
         }
-        int removed = th_node_attr_del(tree, node, name, len);
+        int removed;
+        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+        removed = th_node_attr_del(tree, node, name, len);
+        Py_END_CRITICAL_SECTION();
         PyMem_Free(name);
         if (!removed) {
             PyErr_SetObject(PyExc_KeyError, key);
@@ -876,7 +906,12 @@ static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
     Py_ssize_t value_len;
     int has_value;
     int bad = element_attr_value(value, &points, &value_len, &has_value) < 0;
-    int rc = bad ? -1 : th_node_attr_set(tree, node, name, len, points, value_len, has_value);
+    int rc = -1;
+    if (!bad) {
+        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+        rc = th_node_attr_set(tree, node, name, len, points, value_len, has_value);
+        Py_END_CRITICAL_SECTION();
+    }
     PyMem_Free(name);
     if (!bad) {
         PyMem_Free(points);
@@ -893,7 +928,10 @@ static int attrs_contains(PyObject *self, PyObject *key) {
     if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here, so this cannot fail */
         return -1;      /* GCOVR_EXCL_LINE: unreachable */
     }
-    Py_ssize_t index = find_attr_index(tree_of(self), ((AttrsObject *)self)->node, name, len);
+    Py_ssize_t index;
+    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    index = find_attr_index(tree_of(self), ((AttrsObject *)self)->node, name, len);
+    Py_END_CRITICAL_SECTION();
     PyMem_Free(name);
     return index >= 0;
 }
@@ -987,10 +1025,17 @@ static PyObject *attrs_get(PyObject *self, PyObject *args) {
             return NULL;    /* GCOVR_EXCL_LINE: unreachable */
         }
         th_node *node = ((AttrsObject *)self)->node;
-        Py_ssize_t index = find_attr_index(tree_of(self), node, name, len);
+        Py_ssize_t index;
+        PyObject *result = NULL;
+        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+        index = find_attr_index(tree_of(self), node, name, len);
+        if (index >= 0) {
+            result = attr_value_obj(&node->attrs[index]);
+        }
+        Py_END_CRITICAL_SECTION();
         PyMem_Free(name);
         if (index >= 0) {
-            return attr_value_obj(&node->attrs[index]);
+            return result;
         }
     }
     return Py_NewRef(fallback);
@@ -1526,9 +1571,13 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
     module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
     th_node *origin = ((NodeObject *)self)->node;
     th_node *found = NULL;
     int error = 0;
+    /* hold the per-tree lock across the walk so a concurrent extract() cannot rewire
+       the child/sibling pointers mid-read (a no-op on the GIL build) */
+    Py_BEGIN_CRITICAL_SECTION(handle);
     if (query_is_simple_tag(&query)) {
         /* the first element whose atom matches, found with an integer compare */
         for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
@@ -1550,6 +1599,7 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
             }
         }
     }
+    Py_END_CRITICAL_SECTION();
     free_query(&query);
     if (error) {
         return NULL;
@@ -1585,6 +1635,9 @@ static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs)
     int error = 0;
     /* a non-element node carries TH_TAG_UNKNOWN, so the atom compare alone
        selects the right elements on the fast path */
+    /* hold the per-tree lock across the walk so a concurrent extract() cannot rewire
+       the child/sibling pointers mid-read (a no-op on the GIL build) */
+    Py_BEGIN_CRITICAL_SECTION(handle);
     if (query_is_simple_tag(&query)) {
         for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
             if (query.limit >= 0 && PyList_GET_SIZE(out) >= query.limit) {
@@ -1614,6 +1667,7 @@ static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs)
             }
         }
     }
+    Py_END_CRITICAL_SECTION();
     free_query(&query);
     if (error) {
         Py_DECREF(out);
@@ -1649,6 +1703,7 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
        with sel_match_simple directly, skipping the group/combinator machinery */
     const sel_simple *single = sel_single_simple(compiled);
     int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: a concurrent mutate must not rewire mid-walk */
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
         if (node->type != TH_NODE_ELEMENT) {
             continue;
@@ -1659,6 +1714,7 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
             break;                                                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
+    Py_END_CRITICAL_SECTION();
     selector_free(compiled);
     if (error) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_DECREF(out); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1675,6 +1731,7 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
     th_node *origin = ((NodeObject *)self)->node;
     const sel_simple *single = sel_single_simple(compiled);
     th_node *found = NULL;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle); /* per-tree lock around the walk */
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
         if (node->type != TH_NODE_ELEMENT) {
             continue;
@@ -1684,6 +1741,7 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
             break;
         }
     }
+    Py_END_CRITICAL_SECTION();
     selector_free(compiled);
     return node_wrap(state_of(self), ((NodeObject *)self)->handle, found);
 }
@@ -1694,7 +1752,10 @@ static PyObject *node_css_matches(PyObject *self, PyObject *arg) {
         return NULL;
     }
     th_node *node = ((NodeObject *)self)->node;
-    int matched = node->type == TH_NODE_ELEMENT && selector_matches(node, compiled);
+    int matched;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle); /* selector_matches walks ancestors/siblings */
+    matched = node->type == TH_NODE_ELEMENT && selector_matches(node, compiled);
+    Py_END_CRITICAL_SECTION();
     selector_free(compiled);
     return PyBool_FromLong(matched);
 }
@@ -1705,12 +1766,14 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg) {
         return NULL;
     }
     th_node *found = NULL;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle); /* per-tree lock around the ancestor walk */
     for (th_node *node = ((NodeObject *)self)->node; node != NULL; node = node->parent) {
         if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled)) {
             found = node;
             break;
         }
     }
+    Py_END_CRITICAL_SECTION();
     selector_free(compiled);
     return node_wrap(state_of(self), ((NodeObject *)self)->handle, found);
 }
@@ -1786,8 +1849,12 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
         return NULL;
     }
     Py_ssize_t out_len;
-    Py_UCS4 *data =
-        th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+    Py_UCS4 *data;
+    /* the serializer walks the whole subtree; hold the per-tree lock so a concurrent
+       mutate cannot rewire it mid-walk (a no-op on the GIL build) */
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+    Py_END_CRITICAL_SECTION();
     PyMem_Free(indent);
     if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -2244,7 +2311,11 @@ static th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *c
         PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    /* the caller holds the destination tree's lock; detaching from the source tree (a
+       different tree here) takes the source's lock so it cannot race a source mutation */
+    Py_BEGIN_CRITICAL_SECTION(child->handle);
     th_node_remove(child->node);
+    Py_END_CRITICAL_SECTION();
     Py_SETREF(child->handle, Py_NewRef(anchor->handle));
     child->node = copy;
     return copy;
@@ -2259,11 +2330,17 @@ static int is_same_node(PyObject *self, PyObject *new_obj, th_node *ref) {
 
 static PyObject *element_append(PyObject *self, PyObject *child) {
     th_node *parent = ((NodeObject *)self)->node;
+    int error;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node *node = adopt_into((NodeObject *)self, parent, child);
-    if (node == NULL) {
+    error = node == NULL;
+    if (node != NULL) {
+        th_node_append_child(parent, node);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
         return NULL;
     }
-    th_node_append_child(parent, node);
     Py_RETURN_NONE;
 }
 
@@ -2274,17 +2351,20 @@ static PyObject *element_extend(PyObject *self, PyObject *iterable) {
     }
     th_node *parent = ((NodeObject *)self)->node;
     PyObject *child;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     while ((child = PyIter_Next(iterator)) != NULL) {
         th_node *node = adopt_into((NodeObject *)self, parent, child);
         Py_DECREF(child);
         if (node == NULL) {
-            Py_DECREF(iterator);
-            return NULL;
+            error = 1;
+            break;
         }
         th_node_append_child(parent, node);
     }
+    Py_END_CRITICAL_SECTION();
     Py_DECREF(iterator);
-    if (PyErr_Occurred()) {
+    if (error || PyErr_Occurred()) {
         return NULL;
     }
     Py_RETURN_NONE;
@@ -2297,6 +2377,8 @@ static PyObject *element_insert(PyObject *self, PyObject *args) {
         return NULL;
     }
     th_node *parent = ((NodeObject *)self)->node;
+    int error;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     Py_ssize_t count = 0;
     for (th_node *walk = parent->first_child; walk != NULL; walk = walk->next_sibling) {
         count++;
@@ -2312,23 +2394,31 @@ static PyObject *element_insert(PyObject *self, PyObject *args) {
         }
     }
     th_node *node = adopt_into((NodeObject *)self, parent, child);
-    if (node == NULL) {
+    error = node == NULL;
+    if (node != NULL) {
+        th_node_insert_before(parent, node, ref != NULL && ref->parent == parent ? ref : NULL);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
         return NULL;
     }
-    th_node_insert_before(parent, node, ref != NULL && ref->parent == parent ? ref : NULL);
     Py_RETURN_NONE;
 }
 
 static PyObject *element_clear(PyObject *self, PyObject *Py_UNUSED(ignored)) {
     th_node *parent = ((NodeObject *)self)->node;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     while (parent->first_child != NULL) {
         th_node_remove(parent->first_child);
     }
+    Py_END_CRITICAL_SECTION();
     Py_RETURN_NONE;
 }
 
 static PyObject *element_normalize(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node_normalize(tree_of(self), ((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
     Py_RETURN_NONE;
 }
 
@@ -2342,12 +2432,18 @@ static th_node *sibling_parent(PyObject *self) {
     return parent;
 }
 
+/* The structural edits hold the per-tree lock around the pointer rewiring so a
+   concurrent read/mutate cannot observe a half-linked tree (a no-op on the GIL
+   build). adopt_into may run under the section; on a blocking point the section
+   suspends safely and the NULL-guarded walks stay memory-safe. */
 static PyObject *node_insert_before(PyObject *self, PyObject *nodes) {
     th_node *ref = ((NodeObject *)self)->node;
     th_node *parent = sibling_parent(self);
     if (parent == NULL) {
         return NULL;
     }
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
         PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
         if (is_same_node(self, new_obj, ref)) {
@@ -2355,9 +2451,14 @@ static PyObject *node_insert_before(PyObject *self, PyObject *nodes) {
         }
         th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
         if (node == NULL) {
-            return NULL;
+            error = 1;
+            break;
         }
         th_node_insert_before(parent, node, ref);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
     }
     Py_RETURN_NONE;
 }
@@ -2368,6 +2469,8 @@ static PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
     if (parent == NULL) {
         return NULL;
     }
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
         PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
         if (is_same_node(self, new_obj, cursor)) {
@@ -2375,10 +2478,15 @@ static PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
         }
         th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
         if (node == NULL) {
-            return NULL;
+            error = 1;
+            break;
         }
         th_node_insert_before(parent, node, cursor->next_sibling);
         cursor = node; /* keep multiple inserts in argument order after this node */
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
     }
     Py_RETURN_NONE;
 }
@@ -2390,6 +2498,8 @@ static PyObject *node_replace_with(PyObject *self, PyObject *nodes) {
         return NULL;
     }
     int keep_self = 0;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
         PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
         if (is_same_node(self, new_obj, ref)) {
@@ -2398,12 +2508,17 @@ static PyObject *node_replace_with(PyObject *self, PyObject *nodes) {
         }
         th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
         if (node == NULL) {
-            return NULL;
+            error = 1;
+            break;
         }
         th_node_insert_before(parent, node, ref);
     }
-    if (!keep_self) {
+    if (!error && !keep_self) {
         th_node_remove(ref);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
     }
     Py_RETURN_NONE;
 }
@@ -2417,21 +2532,29 @@ static PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
     }
     NodeObject *node = (NodeObject *)self;
     th_node *parent = node->node->parent;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     if (parent != NULL) {
         th_node *wrapper = adopt_into(node, parent, wrapper_obj);
         if (wrapper == NULL) {
-            return NULL;
+            error = 1;
+        } else {
+            th_node_insert_before(parent, wrapper, node->node);
+            th_node_remove(node->node);
+            th_node_append_child(wrapper, node->node);
         }
-        th_node_insert_before(parent, wrapper, node->node);
-        th_node_remove(node->node);
-        th_node_append_child(wrapper, node->node);
     } else {
         NodeObject *wrapper = (NodeObject *)wrapper_obj;
         th_node *moved = adopt_into(wrapper, wrapper->node, self);
         if (moved == NULL) {
-            return NULL;
+            error = 1;
+        } else {
+            th_node_append_child(wrapper->node, moved);
         }
-        th_node_append_child(wrapper->node, moved);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
     }
     return Py_NewRef(wrapper_obj);
 }
@@ -2442,22 +2565,28 @@ static PyObject *node_unwrap(PyObject *self, PyObject *Py_UNUSED(ignored)) {
     if (parent == NULL) {
         return NULL;
     }
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     while (node->first_child != NULL) {
         th_node *child = node->first_child;
         th_node_remove(child);
         th_node_insert_before(parent, child, node);
     }
     th_node_remove(node);
+    Py_END_CRITICAL_SECTION();
     return Py_NewRef(self);
 }
 
 static PyObject *node_extract(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node_remove(((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
     return Py_NewRef(self);
 }
 
 static PyObject *node_decompose(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node_remove(((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
     Py_RETURN_NONE;
 }
 
@@ -2487,7 +2616,10 @@ static int node_set_data(PyObject *self, PyObject *value, void *Py_UNUSED(closur
     if (points == NULL) {
         return -1;
     }
-    int rc = th_node_set_data(tree_of(self), ((NodeObject *)self)->node, points, len);
+    int rc;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    rc = th_node_set_data(tree_of(self), ((NodeObject *)self)->node, points, len);
+    Py_END_CRITICAL_SECTION();
     PyMem_Free(points);
     return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on OOM */
 }
@@ -2500,19 +2632,23 @@ static int element_set_text(PyObject *self, PyObject *value, void *Py_UNUSED(clo
     }
     th_node *node = ((NodeObject *)self)->node;
     th_tree *tree = tree_of(self);
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     while (node->first_child != NULL) {
         th_node_remove(node->first_child);
     }
-    if (len > 0) {
-        th_node *text = th_tree_make_data_node(tree, TH_NODE_TEXT, points, len);
-        if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            PyMem_Free(points); /* GCOVR_EXCL_LINE: allocation-failure path */
-            return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
+    th_node *text = len > 0 ? th_tree_make_data_node(tree, TH_NODE_TEXT, points, len) : NULL;
+    /* GCOVR_EXCL_START: a make_data_node allocation failure cannot be forced from a test */
+    if (len > 0 && text == NULL) {
+        error = 1;
+    }
+    /* GCOVR_EXCL_STOP */
+    if (text != NULL) {
         th_node_append_child(node, text);
     }
+    Py_END_CRITICAL_SECTION();
     PyMem_Free(points);
-    return 0;
+    return error ? -1 : 0; /* GCOVR_EXCL_BR_LINE: error is set only on the excluded allocation failure */
 }
 
 static PyGetSetDef data_getset[] = {

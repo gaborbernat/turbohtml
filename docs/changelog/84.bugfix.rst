@@ -1,0 +1,8 @@
+Make the navigable node tree memory-safe under the free-threaded build. The ``_html`` extension declares
+``Py_MOD_GIL_NOT_USED``, so concurrent access to one shared tree was a data race: a reader walking child and sibling
+pointers (``find``/``find_all``/``select``/``serialize``/``.text``/``.html``) could dereference a pointer that another
+thread rewired through ``extract`` or another structural edit, segfaulting. Every read traversal and every mutation now
+takes a per-tree :c:macro:`Py_BEGIN_CRITICAL_SECTION` on the owning tree handle, a no-op on the GIL build (so
+single-threaded performance is unchanged) and a cheap per-tree lock on the free-threaded build (so independent trees
+still run fully in parallel), mirroring the tokenizer fix and CPython's own list and dict. The free-threaded test
+matrix now also covers Python 3.13t alongside 3.14t and 3.15t.
