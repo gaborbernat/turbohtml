@@ -115,6 +115,17 @@ def test_attr_on_non_tag_returns_default() -> None:
     assert text.attr("x", "fallback") == "fallback"
 
 
+def test_attr_name_must_be_str() -> None:
+    # a str-typed name rejects bytes (no silent latin-1 match) and other wrong types, naming str
+    (tag,) = list(tokenize("<a href=x>"))
+    with pytest.raises(TypeError):
+        tag.attr(b"href")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError):
+        tag.attr(123)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(UnicodeEncodeError):
+        tag.attr("\udfff")  # a lone surrogate has no UTF-8 form
+
+
 def test_token_repr() -> None:
     tokens = list(tokenize("a<p x=1></p><!--c--><!DOCTYPE html>"))
     assert repr(tokens[0]) == "Token(TEXT, data='a')"

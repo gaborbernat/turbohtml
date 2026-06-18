@@ -56,11 +56,18 @@ def test_template_content_is_a_bare_node(find: Callable[[str, str], Element]) ->
     [
         pytest.param(lambda: parse(123), id="parse"),  # ty: ignore[invalid-argument-type]  # not str or bytes-like
         pytest.param(lambda: parse_fragment(b"x"), id="parse_fragment"),  # ty: ignore[invalid-argument-type]  # non-str
+        # a str-typed context rejects bytes instead of latin-1-decoding it into a garbage tag name
+        pytest.param(lambda: parse_fragment("<a>", b"svg"), id="context"),  # ty: ignore[invalid-argument-type]
     ],
 )
 def test_entry_points_reject_non_str(call: Callable[[], object]) -> None:
     with pytest.raises(TypeError):
         call()
+
+
+def test_parse_fragment_context_with_lone_surrogate_is_rejected() -> None:
+    with pytest.raises(UnicodeEncodeError):
+        parse_fragment("<a>", "\udfff")  # a lone surrogate has no UTF-8 form
 
 
 @pytest.mark.parametrize(

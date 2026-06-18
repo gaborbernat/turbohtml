@@ -2829,10 +2829,18 @@ PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs) {
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs) {
     static char *keywords[] = {"html", "context", NULL};
     PyObject *text;
+    PyObject *context_obj = NULL;
+    /* require str: the "s#" format also accepts bytes, which would decode as latin-1 garbage */
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "U|U:parse_fragment", keywords, &text, &context_obj)) {
+        return NULL;
+    }
     const char *context = "div";
     Py_ssize_t context_len = 3;
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "U|s#:parse_fragment", keywords, &text, &context, &context_len)) {
-        return NULL;
+    if (context_obj != NULL) {
+        context = PyUnicode_AsUTF8AndSize(context_obj, &context_len);
+        if (context == NULL) { /* a lone-surrogate context has no UTF-8 form */
+            return NULL;
+        }
     }
     th_tree *tree = th_tree_parse_fragment(PyUnicode_KIND(text), PyUnicode_DATA(text), PyUnicode_GET_LENGTH(text),
                                            context, context_len);

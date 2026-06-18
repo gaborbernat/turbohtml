@@ -281,10 +281,15 @@ PyDoc_STRVAR(token_attr_doc, "attr(name, default=None)\n--\n\n"
                              "attribute yields None; a missing attribute yields default.");
 
 static PyObject *token_attr(PyObject *self, PyObject *args) {
-    const char *name;
-    Py_ssize_t name_len;
+    PyObject *name_obj;
     PyObject *fallback = Py_None;
-    if (!PyArg_ParseTuple(args, "s#|O:attr", &name, &name_len, &fallback)) {
+    /* require str: the "s#" format also accepts bytes, silently matching a latin-1-decoded name */
+    if (!PyArg_ParseTuple(args, "U|O:attr", &name_obj, &fallback)) {
+        return NULL;
+    }
+    Py_ssize_t name_len;
+    const char *name = PyUnicode_AsUTF8AndSize(name_obj, &name_len);
+    if (name == NULL) { /* a lone-surrogate name has no UTF-8 form */
         return NULL;
     }
     const th_token *record = &((TokenObject *)self)->record;
