@@ -10,6 +10,7 @@ strings), and source positions.
 from __future__ import annotations
 
 import gc
+import threading
 import tracemalloc
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING
@@ -580,3 +581,25 @@ def test_feed_keeps_input_while_a_token_is_queued() -> None:
     tokenizer.feed("z")
     tokens = [first, *tokenizer, *tokenizer.close()]
     assert [_shape(token) for token in tokens] == [_shape(token) for token in tokenize("x<a>z")]
+
+
+def test_concurrent_feed_on_shared_tokenizer_is_memory_safe() -> None:
+    # the shared state machine, its record buffers, and its free list are guarded by a
+    # per-tokenizer critical section, so concurrent feed()/iteration on the free-threaded
+    # interpreter must not corrupt the heap (it segfaulted before); under the GIL this just
+    # exercises the locked paths
+    tokenizer = Tokenizer()
+    chunks = ["<div class='a'>hi</div>", "<p>x</p>", "<a href='x'>l</a>", "<!-- c -->", "<span>partial"]
+
+    def work() -> None:
+        for _ in range(200):
+            for chunk in chunks:
+                for _token in tokenizer.feed(chunk):
+                    pass
+
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    list(tokenizer.close())

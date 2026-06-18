@@ -14,6 +14,15 @@
 
 #include "tokenizer_sm.h"
 
+/* Py_BEGIN_CRITICAL_SECTION arrived in 3.13 for the free-threaded build; on a GIL
+   build it is a brace no-op, and before 3.13 (always GIL) we define the same no-op,
+   so the tokenizer's per-object locking compiles on every supported interpreter
+   while only the free-threaded build pays for a real lock. */
+#ifndef Py_BEGIN_CRITICAL_SECTION
+#define Py_BEGIN_CRITICAL_SECTION(op) {
+#define Py_END_CRITICAL_SECTION() }
+#endif
+
 typedef struct {
     PyObject *token_type;         /* Token */
     PyObject *tokenizer_type;     /* Tokenizer */

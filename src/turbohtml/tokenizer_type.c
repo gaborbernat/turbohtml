@@ -92,15 +92,20 @@ static void iter_dealloc(PyObject *self) {
 
 static PyObject *iter_next(PyObject *self) {
     module_state *state = state_of(self);
-    th_tokenizer *sm = ((TokenizerObject *)((IterObject *)self)->owner)->sm;
+    TokenizerObject *owner = (TokenizerObject *)((IterObject *)self)->owner;
+    th_tokenizer *sm = owner->sm;
+    PyObject *result = NULL;
+    /* the shared state machine, its record buffers, and its free list are mutated here;
+       lock the owning tokenizer so concurrent feed()/iteration on the free-threaded
+       interpreter cannot corrupt them */
+    Py_BEGIN_CRITICAL_SECTION(owner);
     th_token *record;
     switch (th_tok_next(sm, &record)) { /* GCOVR_EXCL_BR_LINE: the TH_STEP_ERROR edge needs an allocation failure, which
                                            cannot be forced from a test */
     case TH_STEP_TOKEN: {
-        TokenizerObject *owner = (TokenizerObject *)((IterObject *)self)->owner;
-        PyObject *token = token_from_record(state, sm, owner->source, record);
-        if (token == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        result = token_from_record(state, sm, owner->source, record);
+        if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            break;            /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         if (record->kind == TH_START_TAG) {
             int model = content_model_for(&record->name);
@@ -108,13 +113,16 @@ static PyObject *iter_next(PyObject *self) {
                 th_tok_switch(sm, (enum th_initial_state)model);
             }
         }
-        return token;
+        break;
     }
-    case TH_STEP_ERROR:          /* GCOVR_EXCL_LINE: the only step error is an out-of-memory condition */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-    default:                     /* NEED_MORE or DONE: nothing more from this iterator */
-        return NULL;
+    case TH_STEP_ERROR:            /* GCOVR_EXCL_LINE: the only step error is an out-of-memory condition */
+        result = PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        break;                     /* GCOVR_EXCL_LINE */
+    default:                       /* NEED_MORE or DONE: nothing more from this iterator */
+        break;
     }
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 PyDoc_STRVAR(iter_doc, "Iterator over the tokens a Tokenizer has buffered. Yields Token objects.");
@@ -188,7 +196,11 @@ PyDoc_STRVAR(tokenizer_feed_doc, "feed(data)\n--\n\n"
 
 static PyObject *tokenizer_feed(PyObject *self, PyObject *data) {
     th_tokenizer *sm = ((TokenizerObject *)self)->sm;
-    if (feed_string(sm, data) < 0) {
+    int rc;
+    Py_BEGIN_CRITICAL_SECTION(self); /* th_tok_feed mutates the shared state machine */
+    rc = feed_string(sm, data);
+    Py_END_CRITICAL_SECTION();
+    if (rc < 0) {
         return NULL;
     }
     return iter_new(state_of(self), self);
@@ -200,7 +212,9 @@ PyDoc_STRVAR(tokenizer_close_doc, "close()\n--\n\n"
 
 static PyObject *tokenizer_close(PyObject *self, PyObject *Py_UNUSED(ignored)) {
     th_tokenizer *sm = ((TokenizerObject *)self)->sm;
+    Py_BEGIN_CRITICAL_SECTION(self); /* th_tok_close mutates the shared state machine */
     th_tok_close(sm);
+    Py_END_CRITICAL_SECTION();
     return iter_new(state_of(self), self);
 }
 
@@ -208,7 +222,9 @@ PyDoc_STRVAR(tokenizer_reset_doc, "reset()\n--\n\n"
                                   "Discard all input and return to the initial Data state.");
 
 static PyObject *tokenizer_reset(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    Py_BEGIN_CRITICAL_SECTION(self); /* th_tok_reset mutates the shared state machine */
     th_tok_reset(((TokenizerObject *)self)->sm);
+    Py_END_CRITICAL_SECTION();
     Py_RETURN_NONE;
 }
 
@@ -223,7 +239,9 @@ PyDoc_STRVAR(tokenizer_exit_doc, "__exit__(*exc)\n--\n\n"
                                  "tokens stay available: iterate the tokenizer to drain them.");
 
 static PyObject *tokenizer_exit(PyObject *self, PyObject *Py_UNUSED(args)) {
+    Py_BEGIN_CRITICAL_SECTION(self); /* th_tok_close mutates the shared state machine */
     th_tok_close(((TokenizerObject *)self)->sm);
+    Py_END_CRITICAL_SECTION();
     Py_RETURN_NONE;
 }
 
