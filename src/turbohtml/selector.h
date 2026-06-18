@@ -295,6 +295,22 @@ static void sel_attribute(sel_parser *parser, sel_simple *simple) {
     parser->pos++;
 }
 
+/* Parse the local part of a type selector (the part after an optional namespace
+   prefix): '*' for the universal selector or an identifier for a tag name. */
+static void sel_type_local(sel_parser *parser, sel_simple *simple) {
+    if (parser->pos < parser->len && parser->src[parser->pos] == '*') {
+        simple->kind = '*';
+        parser->pos++;
+    } else if (parser->pos < parser->len &&
+               (sel_is_ident(parser->src[parser->pos]) || parser->src[parser->pos] == '\\')) {
+        simple->kind = 'e';
+        sel_ident(parser, &simple->name, &simple->name_len);
+        simple->tag_atom = sel_tag_atom(simple->name, simple->name_len);
+    } else {
+        parser->error = 1; /* a namespace prefix must be followed by '*' or a type */
+    }
+}
+
 /* Parse one simple selector into *simple. */
 static void sel_one(sel_parser *parser, sel_simple *simple) {
     simple->tag_atom = TH_TAG_UNKNOWN;
@@ -306,27 +322,43 @@ static void sel_one(sel_parser *parser, sel_simple *simple) {
     simple->value = NULL;
     simple->value_len = 0;
     Py_UCS4 ch = parser->src[parser->pos];
-    if (ch == '*') {
-        simple->kind = '*';
-        parser->pos++;
-    } else if (ch == '.' || ch == '#') {
+    if (ch == '.' || ch == '#') {
         simple->kind = (char)ch;
         parser->pos++;
         sel_ident(parser, &simple->name, &simple->name_len);
     } else if (ch == '[') {
         parser->pos++;
         sel_attribute(parser, simple);
+    } else if (ch == '|') {
+        /* an empty (no-namespace) prefix; the prefix is ignored in a namespaceless
+           HTML document, so |E reduces to E and |* to the universal selector */
+        parser->pos++;
+        sel_type_local(parser, simple);
+    } else if (ch == '*' && parser->pos + 1 < parser->len && parser->src[parser->pos + 1] == '|') {
+        /* a '*|' any-namespace prefix; ignored in HTML, so *|E reduces to E */
+        parser->pos += 2;
+        sel_type_local(parser, simple);
+    } else if (ch == '*') {
+        simple->kind = '*';
+        parser->pos++;
     } else {
-        /* an identifier: sel_starts_simple guarantees at least one char, so
-           sel_ident here always succeeds */
-        simple->kind = 'e';
+        /* an identifier: a tag name, or a namespace prefix when a '|' follows it.
+           sel_starts_simple guarantees at least one char, so sel_ident succeeds */
         sel_ident(parser, &simple->name, &simple->name_len);
-        simple->tag_atom = sel_tag_atom(simple->name, simple->name_len);
+        if (parser->pos < parser->len && parser->src[parser->pos] == '|') {
+            parser->pos++; /* an 'ns|' prefix; ignored in HTML, only the local part selects */
+            simple->name = NULL;
+            simple->name_len = 0;
+            sel_type_local(parser, simple);
+        } else {
+            simple->kind = 'e';
+            simple->tag_atom = sel_tag_atom(simple->name, simple->name_len);
+        }
     }
 }
 
 static int sel_starts_simple(Py_UCS4 ch) {
-    return ch == '*' || ch == '.' || ch == '#' || ch == '[' || ch == '\\' || sel_is_ident(ch);
+    return ch == '*' || ch == '.' || ch == '#' || ch == '[' || ch == '\\' || ch == '|' || sel_is_ident(ch);
 }
 
 /* Parse a compound (one or more adjacent simples) into the given buffer. */
