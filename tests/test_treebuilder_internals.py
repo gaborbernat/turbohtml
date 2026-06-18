@@ -341,6 +341,24 @@ def test_stray_html_in_colgroup_keeps_it_open() -> None:
 
 
 @pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param("<table>\x00 ", "<table> </table>", id="nul-then-space"),
+        pytest.param("<table> \x00 ", "<table>  </table>", id="space-nul-space"),
+        pytest.param("<table> \x00", "<table> </table>", id="space-then-nul"),
+        # control: a real non-whitespace char still foster-parents the run out of the table
+        pytest.param("<table>x\x00 ", "x <table></table>", id="nonspace-fosters"),
+    ],
+)
+def test_nul_in_table_text_keeps_whitespace_inside(html: str, expected: str) -> None:
+    # a U+0000 in "in table text" is dropped, so an otherwise-whitespace run is inserted
+    # inside the table rather than foster-parented out of it
+    body = parse(html).find("body")
+    assert body is not None
+    assert body.inner_html == expected
+
+
+@pytest.mark.parametrize(
     ("html", "inner"),
     [
         pytest.param("<b><math><mi></b>", "<b><math><mi></mi></math></b>", id="mathml-mi"),

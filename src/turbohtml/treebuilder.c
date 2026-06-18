@@ -2035,6 +2035,19 @@ static int all_whitespace(const Py_UCS4 *text, Py_ssize_t len) {
     return 1;
 }
 
+/* Like all_whitespace, but a U+0000 counts as ignorable: in "in table text" a NUL is
+   a parse error that is dropped, so an otherwise-whitespace run is still inserted in
+   the table rather than foster-parented out of it. */
+static int all_whitespace_or_nul(const Py_UCS4 *text, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 character = text[index];
+        if (character != 0 && !is_space(character)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* The content model a start tag switches the tokenizer into, or -1 for none. */
 static int content_model_for(uint16_t atom, uint8_t flags) {
     if (atom == TH_TAG_SCRIPT) {
@@ -3234,7 +3247,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             if (tok->kind == TH_TEXT) {
                 Py_ssize_t len;
                 Py_UCS4 *text = token_text(tree, tok, &len);
-                if (all_whitespace(text, len)) {
+                if (all_whitespace_or_nul(text, len)) {
                     insert_text(tree, text, len);
                 } else {
                     /* non-space character: foster-parent it out of the table */
