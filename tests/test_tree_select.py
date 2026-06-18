@@ -179,6 +179,29 @@ def test_select_over_custom_html(html: str, selector: str, tags: list[str]) -> N
     assert _sel(html, selector) == tags
 
 
+# Selectors-4 §6.1/§6.2: class and ID selectors match ASCII case-insensitively in a
+# quirks-mode document (no doctype) and case-sensitively otherwise. The body is the
+# same markup under both modes; only the leading doctype flips the document mode.
+@pytest.mark.parametrize(
+    ("selector", "quirks_tags", "standards_tags"),
+    [
+        pytest.param(".foo", ["div"], [], id="class-lowercase-selector"),
+        pytest.param(".FOO", ["div"], ["div"], id="class-exact-case-selector"),
+        pytest.param(".FoO", ["div"], [], id="class-mixed-case-selector"),
+        pytest.param("#bar", ["div"], [], id="id-lowercase-selector"),
+        pytest.param("#BAR", ["div"], ["div"], id="id-exact-case-selector"),
+        pytest.param("#BaR", ["div"], [], id="id-mixed-case-selector"),
+        # the quirks fold reaches selectors nested in :is()/:where()/:has()
+        pytest.param(":is(.foo)", ["div"], [], id="class-in-is"),
+        pytest.param("div:has(> .qux)", ["div"], [], id="class-in-has"),
+    ],
+)
+def test_class_id_case_folds_only_in_quirks(selector: str, quirks_tags: list[str], standards_tags: list[str]) -> None:
+    body = '<div class="FOO BAZ" id="BAR"><span class="QUX">x</span></div>'
+    assert _sel(body, selector) == quirks_tags
+    assert _sel(f"<!doctype html>{body}", selector) == standards_tags
+
+
 # a five-item list, a mixed-type container, and custom-element siblings so the
 # of-type pseudo-classes exercise both the builtin-atom and custom-name paths
 _PSEUDO = (

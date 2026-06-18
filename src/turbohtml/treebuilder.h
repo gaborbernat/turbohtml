@@ -167,6 +167,11 @@ th_node *th_tree_document(th_tree *tree);
    cached compiled selector whose attribute atoms were resolved against the tree. */
 uint32_t th_tree_attr_generation(const th_tree *tree);
 
+/* Whether the tree was parsed in quirks mode (no doctype or a quirky one). In
+   quirks mode CSS class and ID selectors match ASCII case-insensitively
+   (Selectors-4 §6.1/§6.2); programmatic trees default to no-quirks. */
+int th_tree_quirks(const th_tree *tree);
+
 /* Materialize one text/comment/doctype node's own character data (realizing a
    zero-copy span on demand) into a freshly PyMem-allocated UCS4 buffer.
    *out_len receives the length; returns NULL on allocation failure. */

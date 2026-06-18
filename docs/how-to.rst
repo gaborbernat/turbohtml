@@ -369,6 +369,21 @@ when a relative selector finds a match anchored at it:
     ['Post']
     ['h1', 'figure', 'h1']
 
+``#id`` and ``.class`` selectors compare case-sensitively in a standards-mode document and ASCII case-insensitively in a
+quirks-mode one (a document with no doctype), matching how a browser resolves them. Add a ``<!doctype html>`` to keep
+the comparison exact:
+
+.. testcode::
+
+    markup = '<div class="Lead" id="Main">x</div>'
+    print(turbohtml.parse(markup).select_one(".lead").tag)  # quirks: folds case
+    print(turbohtml.parse("<!doctype html>" + markup).select_one(".lead"))  # standards: exact
+
+.. testoutput::
+
+    div
+    None
+
 To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node
 match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
 
