@@ -1,0 +1,5 @@
+Resolve the WHATWG "replacement" encoding labels (``replacement``, ``iso-2022-kr``, ``csiso2022kr``, ``iso-2022-cn``,
+``iso-2022-cn-ext``, ``hz-gb-2312``) to the replacement decoder instead of windows-1252. These stateful ISO-2022/HZ
+escape sequences can smuggle markup past a sanitizer, so the standard mandates that a document declaring one of these
+labels decode its entire non-empty body to a single ``U+FFFD``. Previously the labels were unknown and the body was
+decoded literally as windows-1252.
