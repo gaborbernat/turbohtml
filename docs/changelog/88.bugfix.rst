@@ -1,0 +1,4 @@
+Insert whitespace seen in the "after head" insertion mode under the ``html`` element, between ``head`` and ``body``,
+rather than inside the ``body``. The leading whitespace of a mixed text run such as ``<head></head> text`` now becomes a
+text node child of ``html`` and only the first non-whitespace character creates the ``body`` and starts "in body",
+matching the WHATWG algorithm and html5lib.

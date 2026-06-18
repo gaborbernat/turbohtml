@@ -2484,10 +2484,17 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             if (tok->kind == TH_TEXT) {
                 Py_ssize_t len;
                 Py_UCS4 *text = token_text(tree, tok, &len);
-                if (all_whitespace(text, len)) {
-                    insert_text(tree, text, len);
+                Py_ssize_t ws = 0;
+                while (ws < len && is_space(text[ws])) {
+                    ws++;
+                }
+                if (ws > 0) {
+                    insert_text(tree, text, ws); /* leading whitespace goes under html, between head and body */
+                }
+                if (ws == len) {
                     break;
                 }
+                tree->text_offset += ws; /* the body is created below; reprocess only the remainder there */
             }
             if (tok->kind == TH_COMMENT) {
                 insert_comment(tree, tok, NULL);
