@@ -196,10 +196,40 @@ def test_select_one() -> None:
 
 
 @pytest.mark.parametrize(
+    ("selector", "tags"),
+    [
+        # a namespace prefix is ignored in a namespaceless HTML document
+        pytest.param("*|a", ["a"], id="any-ns-type"),
+        pytest.param("|a", ["a"], id="no-ns-type"),
+        pytest.param("ns|a", ["a"], id="named-ns-type"),
+        pytest.param("*|*", ["html", "head", "body", "root", "a", "b"], id="any-ns-universal"),
+        pytest.param("|*", ["html", "head", "body", "root", "a", "b"], id="no-ns-universal"),
+        pytest.param("ns|*", ["html", "head", "body", "root", "a", "b"], id="named-ns-universal"),
+    ],
+)
+def test_namespace_prefixed_type_selectors(selector: str, tags: list[str]) -> None:
+    assert _sel("<root><a>1</a><b>2</b></root>", selector) == tags
+
+
+def test_universal_followed_by_simple_is_not_a_namespace_prefix() -> None:
+    # a '*' not followed by '|' is the plain universal selector, then the next simple
+    assert _sel("<root><a class=x>1</a><b>2</b></root>", "*.x") == ["a"]
+
+
+def test_namespace_prefixed_local_part_decodes_escapes() -> None:
+    # the local part after a namespace prefix is a full identifier, so it decodes escapes
+    assert _sel("<root><a>1</a></root>", "*|\\61") == ["a"]
+
+
+@pytest.mark.parametrize(
     "selector",
     [
         pytest.param("", id="empty"),
         pytest.param("  ", id="whitespace"),
+        # a namespace prefix must be followed by a type or the universal selector
+        pytest.param("*|", id="star-prefix-at-eof"),
+        pytest.param("|", id="bare-pipe"),
+        pytest.param("*|[a]", id="prefix-then-attribute"),
         pytest.param(".", id="bare-dot"),
         pytest.param("#", id="bare-hash"),
         pytest.param("p..", id="double-dot"),
