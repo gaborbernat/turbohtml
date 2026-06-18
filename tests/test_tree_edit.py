@@ -43,16 +43,14 @@ def test_append_adopts_subtree_from_another_tree() -> None:
 
 def test_append_adopts_every_attribute_shape() -> None:
     # data-custom-xyz is no known atom, so adoption must re-intern its name across
-    # trees; the valueless and empty-but-present values must survive the copy too
+    # trees; the valueless and empty values (both "") must survive the copy too
     source = Element("x", {"data-custom-xyz": "1", "disabled": None, "value": ""})
     box = Element("div")
     box.append(source)
     held = _found(box, "x")
     assert held.attrs["data-custom-xyz"] == "1"
-    assert held.attrs["disabled"] is None  # a valueless attribute stays valueless
-    value = held.attrs["value"]
-    assert value is not None  # an empty value stays present, unlike a valueless one
-    assert not value  # but is empty
+    assert held.attrs["disabled"] == ""  # noqa: PLC1901  # exactly "" (valueless reads empty), not None
+    assert held.attrs["value"] == ""  # noqa: PLC1901  # exactly ""
 
 
 def test_append_adopts_an_empty_data_node() -> None:

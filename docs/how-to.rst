@@ -149,8 +149,8 @@ foreign content). Code ported from ``html.parser`` sees the same tokens a browse
  Extract the links of a page
 *****************************
 
-Iterate the token stream and pull the ``href`` of every anchor start tag; :meth:`turbohtml.Token.attr` returns ``None``
-for a valueless attribute and your fallback when the attribute is missing:
+Iterate the token stream and pull the ``href`` of every anchor start tag; :meth:`turbohtml.Token.attr` returns the empty
+string for a valueless attribute and your fallback when the attribute is missing:
 
 .. testcode::
 
