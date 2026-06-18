@@ -369,6 +369,17 @@ _PSEUDO_DOC = (
         # an interior compound that matches only an ancestor of the anchor (main is
         # above section) is not within the anchor's subtree, so :has() does not match
         pytest.param("section:has(main p)", [], id="has-interior-compound-above-anchor"),
+        # :not() keeps an element when it matches none of its (non-forgiving) arms
+        pytest.param("p:not(.lead)", ["p"], id="not-simple"),
+        pytest.param("li:not(.sel)", ["li"], id="not-class-miss"),
+        pytest.param("p:not(.lead, .none)", ["p"], id="not-list"),
+        pytest.param("p:not(.missing)", ["p", "p"], id="not-no-arm-matches"),
+        pytest.param("p:not(:has(a))", ["p"], id="not-with-has"),
+        pytest.param("section > :not(h2)", ["p", "p", "ul"], id="not-child-subject"),
+        pytest.param(":not(html, head, body, section, ul, aside, main *)", ["main"], id="not-complex-arm"),
+        pytest.param("li:not(.sel):not(.none)", ["li"], id="not-chained"),
+        pytest.param(":is(li):not(.sel)", ["li"], id="not-after-is"),
+        pytest.param("section:not(*)", [], id="not-universal-excludes-all"),
     ],
 )
 def test_functional_pseudo_classes(selector: str, tags: list[str]) -> None:
@@ -399,6 +410,13 @@ def test_has_skips_non_element_following_sibling() -> None:
         pytest.param(":1s(p)", id="pseudo-name-with-digit"),  # a below-'A' byte in the case fold
         pytest.param(":is(p):has(", id="pseudo-then-failing-pseudo"),
         pytest.param(":has(>)", id="has-dangling-combinator"),
+        # :not() takes a non-forgiving selector list, so any bad arm invalidates it
+        pytest.param(":not", id="not-without-args"),
+        pytest.param(":not(", id="not-unterminated"),
+        pytest.param(":not()", id="not-empty-args"),
+        pytest.param(":not(.)", id="not-invalid-inner"),
+        pytest.param(":not(:bogus)", id="not-unknown-nested-pseudo"),
+        pytest.param(":not(p,)", id="not-trailing-comma"),
         # a namespace prefix must be followed by a type or the universal selector
         pytest.param("*|", id="star-prefix-at-eof"),
         pytest.param("|", id="bare-pipe"),

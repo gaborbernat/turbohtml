@@ -3,7 +3,7 @@
    names resolve to interned atoms once and every match is an integer compare.
    Matching is right-to-left with backtracking on the descendant and general
    sibling combinators. This covers the common subset: type, universal, class,
-   id, attribute operators, the four combinators, the :is()/:where()/:has()
+   id, attribute operators, the four combinators, the :is()/:where()/:has()/:not()
    functional pseudo-classes, all grouped by commas. */
 
 #ifndef TURBOHTML_SELECTOR_H
@@ -19,8 +19,8 @@ enum sel_attr_op { OP_EXISTS, OP_EQ, OP_INCLUDE, OP_DASH, OP_PREFIX, OP_SUFFIX, 
 typedef struct sel_complex sel_complex;
 
 /* ':' pseudo-classes. The structural ones have fixed meaning (the nth-* variants
-   carry An+B in nth_a/nth_b); the functional ones (:is/:where/:has) carry a nested
-   selector list in sub. */
+   carry An+B in nth_a/nth_b); the functional ones (:is/:where/:has/:not) carry a
+   nested selector list in sub. */
 enum sel_pseudo {
     PSEUDO_NONE,
     PSEUDO_ROOT,
@@ -38,6 +38,7 @@ enum sel_pseudo {
     PSEUDO_IS,
     PSEUDO_WHERE,
     PSEUDO_HAS,
+    PSEUDO_NOT,
 };
 
 typedef struct {
@@ -54,7 +55,7 @@ typedef struct {
     Py_ssize_t name_len;  /* also the attribute name for the rare unknown case */
     const Py_UCS4 *value; /* '[': the attribute value */
     Py_ssize_t value_len;
-    sel_complex *sub; /* ':': the nested selector list for :is()/:where()/:has() */
+    sel_complex *sub; /* ':': the nested selector list for :is()/:where()/:has()/:not() */
     int sub_count;    /* ':': number of comma-separated alternatives in sub */
 } sel_simple;
 
@@ -441,7 +442,7 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
         return;
     }
     int functional = PSEUDO_NONE; /* an nth-* pseudo-class taking An+B */
-    int listy = PSEUDO_NONE;      /* :is()/:where()/:has() taking a selector list */
+    int listy = PSEUDO_NONE;      /* :is()/:where()/:has()/:not() taking a selector list */
     if (sel_kw(name, name_len, "root")) {
         simple->pseudo = PSEUDO_ROOT;
     } else if (sel_kw(name, name_len, "empty")) {
@@ -472,6 +473,8 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
         listy = PSEUDO_WHERE;
     } else if (sel_kw(name, name_len, "has")) {
         listy = PSEUDO_HAS;
+    } else if (sel_kw(name, name_len, "not")) {
+        listy = PSEUDO_NOT;
     } else {
         parser->error = 1; /* an unknown pseudo-class invalidates the selector */
         return;
@@ -951,10 +954,13 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, int quirks)
     case PSEUDO_NTH_LAST_OF_TYPE:
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 1));
     /* the functional pseudo-classes: :is()/:where() match the element against the
-       nested list; :has() searches for a relative match anchored at it */
+       nested list; :not() is its negation; :has() searches for a relative match
+       anchored at it */
     case PSEUDO_IS:
     case PSEUDO_WHERE:
         return sel_matches_alts(node, simple->sub, simple->sub_count, quirks);
+    case PSEUDO_NOT:
+        return !sel_matches_alts(node, simple->sub, simple->sub_count, quirks);
     default: /* PSEUDO_HAS */
         return sel_has_match(node, simple->sub, simple->sub_count, quirks);
     }

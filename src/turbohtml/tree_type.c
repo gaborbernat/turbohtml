@@ -623,7 +623,9 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 
 PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
-                         "document order.");
+                         "document order. The selector grammar covers type, #id, .class, and\n"
+                         "attribute selectors, the four combinators, the structural pseudo-classes,\n"
+                         "and the :is(), :where(), :has(), and :not() functional pseudo-classes.");
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");
