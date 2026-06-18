@@ -392,7 +392,9 @@ def test_table_family_start_tag_pops_select_in_table(tag: str) -> None:
 
 def test_non_table_start_tag_stays_in_select_in_table() -> None:
     # a non-table-family start tag is not affected: an option stays inside the select
-    assert parse("<table><tr><td><select><option>x").find("select").inner_html == "<option>x</option>"
+    select = parse("<table><tr><td><select><option>x").find("select")
+    assert select is not None
+    assert select.inner_html == "<option>x</option>"
 
 
 def test_stray_html_in_colgroup_keeps_it_open() -> None:
