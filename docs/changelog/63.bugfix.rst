@@ -1,0 +1,4 @@
+Place the synthesized ``<br>`` from a ``</br>`` end tag in foreign (SVG or MathML) content inside the foreign element
+rather than as a sibling under ``<body>``. Like ``</p>`` (issue #32), ``</br>`` is an "any other end tag" in the WHATWG
+foreign-content rules: nothing is popped and the token is reprocessed in the current insertion mode with the foreign
+element still current, so ``<svg></br>`` now builds ``<svg><br></svg>``, matching lexbor and html5lib.
