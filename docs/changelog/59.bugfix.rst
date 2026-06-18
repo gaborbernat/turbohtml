@@ -1,0 +1,5 @@
+Compare the value of an attribute in HTML's case-insensitive attribute set ASCII case-insensitively by default in a
+selector, so ``input[type=text]`` matches ``type="TEXT"``. The WHATWG "Case-sensitivity of selectors" rules fold the
+value of a fixed set of attributes (``type``, ``lang``, ``rel``, ``method``, ``charset`` and others) by default in an
+HTML document; turbohtml previously folded only with an explicit ``i`` flag. An explicit ``s`` flag still forces a
+case-sensitive comparison, and attributes outside the set stay case-sensitive.

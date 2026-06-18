@@ -11,6 +11,8 @@
 #include "ascii.h"
 #include "treebuilder.h"
 
+#include <string.h>
+
 enum sel_attr_op { OP_EXISTS, OP_EQ, OP_INCLUDE, OP_DASH, OP_PREFIX, OP_SUFFIX, OP_SUBSTR };
 
 typedef struct {
@@ -172,6 +174,41 @@ static uint32_t sel_attr_atom(th_tree *tree, const Py_UCS4 *name, Py_ssize_t len
     return th_attr_lookup(tree, bytes, at);
 }
 
+/* The HTML "case-insensitive" attribute set (WHATWG "Case-sensitivity of
+   selectors"): a selector comparing one of these attributes' values does so
+   ASCII case-insensitively by default in an HTML document, unless the selector
+   gives an explicit s/i flag. All names are ASCII and at most 14 bytes. */
+static const char *const sel_ci_attrs[] = {
+    "accept",   "accept-charset", "align",    "alink",      "axis",   "bgcolor",  "charset",   "checked",  "clear",
+    "codetype", "color",          "compact",  "declare",    "defer",  "dir",      "direction", "disabled", "enctype",
+    "face",     "frame",          "hreflang", "http-equiv", "lang",   "language", "link",      "media",    "method",
+    "multiple", "nohref",         "noresize", "noshade",    "nowrap", "readonly", "rel",       "rev",      "rules",
+    "scope",    "scrolling",      "selected", "shape",      "target", "text",     "type",      "valign",   "valuetype",
+    "vlink",
+};
+
+/* Whether an attribute name (selector text, any case) is in that set. */
+static int sel_attr_is_ci_default(const Py_UCS4 *name, Py_ssize_t len) {
+    char buf[16];
+    if (len >= (Py_ssize_t)sizeof(buf)) {
+        return 0; /* longer than any name in the set */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 ch = name[index];
+        if (ch >= 'A' && ch <= 'Z') {
+            ch += 32;
+        }
+        buf[index] = ch < 0x80 ? (char)ch : '\x01'; /* a non-ASCII byte is never in the set */
+    }
+    buf[len] = '\0';
+    for (size_t index = 0; index < sizeof(sel_ci_attrs) / sizeof(sel_ci_attrs[0]); index++) {
+        if (strcmp(buf, sel_ci_attrs[index]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Parse a bracketed attribute selector (the leading '[' already consumed). */
 static void sel_attribute(sel_parser *parser, sel_simple *simple) {
     simple->kind = '[';
@@ -237,6 +274,8 @@ static void sel_attribute(sel_parser *parser, sel_simple *simple) {
     } else if (parser->pos < parser->len && (parser->src[parser->pos] | 32) == 's') {
         parser->pos++;
         sel_skip_ws(parser);
+    } else if (sel_attr_is_ci_default(name, name_len)) {
+        simple->ci = 1; /* HTML compares this attribute's value case-insensitively by default */
     }
     if (parser->pos >= parser->len || parser->src[parser->pos] != ']') {
         parser->error = 1;

@@ -123,6 +123,15 @@ def test_select_over_doc(selector: str, tags: list[str]) -> None:
         pytest.param("<div id>", "#x", [], id="valueless-id-matches-nothing"),
         pytest.param("<div class>", ".x", [], id="valueless-class-matches-nothing"),
         pytest.param("<DIV></DIV>", "DIV", ["div"], id="type-folds-case"),
+        # HTML's case-insensitive attribute set: type's value is folded by default (issue #59)
+        pytest.param("<input type=TEXT>", "[type=text]", ["input"], id="ci-attr-set-value-folds"),
+        pytest.param("<input type=TEXT>", "[TYPE=text]", ["input"], id="ci-attr-set-name-folds"),
+        pytest.param("<input type=TEXT>", "[type=text s]", [], id="ci-attr-set-s-flag-overrides"),
+        # an attribute outside the set keeps the case-sensitive default
+        pytest.param('<a href="/X">', '[href="/x"]', [], id="non-ci-attr-stays-case-sensitive"),
+        # a non-ASCII or over-long attribute name is never in the set, so it stays case-sensitive
+        pytest.param('<x café="Y">', "[café=y]", [], id="non-ascii-attr-not-in-ci-set"),
+        pytest.param('<x data-0123456789abc="Y">', "[data-0123456789abc=y]", [], id="overlong-attr-not-in-ci-set"),
         pytest.param('<div class="a_b">', ".a_b", ["div"], id="class-underscore"),
         pytest.param('<div class="café">', ".café", ["div"], id="class-non-ascii"),
         pytest.param("<café>x", "café", ["café"], id="type-non-ascii"),
