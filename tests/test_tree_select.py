@@ -179,6 +179,77 @@ def test_select_over_custom_html(html: str, selector: str, tags: list[str]) -> N
     assert _sel(html, selector) == tags
 
 
+# a five-item list, a mixed-type container, and custom-element siblings so the
+# of-type pseudo-classes exercise both the builtin-atom and custom-name paths
+_PSEUDO = (
+    "<main>"
+    "<ul><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li></ul>"
+    "<section><h2>t</h2><p>a</p><span>b</span><p></p><!--c--></section>"
+    "<nav><x-a>1</x-a><x-b>2</x-b><x-a>3</x-a></nav>"
+    "<header><b>x</b><svg></svg></header>"
+    "<aside><!--z--></aside>"  # only a comment, so still :empty
+    "</main>"
+)
+
+
+# cases whose subjects share a tag are keyed on text, which encodes the position;
+# cases that identify elements by kind are keyed on tag in the by-tag test below
+@pytest.mark.parametrize(
+    ("selector", "texts"),
+    [
+        pytest.param("li:first-child", ["1"], id="first-child"),
+        pytest.param("li:last-child", ["5"], id="last-child"),
+        pytest.param("li:nth-child(1)", ["1"], id="nth-child-literal"),
+        pytest.param("li:nth-child(2n)", ["2", "4"], id="nth-child-even-coeff"),
+        pytest.param("li:nth-child(2n+1)", ["1", "3", "5"], id="nth-child-odd-coeff"),
+        pytest.param("li:nth-child(even)", ["2", "4"], id="nth-child-even-keyword"),
+        # pseudo-class names and An+B keywords are ASCII case-insensitive
+        pytest.param("li:NTH-CHILD(EVEN)", ["2", "4"], id="nth-child-uppercase"),
+        pytest.param("li:nth-child(odd)", ["1", "3", "5"], id="nth-child-odd-keyword"),
+        pytest.param("li:nth-child(-n+2)", ["1", "2"], id="nth-child-negative-a"),
+        pytest.param("li:nth-child(n)", ["1", "2", "3", "4", "5"], id="nth-child-bare-n"),
+        pytest.param("li:nth-child( 2n + 1 )", ["1", "3", "5"], id="nth-child-whitespace"),
+        pytest.param("li:nth-child(0)", [], id="nth-child-zero-matches-none"),
+        pytest.param("li:nth-child(2n-1)", ["1", "3", "5"], id="nth-child-minus-b"),
+        pytest.param("li:nth-last-child(1)", ["5"], id="nth-last-child"),
+        pytest.param("li:nth-last-child(2)", ["4"], id="nth-last-child-second-from-end"),
+        # of-type with a builtin atom: two <p> siblings around a <span>
+        pytest.param("p:first-of-type", ["a"], id="first-of-type"),
+        pytest.param("p:last-of-type", [""], id="last-of-type"),
+        pytest.param("p:nth-of-type(2)", [""], id="nth-of-type"),
+        pytest.param("p:nth-last-of-type(1)", [""], id="nth-last-of-type"),
+        # of-type with custom elements: distinct names must not be conflated
+        pytest.param("x-a:first-of-type", ["1"], id="custom-first-of-type"),
+        pytest.param("x-a:nth-of-type(2)", ["3"], id="custom-nth-of-type"),
+        pytest.param("x-b:only-of-type", ["2"], id="custom-only-of-type"),
+    ],
+)
+def test_structural_pseudo_by_text(selector: str, texts: list[str]) -> None:
+    assert [element.text for element in parse(_PSEUDO).select(selector)] == texts
+
+
+@pytest.mark.parametrize(
+    ("selector", "tags"),
+    [
+        pytest.param(":root", ["html"], id="root-is-html"),
+        # a non-functional pseudo-class followed by a combinator (not '(')
+        pytest.param(":root > head", ["head"], id="root-then-combinator"),
+        pytest.param(":empty", ["head", "p", "svg", "aside"], id="empty-element-or-comment-only"),
+        pytest.param("span:only-of-type", ["span"], id="only-of-type-hit"),
+        pytest.param("p:only-of-type", [], id="only-of-type-miss"),
+        pytest.param("x-a:only-of-type", [], id="custom-only-of-type-miss"),
+        # an html <b> beside an <svg> sibling stays distinct by namespace, so the
+        # <b> is still its parent's only element of that type
+        pytest.param("b:only-of-type", ["b"], id="only-of-type-distinct-namespace"),
+        pytest.param("main:only-child", ["main"], id="only-child-hit"),
+        pytest.param("h2:only-child", [], id="only-child-miss"),
+        pytest.param("aside:only-child", [], id="only-child-multiple-siblings"),
+    ],
+)
+def test_structural_pseudo_by_tag(selector: str, tags: list[str]) -> None:
+    assert [element.tag for element in parse(_PSEUDO).select(selector)] == tags
+
+
 def test_universal_under_a_root() -> None:
     assert (section := parse(_DOC).select_one("section")) is not None
     assert len(section.select("*")) == 8  # h2, p, a, p, ul, li, li, my-widget
@@ -255,6 +326,21 @@ def test_namespace_prefixed_local_part_decodes_escapes() -> None:
         pytest.param(".a\\\nb", id="escape-before-lf"),
         pytest.param(".a\\\rb", id="escape-before-cr"),
         pytest.param(".a\\\x0cb", id="escape-before-ff"),
+        # pseudo-classes: a bare or unknown one, a pseudo-element, a functional
+        # pseudo missing its argument list, and malformed An+B
+        pytest.param(":", id="bare-colon"),
+        pytest.param("::before", id="pseudo-element"),
+        pytest.param(":unknown", id="unknown-pseudo"),
+        pytest.param(":root(x)", id="non-functional-with-args"),
+        pytest.param(":nth-child", id="functional-without-args"),
+        pytest.param(":nth-child()", id="empty-anb"),
+        pytest.param(":nth-child(2n+)", id="anb-sign-without-digits"),
+        pytest.param(":nth-child(+)", id="anb-bare-sign"),
+        pytest.param(":nth-child(2n+1", id="anb-unclosed"),
+        pytest.param(":nth-child(", id="anb-eof-after-paren"),
+        pytest.param(":nth-child(2n", id="anb-eof-after-n"),
+        pytest.param(":nth-child.x", id="functional-without-paren"),
+        pytest.param(":nth-child(2n x)", id="anb-trailing-junk"),
     ],
 )
 def test_invalid_selectors_raise(selector: str) -> None:

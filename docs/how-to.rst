@@ -332,8 +332,10 @@ node kind and unpacks the defining field (``tag`` for an :class:`~turbohtml.Elem
 
 :meth:`~turbohtml.Node.select` returns every descendant matching a CSS selector in document order;
 :meth:`~turbohtml.Node.select_one` returns the first or ``None``. The matcher covers type, ``#id``, ``.class``, and
-attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` operators, joined by the descendant, child
-(``>``), adjacent (``+``), and general-sibling (``~``) combinators, with comma groups:
+attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` operators, the tree-structural pseudo-classes
+(``:root``, ``:empty``, ``:first-child``, ``:last-child``, ``:only-child``, their ``-of-type`` variants, and the
+``:nth-child()`` family with the ``An+B`` microsyntax), joined by the descendant, child (``>``), adjacent (``+``), and
+general-sibling (``~``) combinators, with comma groups:
 
 .. testcode::
 
@@ -341,11 +343,13 @@ attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` opera
     doc = turbohtml.parse('<ul><li class=on>a<li><a href="/x">b</a></ul>')
     print([li.text for li in doc.select("li.on")])
     print(doc.select_one('a[href^="/"]').text)
+    print([li.text for li in doc.select("li:nth-child(odd)")])
 
 .. testoutput::
 
     ['a']
     b
+    ['a']
 
 To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node
 match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
