@@ -13,13 +13,34 @@
 
 enum sel_attr_op { OP_EXISTS, OP_EQ, OP_INCLUDE, OP_DASH, OP_PREFIX, OP_SUFFIX, OP_SUBSTR };
 
+/* ':' tree-structural pseudo-classes. The nth-* variants carry An+B in nth_a/nth_b;
+   the others have fixed structural meaning. */
+enum sel_pseudo {
+    PSEUDO_NONE,
+    PSEUDO_ROOT,
+    PSEUDO_EMPTY,
+    PSEUDO_FIRST_CHILD,
+    PSEUDO_LAST_CHILD,
+    PSEUDO_ONLY_CHILD,
+    PSEUDO_FIRST_OF_TYPE,
+    PSEUDO_LAST_OF_TYPE,
+    PSEUDO_ONLY_OF_TYPE,
+    PSEUDO_NTH_CHILD,
+    PSEUDO_NTH_LAST_CHILD,
+    PSEUDO_NTH_OF_TYPE,
+    PSEUDO_NTH_LAST_OF_TYPE,
+};
+
 typedef struct {
-    char kind;          /* '*', 'e' type, '.' class, '#' id, '[' attribute */
+    char kind;          /* '*', 'e' type, '.' class, '#' id, '[' attribute, ':' pseudo-class */
     uint16_t tag_atom;  /* 'e': the tag atom, TH_TAG_UNKNOWN for a name outside the table */
     uint32_t attr_atom; /* '[': the attribute atom, UINT32_MAX when no element has the name */
     enum sel_attr_op op;
     int ci;               /* '[': matched case-insensitively (explicit i flag) */
     int ci_default;       /* '[': name is in the HTML case-insensitive set, no explicit s/i flag */
+    int pseudo;           /* ':': the pseudo-class id (enum sel_pseudo) */
+    int nth_a;            /* ':': the An+B "A" coefficient for an nth-* pseudo-class */
+    int nth_b;            /* ':': the An+B "B" coefficient for an nth-* pseudo-class */
     const Py_UCS4 *name;  /* class / id / unknown tag name (into the owned source copy) */
     Py_ssize_t name_len;  /* also the attribute name for the rare unknown case */
     const Py_UCS4 *value; /* '[': the attribute value */
@@ -311,12 +332,157 @@ static void sel_type_local(sel_parser *parser, sel_simple *simple) {
     }
 }
 
+/* Whether a name slice equals a lowercase ASCII keyword (ASCII case-insensitive). */
+static int sel_kw(const Py_UCS4 *name, Py_ssize_t len, const char *kw) {
+    if (len != (Py_ssize_t)strlen(kw)) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 ch = name[index];
+        if (ch >= 'A' && ch <= 'Z') {
+            ch += 32;
+        }
+        if (ch != (Py_UCS4)(unsigned char)kw[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Read a run of ASCII digits as a non-negative int; *seen reports any digit. */
+static int sel_read_int(sel_parser *parser, int *seen) {
+    int value = 0;
+    *seen = 0;
+    while (parser->pos < parser->len && parser->src[parser->pos] >= '0' && parser->src[parser->pos] <= '9') {
+        value = value * 10 + (int)(parser->src[parser->pos] - '0');
+        parser->pos++;
+        *seen = 1;
+    }
+    return value;
+}
+
+/* Parse the An+B microsyntax (CSS Syntax §"The An+B microsyntax") into a/b,
+   including the even/odd keywords. pos starts after '(' and stops at the ')'. */
+static void sel_parse_anb(sel_parser *parser, int *a, int *b) {
+    sel_skip_ws(parser);
+    if (parser->pos + 4 <= parser->len && sel_kw(parser->src + parser->pos, 4, "even")) {
+        parser->pos += 4;
+        *a = 2;
+        *b = 0;
+        sel_skip_ws(parser);
+        return;
+    }
+    if (parser->pos + 3 <= parser->len && sel_kw(parser->src + parser->pos, 3, "odd")) {
+        parser->pos += 3;
+        *a = 2;
+        *b = 1;
+        sel_skip_ws(parser);
+        return;
+    }
+    int sign = 1;
+    if (parser->pos < parser->len && (parser->src[parser->pos] == '+' || parser->src[parser->pos] == '-')) {
+        sign = parser->src[parser->pos] == '-' ? -1 : 1;
+        parser->pos++;
+    }
+    int seen_a;
+    int num = sel_read_int(parser, &seen_a);
+    if (parser->pos < parser->len && (parser->src[parser->pos] | 32) == 'n') {
+        parser->pos++;
+        *a = sign * (seen_a ? num : 1);
+        sel_skip_ws(parser);
+        if (parser->pos < parser->len && (parser->src[parser->pos] == '+' || parser->src[parser->pos] == '-')) {
+            int bsign = parser->src[parser->pos] == '-' ? -1 : 1;
+            parser->pos++;
+            sel_skip_ws(parser);
+            int seen_b;
+            int bval = sel_read_int(parser, &seen_b);
+            if (!seen_b) {
+                parser->error = 1;
+                return;
+            }
+            *b = bsign * bval;
+        } else {
+            *b = 0;
+        }
+    } else if (seen_a) {
+        *a = 0;
+        *b = sign * num;
+    } else {
+        parser->error = 1; /* a bare sign with no digits and no 'n' is invalid */
+        return;
+    }
+    sel_skip_ws(parser);
+}
+
+/* Parse a pseudo-class selector (the leading ':' already consumed). */
+static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
+    simple->kind = ':';
+    const Py_UCS4 *name;
+    Py_ssize_t name_len;
+    sel_ident(parser, &name, &name_len);
+    if (parser->error) {
+        return;
+    }
+    int functional = PSEUDO_NONE;
+    if (sel_kw(name, name_len, "root")) {
+        simple->pseudo = PSEUDO_ROOT;
+    } else if (sel_kw(name, name_len, "empty")) {
+        simple->pseudo = PSEUDO_EMPTY;
+    } else if (sel_kw(name, name_len, "first-child")) {
+        simple->pseudo = PSEUDO_FIRST_CHILD;
+    } else if (sel_kw(name, name_len, "last-child")) {
+        simple->pseudo = PSEUDO_LAST_CHILD;
+    } else if (sel_kw(name, name_len, "only-child")) {
+        simple->pseudo = PSEUDO_ONLY_CHILD;
+    } else if (sel_kw(name, name_len, "first-of-type")) {
+        simple->pseudo = PSEUDO_FIRST_OF_TYPE;
+    } else if (sel_kw(name, name_len, "last-of-type")) {
+        simple->pseudo = PSEUDO_LAST_OF_TYPE;
+    } else if (sel_kw(name, name_len, "only-of-type")) {
+        simple->pseudo = PSEUDO_ONLY_OF_TYPE;
+    } else if (sel_kw(name, name_len, "nth-child")) {
+        functional = PSEUDO_NTH_CHILD;
+    } else if (sel_kw(name, name_len, "nth-last-child")) {
+        functional = PSEUDO_NTH_LAST_CHILD;
+    } else if (sel_kw(name, name_len, "nth-of-type")) {
+        functional = PSEUDO_NTH_OF_TYPE;
+    } else if (sel_kw(name, name_len, "nth-last-of-type")) {
+        functional = PSEUDO_NTH_LAST_OF_TYPE;
+    } else {
+        parser->error = 1; /* an unknown pseudo-class invalidates the selector */
+        return;
+    }
+    if (functional != PSEUDO_NONE) {
+        simple->pseudo = functional;
+        if (parser->pos >= parser->len || parser->src[parser->pos] != '(') {
+            parser->error = 1;
+            return;
+        }
+        parser->pos++;
+        sel_parse_anb(parser, &simple->nth_a, &simple->nth_b);
+        if (parser->error) {
+            return;
+        }
+        if (parser->pos >= parser->len || parser->src[parser->pos] != ')') {
+            parser->error = 1;
+            return;
+        }
+        parser->pos++;
+    } else if (parser->pos < parser->len && parser->src[parser->pos] == '(') {
+        parser->error = 1; /* a non-functional pseudo-class takes no argument list */
+        return;
+    }
+}
+
 /* Parse one simple selector into *simple. */
 static void sel_one(sel_parser *parser, sel_simple *simple) {
     simple->tag_atom = TH_TAG_UNKNOWN;
     simple->attr_atom = 0;
     simple->ci = 0;
     simple->ci_default = 0;
+    simple->pseudo = PSEUDO_NONE;
+    simple->nth_a = 0;
+    simple->nth_b = 0;
     simple->name = NULL;
     simple->name_len = 0;
     simple->value = NULL;
@@ -326,6 +492,9 @@ static void sel_one(sel_parser *parser, sel_simple *simple) {
         simple->kind = (char)ch;
         parser->pos++;
         sel_ident(parser, &simple->name, &simple->name_len);
+    } else if (ch == ':') {
+        parser->pos++;
+        sel_pseudo(parser, simple);
     } else if (ch == '[') {
         parser->pos++;
         sel_attribute(parser, simple);
@@ -358,7 +527,7 @@ static void sel_one(sel_parser *parser, sel_simple *simple) {
 }
 
 static int sel_starts_simple(Py_UCS4 ch) {
-    return ch == '*' || ch == '.' || ch == '#' || ch == '[' || ch == '\\' || ch == '|' || sel_is_ident(ch);
+    return ch == '*' || ch == '.' || ch == '#' || ch == '[' || ch == ':' || ch == '\\' || ch == '|' || sel_is_ident(ch);
 }
 
 /* Parse a compound (one or more adjacent simples) into the given buffer. */
@@ -600,10 +769,101 @@ static int sel_match_attr_op(const sel_simple *simple, const Py_UCS4 *value, Py_
     }
 }
 
+/* Two elements share a type when their namespace and tag match; a custom tag
+   (no builtin atom) compares by lowercased name so distinct customs stay apart. */
+static int sel_same_type(const th_node *a, const th_node *b) {
+    if (a->ns != b->ns || a->atom != b->atom) {
+        return 0;
+    }
+    if (a->atom != TH_TAG_UNKNOWN) {
+        return 1;
+    }
+    return sel_eq(a->text, a->text_len, b->text, b->text_len, 0);
+}
+
+/* Whether node has no element sibling on the chosen side (next when from_end),
+   counting only same-type siblings when of_type. Drives the first/last/only
+   structural pseudo-classes. */
+static int sel_no_sibling(th_node *node, int from_end, int of_type) {
+    for (th_node *sibling = from_end ? node->next_sibling : node->prev_sibling; sibling != NULL;
+         sibling = from_end ? sibling->next_sibling : sibling->prev_sibling) {
+        if (sibling->type == TH_NODE_ELEMENT && (!of_type || sel_same_type(node, sibling))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The 1-based position of node among its element siblings (from the end when
+   from_end), counting only same-type siblings when of_type. */
+static int sel_sibling_index(th_node *node, int from_end, int of_type) {
+    int index = 1;
+    for (th_node *sibling = from_end ? node->next_sibling : node->prev_sibling; sibling != NULL;
+         sibling = from_end ? sibling->next_sibling : sibling->prev_sibling) {
+        if (sibling->type == TH_NODE_ELEMENT && (!of_type || sel_same_type(node, sibling))) {
+            index++;
+        }
+    }
+    return index;
+}
+
+/* Whether a 1-based index satisfies An+B for some non-negative n. */
+static int sel_nth_matches(int a, int b, int index) {
+    if (a == 0) {
+        return index == b;
+    }
+    int diff = index - b;
+    return diff % a == 0 && diff / a >= 0;
+}
+
+/* An element is :empty (CSS Selectors Level 3) when it has no element or text
+   children; comments and processing instructions do not count. */
+static int sel_is_empty(const th_node *node) {
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT || child->type == TH_NODE_TEXT) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int sel_match_pseudo(th_node *node, const sel_simple *simple) {
+    switch (simple->pseudo) { /* GCOVR_EXCL_BR_LINE: the parser only stores known pseudo ids */
+    case PSEUDO_ROOT:
+        /* the root element's parent is the document, never an element (a matched
+           node always has a parent, as the '>' combinator above relies on) */
+        return node->parent->type != TH_NODE_ELEMENT;
+    case PSEUDO_EMPTY:
+        return sel_is_empty(node);
+    case PSEUDO_FIRST_CHILD:
+        return sel_no_sibling(node, 0, 0);
+    case PSEUDO_LAST_CHILD:
+        return sel_no_sibling(node, 1, 0);
+    case PSEUDO_ONLY_CHILD:
+        return sel_no_sibling(node, 0, 0) && sel_no_sibling(node, 1, 0);
+    case PSEUDO_FIRST_OF_TYPE:
+        return sel_no_sibling(node, 0, 1);
+    case PSEUDO_LAST_OF_TYPE:
+        return sel_no_sibling(node, 1, 1);
+    case PSEUDO_ONLY_OF_TYPE:
+        return sel_no_sibling(node, 0, 1) && sel_no_sibling(node, 1, 1);
+    case PSEUDO_NTH_CHILD:
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 0));
+    case PSEUDO_NTH_LAST_CHILD:
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 0));
+    case PSEUDO_NTH_OF_TYPE:
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 1));
+    default: /* PSEUDO_NTH_LAST_OF_TYPE */
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 1));
+    }
+}
+
 static int sel_match_simple(th_node *node, const sel_simple *simple) {
     switch (simple->kind) {
     case '*':
         return 1;
+    case ':':
+        return sel_match_pseudo(node, simple);
     case 'e':
         if (simple->tag_atom != TH_TAG_UNKNOWN) {
             return node->atom == simple->tag_atom;
