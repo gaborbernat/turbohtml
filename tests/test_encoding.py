@@ -134,6 +134,11 @@ def test_whatwg_label_decodes(label: str, raw: bytes, char: str) -> None:
         # not actually a meta element
         pytest.param(b"<meto charset=utf-8>", "windows-1252", id="not-meta-name"),
         pytest.param(b"<metax>", "windows-1252", id="meta-no-space"),
+        # WHATWG accepts 0x2F as the separator after "meta", like whitespace
+        pytest.param(b"<meta/charset=utf-8>", "UTF-8", id="meta-slash-separator"),
+        pytest.param(
+            b'<meta/http-equiv="content-type" content="text/html;charset=utf-8">', "UTF-8", id="meta-slash-pragma"
+        ),
         # attribute parsing edges
         pytest.param(b"<meta charset", "windows-1252", id="name-at-eof"),
         pytest.param(b"<meta charset=>", "windows-1252", id="empty-value"),
