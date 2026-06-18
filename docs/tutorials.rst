@@ -239,8 +239,8 @@ assemble them with :meth:`~turbohtml.Element.append`; the ``text`` setter fills 
 
     <article class="post"><h1>Tea</h1><!--draft--></article>
 
-A list value for a token-list attribute (``class``, ``rel``, ...) joins on a space, and a ``None`` value is a valueless
-attribute:
+A list value for a token-list attribute (``class``, ``rel``, ...) joins on a space, and ``None`` (or ``""``) sets an
+empty attribute, which reads back as the empty string:
 
 .. testcode::
 

@@ -192,7 +192,9 @@ static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
     for (Py_ssize_t index = 0; index < record->attr_count; index++) {
         const th_attr *attr = &record->attrs[index];
         PyObject *name = buf_to_str(&attr->name);
-        PyObject *value = attr->has_value ? buf_to_str(&attr->value) : Py_NewRef(Py_None);
+        /* a valueless attribute (<x a>) carries an empty value buffer, so it
+           reports "" the way the WHATWG tokenizer assigns the empty string */
+        PyObject *value = buf_to_str(&attr->value);
         if (name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             Py_XDECREF(name);                /* GCOVR_EXCL_LINE: allocation-failure path */
             Py_XDECREF(value);               /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -278,7 +280,7 @@ static PyGetSetDef token_getset[] = {
 
 PyDoc_STRVAR(token_attr_doc, "attr(name, default=None)\n--\n\n"
                              "Return the value of attribute name on a start or end tag. A valueless\n"
-                             "attribute yields None; a missing attribute yields default.");
+                             "attribute yields the empty string; a missing attribute yields default.");
 
 static PyObject *token_attr(PyObject *self, PyObject *args) {
     PyObject *name_obj;
@@ -308,7 +310,7 @@ static PyObject *token_attr(PyObject *self, PyObject *args) {
                 }
             }
             if (match) {
-                return attr->has_value ? buf_to_str(&attr->value) : Py_NewRef(Py_None);
+                return buf_to_str(&attr->value); /* "" for a valueless attribute */
             }
         }
     }

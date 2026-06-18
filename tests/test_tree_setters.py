@@ -29,19 +29,18 @@ def test_attrs_set_replaces_an_existing_value() -> None:
 def test_attrs_set_valueless_and_empty() -> None:
     element = parse("<input>").find("input")
     assert element is not None
-    element.attrs["disabled"] = None
+    element.attrs["disabled"] = None  # None sets an empty (valueless) attribute
     element.attrs["value"] = ""
     assert element.html == '<input disabled="" value="">'
-    assert element.attrs["disabled"] is None
-    value = element.attrs["value"]
-    assert value is not None
-    assert not value
+    # a valueless or empty attribute reads back as the empty string, like getAttribute
+    assert element.attrs["disabled"] == ""  # noqa: PLC1901  # exactly "", not None
+    assert element.attrs["value"] == ""  # noqa: PLC1901  # exactly ""
 
 
-def test_attrs_set_existing_to_valueless() -> None:
+def test_attrs_set_existing_to_empty() -> None:
     element = _div('<div id="a">')
-    element.attrs["id"] = None  # overwriting an existing value with a valueless one
-    assert element.attrs["id"] is None
+    element.attrs["id"] = None  # None clears an existing value to empty
+    assert element.attrs["id"] == ""  # noqa: PLC1901  # exactly "", not None
     assert element.html == '<div id=""></div>'
 
 

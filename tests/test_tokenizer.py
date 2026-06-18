@@ -84,7 +84,7 @@ def test_self_closing_tag() -> None:
 @pytest.mark.parametrize(
     ("document", "tag_name", "attrs"),
     [
-        pytest.param("<a x=1 y x=2 z=''>", "a", [("x", "1"), ("y", None), ("z", "")], id="duplicates-keep-first"),
+        pytest.param("<a x=1 y x=2 z=''>", "a", [("x", "1"), ("y", ""), ("z", "")], id="duplicates-keep-first"),
         pytest.param("<a xy=1 xő=2>", "a", [("xy", "1"), ("xő", "2")], id="same-length-mixed-width-names"),
         pytest.param("<ab xyz=ő q=🎉>", "ab", [("xyz", "ő"), ("q", "🎉")], id="wide-buffer-after-narrow"),
     ],
@@ -103,8 +103,8 @@ def test_non_latin1_tag_name() -> None:
 def test_attr_lookup() -> None:
     (tag,) = list(tokenize("<a href='u' download>"))
     assert tag.attr("href") == "u"
-    assert tag.attr("download") is None
-    assert tag.attr("missing") is None
+    assert tag.attr("download") == ""  # noqa: PLC1901  # exactly "" (valueless), distinct from None (missing)
+    assert tag.attr("missing") is None  # a missing attribute yields the default
     assert tag.attr("missing", "fallback") == "fallback"
     assert tag.attr("href2", "fallback") == "fallback"
     assert tag.attr("hrex", "fallback") == "fallback"

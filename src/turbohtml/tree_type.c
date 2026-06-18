@@ -751,7 +751,8 @@ static PyObject *split_token_list(const Py_UCS4 *value, Py_ssize_t value_len) {
 }
 
 /* Build the Element.attrs mapping: token-list attributes (class and friends)
-   become a list[str], a valueless attribute is None, everything else is a str. */
+   become a list[str], everything else is a str; a valueless or empty attribute is
+   the empty string (or the empty list for a token-list attribute). */
 /* One attribute's name as a str. */
 static PyObject *attr_name_obj(th_tree *tree, const th_node_attr *attr) {
     Py_ssize_t name_len;
@@ -759,16 +760,14 @@ static PyObject *attr_name_obj(th_tree *tree, const th_node_attr *attr) {
     return PyUnicode_DecodeUTF8(bytes, name_len, "strict");
 }
 
-/* One attribute's value as the public object: None when valueless, a list[str] for
-   a token-list attribute (class, rel, ...), else the str. */
+/* One attribute's value as the public object: a list[str] for a token-list attribute
+   (class, rel, ...), else the str. A valueless (<x a>) or empty (<x a="">) attribute
+   has value == NULL and reports "", the way getAttribute returns the empty string. */
 static PyObject *attr_value_obj(const th_node_attr *attr) {
-    if (attr->value == NULL) {
-        return Py_NewRef(Py_None);
-    }
     if (attr_is_token_list(attr->name_atom)) {
-        return split_token_list(attr->value, attr->value_len);
+        return attr->value == NULL ? PyList_New(0) : split_token_list(attr->value, attr->value_len);
     }
-    return ucs4_to_str(attr->value, attr->value_len);
+    return attr->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(attr->value, attr->value_len);
 }
 
 static int validate_name(PyObject *name, int is_attr);

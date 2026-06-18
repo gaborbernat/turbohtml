@@ -78,15 +78,18 @@ def test_class_whitespace_splitting(find: Callable[[str, str], Element], value: 
 
 
 @pytest.mark.parametrize(
-    ("html", "tag", "attr"),
+    ("html", "tag", "attr", "expected"),
     [
-        pytest.param("<div class>", "div", "class", id="valueless-token-list-name"),
-        pytest.param('<div class="">', "div", "class", id="empty-value-token-list-name"),
-        pytest.param("<input checked>", "input", "checked", id="valueless-plain-name"),
+        pytest.param("<div class>", "div", "class", [], id="valueless-token-list-name"),
+        pytest.param('<div class="">', "div", "class", [], id="empty-value-token-list-name"),
+        pytest.param("<input checked>", "input", "checked", "", id="valueless-plain-name"),
     ],
 )
-def test_valueless_attribute_is_none(find: Callable[[str, str], Element], html: str, tag: str, attr: str) -> None:
-    assert find(html, tag).attrs[attr] is None
+def test_valueless_attribute_is_empty(
+    find: Callable[[str, str], Element], html: str, tag: str, attr: str, expected: str | list[str]
+) -> None:
+    # a valueless (or empty) attribute reads as the empty string, or the empty list for a token-list attribute
+    assert find(html, tag).attrs[attr] == expected
 
 
 def test_find_matches_token_attribute_by_whole_string() -> None:
@@ -117,7 +120,7 @@ def test_many_dynamic_attribute_names_grow_the_table(find: Callable[[str, str], 
     names = [f"data-x{index}" for index in range(20)]
     element = find(f"<div {' '.join(names)}>", "div")
     assert sorted(element.attrs) == sorted(names)
-    assert all(element.attrs[name] is None for name in names)
+    assert all(element.attrs[name] == "" for name in names)  # noqa: PLC1901  # exactly "", not None
 
 
 def test_repeated_dynamic_attribute_name_reuses_atom(find: Callable[[str, str], Element]) -> None:
@@ -148,7 +151,7 @@ def test_attrs_supports_mapping_protocol(find: Callable[[str, str], Element]) ->
             "<p id=first id=second>z</p>", "p", {"id": "first"}, '<p id="first">z</p>', id="unquoted-first-wins"
         ),
         pytest.param(
-            "<span data-x data-x>w</span>", "span", {"data-x": None}, '<span data-x="">w</span>', id="valueless"
+            "<span data-x data-x>w</span>", "span", {"data-x": ""}, '<span data-x="">w</span>', id="valueless"
         ),
     ],
 )

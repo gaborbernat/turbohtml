@@ -79,11 +79,11 @@ def test_attribute_values_are_escaped(find: Callable[[str, str], Element], marku
 @pytest.mark.parametrize(
     ("attr", "value"),
     [
-        pytest.param("checked", None, id="valueless"),
+        pytest.param("checked", "", id="valueless"),
         pytest.param("type", "text", id="valued"),
     ],
 )
-def test_attrs_mapping(find: Callable[[str, str], Element], attr: str, value: str | None) -> None:
+def test_attrs_mapping(find: Callable[[str, str], Element], attr: str, value: str) -> None:
     markup = f"{attr}={value}" if value else attr
     assert find(f"<input {markup}>", "input").attrs[attr] == value
 
