@@ -3,7 +3,7 @@
 The ``_html`` extension declares ``Py_MOD_GIL_NOT_USED``, so it owns the thread
 safety of its mutable tree. A reader and a mutator sharing a tree may produce a
 stale result, but must never segfault (issue #84). Under the GIL build the
-threads serialise; under a free-threaded build they run truly in parallel, so
+threads serialize; under a free-threaded build they run truly in parallel, so
 these exercise the per-tree critical sections the operations take.
 """
 
