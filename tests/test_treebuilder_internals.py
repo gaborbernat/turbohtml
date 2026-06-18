@@ -333,6 +333,13 @@ def test_document_paths(html: str, needle: str) -> None:
     assert needle in _doc(html)
 
 
+def test_stray_html_in_colgroup_keeps_it_open() -> None:
+    # a stray <html> in "in column group" uses the in-body rules (merge attributes, leave the
+    # stack), so the colgroup stays open and the next <col> joins it instead of starting a new one
+    out = parse("<table><colgroup><col><html lang=en><col>").html
+    assert out == ('<html lang="en"><head></head><body><table><colgroup><col><col></colgroup></table></body></html>')
+
+
 @pytest.mark.parametrize(
     ("html", "inner"),
     [
