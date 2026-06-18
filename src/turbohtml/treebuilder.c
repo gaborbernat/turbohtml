@@ -2973,9 +2973,9 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     }
                     break;
                 }
-                if (atom == TH_TAG_INPUT) {
-                    /* an input closes an open select entirely (and is ignored
-                       outright in a select-context fragment) */
+                if (atom == TH_TAG_INPUT || atom == TH_TAG_KEYGEN) {
+                    /* an input or keygen closes an open select entirely (and is
+                       ignored outright in a select-context fragment) */
                     if (tree->fragment_root != NULL && tree->ctx_atom == TH_TAG_SELECT) {
                         break;
                     }

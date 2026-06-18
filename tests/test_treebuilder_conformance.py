@@ -86,6 +86,12 @@ _SPEC_OVERRIDES: dict[tuple[str, str, str | None], str] = {
     ),
     ("foreign-fragment.dat", "<svg></br><foo>", "div"): "| <svg svg>\n|   <br>\n|   <svg foo>",
     ("foreign-fragment.dat", "</br><foo>", "svg svg"): "| <svg foo>",
+    # The "in select" mode pops an open select for an input/keygen/textarea start tag (and ignores
+    # it in a select-context fragment). The pinned .dat predates the keygen rule and still nests it;
+    # html5lib's own library pops it (sibling) for a document and ignores it in a select fragment,
+    # matching the WHATWG algorithm. See https://github.com/tox-dev/turbohtml/issues/93
+    ("tests7.dat", "<select><keygen>", None): "| <html>\n|   <head>\n|   <body>\n|     <select>\n|     <keygen>",
+    ("tests_innerHTML_1.dat", "<keygen><option>", "select"): "| <option>",
 }
 
 
