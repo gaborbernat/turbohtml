@@ -2749,7 +2749,22 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
     if (entry == NULL) {
         entry = th_encoding_lookup("windows-1252", 12);
     }
-    PyObject *decoded = PyUnicode_Decode((const char *)bytes + skip, len - skip, entry->codec, "replace");
+    PyObject *decoded;
+    if (strcmp(entry->codec, "x-user-defined") == 0) {
+        /* x-user-defined has no CPython codec: ASCII bytes stay, 0x80-0xFF map to the
+           private-use block U+F780-U+F7FF, per the WHATWG Encoding Standard */
+        Py_ssize_t count = len - skip;
+        decoded = PyUnicode_New(count, 0xF7FF);
+        if (decoded != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            void *out = PyUnicode_DATA(decoded);
+            for (Py_ssize_t index = 0; index < count; index++) {
+                unsigned char byte = bytes[skip + index];
+                PyUnicode_WRITE(PyUnicode_2BYTE_KIND, out, index, byte < 0x80 ? byte : (Py_UCS4)(0xF700 + byte));
+            }
+        }
+    } else {
+        decoded = PyUnicode_Decode((const char *)bytes + skip, len - skip, entry->codec, "replace");
+    }
     PyBuffer_Release(&view);
     if (decoded == NULL) { /* GCOVR_EXCL_BR_LINE: the codec is from the table and the replace handler never fails */
         return NULL;       /* GCOVR_EXCL_LINE: decode failure */
