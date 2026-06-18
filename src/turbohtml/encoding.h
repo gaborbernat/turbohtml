@@ -345,7 +345,8 @@ static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py
             }
             pos += 3;
         } else if (pos + 6 <= len && buf[pos] == '<' && (buf[pos + 1] | 32) == 'm' && (buf[pos + 2] | 32) == 'e' &&
-                   (buf[pos + 3] | 32) == 't' && (buf[pos + 4] | 32) == 'a' && is_attr_space(buf[pos + 5])) {
+                   (buf[pos + 3] | 32) == 't' && (buf[pos + 4] | 32) == 'a' &&
+                   (is_attr_space(buf[pos + 5]) || buf[pos + 5] == '/')) {
             pos += 5;
             int got_pragma = 0;
             int need_pragma = -1; /* -1 unset, 0 from a charset attr, 1 from a content attr */
