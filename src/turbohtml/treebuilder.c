@@ -972,9 +972,7 @@ static void insertion_location_target(th_tree *tree, th_node *target, th_node **
     }
     if (tree->foster && (target->atom == TH_TAG_TABLE || target->atom == TH_TAG_TBODY || target->atom == TH_TAG_TFOOT ||
                          target->atom == TH_TAG_THEAD || target->atom == TH_TAG_TR)) {
-        /* GCOVR_EXCL_BR_LINE: foster always returns inside the loop */
-        /* foster always finds the table */
-        for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
+        for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) {
             th_node *open = tree->open[index];
             if (open->ns != TH_NS_HTML) { /* GCOVR_EXCL_BR_LINE: no foreign element sits above a fostered table */
                 continue; /* GCOVR_EXCL_LINE: no foreign element sits above the fostered table on the stack */
@@ -997,7 +995,12 @@ static void insertion_location_target(th_tree *tree, th_node *target, th_node **
                 return;
             }
         }
-    } /* GCOVR_EXCL_LINE: foster always returns inside the loop */
+        /* no table is on the stack: a table-section fragment context (tbody/table/
+           tr/...). The appropriate place is then the first element on the stack, the
+           fragment root, so the content fosters out as a sibling of the open row. */
+        *parent = tree->open[0];
+        return;
+    }
     *parent = target;
 }
 
