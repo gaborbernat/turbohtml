@@ -1968,8 +1968,9 @@ static void tmpl_set(th_tree *tree, enum mode mode) {
     }
 }
 
+/* tmpl_top runs only for a template element, which carries a pushed mode. */
 static enum mode tmpl_top(th_tree *tree) {
-    return tree->tmpl_len > 0 ? (enum mode)tree->tmpl[tree->tmpl_len - 1] : M_IN_BODY;
+    return tree->tmpl_len > 0 /* GCOVR_EXCL_BR_LINE */ ? (enum mode)tree->tmpl[tree->tmpl_len - 1] : M_IN_BODY;
 }
 
 /* Reset the insertion mode appropriately: pick the mode implied by the current
@@ -3912,6 +3913,8 @@ static enum mode fragment_mode(uint16_t ctx) {
         return M_IN_COLUMN_GROUP;
     case TH_TAG_TABLE:
         return M_IN_TABLE;
+    case TH_TAG_TEMPLATE:
+        return M_IN_TEMPLATE;
     case TH_TAG_FRAMESET:
         return M_IN_FRAMESET;
     case TH_TAG_HTML:
@@ -3995,7 +3998,8 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     tree->fragment_root = root;
     tree->ctx_atom = ctx_atom;
     if (ctx_atom == TH_TAG_TEMPLATE) {
-        tree->head = root; /* keep reset logic happy; template mode deferred */
+        tree->head = root;              /* keep reset logic happy */
+        tmpl_push(tree, M_IN_TEMPLATE); /* a template context starts in "in template" */
     }
     /* a foreign context element makes the root act as that element's namespace,
        so the foreign-content rules apply to the fragment's content */

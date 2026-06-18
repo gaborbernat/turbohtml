@@ -542,6 +542,16 @@ def test_before_html_end_br_synthesizes_br() -> None:
         # the stack, fosters out to the fragment root rather than nesting (issue #55)
         pytest.param("<tr><li>x", "tbody", "| <tr>\n| <li>", id="foster-out-of-tbody-fragment"),
         pytest.param("<tr><li>x", "table", "|   <tr>\n| <li>", id="foster-out-of-table-fragment"),
+        # a template context starts in "in template" mode, so table-section start tags
+        # build their elements instead of dropping to text (issue #95)
+        pytest.param("<td>x", "template", '| <td>\n|   "x"', id="template-fragment-td"),
+        pytest.param("<col>", "template", "| <col>", id="template-fragment-col"),
+        pytest.param("<tr><td>y", "template", "| <tr>\n|   <td>", id="template-fragment-tr-td"),
+        pytest.param("<caption>c", "template", '| <caption>\n|   "c"', id="template-fragment-caption"),
+        pytest.param("<tbody><tr><td>z", "template", "| <tbody>\n|   <tr>", id="template-fragment-tbody"),
+        pytest.param("<thead><tr><th>h", "template", "| <thead>\n|   <tr>", id="template-fragment-thead"),
+        # ordinary in-body content in a template context is unaffected
+        pytest.param("<p>x", "template", '| <p>\n|   "x"', id="template-fragment-plain-body"),
     ],
 )
 def test_fragment_paths(html: str, context: str, needle: str) -> None:
