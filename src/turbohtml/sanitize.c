@@ -45,6 +45,7 @@ static int is_unsafe_tag(uint16_t atom) {
     case TH_TAG_BASE:
     case TH_TAG_BASEFONT:
     case TH_TAG_TITLE:
+    case TH_TAG_PLAINTEXT:
     case TH_TAG_XMP:
     case TH_TAG_TEMPLATE:
         return 1;

@@ -120,3 +120,20 @@ def test_oracle_detects_a_real_script() -> None:
 
 def test_oracle_detects_a_dangerous_url() -> None:
     assert _live_danger('<a href="javascript:alert(1)">x</a>') == ["href=javascript:alert(1)"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param("<select><plaintext></select><img src=x onerror=alert(1)>", id="plaintext-in-select"),
+        pytest.param("<plaintext><img src=x onerror=alert(1)>", id="bare-plaintext"),
+    ],
+)
+def test_allowlisted_plaintext_is_neutralized(payload: str) -> None:
+    # a custom policy may allowlist <plaintext>, but its content is raw text that cannot
+    # be escaped once the element is kept, so a </select><img onerror> tail would reparse
+    # into a live image. Like <xmp>, <plaintext> must always be neutralized (#72).
+    policy = Policy(tags=frozenset({"plaintext", "select", "img"}), attributes={"img": frozenset({"src"})})
+    out = sanitize(payload, policy)
+    assert _live_danger(out) == [], f"live XSS survived: {out!r}"
+    assert sanitize(out, policy) == out, "sanitizing is not idempotent"
