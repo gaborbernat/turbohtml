@@ -171,21 +171,34 @@ static int is_mathml_text_integration(const th_node *node) {
                                         node->atom == TH_TAG_MS || node->atom == TH_TAG_MTEXT);
 }
 
+/* ASCII case-insensitive match of a code-point run against a NUL-terminated ASCII string. */
+static int value_ci_eq(const Py_UCS4 *value, Py_ssize_t value_len, const char *target) {
+    if (value_len != (Py_ssize_t)strlen(target)) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < value_len; index++) {
+        Py_UCS4 ch = value[index] >= 'A' && value[index] <= 'Z' ? value[index] + 32 : value[index];
+        if (ch != (Py_UCS4)(unsigned char)target[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int is_html_integration(const th_node *node) {
     if (node->ns == TH_NS_SVG) {
         return node->atom == TH_TAG_FOREIGNOBJECT || node->atom == TH_TAG_DESC || node->atom == TH_TAG_TITLE;
     }
-    /* annotation-xml is an HTML integration point only when it carries an encoding of text/html or
-       application/xhtml+xml. Only foreign nodes reach here after the html case, so a non-svg node is always mathml. */
+    /* annotation-xml is an HTML integration point only when its encoding attribute is an ASCII
+       case-insensitive match for exactly text/html or application/xhtml+xml. Only foreign nodes
+       reach here after the html case, so a non-svg node is always mathml. */
     if (node->ns == TH_NS_MATHML /* GCOVR_EXCL_BR_LINE */ && node->atom == TH_TAG_ANNOTATION_XML) {
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
             const th_node_attr *attr = &node->attrs[index];
-            if (attr->name_atom == TH_ATTR_ENCODING && attr->value != NULL) {
-                if ((attr->value_len == 9 && /* "text/html" case-insensitively */
-                     (attr->value[0] | 32) == 't' && (attr->value[1] | 32) == 'e' && (attr->value[5] | 32) == 'h') ||
-                    attr->value_len == 21) { /* application/xhtml+xml */
-                    return 1;
-                }
+            if (attr->name_atom == TH_ATTR_ENCODING && attr->value != NULL &&
+                (value_ci_eq(attr->value, attr->value_len, "text/html") ||
+                 value_ci_eq(attr->value, attr->value_len, "application/xhtml+xml"))) {
+                return 1;
             }
         }
     }

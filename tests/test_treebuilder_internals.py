@@ -173,6 +173,25 @@ _LONG_NAME = "z" * 130
             "<div>",
             id="annotation-xml-non-html-encoding",
         ),
+        # the encoding must be an EXACT case-insensitive match; a near miss is not an integration
+        # point, so <b> breaks out to body level instead of nesting under annotation-xml (issue #92)
+        pytest.param(
+            "<math><annotation-xml encoding='text-html'><b>x</b></annotation-xml></math>",
+            'encoding="text-html"\n|     <b>',
+            id="annotation-xml-encoding-near-miss-breaks-out",
+        ),
+        # the application/xhtml+xml row was length-only, so any 21-char value matched; now it does not
+        pytest.param(
+            "<math><annotation-xml encoding='application/xhtml-xml'><b>x</b></annotation-xml></math>",
+            'encoding="application/xhtml-xml"\n|     <b>',
+            id="annotation-xml-encoding-21-char-near-miss-breaks-out",
+        ),
+        # an uppercase exact match is still an integration point, so <b> stays nested
+        pytest.param(
+            "<math><annotation-xml encoding='TEXT/HTML'><b>x</b></annotation-xml></math>",
+            'encoding="TEXT/HTML"\n|         <b>',
+            id="annotation-xml-encoding-uppercase-integration",
+        ),
         pytest.param("<math><mi><div>x</div></mi></math>", "<div>", id="mathml-mi-not-html-integration"),
         pytest.param("<svg><font face=x>y", "<font>", id="svg-font-face-breakout"),
         pytest.param("<svg><font size=x>y", "<font>", id="svg-font-size-breakout"),
