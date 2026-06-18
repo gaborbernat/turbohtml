@@ -201,6 +201,18 @@ From any node you can walk outward as well as inward: :attr:`~turbohtml.Node.par
     Element('p')
     ['p', 'body', 'html']
 
+For richer queries, :meth:`~turbohtml.Node.select` takes a CSS selector and returns every matching descendant in
+document order. The negation pseudo-class ``:not()`` keeps the elements that match none of its arguments -- here, the
+descendants of ``body`` that are not links:
+
+.. testcode::
+
+    print([node.tag for node in doc.select("body :not(a)")])
+
+.. testoutput::
+
+    ['h1', 'p']
+
 Because the node types are a sealed hierarchy, structural pattern matching works: each subtype unpacks its defining
 field:
 

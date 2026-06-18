@@ -352,8 +352,10 @@ general-sibling (``~``) combinators, with comma groups:
     ['a']
 
 The Selectors Level 4 functional pseudo-classes are supported too: ``:is()`` and ``:where()`` match an element against a
-nested selector list (they differ only in specificity, which a tree matcher ignores), and ``:has()`` keeps an element
-when a relative selector finds a match anchored at it:
+nested selector list (they differ only in specificity, which a tree matcher ignores), ``:has()`` keeps an element when a
+relative selector finds a match anchored at it, and ``:not()`` keeps an element that matches none of its arguments.
+``:not()`` takes a full selector list, so it negates compound and complex selectors -- not just a single class or type
+-- and nests with the others (``article:not(:has(img))`` selects the image-less articles):
 
 .. testcode::
 
@@ -363,11 +365,13 @@ when a relative selector finds a match anchored at it:
     )
     print([a.select_one("h1").text for a in page.select("article:has(img)")])
     print([e.tag for e in page.select(":is(h1, figure)")])
+    print([a.select_one("h1").text for a in page.select("article:not(:has(img))")])
 
 .. testoutput::
 
     ['Post']
     ['h1', 'figure', 'h1']
+    ['Note']
 
 ``#id`` and ``.class`` selectors compare case-sensitively in a standards-mode document and ASCII case-insensitively in a
 quirks-mode one (a document with no doctype), matching how a browser resolves them. Add a ``<!doctype html>`` to keep
