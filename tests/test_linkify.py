@@ -76,10 +76,47 @@ def _no_callbacks() -> list[Callback]:
             '<a href="http://_dmarc.example.com/">http://_dmarc.example.com/</a>',
             id="underscore-leading-host-label-kept",
         ),
+        # Unicode whitespace bounds a URL the way an ASCII space does (issue #53)
+        pytest.param(
+            "http://example.com\xa0more",
+            '<a href="http://example.com">http://example.com</a>&nbsp;more',
+            id="nbsp-ends-url",
+        ),
+        pytest.param(
+            "a　http://x.com　b",
+            'a　<a href="http://x.com">http://x.com</a>　b',
+            id="ideographic-space-ends-url",
+        ),
+        pytest.param(
+            "http://example.com/p\xa0q",
+            '<a href="http://example.com/p">http://example.com/p</a>&nbsp;q',
+            id="nbsp-ends-url-path",
+        ),
+        # a non-whitespace non-ASCII code point keeps an internationalized domain intact
+        pytest.param("münchen.de", '<a href="http://münchen.de">münchen.de</a>', id="idn-host-label-kept"),
+        # zero-width format characters are not White_Space, so they stay in the URL
+        pytest.param(
+            "http://a.com/x\u200by",
+            '<a href="http://a.com/x\u200by">http://a.com/x\u200by</a>',
+            id="zero-width-space-stays-in-url",
+        ),
     ],
 )
 def test_linkify_plain(text: str, expected: str) -> None:
     assert linkify(text, callbacks=_no_callbacks()) == expected
+
+
+@pytest.mark.parametrize(
+    "cp",
+    [
+        0x85, 0xA0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006,
+        0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+    ],
+)  # fmt: skip
+def test_linkify_each_unicode_space_ends_url(cp: int) -> None:
+    # every Unicode White_Space code point bounds the host the way an ASCII space does
+    out = linkify(f"http://x.com{chr(cp)}y", callbacks=_no_callbacks())
+    assert out.startswith('<a href="http://x.com">http://x.com</a>')
 
 
 def test_linkify_default_callback_adds_nofollow() -> None:
@@ -125,6 +162,17 @@ def test_linkify_email_off_by_default() -> None:
 def test_linkify_email_when_enabled() -> None:
     out = linkify("reach bob@example.com now", parse_email=True, callbacks=_no_callbacks())
     assert out == 'reach <a href="mailto:bob@example.com">bob@example.com</a> now'
+
+
+def test_linkify_email_local_part_ends_at_unicode_space() -> None:
+    # Unicode whitespace bounds the email local part the way an ASCII space does (issue #53)
+    out = linkify("foo\xa0bar@example.com", parse_email=True, callbacks=_no_callbacks())
+    assert out == 'foo&nbsp;<a href="mailto:bar@example.com">bar@example.com</a>'
+
+
+def test_linkify_email_keeps_non_ascii_local_part() -> None:
+    out = linkify("naïve@example.com", parse_email=True, callbacks=_no_callbacks())
+    assert out == '<a href="mailto:naïve@example.com">naïve@example.com</a>'
 
 
 def test_linkify_veto_callback_keeps_plain_text() -> None:
