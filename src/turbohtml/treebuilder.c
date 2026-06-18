@@ -2205,6 +2205,21 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             mode = M_IN_TEMPLATE;
             continue;
         }
+        /* "in select in table": a select opened in a table context does not get its own
+           mode here, so a table-family start tag would nest inside the still-open select.
+           Per the spec it pops the select, resets the insertion mode, and reprocesses, so
+           the table element becomes a sibling of the closed select (#90). */
+        if (tok->kind == TH_START_TAG && has_in_scope(tree, TH_TAG_SELECT) &&
+            (mode == M_IN_TABLE || mode == M_IN_TABLE_BODY || mode == M_IN_ROW || mode == M_IN_CELL ||
+             mode == M_IN_CAPTION)) {
+            uint16_t a = tok_atom(tok);
+            if (a == TH_TAG_CAPTION || a == TH_TAG_TABLE || a == TH_TAG_TBODY || a == TH_TAG_TFOOT ||
+                a == TH_TAG_THEAD || a == TH_TAG_TR || a == TH_TAG_TD || a == TH_TAG_TH) {
+                pop_until_atom(tree, TH_TAG_SELECT);
+                mode = reset_insertion_mode(tree);
+                goto reprocess;
+            }
+        }
         /* a DOCTYPE in any insertion mode other than "initial" is a parse error that is
            ignored without changing the insertion mode (foreign content already handled
            its own DOCTYPE above); only the initial mode builds the doctype node */
