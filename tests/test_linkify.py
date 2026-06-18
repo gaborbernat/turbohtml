@@ -305,7 +305,9 @@ def test_bare_domain_path_with_embedded_scheme_keeps_http_prefix() -> None:
         pytest.param("(http://example.com/path)", False, False, [(1, 24, 0)], id="link-in-parens"),
         pytest.param("http://example.com/path.", False, False, [(0, 23, 0)], id="path-trailing-dot-trimmed"),
         pytest.param("http://example.com/a,b,", False, False, [(0, 22, 0)], id="path-trailing-comma-trimmed"),
-        pytest.param("http://example.com/p!?:;*", False, False, [(0, 20, 0)], id="path-trailing-punct-run-trimmed"),
+        pytest.param("http://example.com/p!?:;", False, False, [(0, 20, 0)], id="path-trailing-punct-run-trimmed"),
+        # '*' is an RFC 3986 sub-delim that bleach and linkify_it keep, so a trailing one stays in the link
+        pytest.param("http://example.com/path*", False, False, [(0, 24, 0)], id="path-trailing-star-kept"),
         pytest.param("http://example.com:notaport/x", False, False, [(0, 18, 0)], id="colon-not-a-port-ends-host"),
         pytest.param("http://example.com:8080", False, False, [(0, 23, 0)], id="port-at-end-of-string"),
         pytest.param("http://example.com?q=1", False, False, [(0, 22, 0)], id="query-led-tail"),
