@@ -2907,9 +2907,11 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                     break;
                 }
                 if (atom == TH_TAG_OPTION || atom == TH_TAG_OPTGROUP) {
-                    if (has_in_scope(tree, TH_TAG_SELECT)) {
-                        /* inside a select, implied end tags close open option
-                           and (for an optgroup start) optgroup elements */
+                    if (has_in_scope(tree, TH_TAG_SELECT) ||
+                        (tree->fragment_root != NULL && tree->ctx_atom == TH_TAG_SELECT)) {
+                        /* inside a select (or a select-context fragment, where no select node
+                           is on the stack), implied end tags close open option and (for an
+                           optgroup start) optgroup elements */
                         generate_implied_end_tags(tree, atom == TH_TAG_OPTION ? TH_TAG_OPTGROUP : TH_TAG_UNKNOWN);
                     } else if (current_node(tree)->atom == TH_TAG_OPTION) {
                         stack_pop(tree);
