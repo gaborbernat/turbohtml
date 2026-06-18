@@ -138,7 +138,11 @@ static PyType_Spec iter_spec = {
 
 /* -------------------------------------------------------------- tokenizer */
 
-static PyObject *tokenizer_new(PyTypeObject *type, PyObject *Py_UNUSED(args), PyObject *Py_UNUSED(kwds)) {
+static PyObject *tokenizer_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, ":Tokenizer", keywords)) {
+        return NULL; /* a streaming tokenizer starts empty; reject any positional or keyword argument */
+    }
     TokenizerObject *self = (TokenizerObject *)type->tp_alloc(type, 0);
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */

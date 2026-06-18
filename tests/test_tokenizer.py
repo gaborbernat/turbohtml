@@ -135,6 +135,14 @@ def test_token_cannot_be_instantiated() -> None:
         Token()
 
 
+def test_tokenizer_takes_no_arguments() -> None:
+    # a streaming tokenizer starts empty; a constructor argument is an error, not a silent no-op
+    with pytest.raises(TypeError):
+        Tokenizer("<p>")  # ty: ignore[too-many-positional-arguments]
+    with pytest.raises(TypeError):
+        Tokenizer(source="<p>")  # ty: ignore[unknown-argument]
+
+
 def test_tokens_stay_valid_after_iteration() -> None:
     tokens = list(tokenize("<a x=1><b y=2>"))
     assert [token.tag for token in tokens] == ["a", "b"]
