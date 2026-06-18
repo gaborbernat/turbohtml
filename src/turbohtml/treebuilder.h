@@ -33,6 +33,14 @@ enum th_node_type {
     TH_NODE_CDATA,   /* a CDATA section (construction only, same reason) */
 };
 
+/* A doctype node reuses its (element-only) tag_flags field to record which
+   identifiers the source actually supplied. The serialized text writes an empty
+   string for both a missing and a present-but-empty identifier, so these flags
+   are the only way to tell `<!DOCTYPE x SYSTEM "s">` (public missing) from
+   `<!DOCTYPE x PUBLIC "" "s">` (public present but empty). */
+#define TH_DOCTYPE_HAS_PUBLIC 0x40u
+#define TH_DOCTYPE_HAS_SYSTEM 0x80u
+
 /* An attribute on an element node. The name is interned to an atom: a static
    compile-time id for common names (attr_atom.h), or a per-tree dynamic id for
    the rest. attr_record() recovers the name bytes for serialization and

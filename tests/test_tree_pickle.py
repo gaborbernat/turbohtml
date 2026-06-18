@@ -78,6 +78,10 @@ def test_document_round_trips() -> None:
             "http://www.w3.org/TR/html4/strict.dtd",
             id="public-and-system",
         ),
+        # a missing sibling identifier must stay None across the round-trip, not collapse to ""
+        pytest.param('<!DOCTYPE html PUBLIC "p">', "p", None, id="public-only-missing-system"),
+        pytest.param('<!DOCTYPE html SYSTEM "s">', None, "s", id="system-only-missing-public"),
+        pytest.param('<!DOCTYPE html PUBLIC "p" "">', "p", "", id="public-and-empty-system"),
     ],
 )
 def test_doctype_round_trips(markup: str, public_id: str | None, system_id: str | None) -> None:

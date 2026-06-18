@@ -2200,6 +2200,8 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 th_node *node = node_new(tree, TH_NODE_DOCTYPE);
                 if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                     node->text = build_doctype_text(tree, tok, &node->text_len);
+                    node->tag_flags = (uint8_t)((tok->has_public_id ? TH_DOCTYPE_HAS_PUBLIC : 0) |
+                                                (tok->has_system_id ? TH_DOCTYPE_HAS_SYSTEM : 0));
                     node_append(tree->document, node);
                 }
                 tree->quirks = doctype_is_quirky(tok);

@@ -2603,14 +2603,20 @@ static PyObject *doctype_get_name(PyObject *self, void *Py_UNUSED(closure)) {
 }
 
 /* The doctype's public id (want_system 0) or system id (want_system 1) as a str,
-   or None when the doctype carries no identifiers. */
+   or None when that identifier was not supplied. A supplied-but-empty identifier
+   is the empty string, distinct from a missing one (issue #68). */
 static PyObject *doctype_id(PyObject *self, int want_system) {
+    th_node *node = ((NodeObject *)self)->node;
     const Py_UCS4 *public_id;
     const Py_UCS4 *system_id;
     Py_ssize_t public_len;
     Py_ssize_t system_len;
-    if (!th_node_doctype_ids(((NodeObject *)self)->node, &public_id, &public_len, &system_id, &system_len)) {
-        Py_RETURN_NONE;
+    if (!th_node_doctype_ids(node, &public_id, &public_len, &system_id, &system_len)) {
+        Py_RETURN_NONE; /* the doctype carries no identifiers at all */
+    }
+    uint8_t supplied = want_system ? TH_DOCTYPE_HAS_SYSTEM : TH_DOCTYPE_HAS_PUBLIC;
+    if (!(node->tag_flags & supplied)) {
+        Py_RETURN_NONE; /* only the sibling identifier was supplied; this one is missing, not empty */
     }
     return want_system ? ucs4_to_str(system_id, system_len) : ucs4_to_str(public_id, public_len);
 }
@@ -2908,7 +2914,10 @@ static PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored)) {
 }
 
 /* Rebuild a doctype from its (name, public_id, system_id) triple, repacking the
-   identifiers into the node's stored "name \"public\" \"system\"" form. */
+   identifiers into the node's stored "name \"public\" \"system\"" form. Either
+   identifier may be None (not supplied); a missing one is written as an empty
+   string in the text but recorded as absent in tag_flags, so the round-trip
+   keeps missing distinct from present-but-empty (issue #68). */
 static PyObject *reconstruct_doctype(module_state *state, PyObject *data) {
     PyObject *name;
     PyObject *public_id;
@@ -2916,13 +2925,30 @@ static PyObject *reconstruct_doctype(module_state *state, PyObject *data) {
     if (!PyArg_ParseTuple(data, "OOO", &name, &public_id, &system_id)) { /* GCOVR_EXCL_BR_LINE: we build this tuple */
         return NULL;                                                     /* GCOVR_EXCL_LINE: unreachable */
     }
-    PyObject *packed =
-        public_id == Py_None ? Py_NewRef(name) : PyUnicode_FromFormat("%U \"%U\" \"%U\"", name, public_id, system_id);
+    int has_public = public_id != Py_None;
+    int has_system = system_id != Py_None;
+    PyObject *packed;
+    if (!has_public && !has_system) {
+        packed = Py_NewRef(name);
+    } else {
+        PyObject *empty = PyUnicode_New(0, 0);
+        if (empty == NULL) { /* GCOVR_EXCL_BR_LINE: the empty string is interned and cannot fail */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        packed = PyUnicode_FromFormat("%U \"%U\" \"%U\"", name, has_public ? public_id : empty,
+                                      has_system ? system_id : empty);
+        Py_DECREF(empty);
+    }
     if (packed == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *node = data_node_in_fresh_tree(state, TH_NODE_DOCTYPE, packed);
     Py_DECREF(packed);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    ((NodeObject *)node)->node->tag_flags =
+        (uint8_t)((has_public ? TH_DOCTYPE_HAS_PUBLIC : 0) | (has_system ? TH_DOCTYPE_HAS_SYSTEM : 0));
     return node;
 }
 

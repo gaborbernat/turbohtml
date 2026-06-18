@@ -26,14 +26,20 @@ def _doctype(markup: str) -> Doctype:
         pytest.param(
             '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">',
             "-//W3C//DTD HTML 4.01//EN",
-            "",
-            id="public-only-empty-system",
+            None,  # no system identifier was supplied, so it is missing, not empty
+            id="public-only-missing-system",
         ),
         pytest.param(
             '<!DOCTYPE html SYSTEM "about:legacy-compat">',
-            "",
+            None,  # SYSTEM supplies no public identifier, so it is missing, not empty
             "about:legacy-compat",
-            id="system-only-empty-public",
+            id="system-only-missing-public",
+        ),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "p" "">',
+            "p",
+            "",  # a system identifier given as "" is present but empty, distinct from missing
+            id="public-and-empty-system",
         ),
     ],
 )
