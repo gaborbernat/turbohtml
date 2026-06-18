@@ -469,6 +469,10 @@ def test_before_html_end_br_synthesizes_br() -> None:
         pytest.param("", "html", "| <head>\n| <body>", id="html-fragment-empty-synthesizes-head-body"),
         pytest.param("<title>t</title>", "html", '|     "t"\n| <body>', id="html-fragment-head-only-adds-body"),
         pytest.param("<!--c-->", "html", "| <!-- c -->\n| <head>\n| <body>", id="html-fragment-comment-then-head-body"),
+        # foster parenting in a table-section fragment context, where no <table> is on
+        # the stack, fosters out to the fragment root rather than nesting (issue #55)
+        pytest.param("<tr><li>x", "tbody", "| <tr>\n| <li>", id="foster-out-of-tbody-fragment"),
+        pytest.param("<tr><li>x", "table", "|   <tr>\n| <li>", id="foster-out-of-table-fragment"),
     ],
 )
 def test_fragment_paths(html: str, context: str, needle: str) -> None:
