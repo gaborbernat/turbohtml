@@ -115,6 +115,14 @@ _LONG_NAME = "z" * 130
         pytest.param("<pre>\nkept", '"kept"', id="pre-drops-leading-newline"),
         pytest.param("<pre>zkept", '"zkept"', id="pre-keeps-non-newline"),
         pytest.param("<listing>\nq", '"q"', id="listing-drops-leading-newline"),
+        # after-head whitespace lands under <html> (between head and body); only the rest starts the body (issue #88)
+        pytest.param(
+            "<head></head>  text",
+            '|   <head>\n|   "  "\n|   <body>\n|     "text"',
+            id="after-head-whitespace-under-html",
+        ),
+        pytest.param("<head></head>   ", '|   <head>\n|   "   "\n|   <body>', id="after-head-only-whitespace"),
+        pytest.param("<head></head>x", '|   <head>\n|   <body>\n|     "x"', id="after-head-no-leading-whitespace"),
         pytest.param("a\x00b", '"ab"', id="nul-stripped-from-text"),
         pytest.param("<template>" * 9 + "z", "content", id="template-stack-regrow"),
         pytest.param("<table><thead><tr><td>z</table>", "<td>", id="thead-table-scope-cell"),
