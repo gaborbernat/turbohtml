@@ -134,6 +134,23 @@ def test_whatwg_label_decodes(label: str, raw: bytes, char: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "label",
+    ["replacement", "iso-2022-kr", "csiso2022kr", "iso-2022-cn", "iso-2022-cn-ext", "hz-gb-2312"],
+)
+def test_replacement_encoding_collapses_to_one_fffd(label: str) -> None:
+    # the stateful ISO-2022/HZ encodings are refused: a non-empty input is one U+FFFD
+    doc = parse(b"<meta charset=" + label.encode() + b">\x80\x95")
+    assert doc.encoding == "replacement"
+    body = doc.find("body")
+    assert body is not None
+    assert body.text == "�"
+
+
+def test_replacement_encoding_empty_input_is_empty() -> None:
+    assert parse(b"", encoding="replacement").encoding == "replacement"
+
+
+@pytest.mark.parametrize(
     ("data", "expected"),
     [
         # byte-order-mark near misses fall through to the default

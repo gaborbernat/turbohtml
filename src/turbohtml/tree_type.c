@@ -2779,6 +2779,11 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
                 PyUnicode_WRITE(PyUnicode_2BYTE_KIND, out, index, byte < 0x80 ? byte : (Py_UCS4)(0xF700 + byte));
             }
         }
+    } else if (strcmp(entry->codec, "replacement") == 0) {
+        /* the WHATWG replacement encoding refuses the stateful ISO-2022/HZ byte streams,
+           which can smuggle markup past a sanitizer: a non-empty input decodes to a
+           single U+FFFD and an empty input to nothing */
+        decoded = len - skip > 0 ? PyUnicode_FromOrdinal(0xFFFD) : PyUnicode_New(0, 0);
     } else {
         decoded = PyUnicode_Decode((const char *)bytes + skip, len - skip, entry->codec, "replace");
     }
