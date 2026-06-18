@@ -29,6 +29,8 @@ def _sel(html: str, selector: str) -> list[str]:
         pytest.param(".item", ["li", "li"], id="class"),
         pytest.param("#s", ["section"], id="id"),
         pytest.param("my-widget", ["my-widget"], id="unknown-tag-by-name"),
+        # a type selector is ASCII case-insensitive even for a custom/unknown tag (issue #62)
+        pytest.param("MY-WIDGET", ["my-widget"], id="unknown-tag-folds-case"),
         pytest.param("li.sel", ["li"], id="compound-type-class"),
         pytest.param("p.lead.first", ["p"], id="compound-two-classes"),
         # attribute operators
