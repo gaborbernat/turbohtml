@@ -123,6 +123,6 @@ def test_reconstruct_propagates_a_construction_failure() -> None:
     reduced = Element("div").__reduce__()
     kind = reduced[1][0]  # the (kind, data, children) payload pickle would store
     # a genuinely broken payload still fails: a non-mapping attrs value cannot build an element,
-    # and reconstruction surfaces that error instead of returning a half-built node
-    with pytest.raises(AttributeError):
+    # and reconstruction surfaces that TypeError instead of returning a half-built node
+    with pytest.raises(TypeError):
         _reconstruct(kind, ("div", 123), [])

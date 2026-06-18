@@ -2145,8 +2145,11 @@ static inline PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject
     PyObject *keys = NULL;
     Py_ssize_t attr_count = 0;
     if (attrs != NULL && attrs != Py_None) {
-        keys = PyMapping_Keys(attrs); /* raises if attrs is not a mapping */
+        keys = PyMapping_Keys(attrs);
         if (keys == NULL) {
+            if (PyErr_ExceptionMatches(PyExc_AttributeError)) { /* a non-mapping has no keys() to enumerate */
+                PyErr_SetString(PyExc_TypeError, "attrs must be a mapping");
+            }
             return NULL;
         }
         attr_count = PyList_GET_SIZE(keys);

@@ -156,9 +156,11 @@ def test_element_list_member_must_be_str() -> None:
         Element("div", {"class": [1, 2]})  # ty: ignore[invalid-argument-type]  # members must be str
 
 
-def test_element_attrs_must_be_a_mapping() -> None:
-    with pytest.raises((TypeError, AttributeError)):
-        Element("div", 5)  # ty: ignore[invalid-argument-type]  # attrs must be a mapping
+@pytest.mark.parametrize("attrs", [5, [("a", "b")]], ids=["int", "list"])
+def test_element_attrs_must_be_a_mapping(attrs: object) -> None:
+    # a value without keys() is not a mapping; report that as a TypeError, not the raw AttributeError
+    with pytest.raises(TypeError, match="attrs must be a mapping"):
+        Element("div", attrs)  # ty: ignore[invalid-argument-type]  # attrs must be a mapping
 
 
 def test_element_mapping_getitem_failure_propagates() -> None:
@@ -171,3 +173,14 @@ def test_element_mapping_getitem_failure_propagates() -> None:
 
     with pytest.raises(KeyError):
         Element("div", BadMapping())  # ty: ignore[invalid-argument-type]  # a deliberately broken mapping
+
+
+def test_element_mapping_keys_failure_is_not_masked() -> None:
+    class RaisingKeys:
+        def keys(self) -> list[str]:  # noqa: PLR6301  # a mapping protocol method must be an instance method
+            msg = "boom"
+            raise RuntimeError(msg)
+
+    # keys() exists but raises: surface that error rather than mislabeling it a non-mapping TypeError
+    with pytest.raises(RuntimeError):
+        Element("div", RaisingKeys())  # ty: ignore[invalid-argument-type]  # keys() raises
