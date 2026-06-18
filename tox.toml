@@ -205,7 +205,8 @@ description = "detect data races with ThreadSanitizer; run inside ghcr.io/nasche
 base_python = [ "python3.14t" ]
 package = "skip"
 dependency_groups = [ "test" ]
-set_env = { UV_PYTHON_PREFERENCE = "only-system", CC = "clang", CXX = "clang++", TSAN_OPTIONS = "halt_on_error=0 allocator_may_return_null=1 suppressions={tox_root}{/}tools{/}tsan-suppressions.txt" }
+# let meson autodetect the container's TSan-capable compiler (the one CPython was built with); do not force CC=clang
+set_env = { UV_PYTHON_PREFERENCE = "only-system", TSAN_OPTIONS = "halt_on_error=0 allocator_may_return_null=1 suppressions={tox_root}{/}tools{/}tsan-suppressions.txt" }
 commands_pre = [
   # build the extension with TSan instrumentation against the container's TSan interpreter
   [
