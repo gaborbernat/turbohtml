@@ -495,6 +495,18 @@ def test_before_html_end_br_synthesizes_br() -> None:
         pytest.param("</dd>y", "div", '| "y"', id="end-dd-no-scope"),
         pytest.param("<frame><frameset></frameset>", "frameset", "<frame>", id="frameset-context"),
         pytest.param("<option>a<select><option>b", "select", "<option>", id="select-ignores-nested-select"),
+        # in a select-context fragment a second optgroup/option pops the open one, making siblings (issue #89)
+        pytest.param(
+            "<optgroup>1<optgroup>2",
+            "select",
+            '| <optgroup>\n|   "1"\n| <optgroup>\n|   "2"',
+            id="select-optgroup-pops",
+        ),
+        pytest.param(
+            "<option>1<option>2", "select", '| <option>\n|   "1"\n| <option>\n|   "2"', id="select-option-pops"
+        ),
+        # a non-select-context fragment keeps an optgroup without the select-mode pop
+        pytest.param("<optgroup>x", "div", '| <optgroup>\n|   "x"', id="optgroup-in-non-select-fragment"),
         pytest.param("  <col>x", "colgroup", "<col>", id="colgroup-whitespace-then-content"),
         pytest.param("<select></select><td>next", "tr", "<td>", id="select-in-cell-resets"),
         pytest.param("<table></table>x", "td", '"x"', id="reset-table-close-td-context"),
