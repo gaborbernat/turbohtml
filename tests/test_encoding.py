@@ -94,6 +94,7 @@ def test_invalid_bytes_become_replacement_characters() -> None:
         pytest.param("csiso2022jp", "iso-2022-jp", id="iso-2022-jp-alias"),
         pytest.param("x-mac-ukrainian", "x-mac-cyrillic", id="x-mac-cyrillic-alias"),
         pytest.param("x-user-defined", "x-user-defined", id="x-user-defined"),
+        pytest.param("gbk", "GBK", id="gbk-name-kept"),  # GBK shares gb18030's decoder but keeps its own name
     ],
 )
 def test_whatwg_label_resolves(label: str, expected: str) -> None:
@@ -108,6 +109,9 @@ def test_whatwg_label_resolves(label: str, expected: str) -> None:
         pytest.param("x-user-defined", b"A", "A", id="x-user-defined-ascii"),
         pytest.param("x-user-defined", b"\x80", "", id="x-user-defined-low"),
         pytest.param("x-user-defined", b"\xff", "", id="x-user-defined-high"),
+        # GBK's decoder is gb18030's decoder: the four-byte sequence decodes instead of yielding U+FFFD
+        pytest.param("gbk", bytes([0x81, 0x30, 0x81, 0x30]), "\x80", id="gbk-four-byte"),
+        pytest.param("gbk", bytes([0xD2, 0xBB]), "一", id="gbk-two-byte-legacy"),
     ],
 )
 def test_whatwg_label_decodes(label: str, raw: bytes, char: str) -> None:
