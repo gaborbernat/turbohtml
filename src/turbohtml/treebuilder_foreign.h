@@ -410,27 +410,11 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         }
         return 1;
     }
-    /* end tag: </br> is a breakout tag like its start-tag form. </p> is not: it
-       is "any other end tag", which walks the stack without popping the foreign
-       element and processes the token under HTML rules, so the implied <p> lands
-       inside the foreign root rather than as a sibling. */
-    uint16_t atom = tok_atom(token);
-    if (atom == TH_TAG_BR) {
-        /* html is never foreign, so the breakout loop never empties the stack */
-        while (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE */
-            th_node *cur = current_node(tree);
-            if (cur->ns == TH_NS_HTML || is_mathml_text_integration(cur) || is_html_integration(cur) ||
-                cur == tree->fragment_root) {
-                break; /* never pop the fragment's context root */
-            }
-            stack_pop(tree);
-        }
-        return 0; /* reprocess under HTML rules */
-    }
-    /* otherwise walk up the stack: stop at the first HTML element and run the
-       HTML rules there (the token is reprocessed with the foreign element still
-       current), or match a foreign element by (case-insensitive) name and pop to
-       it; never pop the fragment context root */
+    /* "any other end tag", which includes </br> and </p>: walk up the stack, stop at
+       the first HTML element and run the HTML rules there (the token is reprocessed
+       with the foreign element still current, so a synthesized <br>/<p> lands inside
+       the foreign root rather than as a sibling), or match a foreign element by
+       (case-insensitive) name and pop to it; never pop the fragment context root */
     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
         th_node *node = tree->open[index];
         if (node->ns == TH_NS_HTML) {
