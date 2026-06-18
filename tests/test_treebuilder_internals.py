@@ -108,6 +108,30 @@ _LONG_NAME = "z" * 130
             "|       <table>",
             id="quirks-public-id-w3o-strict",
         ),
+        # WHATWG initial mode: a -//W3C//DTD HTML 4.01 Frameset/Transitional public id puts
+        # the document in quirks mode when the system id is missing OR the empty string (so
+        # <table> nests in the still-open <p>); a non-empty system id downgrades it to
+        # limited-quirks (no-quirks here), closing the <p> so <table> becomes its sibling
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN"><p><table>',
+            "|     <p>\n|       <table>",
+            id="quirks-4.01-frameset-missing-sysid",
+        ),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" ""><p><table>',
+            "|     <p>\n|       <table>",
+            id="quirks-4.01-frameset-empty-sysid",
+        ),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" ""><p><table>',
+            "|     <p>\n|       <table>",
+            id="quirks-4.01-transitional-empty-sysid",
+        ),
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "x"><p><table>',
+            "|     <p>\n|     <table>",
+            id="limited-quirks-4.01-frameset-nonempty-sysid",
+        ),
         pytest.param("<p>" + "x" * 70000, "x" * 40, id="text-larger-than-arena-block"),
         pytest.param("<html a=1><html ő=2>", 'a="1"', id="merge-wide-attr-name"),
         pytest.param("<input type=HIDDEN>", "<input>", id="uppercase-hidden-input-type"),

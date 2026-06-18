@@ -91,8 +91,12 @@ static int doctype_is_quirky(const th_token *tok) {
                 return 1;
             }
         }
-        if (!tok->has_system_id && (buf_imatches(&tok->public_id, "-//W3C//DTD HTML 4.01 Frameset//", 0) ||
-                                    buf_imatches(&tok->public_id, "-//W3C//DTD HTML 4.01 Transitional//", 0))) {
+        /* the spec triggers quirks when the system identifier is "missing or the empty
+           string"; only a non-empty system identifier downgrades these two public
+           identifiers to limited-quirks (which turbohtml treats as no-quirks) */
+        if ((!tok->has_system_id || tok->system_id.len == 0) &&
+            (buf_imatches(&tok->public_id, "-//W3C//DTD HTML 4.01 Frameset//", 0) ||
+             buf_imatches(&tok->public_id, "-//W3C//DTD HTML 4.01 Transitional//", 0))) {
             return 1;
         }
     }
