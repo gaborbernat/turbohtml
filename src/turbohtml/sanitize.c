@@ -282,7 +282,7 @@ static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag) {
     return 0;
 }
 
-static int sanitize_children(sanitizer *s, th_node *parent);
+static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept);
 
 /* Make a Text node owning a copy of `text` in the walked tree. */
 static th_node *make_text(sanitizer *s, PyObject *text) {
@@ -357,7 +357,9 @@ static void hoist_children(th_node *element) {
 
 /* Replace a disallowed element with its escaped start tag, its sanitized children, and its escaped end tag. */
 static int escape_element(sanitizer *s, th_node *element) {
-    if (sanitize_children(s, element) < 0) {
+    /* the element is being escaped to text, so its children lose this element as a
+       kept ancestor (parent_kept = 0): a foreign child must not survive into HTML */
+    if (sanitize_children(s, element, 0) < 0) {
         return -1;
     }
     PyObject *opening = open_tag(s, element);
@@ -392,23 +394,33 @@ static int escape_element(sanitizer *s, th_node *element) {
     return 0;
 }
 
-/* Keep, escape, strip, or remove one element according to the policy. */
-static int sanitize_element(sanitizer *s, th_node *element) {
+/* Keep, escape, strip, or remove one element according to the policy. parent_kept is
+   1 when the element's parent is itself being kept; an allowlisted foreign (SVG/MathML)
+   element is kept only then, so it never outlives its namespace context (e.g. an svg
+   <a> must not survive into HTML as a live anchor when its <svg> is escaped). */
+static int sanitize_element(sanitizer *s, th_node *element, int parent_kept) {
     int is_html = element->ns == TH_NS_HTML;
     PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, element->text, element->text_len);
     if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    int allowed = is_html && !is_unsafe_tag(element->atom) ? PySet_Contains(s->tags, tag) : 0;
+    /* an allowlisted element matches by its serialized name (a foreign element by
+       e.g. "svg"/"foreignObject"); the unsafe-tag set still escapes scripting and
+       raw-text elements in any namespace, and a foreign element also needs kept
+       context so it stays inside real foreign markup */
+    int allowed = is_unsafe_tag(element->atom) ? 0 : PySet_Contains(s->tags, tag);
+    if (allowed > 0 && !is_html && !parent_kept) {
+        allowed = 0;
+    }
     int status = 0;
     if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains only fails on a non-hashable member, impossible here */
         status = -1;   /* GCOVR_EXCL_LINE */
     } else if (allowed) {
-        status = sanitize_attributes(s, element, tag) < 0 ? -1 : sanitize_children(s, element);
+        status = sanitize_attributes(s, element, tag) < 0 ? -1 : sanitize_children(s, element, 1);
     } else if (s->on_disallowed == ON_REMOVE || (s->on_disallowed == ON_STRIP && !is_html)) {
         th_node_remove(element); /* foreign content is removed rather than unwrapped, to avoid namespace confusion */
     } else if (s->on_disallowed == ON_STRIP) {
-        if ((status = sanitize_children(s, element)) == 0) {
+        if ((status = sanitize_children(s, element, 0)) == 0) {
             hoist_children(element);
             th_node_remove(element);
         }
@@ -420,12 +432,12 @@ static int sanitize_element(sanitizer *s, th_node *element) {
 }
 
 /* Walk an element's children, applying the policy; capturing the next sibling keeps the loop safe across edits. */
-static int sanitize_children(sanitizer *s, th_node *parent) {
+static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
     th_node *child = parent->first_child;
     while (child != NULL) {
         th_node *next = child->next_sibling;
         if (child->type == TH_NODE_ELEMENT) {
-            if (sanitize_element(s, child) < 0) {
+            if (sanitize_element(s, child, parent_kept) < 0) {
                 return -1;
             }
         } else if (child->type == TH_NODE_COMMENT) {
@@ -463,7 +475,7 @@ PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
         Py_DECREF(s.star);                              /* GCOVR_EXCL_LINE */
         return NULL;                                    /* GCOVR_EXCL_LINE */
     }
-    int failed = sanitize_children(&s, root) < 0;
+    int failed = sanitize_children(&s, root, 1) < 0; /* the fragment root is kept context */
     Py_DECREF(s.star);
     return failed ? NULL : Py_NewRef(Py_None);
 }
