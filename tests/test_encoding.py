@@ -42,12 +42,12 @@ def test_bom_is_detected_and_stripped(data: bytes, encoding: str) -> None:
 @pytest.mark.parametrize(
     ("data", "encoding_arg", "expected"),
     [
-        pytest.param(b"<p>x", "iso-8859-2", "iso-8859-2", id="argument-used"),
+        pytest.param(b"<p>x", "iso-8859-2", "ISO-8859-2", id="argument-used"),
         pytest.param(b"\xef\xbb\xbf<p>x", "iso-8859-2", "UTF-8", id="bom-overrides-argument"),
         # the argument outranks a <meta>; a <meta> is used only without an argument
-        pytest.param(b'<meta charset="utf-8"><p>x', "iso-8859-2", "iso-8859-2", id="argument-outranks-meta"),
+        pytest.param(b'<meta charset="utf-8"><p>x', "iso-8859-2", "ISO-8859-2", id="argument-outranks-meta"),
         pytest.param(b"<p>x", "not-a-real-encoding", "windows-1252", id="unknown-label-falls-through"),
-        pytest.param(b"<p>x", "  ISO-8859-2  ", "iso-8859-2", id="whitespace-and-case-insensitive"),
+        pytest.param(b"<p>x", "  ISO-8859-2  ", "ISO-8859-2", id="whitespace-and-case-insensitive"),
         pytest.param(b"<p>x", "", "windows-1252", id="empty-label"),
         pytest.param(b"<p>x", "   ", "windows-1252", id="whitespace-label"),
         pytest.param(b"<p>x", "x" * 80, "windows-1252", id="overlong-label"),
@@ -66,7 +66,7 @@ def test_encoding_argument(data: bytes, encoding_arg: str, expected: str) -> Non
     ],
 )
 def test_bytes_like_inputs(wrap: type) -> None:
-    assert parse(wrap(b'<meta charset="iso-8859-2"><p>x')).encoding == "iso-8859-2"
+    assert parse(wrap(b'<meta charset="iso-8859-2"><p>x')).encoding == "ISO-8859-2"
 
 
 def test_invalid_bytes_become_replacement_characters() -> None:
@@ -80,18 +80,18 @@ def test_invalid_bytes_become_replacement_characters() -> None:
 @pytest.mark.parametrize(
     ("label", "expected"),
     [
-        pytest.param("iso-8859-3", "iso-8859-3", id="iso-8859-3"),
-        pytest.param("latin4", "iso-8859-4", id="iso-8859-4-alias"),
-        pytest.param("arabic", "iso-8859-6", id="iso-8859-6-alias"),
-        pytest.param("iso-8859-8", "iso-8859-8", id="iso-8859-8"),
-        pytest.param("hebrew", "iso-8859-8", id="iso-8859-8-alias"),
-        pytest.param("iso-8859-8-i", "iso-8859-8-i", id="iso-8859-8-i"),
-        pytest.param("iso-8859-10", "iso-8859-10", id="iso-8859-10"),
-        pytest.param("iso-8859-13", "iso-8859-13", id="iso-8859-13"),
-        pytest.param("iso-8859-14", "iso-8859-14", id="iso-8859-14"),
-        pytest.param("iso-8859-16", "iso-8859-16", id="iso-8859-16"),
-        pytest.param("866", "ibm866", id="ibm866-alias"),
-        pytest.param("csiso2022jp", "iso-2022-jp", id="iso-2022-jp-alias"),
+        pytest.param("iso-8859-3", "ISO-8859-3", id="iso-8859-3"),
+        pytest.param("latin4", "ISO-8859-4", id="iso-8859-4-alias"),
+        pytest.param("arabic", "ISO-8859-6", id="iso-8859-6-alias"),
+        pytest.param("iso-8859-8", "ISO-8859-8", id="iso-8859-8"),
+        pytest.param("hebrew", "ISO-8859-8", id="iso-8859-8-alias"),
+        pytest.param("iso-8859-8-i", "ISO-8859-8-I", id="iso-8859-8-i"),
+        pytest.param("iso-8859-10", "ISO-8859-10", id="iso-8859-10"),
+        pytest.param("iso-8859-13", "ISO-8859-13", id="iso-8859-13"),
+        pytest.param("iso-8859-14", "ISO-8859-14", id="iso-8859-14"),
+        pytest.param("iso-8859-16", "ISO-8859-16", id="iso-8859-16"),
+        pytest.param("866", "IBM866", id="ibm866-alias"),
+        pytest.param("csiso2022jp", "ISO-2022-JP", id="iso-2022-jp-alias"),
         pytest.param("x-mac-ukrainian", "x-mac-cyrillic", id="x-mac-cyrillic-alias"),
         pytest.param("x-user-defined", "x-user-defined", id="x-user-defined"),
         pytest.param("gbk", "GBK", id="gbk-name-kept"),  # GBK shares gb18030's decoder but keeps its own name

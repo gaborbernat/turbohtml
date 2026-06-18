@@ -411,7 +411,7 @@ does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but return
 
 :func:`turbohtml.parse` accepts ``bytes`` and runs the WHATWG encoding sniffing algorithm (a byte-order mark, then a
 ``<meta>`` declaration, defaulting to windows-1252). Pass ``encoding`` to override the sniff, and read
-:attr:`~turbohtml.Document.encoding` for the label that was used:
+:attr:`~turbohtml.Document.encoding` for the WHATWG name that was resolved:
 
 .. testcode::
 
@@ -422,7 +422,7 @@ does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but return
 
 .. testoutput::
 
-    iso-8859-2
+    ISO-8859-2
     á
 
 ************************
