@@ -46,7 +46,7 @@ typedef struct {
 /* ---------------------------------------------------------------- parsing */
 
 typedef struct {
-    const Py_UCS4 *src;
+    Py_UCS4 *src; /* the owned source copy; sel_ident decodes escapes into it in place */
     Py_ssize_t pos;
     Py_ssize_t len;
     th_tree *tree;
@@ -57,20 +57,71 @@ static int sel_is_ident(Py_UCS4 ch) {
     return is_ascii_alpha(ch) || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch >= 0x80;
 }
 
+static int sel_is_hex(Py_UCS4 ch) {
+    return (ch >= '0' && ch <= '9') || ((ch | 32) >= 'a' && (ch | 32) <= 'f');
+}
+
 static void sel_skip_ws(sel_parser *parser) {
     while (parser->pos < parser->len && is_space(parser->src[parser->pos])) {
         parser->pos++;
     }
 }
 
-/* Read an identifier run, returning its slice via *out / *out_len. */
+/* Whether the backslash at parser->pos begins a valid escape: a backslash is
+   one unless it precedes a CSS newline (LF/CR/FF); at end of input it still
+   escapes the U+FFFD replacement character. */
+static int sel_starts_escape(const sel_parser *parser) {
+    if (parser->pos + 1 >= parser->len) {
+        return 1;
+    }
+    Py_UCS4 next = parser->src[parser->pos + 1];
+    return next != '\n' && next != '\r' && next != '\x0c';
+}
+
+/* Consume an escaped code point (CSS Syntax 4.3.7); the leading backslash at
+   parser->pos is assumed to start a valid escape and is consumed here. */
+static Py_UCS4 sel_consume_escape(sel_parser *parser) {
+    parser->pos++; /* the backslash */
+    if (parser->pos >= parser->len) {
+        return 0xFFFD; /* a trailing backslash escapes the replacement character */
+    }
+    if (!sel_is_hex(parser->src[parser->pos])) {
+        return parser->src[parser->pos++]; /* the literal escaped character */
+    }
+    uint32_t value = 0;
+    for (int digit = 0; digit < 6 && parser->pos < parser->len && sel_is_hex(parser->src[parser->pos]); digit++) {
+        Py_UCS4 hex = parser->src[parser->pos++];
+        value = value * 16 + (hex <= '9' ? (uint32_t)(hex - '0') : (uint32_t)((hex | 32) - 'a' + 10));
+    }
+    if (parser->pos < parser->len && is_space(parser->src[parser->pos])) {
+        parser->pos++; /* one trailing whitespace closes the hex escape */
+    }
+    if (value == 0 || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+        return 0xFFFD; /* null, surrogate, and out-of-range escapes fold to U+FFFD */
+    }
+    return (Py_UCS4)value;
+}
+
+/* Read an identifier run, decoding any CSS escapes in place (a decoded run is
+   never longer than its source), and return its slice via *out / *out_len. */
 static void sel_ident(sel_parser *parser, const Py_UCS4 **out, Py_ssize_t *out_len) {
     Py_ssize_t start = parser->pos;
-    while (parser->pos < parser->len && sel_is_ident(parser->src[parser->pos])) {
-        parser->pos++;
+    Py_ssize_t write = start;
+    while (parser->pos < parser->len) {
+        if (parser->src[parser->pos] == '\\') {
+            if (!sel_starts_escape(parser)) {
+                break; /* a backslash before a newline is not part of the identifier */
+            }
+            parser->src[write++] = sel_consume_escape(parser);
+            continue;
+        }
+        if (!sel_is_ident(parser->src[parser->pos])) {
+            break;
+        }
+        parser->src[write++] = parser->src[parser->pos++];
     }
     *out = parser->src + start;
-    *out_len = parser->pos - start;
+    *out_len = write - start;
     if (*out_len == 0) {
         parser->error = 1;
     }
@@ -224,7 +275,7 @@ static void sel_one(sel_parser *parser, sel_simple *simple) {
 }
 
 static int sel_starts_simple(Py_UCS4 ch) {
-    return ch == '*' || ch == '.' || ch == '#' || ch == '[' || sel_is_ident(ch);
+    return ch == '*' || ch == '.' || ch == '#' || ch == '[' || ch == '\\' || sel_is_ident(ch);
 }
 
 /* Parse a compound (one or more adjacent simples) into the given buffer. */
