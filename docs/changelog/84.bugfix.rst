@@ -5,4 +5,4 @@ thread rewired through ``extract`` or another structural edit, segfaulting. Ever
 takes a per-tree :c:macro:`Py_BEGIN_CRITICAL_SECTION` on the owning tree handle, a no-op on the GIL build (so
 single-threaded performance is unchanged) and a cheap per-tree lock on the free-threaded build (so independent trees
 still run fully in parallel), mirroring the tokenizer fix and CPython's own list and dict. The free-threaded test matrix
-now also covers Python 3.13t alongside 3.14t and 3.15t.
+covers Python 3.14t and 3.15t, where free-threading is officially supported.
