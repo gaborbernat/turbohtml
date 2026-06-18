@@ -227,9 +227,9 @@ static Py_ssize_t scan_url_tail(int kind, const void *data, Py_ssize_t host_end,
         }
         pos++;
         /* a closing bracket or a non-trailing-punctuation byte can end the link;
-           trailing . , ! ? : ; * are valid inside it but never its last byte */
-        if (round == 0 && square == 0 && c != '.' && c != ',' && c != '!' && c != '?' && c != ':' && c != ';' &&
-            c != '*') {
+           trailing . , ! ? : ; are valid inside it but never its last byte. '*' is
+           an RFC 3986 sub-delim that bleach and linkify_it keep, so it ends a link. */
+        if (round == 0 && square == 0 && c != '.' && c != ',' && c != '!' && c != '?' && c != ':' && c != ';') {
             end = pos;
         }
     }
