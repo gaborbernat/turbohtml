@@ -49,14 +49,26 @@ typedef struct {
 
 void xp_nodeset_free(xp_nodeset *ns);
 
-/* Evaluate a location-path program against a context node, collecting the result
-   node-set (document-ordered, duplicate-free) into *out. Returns 0 on success.
-   Returns -2 for a construct this phase does not implement yet (predicates,
-   operators, functions, unions, filter expressions, the following/preceding/
-   namespace axes), with *feature set to a short name for the message. Returns -1
-   on allocation failure. */
+/* The four XPath 1.0 value types an expression can evaluate to. */
+enum xp_result_kind { XP_NODESET, XP_NUMBER, XP_STRING, XP_BOOLEAN };
+
+typedef struct {
+    enum xp_result_kind kind;
+    xp_nodeset nodes; /* XP_NODESET (document-ordered, duplicate-free) */
+    double number;    /* XP_NUMBER */
+    Py_UCS4 *string;  /* XP_STRING, owned */
+    Py_ssize_t string_len;
+    int boolean; /* XP_BOOLEAN */
+} xp_result;
+
+void xp_result_free(xp_result *result);
+
+/* Evaluate a compiled program against a context node. Returns 0 with *out filled
+   (the caller frees it with xp_result_free). Returns -2 for a construct not yet
+   implemented (the following/preceding/namespace axes, unknown functions), with
+   *feature set to a short name for the message. Returns -1 on allocation failure. */
 struct th_tree;
-int xp_eval_nodeset(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_nodeset *out,
-                    const char **feature);
+int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_result *out,
+            const char **feature);
 
 #endif /* TURBOHTML_XPATH_H */

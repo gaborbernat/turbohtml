@@ -176,32 +176,28 @@ def test_xpath_iter_supports_partial_consumption(doc: turbohtml.Node) -> None:
 
 
 def test_xpath_iter_propagates_errors(doc: turbohtml.Node) -> None:
-    with pytest.raises(NotImplementedError, match="predicates"):
-        doc.xpath_iter("//p[1]")
+    with pytest.raises(NotImplementedError, match="following/preceding/namespace"):
+        doc.xpath_iter("//following::x")
     with pytest.raises(TypeError, match="must be a str"):
         doc.xpath_iter(123)  # ty: ignore[invalid-argument-type]  # non-str exercises the TypeError path
 
 
 @pytest.mark.parametrize(
-    ("expr", "message"),
+    "expr",
     [
-        pytest.param("//p[1]", "predicates", id="predicate"),
-        pytest.param("count(//a)", "operators, functions, and unions", id="function"),
-        pytest.param("//a | //p", "operators, functions, and unions", id="union"),
-        pytest.param("(//a)/b", "filter expressions", id="filter-base"),
-        pytest.param("//following::x", "following/preceding/namespace", id="following"),
-        pytest.param("//preceding::x", "following/preceding/namespace", id="preceding"),
-        pytest.param("//namespace::x", "following/preceding/namespace", id="namespace"),
+        pytest.param("//following::x", id="following"),
+        pytest.param("//preceding::x", id="preceding"),
+        pytest.param("//namespace::x", id="namespace"),
     ],
 )
-def test_unsupported_features_raise(doc: turbohtml.Node, expr: str, message: str) -> None:
-    with pytest.raises(NotImplementedError, match=message):
+def test_unsupported_axes_raise(doc: turbohtml.Node, expr: str) -> None:
+    with pytest.raises(NotImplementedError, match="following/preceding/namespace"):
         doc.xpath(expr)
 
 
 def test_xpath_one_unsupported_raises(doc: turbohtml.Node) -> None:
-    with pytest.raises(NotImplementedError, match="predicates"):
-        doc.xpath_one("//p[1]")
+    with pytest.raises(NotImplementedError, match="following/preceding/namespace"):
+        doc.xpath_one("//following::x")
 
 
 def test_invalid_expression_raises_value_error(doc: turbohtml.Node) -> None:

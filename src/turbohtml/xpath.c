@@ -77,8 +77,8 @@ typedef struct {
     uint8_t axis;     /* enum xp_axis (XN_STEP) */
     uint8_t test;     /* enum xp_test (XN_STEP) */
     uint8_t absolute; /* XN_PATH: a leading / was present */
-    int32_t a;        /* first child / operand */
-    int32_t b;        /* second child */
+    int32_t first;    /* first child / operand */
+    int32_t second;   /* second child */
     int32_t next;     /* sibling chain: steps, predicates, args */
     double num;       /* XN_NUM */
     Py_UCS4 *str;     /* owned name/literal; NULL when none */
@@ -93,21 +93,21 @@ struct xp_program {
 };
 
 /* Append a blank node, returning its index or -1 on OOM. */
-static int32_t xn_new(xp_program *p, enum xn_kind kind) {
-    if (p->count == p->cap) {
-        int32_t cap = p->cap ? p->cap * 2 : 16;
-        xn *grown = PyMem_Realloc(p->nodes, (size_t)cap * sizeof(xn));
+static int32_t xn_new(xp_program *prog, enum xn_kind kind) {
+    if (prog->count == prog->cap) {
+        int32_t cap = prog->cap ? prog->cap * 2 : 16;
+        xn *grown = PyMem_Realloc(prog->nodes, (size_t)cap * sizeof(xn));
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;       /* GCOVR_EXCL_LINE */
         }
-        p->nodes = grown;
-        p->cap = cap;
+        prog->nodes = grown;
+        prog->cap = cap;
     }
-    int32_t idx = p->count++;
-    xn *n = &p->nodes[idx];
-    memset(n, 0, sizeof(*n));
-    n->kind = (uint8_t)kind;
-    n->a = n->b = n->next = -1;
+    int32_t idx = prog->count++;
+    xn *node = &prog->nodes[idx];
+    memset(node, 0, sizeof(*node));
+    node->kind = (uint8_t)kind;
+    node->first = node->second = node->next = -1;
     return idx;
 }
 
@@ -157,26 +157,26 @@ typedef struct {
     int error;      /* a lexical error was hit */
 } lexer;
 
-static int xp_is_name_start(Py_UCS4 c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 0x80;
+static int xp_is_name_start(Py_UCS4 ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch >= 0x80;
 }
 
-static int xp_is_name_char(Py_UCS4 c) {
-    return xp_is_name_start(c) || (c >= '0' && c <= '9') || c == '-' || c == '.';
+static int xp_is_name_char(Py_UCS4 ch) {
+    return xp_is_name_start(ch) || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.';
 }
 
-static int xp_is_space(Py_UCS4 c) {
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+static int xp_is_space(Py_UCS4 ch) {
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
 }
 
 static int xp_name_eq(const lexer *lx, const char *kw) {
-    Py_ssize_t i = 0;
-    for (; kw[i] != '\0'; i++) {
-        if (i >= lx->tlen || lx->tstart[i] != (Py_UCS4)(unsigned char)kw[i]) {
+    Py_ssize_t index = 0;
+    for (; kw[index] != '\0'; index++) {
+        if (index >= lx->tlen || lx->tstart[index] != (Py_UCS4)(unsigned char)kw[index]) {
             return 0;
         }
     }
-    return i == lx->tlen;
+    return index == lx->tlen;
 }
 
 /* Whether the just-produced token means the next `*`/NCName sits in operator
@@ -219,12 +219,12 @@ static void lex_next(lexer *lx) {
         lx->kind = TK_EOF;
         return;
     }
-    Py_UCS4 c = lx->src[lx->pos];
-    Py_UCS4 d = lx->pos + 1 < lx->len ? lx->src[lx->pos + 1] : 0;
-    switch (c) {
+    Py_UCS4 ch = lx->src[lx->pos];
+    Py_UCS4 peek = lx->pos + 1 < lx->len ? lx->src[lx->pos + 1] : 0;
+    switch (ch) {
     case '/':
-        lx->pos += d == '/' ? 2 : 1;
-        lx->kind = d == '/' ? TK_DSLASH : TK_SLASH;
+        lx->pos += peek == '/' ? 2 : 1;
+        lx->kind = peek == '/' ? TK_DSLASH : TK_SLASH;
         break;
     case '[':
         lx->pos++;
@@ -271,7 +271,7 @@ static void lex_next(lexer *lx) {
         lx->kind = TK_EQ;
         break;
     case '!':
-        if (d == '=') {
+        if (peek == '=') {
             lx->pos += 2;
             lx->kind = TK_NE;
         } else {
@@ -280,15 +280,15 @@ static void lex_next(lexer *lx) {
         }
         break;
     case '<':
-        lx->pos += d == '=' ? 2 : 1;
-        lx->kind = d == '=' ? TK_LE : TK_LT;
+        lx->pos += peek == '=' ? 2 : 1;
+        lx->kind = peek == '=' ? TK_LE : TK_LT;
         break;
     case '>':
-        lx->pos += d == '=' ? 2 : 1;
-        lx->kind = d == '=' ? TK_GE : TK_GT;
+        lx->pos += peek == '=' ? 2 : 1;
+        lx->kind = peek == '=' ? TK_GE : TK_GT;
         break;
     case ':':
-        if (d == ':') {
+        if (peek == ':') {
             lx->pos += 2;
             lx->kind = TK_COLONCOLON;
         } else {
@@ -299,7 +299,7 @@ static void lex_next(lexer *lx) {
     case '"':
     case '\'': {
         Py_ssize_t start = ++lx->pos;
-        while (lx->pos < lx->len && lx->src[lx->pos] != c) {
+        while (lx->pos < lx->len && lx->src[lx->pos] != ch) {
             lx->pos++;
         }
         if (lx->pos >= lx->len) {
@@ -314,10 +314,10 @@ static void lex_next(lexer *lx) {
         break;
     }
     case '.':
-        if (d == '.') {
+        if (peek == '.') {
             lx->pos += 2;
             lx->kind = TK_DOTDOT;
-        } else if (d >= '0' && d <= '9') {
+        } else if (peek >= '0' && peek <= '9') {
             goto number;
         } else {
             lx->pos++;
@@ -325,10 +325,10 @@ static void lex_next(lexer *lx) {
         }
         break;
     default:
-        if (c >= '0' && c <= '9') {
+        if (ch >= '0' && ch <= '9') {
             goto number;
         }
-        if (xp_is_name_start(c)) {
+        if (xp_is_name_start(ch)) {
             Py_ssize_t start = lx->pos;
             while (lx->pos < lx->len && xp_is_name_char(lx->src[lx->pos])) {
                 lx->pos++;
@@ -367,8 +367,8 @@ static void lex_next(lexer *lx) {
         double frac = 0.0;
         double scale = 1.0;
         int after_dot = 0;
-        for (Py_ssize_t i = start; i < lx->pos; i++) {
-            Py_UCS4 ch = lx->src[i];
+        for (Py_ssize_t index = start; index < lx->pos; index++) {
+            Py_UCS4 ch = lx->src[index];
             if (ch == '.') {
                 after_dot = 1;
             } else if (!after_dot) {
@@ -390,7 +390,7 @@ static void lex_next(lexer *lx) {
 
 typedef struct {
     lexer lx;
-    xp_program *p;
+    xp_program *prog;
     int failed;
     const char *msg;
 } parser;
@@ -425,14 +425,14 @@ static void expect(parser *ps, tok_kind kind, const char *msg) {
 }
 
 /* Copy the lexer's current NAME/LITERAL text into the node's owned string. */
-static int copy_text(xp_program *p, int32_t idx, const Py_UCS4 *src, Py_ssize_t len) {
-    Py_UCS4 *buf = PyMem_Malloc((size_t)(len ? len : 1) * sizeof(Py_UCS4));
+static int copy_text(xp_program *prog, int32_t idx, const Py_UCS4 *src, Py_ssize_t len) {
+    Py_UCS4 *buf = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
     if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;     /* GCOVR_EXCL_LINE */
     }
     memcpy(buf, src, (size_t)len * sizeof(Py_UCS4));
-    p->nodes[idx].str = buf;
-    p->nodes[idx].str_len = len;
+    prog->nodes[idx].str = buf;
+    prog->nodes[idx].str_len = len;
     return 0;
 }
 
@@ -440,7 +440,7 @@ static int copy_text(xp_program *p, int32_t idx, const Py_UCS4 *src, Py_ssize_t 
 static void parse_node_test(parser *ps, int32_t step) {
     lexer *lx = &ps->lx;
     if (lx->kind == TK_STAR) {
-        ps->p->nodes[step].test = NT_STAR;
+        ps->prog->nodes[step].test = NT_STAR;
         lex_next(lx);
         return;
     }
@@ -459,21 +459,21 @@ static void parse_node_test(parser *ps, int32_t step) {
     }
     int kind_test = (is_node || is_text || is_comment || is_pi) && save < lx->len && lx->src[save] == '(';
     if (kind_test) {
-        ps->p->nodes[step].test = (uint8_t)(is_node ? NT_NODE : is_text ? NT_TEXT : is_comment ? NT_COMMENT : NT_PI);
+        ps->prog->nodes[step].test = (uint8_t)(is_node ? NT_NODE : is_text ? NT_TEXT : is_comment ? NT_COMMENT : NT_PI);
         lex_next(lx); /* the name */
         expect(ps, TK_LPAREN, "expected '('");
         if (is_pi && lx->kind == TK_LITERAL) {
-            if (copy_text(ps->p, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                fail(ps, "out of memory");                          /* GCOVR_EXCL_LINE */
+            if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
             }
             lex_next(lx);
         }
         expect(ps, TK_RPAREN, "expected ')'");
         return;
     }
-    ps->p->nodes[step].test = NT_NAME;
-    if (copy_text(ps->p, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory");                          /* GCOVR_EXCL_LINE */
+    ps->prog->nodes[step].test = NT_NAME;
+    if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
     }
     lex_next(lx);
 }
@@ -484,18 +484,18 @@ static int32_t parse_predicates(parser *ps) {
     int32_t tail = -1;
     while (ps->lx.kind == TK_LBRACK) {
         lex_next(&ps->lx);
-        int32_t pred = xn_new(ps->p, XN_PRED);
+        int32_t pred = xn_new(ps->prog, XN_PRED);
         if (pred < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
             fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
             return head;               /* GCOVR_EXCL_LINE */
         }
         int32_t expr = parse_expr(ps);
-        ps->p->nodes[pred].a = expr;
+        ps->prog->nodes[pred].first = expr;
         expect(ps, TK_RBRACK, "expected ']'");
         if (head < 0) {
             head = pred;
         } else {
-            ps->p->nodes[tail].next = pred;
+            ps->prog->nodes[tail].next = pred;
         }
         tail = pred;
     }
@@ -521,9 +521,9 @@ static int axis_from_name(const lexer *lx, enum xp_axis *out) {
         {"preceding", AX_PRECEDING},
         {"namespace", AX_NAMESPACE},
     };
-    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
-        if (xp_name_eq(lx, table[i].name)) {
-            *out = table[i].axis;
+    for (size_t index = 0; index < sizeof(table) / sizeof(table[0]); index++) {
+        if (xp_name_eq(lx, table[index].name)) {
+            *out = table[index].axis;
             return 1;
         }
     }
@@ -535,25 +535,25 @@ static int32_t parse_step(parser *ps) {
     lexer *lx = &ps->lx;
     if (lx->kind == TK_DOT) {
         lex_next(lx);
-        int32_t step = xn_new(ps->p, XN_STEP);
+        int32_t step = xn_new(ps->prog, XN_STEP);
         if (step < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[step].axis = AX_SELF;
-        ps->p->nodes[step].test = NT_NODE;
+        ps->prog->nodes[step].axis = AX_SELF;
+        ps->prog->nodes[step].test = NT_NODE;
         return step;
     }
     if (lx->kind == TK_DOTDOT) {
         lex_next(lx);
-        int32_t step = xn_new(ps->p, XN_STEP);
+        int32_t step = xn_new(ps->prog, XN_STEP);
         if (step < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[step].axis = AX_PARENT;
-        ps->p->nodes[step].test = NT_NODE;
+        ps->prog->nodes[step].axis = AX_PARENT;
+        ps->prog->nodes[step].test = NT_NODE;
         return step;
     }
-    int32_t step = xn_new(ps->p, XN_STEP);
+    int32_t step = xn_new(ps->prog, XN_STEP);
     if (step < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
         return -1;                 /* GCOVR_EXCL_LINE */
@@ -575,30 +575,30 @@ static int32_t parse_step(parser *ps) {
             expect(ps, TK_COLONCOLON, "expected '::'");
         }
     }
-    ps->p->nodes[step].axis = (uint8_t)axis;
+    ps->prog->nodes[step].axis = (uint8_t)axis;
     parse_node_test(ps, step);
-    ps->p->nodes[step].a = parse_predicates(ps);
+    ps->prog->nodes[step].first = parse_predicates(ps);
     return step;
 }
 
-static int starts_step(tok_kind k) {
-    return k == TK_NAME || k == TK_STAR || k == TK_AT || k == TK_DOT || k == TK_DOTDOT;
+static int starts_step(tok_kind kind) {
+    return kind == TK_NAME || kind == TK_STAR || kind == TK_AT || kind == TK_DOT || kind == TK_DOTDOT;
 }
 
 /* A RelativeLocationPath chained onto an existing head step list (after / or //).
    Appends to *tail; inserts a synthetic descendant-or-self::node() for //. */
 static void parse_relative_tail(parser *ps, int32_t *head, int32_t *tail, int dslash) {
     if (dslash) {
-        int32_t ds = xn_new(ps->p, XN_STEP);
+        int32_t ds = xn_new(ps->prog, XN_STEP);
         if (ds < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return;   /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[ds].axis = AX_DESCENDANT_OR_SELF;
-        ps->p->nodes[ds].test = NT_NODE;
+        ps->prog->nodes[ds].axis = AX_DESCENDANT_OR_SELF;
+        ps->prog->nodes[ds].test = NT_NODE;
         if (*head < 0) {
             *head = ds;
         } else {
-            ps->p->nodes[*tail].next = ds;
+            ps->prog->nodes[*tail].next = ds;
         }
         *tail = ds;
     }
@@ -609,14 +609,14 @@ static void parse_relative_tail(parser *ps, int32_t *head, int32_t *tail, int ds
     if (*head < 0) {
         *head = step;
     } else {
-        ps->p->nodes[*tail].next = step;
+        ps->prog->nodes[*tail].next = step;
     }
     *tail = step;
 }
 
 /* LocationPath / PathExpr without a leading FilterExpr. */
 static int32_t parse_location_path(parser *ps) {
-    int32_t path = xn_new(ps->p, XN_PATH);
+    int32_t path = xn_new(ps->prog, XN_PATH);
     if (path < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
         return -1;                 /* GCOVR_EXCL_LINE */
@@ -624,13 +624,13 @@ static int32_t parse_location_path(parser *ps) {
     int32_t head = -1;
     int32_t tail = -1;
     if (ps->lx.kind == TK_SLASH) {
-        ps->p->nodes[path].absolute = 1;
+        ps->prog->nodes[path].absolute = 1;
         lex_next(&ps->lx);
         if (starts_step(ps->lx.kind)) {
             parse_relative_tail(ps, &head, &tail, 0);
         }
     } else if (ps->lx.kind == TK_DSLASH) {
-        ps->p->nodes[path].absolute = 1;
+        ps->prog->nodes[path].absolute = 1;
         lex_next(&ps->lx);
         parse_relative_tail(ps, &head, &tail, 1);
     } else {
@@ -641,8 +641,8 @@ static int32_t parse_location_path(parser *ps) {
         lex_next(&ps->lx);
         parse_relative_tail(ps, &head, &tail, dslash);
     }
-    ps->p->nodes[path].a = head;
-    ps->p->nodes[path].b = -1;
+    ps->prog->nodes[path].first = head;
+    ps->prog->nodes[path].second = -1;
     return path;
 }
 
@@ -656,34 +656,34 @@ static int32_t parse_primary(parser *ps) {
         return inner;
     }
     if (lx->kind == TK_LITERAL) {
-        int32_t lit = xn_new(ps->p, XN_LIT);
+        int32_t lit = xn_new(ps->prog, XN_LIT);
         if (lit < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
         }
-        if (copy_text(ps->p, lit, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory");                         /* GCOVR_EXCL_LINE */
+        if (copy_text(ps->prog, lit, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            fail(ps, "out of memory");                            /* GCOVR_EXCL_LINE */
         }
         lex_next(lx);
         return lit;
     }
     if (lx->kind == TK_NUM) {
-        int32_t num = xn_new(ps->p, XN_NUM);
+        int32_t num = xn_new(ps->prog, XN_NUM);
         if (num < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[num].num = lx->num;
+        ps->prog->nodes[num].num = lx->num;
         lex_next(lx);
         return num;
     }
     /* The only remaining primary is a FunctionCall: starts_filter() guarantees a
        NAME here once '(', a literal, and a number have been ruled out above. */
-    int32_t fn = xn_new(ps->p, XN_FUNC);
+    int32_t fn = xn_new(ps->prog, XN_FUNC);
     if (fn < 0) {                  /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
         return -1;                 /* GCOVR_EXCL_LINE */
     }
-    if (copy_text(ps->p, fn, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory");                        /* GCOVR_EXCL_LINE */
+    if (copy_text(ps->prog, fn, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        fail(ps, "out of memory");                           /* GCOVR_EXCL_LINE */
     }
     lex_next(lx);
     expect(ps, TK_LPAREN, "expected '(' after function name");
@@ -695,7 +695,7 @@ static int32_t parse_primary(parser *ps) {
             if (arg_head < 0) {
                 arg_head = arg;
             } else {
-                ps->p->nodes[arg_tail].next = arg;
+                ps->prog->nodes[arg_tail].next = arg;
             }
             arg_tail = arg;
             if (!accept(ps, TK_COMMA)) {
@@ -704,7 +704,7 @@ static int32_t parse_primary(parser *ps) {
         }
     }
     expect(ps, TK_RPAREN, "expected ')'");
-    ps->p->nodes[fn].a = arg_head;
+    ps->prog->nodes[fn].first = arg_head;
     return fn;
 }
 
@@ -712,11 +712,11 @@ static int32_t parse_primary(parser *ps) {
    immediately before '(' that is neither an axis name nor a kind test). Anything
    else begins a LocationPath. */
 static int starts_filter(parser *ps) {
-    tok_kind k = ps->lx.kind;
-    if (k == TK_LITERAL || k == TK_NUM || k == TK_LPAREN) {
+    tok_kind kind = ps->lx.kind;
+    if (kind == TK_LITERAL || kind == TK_NUM || kind == TK_LPAREN) {
         return 1;
     }
-    if (k != TK_NAME) {
+    if (kind != TK_NAME) {
         return 0;
     }
     Py_ssize_t save = ps->lx.pos;
@@ -742,24 +742,24 @@ static int32_t parse_filter_or_path(parser *ps) {
     int32_t preds = parse_predicates(ps);
     int32_t base = primary;
     if (preds >= 0) {
-        int32_t filter = xn_new(ps->p, XN_FILTER);
+        int32_t filter = xn_new(ps->prog, XN_FILTER);
         if (filter < 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
             fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
             return -1;                 /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[filter].a = primary;
-        ps->p->nodes[filter].b = preds;
+        ps->prog->nodes[filter].first = primary;
+        ps->prog->nodes[filter].second = preds;
         base = filter;
     }
     if (ps->lx.kind != TK_SLASH && ps->lx.kind != TK_DSLASH) {
         return base;
     }
-    int32_t path = xn_new(ps->p, XN_PATH);
+    int32_t path = xn_new(ps->prog, XN_PATH);
     if (path < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
         return -1;                 /* GCOVR_EXCL_LINE */
     }
-    ps->p->nodes[path].b = base;
+    ps->prog->nodes[path].second = base;
     int32_t head = -1;
     int32_t tail = -1;
     while ((ps->lx.kind == TK_SLASH || ps->lx.kind == TK_DSLASH)) {
@@ -767,7 +767,7 @@ static int32_t parse_filter_or_path(parser *ps) {
         lex_next(&ps->lx);
         parse_relative_tail(ps, &head, &tail, dslash);
     }
-    ps->p->nodes[path].a = head;
+    ps->prog->nodes[path].first = head;
     return path;
 }
 
@@ -776,13 +776,13 @@ static int32_t parse_union(parser *ps) {
     while (ps->lx.kind == TK_PIPE) {
         lex_next(&ps->lx);
         int32_t right = parse_filter_or_path(ps);
-        int32_t u = xn_new(ps->p, XN_UNION);
-        if (u < 0) {   /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
-            return -1; /* GCOVR_EXCL_LINE */
+        int32_t union_node = xn_new(ps->prog, XN_UNION);
+        if (union_node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
+            return -1;        /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[u].a = left;
-        ps->p->nodes[u].b = right;
-        left = u;
+        ps->prog->nodes[union_node].first = left;
+        ps->prog->nodes[union_node].second = right;
+        left = union_node;
     }
     return left;
 }
@@ -791,11 +791,11 @@ static int32_t parse_unary(parser *ps) {
     if (ps->lx.kind == TK_MINUS) {
         lex_next(&ps->lx);
         int32_t operand = parse_unary(ps);
-        int32_t neg = xn_new(ps->p, XN_NEG);
+        int32_t neg = xn_new(ps->prog, XN_NEG);
         if (neg < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[neg].a = operand;
+        ps->prog->nodes[neg].first = operand;
         return neg;
     }
     return parse_union(ps);
@@ -804,24 +804,24 @@ static int32_t parse_unary(parser *ps) {
 static int32_t parse_multiplicative(parser *ps) {
     int32_t left = parse_unary(ps);
     for (;;) {
-        enum xn_kind k;
+        enum xn_kind op;
         if (ps->lx.kind == TK_STAR) {
-            k = XN_MUL;
+            op = XN_MUL;
         } else if (ps->lx.kind == TK_DIV) {
-            k = XN_DIV;
+            op = XN_DIV;
         } else if (ps->lx.kind == TK_MOD) {
-            k = XN_MOD;
+            op = XN_MOD;
         } else {
             break;
         }
         lex_next(&ps->lx);
         int32_t right = parse_unary(ps);
-        int32_t node = xn_new(ps->p, k);
+        int32_t node = xn_new(ps->prog, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[node].a = left;
-        ps->p->nodes[node].b = right;
+        ps->prog->nodes[node].first = left;
+        ps->prog->nodes[node].second = right;
         left = node;
     }
     return left;
@@ -830,22 +830,22 @@ static int32_t parse_multiplicative(parser *ps) {
 static int32_t parse_additive(parser *ps) {
     int32_t left = parse_multiplicative(ps);
     for (;;) {
-        enum xn_kind k;
+        enum xn_kind op;
         if (ps->lx.kind == TK_PLUS) {
-            k = XN_ADD;
+            op = XN_ADD;
         } else if (ps->lx.kind == TK_MINUS) {
-            k = XN_SUB;
+            op = XN_SUB;
         } else {
             break;
         }
         lex_next(&ps->lx);
         int32_t right = parse_multiplicative(ps);
-        int32_t node = xn_new(ps->p, k);
+        int32_t node = xn_new(ps->prog, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[node].a = left;
-        ps->p->nodes[node].b = right;
+        ps->prog->nodes[node].first = left;
+        ps->prog->nodes[node].second = right;
         left = node;
     }
     return left;
@@ -854,26 +854,26 @@ static int32_t parse_additive(parser *ps) {
 static int32_t parse_relational(parser *ps) {
     int32_t left = parse_additive(ps);
     for (;;) {
-        enum xn_kind k;
+        enum xn_kind op;
         if (ps->lx.kind == TK_LT) {
-            k = XN_LT;
+            op = XN_LT;
         } else if (ps->lx.kind == TK_LE) {
-            k = XN_LE;
+            op = XN_LE;
         } else if (ps->lx.kind == TK_GT) {
-            k = XN_GT;
+            op = XN_GT;
         } else if (ps->lx.kind == TK_GE) {
-            k = XN_GE;
+            op = XN_GE;
         } else {
             break;
         }
         lex_next(&ps->lx);
         int32_t right = parse_additive(ps);
-        int32_t node = xn_new(ps->p, k);
+        int32_t node = xn_new(ps->prog, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[node].a = left;
-        ps->p->nodes[node].b = right;
+        ps->prog->nodes[node].first = left;
+        ps->prog->nodes[node].second = right;
         left = node;
     }
     return left;
@@ -882,22 +882,22 @@ static int32_t parse_relational(parser *ps) {
 static int32_t parse_equality(parser *ps) {
     int32_t left = parse_relational(ps);
     for (;;) {
-        enum xn_kind k;
+        enum xn_kind op;
         if (ps->lx.kind == TK_EQ) {
-            k = XN_EQ;
+            op = XN_EQ;
         } else if (ps->lx.kind == TK_NE) {
-            k = XN_NE;
+            op = XN_NE;
         } else {
             break;
         }
         lex_next(&ps->lx);
         int32_t right = parse_relational(ps);
-        int32_t node = xn_new(ps->p, k);
+        int32_t node = xn_new(ps->prog, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[node].a = left;
-        ps->p->nodes[node].b = right;
+        ps->prog->nodes[node].first = left;
+        ps->prog->nodes[node].second = right;
         left = node;
     }
     return left;
@@ -908,12 +908,12 @@ static int32_t parse_and(parser *ps) {
     while (ps->lx.kind == TK_AND) {
         lex_next(&ps->lx);
         int32_t right = parse_equality(ps);
-        int32_t node = xn_new(ps->p, XN_AND);
+        int32_t node = xn_new(ps->prog, XN_AND);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[node].a = left;
-        ps->p->nodes[node].b = right;
+        ps->prog->nodes[node].first = left;
+        ps->prog->nodes[node].second = right;
         left = node;
     }
     return left;
@@ -924,12 +924,12 @@ static int32_t parse_expr(parser *ps) {
     while (ps->lx.kind == TK_OR) {
         lex_next(&ps->lx);
         int32_t right = parse_and(ps);
-        int32_t node = xn_new(ps->p, XN_OR);
+        int32_t node = xn_new(ps->prog, XN_OR);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
-        ps->p->nodes[node].a = left;
-        ps->p->nodes[node].b = right;
+        ps->prog->nodes[node].first = left;
+        ps->prog->nodes[node].second = right;
         left = node;
     }
     return left;
@@ -938,17 +938,17 @@ static int32_t parse_expr(parser *ps) {
 /* ---------------------------------------------------------- public API */
 
 xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen) {
-    xp_program *p = PyMem_Malloc(sizeof(*p));
-    if (p == NULL) {                               /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+    xp_program *prog = PyMem_Malloc(sizeof(*prog));
+    if (prog == NULL) {                            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
         snprintf(errbuf, errlen, "out of memory"); /* GCOVR_EXCL_LINE */
         return NULL;                               /* GCOVR_EXCL_LINE */
     }
-    p->nodes = NULL;
-    p->count = 0;
-    p->cap = 0;
-    p->root = -1;
+    prog->nodes = NULL;
+    prog->count = 0;
+    prog->cap = 0;
+    prog->root = -1;
     parser ps = {0};
-    ps.p = p;
+    ps.prog = prog;
     ps.lx.src = src;
     ps.lx.len = len;
     ps.lx.op_context = 0;
@@ -956,7 +956,7 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
     if (ps.lx.error) {
         fail(&ps, "invalid character in expression");
     }
-    p->root = parse_expr(&ps);
+    prog->root = parse_expr(&ps);
     if (ps.lx.error) {
         /* a stray character that made the lexer stop where the parser also stopped
            (e.g. a lone '!') would otherwise look like a clean end of input */
@@ -967,20 +967,20 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
     }
     /* root < 0 and a NULL message only arise from an arena allocation failure that
        did not record a message, so those branches cannot be forced from a test */
-    if (ps.failed || p->root < 0) {                                                   /* GCOVR_EXCL_BR_LINE */
+    if (ps.failed || prog->root < 0) {                                                /* GCOVR_EXCL_BR_LINE */
         snprintf(errbuf, errlen, "%s", ps.msg ? ps.msg : "invalid XPath expression"); /* GCOVR_EXCL_BR_LINE */
-        xp_free(p);
+        xp_free(prog);
         return NULL;
     }
-    return p;
+    return prog;
 }
 
 void xp_free(xp_program *prog) {
     if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: callers never pass NULL */
         return;         /* GCOVR_EXCL_LINE */
     }
-    for (int32_t i = 0; i < prog->count; i++) {
-        PyMem_Free(prog->nodes[i].str);
+    for (int32_t index = 0; index < prog->count; index++) {
+        PyMem_Free(prog->nodes[index].str);
     }
     PyMem_Free(prog->nodes);
     PyMem_Free(prog);
@@ -995,40 +995,40 @@ typedef struct {
     int failed;
 } dumper;
 
-static void dput(dumper *d, Py_UCS4 c) {
-    if (d->len == d->cap) {
-        Py_ssize_t cap = d->cap ? d->cap * 2 : 64;
-        Py_UCS4 *grown = PyMem_Realloc(d->buf, (size_t)cap * sizeof(Py_UCS4));
+static void dput(dumper *out, Py_UCS4 ch) {
+    if (out->len == out->cap) {
+        Py_ssize_t cap = out->cap ? out->cap * 2 : 64;
+        Py_UCS4 *grown = PyMem_Realloc(out->buf, (size_t)cap * sizeof(Py_UCS4));
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-            d->failed = 1;   /* GCOVR_EXCL_LINE */
+            out->failed = 1; /* GCOVR_EXCL_LINE */
             return;          /* GCOVR_EXCL_LINE */
         }
-        d->buf = grown;
-        d->cap = cap;
+        out->buf = grown;
+        out->cap = cap;
     }
-    d->buf[d->len++] = c;
+    out->buf[out->len++] = ch;
 }
 
-static void dputs(dumper *d, const char *s) {
-    for (; *s; s++) {
-        dput(d, (Py_UCS4)(unsigned char)*s);
-    }
-}
-
-static void dput_run(dumper *d, const Py_UCS4 *s, Py_ssize_t n) {
-    for (Py_ssize_t i = 0; i < n; i++) {
-        dput(d, s[i]);
+static void dputs(dumper *out, const char *text) {
+    for (; *text; text++) {
+        dput(out, (Py_UCS4)(unsigned char)*text);
     }
 }
 
-static void dput_num(dumper *d, double v) {
+static void dput_run(dumper *out, const Py_UCS4 *text, Py_ssize_t count) {
+    for (Py_ssize_t index = 0; index < count; index++) {
+        dput(out, text[index]);
+    }
+}
+
+static void dput_num(dumper *out, double value) {
     char tmp[64];
-    if (v == (double)(long)v && fabs(v) < 1e15) {
-        snprintf(tmp, sizeof(tmp), "%ld", (long)v);
+    if (value == (double)(long)value && fabs(value) < 1e15) {
+        snprintf(tmp, sizeof(tmp), "%ld", (long)value);
     } else {
-        snprintf(tmp, sizeof(tmp), "%g", v);
+        snprintf(tmp, sizeof(tmp), "%g", value);
     }
-    dputs(d, tmp);
+    dputs(out, tmp);
 }
 
 static const char *axis_name(uint8_t axis) {
@@ -1062,53 +1062,53 @@ static const char *axis_name(uint8_t axis) {
     }
 }
 
-static void dump_node(dumper *d, const xp_program *p, int32_t idx);
+static void dump_node(dumper *d, const xp_program *prog, int32_t idx);
 
-static void dump_step(dumper *d, const xp_program *p, int32_t idx) {
-    const xn *n = &p->nodes[idx];
-    dputs(d, "(step ");
-    dputs(d, axis_name(n->axis));
-    dput(d, ' ');
-    switch (n->test) {
+static void dump_step(dumper *out, const xp_program *prog, int32_t idx) {
+    const xn *expr = &prog->nodes[idx];
+    dputs(out, "(step ");
+    dputs(out, axis_name(expr->axis));
+    dput(out, ' ');
+    switch (expr->test) {
     case NT_NAME:
-        dputs(d, "name '");
-        dput_run(d, n->str, n->str_len);
-        dput(d, '\'');
+        dputs(out, "name '");
+        dput_run(out, expr->str, expr->str_len);
+        dput(out, '\'');
         break;
     case NT_STAR:
-        dputs(d, "*");
+        dputs(out, "*");
         break;
     case NT_NODE:
-        dputs(d, "node()");
+        dputs(out, "node()");
         break;
     case NT_TEXT:
-        dputs(d, "text()");
+        dputs(out, "text()");
         break;
     case NT_COMMENT:
-        dputs(d, "comment()");
+        dputs(out, "comment()");
         break;
     default: /* NT_PI */
-        dputs(d, "pi(");
-        if (n->str != NULL) {
-            dput(d, '\'');
-            dput_run(d, n->str, n->str_len);
-            dput(d, '\'');
+        dputs(out, "pi(");
+        if (expr->str != NULL) {
+            dput(out, '\'');
+            dput_run(out, expr->str, expr->str_len);
+            dput(out, '\'');
         }
-        dput(d, ')');
+        dput(out, ')');
         break;
     }
-    for (int32_t pr = n->a; pr >= 0; pr = p->nodes[pr].next) {
-        dputs(d, " (pred ");
-        dump_node(d, p, p->nodes[pr].a);
-        dput(d, ')');
+    for (int32_t pr = expr->first; pr >= 0; pr = prog->nodes[pr].next) {
+        dputs(out, " (pred ");
+        dump_node(out, prog, prog->nodes[pr].first);
+        dput(out, ')');
     }
-    dput(d, ')');
+    dput(out, ')');
 }
 
-static void dump_node(dumper *d, const xp_program *p, int32_t idx) {
-    const xn *n = &p->nodes[idx];
+static void dump_node(dumper *out, const xp_program *prog, int32_t idx) {
+    const xn *expr = &prog->nodes[idx];
     static const char *binop[] = {"or", "and", "=", "!=", "<", "<=", ">", ">=", "+", "-", "*", "div", "mod"};
-    switch (n->kind) {
+    switch (expr->kind) {
     case XN_OR:
     case XN_AND:
     case XN_EQ:
@@ -1122,85 +1122,85 @@ static void dump_node(dumper *d, const xp_program *p, int32_t idx) {
     case XN_MUL:
     case XN_DIV:
     case XN_MOD:
-        dput(d, '(');
-        dputs(d, binop[n->kind - XN_OR]);
-        dput(d, ' ');
-        dump_node(d, p, n->a);
-        dput(d, ' ');
-        dump_node(d, p, n->b);
-        dput(d, ')');
+        dput(out, '(');
+        dputs(out, binop[expr->kind - XN_OR]);
+        dput(out, ' ');
+        dump_node(out, prog, expr->first);
+        dput(out, ' ');
+        dump_node(out, prog, expr->second);
+        dput(out, ')');
         break;
     case XN_NEG:
-        dputs(d, "(neg ");
-        dump_node(d, p, n->a);
-        dput(d, ')');
+        dputs(out, "(neg ");
+        dump_node(out, prog, expr->first);
+        dput(out, ')');
         break;
     case XN_UNION:
-        dputs(d, "(union ");
-        dump_node(d, p, n->a);
-        dput(d, ' ');
-        dump_node(d, p, n->b);
-        dput(d, ')');
+        dputs(out, "(union ");
+        dump_node(out, prog, expr->first);
+        dput(out, ' ');
+        dump_node(out, prog, expr->second);
+        dput(out, ')');
         break;
     case XN_NUM:
-        dputs(d, "(num ");
-        dput_num(d, n->num);
-        dput(d, ')');
+        dputs(out, "(num ");
+        dput_num(out, expr->num);
+        dput(out, ')');
         break;
     case XN_LIT:
-        dputs(d, "(lit '");
-        dput_run(d, n->str, n->str_len);
-        dputs(d, "')");
+        dputs(out, "(lit '");
+        dput_run(out, expr->str, expr->str_len);
+        dputs(out, "')");
         break;
     case XN_FUNC:
-        dputs(d, "(call '");
-        dput_run(d, n->str, n->str_len);
-        dput(d, '\'');
-        for (int32_t arg = n->a; arg >= 0; arg = p->nodes[arg].next) {
-            dput(d, ' ');
-            dump_node(d, p, arg);
+        dputs(out, "(call '");
+        dput_run(out, expr->str, expr->str_len);
+        dput(out, '\'');
+        for (int32_t arg = expr->first; arg >= 0; arg = prog->nodes[arg].next) {
+            dput(out, ' ');
+            dump_node(out, prog, arg);
         }
-        dput(d, ')');
+        dput(out, ')');
         break;
     case XN_FILTER:
-        dputs(d, "(filter ");
-        dump_node(d, p, n->a);
-        for (int32_t pr = n->b; pr >= 0; pr = p->nodes[pr].next) {
-            dputs(d, " (pred ");
-            dump_node(d, p, p->nodes[pr].a);
-            dput(d, ')');
+        dputs(out, "(filter ");
+        dump_node(out, prog, expr->first);
+        for (int32_t pr = expr->second; pr >= 0; pr = prog->nodes[pr].next) {
+            dputs(out, " (pred ");
+            dump_node(out, prog, prog->nodes[pr].first);
+            dput(out, ')');
         }
-        dput(d, ')');
+        dput(out, ')');
         break;
     default: /* XN_PATH */
-        dputs(d, "(path ");
-        dputs(d, n->absolute ? "abs" : "rel");
-        if (n->b >= 0) {
-            dputs(d, " (from ");
-            dump_node(d, p, n->b);
-            dput(d, ')');
+        dputs(out, "(path ");
+        dputs(out, expr->absolute ? "abs" : "rel");
+        if (expr->second >= 0) {
+            dputs(out, " (from ");
+            dump_node(out, prog, expr->second);
+            dput(out, ')');
         }
-        for (int32_t st = n->a; st >= 0; st = p->nodes[st].next) {
-            dput(d, ' ');
-            dump_step(d, p, st);
+        for (int32_t st = expr->first; st >= 0; st = prog->nodes[st].next) {
+            dput(out, ' ');
+            dump_step(out, prog, st);
         }
-        dput(d, ')');
+        dput(out, ')');
         break;
     }
 }
 
 Py_UCS4 *xp_dump(const xp_program *prog, Py_ssize_t *out_len) {
-    dumper d = {0};
-    dump_node(&d, prog, prog->root);
-    if (d.failed) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-        PyMem_Free(d.buf); /* GCOVR_EXCL_LINE */
-        return NULL;       /* GCOVR_EXCL_LINE */
+    dumper state = {0};
+    dump_node(&state, prog, prog->root);
+    if (state.failed) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        PyMem_Free(state.buf); /* GCOVR_EXCL_LINE */
+        return NULL;           /* GCOVR_EXCL_LINE */
     }
-    if (d.buf == NULL) {                       /* GCOVR_EXCL_BR_LINE: the root always emits at least "()" */
-        d.buf = PyMem_Malloc(sizeof(Py_UCS4)); /* GCOVR_EXCL_LINE */
+    if (state.buf == NULL) {                       /* GCOVR_EXCL_BR_LINE: the root always emits at least "()" */
+        state.buf = PyMem_Malloc(sizeof(Py_UCS4)); /* GCOVR_EXCL_LINE */
     }
-    *out_len = d.len;
-    return d.buf;
+    *out_len = state.len;
+    return state.buf;
 }
 
 /* ---------------------------------------------------------- evaluation */
@@ -1235,11 +1235,11 @@ static uint16_t resolve_tag_atom(const Py_UCS4 *name, Py_ssize_t len) {
     if (len >= (Py_ssize_t)sizeof(buf)) { /* a name this long is no known tag; the parser never makes an empty one */
         return TH_TAG_UNKNOWN;
     }
-    for (Py_ssize_t i = 0; i < len; i++) {
-        if (name[i] >= 0x80) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (name[index] >= 0x80) {
             return TH_TAG_UNKNOWN;
         }
-        buf[i] = (char)name[i];
+        buf[index] = (char)name[index];
     }
     return th_tag_lookup(buf, len);
 }
@@ -1249,11 +1249,11 @@ static uint32_t resolve_attr_atom(struct th_tree *tree, const Py_UCS4 *name, Py_
     if (len >= (Py_ssize_t)sizeof(buf)) { /* no attribute name is this long; the parser never makes an empty one */
         return UINT32_MAX;
     }
-    for (Py_ssize_t i = 0; i < len; i++) {
-        if (name[i] >= 0x80) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (name[index] >= 0x80) {
             return UINT32_MAX;
         }
-        buf[i] = (char)name[i];
+        buf[index] = (char)name[index];
     }
     return th_attr_lookup(tree, buf, len);
 }
@@ -1286,116 +1286,122 @@ static int node_test_matches(struct th_node *node, const xn *step, uint16_t atom
     }
 }
 
-static struct th_node *descendant_next(struct th_node *n, struct th_node *root) {
-    if (n->first_child != NULL) {
-        return n->first_child;
+static struct th_node *descendant_next(struct th_node *node, struct th_node *root) {
+    if (node->first_child != NULL) {
+        return node->first_child;
     }
-    while (n != root && n->next_sibling == NULL) {
-        n = n->parent;
+    while (node != root && node->next_sibling == NULL) {
+        node = node->parent;
     }
-    return n == root ? NULL : n->next_sibling;
+    return node == root ? NULL : node->next_sibling;
 }
 
 /* Emit, into out, the nodes on ctx's `step` axis that pass the node test. */
+/* Push node when it passes the step's node test. Returns 0, or -1 on allocation
+   failure (which cannot be forced from a test). */
+static int emit_if_match(xp_nodeset *out, struct th_node *node, const xn *step, uint16_t atom) {
+    if (!node_test_matches(node, step, atom)) {
+        return 0;
+    }
+    return ns_push(out, node, -1);
+}
+
 static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint16_t atom, uint32_t attr_atom) {
     switch (step->axis) {
     case AX_ATTRIBUTE:
         /* node() and * both match every attribute; a name test matches by atom;
            text()/comment()/processing-instruction() match no attribute. */
-        for (Py_ssize_t i = 0; i < ctx->attr_count; i++) {
+        for (Py_ssize_t index = 0; index < ctx->attr_count; index++) {
             int hit = step->test == NT_STAR || step->test == NT_NODE ||
-                      (step->test == NT_NAME && ctx->attrs[i].name_atom == attr_atom);
-            if (hit && ns_push(out, ctx, i) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-                return -1;                         /* GCOVR_EXCL_LINE */
+                      (step->test == NT_NAME && ctx->attrs[index].name_atom == attr_atom);
+            if (hit && ns_push(out, ctx, index) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                return -1;                             /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_SELF:
-        return node_test_matches(ctx, step, atom) ? ns_push(out, ctx, -1) : 0;
+        return emit_if_match(out, ctx, step, atom);
     case AX_CHILD:
-        for (struct th_node *c = ctx->first_child; c != NULL; c = c->next_sibling) {
-            if (node_test_matches(c, step, atom) && ns_push(out, c, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                                     /* GCOVR_EXCL_LINE */
+        for (struct th_node *child = ctx->first_child; child != NULL; child = child->next_sibling) {
+            if (emit_if_match(out, child, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_DESCENDANT_OR_SELF:
-        if (node_test_matches(ctx, step, atom) && ns_push(out, ctx, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                                         /* GCOVR_EXCL_LINE */
+        if (emit_if_match(out, ctx, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                 /* GCOVR_EXCL_LINE */
         }
         /* FALLTHROUGH: descendant-or-self is self plus the descendant walk */
     case AX_DESCENDANT:
-        for (struct th_node *d = ctx->first_child; d != NULL; d = descendant_next(d, ctx)) {
-            if (node_test_matches(d, step, atom) && ns_push(out, d, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                                     /* GCOVR_EXCL_LINE */
+        for (struct th_node *node = ctx->first_child; node != NULL; node = descendant_next(node, ctx)) {
+            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                  /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_PARENT:
-        if (ctx->parent != NULL && node_test_matches(ctx->parent, step, atom)) {
-            return ns_push(out, ctx->parent, -1);
-        }
-        return 0;
+        return ctx->parent != NULL ? emit_if_match(out, ctx->parent, step, atom) : 0;
     case AX_ANCESTOR_OR_SELF:
-        if (node_test_matches(ctx, step, atom) && ns_push(out, ctx, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                                         /* GCOVR_EXCL_LINE */
+        if (emit_if_match(out, ctx, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                 /* GCOVR_EXCL_LINE */
         }
         /* FALLTHROUGH: ancestor-or-self is self plus the ancestor walk */
     case AX_ANCESTOR:
-        for (struct th_node *a = ctx->parent; a != NULL; a = a->parent) {
-            if (node_test_matches(a, step, atom) && ns_push(out, a, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                                     /* GCOVR_EXCL_LINE */
+        for (struct th_node *node = ctx->parent; node != NULL; node = node->parent) {
+            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                  /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_FOLLOWING_SIBLING:
-        for (struct th_node *s = ctx->next_sibling; s != NULL; s = s->next_sibling) {
-            if (node_test_matches(s, step, atom) && ns_push(out, s, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                                     /* GCOVR_EXCL_LINE */
+        for (struct th_node *node = ctx->next_sibling; node != NULL; node = node->next_sibling) {
+            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                  /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     default: /* AX_PRECEDING_SIBLING */
-        for (struct th_node *s = ctx->prev_sibling; s != NULL; s = s->prev_sibling) {
-            if (node_test_matches(s, step, atom) && ns_push(out, s, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                                     /* GCOVR_EXCL_LINE */
+        for (struct th_node *node = ctx->prev_sibling; node != NULL; node = node->prev_sibling) {
+            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                  /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     }
 }
 
-static Py_ssize_t node_depth(struct th_node *n) {
-    Py_ssize_t d = 0;
-    while (n->parent != NULL) {
-        n = n->parent;
-        d++;
+static Py_ssize_t node_depth(struct th_node *node) {
+    Py_ssize_t depth = 0;
+    while (node->parent != NULL) {
+        node = node->parent;
+        depth++;
     }
-    return d;
+    return depth;
 }
 
 /* Negative when x precedes y in document (pre-order); positive otherwise. Never
    called with x == y. */
-static int node_before(struct th_node *x, struct th_node *y) {
-    Py_ssize_t dx = node_depth(x);
-    Py_ssize_t dy = node_depth(y);
-    struct th_node *a = x;
-    struct th_node *b = y;
-    for (Py_ssize_t i = dx; i > dy; i--) {
-        a = a->parent;
+static int node_before(struct th_node *left, struct th_node *right) {
+    Py_ssize_t dx = node_depth(left);
+    Py_ssize_t dy = node_depth(right);
+    struct th_node *walk_left = left;
+    struct th_node *walk_right = right;
+    for (Py_ssize_t index = dx; index > dy; index--) {
+        walk_left = walk_left->parent;
     }
-    for (Py_ssize_t i = dy; i > dx; i--) {
-        b = b->parent;
+    for (Py_ssize_t index = dy; index > dx; index--) {
+        walk_right = walk_right->parent;
     }
-    if (a == b) {
+    if (walk_left == walk_right) {
         return dx < dy ? -1 : 1; /* the shallower original node is an ancestor of the other */
     }
-    while (a->parent != b->parent) {
-        a = a->parent;
-        b = b->parent;
+    while (walk_left->parent != walk_right->parent) {
+        walk_left = walk_left->parent;
+        walk_right = walk_right->parent;
     }
-    for (struct th_node *s = a->next_sibling; s != NULL; s = s->next_sibling) {
-        if (s == b) {
+    for (struct th_node *sibling = walk_left->next_sibling; sibling != NULL; sibling = sibling->next_sibling) {
+        if (sibling == walk_right) {
             return -1;
         }
     }
@@ -1403,12 +1409,12 @@ static int node_before(struct th_node *x, struct th_node *y) {
 }
 
 static int item_cmp(const void *pa, const void *pb) {
-    const xp_item *a = pa;
-    const xp_item *b = pb;
-    if (a->node == b->node) {
-        return a->attr < b->attr ? -1 : 1; /* same node: the node (-1) sorts before its attributes */
+    const xp_item *left = pa;
+    const xp_item *right = pb;
+    if (left->node == right->node) {
+        return left->attr < right->attr ? -1 : 1; /* same node: the node (-1) sorts before its attributes */
     }
-    return node_before(a->node, b->node);
+    return node_before(left->node, right->node);
 }
 
 static void sort_unique(xp_nodeset *ns) {
@@ -1416,56 +1422,301 @@ static void sort_unique(xp_nodeset *ns) {
         return;
     }
     qsort(ns->items, (size_t)ns->len, sizeof(xp_item), item_cmp);
-    Py_ssize_t w = 1;
-    for (Py_ssize_t r = 1; r < ns->len; r++) {
-        if (ns->items[r].node != ns->items[w - 1].node || ns->items[r].attr != ns->items[w - 1].attr) {
-            ns->items[w++] = ns->items[r];
+    Py_ssize_t write_pos = 1;
+    for (Py_ssize_t read_pos = 1; read_pos < ns->len; read_pos++) {
+        if (ns->items[read_pos].node != ns->items[write_pos - 1].node ||
+            ns->items[read_pos].attr != ns->items[write_pos - 1].attr) {
+            ns->items[write_pos++] = ns->items[read_pos];
         }
     }
-    ns->len = w;
+    ns->len = write_pos;
 }
 
 static int axis_supported(uint8_t axis) {
     return axis != AX_FOLLOWING && axis != AX_PRECEDING && axis != AX_NAMESPACE;
 }
 
-int xp_eval_nodeset(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_nodeset *out,
-                    const char **feature) {
-    const xn *root = &prog->nodes[prog->root];
-    if (root->kind != XN_PATH) {
-        *feature = "operators, functions, and unions";
-        return -2;
+/* --------------------------------------------------------- value model */
+
+/* The evaluation context: the tree, the current node, its 1-based proximity
+   position and the context size, plus where to report an unimplemented feature. */
+typedef struct {
+    struct th_tree *tree;
+    struct th_node *node;
+    Py_ssize_t pos;
+    Py_ssize_t size;
+    const char **feature;
+} xp_ctx;
+
+void xp_result_free(xp_result *result) {
+    if (result->kind == XP_STRING) {
+        PyMem_Free(result->string);
+        result->string = NULL;
+    } else if (result->kind == XP_NODESET) {
+        xp_nodeset_free(&result->nodes);
     }
-    if (root->b >= 0) {
-        *feature = "filter expressions";
-        return -2;
+}
+
+static void result_bool(xp_result *result, int value) {
+    memset(result, 0, sizeof(*result));
+    result->kind = XP_BOOLEAN;
+    result->boolean = value != 0;
+}
+
+static void result_number(xp_result *result, double value) {
+    memset(result, 0, sizeof(*result));
+    result->kind = XP_NUMBER;
+    result->number = value;
+}
+
+static void result_string(xp_result *result, Py_UCS4 *owned, Py_ssize_t len) {
+    memset(result, 0, sizeof(*result));
+    result->kind = XP_STRING;
+    result->string = owned;
+    result->string_len = len;
+}
+
+static Py_UCS4 *ucs4_dup(const Py_UCS4 *src, Py_ssize_t len) {
+    Py_UCS4 *buf = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return NULL;   /* GCOVR_EXCL_LINE */
     }
+    if (len) {
+        memcpy(buf, src, (size_t)len * sizeof(Py_UCS4));
+    }
+    return buf;
+}
+
+/* The XPath string-value of a node-set member, freshly allocated. */
+static Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
+    if (item.attr >= 0) {
+        const th_node_attr *attr_record = &item.node->attrs[item.attr];
+        *len = attr_record->value == NULL ? 0 : attr_record->value_len;
+        return ucs4_dup(attr_record->value, *len);
+    }
+    if (item.node->type == TH_NODE_TEXT || item.node->type == TH_NODE_COMMENT) {
+        return th_node_data(tree, item.node, len);
+    }
+    return th_node_text(tree, item.node, len);
+}
+
+/* XPath number parse: optional leading/trailing whitespace around an optional sign,
+   digits, and attr_record fractional part; anything else is NaN. */
+static double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
+    Py_ssize_t index = 0;
+    while (index < len && xp_is_space(text[index])) {
+        index++;
+    }
+    Py_ssize_t end = len;
+    while (end > index && xp_is_space(text[end - 1])) {
+        end--;
+    }
+    if (index == end) {
+        return (double)NAN;
+    }
+    int sign = 1;
+    if (text[index] == '-') {
+        sign = -1;
+        index++;
+    }
+    double value = 0;
+    double frac = 0;
+    double scale = 1;
+    int seen_digit = 0;
+    int after_dot = 0;
+    for (; index < end; index++) {
+        Py_UCS4 ch = text[index];
+        if (ch == '.' && !after_dot) {
+            after_dot = 1;
+        } else if (ch >= '0' && ch <= '9') {
+            seen_digit = 1;
+            if (after_dot) {
+                scale *= 10;
+                frac += (ch - '0') / scale;
+            } else {
+                value = value * 10 + (ch - '0');
+            }
+        } else {
+            return (double)NAN;
+        }
+    }
+    return seen_digit ? sign * (value + frac) : (double)NAN;
+}
+
+static int format_number(double value, Py_UCS4 **out, Py_ssize_t *out_len) {
+    char buf[64];
+    if (isnan(value)) {
+        memcpy(buf, "NaN", 4);
+    } else if (isinf(value)) {
+        memcpy(buf, value < 0 ? "-Infinity" : "Infinity", value < 0 ? 10 : 9);
+    } else if (value == (double)(long long)value && fabs(value) < 1e15) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    } else {
+        snprintf(buf, sizeof(buf), "%.12g", value);
+    }
+    Py_ssize_t len = (Py_ssize_t)strlen(buf);
+    Py_UCS4 *buffer = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+    if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        buffer[index] = (Py_UCS4)(unsigned char)buf[index];
+    }
+    *out = buffer;
+    *out_len = len;
+    return 0;
+}
+
+static int to_boolean(struct th_tree *tree, const xp_result *value) {
+    switch (value->kind) {
+    case XP_BOOLEAN:
+        return value->boolean;
+    case XP_NUMBER:
+        return value->number != 0 && !isnan(value->number);
+    case XP_STRING:
+        return value->string_len > 0;
+    default: /* XP_NODESET */
+        (void)tree;
+        return value->nodes.len > 0;
+    }
+}
+
+/* The string-value of value, freshly allocated; *len receives the length. */
+static Py_UCS4 *to_string(struct th_tree *tree, const xp_result *value, Py_ssize_t *len) {
+    switch (value->kind) {
+    case XP_STRING:
+        *len = value->string_len;
+        return ucs4_dup(value->string, value->string_len);
+    case XP_BOOLEAN: {
+        const char *literal = value->boolean ? "true" : "false";
+        *len = (Py_ssize_t)strlen(literal);
+        Py_UCS4 *buffer = PyMem_Malloc((size_t)*len * sizeof(Py_UCS4));
+        if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            return NULL;      /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < *len; index++) {
+            buffer[index] = (Py_UCS4)(unsigned char)literal[index];
+        }
+        return buffer;
+    }
+    case XP_NUMBER: {
+        Py_UCS4 *buffer = NULL;
+        if (format_number(value->number, &buffer, len) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return NULL;                                      /* GCOVR_EXCL_LINE */
+        }
+        return buffer;
+    }
+    default: /* XP_NODESET: string-value of the first node in document order */
+        if (value->nodes.len == 0) {
+            *len = 0;
+            return ucs4_dup(NULL, 0);
+        }
+        return item_string(tree, value->nodes.items[0], len);
+    }
+}
+
+static double to_number(struct th_tree *tree, const xp_result *value) {
+    if (value->kind == XP_NUMBER) {
+        return value->number;
+    }
+    if (value->kind == XP_BOOLEAN) {
+        return value->boolean ? 1.0 : 0.0;
+    }
+    Py_ssize_t len;
+    Py_UCS4 *text = to_string(tree, value, &len);
+    if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: alloc */
+        return (double)NAN; /* GCOVR_EXCL_LINE */
+    }
+    double number = parse_number(text, len);
+    PyMem_Free(text);
+    return number;
+}
+
+/* ---------------------------------------------------------- evaluation */
+
+static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out);
+
+/* Apply each predicate in the XN_PRED chain to set, in place, in proximity order. */
+static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *ctx, xp_nodeset *set) {
+    for (int32_t pr = pred_head; pr >= 0; pr = prog->nodes[pr].next) {
+        int32_t expr = prog->nodes[pr].first;
+        Py_ssize_t size = set->len;
+        Py_ssize_t write_pos = 0;
+        for (Py_ssize_t index = 0; index < set->len; index++) {
+            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1, size, ctx->feature};
+            xp_result value;
+            int rc = eval_expr(prog, expr, &pctx, &value);
+            if (rc < 0) {
+                return rc;
+            }
+            int keep = value.kind == XP_NUMBER ? (double)(index + 1) == value.number : to_boolean(ctx->tree, &value);
+            xp_result_free(&value);
+            if (keep) {
+                set->items[write_pos++] = set->items[index];
+            }
+        }
+        set->len = write_pos;
+    }
+    return 0;
+}
+
+/* Evaluate an XN_PATH (optionally with a filter base) into a node-set. */
+static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out) {
+    const xn *root = &prog->nodes[path_idx];
     xp_nodeset cur = {0};
-    xp_nodeset next = {0};
-    if (ns_push(&cur, root->absolute ? th_tree_document(tree) : context, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        return -1;                                                                  /* GCOVR_EXCL_LINE */
+    if (root->second >= 0) {
+        xp_result base;
+        int rc = eval_expr(prog, root->second, ctx, &base);
+        if (rc < 0) {
+            return rc;
+        }
+        if (base.kind != XP_NODESET) {
+            xp_result_free(&base);
+            *ctx->feature = "a path step on a non-node-set";
+            return -2;
+        }
+        cur = base.nodes; /* take ownership */
+    } else {
+        struct th_node *start = root->absolute ? th_tree_document(ctx->tree) : ctx->node;
+        if (ns_push(&cur, start, -1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            return -1;                      /* GCOVR_EXCL_LINE */
+        }
     }
-    for (int32_t si = root->a; si >= 0; si = prog->nodes[si].next) {
+    xp_nodeset next = {0};
+    for (int32_t si = root->first; si >= 0; si = prog->nodes[si].next) {
         const xn *step = &prog->nodes[si];
-        if (step->a >= 0 || !axis_supported(step->axis)) {
-            *feature = step->a >= 0 ? "predicates" : "the following/preceding/namespace axes";
+        if (!axis_supported(step->axis)) {
+            *ctx->feature = "the following/preceding/namespace axes";
             xp_nodeset_free(&cur);
             xp_nodeset_free(&next);
             return -2;
         }
         int name_test = step->test == NT_NAME;
         uint16_t atom = name_test && step->axis != AX_ATTRIBUTE ? resolve_tag_atom(step->str, step->str_len) : 0;
-        uint32_t attr_atom =
-            name_test && step->axis == AX_ATTRIBUTE ? resolve_attr_atom(tree, step->str, step->str_len) : UINT32_MAX;
+        uint32_t attr_atom = name_test && step->axis == AX_ATTRIBUTE
+                                 ? resolve_attr_atom(ctx->tree, step->str, step->str_len)
+                                 : UINT32_MAX;
         next.len = 0;
-        for (Py_ssize_t i = 0; i < cur.len; i++) {
-            if (cur.items[i].attr >= 0) {
-                continue; /* an attribute has no axes of its own in this phase */
+        for (Py_ssize_t index = 0; index < cur.len; index++) {
+            if (cur.items[index].attr >= 0) {
+                continue; /* an attribute has no axes of its own */
             }
-            if (apply_step(&next, cur.items[i].node, step, atom, attr_atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                xp_nodeset_free(&cur);                                             /* GCOVR_EXCL_LINE */
-                xp_nodeset_free(&next);                                            /* GCOVR_EXCL_LINE */
-                return -1;                                                         /* GCOVR_EXCL_LINE */
+            Py_ssize_t before = next.len;
+            if (apply_step(&next, cur.items[index].node, step, atom, attr_atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                xp_nodeset_free(&cur);                                                 /* GCOVR_EXCL_LINE */
+                xp_nodeset_free(&next);                                                /* GCOVR_EXCL_LINE */
+                return -1;                                                             /* GCOVR_EXCL_LINE */
+            }
+            if (step->first >= 0) {
+                /* filter this context node's candidates in proximity order */
+                xp_nodeset slice = {next.items + before, next.len - before, 0};
+                int rc = apply_predicates(prog, step->first, ctx, &slice);
+                if (rc < 0) {
+                    xp_nodeset_free(&cur);
+                    xp_nodeset_free(&next);
+                    return rc;
+                }
+                next.len = before + slice.len;
             }
         }
         xp_nodeset swap = cur;
@@ -1476,6 +1727,586 @@ int xp_eval_nodeset(const xp_program *prog, struct th_tree *tree, struct th_node
     xp_nodeset_free(&next);
     *out = cur;
     return 0;
+}
+
+/* Existential comparison of two scalar values (neither a node-set). */
+static int cmp_scalar(struct th_tree *tree, int op, const xp_result *left, const xp_result *right) {
+    if (op == XN_EQ || op == XN_NE) {
+        int eq;
+        if (left->kind == XP_BOOLEAN || right->kind == XP_BOOLEAN) {
+            eq = to_boolean(tree, left) == to_boolean(tree, right);
+        } else if (left->kind == XP_NUMBER || right->kind == XP_NUMBER) {
+            eq = to_number(tree, left) == to_number(tree, right);
+        } else {
+            Py_ssize_t la;
+            Py_ssize_t lb;
+            Py_UCS4 *sa = to_string(tree, left, &la);
+            Py_UCS4 *sb = to_string(tree, right, &lb);
+            if (sa == NULL || sb == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                eq = 0;                     /* GCOVR_EXCL_LINE */
+            } else {
+                eq = la == lb && memcmp(sa, sb, (size_t)la * sizeof(Py_UCS4)) == 0;
+            }
+            PyMem_Free(sa);
+            PyMem_Free(sb);
+        }
+        return op == XN_EQ ? eq : !eq;
+    }
+    double left_num = to_number(tree, left);
+    double right_num = to_number(tree, right);
+    switch (op) {
+    case XN_LT:
+        return left_num < right_num;
+    case XN_LE:
+        return left_num <= right_num;
+    case XN_GT:
+        return left_num > right_num;
+    default: /* XN_GE */
+        return left_num >= right_num;
+    }
+}
+
+/* A node-set member wrapped as left standalone string value. */
+static int item_as_string(struct th_tree *tree, xp_item item, xp_result *out) {
+    Py_ssize_t len;
+    Py_UCS4 *text = item_string(tree, item, &len);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    result_string(out, text, len);
+    return 0;
+}
+
+static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *second, int *result) {
+    int a_ns = first->kind == XP_NODESET;
+    int b_ns = second->kind == XP_NODESET;
+    if (!a_ns && !b_ns) {
+        *result = cmp_scalar(tree, op, first, second);
+        return 0;
+    }
+    /* first node-set compared with first boolean uses the node-set's own boolean value */
+    if ((a_ns && second->kind == XP_BOOLEAN) || (b_ns && first->kind == XP_BOOLEAN)) {
+        *result = cmp_scalar(tree, op, first, second);
+        return 0;
+    }
+    xp_nodeset *left = a_ns ? &first->nodes : NULL;
+    xp_nodeset *right = b_ns ? &second->nodes : NULL;
+    *result = 0;
+    if (a_ns && b_ns) {
+        for (Py_ssize_t index = 0; index < left->len && !*result; index++) {
+            xp_result si;
+            if (item_as_string(tree, left->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                           /* GCOVR_EXCL_LINE */
+            }
+            for (Py_ssize_t inner_index = 0; inner_index < right->len && !*result; inner_index++) {
+                xp_result sj;
+                if (item_as_string(tree, right->items[inner_index], &sj) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    xp_result_free(&si);                                        /* GCOVR_EXCL_LINE */
+                    return -1;                                                  /* GCOVR_EXCL_LINE */
+                }
+                *result = cmp_scalar(tree, op, &si, &sj);
+                xp_result_free(&sj);
+            }
+            xp_result_free(&si);
+        }
+        return 0;
+    }
+    xp_nodeset *ns = a_ns ? left : right;
+    xp_result *other = a_ns ? second : first;
+    for (Py_ssize_t index = 0; index < ns->len && !*result; index++) {
+        xp_result si;
+        if (item_as_string(tree, ns->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                         /* GCOVR_EXCL_LINE */
+        }
+        *result = a_ns ? cmp_scalar(tree, op, &si, other) : cmp_scalar(tree, op, other, &si);
+        xp_result_free(&si);
+    }
+    return 0;
+}
+
+/* -------------------------------------------------------- function library */
+
+/* number() with no argument: the context node's string-value parsed as first number. */
+static double context_node_number(xp_ctx *ctx) {
+    xp_item item = {ctx->node, -1};
+    Py_ssize_t length;
+    Py_UCS4 *text = item_string(ctx->tree, item, &length);
+    if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return (double)NAN; /* GCOVR_EXCL_LINE */
+    }
+    double value = parse_number(text, length);
+    PyMem_Free(text);
+    return value;
+}
+
+static int func_is(const xn *fn, const char *kw) {
+    Py_ssize_t index = 0;
+    for (; kw[index] != '\0'; index++) {
+        if (index >= fn->str_len || fn->str[index] != (Py_UCS4)(unsigned char)kw[index]) {
+            return 0;
+        }
+    }
+    return index == fn->str_len;
+}
+
+static Py_ssize_t ucs4_find(const Py_UCS4 *hay, Py_ssize_t hlen, const Py_UCS4 *needle, Py_ssize_t nlen) {
+    if (nlen == 0) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index + nlen <= hlen; index++) {
+        if (memcmp(hay + index, needle, (size_t)nlen * sizeof(Py_UCS4)) == 0) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+/* The string-value to operate on: the first argument's, or the context node's when
+   the function was called with no arguments. */
+static Py_UCS4 *arg_or_context_string(xp_ctx *ctx, xp_result *args, int argc, Py_ssize_t *len) {
+    if (argc >= 1) {
+        return to_string(ctx->tree, &args[0], len);
+    }
+    xp_item item = {ctx->node, -1};
+    return item_string(ctx->tree, item, len);
+}
+
+/* The qualified name of a node-set's first node (or the context node), as a fresh
+   string; empty for a non-named node or an empty node-set. */
+static Py_UCS4 *node_name_string(xp_ctx *ctx, xp_result *args, int argc, Py_ssize_t *len) {
+    struct th_node *node = ctx->node;
+    Py_ssize_t attr = -1;
+    if (argc >= 1) {
+        if (args[0].kind != XP_NODESET || args[0].nodes.len == 0) {
+            *len = 0;
+            return ucs4_dup(NULL, 0);
+        }
+        node = args[0].nodes.items[0].node;
+        attr = args[0].nodes.items[0].attr;
+    }
+    if (attr >= 0) {
+        Py_ssize_t blen;
+        const char *bytes = th_attr_name(ctx->tree, node->attrs[attr].name_atom, &blen);
+        Py_UCS4 *buffer =
+            PyMem_Malloc((size_t)blen * sizeof(Py_UCS4)); /* GCOVR_EXCL_BR_LINE: attribute names are never empty */
+        if (buffer == NULL) {                             /* GCOVR_EXCL_BR_LINE: alloc */
+            return NULL;                                  /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < blen; index++) {
+            buffer[index] = (Py_UCS4)(unsigned char)bytes[index];
+        }
+        *len = blen;
+        return buffer;
+    }
+    if (node->type == TH_NODE_ELEMENT) {
+        *len = node->text_len;
+        return ucs4_dup(node->text, node->text_len);
+    }
+    *len = 0;
+    return ucs4_dup(NULL, 0);
+}
+
+/* normalize-space: trim ends, collapse internal whitespace runs to one space. */
+static int normalize_space(const Py_UCS4 *text, Py_ssize_t len, xp_result *out) {
+    Py_UCS4 *buf = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t write_pos = 0;
+    int in_space = 1; /* leading whitespace is dropped */
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (xp_is_space(text[index])) {
+            in_space = 1;
+        } else {
+            if (in_space && write_pos > 0) {
+                buf[write_pos++] = ' ';
+            }
+            buf[write_pos++] = text[index];
+            in_space = 0;
+        }
+    }
+    result_string(out, buf, write_pos);
+    return 0;
+}
+
+static int translate(const Py_UCS4 *text, Py_ssize_t slen, const Py_UCS4 *from, Py_ssize_t flen, const Py_UCS4 *to,
+                     Py_ssize_t tlen, xp_result *out) {
+    Py_UCS4 *buf = PyMem_Malloc((size_t)slen * sizeof(Py_UCS4));
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t write_pos = 0;
+    for (Py_ssize_t index = 0; index < slen; index++) {
+        Py_ssize_t from_index = 0;
+        while (from_index < flen && from[from_index] != text[index]) {
+            from_index++;
+        }
+        if (from_index >= flen) {
+            buf[write_pos++] = text[index];
+        } else if (from_index < tlen) {
+            buf[write_pos++] = to[from_index];
+        }
+        /* else: in `from` but past the end of `to`, so the character is removed */
+    }
+    result_string(out, buf, write_pos);
+    return 0;
+}
+
+static int substring(struct th_tree *tree, xp_result *args, int argc, xp_result *out) {
+    Py_ssize_t slen;
+    Py_UCS4 *text = to_string(tree, &args[0], &slen);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    double start = round(to_number(tree, &args[1]));
+    double last = argc >= 3 ? start + round(to_number(tree, &args[2])) : (double)slen + 1;
+    Py_ssize_t lo = start < 1 ? 0 : (start > (double)slen + 1 ? slen : (Py_ssize_t)start - 1);
+    Py_ssize_t hi = last < 1 ? 0 : (last > (double)slen + 1 ? slen : (Py_ssize_t)last - 1);
+    if (hi < lo) {
+        hi = lo;
+    }
+    Py_UCS4 *result_text = ucs4_dup(text + lo, hi - lo);
+    PyMem_Free(text);
+    if (result_text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;             /* GCOVR_EXCL_LINE */
+    }
+    result_string(out, result_text, hi - lo);
+    return 0;
+}
+
+static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) {
+    const xn *fn = &prog->nodes[idx];
+    xp_result args[8];
+    int argc = 0;
+    for (int32_t arg_node = fn->first; arg_node >= 0; arg_node = prog->nodes[arg_node].next) {
+        if (argc == 8) { /* GCOVR_EXCL_BR_LINE: no supported function takes 8 args */
+            *ctx->feature = "a function with too many arguments";                /* GCOVR_EXCL_LINE */
+            for (int cleanup_index = 0; cleanup_index < argc; cleanup_index++) { /* GCOVR_EXCL_LINE */
+                xp_result_free(&args[cleanup_index]);                            /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE */
+            return -2; /* GCOVR_EXCL_LINE */
+        }
+        int rc = eval_expr(prog, arg_node, ctx, &args[argc]);
+        if (rc < 0) {
+            for (int cleanup_index = 0; cleanup_index < argc; cleanup_index++) {
+                xp_result_free(&args[cleanup_index]);
+            }
+            return rc;
+        }
+        argc++;
+    }
+    int rc = 0;
+    if (func_is(fn, "true") || func_is(fn, "false")) {
+        result_bool(out, func_is(fn, "true"));
+    } else if (func_is(fn, "position")) {
+        result_number(out, (double)ctx->pos);
+    } else if (func_is(fn, "last")) {
+        result_number(out, (double)ctx->size);
+    } else if (func_is(fn, "not")) {
+        result_bool(out, !to_boolean(ctx->tree, &args[0]));
+    } else if (func_is(fn, "boolean")) {
+        result_bool(out, to_boolean(ctx->tree, &args[0]));
+    } else if (func_is(fn, "number")) {
+        result_number(out, argc >= 1 ? to_number(ctx->tree, &args[0]) : context_node_number(ctx));
+    } else if (func_is(fn, "floor") || func_is(fn, "ceiling") || func_is(fn, "round")) {
+        double value = to_number(ctx->tree, &args[0]);
+        result_number(out, func_is(fn, "floor") ? floor(value) : func_is(fn, "ceiling") ? ceil(value) : round(value));
+    } else if (func_is(fn, "count")) {
+        if (args[0].kind != XP_NODESET) {
+            *ctx->feature = "count() of a non-node-set";
+            rc = -2;
+        } else {
+            result_number(out, (double)args[0].nodes.len);
+        }
+    } else if (func_is(fn, "sum")) {
+        if (args[0].kind != XP_NODESET) {
+            *ctx->feature = "sum() of a non-node-set";
+            rc = -2;
+        } else {
+            double total = 0;
+            for (Py_ssize_t index = 0; index < args[0].nodes.len; index++) {
+                Py_ssize_t length;
+                Py_UCS4 *text = item_string(ctx->tree, args[0].nodes.items[index], &length);
+                if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    rc = -1;        /* GCOVR_EXCL_LINE */
+                    break;          /* GCOVR_EXCL_LINE */
+                }
+                total += parse_number(text, length);
+                PyMem_Free(text);
+            }
+            if (rc == 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                result_number(out, total);
+            }
+        }
+    } else if (func_is(fn, "string")) {
+        Py_ssize_t length;
+        Py_UCS4 *text = arg_or_context_string(ctx, args, argc, &length);
+        rc = text == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+        if (rc == 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
+            result_string(out, text, length);
+        }
+    } else if (func_is(fn, "string-length")) {
+        Py_ssize_t length;
+        Py_UCS4 *text = arg_or_context_string(ctx, args, argc, &length);
+        rc = text == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+        if (rc == 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
+            result_number(out, (double)length);
+            PyMem_Free(text);
+        }
+    } else if (func_is(fn, "normalize-space")) {
+        Py_ssize_t length;
+        Py_UCS4 *text = arg_or_context_string(ctx, args, argc, &length);
+        rc = text == NULL ? -1 : normalize_space(text, length, out); /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(text);
+    } else if (func_is(fn, "local-name") || func_is(fn, "name")) {
+        Py_ssize_t length;
+        Py_UCS4 *text = node_name_string(ctx, args, argc, &length);
+        rc = text == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+        if (rc == 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
+            result_string(out, text, length);
+        }
+    } else if (func_is(fn, "concat")) {
+        Py_ssize_t total = 0;
+        Py_UCS4 *parts[8];
+        Py_ssize_t lens[8];
+        for (int index = 0; index < argc; index++) {
+            parts[index] = to_string(ctx->tree, &args[index], &lens[index]);
+            if (parts[index] == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+                rc = -1;                /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE */
+            total += lens[index];
+        }
+        if (rc == 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            Py_UCS4 *buf = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
+            if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+                rc = -1;       /* GCOVR_EXCL_LINE */
+            } else {
+                Py_ssize_t write_pos = 0;
+                for (int index = 0; index < argc; index++) {
+                    memcpy(buf + write_pos, parts[index], (size_t)lens[index] * sizeof(Py_UCS4));
+                    write_pos += lens[index];
+                }
+                result_string(out, buf, total);
+            }
+        }
+        for (int index = 0; index < argc; index++) {
+            PyMem_Free(parts[index]);
+        }
+    } else if (func_is(fn, "starts-with") || func_is(fn, "contains")) {
+        Py_ssize_t hl;
+        Py_ssize_t nl;
+        Py_UCS4 *hay = to_string(ctx->tree, &args[0], &hl);
+        Py_UCS4 *needle = to_string(ctx->tree, &args[1], &nl);
+        if (hay == NULL || needle == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            rc = -1;                         /* GCOVR_EXCL_LINE */
+        } else if (func_is(fn, "starts-with")) {
+            result_bool(out, nl <= hl && memcmp(hay, needle, (size_t)nl * sizeof(Py_UCS4)) == 0);
+        } else {
+            result_bool(out, ucs4_find(hay, hl, needle, nl) >= 0);
+        }
+        PyMem_Free(hay);
+        PyMem_Free(needle);
+    } else if (func_is(fn, "substring-before") || func_is(fn, "substring-after")) {
+        Py_ssize_t hl;
+        Py_ssize_t nl;
+        Py_UCS4 *hay = to_string(ctx->tree, &args[0], &hl);
+        Py_UCS4 *needle = to_string(ctx->tree, &args[1], &nl);
+        if (hay == NULL || needle == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            rc = -1;                         /* GCOVR_EXCL_LINE */
+        } else {
+            Py_ssize_t at = ucs4_find(hay, hl, needle, nl);
+            const Py_UCS4 *start = at < 0 ? hay : func_is(fn, "substring-before") ? hay : hay + at + nl;
+            Py_ssize_t rlen = at < 0 ? 0 : func_is(fn, "substring-before") ? at : hl - (at + nl);
+            Py_UCS4 *result_text = ucs4_dup(start, rlen);
+            rc = result_text == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+            if (rc == 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
+                result_string(out, result_text, rlen);
+            }
+        }
+        PyMem_Free(hay);
+        PyMem_Free(needle);
+    } else if (func_is(fn, "substring")) {
+        rc = substring(ctx->tree, args, argc, out);
+    } else if (func_is(fn, "translate")) {
+        Py_ssize_t sl;
+        Py_ssize_t fl;
+        Py_ssize_t tl;
+        Py_UCS4 *text = to_string(ctx->tree, &args[0], &sl);
+        Py_UCS4 *from = to_string(ctx->tree, &args[1], &fl);
+        Py_UCS4 *to = to_string(ctx->tree, &args[2], &tl);
+        if (text == NULL || from == NULL || to == NULL) { /* GCOVR_EXCL_BR_LINE: alloc cannot be forced */
+            rc = -1;                                      /* GCOVR_EXCL_LINE */
+        } else {
+            rc = translate(text, sl, from, fl, to, tl, out);
+        }
+        PyMem_Free(text);
+        PyMem_Free(from);
+        PyMem_Free(to);
+    } else {
+        *ctx->feature = "this function";
+        rc = -2;
+    }
+    for (int cleanup_index = 0; cleanup_index < argc; cleanup_index++) {
+        xp_result_free(&args[cleanup_index]);
+    }
+    return rc;
+}
+
+/* Merge b'text items into arg_node (taking ownership of b'text storage on success). */
+static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
+    for (Py_ssize_t index = 0; index < source->len; index++) {
+        if (ns_push(target, source->items[index].node, source->items[index].attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                                                   /* GCOVR_EXCL_LINE */
+        }
+    }
+    xp_nodeset_free(source);
+    sort_unique(target);
+    return 0;
+}
+
+static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) {
+    const xn *expr = &prog->nodes[idx];
+    switch (expr->kind) {
+    case XN_NUM:
+        result_number(out, expr->num);
+        return 0;
+    case XN_LIT: {
+        Py_UCS4 *text = ucs4_dup(expr->str, expr->str_len);
+        if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;      /* GCOVR_EXCL_LINE */
+        }
+        result_string(out, text, expr->str_len);
+        return 0;
+    }
+    case XN_PATH: {
+        xp_nodeset ns = {0};
+        int rc = eval_path(prog, idx, ctx, &ns);
+        if (rc < 0) {
+            return rc;
+        }
+        memset(out, 0, sizeof(*out));
+        out->kind = XP_NODESET;
+        out->nodes = ns;
+        return 0;
+    }
+    case XN_FILTER: {
+        xp_result primary;
+        int rc = eval_expr(prog, expr->first, ctx, &primary);
+        if (rc < 0) {
+            return rc;
+        }
+        if (primary.kind != XP_NODESET) {
+            xp_result_free(&primary);
+            *ctx->feature = "a predicate on a non-node-set";
+            return -2;
+        }
+        sort_unique(&primary.nodes);
+        rc = apply_predicates(prog, expr->second, ctx, &primary.nodes);
+        if (rc < 0) {
+            xp_result_free(&primary);
+            return rc;
+        }
+        *out = primary;
+        return 0;
+    }
+    case XN_UNION: {
+        xp_result left;
+        xp_result right;
+        int rc = eval_expr(prog, expr->first, ctx, &left);
+        if (rc < 0) {
+            return rc;
+        }
+        rc = eval_expr(prog, expr->second, ctx, &right);
+        if (rc < 0) {
+            xp_result_free(&left);
+            return rc;
+        }
+        if (left.kind != XP_NODESET || right.kind != XP_NODESET) {
+            xp_result_free(&left);
+            xp_result_free(&right);
+            *ctx->feature = "a union of non-node-sets";
+            return -2;
+        }
+        if (nodeset_union(&left.nodes, &right.nodes) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            xp_result_free(&left);                          /* GCOVR_EXCL_LINE */
+            return -1;                                      /* GCOVR_EXCL_LINE */
+        }
+        *out = left;
+        return 0;
+    }
+    case XN_OR:
+    case XN_AND: {
+        xp_result left;
+        int rc = eval_expr(prog, expr->first, ctx, &left);
+        if (rc < 0) {
+            return rc;
+        }
+        int la = to_boolean(ctx->tree, &left);
+        xp_result_free(&left);
+        if (expr->kind == XN_OR ? la : !la) {
+            result_bool(out, expr->kind == XN_OR);
+            return 0;
+        }
+        xp_result right;
+        rc = eval_expr(prog, expr->second, ctx, &right);
+        if (rc < 0) {
+            return rc;
+        }
+        result_bool(out, to_boolean(ctx->tree, &right));
+        xp_result_free(&right);
+        return 0;
+    }
+    case XN_NEG: {
+        xp_result left;
+        int rc = eval_expr(prog, expr->first, ctx, &left);
+        if (rc < 0) {
+            return rc;
+        }
+        result_number(out, -to_number(ctx->tree, &left));
+        xp_result_free(&left);
+        return 0;
+    }
+    case XN_FUNC:
+        return eval_function(prog, idx, ctx, out);
+    default: { /* the comparison and arithmetic binary operators */
+        xp_result left;
+        xp_result right;
+        int rc = eval_expr(prog, expr->first, ctx, &left);
+        if (rc < 0) {
+            return rc;
+        }
+        rc = eval_expr(prog, expr->second, ctx, &right);
+        if (rc < 0) {
+            xp_result_free(&left);
+            return rc;
+        }
+        if (expr->kind <= XN_GE) { /* the default case holds only the comparison and arithmetic operators */
+            int cmp = 0;
+            rc = compare(ctx->tree, expr->kind, &left, &right, &cmp);
+            if (rc == 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                result_bool(out, cmp);
+            }
+        } else {
+            double left_value = to_number(ctx->tree, &left);
+            double right_value = to_number(ctx->tree, &right);
+            double value = expr->kind == XN_ADD   ? left_value + right_value
+                           : expr->kind == XN_SUB ? left_value - right_value
+                           : expr->kind == XN_MUL ? left_value * right_value
+                           : expr->kind == XN_DIV ? left_value / right_value
+                                                  : fmod(left_value, right_value);
+            result_number(out, value);
+        }
+        xp_result_free(&left);
+        xp_result_free(&right);
+        return rc;
+    }
+    }
+}
+
+int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_result *out,
+            const char **feature) {
+    xp_ctx ctx = {tree, context, 1, 1, feature};
+    return eval_expr(prog, prog->root, &ctx, out);
 }
 
 /* --------------------------------------------------- Python test hook */

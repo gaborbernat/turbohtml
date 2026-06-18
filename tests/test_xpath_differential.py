@@ -59,6 +59,38 @@ EXPRS = [
     "//ul/li/a",
     "/html/head/title/text()",
     "//body/*",
+    # predicates
+    "//p[1]",
+    "//p[2]",
+    "//p[last()]",
+    "//article/p[1]",
+    "//li[position()=2]",
+    "//li[position()<3]",
+    "//li[position()>1]",
+    "//p[@class]",
+    "//p[@class='lead']",
+    "//a[@href='/x']",
+    "//article[@id='a2']/p",
+    "//article[h2]",
+    "//*[contains(@class,'lea')]",
+    "//th[text()='H1']",
+    "(//p)[1]",
+    "(//p)[last()]",
+    "//tr/td[1]",
+    "//tr/td[last()]",
+    "//p[position()=last()]",
+    # unions
+    "//p | //h2",
+    "//th | //td",
+    # scalar results
+    "count(//p)",
+    "count(//li)",
+    "count(//article)",
+    "string(//title)",
+    "//p[count(//article)=2]",
+    "boolean(//p)",
+    "boolean(//zzz)",
+    "//article[position()=1]/h2/text()",
 ]
 
 
@@ -73,10 +105,13 @@ def normalize(result: Iterable[object]) -> list[str]:
     return out
 
 
-@pytest.mark.parametrize("expr", EXPRS, ids=lambda e: e)
+@pytest.mark.parametrize("expr", EXPRS, ids=lambda expr: expr)
 @pytest.mark.parametrize("doc_name", list(DOCS), ids=list(DOCS))
 def test_matches_lxml(doc_name: str, expr: str) -> None:
     html = DOCS[doc_name]
-    ours = normalize(turbohtml.parse(html).xpath(expr))
-    theirs = normalize(lxml_html.document_fromstring(html).xpath(expr))
-    assert ours == theirs
+    ours = turbohtml.parse(html).xpath(expr)
+    theirs = lxml_html.document_fromstring(html).xpath(expr)
+    if isinstance(ours, list):
+        assert normalize(ours) == normalize(theirs)
+    else:  # a scalar result: count() -> float, string() -> str, boolean() -> bool
+        assert ours == theirs
