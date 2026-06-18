@@ -78,6 +78,18 @@ def test_invalid_bytes_become_replacement_characters() -> None:
 
 
 @pytest.mark.parametrize(
+    ("pad", "expected"),
+    [
+        # <meta charset=utf-8> is 20 bytes; the prescan examines only the first 1024
+        pytest.param(1004, "UTF-8", id="meta-ends-at-1023-honored"),
+        pytest.param(1005, "windows-1252", id="meta-ends-at-1024-ignored"),
+    ],
+)
+def test_meta_prescan_stops_at_1024_bytes(pad: int, expected: str) -> None:
+    assert parse(b"a" * pad + b"<meta charset=utf-8>").encoding == expected
+
+
+@pytest.mark.parametrize(
     ("label", "expected"),
     [
         pytest.param("iso-8859-3", "ISO-8859-3", id="iso-8859-3"),

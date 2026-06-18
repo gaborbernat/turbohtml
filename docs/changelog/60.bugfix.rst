@@ -1,0 +1,3 @@
+Limit the ``<meta charset>`` prescan to the first 1024 bytes, per the WHATWG "prescan a byte stream to determine its
+encoding" algorithm. A ``<meta>`` whose end reaches byte 1024 or later is no longer honored, so the document falls back
+to windows-1252 instead of adopting a late declaration (and an arbitrarily large input is no longer scanned in full).
