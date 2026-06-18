@@ -273,6 +273,27 @@ def test_structural_pseudo_by_tag(selector: str, tags: list[str]) -> None:
     assert [element.tag for element in parse(_PSEUDO).select(selector)] == tags
 
 
+# Selectors-4 §13.2 changed :empty from Level 3: an element holding only document
+# white space still matches, while any non-whitespace text or element child does not.
+@pytest.mark.parametrize(
+    ("html", "tags"),
+    [
+        pytest.param("<p></p>", ["p"], id="no-children"),
+        pytest.param("<p> </p>", ["p"], id="single-space"),
+        pytest.param("<p>\t\n\f </p>", ["p"], id="mixed-ascii-whitespace"),
+        pytest.param("<p><!--c--></p>", ["p"], id="comment-only"),
+        pytest.param("<p> <!--c--> </p>", ["p"], id="whitespace-around-comment"),
+        pytest.param("<p>x</p>", [], id="text"),
+        pytest.param("<p> x </p>", [], id="whitespace-around-text"),
+        pytest.param("<p>\xa0</p>", [], id="non-breaking-space-is-not-whitespace"),
+        pytest.param("<p><span></span></p>", [], id="element-child"),
+        pytest.param("<p> <span></span> </p>", [], id="element-child-among-whitespace"),
+    ],
+)
+def test_empty_ignores_document_whitespace(html: str, tags: list[str]) -> None:
+    assert _sel(html, "p:empty") == tags
+
+
 def test_universal_under_a_root() -> None:
     assert (section := parse(_DOC).select_one("section")) is not None
     assert len(section.select("*")) == 8  # h2, p, a, p, ul, li, li, my-widget

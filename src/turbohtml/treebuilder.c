@@ -401,6 +401,16 @@ int th_tree_quirks(const th_tree *tree) {
     return tree->quirks;
 }
 
+int th_node_text_is_blank(th_tree *tree, th_node *node) {
+    const Py_UCS4 *text = need_text(tree, node); /* realize a zero-copy span before scanning */
+    for (Py_ssize_t index = 0; index < node->text_len; index++) {
+        if (!is_space(text[index])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Resolve a lowercased tag name (UTF-8 bytes) to its atom, or TH_TAG_UNKNOWN for
    a name outside the table (the caller then compares the tag name as text). */
 uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len) {

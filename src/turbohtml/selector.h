@@ -74,8 +74,9 @@ typedef struct {
     Py_UCS4 *source; /* an owned copy of the selector text the slices point into */
     sel_complex *alts;
     int count;
-    int failed; /* an allocation or a syntax error happened during compile */
-    int quirks; /* the tree was parsed in quirks mode: class/ID match case-insensitively */
+    int failed;    /* an allocation or a syntax error happened during compile */
+    int quirks;    /* the tree was parsed in quirks mode: class/ID match case-insensitively */
+    th_tree *tree; /* the tree this selector runs on; :empty reads text spans through it */
 } sel_compiled;
 
 /* ---------------------------------------------------------------- parsing */
@@ -767,6 +768,7 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
         return NULL;                /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     compiled->quirks = th_tree_quirks(tree);
+    compiled->tree = tree;
     sel_parser parser = {compiled->source, 0, PyUnicode_GET_LENGTH(selector_str), tree, 0};
     if (sel_parse_alts(&parser, &compiled->alts, &compiled->count, 0, 0) < 0) {
         PyMem_Free(compiled->source);
@@ -782,9 +784,9 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
 /* The functional pseudo-classes recurse into the matcher: :is()/:where() test the
    element against a nested list, and :has() searches for a relative match, so the
    matching primitives they call are forward-declared here. */
-static int sel_match_compound(th_node *node, const sel_compound *compound, int quirks);
-static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, int quirks);
-static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, int quirks);
+static int sel_match_compound(th_node *node, const sel_compound *compound, int quirks, th_tree *tree);
+static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, int quirks, th_tree *tree);
+static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, int quirks, th_tree *tree);
 
 static Py_UCS4 sel_fold(Py_UCS4 ch, int ci) {
     return (ci && ch >= 'A' && ch <= 'Z') ? ch + 32 : ch;
@@ -914,25 +916,31 @@ static int sel_nth_matches(int a, int b, int index) {
     return diff % a == 0 && diff / a >= 0;
 }
 
-/* An element is :empty (CSS Selectors Level 3) when it has no element or text
-   children; comments and processing instructions do not count. */
-static int sel_is_empty(const th_node *node) {
+/* An element is :empty (Selectors-4 §13.2) when it has no children except,
+   optionally, document white space: any element child or a text child holding a
+   non-whitespace code point makes it non-empty, while comments, processing
+   instructions, and whitespace-only text do not count. Level 3 rejected
+   whitespace-only elements; Level 4 changed that, so `<p> </p>` now matches. */
+static int sel_is_empty(const th_node *node, th_tree *tree) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        if (child->type == TH_NODE_ELEMENT || child->type == TH_NODE_TEXT) {
+        if (child->type == TH_NODE_ELEMENT) {
+            return 0;
+        }
+        if (child->type == TH_NODE_TEXT && !th_node_text_is_blank(tree, child)) {
             return 0;
         }
     }
     return 1;
 }
 
-static int sel_match_pseudo(th_node *node, const sel_simple *simple, int quirks) {
+static int sel_match_pseudo(th_node *node, const sel_simple *simple, int quirks, th_tree *tree) {
     switch (simple->pseudo) { /* GCOVR_EXCL_BR_LINE: the parser only stores known pseudo ids */
     case PSEUDO_ROOT:
         /* the root element's parent is the document, never an element (a matched
            node always has a parent, as the '>' combinator above relies on) */
         return node->parent->type != TH_NODE_ELEMENT;
     case PSEUDO_EMPTY:
-        return sel_is_empty(node);
+        return sel_is_empty(node, tree);
     case PSEUDO_FIRST_CHILD:
         return sel_no_sibling(node, 0, 0);
     case PSEUDO_LAST_CHILD:
@@ -958,20 +966,20 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, int quirks)
        anchored at it */
     case PSEUDO_IS:
     case PSEUDO_WHERE:
-        return sel_matches_alts(node, simple->sub, simple->sub_count, quirks);
+        return sel_matches_alts(node, simple->sub, simple->sub_count, quirks, tree);
     case PSEUDO_NOT:
-        return !sel_matches_alts(node, simple->sub, simple->sub_count, quirks);
+        return !sel_matches_alts(node, simple->sub, simple->sub_count, quirks, tree);
     default: /* PSEUDO_HAS */
-        return sel_has_match(node, simple->sub, simple->sub_count, quirks);
+        return sel_has_match(node, simple->sub, simple->sub_count, quirks, tree);
     }
 }
 
-static int sel_match_simple(th_node *node, const sel_simple *simple, int quirks) {
+static int sel_match_simple(th_node *node, const sel_simple *simple, int quirks, th_tree *tree) {
     switch (simple->kind) {
     case '*':
         return 1;
     case ':':
-        return sel_match_pseudo(node, simple, quirks);
+        return sel_match_pseudo(node, simple, quirks, tree);
     case 'e':
         if (simple->tag_atom != TH_TAG_UNKNOWN) {
             return node->atom == simple->tag_atom;
@@ -1010,12 +1018,12 @@ static int sel_match_simple(th_node *node, const sel_simple *simple, int quirks)
     }
 }
 
-static int sel_match_compound(th_node *node, const sel_compound *compound, int quirks) {
+static int sel_match_compound(th_node *node, const sel_compound *compound, int quirks, th_tree *tree) {
     if (node->type != TH_NODE_ELEMENT) {
         return 0;
     }
     for (int index = 0; index < compound->count; index++) {
-        if (!sel_match_simple(node, &compound->simples[index], quirks)) {
+        if (!sel_match_simple(node, &compound->simples[index], quirks, tree)) {
             return 0;
         }
     }
@@ -1036,7 +1044,8 @@ static th_node *sel_prev_element(th_node *node) {
    ordinary selector (the leftmost compound is the end); for a :has() relative selector
    it is the element :has() tests, and the leftmost compound's leading combinator must
    connect to it. The interior-combinator machinery is shared by both. */
-static int sel_match_from(th_node *node, const sel_complex *complex, int index, th_node *anchor, int quirks) {
+static int sel_match_from(th_node *node, const sel_complex *complex, int index, th_node *anchor, int quirks,
+                          th_tree *tree) {
     if (index == 0) {
         if (anchor == NULL) {
             return 1;
@@ -1068,24 +1077,26 @@ static int sel_match_from(th_node *node, const sel_complex *complex, int index, 
         /* a matched node is an element, so it always has a parent (the document
            at the root), which sel_match_compound rejects as a non-element */
         th_node *parent = node->parent;
-        return sel_match_compound(parent, target, quirks) && sel_match_from(parent, complex, index - 1, anchor, quirks);
+        return sel_match_compound(parent, target, quirks, tree) &&
+               sel_match_from(parent, complex, index - 1, anchor, quirks, tree);
     }
     case '+': {
         th_node *prev = sel_prev_element(node);
-        return prev != NULL && sel_match_compound(prev, target, quirks) &&
-               sel_match_from(prev, complex, index - 1, anchor, quirks);
+        return prev != NULL && sel_match_compound(prev, target, quirks, tree) &&
+               sel_match_from(prev, complex, index - 1, anchor, quirks, tree);
     }
     case '~':
         for (th_node *prev = sel_prev_element(node); prev != NULL; prev = sel_prev_element(prev)) {
-            if (sel_match_compound(prev, target, quirks) && sel_match_from(prev, complex, index - 1, anchor, quirks)) {
+            if (sel_match_compound(prev, target, quirks, tree) &&
+                sel_match_from(prev, complex, index - 1, anchor, quirks, tree)) {
                 return 1;
             }
         }
         return 0;
     default: /* descendant */
         for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
-            if (sel_match_compound(ancestor, target, quirks) &&
-                sel_match_from(ancestor, complex, index - 1, anchor, quirks)) {
+            if (sel_match_compound(ancestor, target, quirks, tree) &&
+                sel_match_from(ancestor, complex, index - 1, anchor, quirks, tree)) {
                 return 1;
             }
         }
@@ -1096,12 +1107,12 @@ static int sel_match_from(th_node *node, const sel_complex *complex, int index, 
 /* node matches some alternative in alts: it is the subject (rightmost compound) of
    one complex whose combinators to the left verify. The top-level match and the
    :is()/:where() pseudo-classes share this. */
-static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, int quirks) {
+static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, int quirks, th_tree *tree) {
     for (int index = 0; index < count; index++) {
         const sel_complex *complex = &alts[index];
         int subject = complex->count - 1;
-        if (sel_match_compound(node, &complex->compounds[subject], quirks) &&
-            sel_match_from(node, complex, subject, NULL, quirks)) {
+        if (sel_match_compound(node, &complex->compounds[subject], quirks, tree) &&
+            sel_match_from(node, complex, subject, NULL, quirks, tree)) {
             return 1;
         }
     }
@@ -1110,14 +1121,15 @@ static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, i
 
 /* Whether any element in the subtree below node is the subject of rel anchored at
    anchor (the element :has() is testing), checked recursively in document order. */
-static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, th_node *anchor, int quirks) {
+static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, th_node *anchor, int quirks,
+                           th_tree *tree) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         if (child->type != TH_NODE_ELEMENT) {
             continue;
         }
-        if ((sel_match_compound(child, &rel->compounds[subject], quirks) &&
-             sel_match_from(child, rel, subject, anchor, quirks)) ||
-            sel_has_subtree(child, rel, subject, anchor, quirks)) {
+        if ((sel_match_compound(child, &rel->compounds[subject], quirks, tree) &&
+             sel_match_from(child, rel, subject, anchor, quirks, tree)) ||
+            sel_has_subtree(child, rel, subject, anchor, quirks, tree)) {
             return 1;
         }
     }
@@ -1127,11 +1139,11 @@ static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, t
 /* Whether the anchor element satisfies any :has() relative selector. A relative
    selector reaches the anchor's descendants and, through a leading sibling
    combinator, its following siblings and their subtrees. */
-static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, int quirks) {
+static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, int quirks, th_tree *tree) {
     for (int index = 0; index < count; index++) {
         const sel_complex *rel = &alts[index];
         int subject = rel->count - 1;
-        if (sel_has_subtree(anchor, rel, subject, anchor, quirks)) {
+        if (sel_has_subtree(anchor, rel, subject, anchor, quirks, tree)) {
             return 1;
         }
         /* only a leading sibling combinator (:has(+ x) / :has(~ x)) can match outside
@@ -1145,9 +1157,9 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, in
             if (sibling->type != TH_NODE_ELEMENT) {
                 continue;
             }
-            if ((sel_match_compound(sibling, &rel->compounds[subject], quirks) &&
-                 sel_match_from(sibling, rel, subject, anchor, quirks)) ||
-                sel_has_subtree(sibling, rel, subject, anchor, quirks)) {
+            if ((sel_match_compound(sibling, &rel->compounds[subject], quirks, tree) &&
+                 sel_match_from(sibling, rel, subject, anchor, quirks, tree)) ||
+                sel_has_subtree(sibling, rel, subject, anchor, quirks, tree)) {
                 return 1;
             }
         }
@@ -1156,7 +1168,7 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, in
 }
 
 static int selector_matches(th_node *node, const sel_compiled *compiled) {
-    return sel_matches_alts(node, compiled->alts, compiled->count, compiled->quirks);
+    return sel_matches_alts(node, compiled->alts, compiled->count, compiled->quirks, compiled->tree);
 }
 
 /* The lone simple selector of a selector that is one group, one compound, one
