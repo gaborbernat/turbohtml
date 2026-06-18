@@ -330,13 +330,17 @@ static const char *prescan_charset_in_content(const char *content, char *out, si
     return NULL;
 }
 
-/* Prescan the input for a usable <meta> encoding, scanning the whole buffer as
-   html5lib does. A utf-16 label in this meta context is forced to utf-8. Returns
-   the table entry, or NULL when none is found. */
+/* Prescan the input for a usable <meta> encoding. Per the WHATWG "prescan a byte
+   stream to determine its encoding" algorithm only the first 1024 bytes are examined,
+   so a <meta> whose end reaches past that is not honored. A utf-16 label in this meta
+   context is forced to utf-8. Returns the table entry, or NULL when none is found. */
 static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py_ssize_t len) {
     Py_ssize_t pos = 0;
     char name[32];
     char value[128];
+    if (len > 1024) {
+        len = 1024;
+    }
     while (pos < len) {
         if (pos + 4 <= len && memcmp(buf + pos, "<!--", 4) == 0) {
             pos += 4;
