@@ -381,6 +381,22 @@ def test_document_paths(html: str, needle: str) -> None:
     assert needle in _doc(html)
 
 
+@pytest.mark.parametrize("tag", ["caption", "table", "tbody", "tfoot", "thead", "tr", "td", "th"])
+def test_table_family_start_tag_pops_select_in_table(tag: str) -> None:
+    # "in select in table": a table-family start tag pops the open select and reprocesses,
+    # so it never nests inside the select (the select is left empty as a sibling)
+    select = parse(f"<table><tr><td><select><{tag}>").find("select")
+    assert select is not None
+    assert not select.inner_html
+
+
+def test_non_table_start_tag_stays_in_select_in_table() -> None:
+    # a non-table-family start tag is not affected: an option stays inside the select
+    select = parse("<table><tr><td><select><option>x").find("select")
+    assert select is not None
+    assert select.inner_html == "<option>x</option>"
+
+
 def test_stray_html_in_colgroup_keeps_it_open() -> None:
     # a stray <html> in "in column group" uses the in-body rules (merge attributes, leave the
     # stack), so the colgroup stays open and the next <col> joins it instead of starting a new one
