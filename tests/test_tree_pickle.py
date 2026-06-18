@@ -104,6 +104,33 @@ def test_pickled_element_is_independent() -> None:
     assert clone.html == "<p>x<b></b></p>"
 
 
+@pytest.mark.parametrize(
+    ("html", "container"),
+    [
+        pytest.param("<svg><rect></rect></svg>", "svg", id="svg"),
+        pytest.param("<math><mi>x</mi></math>", "math", id="mathml"),
+    ],
+)
+def test_foreign_element_round_trip_keeps_namespace(html: str, container: str) -> None:
+    parent = parse(html).find(container)
+    assert parent is not None
+    child = parent.children[0]
+    assert isinstance(child, Element)
+    clone = _roundtrip(child)
+    assert isinstance(clone, Element)
+    assert clone.namespace == child.namespace  # not reset to Namespace.HTML on the round-trip (issue #85)
+
+
+@pytest.mark.parametrize("ns", [-1, 99], ids=["below", "above"])
+def test_reconstruct_rejects_out_of_range_namespace(ns: int) -> None:
+    reduced = Element("div").__reduce__()
+    assert isinstance(reduced, tuple)
+    kind = reduced[1][0]  # the element kind from the (kind, data, children) payload
+    # a crafted payload must not index the namespaces table out of bounds
+    with pytest.raises(ValueError, match="namespace out of range"):
+        _reconstruct(kind, ("div", {}, ns), [])
+
+
 def test_reconstruct_rejects_malformed_arguments() -> None:
     with pytest.raises(TypeError):
         _reconstruct("not a triple")  # ty: ignore[missing-argument, invalid-argument-type]  # deliberately malformed

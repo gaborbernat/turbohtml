@@ -2896,7 +2896,11 @@ static PyObject *node_pickle_data(PyObject *self, th_node *node) {
         if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        return Py_BuildValue("(NN)", element_get_tag(self, NULL), attrs);
+        if (node->ns == TH_NS_HTML) {
+            return Py_BuildValue("(NN)", element_get_tag(self, NULL), attrs);
+        }
+        /* a foreign (SVG/MathML) element carries its namespace so the round-trip keeps it */
+        return Py_BuildValue("(NNi)", element_get_tag(self, NULL), attrs, (int)node->ns);
     }
     case TH_NODE_DOCUMENT:
     case TH_NODE_CONTENT:
@@ -2986,12 +2990,20 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
            through the trusted builder rather than the validating public constructor */
         PyObject *tag;
         PyObject *element_attrs;
-        /* GCOVR_EXCL_START: node_reduce builds this (tag, attrs) tuple, so the parse never fails */
-        if (!PyArg_ParseTuple(data, "UO", &tag, &element_attrs)) {
+        int ns = TH_NS_HTML; /* an HTML element omits the namespace; a foreign one appends it */
+        /* GCOVR_EXCL_START: node_reduce builds this (tag, attrs[, ns]) tuple, so the parse never fails */
+        if (!PyArg_ParseTuple(data, "UO|i", &tag, &element_attrs, &ns)) {
             return NULL;
         }
         /* GCOVR_EXCL_STOP */
+        if (ns < TH_NS_HTML || ns > TH_NS_MATHML) { /* guard the namespaces[] index against a crafted payload */
+            PyErr_SetString(PyExc_ValueError, "namespace out of range");
+            return NULL;
+        }
         node = make_element((PyTypeObject *)state->element_type, tag, element_attrs);
+        if (node != NULL) {
+            ((NodeObject *)node)->node->ns = (uint8_t)ns;
+        }
         break;
     }
     case TH_NODE_DOCTYPE:
