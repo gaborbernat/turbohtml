@@ -78,6 +78,46 @@ def test_invalid_bytes_become_replacement_characters() -> None:
 
 
 @pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        pytest.param("iso-8859-3", "iso-8859-3", id="iso-8859-3"),
+        pytest.param("latin4", "iso-8859-4", id="iso-8859-4-alias"),
+        pytest.param("arabic", "iso-8859-6", id="iso-8859-6-alias"),
+        pytest.param("iso-8859-8", "iso-8859-8", id="iso-8859-8"),
+        pytest.param("hebrew", "iso-8859-8", id="iso-8859-8-alias"),
+        pytest.param("iso-8859-8-i", "iso-8859-8-i", id="iso-8859-8-i"),
+        pytest.param("iso-8859-10", "iso-8859-10", id="iso-8859-10"),
+        pytest.param("iso-8859-13", "iso-8859-13", id="iso-8859-13"),
+        pytest.param("iso-8859-14", "iso-8859-14", id="iso-8859-14"),
+        pytest.param("iso-8859-16", "iso-8859-16", id="iso-8859-16"),
+        pytest.param("866", "ibm866", id="ibm866-alias"),
+        pytest.param("csiso2022jp", "iso-2022-jp", id="iso-2022-jp-alias"),
+        pytest.param("x-mac-ukrainian", "x-mac-cyrillic", id="x-mac-cyrillic-alias"),
+        pytest.param("x-user-defined", "x-user-defined", id="x-user-defined"),
+    ],
+)
+def test_whatwg_label_resolves(label: str, expected: str) -> None:
+    assert parse(b"<p>x", encoding=label).encoding == expected
+
+
+@pytest.mark.parametrize(
+    ("label", "raw", "char"),
+    [
+        pytest.param("iso-8859-8", b"\xe0", "א", id="iso-8859-8-hebrew-alef"),
+        pytest.param("ibm866", b"\x80", "\u0410", id="ibm866-cyrillic"),
+        pytest.param("x-user-defined", b"A", "A", id="x-user-defined-ascii"),
+        pytest.param("x-user-defined", b"\x80", "", id="x-user-defined-low"),
+        pytest.param("x-user-defined", b"\xff", "", id="x-user-defined-high"),
+    ],
+)
+def test_whatwg_label_decodes(label: str, raw: bytes, char: str) -> None:
+    doc = parse(b"<meta charset=" + label.encode() + b"><p>" + raw + b"</p>")
+    element = doc.find("p")
+    assert element is not None
+    assert element.text == char
+
+
+@pytest.mark.parametrize(
     ("data", "expected"),
     [
         # byte-order-mark near misses fall through to the default
