@@ -3425,6 +3425,15 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
                 insert_comment(tree, tok, NULL);
                 break;
             }
+            if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HTML) {
+                /* a stray html start tag uses the in-body rules: merge attributes onto
+                   the open html and leave the stack (so the colgroup stays open) */
+                if (tree->open_len > 0 && tree->open[0]->atom == TH_TAG_HTML && /* GCOVR_EXCL_BR_LINE */
+                    stack_index_of_atom(tree, TH_TAG_TEMPLATE) < 0) {
+                    merge_attrs(tree, tree->open[0], tok);
+                }
+                break;
+            }
             if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_COL) {
                 insert_element(tree, tok); /* col is void */
                 break;
