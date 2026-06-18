@@ -100,18 +100,18 @@ def test_foreign_content_never_unwrapped(disposition: OnDisallowed) -> None:
 
 def test_allowlisted_foreign_element_is_kept() -> None:
     # an SVG/MathML element on the allowlist is kept, matching bleach and nh3
-    assert sanitize("<svg>text</svg>", Policy(tags={"svg"})) == "<svg>text</svg>"
+    assert sanitize("<svg>text</svg>", Policy(tags=frozenset({"svg"}))) == "<svg>text</svg>"
 
 
 def test_allowlisted_foreign_subtree_keeps_html_integration_child() -> None:
-    policy = Policy(tags={"svg", "foreignObject", "p"})
+    policy = Policy(tags=frozenset({"svg", "foreignObject", "p"}))
     out = sanitize("<svg><foreignObject><p>hi</p></foreignObject></svg>", policy)
     assert out == "<svg><foreignObject><p>hi</p></foreignObject></svg>"
 
 
 def test_allowlisted_foreign_script_is_still_escaped() -> None:
     # the unsafe-tag set neutralizes scripting in any namespace even when allowlisted
-    out = sanitize("<svg><script>alert(1)</script></svg>", Policy(tags={"svg", "script"}))
+    out = sanitize("<svg><script>alert(1)</script></svg>", Policy(tags=frozenset({"svg", "script"})))
     assert "<script>" not in out
 
 
