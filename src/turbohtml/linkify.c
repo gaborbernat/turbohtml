@@ -34,12 +34,21 @@ static inline int is_ascii_digit(Py_UCS4 c) {
     return c >= '0' && c <= '9';
 }
 
+/* A non-ASCII Unicode White_Space code point (the ASCII ones are c <= 0x20). UTS46
+   domain-to-ASCII forbids these in host labels, and they end a URL in running text,
+   so they bound a host or URL the way an ASCII space does; the zero-width format
+   characters (ZWSP, BOM, word joiner) are not White_Space and stay in the URL. */
+static inline int is_unicode_space(Py_UCS4 c) {
+    return c == 0x85 || c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x2028 || c == 0x2029 ||
+           c == 0x202F || c == 0x205F || c == 0x3000;
+}
+
 /* A host label character: ASCII alphanumeric, underscore (an RFC 3986 unreserved
    character, valid anywhere in a reg-name host, as in ``_dmarc``/``cdn_1``), or
-   any non-ASCII code point so an internationalized domain stays in one piece (the
-   IRI case). */
+   any non-ASCII code point that is not Unicode whitespace, so an internationalized
+   domain stays in one piece (the IRI case) but an ``&nbsp;`` ends the host. */
 static inline int is_label_char(Py_UCS4 c) {
-    return is_ascii_alpha(c) || is_ascii_digit(c) || c == '_' || c >= 0x80;
+    return is_ascii_alpha(c) || is_ascii_digit(c) || c == '_' || (c >= 0x80 && !is_unicode_space(c));
 }
 
 /* Email local-part atext, per the addr-spec dot-atom plus the characters real
@@ -67,7 +76,7 @@ static inline int is_local_char(Py_UCS4 c) {
     case '~':
         return 1;
     default:
-        return is_ascii_alpha(c) || is_ascii_digit(c) || c >= 0x80;
+        return is_ascii_alpha(c) || is_ascii_digit(c) || (c >= 0x80 && !is_unicode_space(c));
     }
 }
 
@@ -82,7 +91,7 @@ static inline int is_scheme_char(Py_UCS4 c) {
    that end a URL in running text; brackets and parens are handled by balancing,
    not exclusion, so a Wikipedia URL keeps its trailing ``)``. */
 static inline int is_url_tail_char(Py_UCS4 c) {
-    if (c <= 0x20 || c == 0x7F) {
+    if (c <= 0x20 || c == 0x7F || is_unicode_space(c)) {
         return 0;
     }
     switch (c) {
