@@ -133,6 +133,27 @@ def test_select_over_doc(selector: str, tags: list[str]) -> None:
         # the scan reaches the end with no match, exercising the loop-exit branches
         pytest.param('<div class="a ">', ".zzz", [], id="trailing-whitespace-class-miss"),
         pytest.param('<div data-x="a ">', '[data-x~="zzz"]', [], id="trailing-whitespace-attr-miss"),
+        # CSS identifier escapes (Syntax 4.3.7): a backslash escapes the literal
+        # next character, and \HHHHHH (with one optional trailing space) a code point
+        pytest.param('<div class="foo:bar">', r".foo\:bar", ["div"], id="class-escaped-colon"),
+        pytest.param('<div class="foo.bar">', r".foo\.bar", ["div"], id="class-escaped-dot"),
+        pytest.param('<div id="a:b">', r"#a\:b", ["div"], id="id-escaped-colon"),
+        pytest.param('<div id="a b">', r"#a\ b", ["div"], id="id-escaped-space"),
+        pytest.param('<div class="©">', r".\A9 ", ["div"], id="class-hex-escape-trailing-space"),
+        pytest.param('<div class="©">', r".\0000A9", ["div"], id="class-hex-escape-six-digits"),
+        pytest.param("<div></div>", r"\64 iv", ["div"], id="type-hex-escape"),
+        pytest.param('<div data-x="a:b">', r"[data\-x=a\:b]", ["div"], id="attr-name-and-value-escapes"),
+        # a null, surrogate, or out-of-range hex escape folds to U+FFFD
+        pytest.param('<div class="�">', r".\0", ["div"], id="class-null-hex-escape-is-replacement"),
+        pytest.param('<div class="�">', r".\D800", ["div"], id="class-surrogate-hex-is-replacement"),
+        pytest.param("<div class='\ue000'>", r".\E000", ["div"], id="class-just-above-surrogate-is-kept"),
+        pytest.param('<div class="\U0010ffff">', r".\10FFFF", ["div"], id="class-max-code-point-hex-escape"),
+        pytest.param('<div class="�">', r".\110000", ["div"], id="class-out-of-range-hex-is-replacement"),
+        # a hex escape ends at end of input, at a non-hex char, or at one trailing space
+        pytest.param('<div class="©">', r".\A9", ["div"], id="class-hex-escape-at-eof"),
+        pytest.param('<div class="Az">', r".\41z", ["div"], id="class-hex-escape-stops-at-non-hex"),
+        # a trailing backslash escapes U+FFFD
+        pytest.param('<div class="x�">', ".x\\", ["div"], id="class-trailing-backslash-is-replacement"),
     ],
 )
 def test_select_over_custom_html(html: str, selector: str, tags: list[str]) -> None:
@@ -180,6 +201,11 @@ def test_select_one() -> None:
         pytest.param("p" + ".x" * 40, id="too-many-simples"),
         pytest.param(" ".join(["a"] * 40), id="too-many-compounds"),
         pytest.param(",".join(["a"] * 70), id="too-many-groups"),
+        # a backslash before any CSS newline (LF, CR, FF) does not start an escape,
+        # so the dangling backslash leaves an empty identifier
+        pytest.param(".a\\\nb", id="escape-before-lf"),
+        pytest.param(".a\\\rb", id="escape-before-cr"),
+        pytest.param(".a\\\x0cb", id="escape-before-ff"),
     ],
 )
 def test_invalid_selectors_raise(selector: str) -> None:
