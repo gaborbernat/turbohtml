@@ -1032,7 +1032,7 @@ def main() -> None:
     find_cases = run_readpath_suite(bench, 0, "find") if "query" in suites else []
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     has_select_cases = run_readpath_suite(bench, 3, "select :has") if "query" in suites else []
-    xpath_cases = run_xpath_suite(bench) if "xpath" in suites else []
+    xpath_cases = run_xpath_suite(bench) if "xpath" in suites else ([], [])
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     build_cases = run_build_suite(bench) if "build" in suites else []
     edit_cases = run_edit_suite(bench) if "edit" in suites else []
