@@ -1,0 +1,10 @@
+Export a node and its subtree as GitHub-Flavored Markdown with :meth:`~turbohtml.Node.to_markdown`, a single C tree walk
+that covers the common ``scrape`` → ``Markdown`` pipeline without a second dependency. It maps headings, paragraphs,
+ordered and unordered (and nested) lists, links, images, ``*``/``**`` emphasis and ``~~`` strikethrough, inline code and
+fenced code blocks (with the language from a ``language-*`` class), blockquotes, horizontal rules, line breaks, and pipe
+tables, collapsing runs of whitespace the way CSS normal flow does. Whitespace is settled with a deferred-space rule and
+the emphasis markers are deferred too, so a space inside ``<b> bold </b>`` lands outside the ``**`` instead of producing
+invalid Markdown; plain prose is bulk-copied after its first character. Three things the reference converters get wrong
+are correct here: an inline code span grows its backtick fence past any backticks in the content, a ``|`` inside a table
+cell is escaped, and a nested ordered list keeps its own counter. The walk holds no state outside its stack frame and
+takes the per-tree critical section, so it is safe under the free-threaded build.

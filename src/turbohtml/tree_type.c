@@ -513,6 +513,19 @@ static PyObject *node_get_inner_html(PyObject *self, void *Py_UNUSED(closure)) {
     return result;
 }
 
+PyDoc_STRVAR(to_markdown_doc, "to_markdown()\n--\n\n"
+                              "Render this node and its subtree as GitHub-Flavored Markdown: headings,\n"
+                              "lists, links, emphasis, code, blockquotes, images and pipe tables, with\n"
+                              "runs of whitespace collapsed the way normal flow lays them out.");
+
+static PyObject *node_to_markdown(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    result = str_from_accessor(th_node_markdown, tree_of(self), ((NodeObject *)self)->node);
+    Py_END_CRITICAL_SECTION();
+    return result;
+}
+
 static PyGetSetDef node_getset[] = {
     {"parent", node_get_parent, NULL, "the parent Element or Document, or None for the document root", NULL},
     {"children", node_get_children, NULL, "the child nodes as a tuple", NULL},
@@ -742,6 +755,7 @@ static PyMethodDef node_methods[] = {
     {"closest", node_css_closest, METH_O, closest_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
     {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
+    {"to_markdown", node_to_markdown, METH_NOARGS, to_markdown_doc},
     {"insert_before", node_insert_before, METH_VARARGS, insert_before_doc},
     {"insert_after", node_insert_after, METH_VARARGS, insert_after_doc},
     {"replace_with", node_replace_with, METH_VARARGS, replace_with_doc},

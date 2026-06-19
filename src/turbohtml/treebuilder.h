@@ -215,6 +215,12 @@ typedef struct {
    PyMem-allocated; *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatter, Py_ssize_t *out_len);
 
+/* Render node and its subtree as GitHub-Flavored Markdown: a block-aware tree
+   walk emitting headings, lists, links, emphasis, code, blockquotes, images and
+   pipe tables with normal-flow whitespace collapsing. PyMem-allocated; *out_len
+   receives the length. NULL on allocation failure. */
+Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, Py_ssize_t *out_len);
+
 /* The doctype's public and system identifiers as slices of the node's own text;
    returns 1 with the four out params set when present, 0 for a name-only doctype. */
 int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,

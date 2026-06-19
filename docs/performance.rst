@@ -8,8 +8,8 @@ documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/
 source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
-suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``, or
-``edit``. Numbers vary with input and hardware.
+suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``,
+``edit``, ``markup``, ``linkify``, ``markdown``, or ``sanitize``. Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -146,6 +146,37 @@ far behind.
       - 52 µs
       - 152 µs
       - 2570 µs
+
+**********
+ Markdown
+**********
+
+:meth:`turbohtml.Node.to_markdown` against `markdownify <https://github.com/matthewwithanm/python-markdownify>`_ (on
+BeautifulSoup) and `html2text <https://github.com/Alir3z4/html2text>`_ (a streaming ``HTMLParser`` subclass). All three
+take an HTML string and return Markdown, so each parses first; turbohtml parses to the WHATWG tree and walks it in C,
+where the others build and convert in Python. The single C pass converts a page in tens of microseconds, two orders of
+magnitude ahead of markdownify.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 22 22 22
+
+    - - input
+      - turbohtml
+      - markdownify
+      - html2text
+    - - article (2 KiB)
+      - 12 µs
+      - 1267 µs
+      - 573 µs
+    - - list (4 KiB)
+      - 21 µs
+      - 2453 µs
+      - 1209 µs
+    - - table (4 KiB)
+      - 27 µs
+      - 2948 µs
+      - 1069 µs
 
 ************
  Unescaping

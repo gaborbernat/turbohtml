@@ -529,3 +529,51 @@ nh3's ``link_rel`` maps to ``Policy.add_link_rel``, its ``url_schemes`` to ``url
 to ``attribute_filter`` (turbohtml's may rewrite a value, not only drop it). turbohtml escapes disallowed tags by
 default (``OnDisallowed.ESCAPE``), the mode ammonia blocked upstream; pass ``OnDisallowed.STRIP`` or
 ``OnDisallowed.REMOVE`` for nh3-style dropping.
+
+******************************
+ From html2text / markdownify
+******************************
+
+`html2text <https://github.com/Alir3z4/html2text>`_ and `markdownify
+<https://github.com/matthewwithanm/python-markdownify>`_ both turn HTML into Markdown.
+:meth:`~turbohtml.Node.to_markdown` replaces a call to either with one method on the parsed tree, and the conversion
+runs in C rather than a Python walk over a second parser's tree:
+
+.. code-block:: python
+
+    # html2text
+    import html2text
+
+    html2text.html2text(text)
+
+    # markdownify
+    from markdownify import markdownify
+
+    markdownify(text)
+
+    # turbohtml
+    import turbohtml
+
+    turbohtml.parse(text).to_markdown()
+
+.. testcode::
+
+    print(parse("<h1>Title</h1><p>Some <b>bold</b> text.</p>").to_markdown())
+
+.. testoutput::
+
+    # Title
+
+    Some **bold** text.
+
+Pitfalls
+========
+
+- The output is opinionated GitHub-Flavored Markdown with no options: ATX headings, ``-`` bullets, ``*``/``**``
+  emphasis, fenced code blocks, and inline links. The knob-per-feature surface ``html2text`` and ``markdownify`` expose
+  (heading style, bullet character, line wrapping, reference links) is not configurable yet.
+- ``to_markdown`` is a method on any node, so convert a subtree by calling it on the element you selected
+  (``doc.find("article").to_markdown()``) instead of slicing the HTML string first.
+- There is no line wrapping; ``html2text``'s ``body_width`` has no equivalent. Each block is one logical line.
+- Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is not part of this method; for now read
+  :attr:`~turbohtml.Node.text` for the unstructured concatenation.

@@ -585,6 +585,7 @@ whitespace and so does not preserve meaning. :meth:`~turbohtml.Node.encode` is t
     </div>
     b'<div><p>caf&eacute; &amp; co</p></div>'
 
+<<<<<<< HEAD
 *******************
  Minify the output
 *******************
@@ -614,6 +615,41 @@ strip comments; all default on. Because ``layout`` holds one mode, a :class:`~tu
 Whitespace-significant elements (``pre``, ``textarea``, ``listing``) and raw-text elements (``script``, ``style``) keep
 their content verbatim, and a tag is never dropped when omitting it would let the reparse reconstruct a formatting
 element across the boundary.
+||||||| parent of ec40555 (✨ feat(serialize): add to_markdown GFM tree exporter)
+=======
+********************
+ Export to Markdown
+********************
+
+:meth:`~turbohtml.Node.to_markdown` renders a node and its subtree as GitHub-Flavored Markdown — headings, lists, links,
+emphasis, code, blockquotes, images, and pipe tables — collapsing runs of whitespace the way normal flow lays them out.
+It is a one-call replacement for the ``scrape`` → ``Markdown`` step that html2text or markdownify would do, with no
+second dependency and the whole walk in C:
+
+.. testcode::
+
+    import turbohtml
+    page = turbohtml.parse(
+        "<h1>Recipe</h1><p>A <b>quick</b> loaf.</p>"
+        "<ul><li>flour</li><li>water</li></ul>"
+        "<blockquote><p>Rest 1 hour.</p></blockquote>"
+    )
+    print(page.to_markdown())
+
+.. testoutput::
+
+    # Recipe
+
+    A **quick** loaf.
+
+    - flour
+    - water
+
+    > Rest 1 hour.
+
+Call it on any node to export just that subtree (``article.to_markdown()``). The output is opinionated GFM: ATX
+headings, ``-`` bullets, fenced code blocks, inline links, and ``*``/``**`` emphasis.
+>>>>>>> ec40555 (✨ feat(serialize): add to_markdown GFM tree exporter)
 
 ************************************
  Parse bytes of an unknown encoding
