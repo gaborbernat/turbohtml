@@ -103,6 +103,13 @@ _LONG_NAME = "z" * 130
             "|       <table>",
             id="quirks-public-id-4.0-transitional",
         ),
+        # a same-length near-miss of the 4.0-transitional exact id is not quirky, so the
+        # <p> closes and <table> becomes its sibling (exercises the exact-match mismatch)
+        pytest.param(
+            '<!DOCTYPE html PUBLIC "-/W3C/DTD HTML 4.0 Transitional/EX"><p><table>',
+            "|     <p>\n|     <table>",
+            id="no-quirks-public-id-4.0-transitional-near-miss",
+        ),
         pytest.param(
             '<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML Strict 3.0//EN//"><p><table>',
             "|       <table>",

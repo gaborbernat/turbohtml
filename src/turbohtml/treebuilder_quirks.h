@@ -20,6 +20,11 @@ static int buf_imatches(const th_buf *buf, const char *pat, int whole) {
 /* WHATWG quirks-mode triggers: forced-quirks flag, a non-html name, or a
    legacy public/system identifier. */
 static int doctype_is_quirky(const th_token *tok) {
+    static const char *const QUIRKY_EXACT[] = {
+        "-//W3O//DTD W3 HTML Strict 3.0//EN//",
+        "-/W3C/DTD HTML 4.0 Transitional/EN",
+        "HTML",
+    };
     static const char *const QUIRKY_PREFIXES[] = {
         "+//Silmaril//dtd html Pro v0r11 19970101//",
         "-//AS//DTD HTML 3.0 asWedit + extensions//",
@@ -81,10 +86,10 @@ static int doctype_is_quirky(const th_token *tok) {
         return 1;
     }
     if (tok->has_public_id) {
-        if (buf_imatches(&tok->public_id, "-//W3O//DTD W3 HTML Strict 3.0//EN//", 1) ||
-            buf_imatches(&tok->public_id, "-/W3C/DTD HTML 4.0 Transitional/EN", 1) ||
-            buf_imatches(&tok->public_id, "HTML", 1)) {
-            return 1;
+        for (size_t index = 0; index < sizeof(QUIRKY_EXACT) / sizeof(QUIRKY_EXACT[0]); index++) {
+            if (buf_imatches(&tok->public_id, QUIRKY_EXACT[index], 1)) {
+                return 1;
+            }
         }
         for (size_t index = 0; index < sizeof(QUIRKY_PREFIXES) / sizeof(QUIRKY_PREFIXES[0]); index++) {
             if (buf_imatches(&tok->public_id, QUIRKY_PREFIXES[index], 0)) {
