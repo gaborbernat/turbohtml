@@ -16,8 +16,9 @@ than the standard library.
 
 It is the wrong tool in a few honest cases:
 
-- **You need XPath, XSLT, schema validation, or C14N.** turbohtml gives CSS selectors and the ``find`` filter grammar,
-  not XPath, and none of `lxml <https://lxml.de>`_'s XML toolchain. Code that leans on those should stay on lxml.
+- **You need XSLT, schema validation, or C14N.** turbohtml gives CSS selectors, the ``find`` filter grammar, and an
+  XPath 1.0 engine, but none of `lxml <https://lxml.de>`_'s wider XML toolchain. Code that leans on those should stay on
+  lxml.
 - **You depend on `BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/>`_'s ecosystem or its forgiving,
   duck-typed API.** ``bs4`` swaps parser backends, integrates with a long tail of tools, and accepts almost any shape;
   turbohtml is one conformant parser with a sealed, typed hierarchy. Code written to ``bs4``'s contract needs the
@@ -192,7 +193,11 @@ attribute, the four combinators, and the ``:is()``/``:where()``/``:has()``/``:no
 :meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the
 tree, so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an integer
 compare. Compiling against the tree also captures its document mode, so ``#id`` and ``.class`` fold ASCII case in a
-quirks-mode document and compare exactly otherwise, as the Selectors standard requires. Output runs back through
+quirks-mode document and compare exactly otherwise, as the Selectors standard requires. :meth:`~turbohtml.Node.xpath`,
+:meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` evaluate XPath 1.0 over the same model: a
+native-C engine compiles each expression once into an immutable, per-tree-cached program, resolves name tests to
+interned atoms, and collapses the ``//`` abbreviation to a single ``descendant`` walk, so the structural axes,
+predicates, operators, unions, and the core function library run at lxml's speed. Output runs back through
 :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant
 by default with the escaping selectable through :class:`~turbohtml.Formatter`.
 

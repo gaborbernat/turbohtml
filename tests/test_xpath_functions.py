@@ -1,0 +1,223 @@
+"""XPath functions, operators, and value coercions evaluated through ``Node.xpath``.
+
+A node-set expression returns a list; the three scalar-typed expressions return the
+matching ``float`` / ``str`` / ``bool``, the same as lxml.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pytest
+
+import turbohtml
+from turbohtml import Element
+
+
+def number(node: turbohtml.Node, expr: str) -> float:
+    result = node.xpath(expr)
+    assert isinstance(result, float)
+    return result
+
+
+HTML = (
+    "<html><body><div class='a b'><p>one</p><p class='x'>two</p><p>three</p></div>"
+    "<ul><li>1</li><li>2</li><li>3</li></ul>"
+    "<a href='/y'>L</a><input disabled><!--note--></body></html>"
+)
+
+
+@pytest.fixture
+def doc() -> turbohtml.Node:
+    return turbohtml.parse(HTML)
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        # arithmetic
+        pytest.param("1 + 2 * 3", 7.0, id="precedence"),
+        pytest.param("(1 + 2) * 3", 9.0, id="grouping"),
+        pytest.param("7 div 2", 3.5, id="div"),
+        pytest.param("7 mod 3", 1.0, id="mod"),
+        pytest.param("-5 + 1", -4.0, id="unary-minus"),
+        # numeric functions
+        pytest.param("count(//p)", 3.0, id="count"),
+        pytest.param("count(//li)", 3.0, id="count-li"),
+        pytest.param("sum(//li)", 6.0, id="sum"),
+        pytest.param("string-length('hello')", 5.0, id="string-length"),
+        pytest.param("floor(3.7)", 3.0, id="floor"),
+        pytest.param("ceiling(3.2)", 4.0, id="ceiling"),
+        pytest.param("round(3.5)", 4.0, id="round"),
+        pytest.param("number('3.5')", 3.5, id="number-string"),
+        pytest.param("number(true())", 1.0, id="number-bool"),
+        pytest.param("number(false())", 0.0, id="number-false"),
+        pytest.param("number(' -2.50 ')", -2.5, id="number-whitespace"),
+        pytest.param("number('.5')", 0.5, id="number-leading-dot"),
+        pytest.param("number(//li)", 1.0, id="number-nodeset"),
+        pytest.param("5 - 2", 3.0, id="subtraction"),
+        # string functions
+        pytest.param("string(42)", "42", id="string-number"),
+        pytest.param("string(3.5)", "3.5", id="string-decimal"),
+        pytest.param("string(true())", "true", id="string-bool"),
+        pytest.param("string(//p)", "one", id="string-nodeset"),
+        pytest.param("string(//zzz)", "", id="string-empty-nodeset"),
+        pytest.param("string(false())", "false", id="string-false"),
+        pytest.param("string(1 div 0)", "Infinity", id="string-infinity"),
+        pytest.param("string(-1 div 0)", "-Infinity", id="string-neg-infinity"),
+        pytest.param("string(0 div 0)", "NaN", id="string-nan"),
+        pytest.param("string(1000000000000000)", "1e+15", id="string-huge"),
+        pytest.param("string(//input/@disabled)", "", id="string-valueless-attr"),
+        pytest.param("string(//comment())", "note", id="string-comment"),
+        pytest.param("concat('a', 'b', 'c')", "abc", id="concat"),
+        pytest.param("normalize-space('  a   b ')", "a b", id="normalize-space"),
+        pytest.param("normalize-space('')", "", id="normalize-space-empty"),
+        pytest.param("normalize-space('   ')", "", id="normalize-space-blank"),
+        pytest.param("substring('hello', 2)", "ello", id="substring-2"),
+        pytest.param("substring('hello', 2, 3)", "ell", id="substring-3"),
+        pytest.param("substring('hello', 0, 2)", "h", id="substring-clamp-low"),
+        pytest.param("substring('hello', 10)", "", id="substring-past-end"),
+        pytest.param("substring('hello', 2, 100)", "ello", id="substring-clamp-high"),
+        pytest.param("substring('hello', 3, -1)", "", id="substring-empty"),
+        pytest.param("substring('', 1, 1)", "", id="substring-of-empty"),
+        pytest.param("substring-before('a/b/c', '/')", "a", id="substring-before"),
+        pytest.param("substring-after('a/b/c', '/')", "b/c", id="substring-after"),
+        pytest.param("substring-before('abc', '/')", "", id="substring-before-miss"),
+        pytest.param("translate('bar', 'abc', 'ABC')", "BAr", id="translate"),
+        pytest.param("translate('abcd', 'bc', 'x')", "axd", id="translate-delete"),
+        pytest.param("contains('abc', '')", True, id="contains-empty"),
+        pytest.param("string('')", "", id="string-empty-literal"),
+        pytest.param("concat('', '')", "", id="concat-empty"),
+        pytest.param("substring('hello', 0, 0)", "", id="substring-zero-length"),
+        pytest.param("starts-with('hello', 'he')", True, id="starts-with-true"),
+        pytest.param("starts-with('he', 'hello')", False, id="starts-with-longer-needle"),
+        pytest.param("starts-with('hello', 'xx')", False, id="starts-with-miss"),
+        pytest.param("name(//comment())", "", id="name-of-comment"),
+        pytest.param("'a' = 1", False, id="string-eq-number"),
+        pytest.param("local-name(//p)", "p", id="local-name"),
+        pytest.param("name(//li)", "li", id="name"),
+        pytest.param("name(//p/@class)", "class", id="name-attribute"),
+        pytest.param("name(//a/@href)", "href", id="name-href-attribute"),
+        pytest.param("local-name(//zzz)", "", id="local-name-empty"),
+        pytest.param("local-name(1)", "", id="local-name-non-nodeset"),
+        # boolean functions and operators
+        pytest.param("true()", True, id="true"),
+        pytest.param("false()", False, id="false"),
+        pytest.param("not(1 = 1)", False, id="not"),
+        pytest.param("boolean(1)", True, id="boolean-number"),
+        pytest.param("boolean(0)", False, id="boolean-zero"),
+        pytest.param("boolean('')", False, id="boolean-empty"),
+        pytest.param("boolean(//p)", True, id="boolean-nodeset"),
+        pytest.param("boolean(//zzz)", False, id="boolean-empty-nodeset"),
+        pytest.param("boolean(0 div 0)", False, id="boolean-nan"),
+        pytest.param("1 = 1", True, id="eq"),
+        pytest.param("1 != 2", True, id="ne"),
+        pytest.param("1 < 2", True, id="lt"),
+        pytest.param("2 <= 2", True, id="le"),
+        pytest.param("3 > 2", True, id="gt"),
+        pytest.param("2 >= 3", False, id="ge"),
+        pytest.param("'a' = 'a'", True, id="string-eq"),
+        pytest.param("'a' = 'b'", False, id="string-ne"),
+        pytest.param("'a' = 'bb'", False, id="string-ne-length"),
+        pytest.param("true() = false()", False, id="bool-eq-bool"),
+        pytest.param("1 = true()", True, id="number-eq-bool"),
+        pytest.param("1 = 1 and 2 = 2", True, id="and"),
+        pytest.param("1 = 2 or 2 = 2", True, id="or"),
+        pytest.param("1 = 2 and 2 = 2", False, id="and-short-circuit"),
+        pytest.param("1 = 1 or 2 = 3", True, id="or-short-circuit"),
+        # node-set comparisons (existential)
+        pytest.param("//p/text() = 'two'", True, id="nodeset-eq-string"),
+        pytest.param("'two' = //p/text()", True, id="string-eq-nodeset"),
+        pytest.param("//p/text() = 'nope'", False, id="nodeset-eq-string-miss"),
+        pytest.param("//li > 2", True, id="nodeset-gt-number"),
+        pytest.param("//p = true()", True, id="nodeset-eq-bool"),
+        pytest.param("false() = //zzz", True, id="bool-eq-empty-nodeset"),
+        pytest.param("//zzz = false()", True, id="empty-nodeset-eq-bool"),
+        pytest.param("//li = //li", True, id="nodeset-eq-nodeset"),
+        pytest.param("//p/text() = //li/text()", False, id="nodeset-eq-nodeset-miss"),
+        # 0-argument functions operate on the context node
+        pytest.param("count(//p[normalize-space()='one'])", 1.0, id="context-normalize-space"),
+        pytest.param("count(//p[string()='one'])", 1.0, id="context-string"),
+        pytest.param("count(//p[string-length()=3])", 2.0, id="context-string-length"),
+        pytest.param("count(//p[name()='p'])", 3.0, id="context-name"),
+        pytest.param("count(//li[number()=2])", 1.0, id="context-number"),
+    ],
+)
+def test_scalar_and_boolean(doc: turbohtml.Node, expr: str, expected: object) -> None:
+    assert doc.xpath(expr) == expected
+
+
+def test_number_parse_edge_cases(doc: turbohtml.Node) -> None:
+    assert math.isnan(number(doc, "number('1.2.3')"))
+    assert math.isnan(number(doc, "number('12x')"))
+    assert math.isnan(number(doc, "number('.')"))
+
+
+def test_number_of_non_numeric_string_is_nan(doc: turbohtml.Node) -> None:
+    assert math.isnan(number(doc, "number('hello')"))
+    assert math.isnan(number(doc, "number('')"))
+
+
+def test_scalar_through_xpath_one(doc: turbohtml.Node) -> None:
+    assert doc.xpath_one("count(//p)") == pytest.approx(3.0)
+    assert doc.xpath_one("string(//p)") == "one"
+
+
+def test_scalar_through_xpath_iter(doc: turbohtml.Node) -> None:
+    assert list(doc.xpath_iter("count(//p)")) == [3.0]
+
+
+def test_filter_base_node_set_continues_as_path(doc: turbohtml.Node) -> None:
+    # a parenthesised node-set followed by a step
+    result = doc.xpath("(//div)/p")
+    assert [node.tag for node in result if isinstance(node, Element)] == ["p", "p", "p"]
+
+
+@pytest.mark.parametrize(
+    ("expr", "message"),
+    [
+        pytest.param("bogus-fn(1)", "this function", id="unknown-function"),
+        pytest.param("count('x')", "count.. of a non-node-set", id="count-non-nodeset"),
+        pytest.param("sum('x')", "sum.. of a non-node-set", id="sum-non-nodeset"),
+        pytest.param("(1)/p", "non-node-set", id="path-on-non-nodeset"),
+        pytest.param("(1)[1]", "non-node-set", id="predicate-on-non-nodeset"),
+        pytest.param("//a | 1", "non-node-set", id="union-of-non-nodesets"),
+        pytest.param("1 | //a", "non-node-set", id="union-non-nodeset-left"),
+        # an unknown function nested in each expression form propagates the error out
+        pytest.param("count(bogus-fn(1))", "this function", id="in-function-arg"),
+        pytest.param("concat('x', bogus-fn(1))", "this function", id="in-later-function-arg"),
+        pytest.param("//p[bogus-fn(1)]", "this function", id="in-predicate"),
+        pytest.param("(bogus-fn(1))[1]", "this function", id="in-filter-primary"),
+        pytest.param("(//p)[bogus-fn(1)]", "this function", id="in-filter-predicate"),
+        pytest.param("(bogus-fn(1))/p", "this function", id="in-filter-base"),
+        pytest.param("bogus-fn(1) | //p", "this function", id="in-union-left"),
+        pytest.param("//p | bogus-fn(1)", "this function", id="in-union-right"),
+        pytest.param("bogus-fn(1) or 1", "this function", id="in-or-left"),
+        pytest.param("false() or bogus-fn(1)", "this function", id="in-or-right"),
+        pytest.param("bogus-fn(1) and 1", "this function", id="in-and-left"),
+        pytest.param("true() and bogus-fn(1)", "this function", id="in-and-right"),
+        pytest.param("- bogus-fn(1)", "this function", id="in-negation"),
+        pytest.param("bogus-fn(1) = 1", "this function", id="in-compare-left"),
+        pytest.param("1 = bogus-fn(1)", "this function", id="in-compare-right"),
+    ],
+)
+def test_unsupported_constructs_raise(doc: turbohtml.Node, expr: str, message: str) -> None:
+    with pytest.raises(NotImplementedError, match=message):
+        doc.xpath(expr)
+
+
+def test_namespace_axis(doc: turbohtml.Node) -> None:
+    # every element exposes the implicit xml namespace node; it marshals to its URI
+    uri = "http://www.w3.org/XML/1998/namespace"
+    assert doc.xpath("//p/namespace::*") == [uri, uri, uri]  # three <p> elements
+    assert doc.xpath("//p/namespace::xml") == [uri, uri, uri]
+    assert doc.xpath("//p/namespace::node()") == [uri, uri, uri]
+    assert doc.xpath("//p/namespace::other") == []  # wrong length
+    assert doc.xpath("//p/namespace::aml") == []  # wrong first character
+    assert doc.xpath("//p/namespace::xyz") == []  # wrong second character
+    assert doc.xpath("//p/namespace::xmz") == []  # wrong third character
+    assert doc.xpath("//p/namespace::text()") == []
+    assert doc.xpath("name(//p/namespace::*)") == "xml"
+    assert doc.xpath("//p/namespace::*/a") == []  # a namespace node has no axes
+    # an attribute and the namespace node of the same element sort node-then-namespace
+    assert doc.xpath("count(//p/@class | //p/namespace::*)") == pytest.approx(4.0)

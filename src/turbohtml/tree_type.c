@@ -17,6 +17,7 @@
 #include "encoding.h"
 #include "selector.h"
 #include "treebuilder.h"
+#include "xpath.h"
 
 /* A per-tree cache of compiled CSS selectors. A repeated select()/select_one()
    with the same selector string then reuses the parse instead of re-running the
@@ -26,12 +27,20 @@
    a new attribute name (which could change an "absent" resolution) invalidates a
    stale entry. Move-to-front, capped, guarded by the handle's critical section. */
 #define SEL_CACHE_CAP 16
+#define XPATH_CACHE_CAP 16
 
 typedef struct {
     PyObject *key;          /* the selector str (a strong reference) */
     sel_compiled *compiled; /* compiled against this handle's tree */
     uint32_t attr_gen;      /* tree attribute generation when compiled */
 } sel_cache_entry;
+
+/* A compiled XPath program is tree-independent (it resolves atoms at evaluation),
+   so unlike the selector cache it needs no generation to invalidate it. */
+typedef struct {
+    PyObject *key; /* the expression str (a strong reference) */
+    xp_program *prog;
+} xpath_cache_entry;
 
 typedef struct {
     PyObject_HEAD th_tree *tree;
@@ -47,6 +56,8 @@ typedef struct {
     int index_built;
     sel_cache_entry sel_cache[SEL_CACHE_CAP];
     int sel_cache_len;
+    xpath_cache_entry xpath_cache[XPATH_CACHE_CAP];
+    int xpath_cache_len;
 } HandleObject;
 
 typedef struct {
@@ -618,6 +629,9 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_select(PyObject *self, PyObject *arg);
 static PyObject *node_select_one(PyObject *self, PyObject *arg);
+static PyObject *node_xpath(PyObject *self, PyObject *arg);
+static PyObject *node_xpath_iter(PyObject *self, PyObject *arg);
+static PyObject *node_xpath_one(PyObject *self, PyObject *arg);
 static PyObject *node_css_matches(PyObject *self, PyObject *arg);
 static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 
@@ -629,6 +643,17 @@ PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");
+
+PyDoc_STRVAR(xpath_doc, "xpath(expression, /)\n--\n\n"
+                        "Evaluate an XPath expression relative to this node and return the result:\n"
+                        "a list of Elements (and attribute/text values as str) in document order for\n"
+                        "a node-set. Absolute paths start at the document root.");
+
+PyDoc_STRVAR(xpath_iter_doc, "xpath_iter(expression, /)\n--\n\n"
+                             "Like xpath, but return an iterator over the results in document order.");
+
+PyDoc_STRVAR(xpath_one_doc, "xpath_one(expression, /)\n--\n\n"
+                            "Return the first result of the XPath expression in document order, or None.");
 
 PyDoc_STRVAR(matches_doc, "matches(selector, /)\n--\n\n"
                           "Return whether this node is an Element matching the CSS selector,\n"
@@ -705,6 +730,9 @@ static PyMethodDef node_methods[] = {
     {"find_all", (PyCFunction)(void (*)(void))node_find_all, METH_VARARGS | METH_KEYWORDS, find_all_doc},
     {"select", node_select, METH_O, select_doc},
     {"select_one", node_select_one, METH_O, select_one_doc},
+    {"xpath", node_xpath, METH_O, xpath_doc},
+    {"xpath_iter", node_xpath_iter, METH_O, xpath_iter_doc},
+    {"xpath_one", node_xpath_one, METH_O, xpath_one_doc},
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
@@ -1977,6 +2005,181 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
     return node_wrap(state_of(self), handle, found);
 }
 
+/* Return the compiled program for arg from handle's per-tree cache, compiling and
+   inserting it on a miss (most recent first, capped at XPATH_CACHE_CAP). The program
+   is tree-independent, so an entry never goes stale. The caller must hold the handle's
+   critical section and have type-checked arg; the returned pointer is borrowed. NULL
+   with a Python error set on a compile error. */
+static xp_program *cached_xpath_compile(HandleObject *handle, PyObject *arg) {
+    for (int index = 0; index < handle->xpath_cache_len; index++) {
+        xpath_cache_entry entry = handle->xpath_cache[index];
+        if (entry.key != arg && PyUnicode_Compare(entry.key, arg) != 0) {
+            continue;
+        }
+        memmove(&handle->xpath_cache[1], &handle->xpath_cache[0], (size_t)index * sizeof(xpath_cache_entry));
+        handle->xpath_cache[0] = entry;
+        return entry.prog;
+    }
+    Py_ssize_t len = PyUnicode_GET_LENGTH(arg);
+    Py_UCS4 *src = PyUnicode_AsUCS4Copy(arg);
+    if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+    char err[128];
+    xp_program *prog = xp_compile(src, len, err, sizeof(err));
+    PyMem_Free(src);
+    if (prog == NULL) {
+        PyErr_SetString(PyExc_ValueError, err);
+        return NULL;
+    }
+    if (handle->xpath_cache_len == XPATH_CACHE_CAP) {
+        xpath_cache_entry *evicted = &handle->xpath_cache[XPATH_CACHE_CAP - 1];
+        xp_free(evicted->prog);
+        Py_DECREF(evicted->key);
+    } else {
+        handle->xpath_cache_len++;
+    }
+    memmove(&handle->xpath_cache[1], &handle->xpath_cache[0],
+            (size_t)(handle->xpath_cache_len - 1) * sizeof(xpath_cache_entry));
+    handle->xpath_cache[0] = (xpath_cache_entry){Py_NewRef(arg), prog};
+    return prog;
+}
+
+/* Marshal one evaluated node-set item: a namespace node (attr == -2) and an attribute
+   to their string value as str, a text node to its data as str, any other node to its
+   element/comment/... wrapper. */
+static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
+    if (item.attr == -2) {
+        return PyUnicode_FromString("http://www.w3.org/XML/1998/namespace");
+    }
+    if (item.attr >= 0) {
+        const th_node_attr *attr = &item.node->attrs[item.attr];
+        return attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);
+    }
+    if (item.node->type == TH_NODE_TEXT) {
+        return str_from_accessor(th_node_data, tree, item.node);
+    }
+    return node_wrap(state, handle, item.node);
+}
+
+/* Translate an xp_eval status (-2 unsupported, -1 OOM) into a Python error. */
+static void *xpath_raise_status(int status, const char *feature) {
+    if (status == -2) { /* GCOVR_EXCL_BR_LINE: the only other status, -1, is an allocation failure */
+        PyErr_Format(PyExc_NotImplementedError, "xpath: %s are not implemented yet", feature);
+        return NULL;
+    }
+    return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: status == -1 is an allocation failure that cannot be forced */
+}
+
+static PyObject *xpath_scalar_to_py(const xp_result *result) {
+    if (result->kind == XP_NUMBER) {
+        return PyFloat_FromDouble(result->number);
+    }
+    if (result->kind == XP_STRING) {
+        return ucs4_to_str(result->string, result->string_len);
+    }
+    return PyBool_FromLong(result->boolean);
+}
+
+/* Evaluate an expression and marshal it to a Python object: a node-set becomes a
+   list (elements as Element, attribute/text values as str); a scalar becomes the
+   matching float / str / bool. */
+static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    xp_result result;
+    const char *feature = NULL;
+    PyObject *out = NULL;
+    int status = 0;
+    int build_error = 0;
+    int compiled = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: the compile cache and the eval read the tree */
+    HandleObject *handle_obj = (HandleObject *)handle;
+    th_tree *tree = handle_obj->tree;
+    xp_program *prog = cached_xpath_compile(handle_obj, arg);
+    if (prog != NULL) {
+        compiled = 1;
+        status = xp_eval(prog, tree, origin, &result, &feature);
+    }
+    if (compiled && status == 0) {
+        if (result.kind == XP_NODESET) {
+            out = PyList_New(result.nodes.len);
+            if (out == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+                build_error = 1; /* GCOVR_EXCL_LINE */
+            } else {             /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+                for (Py_ssize_t index = 0; index < result.nodes.len; index++) {
+                    PyObject *item = xpath_item_to_py(state, handle, tree, result.nodes.items[index]);
+                    if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+                        build_error = 1; /* GCOVR_EXCL_LINE */
+                        break;           /* GCOVR_EXCL_LINE */
+                    }
+                    PyList_SET_ITEM(out, index, item);
+                }
+            }
+        } else {
+            out = xpath_scalar_to_py(&result);
+            if (out == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+                build_error = 1; /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        }
+        xp_result_free(&result);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (!compiled) {
+        return NULL; /* a compile error left a Python exception set */
+    }
+    if (status < 0) {
+        return xpath_raise_status(status, feature);
+    }
+    if (build_error) {   /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        Py_XDECREF(out); /* GCOVR_EXCL_LINE */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    return out;
+}
+
+static PyObject *node_xpath(PyObject *self, PyObject *arg) {
+    return xpath_eval_object(self, arg);
+}
+
+static PyObject *node_xpath_iter(PyObject *self, PyObject *arg) {
+    PyObject *value = xpath_eval_object(self, arg);
+    if (value == NULL) {
+        return NULL;
+    }
+    PyObject *sequence = value;
+    if (!PyList_Check(value)) { /* wrap a scalar result so it can still be iterated */
+        sequence = PyList_New(1);
+        if (sequence == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            Py_DECREF(value);   /* GCOVR_EXCL_LINE */
+            return NULL;        /* GCOVR_EXCL_LINE */
+        }
+        PyList_SET_ITEM(sequence, 0, value);
+    }
+    PyObject *iterator = PyObject_GetIter(sequence);
+    Py_DECREF(sequence);
+    return iterator;
+}
+
+static PyObject *node_xpath_one(PyObject *self, PyObject *arg) {
+    PyObject *value = xpath_eval_object(self, arg);
+    if (value == NULL) {
+        return NULL;
+    }
+    if (!PyList_Check(value)) {
+        return value; /* a scalar expression has a single value */
+    }
+    PyObject *first = PyList_GET_SIZE(value) == 0 ? Py_None : PyList_GET_ITEM(value, 0);
+    Py_INCREF(first);
+    Py_DECREF(value);
+    return first;
+}
+
 static PyObject *node_css_matches(PyObject *self, PyObject *arg) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
@@ -3096,6 +3299,10 @@ static void handle_dealloc(PyObject *self) {
     for (int index = 0; index < handle->sel_cache_len; index++) {
         selector_free(handle->sel_cache[index].compiled);
         Py_DECREF(handle->sel_cache[index].key);
+    }
+    for (int index = 0; index < handle->xpath_cache_len; index++) {
+        xp_free(handle->xpath_cache[index].prog);
+        Py_DECREF(handle->xpath_cache[index].key);
     }
     PyMem_Free(handle->index_offsets);
     PyMem_Free(handle->index_nodes);

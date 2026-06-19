@@ -30,6 +30,7 @@ py.extension_module(
         'src/turbohtml/treebuilder_py.c',
         'src/turbohtml/tree_type.c',
         'src/turbohtml/unescape.c',
+        'src/turbohtml/xpath.c',
     ],
     include_directories: include_directories('src/turbohtml'),
     install: true,

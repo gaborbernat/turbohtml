@@ -49,6 +49,11 @@ PyObject *turbohtml_parse_tree(PyObject *module, PyObject *arg);
 PyObject *turbohtml_parse_fragment(PyObject *module, PyObject *args);
 PyObject *turbohtml_parse_only(PyObject *module, PyObject *arg);
 
+/* Implemented in xpath.c. _xpath_parse compiles an XPath expression and returns a
+   canonical S-expression of the parsed AST; the conformance hook the parser tests
+   diff against. Signature matches METH_O. */
+PyObject *turbohtml_xpath_parse(PyObject *module, PyObject *arg);
+
 /* SWAR lane probes over a 64-bit word holding four UCS-2 / two UCS-4 code
    points. The has-zero test is exact as an existence test: the subtraction can
    only borrow across a lane when that lane itself is zero, so the mask is
