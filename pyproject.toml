@@ -98,6 +98,7 @@ bench = [
   "markupsafe>=3",
   "minify-html>=0.15",
   "nh3>=0.2",
+  "parsel>=1.9",
   "pyperf>=2.9",
   "pyquery>=2",
   "resiliparse>=1.0.8",

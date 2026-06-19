@@ -351,6 +351,76 @@ Python binding no longer builds on a current toolchain, so there is nothing to p
 gumbo or html5-parser tree maps onto the same :meth:`~turbohtml.Node.find`/:meth:`~turbohtml.Node.select` read surface
 shown above, with turbohtml supplying the maintained, mutable, typed tree that lineage lacks.
 
+*************
+ From parsel
+*************
+
+`parsel <https://github.com/scrapy/parsel>`_ (Scrapy's selector library) is extraction-oriented: a ``Selector`` query
+returns a ``SelectorList`` and you pull *strings* out of it with ``.get()`` / ``.getall()``, using the ``::text`` and
+``::attr(name)`` pseudo-elements to reach text and attribute values. turbohtml instead returns :class:`~turbohtml.Node`
+objects from :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.xpath`, and you read
+:attr:`~turbohtml.Node.text`, ``attrs``, or :attr:`~turbohtml.Node.html` off each node -- so the non-standard ``::text``
+/ ``::attr()`` pseudo-elements become ordinary attribute and text access.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - parsel
+      - turbohtml
+    - - ``Selector(text=html)``
+      - ``turbohtml.parse(html)``
+    - - ``sel.css("a")``, ``sel.xpath("//a")``
+      - ``node.select("a")``, ``node.xpath("//a")``
+    - - ``sel.css("a").get()`` (outer HTML)
+      - ``node.select_one("a").html``
+    - - ``sel.css("a::text").get()``, ``.getall()``
+      - ``node.select_one("a").text``, ``[a.text for a in node.select("a")]``
+    - - ``sel.css("a::attr(href)").get()``, ``.getall()``
+      - ``node.select_one("a").attrs.get("href")``, ``[a.attrs.get("href") for a in node.select("a")]``
+    - - ``sel.xpath("//a/@href").getall()``
+      - ``node.xpath("//a/@href")``
+    - - ``sel.attrib``
+      - ``node.attrs``
+    - - ``sel.re(pattern)``, ``sel.re_first(pattern)``
+      - ``re`` over ``node.text`` (use Python's :mod:`re` directly)
+    - - ``sel.root`` (an lxml element)
+      - the :class:`~turbohtml.Node` itself
+
+.. testcode::
+
+    doc = parse('<a href="/x">home</a><a href="/y">about</a>')
+    print([a.attrs.get("href") for a in doc.select("a")])
+    print(doc.select_one("a").text)
+    print(doc.xpath("//a/@href"))
+
+.. testoutput::
+
+    ['/x', '/y']
+    home
+    ['/x', '/y']
+
+Performance
+===========
+
+parsel translates every ``.css()`` query to XPath with `cssselect <https://github.com/scrapy/cssselect>`_ and evaluates
+it on libxml2, building a fresh ``SelectorList`` on each call. turbohtml compiles a selector against the tree once and
+then matches by comparing interned integer atoms, so the same query runs several times faster end to end and an order of
+magnitude faster when it is reused against an already-parsed tree. The :doc:`performance` page's *Querying* table
+measures turbohtml's :meth:`~turbohtml.Node.select` at two to over forty times faster than lxml's ``cssselect`` -- the
+engine parsel itself runs on -- so a parsel-to-turbohtml port keeps that margin and removes parsel's per-call
+``SelectorList`` overhead on top.
+
+Pitfalls
+========
+
+- parsel's ``::text`` and ``::attr()`` pseudo-elements are not CSS standard and turbohtml does not parse them; read
+  :attr:`~turbohtml.Node.text` and ``attrs`` off the selected node instead.
+- ``.get()`` / ``.getall()`` return strings; turbohtml returns nodes, so choose ``.text``, ``.html``, or an attribute
+  explicitly per call.
+- A turbohtml ``xpath("//a/@href")`` already yields the attribute *values* as strings, so there is no ``.getall()`` to
+  chain.
+
 ***************
  From html5lib
 ***************

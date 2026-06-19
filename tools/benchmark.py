@@ -51,6 +51,7 @@ import w3lib.html
 from bs4 import BeautifulSoup
 from linkify_it import LinkifyIt
 from lxml import html as lxml_html
+from parsel import Selector
 from pyquery import PyQuery
 from resiliparse.parse.html import HTMLTree  # ty: ignore[unresolved-import]  # Cython extension, ships no type stubs
 from selectolax.lexbor import LexborHTMLParser
@@ -384,6 +385,21 @@ def lexbor_select(tree: LexborHTMLParser) -> None:
     tree.css(CSS_SELECTOR)
 
 
+def parsel_tree(text: str) -> Selector:
+    """Parse with parsel (Scrapy's selector library), which builds an lxml tree."""
+    return Selector(text=text)
+
+
+def parsel_find(sel: Selector) -> None:
+    """Collect every anchor with parsel's css."""
+    sel.css("a")
+
+
+def parsel_select(sel: Selector) -> None:
+    """Run the CSS selector with parsel's css (cssselect translates it to XPath on libxml2)."""
+    sel.css(CSS_SELECTOR)
+
+
 HAS_SELECTOR = "div:has(a)"  # the :has() relational pseudo-class: a div that contains a link
 
 
@@ -500,11 +516,13 @@ def print_build_table(means: dict[str, float], cases: list[str]) -> None:
 
 
 # Read-path competitors, fastest-first: a tree builder plus the find/select/serialize/:has ops. turbohtml leads each.
-READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., None], ...]], ...] = (
+# A None op means the library does not offer it (parsel has no serializer, and its cssselect cannot compile :has()).
+READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., None] | None, ...]], ...] = (
     ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize, turbo_has_select)),
     ("lxml", lxml_tree, (lxml_find, lxml_select, lxml_serialize, lxml_has_select)),
     ("selectolax", lexbor_tree, (lexbor_find, lexbor_select, lexbor_serialize, lexbor_has_select)),
     ("BeautifulSoup", bs4_tree, (bs4_find, bs4_select, bs4_serialize, bs4_has_select)),
+    ("parsel", parsel_tree, (parsel_find, parsel_select, None, None)),
 )
 
 # wpt pages from 4 kB to 92 kB; the multi-MB specs are skipped here since every
@@ -1040,7 +1058,10 @@ def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: i
     for name, path, enc in READPATH_CASES:
         text = corpus_text(path, enc)
         for label, build, ops in READPATH_LIBS:
-            bench(f"{op} {name} [{label}]", ops[op_index], build(text))
+            op_fn = ops[op_index]
+            if op_fn is None:
+                continue  # the library does not offer this operation (e.g. parsel has no serialize/:has)
+            bench(f"{op} {name} [{label}]", op_fn, build(text))
         names.append(name)
     return names
 
