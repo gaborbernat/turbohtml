@@ -26,10 +26,7 @@ ID_HTML = (
     "<span>no id</span><i id=''>empty</i><!--note--></body></html>"
 )
 
-NS_HTML = (
-    "<html><body><p id='p'>html</p>"
-    "<svg id='s'><circle/></svg><math><mi>x</mi></math></body></html>"
-)
+NS_HTML = "<html><body><p id='p'>html</p><svg id='s'><circle/></svg><math><mi>x</mi></math></body></html>"
 
 LANG_HTML = (
     "<html><body><p id='nolang'>x</p>"
@@ -96,7 +93,7 @@ def test_namespace_uri(foreign: turbohtml.Node, expr: str, expected: str) -> Non
 
 def test_namespace_uri_context_node_counts_svg_subtree(foreign: turbohtml.Node) -> None:
     # The <svg> and its <circle> child are both in the SVG namespace.
-    assert foreign.xpath("count(//*[namespace-uri()='http://www.w3.org/2000/svg'])") == 2.0
+    assert foreign.xpath("count(//*[namespace-uri()='http://www.w3.org/2000/svg'])") == pytest.approx(2.0)
 
 
 @pytest.fixture

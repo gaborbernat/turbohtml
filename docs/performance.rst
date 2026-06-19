@@ -421,28 +421,54 @@ relational lookup keeps the same interned-atom comparison the flat selectors use
       - 1.40 ms
 
 XPath 1.0 evaluation runs through :meth:`~turbohtml.Node.xpath`, raced against lxml's libxml2 engine, the XPath that
-parsel, pyquery, and html5-parser all wrap (selectolax and BeautifulSoup have none). Both evaluate ``//div//a[@href]``,
-the XPath spelling of the ``div a[href]`` selector above: every href-bearing anchor under a ``div``. turbohtml compiles
-the expression against the tree once, resolves the name tests to interned atoms, and collapses the ``//`` abbreviation
-to a single ``descendant`` walk, so it runs about five times faster than libxml2 on the smaller pages and keeps a lead
-on the largest, where the subtree walk both engines must perform dominates the cost.
+parsel, pyquery, and html5-parser all wrap (selectolax and BeautifulSoup have none). One expression per feature class
+(name tests, the ``//`` abbreviation, attribute, positional, and arithmetic predicates, string and aggregate functions,
+a reverse axis, a union, and a computed name test) runs over the 9.6 kB wpt page below; ``tox -e bench xpath`` repeats
+the sweep across every page size. turbohtml compiles each expression against the tree once, resolves name tests to
+interned atoms, and folds ``//`` to a single ``descendant`` walk, so it leads across the surface. The exception is a
+predicate that references ``position()`` (``[1]`` or ``position() <= 3``): it pins the result to proximity order and
+disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap.
 
 .. list-table::
     :header-rows: 1
-    :widths: 28 18 18
+    :widths: 44 14 14
 
-    - - xpath ``//div//a[@href]``
+    - - xpath (9.6 kB page)
       - turbohtml
       - lxml
-    - - wpt page (4 kB)
-      - 1.3 µs
-      - 6.1 µs
-    - - wpt page (9.6 kB)
-      - 2.0 µs
-      - 9.8 µs
-    - - wpt page (92 kB)
+    - - ``//div``
+      - 2.5 µs
       - 13.9 µs
-      - 21.5 µs
+    - - ``//a[@href]``
+      - 0.5 µs
+      - 3.9 µs
+    - - ``//div//a[@href]``
+      - 2.0 µs
+      - 9.9 µs
+    - - ``/html/body/div``
+      - 1.1 µs
+      - 6.1 µs
+    - - ``//div//a[1]``
+      - 11.0 µs
+      - 9.9 µs
+    - - ``//a[contains(@href, '/')]``
+      - 0.5 µs
+      - 4.1 µs
+    - - ``//div[position() <= 3]``
+      - 6.4 µs
+      - 13.4 µs
+    - - ``//a/ancestor::div``
+      - 0.5 µs
+      - 2.4 µs
+    - - ``//a | //span``
+      - 0.9 µs
+      - 3.1 µs
+    - - ``//*[local-name() = 'a']``
+      - 5.4 µs
+      - 14.1 µs
+    - - ``count(//a)``
+      - 0.5 µs
+      - 2.4 µs
 
 *************
  Serializing

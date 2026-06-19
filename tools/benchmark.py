@@ -26,6 +26,7 @@ their repositories are too large to vendor.
 
 from __future__ import annotations
 
+import functools
 import html
 import os
 import random
@@ -827,25 +828,37 @@ def print_readpath_table(means: dict[str, float], op: str, cases: list[str]) -> 
         print(row)
 
 
-# --- xpath suite: evaluate an XPath 1.0 expression over a pre-parsed tree --- #
+# --- xpath suite: evaluate the XPath feature surface over a pre-parsed tree - #
 # turbohtml.xpath against lxml's libxml2 XPath engine, the de-facto XPath in
 # Python that parsel, pyquery, and html5-parser all delegate to. selectolax and
-# BeautifulSoup expose no XPath, so the table is a straight turbohtml-vs-lxml
-# race. The expression mirrors the CSS select case (div a[href]) so the two query
-# surfaces line up: every href-bearing anchor under a div, reached through the //
-# descendant abbreviation the engine collapses to a single walk.
+# BeautifulSoup expose no XPath, so each table is a straight turbohtml-vs-lxml
+# race. One expression per feature class -- name tests, the descendant
+# abbreviation, attribute and positional and arithmetic predicates, string and
+# aggregate functions, a reverse axis, a union, a computed name test -- runs
+# across the wpt pages so the comparison spans the whole engine, not one query.
+XPATH_EXPRS: tuple[tuple[str, str], ...] = (
+    ("descendant name test", "//div"),
+    ("attribute predicate", "//a[@href]"),
+    ("descendant combinator", "//div//a[@href]"),
+    ("absolute child path", "/html/body/div"),
+    ("positional predicate", "//div//a[1]"),
+    ("string function", "//a[contains(@href, '/')]"),
+    ("arithmetic predicate", "//div[position() <= 3]"),
+    ("reverse axis", "//a/ancestor::div"),
+    ("union", "//a | //span"),
+    ("computed name test", "//*[local-name() = 'a']"),
+    ("aggregate count", "count(//a)"),
+)
 
-XPATH_EXPR = "//div//a[@href]"
+
+def turbo_xpath(doc: Document, expr: str) -> None:
+    """Evaluate one XPath expression with turbohtml's compiled-program engine."""
+    doc.xpath(expr)
 
 
-def turbo_xpath(doc: Document) -> None:
-    """Evaluate the XPath expression with turbohtml's compiled-program engine."""
-    doc.xpath(XPATH_EXPR)
-
-
-def lxml_xpath(tree: HtmlElement) -> None:
+def lxml_xpath(tree: HtmlElement, expr: str) -> None:
     """Evaluate the same XPath expression with lxml's libxml2 engine."""
-    tree.xpath(XPATH_EXPR)
+    tree.xpath(expr)
 
 
 # XPath competitors; only turbohtml and lxml expose an XPath engine.
@@ -855,32 +868,34 @@ XPATH_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...]
 )
 
 
-def run_xpath_suite(bench: Callable[[str, object, object], None]) -> list[str]:
-    """Benchmark XPath evaluation across turbohtml and lxml; return the case names."""
-    names: list[str] = []
-    for name, path, enc in READPATH_CASES:
-        text = corpus_text(path, enc)
-        for label, build, evaluate in XPATH_LIBS:
-            bench(f"xpath {name} [{label}]", evaluate, build(text))
-        names.append(name)
-    return names
+def run_xpath_suite(bench: Callable[[str, object, object], None]) -> tuple[list[str], list[str]]:
+    """Benchmark every XPath feature class across each page size; return (features, sizes)."""
+    for feature, expr in XPATH_EXPRS:
+        for size_name, path, enc in READPATH_CASES:
+            text = corpus_text(path, enc)
+            for label, build, evaluate in XPATH_LIBS:
+                bench(f"xpath {feature} | {size_name} [{label}]", functools.partial(evaluate, expr=expr), build(text))
+    return [feature for feature, _ in XPATH_EXPRS], [name for name, _, _ in READPATH_CASES]
 
 
-def print_xpath_table(means: dict[str, float], cases: list[str]) -> None:
-    """Render turbohtml's XPath engine beside lxml and its slowdown factor."""
-    if not cases:
+def print_xpath_table(means: dict[str, float], suite: tuple[list[str], list[str]]) -> None:
+    """Render one table per page size: turbohtml beside lxml across every feature class."""
+    features, sizes = suite or ([], [])
+    if not features:
         return
     others = [label for label, _, _ in XPATH_LIBS if label != "turbohtml"]
-    print()
-    header = f"{'xpath benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
-    print(header)
-    for name in cases:
-        turbo = means[f"xpath {name} [turbohtml]"]
-        row = f"{'xpath ' + name:28} {turbo * 1e6:8.1f} us"
-        for label in others:
-            other = means.get(f"xpath {name} [{label}]")
-            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
-        print(row)
+    for size_name in sizes:
+        print()
+        header = f"{'xpath / ' + size_name:34} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+        print(header)
+        for feature in features:
+            if (turbo := means.get(f"xpath {feature} | {size_name} [turbohtml]")) is None:
+                continue
+            row = f"{feature:34} {turbo * 1e6:8.1f} us"
+            for label in others:
+                other = means.get(f"xpath {feature} | {size_name} [{label}]")
+                row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+            print(row)
 
 
 def stdlib_tokenize(text: str) -> None:
