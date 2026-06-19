@@ -37,8 +37,7 @@ LANG_HTML = (
 )
 
 
-def tags(result: object) -> list[str]:
-    assert isinstance(result, list)
+def tags(result: list[Element | str]) -> list[str]:
     return [node.tag if isinstance(node, Element) else node for node in result]
 
 

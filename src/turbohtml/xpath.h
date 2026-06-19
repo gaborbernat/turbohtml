@@ -63,12 +63,26 @@ typedef struct {
 
 void xp_result_free(xp_result *result);
 
-/* Evaluate a compiled program against a context node. Returns 0 with *out filled
-   (the caller frees it with xp_result_free). Returns -2 for a construct not yet
-   implemented (the following/preceding/namespace axes, unknown functions), with
-   *feature set to a short name for the message. Returns -1 on allocation failure. */
+/* A $name variable binding. The value is borrowed for the duration of one eval
+   (the caller owns it and frees it afterwards); a referenced variable copies it. */
+typedef struct {
+    const Py_UCS4 *name;
+    Py_ssize_t name_len;
+    xp_result value;
+} xp_binding;
+
+typedef struct {
+    const xp_binding *items;
+    Py_ssize_t len;
+} xp_bindings;
+
+/* Evaluate a compiled program against a context node. vars supplies $name bindings
+   (NULL when none). Returns 0 with *out filled (the caller frees it with
+   xp_result_free). Returns -2 for a construct not yet implemented, or -3 for an
+   evaluation error (a reference to an unbound variable), with *feature set to a
+   short name for the message. Returns -1 on allocation failure. */
 struct th_tree;
-int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_result *out,
-            const char **feature);
+int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
+            xp_result *out, const char **feature);
 
 #endif /* TURBOHTML_XPATH_H */

@@ -40,6 +40,7 @@ enum xn_kind {
     XN_UNION,  /* a | b */
     XN_NUM,    /* num literal */
     XN_LIT,    /* string literal: str/str_len */
+    XN_VAR,    /* variable reference: str/str_len holds the name after '$' */
     XN_PATH,   /* absolute flag; a = first step; b = filter primary or -1 */
     XN_STEP,   /* axis/test/name; a = first predicate (XN_PRED chain); next = next step */
     XN_PRED,   /* predicate wrapper: a = expr; next = next predicate */
@@ -122,6 +123,7 @@ typedef enum {
     TK_LPAREN,
     TK_RPAREN,
     TK_AT,
+    TK_DOLLAR,
     TK_COMMA,
     TK_DOT,
     TK_DOTDOT,
@@ -184,6 +186,7 @@ static int xp_name_eq(const lexer *lx, const char *kw) {
 static int xp_op_follows(tok_kind kind) {
     switch (kind) {
     case TK_AT:
+    case TK_DOLLAR:
     case TK_COLONCOLON:
     case TK_LPAREN:
     case TK_LBRACK:
@@ -245,6 +248,10 @@ static void lex_next(lexer *lx) {
     case '@':
         lx->pos++;
         lx->kind = TK_AT;
+        break;
+    case '$':
+        lx->pos++;
+        lx->kind = TK_DOLLAR;
         break;
     case ',':
         lx->pos++;
@@ -675,6 +682,22 @@ static int32_t parse_primary(parser *ps) {
         lex_next(lx);
         return num;
     }
+    if (lx->kind == TK_DOLLAR) {
+        lex_next(lx); /* the variable name */
+        if (lx->kind != TK_NAME) {
+            fail(ps, "expected a name after '$'");
+            return -1;
+        }
+        int32_t var = xn_new(ps->prog, XN_VAR);
+        if (var < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
+            return -1; /* GCOVR_EXCL_LINE */
+        }
+        if (copy_text(ps->prog, var, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            fail(ps, "out of memory");                            /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        lex_next(lx);
+        return var;
+    }
     /* The only remaining primary is a FunctionCall: starts_filter() guarantees a
        NAME here once '(', a literal, and a number have been ruled out above. */
     int32_t fn = xn_new(ps->prog, XN_FUNC);
@@ -713,7 +736,7 @@ static int32_t parse_primary(parser *ps) {
    else begins a LocationPath. */
 static int starts_filter(parser *ps) {
     tok_kind kind = ps->lx.kind;
-    if (kind == TK_LITERAL || kind == TK_NUM || kind == TK_LPAREN) {
+    if (kind == TK_LITERAL || kind == TK_NUM || kind == TK_LPAREN || kind == TK_DOLLAR) {
         return 1;
     }
     if (kind != TK_NAME) {
@@ -1249,6 +1272,11 @@ static void dump_node(dumper *out, const xp_program *prog, int32_t idx) {
         dput_run(out, expr->str, expr->str_len);
         dputs(out, "')");
         break;
+    case XN_VAR:
+        dputs(out, "(var '");
+        dput_run(out, expr->str, expr->str_len);
+        dputs(out, "')");
+        break;
     case XN_FUNC:
         dputs(out, "(call '");
         dput_run(out, expr->str, expr->str_len);
@@ -1629,6 +1657,7 @@ typedef struct {
     Py_ssize_t pos;
     Py_ssize_t size;
     const char **feature;
+    const xp_bindings *vars;
 } xp_ctx;
 
 void xp_result_free(xp_result *result) {
@@ -1851,7 +1880,7 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
         Py_ssize_t size = set->len;
         Py_ssize_t write_pos = 0;
         for (Py_ssize_t index = 0; index < set->len; index++) {
-            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1, size, ctx->feature};
+            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1, size, ctx->feature, ctx->vars};
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
             if (rc < 0) {
@@ -2525,6 +2554,25 @@ static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
     return 0;
 }
 
+/* Deep-copy a bound variable's value so the reference owns its result. The C API
+   only ever binds the scalar kinds, so there is no node-set arm. */
+static int copy_result(const xp_result *src, xp_result *dst) {
+    memset(dst, 0, sizeof(*dst));
+    dst->kind = src->kind;
+    if (src->kind == XP_STRING) {
+        dst->string = ucs4_dup(src->string, src->string_len);
+        if (dst->string == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;             /* GCOVR_EXCL_LINE */
+        }
+        dst->string_len = src->string_len;
+    } else if (src->kind == XP_NUMBER) {
+        dst->number = src->number;
+    } else {
+        dst->boolean = src->boolean;
+    }
+    return 0;
+}
+
 static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) {
     const xn *expr = &prog->nodes[idx];
     switch (expr->kind) {
@@ -2538,6 +2586,17 @@ static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result
         }
         result_string(out, text, expr->str_len);
         return 0;
+    }
+    case XN_VAR: {
+        for (Py_ssize_t index = 0; ctx->vars != NULL && index < ctx->vars->len; index++) {
+            const xp_binding *binding = &ctx->vars->items[index];
+            if (binding->name_len == expr->str_len &&
+                memcmp(binding->name, expr->str, (size_t)expr->str_len * sizeof(Py_UCS4)) == 0) {
+                return copy_result(&binding->value, out);
+            }
+        }
+        *ctx->feature = "a reference to an unbound variable";
+        return -3;
     }
     case XN_PATH: {
         xp_nodeset ns = {0};
@@ -2664,9 +2723,9 @@ static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result
     }
 }
 
-int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_result *out,
-            const char **feature) {
-    xp_ctx ctx = {tree, context, 1, 1, feature};
+int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
+            xp_result *out, const char **feature) {
+    xp_ctx ctx = {tree, context, 1, 1, feature, vars};
     return eval_expr(prog, prog->root, &ctx, out);
 }
 

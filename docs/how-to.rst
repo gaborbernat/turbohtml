@@ -539,6 +539,19 @@ Two functions read the HTML document the way HTML means it, where ``lxml``'s leg
 real SVG and MathML namespace for foreign content (``lxml`` leaves it empty). HTML elements report no namespace in both,
 so an unprefixed name test keeps matching them.
 
+Pass ``$name`` variables as keyword arguments instead of formatting values into the expression string, so a value with
+quotes or special characters cannot break the query:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<a href='/in'>in</a><a href='/out'>out</a>")
+    print([a.text for a in doc.xpath("//a[@href=$href]", href="/out")])
+
+.. testoutput::
+
+    ['out']
+
 ********************************
  Filter by attribute or pattern
 ********************************

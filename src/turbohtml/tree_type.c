@@ -629,9 +629,9 @@ static PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs);
 static PyObject *node_select(PyObject *self, PyObject *arg);
 static PyObject *node_select_one(PyObject *self, PyObject *arg);
-static PyObject *node_xpath(PyObject *self, PyObject *arg);
-static PyObject *node_xpath_iter(PyObject *self, PyObject *arg);
-static PyObject *node_xpath_one(PyObject *self, PyObject *arg);
+static PyObject *node_xpath(PyObject *self, PyObject *args, PyObject *kwds);
+static PyObject *node_xpath_iter(PyObject *self, PyObject *args, PyObject *kwds);
+static PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_css_matches(PyObject *self, PyObject *arg);
 static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 
@@ -735,9 +735,9 @@ static PyMethodDef node_methods[] = {
     {"find_all", (PyCFunction)(void (*)(void))node_find_all, METH_VARARGS | METH_KEYWORDS, find_all_doc},
     {"select", node_select, METH_O, select_doc},
     {"select_one", node_select_one, METH_O, select_one_doc},
-    {"xpath", node_xpath, METH_O, xpath_doc},
-    {"xpath_iter", node_xpath_iter, METH_O, xpath_iter_doc},
-    {"xpath_one", node_xpath_one, METH_O, xpath_one_doc},
+    {"xpath", (PyCFunction)(void (*)(void))node_xpath, METH_VARARGS | METH_KEYWORDS, xpath_doc},
+    {"xpath_iter", (PyCFunction)(void (*)(void))node_xpath_iter, METH_VARARGS | METH_KEYWORDS, xpath_iter_doc},
+    {"xpath_one", (PyCFunction)(void (*)(void))node_xpath_one, METH_VARARGS | METH_KEYWORDS, xpath_one_doc},
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
@@ -2069,8 +2069,12 @@ static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree
 
 /* Translate an xp_eval status (-2 unsupported, -1 OOM) into a Python error. */
 static void *xpath_raise_status(int status, const char *feature) {
-    if (status == -2) { /* GCOVR_EXCL_BR_LINE: the only other status, -1, is an allocation failure */
+    if (status == -2) {
         PyErr_Format(PyExc_NotImplementedError, "xpath: %s are not implemented yet", feature);
+        return NULL;
+    }
+    if (status == -3) { /* GCOVR_EXCL_BR_LINE: the remaining status -1 is an allocation failure */
+        PyErr_Format(PyExc_ValueError, "xpath: %s", feature);
         return NULL;
     }
     return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: status == -1 is an allocation failure that cannot be forced */
@@ -2089,7 +2093,7 @@ static PyObject *xpath_scalar_to_py(const xp_result *result) {
 /* Evaluate an expression and marshal it to a Python object: a node-set becomes a
    list (elements as Element, attribute/text values as str); a scalar becomes the
    matching float / str / bool. */
-static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
+static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars) {
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
         return NULL;
@@ -2109,7 +2113,7 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
     xp_program *prog = cached_xpath_compile(handle_obj, arg);
     if (prog != NULL) {
         compiled = 1;
-        status = xp_eval(prog, tree, origin, &result, &feature);
+        status = xp_eval(prog, tree, origin, vars, &result, &feature);
     }
     if (compiled && status == 0) {
         if (result.kind == XP_NODESET) {
@@ -2148,12 +2152,108 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
     return out;
 }
 
-static PyObject *node_xpath(PyObject *self, PyObject *arg) {
-    return xpath_eval_object(self, arg);
+/* Convert one keyword-argument value into an XPath variable binding value. */
+static int xpath_var_value(PyObject *obj, xp_result *out) {
+    memset(out, 0, sizeof(*out));
+    if (PyBool_Check(obj)) {
+        out->kind = XP_BOOLEAN;
+        out->boolean = obj == Py_True;
+    } else if (PyLong_Check(obj) || PyFloat_Check(obj)) {
+        double value = PyFloat_AsDouble(obj);
+        if (value == -1.0 && PyErr_Occurred()) {
+            return -1;
+        }
+        out->kind = XP_NUMBER;
+        out->number = value;
+    } else if (PyUnicode_Check(obj)) {
+        Py_ssize_t length = PyUnicode_GET_LENGTH(obj);
+        Py_UCS4 *buf = PyUnicode_AsUCS4Copy(obj);
+        if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            return -1;     /* GCOVR_EXCL_LINE */
+        }
+        out->kind = XP_STRING;
+        out->string = buf;
+        out->string_len = length;
+    } else {
+        PyErr_Format(PyExc_TypeError, "xpath variable must be str, int, float, or bool, not %.80s",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    return 0;
 }
 
-static PyObject *node_xpath_iter(PyObject *self, PyObject *arg) {
-    PyObject *value = xpath_eval_object(self, arg);
+static void free_xpath_vars(xp_binding *items, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        PyMem_Free((void *)items[index].name);
+        xp_result_free(&items[index].value);
+    }
+    PyMem_Free(items);
+}
+
+/* Build the $name bindings from the call's keyword arguments (kwargs keys are
+   always str). On error an exception is set and any partial bindings are freed. */
+static int build_xpath_vars(PyObject *kwds, xp_binding **out_items, Py_ssize_t *out_len) {
+    *out_items = NULL;
+    *out_len = 0;
+    Py_ssize_t total = kwds == NULL ? 0 : PyDict_Size(kwds);
+    if (total == 0) {
+        return 0;
+    }
+    xp_binding *items = PyMem_Calloc((size_t)total, sizeof(xp_binding));
+    if (items == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t count = 0;
+    Py_ssize_t pos = 0;
+    PyObject *key;
+    PyObject *value;
+    while (PyDict_Next(kwds, &pos, &key, &value)) {
+        Py_UCS4 *name = PyUnicode_AsUCS4Copy(key);
+        if (name == NULL) {                /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            free_xpath_vars(items, count); /* GCOVR_EXCL_LINE */
+            return -1;                     /* GCOVR_EXCL_LINE */
+        }
+        if (xpath_var_value(value, &items[count].value) < 0) {
+            PyMem_Free(name);
+            free_xpath_vars(items, count);
+            return -1;
+        }
+        items[count].name = name;
+        items[count].name_len = PyUnicode_GET_LENGTH(key);
+        count++;
+    }
+    *out_items = items;
+    *out_len = count;
+    return 0;
+}
+
+/* Shared front end for xpath/xpath_iter/xpath_one: the expression is positional,
+   every keyword argument is a $name variable binding. */
+static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *kwds, const char *fname) {
+    PyObject *expr_obj;
+    char fmt[24];
+    snprintf(fmt, sizeof(fmt), "O:%s", fname);
+    if (!PyArg_ParseTuple(args, fmt, &expr_obj)) {
+        return NULL;
+    }
+    xp_binding *items;
+    Py_ssize_t len;
+    if (build_xpath_vars(kwds, &items, &len) < 0) {
+        return NULL;
+    }
+    xp_bindings vars = {items, len};
+    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars);
+    free_xpath_vars(items, len);
+    return result;
+}
+
+static PyObject *node_xpath(PyObject *self, PyObject *args, PyObject *kwds) {
+    return xpath_eval_with_vars(self, args, kwds, "xpath");
+}
+
+static PyObject *node_xpath_iter(PyObject *self, PyObject *args, PyObject *kwds) {
+    PyObject *value = xpath_eval_with_vars(self, args, kwds, "xpath_iter");
     if (value == NULL) {
         return NULL;
     }
@@ -2171,8 +2271,8 @@ static PyObject *node_xpath_iter(PyObject *self, PyObject *arg) {
     return iterator;
 }
 
-static PyObject *node_xpath_one(PyObject *self, PyObject *arg) {
-    PyObject *value = xpath_eval_object(self, arg);
+static PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds) {
+    PyObject *value = xpath_eval_with_vars(self, args, kwds, "xpath_one");
     if (value == NULL) {
         return NULL;
     }

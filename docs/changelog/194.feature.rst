@@ -1,3 +1,8 @@
 Complete the XPath 1.0 core function library with ``id()``, ``namespace-uri()``, and ``lang()``. On an HTML document
 ``lang()`` honors the HTML ``lang`` attribute and ``namespace-uri()`` reports the SVG and MathML namespace for foreign
 content, where ``lxml``'s legacy HTML parser returns nothing for both.
+
+Bind ``$name`` variables by passing them as keyword arguments to :meth:`~turbohtml.Node.xpath`,
+:meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` (a ``str``, ``int``, ``float``, or ``bool``
+each), so ``doc.xpath("//a[@href=$url]", url=target)`` keeps the value out of the expression string the way ``lxml`` and
+``parsel`` do.
