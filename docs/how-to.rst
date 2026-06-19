@@ -646,6 +646,86 @@ Whitespace-significant elements (``pre``, ``textarea``, ``listing``) and raw-tex
 their content verbatim, and a tag is never dropped when omitting it would let the reparse reconstruct a formatting
 element across the boundary.
 
+********************
+ Export to Markdown
+********************
+
+:meth:`~turbohtml.Node.to_markdown` renders a node and its subtree as GitHub-Flavored Markdown — headings, lists, links,
+emphasis, code, blockquotes, images, and pipe tables — collapsing runs of whitespace the way normal flow lays them out.
+It is a one-call replacement for the ``scrape`` → ``Markdown`` step that html2text or markdownify would do, with no
+second dependency and the whole walk in C:
+
+.. testcode::
+
+    import turbohtml
+    page = turbohtml.parse(
+        "<h1>Recipe</h1><p>A <b>quick</b> loaf.</p>"
+        "<ul><li>flour</li><li>water</li></ul>"
+        "<blockquote><p>Rest 1 hour.</p></blockquote>"
+    )
+    print(page.to_markdown())
+
+.. testoutput::
+
+    # Recipe
+
+    A **quick** loaf.
+
+    - flour
+    - water
+
+    > Rest 1 hour.
+
+Call it on any node to export just that subtree (``article.to_markdown()``). The output is opinionated GFM: ATX
+headings, ``-`` bullets, fenced code blocks, inline links, and ``*``/``**`` emphasis.
+
+Keyword options cover the markdownify and html2text configuration surface, so a migration reproduces the old output:
+setext headings, underscore emphasis, reference links, padded tables, alternate escaping, and more. The :doc:`migration`
+guide maps each old option to its turbohtml name.
+
+.. testcode::
+
+    doc = turbohtml.parse('<h2>Tea</h2><p><b>Steep</b> it. <a href="/x">More</a>.</p>')
+    print(doc.to_markdown(heading_style="setext", strong="__", link_style="reference"))
+
+.. testoutput::
+
+    Tea
+    ---
+
+    __Steep__ it. [More][1].
+
+    [1]: /x
+
+**********************
+ Export to plain text
+**********************
+
+:meth:`~turbohtml.Node.to_text` renders layout-aware plain text — the role `inscriptis
+<https://github.com/weblyzard/inscriptis>`_ fills — keeping the visual structure rather than collapsing everything like
+:attr:`~turbohtml.Node.text` does. Its most visible feature is laying tables out as aligned columns:
+
+.. testcode::
+
+    import turbohtml
+    page = turbohtml.parse(
+        "<h2>Stock</h2>"
+        "<table><tr><th>Item</th><th>Qty</th></tr>"
+        "<tr><td>Apples</td><td>3</td></tr><tr><td>Pears</td><td>40</td></tr></table>"
+    )
+    print(page.to_text())
+
+.. testoutput::
+
+    Stock
+
+    Item    Qty
+    Apples  3
+    Pears   40
+
+Links are hidden by default; pass ``links="inline"`` to append ``text (url)``, ``links="footnote"`` for numbered
+references, ``images=True`` to show alt text, and ``width`` to word-wrap.
+
 ************************************
  Parse bytes of an unknown encoding
 ************************************

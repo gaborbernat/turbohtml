@@ -529,3 +529,189 @@ nh3's ``link_rel`` maps to ``Policy.add_link_rel``, its ``url_schemes`` to ``url
 to ``attribute_filter`` (turbohtml's may rewrite a value, not only drop it). turbohtml escapes disallowed tags by
 default (``OnDisallowed.ESCAPE``), the mode ammonia blocked upstream; pass ``OnDisallowed.STRIP`` or
 ``OnDisallowed.REMOVE`` for nh3-style dropping.
+
+******************************
+ From html2text / markdownify
+******************************
+
+`html2text <https://github.com/Alir3z4/html2text>`_ and `markdownify
+<https://github.com/matthewwithanm/python-markdownify>`_ both turn HTML into Markdown.
+:meth:`~turbohtml.Node.to_markdown` replaces a call to either with one method on the parsed tree, and the conversion
+runs in C rather than a Python walk over a second parser's tree:
+
+.. code-block:: python
+
+    # html2text
+    import html2text
+
+    html2text.html2text(text)
+
+    # markdownify
+    from markdownify import markdownify
+
+    markdownify(text)
+
+    # turbohtml
+    import turbohtml
+
+    turbohtml.parse(text).to_markdown()
+
+.. testcode::
+
+    print(parse("<h1>Title</h1><p>Some <b>bold</b> text.</p>").to_markdown())
+
+.. testoutput::
+
+    # Title
+
+    Some **bold** text.
+
+The defaults emit opinionated GitHub-Flavored Markdown, and keyword options cover the configuration surface of both
+libraries with one name per concept. The markdownify options map as:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - markdownify
+      - turbohtml ``to_markdown(...)``
+    - - ``heading_style`` (``atx``/``atx_closed``/``underlined``)
+      - ``heading_style`` (``"atx"``/``"atx_closed"``/``"setext"``)
+    - - ``bullets``
+      - ``bullets``
+    - - ``strong_em_symbol``
+      - ``strong`` and ``emphasis`` (independent, so a superset)
+    - - ``sub_symbol``, ``sup_symbol``
+      - ``sub_symbol``, ``sup_symbol``
+    - - ``escape_asterisks``, ``escape_underscores``
+      - ``escape_asterisks``, ``escape_underscores``
+    - - ``escape_misc``
+      - ``escape_mode="all"``
+    - - ``autolinks``
+      - ``autolink``
+    - - ``default_title``
+      - ``link_title``
+    - - ``table_infer_header``
+      - ``table_header="first"`` (the default) vs ``"none"``
+    - - ``newline_style`` (``spaces``/``backslash``)
+      - ``line_break`` (``"spaces"``/``"backslash"``)
+    - - ``strip_document``
+      - ``document_strip`` (``"strip"``/``"lstrip"``/``"rstrip"``/``"none"``)
+    - - ``code_language``
+      - ``code_language``
+
+The html2text options map as:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - html2text
+      - turbohtml ``to_markdown(...)``
+    - - ``ul_item_mark``
+      - ``bullets``
+    - - ``emphasis_mark``, ``strong_mark``
+      - ``emphasis``, ``strong``
+    - - ``ignore_emphasis``
+      - ``ignore_emphasis``
+    - - ``ignore_links``
+      - ``ignore_links``
+    - - ``skip_internal_links``
+      - ``skip_internal_links``
+    - - ``inline_links``
+      - ``link_style`` (``"inline"``/``"reference"``)
+    - - ``ignore_images``, ``images_to_alt``
+      - ``image_mode`` (``"markdown"``/``"alt"``/``"ignore"``)
+    - - ``default_image_alt``
+      - ``default_image_alt``
+    - - ``ignore_tables``, ``bypass_tables``
+      - ``table_mode`` (``"markdown"``/``"strip"``)
+    - - ``pad_tables``
+      - ``pad_tables``
+    - - ``mark_code``
+      - ``mark_code``
+    - - ``backquote_code_style``
+      - ``code_block_style`` (``"fenced"``/``"indented"``)
+    - - ``single_line_break``
+      - ``block_spacing="single"``
+    - - ``baseurl``
+      - ``base_url``
+    - - ``open_quote``, ``close_quote``
+      - ``quote_open``, ``quote_close``
+    - - ``escape_snob``
+      - ``escape_mode="all"``
+
+Pitfalls
+========
+
+- The bold and italic markers are independent (``strong`` and ``emphasis``), where markdownify derives both from one
+  ``strong_em_symbol``; set both to reproduce its behavior.
+- ``to_markdown`` is a method on any node, so convert a subtree by calling it on the element you selected
+  (``doc.find("article").to_markdown()``) instead of slicing the HTML string first.
+- A few niche knobs are intentionally dropped: html2text's Google-Docs heuristics (``google_doc``,
+  ``google_list_indent``), the parser-selection options (markdownify's ``bs4_options``), and the per-call tag-handler
+  callbacks. ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
+- Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is a separate method; for the unstructured
+  concatenation read :attr:`~turbohtml.Node.text`.
+
+*****************
+ From inscriptis
+*****************
+
+`inscriptis <https://github.com/weblyzard/inscriptis>`_ renders HTML to *layout-aware* plain text: it keeps the visual
+structure, most visibly by laying tables out as aligned columns. :meth:`~turbohtml.Node.to_text` is the same idea in C,
+replacing ``get_text``:
+
+.. code-block:: python
+
+    # inscriptis
+    from inscriptis import get_text
+
+    get_text(html)
+
+    # turbohtml
+    import turbohtml
+
+    turbohtml.parse(html).to_text()
+
+.. testcode::
+
+    html = "<h1>Sales</h1><table><tr><th>Region</th><th>Total</th></tr><tr><td>North</td><td>120</td></tr></table>"
+    print(parse(html).to_text())
+
+.. testoutput::
+
+    Sales
+
+    Region  Total
+    North   120
+
+The ``ParserConfig`` options map as:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - inscriptis
+      - turbohtml ``to_text(...)``
+    - - ``display_links``
+      - ``links`` (``"none"``/``"inline"``/``"footnote"``)
+    - - ``display_images``
+      - ``images``
+    - - ``table_cell_separator``
+      - ``table_cell_separator``
+    - - the ``strict`` / ``relaxed`` CSS profile
+      - ``layout`` (``"strict"``/``"extended"``)
+    - - the list bullet
+      - ``bullet``
+    - - (no equivalent)
+      - ``width`` adds word wrapping, which inscriptis leaves to the caller
+
+Pitfalls
+========
+
+- Links are hidden by default (matching inscriptis); pass ``links="inline"`` for ``text (url)`` or ``links="footnote"``
+  for numbered references collected at the end.
+- ``to_text`` renders structure, not styling: there is no bold or color, and headings are plain text. For the raw
+  concatenation with no layout at all, read :attr:`~turbohtml.Node.text`.
+- The annotation API (inscriptis's ``get_annotated_text`` and ``annotation_rules``) is not ported.

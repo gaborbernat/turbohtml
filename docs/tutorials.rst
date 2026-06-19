@@ -342,5 +342,23 @@ the same tree. Here the ``</li>`` tags stay because real whitespace separates th
 
     <ul> <li>one</li> <li>two</li> </ul>
 
+****************
+ Export to text
+****************
+
+Once you have the node you want, :meth:`~turbohtml.Node.to_markdown` turns it into GitHub-Flavored Markdown in one call,
+so a scraping script ends with Markdown instead of a tag soup:
+
+.. testcode::
+
+    doc = turbohtml.parse("<article><h2>Tea</h2><p>Steep <em>green</em> tea for <b>3</b> minutes.</p></article>")
+    print(doc.find("article").to_markdown())
+
+.. testoutput::
+
+    ## Tea
+
+    Steep *green* tea for **3** minutes.
+
 That is the whole tree API. Head to the :doc:`how-to` guides for task-focused recipes, the :doc:`migration` guide if you
 are coming from another HTML library, or the :doc:`reference` for the exact signatures.

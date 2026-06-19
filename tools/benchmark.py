@@ -36,7 +36,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import bleach
+import html2text
 import html5lib
+import inscriptis
+import markdownify
 import markupsafe
 import minify_html
 import nh3
@@ -733,6 +736,153 @@ def print_linkify_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- markdown suite: HTML to Markdown against markdownify and html2text ------ #
+# turbohtml.to_markdown against markdownify (BeautifulSoup) and html2text (a
+# streaming HTMLParser). All three take an HTML string and return Markdown, so
+# each does its own parse; turbohtml parses to the WHATWG tree and walks it in C.
+
+
+def turbo_markdown(text: str) -> None:
+    """Convert HTML to Markdown with turbohtml, parsing and walking the tree."""
+    turbohtml.parse(text).to_markdown()
+
+
+def markdownify_markdown(text: str) -> None:
+    """Convert HTML to Markdown with markdownify, on BeautifulSoup."""
+    markdownify.markdownify(text)
+
+
+_HTML2TEXT = html2text.HTML2Text()
+_HTML2TEXT.body_width = 0
+
+
+def html2text_markdown(text: str) -> None:
+    """Convert HTML to Markdown with html2text, a streaming HTMLParser subclass."""
+    _HTML2TEXT.handle(text)
+
+
+MARKDOWN_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_markdown),
+    ("markdownify", markdownify_markdown),
+    ("html2text", html2text_markdown),
+)
+
+MARKDOWN_CASES: tuple[tuple[str, str], ...] = (
+    ("article 2 KiB", ("<h2>Heading</h2><p>A <b>bold</b> <a href='/x'>link</a> and <code>code</code>.</p>" * 18)),
+    ("list 4 KiB", ("<ul><li>item <em>one</em></li><li>item two<ul><li>nested</li></ul></li></ul>" * 40)),
+    ("table 4 KiB", ("<table><tr><th>Name</th><th>Value</th></tr><tr><td>a</td><td>1</td></tr></table>" * 35)),
+)
+
+# the configured case turns on the option machinery in each library (underscore
+# emphasis, reference links, padded tables, full escaping) so the cost of a
+# non-default conversion is measured, not just the opinionated defaults.
+_MARKDOWN_OPTS_HTML = (
+    "<h2>H</h2><p>A <b>b</b> & <a href='/x'>l</a>.</p>"
+    "<table><tr><th>K</th><th>V</th></tr><tr><td>a</td><td>1</td></tr></table>"
+) * 18
+
+
+def turbo_markdown_configured(text: str) -> None:
+    """Convert with turbohtml's option surface engaged."""
+    turbohtml.parse(text).to_markdown(
+        strong="__", emphasis="_", link_style="reference", pad_tables=True, escape_mode="all"
+    )
+
+
+def markdownify_configured(text: str) -> None:
+    """Convert with markdownify's comparable options."""
+    markdownify.markdownify(text, strong_em_symbol="_", heading_style="atx", escape_misc=True)
+
+
+_HTML2TEXT_CONFIGURED = html2text.HTML2Text()
+_HTML2TEXT_CONFIGURED.body_width = 0
+_HTML2TEXT_CONFIGURED.emphasis_mark = "_"
+_HTML2TEXT_CONFIGURED.strong_mark = "__"
+_HTML2TEXT_CONFIGURED.inline_links = False
+_HTML2TEXT_CONFIGURED.pad_tables = True
+_HTML2TEXT_CONFIGURED.escape_snob = True
+
+
+def html2text_configured(text: str) -> None:
+    """Convert with html2text's comparable options."""
+    _HTML2TEXT_CONFIGURED.handle(text)
+
+
+MARKDOWN_OPT_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_markdown_configured),
+    ("markdownify", markdownify_configured),
+    ("html2text", html2text_configured),
+)
+
+MARKDOWN_CASE_NAMES = [name for name, _ in MARKDOWN_CASES] + ["configured 4 KiB"]
+
+
+def turbo_text(text: str) -> None:
+    """Render layout-aware text with turbohtml, walking the tree in C."""
+    turbohtml.parse(text).to_text()
+
+
+def inscriptis_text(text: str) -> None:
+    """Render layout-aware text with inscriptis, on an lxml tree."""
+    inscriptis.get_text(text)
+
+
+TEXT_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_text),
+    ("inscriptis", inscriptis_text),
+)
+
+TEXT_CASES: tuple[tuple[str, str], ...] = (
+    ("article 2 KiB", ("<h2>Heading</h2><p>A paragraph of plain prose with a <a href='/x'>link</a> in it.</p>" * 16)),
+    ("table 4 KiB", ("<table><tr><th>Region</th><th>Total</th></tr><tr><td>North</td><td>120</td></tr></table>" * 30)),
+)
+TEXT_CASE_NAMES = [name for name, _ in TEXT_CASES]
+
+
+def run_markdown_suite(bench: Callable[[str, object, object], None]) -> None:
+    """Benchmark Markdown against markdownify/html2text and layout text against inscriptis."""
+    for name, text in MARKDOWN_CASES:
+        for label, run in MARKDOWN_LIBS:
+            bench(f"markdown {name} [{label}]", run, text)
+    for label, run in MARKDOWN_OPT_LIBS:
+        bench(f"markdown configured 4 KiB [{label}]", run, _MARKDOWN_OPTS_HTML)
+    for name, text in TEXT_CASES:
+        for label, run in TEXT_LIBS:
+            bench(f"text {name} [{label}]", run, text)
+
+
+def print_text_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's to_text beside inscriptis and its slowdown factor."""
+    if not cases:
+        return
+    print()
+    header = f"{'text benchmark':28} {'turbohtml':>11}{'inscriptis':>18}"
+    print(header)
+    for name in cases:
+        turbo = means[f"text {name} [turbohtml]"]
+        other = means.get(f"text {name} [inscriptis]")
+        row = f"{'text ' + name:28} {turbo * 1e6:8.1f} us"
+        row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
+def print_markdown_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's to_markdown beside markdownify and html2text and their slowdown factors."""
+    if not cases:
+        return
+    others = [label for label, _ in MARKDOWN_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'markdown benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"markdown {name} [turbohtml]"]
+        row = f"{'markdown ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"markdown {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 # --- sanitize suite: allowlist HTML sanitizing against bleach and nh3 --------#
 # turbohtml.sanitizer against bleach (its end-of-life predecessor, on html5lib)
 # and nh3 (the Rust ammonia binding). All three parse, filter to an allowlist,
@@ -1099,6 +1249,7 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
             "markup",
             "minify",
             "linkify",
+            "markdown",
             "sanitize",
             [],
         ],
@@ -1113,7 +1264,7 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,markup,minify,linkify,sanitize",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,markup,minify,linkify,markdown,sanitize",
         ).split(",")
     )
     means: dict[str, float] = {}
@@ -1136,6 +1287,8 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
     minify_cases = run_minify_suite(bench) if "minify" in suites else []
     if "linkify" in suites:
         run_linkify_suite(bench)
+    if "markdown" in suites:
+        run_markdown_suite(bench)
     if "sanitize" in suites:
         run_sanitize_suite(bench)
     if args.worker or not means:
@@ -1153,6 +1306,8 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
     print_markup_table(means, markup_cases)
     print_minify_table(means, minify_cases)
     print_linkify_table(means, LINKIFY_CASE_NAMES if "linkify" in suites else [])
+    print_markdown_table(means, MARKDOWN_CASE_NAMES if "markdown" in suites else [])
+    print_text_table(means, TEXT_CASE_NAMES if "markdown" in suites else [])
     print_sanitize_table(means, [n for n, _ in SANITIZE_CASES] if "sanitize" in suites else [])
 
 

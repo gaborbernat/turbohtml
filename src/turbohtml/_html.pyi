@@ -1,7 +1,7 @@
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from enum import Enum, IntEnum
-from typing import TypeAlias, final
+from typing import Literal, TypeAlias, final
 
 _Filter: TypeAlias = str | re.Pattern[str] | bool | Callable[[str | None], bool] | list[_Filter]
 
@@ -206,6 +206,51 @@ class Node:
     def encode(
         self, encoding: str = "utf-8", *, formatter: Formatter = ..., layout: Indent | Minify | None = ...
     ) -> bytes: ...
+    def to_markdown(
+        self,
+        *,
+        heading_style: Literal["atx", "atx_closed", "setext"] = "atx",
+        bullets: str = "-",
+        strong: str = "**",
+        emphasis: str = "*",
+        strikethrough: Literal["keep", "hide"] = "keep",
+        ignore_emphasis: bool = False,
+        sub_symbol: str = "",
+        sup_symbol: str = "",
+        code_block_style: Literal["fenced", "indented"] = "fenced",
+        code_language: str = "",
+        mark_code: bool = False,
+        link_style: Literal["inline", "reference"] = "inline",
+        autolink: bool = True,
+        link_title: bool = False,
+        ignore_links: bool = False,
+        skip_internal_links: bool = False,
+        base_url: str = "",
+        image_mode: Literal["markdown", "alt", "ignore"] = "markdown",
+        default_image_alt: str = "",
+        table_mode: Literal["markdown", "strip"] = "markdown",
+        table_header: Literal["first", "detect", "none"] = "first",
+        pad_tables: bool = False,
+        escape_mode: Literal["minimal", "all"] = "minimal",
+        escape_asterisks: bool = True,
+        escape_underscores: bool = True,
+        line_break: Literal["spaces", "backslash"] = "spaces",
+        block_spacing: Literal["double", "single"] = "double",
+        document_strip: Literal["strip", "lstrip", "rstrip", "none"] = "strip",
+        quote_open: str = '"',
+        quote_close: str = '"',
+    ) -> str: ...
+    def to_text(
+        self,
+        *,
+        width: int = 0,
+        links: Literal["none", "inline", "footnote"] = "none",
+        images: bool = False,
+        layout: Literal["extended", "strict"] = "extended",
+        default_image_alt: str = "",
+        table_cell_separator: str = "  ",
+        bullet: str = "* ",
+    ) -> str: ...
     def insert_before(self, *nodes: Node) -> None: ...
     def insert_after(self, *nodes: Node) -> None: ...
     def replace_with(self, *nodes: Node) -> None: ...

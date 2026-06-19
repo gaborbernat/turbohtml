@@ -4086,3 +4086,5 @@ void th_tree_free(th_tree *tree) {
 
 #include "treebuilder_serialize.h"
 #include "treebuilder_minify.h"
+#include "treebuilder_markdown.h"
+#include "treebuilder_text.h"

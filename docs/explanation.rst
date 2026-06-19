@@ -219,6 +219,38 @@ otherwise reconstruct one across the gap and shift the tree; and a value is unqu
 re-open it. The transforms that would *not* round-trip -- deleting whitespace between block elements, or omitting a tag
 whose reparse changes nesting -- are exactly the ones turbohtml declines to make.
 
+***********************
+ Exporting to Markdown
+***********************
+
+:meth:`~turbohtml.Node.to_markdown` is a second serializer that walks the same arena tree but emits GitHub-Flavored
+Markdown instead of HTML. The survey of the field -- the Python ``html2text``, ``markdownify``, and ``inscriptis``, Go's
+``html-to-markdown``, and Rust's ``htmd`` -- converged on one architecture: a recursive visit over a real DOM (not a
+streaming parse), with the block context threaded through the recursion rather than re-derived by walking parent
+pointers. turbohtml already has the tree, so the exporter is a single pass over it into one growing buffer, classifying
+each element as block (its own line, with collapsed blank-line margins) or inline (wrapped in a marker), the CSS
+normal-flow distinction.
+
+The one subtle part is whitespace, and it is where the reference libraries differ. turbohtml never emits a space from
+text eagerly: a run of whitespace sets a pending flag, and the owed space is written only just before the next visible
+character, and dropped at a line or block start. Because a closing emphasis marker does not flush that pending space, a
+trailing space inside ``<b>bold </b>`` lands *after* the ``**`` rather than producing the invalid ``**bold **``; because
+the opening marker is itself deferred until the first visible character, a leading space moves out the same way. The
+common case -- a run of plain prose with nothing to escape -- is bulk-copied in one ``memcpy`` after its first
+character, the borrow-or-copy fast path Rust's ``htmd`` uses.
+
+Three places where the field is inconsistent, turbohtml does the correct thing: an inline code span is fenced with one
+more backtick than the longest run inside it (so ``` `a``b` ``` never splits), a ``|`` inside a table cell is escaped,
+and a nested ordered list keeps its own counter through the recursion stack rather than a single mutable field that a
+naive implementation corrupts on nesting. The output is opinionated GFM with no options, validated both by golden cases
+and by rendering it back to HTML with a reference Markdown engine and checking that no visible text was lost.
+
+The walk holds no state outside its stack frame -- no module-level buffers, no per-converter object -- so two threads
+exporting two trees never interfere, and the binding takes the same per-tree critical section
+:attr:`~turbohtml.Node.text` and :attr:`~turbohtml.Node.html` use so a concurrent mutation cannot rewire the tree
+mid-walk (a no-op under the GIL build). Where Go's ``html-to-markdown`` reaches for a mutex, the stateless visitor needs
+none.
+
 *******************
  Mutating the tree
 *******************
