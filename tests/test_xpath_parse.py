@@ -22,21 +22,69 @@ parse = _html._xpath_parse
         pytest.param("/html/body", "(path abs (step child name 'html') (step child name 'body'))", id="absolute"),
         pytest.param(
             "//a",
-            "(path abs (step descendant-or-self node()) (step child name 'a'))",
+            "(path abs (step descendant name 'a'))",
             id="double-slash",
         ),
         pytest.param(
             "a/b//c",
-            "(path rel (step child name 'a') (step child name 'b') "
-            "(step descendant-or-self node()) (step child name 'c'))",
+            "(path rel (step child name 'a') (step child name 'b') (step descendant name 'c'))",
             id="mixed-slashes",
+        ),
+        # the // collapse leaves descendant-or-self in place when the abbreviation
+        # does not apply: a predicate on it, no following step, or a non-child step
+        pytest.param(
+            "//@x",
+            "(path abs (step descendant-or-self node()) (step attribute name 'x'))",
+            id="double-slash-attribute",
+        ),
+        pytest.param(
+            "a/descendant-or-self::node()",
+            "(path rel (step child name 'a') (step descendant-or-self node()))",
+            id="trailing-descendant-or-self",
+        ),
+        pytest.param(
+            "descendant-or-self::node()[1]/a",
+            "(path rel (step descendant-or-self node() (pred (num 1))) (step child name 'a'))",
+            id="descendant-or-self-predicate",
+        ),
+        # a position-independent predicate still collapses; a positional one does not
+        pytest.param(
+            "//a[@href]",
+            "(path abs (step descendant name 'a' (pred (path rel (step attribute name 'href')))))",
+            id="double-slash-nonpositional-predicate",
+        ),
+        pytest.param(
+            "//a[last()]",
+            "(path abs (step descendant-or-self node()) (step child name 'a' (pred (call 'last'))))",
+            id="double-slash-positional-function",
+        ),
+        pytest.param(
+            "//a[2 + 1]",
+            "(path abs (step descendant-or-self node()) (step child name 'a' (pred (+ (num 2) (num 1)))))",
+            id="double-slash-arithmetic-predicate",
+        ),
+        pytest.param(
+            "//a[round(1.5)]",
+            "(path abs (step descendant-or-self node()) (step child name 'a' (pred (call 'round' (num 1.5)))))",
+            id="double-slash-numeric-function",
+        ),
+        pytest.param(
+            "//a[1 = position()]",
+            "(path abs (step descendant-or-self node()) (step child name 'a' (pred (= (num 1) (call 'position')))))",
+            id="double-slash-position-on-right",
+        ),
+        pytest.param(
+            "//a[contains(b, position())]",
+            "(path abs (step descendant-or-self node()) (step child name 'a' "
+            "(pred (call 'contains' (path rel (step child name 'b')) (call 'position')))))",
+            id="double-slash-position-in-argument",
         ),
         pytest.param("/", "(path abs)", id="root-only"),
         pytest.param(".", "(path rel (step self node()))", id="dot"),
         pytest.param("..", "(path rel (step parent node()))", id="dotdot"),
         pytest.param(
             ".//p",
-            "(path rel (step self node()) (step descendant-or-self node()) (step child name 'p'))",
+            "(path rel (step self node()) (step descendant name 'p'))",
             id="context-descendants",
         ),
         # axes spelled out
@@ -104,13 +152,12 @@ parse = _html._xpath_parse
         ),
         pytest.param(
             "(//a)[1]",
-            "(filter (path abs (step descendant-or-self node()) (step child name 'a')) (pred (num 1)))",
+            "(filter (path abs (step descendant name 'a')) (pred (num 1)))",
             id="filter-predicate",
         ),
         pytest.param(
             "(//a)[1]/b",
-            "(path rel (from (filter (path abs (step descendant-or-self node()) (step child name 'a')) "
-            "(pred (num 1)))) (step child name 'b'))",
+            "(path rel (from (filter (path abs (step descendant name 'a')) (pred (num 1)))) (step child name 'b'))",
             id="filter-then-path",
         ),
         # primaries
@@ -121,7 +168,7 @@ parse = _html._xpath_parse
         pytest.param("(1)", "(num 1)", id="parens"),
         pytest.param(
             "count(//a)",
-            "(call 'count' (path abs (step descendant-or-self node()) (step child name 'a')))",
+            "(call 'count' (path abs (step descendant name 'a')))",
             id="call-one-arg",
         ),
         pytest.param("true()", "(call 'true')", id="call-no-args"),
@@ -151,12 +198,11 @@ parse = _html._xpath_parse
         ),
         pytest.param(
             "//a | //b",
-            "(union (path abs (step descendant-or-self node()) (step child name 'a')) "
-            "(path abs (step descendant-or-self node()) (step child name 'b')))",
+            "(union (path abs (step descendant name 'a')) (path abs (step descendant name 'b')))",
             id="union",
         ),
         # the operator-name disambiguation: a leading 'and' is a name test, not an operator
-        pytest.param("//and", "(path abs (step descendant-or-self node()) (step child name 'and'))", id="and-as-name"),
+        pytest.param("//and", "(path abs (step descendant name 'and'))", id="and-as-name"),
         pytest.param("div/mod", "(path rel (step child name 'div') (step child name 'mod'))", id="opnames-as-names"),
         # name character classes
         pytest.param("DIV", "(path rel (step child name 'DIV'))", id="uppercase-name"),
@@ -186,8 +232,7 @@ parse = _html._xpath_parse
         ),
         pytest.param(
             "(//a)//b",
-            "(path rel (from (path abs (step descendant-or-self node()) (step child name 'a'))) "
-            "(step descendant-or-self node()) (step child name 'b'))",
+            "(path rel (from (path abs (step descendant name 'a'))) (step descendant name 'b'))",
             id="grouped-then-descendants",
         ),
     ],

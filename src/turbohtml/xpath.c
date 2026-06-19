@@ -937,6 +937,102 @@ static int32_t parse_expr(parser *ps) {
 
 /* ---------------------------------------------------------- public API */
 
+static int func_name_is(const xn *node, const char *name) {
+    Py_ssize_t length = (Py_ssize_t)strlen(name);
+    if (node->str_len != length) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < length; index++) {
+        if (node->str[index] != (Py_UCS4)(unsigned char)name[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int func_name_in(const xn *node, const char *const *names) {
+    for (int index = 0; names[index] != NULL; index++) {
+        if (func_name_is(node, names[index])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The functions that return a number; a predicate that calls one is positional. */
+static const char *const NUMERIC_FUNCS[] = {"last",  "position", "count", "sum",    "string-length",
+                                            "floor", "ceiling",  "round", "number", NULL};
+static const char *const POSITION_FUNCS[] = {"position", "last", NULL};
+
+/* Whether an expression calls position() or last() anywhere within it. */
+static int references_position(const xp_program *prog, int32_t index) {
+    if (index < 0) {
+        return 0;
+    }
+    const xn *node = &prog->nodes[index];
+    if (node->kind == XN_FUNC && func_name_in(node, POSITION_FUNCS)) {
+        return 1;
+    }
+    return references_position(prog, node->first) || references_position(prog, node->second) ||
+           references_position(prog, node->next);
+}
+
+/* A predicate is positional (so its result depends on the axis it runs over) when it
+   yields a number -- a bare [n], an arithmetic expression, or a numeric function --
+   or when it mentions position()/last(). Such a predicate makes the //X collapse
+   unsafe, because //p[1] is the first p child of each parent, not descendant::p[1]. */
+static int predicate_is_positional(const xp_program *prog, int32_t index) {
+    const xn *node = &prog->nodes[index];
+    if (node->kind == XN_NUM || (node->kind >= XN_ADD && node->kind <= XN_NEG)) {
+        return 1;
+    }
+    if (node->kind == XN_FUNC && func_name_in(node, NUMERIC_FUNCS)) {
+        return 1;
+    }
+    return references_position(prog, index);
+}
+
+static int step_has_positional_predicate(const xp_program *prog, int32_t step_index) {
+    for (int32_t pred = prog->nodes[step_index].first; pred >= 0; pred = prog->nodes[pred].next) {
+        if (predicate_is_positional(prog, prog->nodes[pred].first)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Collapse `descendant-or-self::node()/child::X` (the `//X` abbreviation) into a
+   single `descendant::X` step, so `//a` is one descendant walk testing for a rather
+   than materializing every node and then filtering its children. The two forms are
+   equivalent -- an element is a child of some node in descendant-or-self(context) iff
+   it is a (proper) descendant of context -- as long as the child step carries no
+   positional predicate, whose meaning differs between the two axes. */
+static void optimize_descendant_steps(xp_program *prog) {
+    for (int32_t index = 0; index < prog->count; index++) {
+        if (prog->nodes[index].kind != XN_PATH) {
+            continue;
+        }
+        for (int32_t cursor = prog->nodes[index].first; cursor >= 0; cursor = prog->nodes[cursor].next) {
+            xn *step = &prog->nodes[cursor];
+            if (step->axis != AX_DESCENDANT_OR_SELF || step->test != NT_NODE || step->first >= 0 || step->next < 0) {
+                continue;
+            }
+            xn *follow = &prog->nodes[step->next];
+            if (follow->axis != AX_CHILD || step_has_positional_predicate(prog, step->next)) {
+                continue;
+            }
+            step->axis = AX_DESCENDANT;
+            step->test = follow->test;
+            PyMem_Free(step->str); /* the node() test owns no name */
+            step->str = follow->str;
+            step->str_len = follow->str_len;
+            follow->str = NULL; /* ownership moved to step */
+            step->first = follow->first;
+            step->next = follow->next;
+        }
+    }
+}
+
 xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen) {
     xp_program *prog = PyMem_Malloc(sizeof(*prog));
     if (prog == NULL) {                            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
@@ -972,6 +1068,7 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
         xp_free(prog);
         return NULL;
     }
+    optimize_descendant_steps(prog);
     return prog;
 }
 

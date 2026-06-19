@@ -27,12 +27,20 @@
    a new attribute name (which could change an "absent" resolution) invalidates a
    stale entry. Move-to-front, capped, guarded by the handle's critical section. */
 #define SEL_CACHE_CAP 16
+#define XPATH_CACHE_CAP 16
 
 typedef struct {
     PyObject *key;          /* the selector str (a strong reference) */
     sel_compiled *compiled; /* compiled against this handle's tree */
     uint32_t attr_gen;      /* tree attribute generation when compiled */
 } sel_cache_entry;
+
+/* A compiled XPath program is tree-independent (it resolves atoms at evaluation),
+   so unlike the selector cache it needs no generation to invalidate it. */
+typedef struct {
+    PyObject *key; /* the expression str (a strong reference) */
+    xp_program *prog;
+} xpath_cache_entry;
 
 typedef struct {
     PyObject_HEAD th_tree *tree;
@@ -48,6 +56,8 @@ typedef struct {
     int index_built;
     sel_cache_entry sel_cache[SEL_CACHE_CAP];
     int sel_cache_len;
+    xpath_cache_entry xpath_cache[XPATH_CACHE_CAP];
+    int xpath_cache_len;
 } HandleObject;
 
 typedef struct {
@@ -1995,11 +2005,20 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
     return node_wrap(state_of(self), handle, found);
 }
 
-/* Compile arg (a str) to an XPath program, or NULL with a Python error set. */
-static xp_program *xpath_compile_arg(PyObject *arg) {
-    if (!PyUnicode_Check(arg)) {
-        PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
-        return NULL;
+/* Return the compiled program for arg from handle's per-tree cache, compiling and
+   inserting it on a miss (most recent first, capped at XPATH_CACHE_CAP). The program
+   is tree-independent, so an entry never goes stale. The caller must hold the handle's
+   critical section and have type-checked arg; the returned pointer is borrowed. NULL
+   with a Python error set on a compile error. */
+static xp_program *cached_xpath_compile(HandleObject *handle, PyObject *arg) {
+    for (int index = 0; index < handle->xpath_cache_len; index++) {
+        xpath_cache_entry entry = handle->xpath_cache[index];
+        if (entry.key != arg && PyUnicode_Compare(entry.key, arg) != 0) {
+            continue;
+        }
+        memmove(&handle->xpath_cache[1], &handle->xpath_cache[0], (size_t)index * sizeof(xpath_cache_entry));
+        handle->xpath_cache[0] = entry;
+        return entry.prog;
     }
     Py_ssize_t len = PyUnicode_GET_LENGTH(arg);
     Py_UCS4 *src = PyUnicode_AsUCS4Copy(arg);
@@ -2011,7 +2030,18 @@ static xp_program *xpath_compile_arg(PyObject *arg) {
     PyMem_Free(src);
     if (prog == NULL) {
         PyErr_SetString(PyExc_ValueError, err);
+        return NULL;
     }
+    if (handle->xpath_cache_len == XPATH_CACHE_CAP) {
+        xpath_cache_entry *evicted = &handle->xpath_cache[XPATH_CACHE_CAP - 1];
+        xp_free(evicted->prog);
+        Py_DECREF(evicted->key);
+    } else {
+        handle->xpath_cache_len++;
+    }
+    memmove(&handle->xpath_cache[1], &handle->xpath_cache[0],
+            (size_t)(handle->xpath_cache_len - 1) * sizeof(xpath_cache_entry));
+    handle->xpath_cache[0] = (xpath_cache_entry){Py_NewRef(arg), prog};
     return prog;
 }
 
@@ -2051,8 +2081,8 @@ static PyObject *xpath_scalar_to_py(const xp_result *result) {
    list (elements as Element, attribute/text values as str); a scalar becomes the
    matching float / str / bool. */
 static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
-    xp_program *prog = xpath_compile_arg(arg);
-    if (prog == NULL) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
         return NULL;
     }
     module_state *state = state_of(self);
@@ -2061,12 +2091,18 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
     xp_result result;
     const char *feature = NULL;
     PyObject *out = NULL;
-    int status;
+    int status = 0;
     int build_error = 0;
-    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: the eval reads the tree */
-    th_tree *tree = ((HandleObject *)handle)->tree;
-    status = xp_eval(prog, tree, origin, &result, &feature);
-    if (status == 0) {
+    int compiled = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: the compile cache and the eval read the tree */
+    HandleObject *handle_obj = (HandleObject *)handle;
+    th_tree *tree = handle_obj->tree;
+    xp_program *prog = cached_xpath_compile(handle_obj, arg);
+    if (prog != NULL) {
+        compiled = 1;
+        status = xp_eval(prog, tree, origin, &result, &feature);
+    }
+    if (compiled && status == 0) {
         if (result.kind == XP_NODESET) {
             out = PyList_New(result.nodes.len);
             if (out == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
@@ -2090,7 +2126,9 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
         xp_result_free(&result);
     }
     Py_END_CRITICAL_SECTION();
-    xp_free(prog);
+    if (!compiled) {
+        return NULL; /* a compile error left a Python exception set */
+    }
     if (status < 0) {
         return xpath_raise_status(status, feature);
     }
@@ -3257,6 +3295,10 @@ static void handle_dealloc(PyObject *self) {
     for (int index = 0; index < handle->sel_cache_len; index++) {
         selector_free(handle->sel_cache[index].compiled);
         Py_DECREF(handle->sel_cache[index].key);
+    }
+    for (int index = 0; index < handle->xpath_cache_len; index++) {
+        xp_free(handle->xpath_cache[index].prog);
+        Py_DECREF(handle->xpath_cache[index].key);
     }
     PyMem_Free(handle->index_offsets);
     PyMem_Free(handle->index_nodes);
