@@ -2328,7 +2328,7 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
         }
     }
     int rc = 0;
-    for (struct th_node *node = th_tree_document(ctx->tree); node != NULL && rc == 0; node = document_next(node)) {
+    for (struct th_node *node = th_tree_document(ctx->tree); node != NULL; node = document_next(node)) {
         if (node->type != TH_NODE_ELEMENT) {
             continue;
         }
