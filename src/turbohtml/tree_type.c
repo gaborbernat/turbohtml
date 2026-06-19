@@ -2111,7 +2111,7 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
             out = PyList_New(result.nodes.len);
             if (out == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                 build_error = 1; /* GCOVR_EXCL_LINE */
-            } else {
+            } else {             /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
                 for (Py_ssize_t index = 0; index < result.nodes.len; index++) {
                     PyObject *item = xpath_item_to_py(state, handle, tree, result.nodes.items[index]);
                     if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
@@ -2125,7 +2125,7 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg) {
             out = xpath_scalar_to_py(&result);
             if (out == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                 build_error = 1; /* GCOVR_EXCL_LINE */
-            }
+            } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         }
         xp_result_free(&result);
     }

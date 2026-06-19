@@ -465,7 +465,7 @@ static void parse_node_test(parser *ps, int32_t step) {
         if (is_pi && lx->kind == TK_LITERAL) {
             if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
-            }
+            } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
             lex_next(lx);
         }
         expect(ps, TK_RPAREN, "expected ')'");
@@ -474,7 +474,7 @@ static void parse_node_test(parser *ps, int32_t step) {
     ps->prog->nodes[step].test = NT_NAME;
     if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
-    }
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
     lex_next(lx);
 }
 
@@ -662,7 +662,7 @@ static int32_t parse_primary(parser *ps) {
         }
         if (copy_text(ps->prog, lit, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             fail(ps, "out of memory");                            /* GCOVR_EXCL_LINE */
-        }
+        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         lex_next(lx);
         return lit;
     }
@@ -684,7 +684,7 @@ static int32_t parse_primary(parser *ps) {
     }
     if (copy_text(ps->prog, fn, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory");                           /* GCOVR_EXCL_LINE */
-    }
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
     lex_next(lx);
     expect(ps, TK_LPAREN, "expected '(' after function name");
     int32_t arg_head = -1;
@@ -1295,7 +1295,7 @@ Py_UCS4 *xp_dump(const xp_program *prog, Py_ssize_t *out_len) {
     }
     if (state.buf == NULL) {                       /* GCOVR_EXCL_BR_LINE: the root always emits at least "()" */
         state.buf = PyMem_Malloc(sizeof(Py_UCS4)); /* GCOVR_EXCL_LINE */
-    }
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
     *out_len = state.len;
     return state.buf;
 }
@@ -1747,9 +1747,9 @@ static double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
 
 static int format_number(double value, Py_UCS4 **out, Py_ssize_t *out_len) {
     char buf[64];
-    if (isnan(value)) {
+    if (isnan(value)) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
         memcpy(buf, "NaN", 4);
-    } else if (isinf(value)) {
+    } else if (isinf(value)) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isinf macro */
         memcpy(buf, value < 0 ? "-Infinity" : "Infinity", value < 0 ? 10 : 9);
     } else if (value == (double)(long long)value && fabs(value) < 1e15) {
         snprintf(buf, sizeof(buf), "%lld", (long long)value);
@@ -1940,7 +1940,7 @@ static int cmp_scalar(struct th_tree *tree, int op, const xp_result *left, const
             Py_UCS4 *sb = to_string(tree, right, &lb);
             if (sa == NULL || sb == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
                 eq = 0;                     /* GCOVR_EXCL_LINE */
-            } else {
+            } else {                        /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
                 eq = la == lb && memcmp(sa, sb, (size_t)la * sizeof(Py_UCS4)) == 0;
             }
             PyMem_Free(sa);
@@ -2274,7 +2274,7 @@ static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_re
             Py_UCS4 *buf = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
             if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
                 rc = -1;       /* GCOVR_EXCL_LINE */
-            } else {
+            } else {           /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
                 Py_ssize_t write_pos = 0;
                 for (int index = 0; index < argc; index++) {
                     memcpy(buf + write_pos, parts[index], (size_t)lens[index] * sizeof(Py_UCS4));
@@ -2307,7 +2307,7 @@ static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_re
         Py_UCS4 *needle = to_string(ctx->tree, &args[1], &nl);
         if (hay == NULL || needle == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
             rc = -1;                         /* GCOVR_EXCL_LINE */
-        } else {
+        } else {                             /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
             Py_ssize_t at = ucs4_find(hay, hl, needle, nl);
             const Py_UCS4 *start = at < 0 ? hay : func_is(fn, "substring-before") ? hay : hay + at + nl;
             Py_ssize_t rlen = at < 0 ? 0 : func_is(fn, "substring-before") ? at : hl - (at + nl);
@@ -2330,7 +2330,7 @@ static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_re
         Py_UCS4 *to = to_string(ctx->tree, &args[2], &tl);
         if (text == NULL || from == NULL || to == NULL) { /* GCOVR_EXCL_BR_LINE: alloc cannot be forced */
             rc = -1;                                      /* GCOVR_EXCL_LINE */
-        } else {
+        } else { /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
             rc = translate(text, sl, from, fl, to, tl, out);
         }
         PyMem_Free(text);

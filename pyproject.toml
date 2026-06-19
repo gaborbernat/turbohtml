@@ -204,6 +204,12 @@ testpaths = [
 ]
 
 [tool.coverage]
+# lxml, the XPath oracle this differential suite diffs against, ships no wheels for 3.15,
+# the free-threaded builds, or Windows, so the module importorskips itself there; measuring
+# it would make the gate interpreter-dependent. It still runs and validates wherever lxml exists.
+run.omit = [
+  "tests/test_xpath_differential.py",
+]
 run.parallel = true
 run.plugins = [
   "covdefaults",
