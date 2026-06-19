@@ -1079,7 +1079,7 @@ def run_string_suites(bench: Callable[[str, object, object], None], suites: set[
     return rows
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; the orchestration is flat by design
     """Run all cases under pyperf and print the speedup table in the parent."""
     runner = pyperf.Runner()
     runner.argparser.add_argument(
