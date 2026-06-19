@@ -9,7 +9,7 @@
 A fast, fully typed HTML toolkit for Python with a C-accelerated core. turbohtml escapes and unescapes HTML to match the
 standard library byte for byte, tokenizes markup with a WHATWG-conformant streaming tokenizer, and parses whole
 documents into a navigable element tree you query with CSS selectors, edit in place, build from scratch, serialize back
-to conformant HTML, and export to GitHub-Flavored Markdown. A
+to conformant HTML, and export to GitHub-Flavored Markdown or layout-aware plain text. A
 [markupsafe](https://markupsafe.palletsprojects.com)-compatible `turbohtml.markup` covers template autoescaping, and
 `turbohtml.linkify` auto-links URLs and emails the way [bleach](https://github.com/mozilla/bleach) did. Each operation
 runs several times faster than its pure-Python counterpart and supports the free-threaded build.
@@ -125,6 +125,15 @@ print(doc.to_markdown())
 # - water
 ```
 
+Or to layout-aware plain text (the `inscriptis` role), with tables laid out as aligned columns:
+
+```python
+doc = turbohtml.parse("<table><tr><th>Item</th><th>Qty</th></tr><tr><td>Apples</td><td>3</td></tr></table>")
+print(doc.to_text())
+# Item    Qty
+# Apples  3
+```
+
 Pass `bytes` to sniff the encoding the WHATWG way (byte-order mark, then a `<meta>` declaration):
 
 ```python
@@ -189,6 +198,7 @@ the other C libraries on the read-path benchmarks. Measured with [pyperf](https:
 - serializing a tree back to HTML runs 2–4× faster than lxml and selectolax and about 40× faster than BeautifulSoup.
 - `to_markdown` exports GitHub-Flavored Markdown 40–110× faster than markdownify and html2text, which build and convert
   in Python.
+- `to_text` renders layout-aware plain text 20–35× faster than [inscriptis](https://github.com/weblyzard/inscriptis).
 - building a tree from scratch and editing a parsed one both run about twice as fast as lxml and an order of magnitude
   faster than BeautifulSoup.
 

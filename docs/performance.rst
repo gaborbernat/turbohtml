@@ -183,6 +183,28 @@ reference links, padded tables, full escaping), and turbohtml stays ahead by the
       - 2726 µs
       - 1182 µs
 
+*************
+ Layout text
+*************
+
+:meth:`turbohtml.Node.to_text` against `inscriptis <https://github.com/weblyzard/inscriptis>`_, the layout-aware
+HTML-to-text renderer it succeeds. Both keep the visual structure and lay tables out as aligned columns; inscriptis
+builds an lxml tree and a CSS model in Python, where turbohtml does the whole layout in one C walk.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 28 28
+
+    - - input
+      - turbohtml
+      - inscriptis
+    - - article (2 KiB)
+      - 7 µs
+      - 172 µs
+    - - table (4 KiB)
+      - 26 µs
+      - 885 µs
+
 ************
  Unescaping
 ************

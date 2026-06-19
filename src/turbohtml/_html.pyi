@@ -215,6 +215,17 @@ class Node:
         quote_open: str = '"',
         quote_close: str = '"',
     ) -> str: ...
+    def to_text(
+        self,
+        *,
+        width: int = 0,
+        links: Literal["none", "inline", "footnote"] = "none",
+        images: bool = False,
+        layout: Literal["extended", "strict"] = "extended",
+        default_image_alt: str = "",
+        table_cell_separator: str = "  ",
+        bullet: str = "* ",
+    ) -> str: ...
     def insert_before(self, *nodes: Node) -> None: ...
     def insert_after(self, *nodes: Node) -> None: ...
     def replace_with(self, *nodes: Node) -> None: ...

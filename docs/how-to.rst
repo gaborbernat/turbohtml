@@ -666,6 +666,35 @@ guide maps each old option to its turbohtml name.
 
     [1]: /x
 
+**********************
+ Export to plain text
+**********************
+
+:meth:`~turbohtml.Node.to_text` renders layout-aware plain text — the role `inscriptis
+<https://github.com/weblyzard/inscriptis>`_ fills — keeping the visual structure rather than collapsing everything like
+:attr:`~turbohtml.Node.text` does. Its most visible feature is laying tables out as aligned columns:
+
+.. testcode::
+
+    import turbohtml
+    page = turbohtml.parse(
+        "<h2>Stock</h2>"
+        "<table><tr><th>Item</th><th>Qty</th></tr>"
+        "<tr><td>Apples</td><td>3</td></tr><tr><td>Pears</td><td>40</td></tr></table>"
+    )
+    print(page.to_text())
+
+.. testoutput::
+
+    Stock
+
+    Item    Qty
+    Apples  3
+    Pears   40
+
+Links are hidden by default; pass ``links="inline"`` to append ``text (url)``, ``links="footnote"`` for numbered
+references, ``images=True`` to show alt text, and ``width`` to word-wrap.
+
 ************************************
  Parse bytes of an unknown encoding
 ************************************

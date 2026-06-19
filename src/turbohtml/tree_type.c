@@ -640,6 +640,40 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
     return result;
 }
 
+PyDoc_STRVAR(to_text_doc, "to_text(*, width=0, links='none', images=False, layout='extended', default_image_alt='', "
+                          "table_cell_separator='  ', bullet='* ')\n--\n\n"
+                          "Render this node and its subtree as layout-aware plain text: blocks\n"
+                          "separated by blank lines, lists indented under their bullets, and tables\n"
+                          "laid out as a column-aligned grid. The inscriptis role, in C.");
+
+static PyObject *node_to_text(PyObject *self, PyObject *args, PyObject *kwds) {
+    text_opts opt = th_text_default_opts();
+    PyObject *links = NULL, *layout = NULL;
+    static char *kw[] = {"width",  "links", "images", "layout", "default_image_alt", "table_cell_separator",
+                         "bullet", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$iOpOsss", kw, &opt.width, &links, &opt.images, &layout,
+                                     &opt.default_image_alt, &opt.cell_separator, &opt.bullet)) {
+        return NULL;
+    }
+    static const char *const link_modes[] = {"none", "inline", "footnote"};
+    static const char *const layouts[] = {"strict", "extended"};
+    if (md_resolve_enum("links", links, link_modes, 3, &opt.links) < 0 ||
+        md_resolve_enum("layout", layout, layouts, 2, &opt.extended) < 0) {
+        return NULL;
+    }
+    Py_ssize_t out_len;
+    Py_UCS4 *data;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    data = th_node_layout_text(tree_of(self), ((NodeObject *)self)->node, &opt, &out_len);
+    Py_END_CRITICAL_SECTION();
+    if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = ucs4_to_str(data, out_len);
+    PyMem_Free(data);
+    return result;
+}
+
 static PyGetSetDef node_getset[] = {
     {"parent", node_get_parent, NULL, "the parent Element or Document, or None for the document root", NULL},
     {"children", node_get_children, NULL, "the child nodes as a tuple", NULL},
@@ -870,6 +904,7 @@ static PyMethodDef node_methods[] = {
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
     {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
     {"to_markdown", (PyCFunction)(void (*)(void))node_to_markdown, METH_VARARGS | METH_KEYWORDS, to_markdown_doc},
+    {"to_text", (PyCFunction)(void (*)(void))node_to_text, METH_VARARGS | METH_KEYWORDS, to_text_doc},
     {"insert_before", node_insert_before, METH_VARARGS, insert_before_doc},
     {"insert_after", node_insert_after, METH_VARARGS, insert_after_doc},
     {"replace_with", node_replace_with, METH_VARARGS, replace_with_doc},

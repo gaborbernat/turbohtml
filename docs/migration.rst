@@ -653,3 +653,65 @@ Pitfalls
   callbacks. ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
 - Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is a separate method; for the unstructured
   concatenation read :attr:`~turbohtml.Node.text`.
+
+*****************
+ From inscriptis
+*****************
+
+`inscriptis <https://github.com/weblyzard/inscriptis>`_ renders HTML to *layout-aware* plain text: it keeps the visual
+structure, most visibly by laying tables out as aligned columns. :meth:`~turbohtml.Node.to_text` is the same idea in C,
+replacing ``get_text``:
+
+.. code-block:: python
+
+    # inscriptis
+    from inscriptis import get_text
+
+    get_text(html)
+
+    # turbohtml
+    import turbohtml
+
+    turbohtml.parse(html).to_text()
+
+.. testcode::
+
+    html = "<h1>Sales</h1><table><tr><th>Region</th><th>Total</th></tr><tr><td>North</td><td>120</td></tr></table>"
+    print(parse(html).to_text())
+
+.. testoutput::
+
+    Sales
+
+    Region  Total
+    North   120
+
+The ``ParserConfig`` options map as:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - inscriptis
+      - turbohtml ``to_text(...)``
+    - - ``display_links``
+      - ``links`` (``"none"``/``"inline"``/``"footnote"``)
+    - - ``display_images``
+      - ``images``
+    - - ``table_cell_separator``
+      - ``table_cell_separator``
+    - - the ``strict`` / ``relaxed`` CSS profile
+      - ``layout`` (``"strict"``/``"extended"``)
+    - - the list bullet
+      - ``bullet``
+    - - (no equivalent)
+      - ``width`` adds word wrapping, which inscriptis leaves to the caller
+
+Pitfalls
+========
+
+- Links are hidden by default (matching inscriptis); pass ``links="inline"`` for ``text (url)`` or ``links="footnote"``
+  for numbered references collected at the end.
+- ``to_text`` renders structure, not styling: there is no bold or color, and headings are plain text. For the raw
+  concatenation with no layout at all, read :attr:`~turbohtml.Node.text`.
+- The annotation API (inscriptis's ``get_annotated_text`` and ``annotation_rules``) is not ported.

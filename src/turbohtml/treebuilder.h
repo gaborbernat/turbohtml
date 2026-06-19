@@ -275,6 +275,29 @@ md_opts th_markdown_default_opts(void);
    receives the length. NULL on allocation failure. */
 Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_ssize_t *out_len);
 
+/* The layout-aware text export configuration (the inscriptis role): a plain-text
+   rendering that keeps the visual structure, with column-aligned tables. */
+enum th_text_links { TH_TEXT_LINKS_NONE, TH_TEXT_LINKS_INLINE, TH_TEXT_LINKS_FOOTNOTE };
+
+typedef struct {
+    int width;    /* word-wrap column, 0 disables */
+    int links;    /* enum th_text_links */
+    int images;   /* render an image as its alt text */
+    int extended; /* the relaxed CSS profile (div padding, span spacing) vs strict */
+    const char *default_image_alt;
+    const char *cell_separator; /* between table columns, e.g. "  " */
+    const char *bullet;         /* unordered list marker, e.g. "* " */
+} text_opts;
+
+/* The no-argument baseline (extended profile, links hidden, images off). */
+text_opts th_text_default_opts(void);
+
+/* Render node and its subtree as layout-aware plain text under opt: blocks
+   separated by blank lines, lists indented under their bullets, and tables laid
+   out as a column-aligned grid. PyMem-allocated; *out_len receives the length.
+   NULL on allocation failure. */
+Py_UCS4 *th_node_layout_text(th_tree *tree, th_node *node, const text_opts *opt, Py_ssize_t *out_len);
+
 /* The doctype's public and system identifiers as slices of the node's own text;
    returns 1 with the four out params set when present, 0 for a name-only doctype. */
 int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import bleach
 import html2text
 import html5lib
+import inscriptis
 import markdownify
 import markupsafe
 import minify_html
@@ -815,13 +816,53 @@ MARKDOWN_OPT_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
 MARKDOWN_CASE_NAMES = [name for name, _ in MARKDOWN_CASES] + ["configured 4 KiB"]
 
 
+def turbo_text(text: str) -> None:
+    """Render layout-aware text with turbohtml, walking the tree in C."""
+    turbohtml.parse(text).to_text()
+
+
+def inscriptis_text(text: str) -> None:
+    """Render layout-aware text with inscriptis, on an lxml tree."""
+    inscriptis.get_text(text)
+
+
+TEXT_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_text),
+    ("inscriptis", inscriptis_text),
+)
+
+TEXT_CASES: tuple[tuple[str, str], ...] = (
+    ("article 2 KiB", ("<h2>Heading</h2><p>A paragraph of plain prose with a <a href='/x'>link</a> in it.</p>" * 16)),
+    ("table 4 KiB", ("<table><tr><th>Region</th><th>Total</th></tr><tr><td>North</td><td>120</td></tr></table>" * 30)),
+)
+TEXT_CASE_NAMES = [name for name, _ in TEXT_CASES]
+
+
 def run_markdown_suite(bench: Callable[[str, object, object], None]) -> None:
-    """Benchmark HTML to Markdown against markdownify and html2text."""
+    """Benchmark Markdown against markdownify/html2text and layout text against inscriptis."""
     for name, text in MARKDOWN_CASES:
         for label, run in MARKDOWN_LIBS:
             bench(f"markdown {name} [{label}]", run, text)
     for label, run in MARKDOWN_OPT_LIBS:
         bench(f"markdown configured 4 KiB [{label}]", run, _MARKDOWN_OPTS_HTML)
+    for name, text in TEXT_CASES:
+        for label, run in TEXT_LIBS:
+            bench(f"text {name} [{label}]", run, text)
+
+
+def print_text_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's to_text beside inscriptis and its slowdown factor."""
+    if not cases:
+        return
+    print()
+    header = f"{'text benchmark':28} {'turbohtml':>11}{'inscriptis':>18}"
+    print(header)
+    for name in cases:
+        turbo = means[f"text {name} [turbohtml]"]
+        other = means.get(f"text {name} [inscriptis]")
+        row = f"{'text ' + name:28} {turbo * 1e6:8.1f} us"
+        row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
 
 
 def print_markdown_table(means: dict[str, float], cases: list[str]) -> None:
@@ -1154,6 +1195,7 @@ def main() -> None:
     print_minify_table(means, minify_cases)
     print_linkify_table(means, LINKIFY_CASE_NAMES if "linkify" in suites else [])
     print_markdown_table(means, MARKDOWN_CASE_NAMES if "markdown" in suites else [])
+    print_text_table(means, TEXT_CASE_NAMES if "markdown" in suites else [])
     print_sanitize_table(means, [n for n, _ in SANITIZE_CASES] if "sanitize" in suites else [])
 
 
