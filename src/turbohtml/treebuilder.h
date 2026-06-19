@@ -202,6 +202,19 @@ Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
                            Py_ssize_t *out_len);
 
+/* The minification transforms serialize(minify=...) toggles, each round-trip safe
+   (the minified bytes reparse to the same tree). */
+typedef struct {
+    int collapse_whitespace; /* fold ASCII-whitespace runs to a single space outside pre/textarea/listing */
+    int omit_optional_tags;  /* drop the start/end tags the WHATWG optional-tag rules allow */
+    int unquote_attributes;  /* drop redundant attribute quotes and write empty values as bare names */
+    int strip_comments;      /* skip comment nodes */
+} th_minify_opts;
+
+/* Serialize node and its subtree minified under opts and the escape formatter.
+   PyMem-allocated; *out_len receives the length. NULL on failure. */
+Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatter, Py_ssize_t *out_len);
+
 /* The doctype's public and system identifiers as slices of the node's own text;
    returns 1 with the four out params set when present, 0 for a name-only doctype. */
 int th_node_doctype_ids(th_node *node, const Py_UCS4 **public_id, Py_ssize_t *public_len, const Py_UCS4 **system_id,

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import bleach
 import html5lib
 import markupsafe
+import minify_html
 import nh3
 import pyperf
 from bs4 import BeautifulSoup
@@ -608,6 +609,63 @@ def print_markup_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- minify suite: shrink HTML against minify-html -------------------------- #
+# turbohtml.serialize(layout=Minify(...)) against minify-html (Rust, the modern leader).
+# Both take a source string and return minified HTML, so each run is a full
+# parse-and-minify; the cases are real pages from the html5lib-python corpus.
+
+
+_MINIFY = turbohtml.Minify()
+
+
+def turbo_minify(text: str) -> None:
+    """Parse and minify with turbohtml's serializer minify mode."""
+    _ = turbohtml.parse(text).serialize(layout=_MINIFY)
+
+
+def minifyhtml_minify(text: str) -> None:
+    """Minify with minify-html, the Rust minifier (parse and minify in one call)."""
+    minify_html.minify(text)
+
+
+MINIFY_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_minify),
+    ("minify-html", minifyhtml_minify),
+)
+
+MINIFY_CASES: tuple[tuple[str, str, str], ...] = (
+    ("wpt small (4 kB)", "wpt/weighted/align-content-wrap-002.html", "utf-8"),
+    ("wpt medium (9.6 kB)", "wpt/weighted/grid-auto-fill-rows-001.html", "utf-8"),
+    ("wpt large (92 kB)", "wpt/weighted/test-plan.src.html", "utf-8"),
+)
+
+
+def run_minify_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark turbohtml's minify mode against minify-html; return the case names."""
+    cases = [(name, corpus_text(path, enc)) for name, path, enc in MINIFY_CASES]
+    for name, text in cases:
+        for label, run in MINIFY_LIBS:
+            bench(f"minify {name} [{label}]", run, text)
+    return [name for name, _ in cases]
+
+
+def print_minify_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's minify beside minify-html and the slowdown factor; values in ms."""
+    if not cases:
+        return
+    others = [label for label, _ in MINIFY_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'minify benchmark':28} {'turbohtml':>12}" + "".join(f"{label:>22}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"minify {name} [turbohtml]"]
+        row = f"{'minify ' + name:28} {turbo * 1e3:8.2f} ms"
+        for label in others:
+            other = means.get(f"minify {name} [{label}]")
+            row += f" {other * 1e3:10.2f} ms {other / turbo:4.1f}x" if other is not None else f"{'-':>22}"
+        print(row)
+
+
 # --- linkify suite: auto-link URLs/emails in HTML against bleach and linkify-it #
 # turbohtml.linkify against bleach.linkify, the HTML-aware linkifier it succeeds,
 # and linkify-it-py, the pure-Python scanner markdown-it-py pulls in. bleach and
@@ -929,6 +987,7 @@ def main() -> None:
             "build",
             "edit",
             "markup",
+            "minify",
             "linkify",
             "sanitize",
             [],
@@ -944,7 +1003,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,markup,linkify,sanitize",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,markup,minify,linkify,sanitize",
         ).split(",")
     )
     means: dict[str, float] = {}
@@ -963,6 +1022,7 @@ def main() -> None:
     build_cases = run_build_suite(bench) if "build" in suites else []
     edit_cases = run_edit_suite(bench) if "edit" in suites else []
     markup_cases = run_markup_suite(bench) if "markup" in suites else []
+    minify_cases = run_minify_suite(bench) if "minify" in suites else []
     if "linkify" in suites:
         run_linkify_suite(bench)
     if "sanitize" in suites:
@@ -979,6 +1039,7 @@ def main() -> None:
     print_build_table(means, build_cases)
     print_edit_table(means, edit_cases)
     print_markup_table(means, markup_cases)
+    print_minify_table(means, minify_cases)
     print_linkify_table(means, LINKIFY_CASE_NAMES if "linkify" in suites else [])
     print_sanitize_table(means, [n for n, _ in SANITIZE_CASES] if "sanitize" in suites else [])
 

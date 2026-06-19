@@ -90,6 +90,7 @@ bench = [
   "linkify-it-py>=2",
   "lxml>=6.1",
   "markupsafe>=3",
+  "minify-html>=0.15",
   "nh3>=0.2",
   "pyperf>=2.9",
   "selectolax>=0.3.30",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import CData, Comment, Element, ProcessingInstruction, Text
+from turbohtml import CData, Comment, Element, Indent, ProcessingInstruction, Text
 
 
 def test_pi_carries_target_and_data() -> None:
@@ -109,4 +109,4 @@ def test_pi_adopts_across_trees_keeping_both_halves() -> None:
 def test_pi_and_cdata_serialize_pretty() -> None:
     root = Element("root")
     root.extend([CData("d"), ProcessingInstruction("t", "x")])
-    assert root.serialize(indent=2) == "<root>\n  <![CDATA[d]]>\n  <?t x>\n</root>"
+    assert root.serialize(layout=Indent(2)) == "<root>\n  <![CDATA[d]]>\n  <?t x>\n</root>"

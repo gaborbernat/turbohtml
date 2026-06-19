@@ -670,14 +670,15 @@ PyDoc_STRVAR(closest_doc, "closest(selector, /)\n--\n\n"
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds);
 
-PyDoc_STRVAR(serialize_doc, "serialize(*, formatter=Formatter.WHATWG, indent=None)\n--\n\n"
-                            "Serialize this node and its subtree to a str. formatter chooses the\n"
-                            "escape policy; indent, an int or string, switches to a pretty form that\n"
-                            "adds whitespace and so does not preserve meaning.");
+PyDoc_STRVAR(serialize_doc, "serialize(*, formatter=Formatter.WHATWG, layout=None)\n--\n\n"
+                            "Serialize this node and its subtree to a str. formatter chooses the escape\n"
+                            "policy. layout chooses the whitespace: None gives the compact WHATWG form,\n"
+                            "an Indent pretty-prints (adding whitespace, so it does not preserve\n"
+                            "meaning), and a Minify shrinks the output while reparsing to the same tree.");
 
-PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG, indent=None)\n--\n\n"
+PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG, layout=None)\n--\n\n"
                          "Serialize this node and its subtree to bytes in the named encoding,\n"
-                         "with the same formatter and indent controls as serialize().");
+                         "with the same formatter and layout controls as serialize().");
 
 PyDoc_STRVAR(find_doc, "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, **filters)\n--\n\n"
                        "Return the first Element along axis matching the tag filter and every\n"
@@ -2235,6 +2236,244 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg) {
     return node_wrap(state_of(self), handle, found);
 }
 
+/* The serialize(minify=...) options object: four independent round-trip-safe
+   transforms, each a bool. Immutable and reference-free, so it lives outside the
+   garbage collector like Token. */
+typedef struct {
+    PyObject_HEAD unsigned char collapse_whitespace;
+    unsigned char omit_optional_tags;
+    unsigned char unquote_attributes;
+    unsigned char strip_comments;
+} MinifyObject;
+
+static PyObject *minify_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"collapse_whitespace", "omit_optional_tags", "unquote_attributes", "strip_comments",
+                               NULL};
+    int collapse = 1;
+    int omit = 1;
+    int unquote = 1;
+    int strip = 1;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pppp:Minify", keywords, &collapse, &omit, &unquote, &strip)) {
+        return NULL;
+    }
+    MinifyObject *self = (MinifyObject *)type->tp_alloc(type, 0);
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->collapse_whitespace = (unsigned char)collapse;
+    self->omit_optional_tags = (unsigned char)omit;
+    self->unquote_attributes = (unsigned char)unquote;
+    self->strip_comments = (unsigned char)strip;
+    return (PyObject *)self;
+}
+
+static PyObject *minify_get_collapse(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyBool_FromLong(((MinifyObject *)self)->collapse_whitespace);
+}
+
+static PyObject *minify_get_omit(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyBool_FromLong(((MinifyObject *)self)->omit_optional_tags);
+}
+
+static PyObject *minify_get_unquote(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyBool_FromLong(((MinifyObject *)self)->unquote_attributes);
+}
+
+static PyObject *minify_get_strip(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyBool_FromLong(((MinifyObject *)self)->strip_comments);
+}
+
+static PyGetSetDef minify_getset[] = {
+    {"collapse_whitespace", minify_get_collapse, NULL, "fold insignificant whitespace runs to a single space", NULL},
+    {"omit_optional_tags", minify_get_omit, NULL, "drop the start/end tags the WHATWG rules make optional", NULL},
+    {"unquote_attributes", minify_get_unquote, NULL, "drop redundant attribute quotes and empty values", NULL},
+    {"strip_comments", minify_get_strip, NULL, "remove comment nodes", NULL},
+    {NULL, NULL, NULL, NULL, NULL},
+};
+
+/* Pack the four flags into the low bits so equality and hashing reduce to one
+   integer compare. */
+static long minify_bits(MinifyObject *self) {
+    return self->collapse_whitespace | self->omit_optional_tags << 1 | self->unquote_attributes << 2 |
+           self->strip_comments << 3;
+}
+
+static PyObject *minify_richcompare(PyObject *self, PyObject *other, int op) {
+    /* split rather than one compound condition: clang's branch instrumentation
+       miscounts the short-circuit edges of (... && ...) || ... and fails the gate */
+    if (!Py_IS_TYPE(other, Py_TYPE(self))) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (op != Py_EQ && op != Py_NE) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    int equal = minify_bits((MinifyObject *)self) == minify_bits((MinifyObject *)other);
+    return PyBool_FromLong(op == Py_EQ ? equal : !equal);
+}
+
+static Py_hash_t minify_hash(PyObject *self) {
+    return minify_bits((MinifyObject *)self); /* small non-negative; -1 is never produced, so no sentinel clash */
+}
+
+static PyObject *minify_repr(PyObject *self) {
+    MinifyObject *minify = (MinifyObject *)self;
+    return PyUnicode_FromFormat(
+        "Minify(collapse_whitespace=%s, omit_optional_tags=%s, unquote_attributes=%s, "
+        "strip_comments=%s)",
+        minify->collapse_whitespace ? "True" : "False", minify->omit_optional_tags ? "True" : "False",
+        minify->unquote_attributes ? "True" : "False", minify->strip_comments ? "True" : "False");
+}
+
+PyDoc_STRVAR(minify_doc, "Minify(*, collapse_whitespace=True, omit_optional_tags=True, unquote_attributes=True, "
+                         "strip_comments=True)\n--\n\n"
+                         "A serialize(layout=...)/encode(layout=...) mode that shrinks the output. Each\n"
+                         "flag toggles one round-trip-safe transform: the minified output always reparses\n"
+                         "to the same tree.");
+
+static PyType_Slot minify_slots[] = {
+    {Py_tp_doc, (void *)minify_doc},
+    {Py_tp_new, minify_new},
+    {Py_tp_repr, minify_repr},
+    {Py_tp_getset, minify_getset},
+    {Py_tp_richcompare, minify_richcompare},
+    {Py_tp_hash, minify_hash},
+    {0, NULL},
+};
+
+static PyType_Spec minify_spec = {
+    .name = "turbohtml._html.Minify",
+    .basicsize = sizeof(MinifyObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE,
+    .slots = minify_slots,
+};
+
+/* The serialize(layout=...) pretty-print mode: a per-level whitespace unit. Like
+   Minify it is immutable; it owns its unit as plain C memory and holds no Python
+   references, so it lives outside the garbage collector and only needs a dealloc
+   to free the buffer. */
+typedef struct {
+    PyObject_HEAD Py_UCS4 *unit;
+    Py_ssize_t unit_len;
+} IndentObject;
+
+static PyObject *indent_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"indent", NULL};
+    PyObject *spec = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O:Indent", keywords, &spec)) {
+        return NULL;
+    }
+    Py_UCS4 *unit;
+    Py_ssize_t unit_len;
+    if (spec == NULL || PyLong_Check(spec)) {
+        long count = spec == NULL ? 2 : PyLong_AsLong(spec);
+        if (count == -1 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: an int wider than long cannot be forced here */
+            return NULL;                       /* GCOVR_EXCL_LINE: overflow path */
+        }
+        if (count < 0) {
+            PyErr_SetString(PyExc_ValueError, "indent must not be negative");
+            return NULL;
+        }
+        unit = PyMem_Malloc((count ? (size_t)count : 1) * sizeof(Py_UCS4));
+        if (unit == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (long index = 0; index < count; index++) {
+            unit[index] = ' ';
+        }
+        unit_len = count;
+    } else if (PyUnicode_Check(spec)) {
+        unit_len = PyUnicode_GET_LENGTH(spec);
+        unit = PyUnicode_AsUCS4Copy(spec);
+        if (unit == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    } else {
+        PyErr_SetString(PyExc_TypeError, "indent must be an int or str");
+        return NULL;
+    }
+    IndentObject *self = (IndentObject *)type->tp_alloc(type, 0);
+    if (self == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(unit); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->unit = unit;
+    self->unit_len = unit_len;
+    return (PyObject *)self;
+}
+
+static void indent_dealloc(PyObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    PyMem_Free(((IndentObject *)self)->unit);
+    type->tp_free(self);
+    Py_DECREF(type);
+}
+
+static PyObject *indent_get_unit(PyObject *self, void *Py_UNUSED(closure)) {
+    IndentObject *indent = (IndentObject *)self;
+    return ucs4_to_str(indent->unit, indent->unit_len);
+}
+
+static PyGetSetDef indent_getset[] = {
+    {"unit", indent_get_unit, NULL, "the whitespace inserted per nesting level", NULL},
+    {NULL, NULL, NULL, NULL, NULL},
+};
+
+/* Mask off the sign bit so the hash is always non-negative and so never collides
+   with the -1 error sentinel, which removes the branch a sentinel remap would add. */
+static Py_hash_t indent_hash(PyObject *self) {
+    IndentObject *indent = (IndentObject *)self;
+    Py_uhash_t hash = 14695981039346656037ULL;
+    for (Py_ssize_t index = 0; index < indent->unit_len; index++) {
+        hash = (hash ^ indent->unit[index]) * 1099511628211ULL;
+    }
+    return (Py_hash_t)(hash & 0x7fffffffffffffffULL);
+}
+
+static PyObject *indent_richcompare(PyObject *self, PyObject *other, int op) {
+    /* split as in minify_richcompare so clang's branch gate covers each edge */
+    if (!Py_IS_TYPE(other, Py_TYPE(self))) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (op != Py_EQ && op != Py_NE) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    IndentObject *left = (IndentObject *)self;
+    IndentObject *right = (IndentObject *)other;
+    int equal = left->unit_len == right->unit_len &&
+                memcmp(left->unit, right->unit, (size_t)left->unit_len * sizeof(Py_UCS4)) == 0;
+    return PyBool_FromLong(op == Py_EQ ? equal : !equal);
+}
+
+static PyObject *indent_repr(PyObject *self) {
+    IndentObject *indent = (IndentObject *)self;
+    PyObject *unit = ucs4_to_str(indent->unit, indent->unit_len);
+    if (unit == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *repr = PyUnicode_FromFormat("Indent(%R)", unit);
+    Py_DECREF(unit);
+    return repr;
+}
+
+PyDoc_STRVAR(indent_doc, "Indent(indent=2)\n--\n\n"
+                         "A serialize(layout=...)/encode(layout=...) mode that pretty-prints with the\n"
+                         "given per-level unit: an int for that many spaces, or a string used verbatim.\n"
+                         "It adds whitespace, so unlike the compact default it does not preserve meaning.");
+
+static PyType_Slot indent_slots[] = {
+    {Py_tp_doc, (void *)indent_doc}, {Py_tp_new, indent_new},
+    {Py_tp_dealloc, indent_dealloc}, {Py_tp_repr, indent_repr},
+    {Py_tp_getset, indent_getset},   {Py_tp_richcompare, indent_richcompare},
+    {Py_tp_hash, indent_hash},       {0, NULL},
+};
+
+static PyType_Spec indent_spec = {
+    .name = "turbohtml._html.Indent",
+    .basicsize = sizeof(IndentObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE,
+    .slots = indent_slots,
+};
+
 /* Map a Formatter member to its enum th_formatter index; absent means the
    WHATWG default. */
 static int resolve_formatter(module_state *state, PyObject *formatter, int *out) {
@@ -2252,57 +2491,54 @@ static int resolve_formatter(module_state *state, PyObject *formatter, int *out)
     return -1;
 }
 
-/* Resolve the indent argument to a per-level UCS4 unit: None for compact output,
-   an int for that many spaces, or a string used verbatim. *out is a PyMem buffer
-   the caller frees. */
-static int resolve_indent(PyObject *indent, Py_UCS4 **out, Py_ssize_t *out_len) {
-    *out = NULL;
-    *out_len = 0;
-    if (indent == NULL || indent == Py_None) {
+/* The serialization layout the layout=... argument selects. */
+enum th_layout_mode {
+    TH_LAYOUT_COMPACT, /* the WHATWG fragment algorithm, no inserted whitespace */
+    TH_LAYOUT_INDENT,  /* pretty form keyed on an Indent's per-level unit */
+    TH_LAYOUT_MINIFY,  /* the round-trip-safe minify transforms */
+};
+
+/* Resolve the layout argument: None compacts, an Indent pretty-prints, a Minify
+   minifies. An Indent owns its unit buffer and a Minify its flags, so the resolved
+   values borrow from the object the caller keeps alive for the serialize. Returns
+   0 on success (mode set) or -1 with a TypeError on any other object. */
+static int resolve_layout(module_state *state, PyObject *layout_obj, enum th_layout_mode *mode,
+                          const Py_UCS4 **indent_unit, Py_ssize_t *indent_len, th_minify_opts *opts) {
+    if (layout_obj == NULL || layout_obj == Py_None) {
+        *mode = TH_LAYOUT_COMPACT;
         return 0;
     }
-    if (PyLong_Check(indent)) {
-        long count = PyLong_AsLong(indent);
-        if (count == -1 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: an int wider than long cannot be forced here */
-            return -1;                         /* GCOVR_EXCL_LINE: overflow path */
-        }
-        if (count < 0) {
-            PyErr_SetString(PyExc_ValueError, "indent must not be negative");
-            return -1;
-        }
-        Py_UCS4 *buffer = PyMem_Malloc((count ? (size_t)count : 1) * sizeof(Py_UCS4));
-        if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        for (long index = 0; index < count; index++) {
-            buffer[index] = ' ';
-        }
-        *out = buffer;
-        *out_len = count;
+    if (Py_IS_TYPE(layout_obj, (PyTypeObject *)state->indent_type)) {
+        IndentObject *indent = (IndentObject *)layout_obj;
+        *indent_unit = indent->unit;
+        *indent_len = indent->unit_len;
+        *mode = TH_LAYOUT_INDENT;
         return 0;
     }
-    if (PyUnicode_Check(indent)) {
-        *out_len = PyUnicode_GET_LENGTH(indent);
-        *out = PyUnicode_AsUCS4Copy(indent);
-        if (*out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
+    if (Py_IS_TYPE(layout_obj, (PyTypeObject *)state->minify_type)) {
+        MinifyObject *minify = (MinifyObject *)layout_obj;
+        opts->collapse_whitespace = minify->collapse_whitespace;
+        opts->omit_optional_tags = minify->omit_optional_tags;
+        opts->unquote_attributes = minify->unquote_attributes;
+        opts->strip_comments = minify->strip_comments;
+        *mode = TH_LAYOUT_MINIFY;
         return 0;
     }
-    PyErr_SetString(PyExc_TypeError, "indent must be an int, str, or None");
+    PyErr_SetString(PyExc_TypeError, "layout must be an Indent, a Minify, or None");
     return -1;
 }
 
-/* Serialize self to a str under the given Formatter member and indent argument. */
-static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *indent_obj) {
+/* Serialize self to a str under the given Formatter member and layout mode. */
+static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *layout_obj) {
     int formatter;
     if (resolve_formatter(state_of(self), formatter_obj, &formatter) < 0) {
         return NULL;
     }
-    Py_UCS4 *indent;
-    Py_ssize_t indent_len;
-    if (resolve_indent(indent_obj, &indent, &indent_len) < 0) {
+    enum th_layout_mode mode;
+    const Py_UCS4 *indent_unit = NULL;
+    Py_ssize_t indent_len = 0;
+    th_minify_opts minify_opts;
+    if (resolve_layout(state_of(self), layout_obj, &mode, &indent_unit, &indent_len, &minify_opts) < 0) {
         return NULL;
     }
     Py_ssize_t out_len;
@@ -2310,9 +2546,13 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
     /* the serializer walks the whole subtree; hold the per-tree lock so a concurrent
        mutate cannot rewire it mid-walk (a no-op on the GIL build) */
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+    if (mode == TH_LAYOUT_MINIFY) {
+        data = th_node_minify(tree_of(self), ((NodeObject *)self)->node, &minify_opts, formatter, &out_len);
+    } else {
+        const Py_UCS4 *indent = mode == TH_LAYOUT_INDENT ? indent_unit : NULL;
+        data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+    }
     Py_END_CRITICAL_SECTION();
-    PyMem_Free(indent);
     if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -2322,24 +2562,24 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
 }
 
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"formatter", "indent", NULL};
+    static char *keywords[] = {"formatter", "layout", NULL};
     PyObject *formatter_obj = NULL;
-    PyObject *indent_obj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OO", keywords, &formatter_obj, &indent_obj)) {
+    PyObject *layout_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OO", keywords, &formatter_obj, &layout_obj)) {
         return NULL;
     }
-    return node_serialize_str(self, formatter_obj, indent_obj);
+    return node_serialize_str(self, formatter_obj, layout_obj);
 }
 
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"encoding", "formatter", "indent", NULL};
+    static char *keywords[] = {"encoding", "formatter", "layout", NULL};
     const char *encoding = "utf-8";
     PyObject *formatter_obj = NULL;
-    PyObject *indent_obj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|s$OO", keywords, &encoding, &formatter_obj, &indent_obj)) {
+    PyObject *layout_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|s$OO", keywords, &encoding, &formatter_obj, &layout_obj)) {
         return NULL;
     }
-    PyObject *text = node_serialize_str(self, formatter_obj, indent_obj);
+    PyObject *text = node_serialize_str(self, formatter_obj, layout_obj);
     if (text == NULL) {
         return NULL;
     }
@@ -3785,6 +4025,18 @@ int tree_register(PyObject *module, module_state *state) {
     }
     if (cache_pattern_type(state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
         return -1;                       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    state->minify_type = PyType_FromModuleAndSpec(module, &minify_spec, NULL);
+    /* allocation failure cannot be forced from a test */
+    if (state->minify_type == NULL ||                                      /* GCOVR_EXCL_BR_LINE */
+        PyModule_AddObjectRef(module, "Minify", state->minify_type) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    state->indent_type = PyType_FromModuleAndSpec(module, &indent_spec, NULL);
+    /* allocation failure cannot be forced from a test */
+    if (state->indent_type == NULL ||                                      /* GCOVR_EXCL_BR_LINE */
+        PyModule_AddObjectRef(module, "Indent", state->indent_type) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->walker_type = PyType_FromModuleAndSpec(module, &walker_spec, NULL);
     state->string_walker_type = PyType_FromModuleAndSpec(module, &string_walker_spec, NULL);

@@ -108,6 +108,8 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     }
     Py_VISIT(state->axis_enum);      /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->formatter_enum); /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->minify_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->indent_type);    /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->pattern_type);   /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->markup_type);    /* GCOVR_EXCL_BR_LINE: same */
     for (int index = 0; index < 7; index++) {
@@ -146,6 +148,8 @@ static int html_clear(PyObject *module) {
     }
     Py_CLEAR(state->axis_enum);
     Py_CLEAR(state->formatter_enum);
+    Py_CLEAR(state->minify_type);
+    Py_CLEAR(state->indent_type);
     Py_CLEAR(state->pattern_type);
     Py_CLEAR(state->markup_type);
     for (int index = 0; index < 7; index++) {
