@@ -46,6 +46,7 @@ py.install_sources(
         'src/turbohtml/html_parser.py',
         'src/turbohtml/linkify.py',
         'src/turbohtml/markup.py',
+        'src/turbohtml/query.py',
         'src/turbohtml/sanitizer.py',
         'src/turbohtml/py.typed',
     ],

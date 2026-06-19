@@ -248,6 +248,9 @@ the first checked box, ignoring the unchecked ones in between:
 
     ['']
 
+If you are coming from pyquery's jQuery-style chaining, :class:`turbohtml.query.Query` wraps these primitives in a
+fluent, chainable surface where each call returns a new wrapper.
+
 Because the node types are a sealed hierarchy, structural pattern matching works: each subtype unpacks its defining
 field:
 

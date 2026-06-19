@@ -99,6 +99,7 @@ bench = [
   "minify-html>=0.15",
   "nh3>=0.2",
   "pyperf>=2.9",
+  "pyquery>=2",
   "resiliparse>=1.0.8",
   "selectolax>=0.3.30",
   "soupsieve>=2.8",

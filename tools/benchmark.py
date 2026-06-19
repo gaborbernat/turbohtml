@@ -51,6 +51,7 @@ import w3lib.html
 from bs4 import BeautifulSoup
 from linkify_it import LinkifyIt
 from lxml import html as lxml_html
+from pyquery import PyQuery
 from resiliparse.parse.html import HTMLTree  # ty: ignore[unresolved-import]  # Cython extension, ships no type stubs
 from selectolax.lexbor import LexborHTMLParser
 
@@ -58,6 +59,7 @@ import turbohtml
 from turbohtml import sanitizer as turbo_sanitizer
 from turbohtml.linkify import linkify as turbo_linkify_html
 from turbohtml.markup import escape as turbo_markup_escape
+from turbohtml.query import Query as TurboQuery
 
 _SANITIZER = turbo_sanitizer.Sanitizer(turbo_sanitizer.Policy.relaxed())
 _LXML_CLEANER = lxml_html_clean.Cleaner()
@@ -566,6 +568,63 @@ def print_edit_table(means: dict[str, float], cases: list[str]) -> None:
         row = f"{'edit ' + name:28} {turbo * 1e6:8.1f} us"
         for label in others:
             other = means.get(f"edit {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
+# --- chain suite: a pyquery-style fluent chain over a pre-parsed tree ------- #
+# Each library parses once (outside the timed region), then the timed function
+# runs one fluent chain: select every anchor, keep the linked ones, take the
+# first, tag it, and read its href -- turbohtml.query.Query against pyquery, whose
+# wrapper delegates to lxml. add_class is idempotent, so each pyperf call is equal.
+
+
+def pyquery_tree(text: str) -> PyQuery:
+    """Parse with pyquery (an lxml tree under a jQuery-style wrapper)."""
+    return PyQuery(text)
+
+
+def turbo_chain(doc: Document) -> None:
+    """Run the fluent chain with turbohtml's Query wrapper."""
+    TurboQuery(doc)("a").filter("[href]").eq(0).add_class("seen").attr("href")
+
+
+def pyquery_chain(page: PyQuery) -> None:
+    """Run the same fluent chain with pyquery."""
+    page("a").filter("[href]").eq(0).add_class("seen").attr("href")
+
+
+# Fluent-chain competitors; only turbohtml and pyquery offer jQuery-style chaining.
+CHAIN_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
+    ("turbohtml", turbo_tree, turbo_chain),
+    ("pyquery", pyquery_tree, pyquery_chain),
+)
+
+
+def run_chain_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark a pyquery-style fluent chain across every library; return the case names."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, chain in CHAIN_LIBS:
+            bench(f"chain {name} [{label}]", chain, build(text))
+        names.append(name)
+    return names
+
+
+def print_chain_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml beside pyquery and its slowdown factor for a fluent chain."""
+    if not cases:
+        return
+    others = [label for label, _, _ in CHAIN_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'chain benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"chain {name} [turbohtml]"]
+        row = f"{'chain ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"chain {name} [{label}]")
             row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
         print(row)
 
@@ -1280,6 +1339,7 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
             "serialize",
             "build",
             "edit",
+            "chain",
             "markup",
             "minify",
             "linkify",
@@ -1298,7 +1358,7 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,markup,minify,linkify,markdown,sanitize",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,markup,minify,linkify,markdown,sanitize",
         ).split(",")
     )
     means: dict[str, float] = {}
@@ -1317,6 +1377,7 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     build_cases = run_build_suite(bench) if "build" in suites else []
     edit_cases = run_edit_suite(bench) if "edit" in suites else []
+    chain_cases = run_chain_suite(bench) if "chain" in suites else []
     markup_cases = run_markup_suite(bench) if "markup" in suites else []
     minify_cases = run_minify_suite(bench) if "minify" in suites else []
     if "linkify" in suites:
@@ -1337,6 +1398,7 @@ def main() -> None:  # noqa: PLR0914  # one local per suite's collected cases; t
     print_readpath_table(means, "serialize", serialize_cases)
     print_build_table(means, build_cases)
     print_edit_table(means, edit_cases)
+    print_chain_table(means, chain_cases)
     print_markup_table(means, markup_cases)
     print_minify_table(means, minify_cases)
     print_linkify_table(means, LINKIFY_CASE_NAMES if "linkify" in suites else [])

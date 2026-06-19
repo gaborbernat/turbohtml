@@ -205,8 +205,10 @@ in a quirks-mode document and compare exactly otherwise, as the Selectors standa
 :meth:`~turbohtml.Node.xpath`, :meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` evaluate XPath
 1.0 over the same model: a native-C engine compiles each expression once into an immutable, per-tree-cached program,
 resolves name tests to interned atoms, and collapses the ``//`` abbreviation to a single ``descendant`` walk, so the
-structural axes, predicates, operators, unions, and the core function library run at lxml's speed. Output runs back
-through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`,
+structural axes, predicates, operators, unions, and the core function library run at lxml's speed. The core API stays
+one-name-per-concept and returns plain lists, so the jQuery-style chaining pyquery users expect lives in an optional
+Python-side wrapper, :class:`turbohtml.query.Query`, whose traversal and mutation methods each return a wrapper. Output
+runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`,
 WHATWG-conformant by default with the escaping selectable through :class:`~turbohtml.Formatter`.
 
 A :class:`~turbohtml.Minify` is a serialization mode on that same conformant tree, and its design rule is that the
