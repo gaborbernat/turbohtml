@@ -770,7 +770,49 @@ MARKDOWN_CASES: tuple[tuple[str, str], ...] = (
     ("list 4 KiB", ("<ul><li>item <em>one</em></li><li>item two<ul><li>nested</li></ul></li></ul>" * 40)),
     ("table 4 KiB", ("<table><tr><th>Name</th><th>Value</th></tr><tr><td>a</td><td>1</td></tr></table>" * 35)),
 )
-MARKDOWN_CASE_NAMES = [name for name, _ in MARKDOWN_CASES]
+
+# the configured case turns on the option machinery in each library (underscore
+# emphasis, reference links, padded tables, full escaping) so the cost of a
+# non-default conversion is measured, not just the opinionated defaults.
+_MARKDOWN_OPTS_HTML = (
+    "<h2>H</h2><p>A <b>b</b> & <a href='/x'>l</a>.</p>"
+    "<table><tr><th>K</th><th>V</th></tr><tr><td>a</td><td>1</td></tr></table>"
+) * 18
+
+
+def turbo_markdown_configured(text: str) -> None:
+    """Convert with turbohtml's option surface engaged."""
+    turbohtml.parse(text).to_markdown(
+        strong="__", emphasis="_", link_style="reference", pad_tables=True, escape_mode="all"
+    )
+
+
+def markdownify_configured(text: str) -> None:
+    """Convert with markdownify's comparable options."""
+    markdownify.markdownify(text, strong_em_symbol="_", heading_style="atx", escape_misc=True)
+
+
+_HTML2TEXT_CONFIGURED = html2text.HTML2Text()
+_HTML2TEXT_CONFIGURED.body_width = 0
+_HTML2TEXT_CONFIGURED.emphasis_mark = "_"
+_HTML2TEXT_CONFIGURED.strong_mark = "__"
+_HTML2TEXT_CONFIGURED.inline_links = False
+_HTML2TEXT_CONFIGURED.pad_tables = True
+_HTML2TEXT_CONFIGURED.escape_snob = True
+
+
+def html2text_configured(text: str) -> None:
+    """Convert with html2text's comparable options."""
+    _HTML2TEXT_CONFIGURED.handle(text)
+
+
+MARKDOWN_OPT_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_markdown_configured),
+    ("markdownify", markdownify_configured),
+    ("html2text", html2text_configured),
+)
+
+MARKDOWN_CASE_NAMES = [name for name, _ in MARKDOWN_CASES] + ["configured 4 KiB"]
 
 
 def run_markdown_suite(bench: Callable[[str, object, object], None]) -> None:
@@ -778,6 +820,8 @@ def run_markdown_suite(bench: Callable[[str, object, object], None]) -> None:
     for name, text in MARKDOWN_CASES:
         for label, run in MARKDOWN_LIBS:
             bench(f"markdown {name} [{label}]", run, text)
+    for label, run in MARKDOWN_OPT_LIBS:
+        bench(f"markdown configured 4 KiB [{label}]", run, _MARKDOWN_OPTS_HTML)
 
 
 def print_markdown_table(means: dict[str, float], cases: list[str]) -> None:

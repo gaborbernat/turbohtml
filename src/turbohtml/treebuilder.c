@@ -4085,9 +4085,5 @@ void th_tree_free(th_tree *tree) {
 }
 
 #include "treebuilder_serialize.h"
-<<<<<<< HEAD
 #include "treebuilder_minify.h"
-||||||| parent of ec40555 (✨ feat(serialize): add to_markdown GFM tree exporter)
-=======
 #include "treebuilder_markdown.h"
->>>>>>> ec40555 (✨ feat(serialize): add to_markdown GFM tree exporter)

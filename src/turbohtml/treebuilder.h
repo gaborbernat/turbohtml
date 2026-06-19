@@ -215,11 +215,65 @@ typedef struct {
    PyMem-allocated; *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatter, Py_ssize_t *out_len);
 
-/* Render node and its subtree as GitHub-Flavored Markdown: a block-aware tree
-   walk emitting headings, lists, links, emphasis, code, blockquotes, images and
-   pipe tables with normal-flow whitespace collapsing. PyMem-allocated; *out_len
+/* The Markdown export configuration, a union of the markdownify and html2text
+   knobs with one name per concept. The Python binding fills it from keyword
+   arguments starting from th_markdown_default_opts(). String markers are
+   borrowed ASCII whose argument objects the binding keeps alive for the call. */
+enum th_md_heading { TH_MD_HEADING_ATX, TH_MD_HEADING_ATX_CLOSED, TH_MD_HEADING_SETEXT };
+enum th_md_code { TH_MD_CODE_FENCED, TH_MD_CODE_INDENTED };
+enum th_md_link { TH_MD_LINK_INLINE, TH_MD_LINK_REFERENCE };
+enum th_md_image { TH_MD_IMAGE_MARKDOWN, TH_MD_IMAGE_ALT, TH_MD_IMAGE_IGNORE };
+enum th_md_table { TH_MD_TABLE_MARKDOWN, TH_MD_TABLE_STRIP };
+enum th_md_escape { TH_MD_ESCAPE_MINIMAL, TH_MD_ESCAPE_ALL };
+enum th_md_break { TH_MD_BREAK_SPACES, TH_MD_BREAK_BACKSLASH };
+enum th_md_doc_strip { TH_MD_DOC_STRIP, TH_MD_DOC_LSTRIP, TH_MD_DOC_RSTRIP, TH_MD_DOC_NONE };
+enum th_md_table_header { TH_MD_HEADER_FIRST, TH_MD_HEADER_DETECT, TH_MD_HEADER_NONE };
+
+typedef struct {
+    int heading_style;          /* enum th_md_heading */
+    const char *bullets;        /* unordered markers cycled by depth, e.g. "-*+" */
+    const char *strong;         /* bold wrapper, e.g. "**" */
+    const char *emphasis;       /* italic wrapper, e.g. "*" */
+    const char *strikethrough;  /* del/s wrapper, e.g. "~~" */
+    int keep_emphasis;          /* 0 strips bold/italic/strike markup, emitting text only */
+    int keep_strikethrough;     /* 0 hides del/s content entirely */
+    int code_block_style;       /* enum th_md_code */
+    const char *code_language;  /* default fence language when none is on the element */
+    const char *code_mark_open; /* non-NULL wraps code blocks, e.g. "[code]" */
+    const char *code_mark_close;
+    int link_style;          /* enum th_md_link */
+    int autolink;            /* emit <url> when the text equals an absolute href */
+    int link_title;          /* 1 uses the href as the title when none is given */
+    int ignore_links;        /* emit link text only, no markup */
+    int skip_internal_links; /* drop href="#..." fragment links */
+    int image_mode;          /* enum th_md_image */
+    const char *default_image_alt;
+    const char *base_url;   /* prefix resolved onto a relative link/image href */
+    int table_mode;         /* enum th_md_table */
+    int table_header;       /* enum th_md_table_header */
+    int pad_tables;         /* align columns to a common width */
+    const char *quote_open; /* <q> wrappers */
+    const char *quote_close;
+    int escape_mode; /* enum th_md_escape */
+    int escape_asterisks;
+    int escape_underscores;
+    int line_break;           /* enum th_md_break */
+    int block_spacing_single; /* one newline between blocks instead of a blank line */
+    int wrap_width;           /* word-wrap column, 0 disables */
+    int wrap_list_items;
+    int document_strip; /* enum th_md_doc_strip */
+    const char *sub;    /* <sub> wrapper */
+    const char *sup;    /* <sup> wrapper */
+} md_opts;
+
+/* The no-argument baseline configuration (opinionated GitHub-Flavored Markdown). */
+md_opts th_markdown_default_opts(void);
+
+/* Render node and its subtree as Markdown under opt: a block-aware tree walk
+   emitting headings, lists, links, emphasis, code, blockquotes, images and pipe
+   tables with normal-flow whitespace collapsing. PyMem-allocated; *out_len
    receives the length. NULL on allocation failure. */
-Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, Py_ssize_t *out_len);
+Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_ssize_t *out_len);
 
 /* The doctype's public and system identifiers as slices of the node's own text;
    returns 1 with the four out params set when present, 0 for a name-only doctype. */

@@ -585,7 +585,6 @@ whitespace and so does not preserve meaning. :meth:`~turbohtml.Node.encode` is t
     </div>
     b'<div><p>caf&eacute; &amp; co</p></div>'
 
-<<<<<<< HEAD
 *******************
  Minify the output
 *******************
@@ -615,8 +614,7 @@ strip comments; all default on. Because ``layout`` holds one mode, a :class:`~tu
 Whitespace-significant elements (``pre``, ``textarea``, ``listing``) and raw-text elements (``script``, ``style``) keep
 their content verbatim, and a tag is never dropped when omitting it would let the reparse reconstruct a formatting
 element across the boundary.
-||||||| parent of ec40555 (✨ feat(serialize): add to_markdown GFM tree exporter)
-=======
+
 ********************
  Export to Markdown
 ********************
@@ -649,7 +647,24 @@ second dependency and the whole walk in C:
 
 Call it on any node to export just that subtree (``article.to_markdown()``). The output is opinionated GFM: ATX
 headings, ``-`` bullets, fenced code blocks, inline links, and ``*``/``**`` emphasis.
->>>>>>> ec40555 (✨ feat(serialize): add to_markdown GFM tree exporter)
+
+Keyword options cover the markdownify and html2text configuration surface, so a migration reproduces the old output:
+setext headings, underscore emphasis, reference links, padded tables, alternate escaping, and more. The :doc:`migration`
+guide maps each old option to its turbohtml name.
+
+.. testcode::
+
+    doc = turbohtml.parse('<h2>Tea</h2><p><b>Steep</b> it. <a href="/x">More</a>.</p>')
+    print(doc.to_markdown(heading_style="setext", strong="__", link_style="reference"))
+
+.. testoutput::
+
+    Tea
+    ---
+
+    __Steep__ it. [More][1].
+
+    [1]: /x
 
 ************************************
  Parse bytes of an unknown encoding

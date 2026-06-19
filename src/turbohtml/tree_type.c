@@ -513,16 +513,130 @@ static PyObject *node_get_inner_html(PyObject *self, void *Py_UNUSED(closure)) {
     return result;
 }
 
-PyDoc_STRVAR(to_markdown_doc, "to_markdown()\n--\n\n"
-                              "Render this node and its subtree as GitHub-Flavored Markdown: headings,\n"
-                              "lists, links, emphasis, code, blockquotes, images and pipe tables, with\n"
-                              "runs of whitespace collapsed the way normal flow lays them out.");
+PyDoc_STRVAR(
+    to_markdown_doc,
+    "to_markdown(*, heading_style='atx', bullets='-', strong='**', emphasis='*', strikethrough='keep', "
+    "ignore_emphasis=False, sub_symbol='', sup_symbol='', code_block_style='fenced', code_language='', "
+    "mark_code=False, link_style='inline', autolink=True, link_title=False, ignore_links=False, "
+    "skip_internal_links=False, base_url='', image_mode='markdown', default_image_alt='', table_mode='markdown', "
+    "table_header='first', pad_tables=False, escape_mode='minimal', escape_asterisks=True, escape_underscores=True, "
+    "line_break='spaces', block_spacing='double', document_strip='strip', quote_open='\"', quote_close='\"')\n--\n\n"
+    "Render this node and its subtree as Markdown. The keyword options cover the\n"
+    "markdownify and html2text configuration surface; the defaults emit opinionated\n"
+    "GitHub-Flavored Markdown.");
 
-static PyObject *node_to_markdown(PyObject *self, PyObject *Py_UNUSED(ignored)) {
-    PyObject *result;
+/* Resolve a string option against its allowed values, writing the matched index
+   into *out (an enum), or leave *out untouched when the argument was omitted. */
+static int md_resolve_enum(const char *name, PyObject *value, const char *const *choices, int count, int *out) {
+    if (value == NULL) {
+        return 0;
+    }
+    const char *text = PyUnicode_AsUTF8(value);
+    if (text == NULL) {
+        PyErr_Clear();
+        PyErr_Format(PyExc_TypeError, "%s must be a string", name);
+        return -1;
+    }
+    for (int i = 0; i < count; i++) {
+        if (strcmp(text, choices[i]) == 0) {
+            *out = i;
+            return 0;
+        }
+    }
+    PyErr_Format(PyExc_ValueError, "%s: invalid value %R", name, value);
+    return -1;
+}
+
+static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds) {
+    md_opts opt = th_markdown_default_opts();
+    PyObject *heading = NULL, *strike = NULL, *code_style = NULL, *link = NULL, *image = NULL, *table = NULL;
+    PyObject *header = NULL, *escape = NULL, *brk = NULL, *spacing = NULL, *docstrip = NULL;
+    int ignore_emphasis = 0, mark_code = 0;
+    static char *kw[] = {"heading_style",
+                         "bullets",
+                         "strong",
+                         "emphasis",
+                         "strikethrough",
+                         "ignore_emphasis",
+                         "sub_symbol",
+                         "sup_symbol",
+                         "code_block_style",
+                         "code_language",
+                         "mark_code",
+                         "link_style",
+                         "autolink",
+                         "link_title",
+                         "ignore_links",
+                         "skip_internal_links",
+                         "base_url",
+                         "image_mode",
+                         "default_image_alt",
+                         "table_mode",
+                         "table_header",
+                         "pad_tables",
+                         "escape_mode",
+                         "escape_asterisks",
+                         "escape_underscores",
+                         "line_break",
+                         "block_spacing",
+                         "document_strip",
+                         "quote_open",
+                         "quote_close",
+                         NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOOss", kw, &heading, &opt.bullets, &opt.strong, &opt.emphasis,
+            &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code, &link,
+            &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
+            &opt.default_image_alt, &table, &header, &opt.pad_tables, &escape, &opt.escape_asterisks,
+            &opt.escape_underscores, &brk, &spacing, &docstrip, &opt.quote_open, &opt.quote_close)) {
+        return NULL;
+    }
+    static const char *const headings[] = {"atx", "atx_closed", "setext"};
+    static const char *const strikes[] = {"keep", "hide"};
+    static const char *const codes[] = {"fenced", "indented"};
+    static const char *const links[] = {"inline", "reference"};
+    static const char *const images[] = {"markdown", "alt", "ignore"};
+    static const char *const tables[] = {"markdown", "strip"};
+    static const char *const headers[] = {"first", "detect", "none"};
+    static const char *const escapes[] = {"minimal", "all"};
+    static const char *const breaks[] = {"spaces", "backslash"};
+    static const char *const spacings[] = {"double", "single"};
+    static const char *const strips[] = {"strip", "lstrip", "rstrip", "none"};
+    int keep_strike = 0, block_spacing = 0;
+    if (md_resolve_enum("heading_style", heading, headings, 3, &opt.heading_style) < 0 ||
+        md_resolve_enum("strikethrough", strike, strikes, 2, &keep_strike) < 0 ||
+        md_resolve_enum("code_block_style", code_style, codes, 2, &opt.code_block_style) < 0 ||
+        md_resolve_enum("link_style", link, links, 2, &opt.link_style) < 0 ||
+        md_resolve_enum("image_mode", image, images, 3, &opt.image_mode) < 0 ||
+        md_resolve_enum("table_mode", table, tables, 2, &opt.table_mode) < 0 ||
+        md_resolve_enum("table_header", header, headers, 3, &opt.table_header) < 0 ||
+        md_resolve_enum("escape_mode", escape, escapes, 2, &opt.escape_mode) < 0 ||
+        md_resolve_enum("line_break", brk, breaks, 2, &opt.line_break) < 0 ||
+        md_resolve_enum("block_spacing", spacing, spacings, 2, &block_spacing) < 0 ||
+        md_resolve_enum("document_strip", docstrip, strips, 4, &opt.document_strip) < 0) {
+        return NULL;
+    }
+    if (*opt.bullets == '\0') {
+        PyErr_SetString(PyExc_ValueError, "bullets must not be empty");
+        return NULL;
+    }
+    opt.keep_emphasis = !ignore_emphasis;
+    opt.keep_strikethrough = keep_strike == 0;
+    opt.block_spacing_single = block_spacing == 1;
+    if (mark_code) {
+        opt.code_mark_open = "[code]";
+        opt.code_mark_close = "[/code]";
+    }
+    Py_ssize_t out_len;
+    Py_UCS4 *data;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    result = str_from_accessor(th_node_markdown, tree_of(self), ((NodeObject *)self)->node);
+    data = th_node_markdown(tree_of(self), ((NodeObject *)self)->node, &opt, &out_len);
     Py_END_CRITICAL_SECTION();
+    if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = ucs4_to_str(data, out_len);
+    PyMem_Free(data);
     return result;
 }
 
@@ -755,7 +869,7 @@ static PyMethodDef node_methods[] = {
     {"closest", node_css_closest, METH_O, closest_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
     {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
-    {"to_markdown", node_to_markdown, METH_NOARGS, to_markdown_doc},
+    {"to_markdown", (PyCFunction)(void (*)(void))node_to_markdown, METH_VARARGS | METH_KEYWORDS, to_markdown_doc},
     {"insert_before", node_insert_before, METH_VARARGS, insert_before_doc},
     {"insert_after", node_insert_after, METH_VARARGS, insert_after_doc},
     {"replace_with", node_replace_with, METH_VARARGS, replace_with_doc},

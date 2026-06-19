@@ -8,3 +8,9 @@ invalid Markdown; plain prose is bulk-copied after its first character. Three th
 are correct here: an inline code span grows its backtick fence past any backticks in the content, a ``|`` inside a table
 cell is escaped, and a nested ordered list keeps its own counter. The walk holds no state outside its stack frame and
 takes the per-tree critical section, so it is safe under the free-threaded build.
+
+Keyword options cover the markdownify and html2text configuration surface with one name per concept, so a project
+migrating off either reproduces its output: heading style (ATX, closed ATX, setext), bullet and emphasis and quote
+markers, reference vs inline links with autolinking, image alt/ignore modes, ignored links/emphasis/tables, fenced or
+indented or marked code blocks, padded and stripped tables, three escaping levels, single vs double block spacing, and
+document trimming. The :doc:`migration <migration>` guide maps each old option to its turbohtml name.

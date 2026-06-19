@@ -566,14 +566,90 @@ runs in C rather than a Python walk over a second parser's tree:
 
     Some **bold** text.
 
+The defaults emit opinionated GitHub-Flavored Markdown, and keyword options cover the configuration surface of both
+libraries with one name per concept. The markdownify options map as:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - markdownify
+      - turbohtml ``to_markdown(...)``
+    - - ``heading_style`` (``atx``/``atx_closed``/``underlined``)
+      - ``heading_style`` (``"atx"``/``"atx_closed"``/``"setext"``)
+    - - ``bullets``
+      - ``bullets``
+    - - ``strong_em_symbol``
+      - ``strong`` and ``emphasis`` (independent, so a superset)
+    - - ``sub_symbol``, ``sup_symbol``
+      - ``sub_symbol``, ``sup_symbol``
+    - - ``escape_asterisks``, ``escape_underscores``
+      - ``escape_asterisks``, ``escape_underscores``
+    - - ``escape_misc``
+      - ``escape_mode="all"``
+    - - ``autolinks``
+      - ``autolink``
+    - - ``default_title``
+      - ``link_title``
+    - - ``table_infer_header``
+      - ``table_header="first"`` (the default) vs ``"none"``
+    - - ``newline_style`` (``spaces``/``backslash``)
+      - ``line_break`` (``"spaces"``/``"backslash"``)
+    - - ``strip_document``
+      - ``document_strip`` (``"strip"``/``"lstrip"``/``"rstrip"``/``"none"``)
+    - - ``code_language``
+      - ``code_language``
+
+The html2text options map as:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - html2text
+      - turbohtml ``to_markdown(...)``
+    - - ``ul_item_mark``
+      - ``bullets``
+    - - ``emphasis_mark``, ``strong_mark``
+      - ``emphasis``, ``strong``
+    - - ``ignore_emphasis``
+      - ``ignore_emphasis``
+    - - ``ignore_links``
+      - ``ignore_links``
+    - - ``skip_internal_links``
+      - ``skip_internal_links``
+    - - ``inline_links``
+      - ``link_style`` (``"inline"``/``"reference"``)
+    - - ``ignore_images``, ``images_to_alt``
+      - ``image_mode`` (``"markdown"``/``"alt"``/``"ignore"``)
+    - - ``default_image_alt``
+      - ``default_image_alt``
+    - - ``ignore_tables``, ``bypass_tables``
+      - ``table_mode`` (``"markdown"``/``"strip"``)
+    - - ``pad_tables``
+      - ``pad_tables``
+    - - ``mark_code``
+      - ``mark_code``
+    - - ``backquote_code_style``
+      - ``code_block_style`` (``"fenced"``/``"indented"``)
+    - - ``single_line_break``
+      - ``block_spacing="single"``
+    - - ``baseurl``
+      - ``base_url``
+    - - ``open_quote``, ``close_quote``
+      - ``quote_open``, ``quote_close``
+    - - ``escape_snob``
+      - ``escape_mode="all"``
+
 Pitfalls
 ========
 
-- The output is opinionated GitHub-Flavored Markdown with no options: ATX headings, ``-`` bullets, ``*``/``**``
-  emphasis, fenced code blocks, and inline links. The knob-per-feature surface ``html2text`` and ``markdownify`` expose
-  (heading style, bullet character, line wrapping, reference links) is not configurable yet.
+- The bold and italic markers are independent (``strong`` and ``emphasis``), where markdownify derives both from one
+  ``strong_em_symbol``; set both to reproduce its behavior.
 - ``to_markdown`` is a method on any node, so convert a subtree by calling it on the element you selected
   (``doc.find("article").to_markdown()``) instead of slicing the HTML string first.
-- There is no line wrapping; ``html2text``'s ``body_width`` has no equivalent. Each block is one logical line.
-- Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is not part of this method; for now read
-  :attr:`~turbohtml.Node.text` for the unstructured concatenation.
+- A few niche knobs are intentionally dropped: html2text's Google-Docs heuristics (``google_doc``,
+  ``google_list_indent``), the parser-selection options (markdownify's ``bs4_options``), and the per-call tag-handler
+  callbacks. ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
+- Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is a separate method; for the unstructured
+  concatenation read :attr:`~turbohtml.Node.text`.

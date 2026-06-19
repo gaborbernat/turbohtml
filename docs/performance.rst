@@ -155,7 +155,8 @@ far behind.
 BeautifulSoup) and `html2text <https://github.com/Alir3z4/html2text>`_ (a streaming ``HTMLParser`` subclass). All three
 take an HTML string and return Markdown, so each parses first; turbohtml parses to the WHATWG tree and walks it in C,
 where the others build and convert in Python. The single C pass converts a page in tens of microseconds, two orders of
-magnitude ahead of markdownify.
+magnitude ahead of markdownify. The ``configured`` row turns the option surface on in all three (underscore emphasis,
+reference links, padded tables, full escaping), and turbohtml stays ahead by the same margin.
 
 .. list-table::
     :header-rows: 1
@@ -177,6 +178,10 @@ magnitude ahead of markdownify.
       - 27 µs
       - 2948 µs
       - 1069 µs
+    - - configured (4 KiB)
+      - 28 µs
+      - 2726 µs
+      - 1182 µs
 
 ************
  Unescaping
