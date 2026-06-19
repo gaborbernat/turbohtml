@@ -1,0 +1,3 @@
+Add a "From parsel" section to the migration guide, mapping Scrapy parsel's extraction-oriented ``Selector`` API
+(``.css()`` / ``.xpath()`` with ``.get()`` / ``.getall()`` and the ``::text`` / ``::attr()`` pseudo-elements) onto
+turbohtml's node-returning :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.xpath`.
