@@ -219,38 +219,47 @@ builds an lxml tree and a CSS model in Python, where turbohtml does the whole la
  Unescaping
 ************
 
-:func:`turbohtml.unescape` against :func:`python:html.unescape`. It gains the most on entity-heavy input, where the
-standard library pays a Python call per match; turbohtml hops between ``&`` occurrences and bulk-copies the clean spans
-between references.
+:func:`turbohtml.unescape` against :func:`python:html.unescape` and `w3lib <https://github.com/scrapy/w3lib>`_'s
+``replace_entities``, the Scrapy helper that resolves the same references. It gains the most on entity-heavy input,
+where the standard library pays a Python call per match and w3lib runs a regular-expression substitution with a Python
+callback per match; turbohtml hops between ``&`` occurrences in C and bulk-copies the clean spans between references.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40 20 20
+    :widths: 38 20 21 21
 
     - - input
       - turbohtml
       - html.unescape
+      - w3lib
     - - tiny plain (64 B)
       - 0.02 µs
       - 0.03 µs
+      - 0.26 µs
     - - medium dense refs (4 KiB)
-      - 8.26 µs
-      - 69.0 µs
+      - 8.03 µs
+      - 69.5 µs
+      - 116 µs
     - - numeric refs (4 KiB)
-      - 6.00 µs
-      - 78.9 µs
+      - 5.74 µs
+      - 78.7 µs
+      - 93.2 µs
     - - book HTML, real refs (4 MiB)
-      - 2.50 ms
-      - 7.91 ms
+      - 2.46 ms
+      - 7.92 ms
+      - 13.3 ms
     - - escaped book HTML (5 MiB)
       - 1.87 ms
-      - 19.3 ms
+      - 19.5 ms
+      - 35.5 ms
     - - dense refs (4 MiB)
       - 10.1 ms
-      - 73.2 ms
+      - 74.1 ms
+      - 117 ms
     - - UCS-2 refs (4 MiB)
-      - 2.67 ms
-      - 18.0 ms
+      - 2.66 ms
+      - 18.4 ms
+      - 27.5 ms
 
 ************
  Tokenizing
