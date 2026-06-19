@@ -39,7 +39,9 @@ from typing import TYPE_CHECKING
 import bleach
 import html2text
 import html5lib
+import html_sanitizer
 import inscriptis
+import lxml_html_clean
 import markdownify
 import markupsafe
 import minify_html
@@ -57,6 +59,8 @@ from turbohtml.linkify import linkify as turbo_linkify_html
 from turbohtml.markup import escape as turbo_markup_escape
 
 _SANITIZER = turbo_sanitizer.Sanitizer(turbo_sanitizer.Policy.relaxed())
+_LXML_CLEANER = lxml_html_clean.Cleaner()
+_HTML_SANITIZER = html_sanitizer.Sanitizer()
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -913,10 +917,22 @@ def nh3_sanitize(text: str) -> None:
     nh3.clean(text)
 
 
+def lxml_clean_sanitize(text: str) -> None:
+    """Sanitize with lxml-html-clean's blocklist Cleaner (the externalized lxml.html.clean)."""
+    _LXML_CLEANER.clean_html(text)
+
+
+def html_sanitizer_sanitize(text: str) -> None:
+    """Sanitize with html-sanitizer's allowlist Sanitizer, over lxml."""
+    _HTML_SANITIZER.sanitize(text)
+
+
 SANITIZE_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
     ("turbohtml", turbo_sanitize),
     ("nh3", nh3_sanitize),
     ("bleach", bleach_sanitize),
+    ("lxml-html-clean", lxml_clean_sanitize),
+    ("html-sanitizer", html_sanitizer_sanitize),
 )
 
 SANITIZE_CASES: tuple[tuple[str, str], ...] = (

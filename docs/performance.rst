@@ -124,28 +124,38 @@ turbohtml's own tree carry it past bleach's html5lib pass by five to twenty time
  Sanitize
 **********
 
-:func:`turbohtml.sanitizer.sanitize` against `bleach <https://bleach.readthedocs.io>`_'s ``clean`` (its end-of-life
-predecessor, on html5lib) and `nh3 <https://nh3.readthedocs.io>`_ (the Rust ammonia binding). All three parse, filter to
-an allowlist, and reserialize; the inputs are realistic user-generated content with a few disallowed tags and a
-dangerous attribute mixed in. turbohtml runs the whole filtering walk in C, so it beats even nh3, and it leaves bleach
-far behind.
+:func:`turbohtml.sanitizer.sanitize` against four sanitizers. Three share its allowlist model -- only listed tags and
+attributes survive, so a vector nobody anticipated is dropped by default: `nh3 <https://nh3.readthedocs.io>`_ (the Rust
+ammonia binding), `bleach <https://bleach.readthedocs.io>`_ (its end-of-life predecessor, on html5lib), and
+`html-sanitizer <https://github.com/matthiask/html-sanitizer>`_ (an allowlist over lxml). The fourth, `lxml-html-clean
+<https://github.com/fedora-python/lxml_html_clean>`_ (the externalized ``lxml.html.clean.Cleaner``), is a blocklist: it
+strips the constructs it knows are dangerous and lets the rest through, a model lxml itself flagged as hard to keep
+safe. The inputs are realistic user content with a few disallowed tags and a dangerous attribute mixed in. turbohtml
+runs the whole filtering walk in C and leads every alternative, but the model matters more than the microseconds --
+prefer an allowlist, since a blocklist passes anything it did not think to name.
 
 .. list-table::
     :header-rows: 1
-    :widths: 34 22 22 22
+    :widths: 22 12 11 11 18 18
 
     - - input
       - turbohtml
       - nh3
       - bleach
+      - lxml-html-clean
+      - html-sanitizer
     - - comment (1 link, 1 script)
-      - 1.8 µs
-      - 6.9 µs
-      - 107 µs
+      - 1.5 µs
+      - 5.5 µs
+      - 79.3 µs
+      - 19.3 µs
+      - 46.8 µs
     - - post (4 KiB)
-      - 52 µs
-      - 152 µs
-      - 2570 µs
+      - 41.1 µs
+      - 121.6 µs
+      - 1921 µs
+      - 505 µs
+      - 1559 µs
 
 **********
  Markdown
