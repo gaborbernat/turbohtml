@@ -224,6 +224,17 @@ Selectors also reach the form and UI pseudo-classes the markup determines, such 
 
     1
 
+``:is()`` and ``:where()`` are forgiving, so an arm they cannot parse is dropped and the rest still select -- a typo in
+one alternative does not break the query:
+
+.. testcode::
+
+    print([node.tag for node in doc.select(":is(h1, :oops)")])
+
+.. testoutput::
+
+    ['h1']
+
 Because the node types are a sealed hierarchy, structural pattern matching works: each subtype unpacks its defining
 field:
 

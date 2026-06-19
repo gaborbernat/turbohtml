@@ -403,6 +403,19 @@ The interaction- and navigation-state pseudo-classes -- ``:hover``, ``:focus``, 
 match nothing, since a parsed tree has no live UA state. They stay usable inside ``:is()`` and ``:not()`` rather than
 raising, so ``a:not(:visited)`` keeps every link.
 
+``:is()`` and ``:where()`` take a *forgiving* selector list: an arm that fails to parse is dropped and the rest stay
+usable, so one unsupported or malformed arm never invalidates the whole selector (``:not()`` and ``:has()`` take a real
+list, where a bad arm is still an error):
+
+.. testcode::
+
+    doc = turbohtml.parse("<p>one</p><div>two</div>")
+    print([e.tag for e in doc.select(":is(p, :totally-unknown)")])
+
+.. testoutput::
+
+    ['p']
+
 ``#id`` and ``.class`` selectors compare case-sensitively in a standards-mode document and ASCII case-insensitively in a
 quirks-mode one (a document with no doctype), matching how a browser resolves them. Add a ``<!doctype html>`` to keep
 the comparison exact:

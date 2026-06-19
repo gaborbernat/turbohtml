@@ -192,7 +192,9 @@ node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_al
 attribute, the four combinators, the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, and the
 ``:scope``, form/UI (``:checked``, ``:disabled``, ``:default``, ...), ``:lang()`` and ``:dir()`` pseudo-classes that a
 static tree can determine -- and :meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place.
-The pseudo-classes that depend on live interaction or navigation state (``:hover``, ``:focus``, ``:target``,
+``:is()`` and ``:where()`` parse their argument as a forgiving selector list (a bad arm is dropped, the rest stay
+usable), while ``:not()`` and ``:has()`` take a real list where any bad arm is an error, as the Selectors standard
+specifies. The pseudo-classes that depend on live interaction or navigation state (``:hover``, ``:focus``, ``:target``,
 ``:visited``, ``:link``, ...) parse but match nothing, since a parsed document has no such state. Selectors compile
 against the tree, so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an
 integer compare. Compiling against the tree also captures its document mode, so ``#id`` and ``.class`` fold ASCII case
