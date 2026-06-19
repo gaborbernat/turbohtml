@@ -641,7 +641,8 @@ PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "attribute selectors, the four combinators, the structural pseudo-classes,\n"
                          "the :is(), :where(), :has(), and :not() functional pseudo-classes, and the\n"
                          ":scope, form/UI, :lang() and :dir() pseudo-classes a static tree can\n"
-                         "determine; live-state pseudo-classes (:hover, :focus, ...) match nothing.");
+                         "determine; live-state pseudo-classes (:hover, :focus, ...) match nothing.\n"
+                         ":is() and :where() take a forgiving list, so a bad arm is dropped.");
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");

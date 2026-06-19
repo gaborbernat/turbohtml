@@ -454,7 +454,8 @@ static void sel_parse_anb(sel_parser *parser, int *a, int *b) {
 
 /* Parse the comma-separated selector list inside a :is()/:where()/:has(); defined
    below, after the complex-selector parser it drives. */
-static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, int nested, int relative);
+static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, int nested, int relative,
+                          int forgiving);
 static void sel_free_alts(sel_complex *alts, int count);
 
 /* The pseudo-classes that depend on live UA/interaction or navigation state a
@@ -602,7 +603,10 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
             return;
         }
         parser->pos++;
-        sel_parse_alts(parser, &simple->sub, &simple->sub_count, 1, listy == PSEUDO_HAS);
+        /* :is()/:where() take a forgiving selector list (a bad arm is dropped); :has()
+           and :not() take a real list, so any bad arm invalidates the whole selector */
+        int forgiving = listy == PSEUDO_IS || listy == PSEUDO_WHERE;
+        sel_parse_alts(parser, &simple->sub, &simple->sub_count, 1, listy == PSEUDO_HAS, forgiving);
     } else if (langdir != PSEUDO_NONE) {
         simple->pseudo = langdir;
         if (parser->pos >= parser->len || parser->src[parser->pos] != '(') {
@@ -813,11 +817,53 @@ static int sel_complex_parse(sel_parser *parser, sel_complex *complex, int neste
     return 0;
 }
 
+/* Recover from a failed arm in a forgiving selector list: advance to the next
+   top-level ',' or the ')' that closes the list (or the end), skipping balanced
+   brackets and quoted strings so a delimiter inside them does not end the arm. */
+static void sel_skip_bad_arm(sel_parser *parser) {
+    int depth = 0;
+    while (parser->pos < parser->len) {
+        Py_UCS4 ch = parser->src[parser->pos];
+        if (ch == '"' || ch == '\'') {
+            Py_UCS4 quote = ch;
+            parser->pos++;
+            while (parser->pos < parser->len && parser->src[parser->pos] != quote) {
+                if (parser->src[parser->pos] == '\\' && parser->pos + 1 < parser->len) {
+                    parser->pos++; /* the escaped character cannot close the string */
+                }
+                parser->pos++;
+            }
+            if (parser->pos < parser->len) {
+                parser->pos++; /* the closing quote */
+            }
+            continue;
+        }
+        if (ch == '(' || ch == '[') {
+            depth++;
+        } else if (ch == ']') {
+            if (depth > 0) {
+                depth--;
+            }
+        } else if (ch == ')') {
+            if (depth == 0) {
+                return; /* the ')' that ends the forgiving list */
+            }
+            depth--;
+        } else if (ch == ',' && depth == 0) {
+            return; /* the next arm */
+        }
+        parser->pos++;
+    }
+}
+
 /* Parse a comma-separated list of complex selectors into a freshly allocated array.
    nested stops the list at a closing ')' (the :is()/:where()/:has() argument case)
-   and requires that ')'; relative lets each complex open with a combinator (:has()).
-   Returns 0 with the out parameters set, or -1 with parser->error set. */
-static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, int nested, int relative) {
+   and requires that ')'; relative lets each complex open with a combinator (:has());
+   forgiving drops an arm that fails to parse instead of failing the whole list (the
+   :is()/:where() rule), and may leave an empty list (*out_alts NULL) that matches
+   nothing. Returns 0 with the out parameters set, or -1 with parser->error set. */
+static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, int nested, int relative,
+                          int forgiving) {
     sel_complex temp[64];
     int count = 0;
     while (1) {
@@ -826,10 +872,14 @@ static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_c
             parser->error = 1;
             break;
         }
-        if (sel_complex_parse(parser, &temp[count], nested, relative) < 0) {
+        if (sel_complex_parse(parser, &temp[count], nested, relative) == 0) {
+            count++;
+        } else if (forgiving) {
+            parser->error = 0; /* drop the unparsable arm and recover to the next one */
+            sel_skip_bad_arm(parser);
+        } else {
             break;
         }
-        count++;
         sel_skip_ws(parser);
         if (parser->pos >= parser->len) {
             if (nested) {
@@ -841,8 +891,8 @@ static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_c
             parser->pos++;
             continue;
         }
-        /* a successful complex stops only at a comma, the end, or -- when nested -- the
-           closing ')' that ends the argument list; consume it and finish */
+        /* an arm stops only at a comma, the end, or -- when nested -- the closing
+           ')' that ends the argument list; consume it and finish */
         parser->pos++;
         break;
     }
@@ -852,6 +902,11 @@ static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_c
             PyMem_Free(temp[index].compounds);
         }
         return -1;
+    }
+    if (count == 0) {
+        *out_alts = NULL; /* a forgiving list whose arms all dropped matches nothing */
+        *out_count = 0;
+        return 0;
     }
     sel_complex *owned = PyMem_Malloc((size_t)count * sizeof(sel_complex));
     if (owned == NULL) {                              /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
@@ -889,7 +944,7 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
     compiled->quirks = th_tree_quirks(tree);
     compiled->tree = tree;
     sel_parser parser = {compiled->source, 0, PyUnicode_GET_LENGTH(selector_str), tree, 0};
-    if (sel_parse_alts(&parser, &compiled->alts, &compiled->count, 0, 0) < 0) {
+    if (sel_parse_alts(&parser, &compiled->alts, &compiled->count, 0, 0, 0) < 0) {
         PyMem_Free(compiled->source);
         PyMem_Free(compiled);
         PyErr_SetString(PyExc_ValueError, "invalid CSS selector");

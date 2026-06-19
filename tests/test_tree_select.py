@@ -401,6 +401,26 @@ _PSEUDO_DOC = (
         pytest.param("li:not(.sel):not(.none)", ["li"], id="not-chained"),
         pytest.param(":is(li):not(.sel)", ["li"], id="not-after-is"),
         pytest.param("section:not(*)", [], id="not-universal-excludes-all"),
+        # :is()/:where() are forgiving: an arm that fails to parse is dropped and the
+        # rest stay usable, so a bad arm never invalidates the whole selector
+        pytest.param(":is(:bogus, h2)", ["h2"], id="is-drops-bad-arm"),
+        pytest.param(":where(::bogus, li)", ["li", "li"], id="where-drops-pseudo-element-arm"),
+        pytest.param(":is(:bogus)", [], id="is-all-arms-bad-matches-nothing"),
+        pytest.param(":where(:bogus)", [], id="where-bad-matches-nothing"),
+        pytest.param(":is()", [], id="is-empty-matches-nothing"),
+        pytest.param(":is(h2, )", ["h2"], id="is-trailing-comma-drops-empty-arm"),
+        pytest.param(":is(.)", [], id="is-invalid-inner-dropped"),
+        pytest.param(":is(:bogus, ul) li", ["li", "li"], id="is-forgiving-then-descendant"),
+        # a bad arm carrying a string or balanced brackets recovers to the real comma
+        pytest.param(':is([x="a, b"]:bogus, h2)', ["h2"], id="is-recover-past-string"),
+        pytest.param(":is(:x(a, b), h2)", ["h2"], id="is-recover-past-parens"),
+        # recovery skips delimiters inside strings and balanced brackets/parens
+        pytest.param(':is(@"a, b", h2)', ["h2"], id="is-recover-comma-in-string"),
+        pytest.param(":is(@'a, b', h2)", ["h2"], id="is-recover-comma-in-single-quoted"),
+        pytest.param(":is(@[a, b], h2)", ["h2"], id="is-recover-comma-in-brackets"),
+        pytest.param(":is(@(a, b), h2)", ["h2"], id="is-recover-comma-in-parens"),
+        pytest.param(":is(@], h2)", ["h2"], id="is-recover-unbalanced-bracket"),
+        pytest.param(r':is(@"a\"b", h2)', ["h2"], id="is-recover-escaped-quote"),
     ],
 )
 def test_functional_pseudo_classes(selector: str, tags: list[str]) -> None:
@@ -423,9 +443,10 @@ def test_has_skips_non_element_following_sibling() -> None:
         pytest.param(":is", id="is-without-args"),
         pytest.param(":is(", id="is-unterminated"),
         pytest.param(":is(p", id="is-unterminated-after-arg"),
-        pytest.param(":is()", id="is-empty-args"),
-        pytest.param(":is(p,)", id="is-trailing-comma"),
-        pytest.param(":is(.)", id="is-invalid-inner"),
+        # a forgiving list still needs its ')': an arm that runs to the end (here with
+        # an unterminated string, or a trailing backslash) leaves the '(' unclosed
+        pytest.param(':is(@"x', id="is-forgiving-unterminated-string"),
+        pytest.param(':is(@"x\\', id="is-forgiving-trailing-backslash"),
         pytest.param(":is.x", id="pseudo-name-then-non-paren"),
         pytest.param(":ix(p)", id="pseudo-name-char-mismatch"),
         pytest.param(":1s(p)", id="pseudo-name-with-digit"),  # a below-'A' byte in the case fold
