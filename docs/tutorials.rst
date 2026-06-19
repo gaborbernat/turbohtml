@@ -213,6 +213,17 @@ descendants of ``body`` that are not links:
 
     ['h1', 'p']
 
+Selectors also reach the form and UI pseudo-classes the markup determines, such as ``:checked`` for a checked control:
+
+.. testcode::
+
+    form = turbohtml.parse("<input type=checkbox checked><input type=checkbox>")
+    print(len(form.select(":checked")))
+
+.. testoutput::
+
+    1
+
 Because the node types are a sealed hierarchy, structural pattern matching works: each subtype unpacks its defining
 field:
 

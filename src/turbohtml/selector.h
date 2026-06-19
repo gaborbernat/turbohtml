@@ -39,6 +39,22 @@ enum sel_pseudo {
     PSEUDO_WHERE,
     PSEUDO_HAS,
     PSEUDO_NOT,
+    /* §6.6 the scoping root, and the §12 input pseudo-classes determinable from the
+       static tree */
+    PSEUDO_SCOPE,
+    PSEUDO_CHECKED,
+    PSEUDO_DISABLED,
+    PSEUDO_ENABLED,
+    PSEUDO_REQUIRED,
+    PSEUDO_OPTIONAL,
+    PSEUDO_READ_ONLY,
+    PSEUDO_READ_WRITE,
+    PSEUDO_DEFAULT,
+    PSEUDO_LANG, /* §11.1, the comma list of ranges is stored as the value slice */
+    PSEUDO_DIR,  /* §11.2, the direction (1 ltr, 2 rtl, 0 other) is stored in nth_a */
+    /* live UA/interaction or navigation state a static tree cannot express: these
+       parse as valid selectors but match nothing (so :is()/:not() still compose) */
+    PSEUDO_NEVER,
 };
 
 typedef struct {
@@ -49,11 +65,11 @@ typedef struct {
     int ci;               /* '[': matched case-insensitively (explicit i flag) */
     int ci_default;       /* '[': name is in the HTML case-insensitive set, no explicit s/i flag */
     int pseudo;           /* ':': the pseudo-class id (enum sel_pseudo) */
-    int nth_a;            /* ':': the An+B "A" coefficient for an nth-* pseudo-class */
+    int nth_a;            /* ':': the An+B "A" coefficient for an nth-* pseudo-class; :dir() direction code */
     int nth_b;            /* ':': the An+B "B" coefficient for an nth-* pseudo-class */
     const Py_UCS4 *name;  /* class / id / unknown tag name (into the owned source copy) */
     Py_ssize_t name_len;  /* also the attribute name for the rare unknown case */
-    const Py_UCS4 *value; /* '[': the attribute value */
+    const Py_UCS4 *value; /* '[': the attribute value; ':' the :lang() comma list of ranges */
     Py_ssize_t value_len;
     sel_complex *sub; /* ':': the nested selector list for :is()/:where()/:has()/:not() */
     int sub_count;    /* ':': number of comma-separated alternatives in sub */
@@ -76,8 +92,16 @@ typedef struct {
     int count;
     int failed;    /* an allocation or a syntax error happened during compile */
     int quirks;    /* the tree was parsed in quirks mode: class/ID match case-insensitively */
-    th_tree *tree; /* the tree this selector runs on; :empty reads text spans through it */
+    th_tree *tree; /* the tree the selector runs on; :empty and :dir(auto) read text spans through it */
 } sel_compiled;
+
+/* The read-only context threaded through the matcher: the quirks-mode flag, the
+   element :scope matches (the query root), and the tree text spans resolve against. */
+typedef struct {
+    th_tree *tree;
+    th_node *scope;
+    int quirks;
+} sel_ctx;
 
 /* ---------------------------------------------------------------- parsing */
 
@@ -433,6 +457,50 @@ static void sel_parse_anb(sel_parser *parser, int *a, int *b) {
 static int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, int nested, int relative);
 static void sel_free_alts(sel_complex *alts, int count);
 
+/* The pseudo-classes that depend on live UA/interaction or navigation state a
+   parsed tree cannot express. They parse as valid selectors but match nothing,
+   so :is()/:not() compositions stay usable instead of failing to compile. */
+static const char *const SEL_NEVER_PSEUDOS[] = {
+    "hover",  "focus",         "focus-within", "focus-visible", "active",
+    "target", "target-within", "visited",      "link",          "any-link",
+};
+
+/* Parse the :dir() argument (pos just after '('): an identifier, mapped to the
+   direction code 1 (ltr) or 2 (rtl); any other identifier is valid but matches
+   nothing, stored as 0. */
+static void sel_parse_dir(sel_parser *parser, sel_simple *simple) {
+    sel_skip_ws(parser);
+    const Py_UCS4 *arg;
+    Py_ssize_t arg_len;
+    sel_ident(parser, &arg, &arg_len);
+    if (parser->error) {
+        return;
+    }
+    simple->nth_a = sel_kw(arg, arg_len, "ltr") ? 1 : (sel_kw(arg, arg_len, "rtl") ? 2 : 0);
+    sel_skip_ws(parser);
+}
+
+/* Parse the :lang() argument (pos just after '('): a non-empty comma-separated
+   list of language ranges, captured verbatim as the value slice and split at
+   match time. */
+static void sel_parse_lang(sel_parser *parser, sel_simple *simple) {
+    sel_skip_ws(parser);
+    Py_ssize_t start = parser->pos;
+    while (parser->pos < parser->len && parser->src[parser->pos] != ')') {
+        parser->pos++;
+    }
+    Py_ssize_t end = parser->pos;
+    while (end > start && is_space(parser->src[end - 1])) {
+        end--;
+    }
+    if (end == start) {
+        parser->error = 1; /* :lang() with no range is invalid */
+        return;
+    }
+    simple->value = parser->src + start;
+    simple->value_len = end - start;
+}
+
 /* Parse a pseudo-class selector (the leading ':' already consumed). */
 static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
     simple->kind = ':';
@@ -444,6 +512,7 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
     }
     int functional = PSEUDO_NONE; /* an nth-* pseudo-class taking An+B */
     int listy = PSEUDO_NONE;      /* :is()/:where()/:has()/:not() taking a selector list */
+    int langdir = PSEUDO_NONE;    /* :lang()/:dir() taking a special argument */
     if (sel_kw(name, name_len, "root")) {
         simple->pseudo = PSEUDO_ROOT;
     } else if (sel_kw(name, name_len, "empty")) {
@@ -476,9 +545,39 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
         listy = PSEUDO_HAS;
     } else if (sel_kw(name, name_len, "not")) {
         listy = PSEUDO_NOT;
+    } else if (sel_kw(name, name_len, "scope")) {
+        simple->pseudo = PSEUDO_SCOPE;
+    } else if (sel_kw(name, name_len, "checked")) {
+        simple->pseudo = PSEUDO_CHECKED;
+    } else if (sel_kw(name, name_len, "disabled")) {
+        simple->pseudo = PSEUDO_DISABLED;
+    } else if (sel_kw(name, name_len, "enabled")) {
+        simple->pseudo = PSEUDO_ENABLED;
+    } else if (sel_kw(name, name_len, "required")) {
+        simple->pseudo = PSEUDO_REQUIRED;
+    } else if (sel_kw(name, name_len, "optional")) {
+        simple->pseudo = PSEUDO_OPTIONAL;
+    } else if (sel_kw(name, name_len, "read-only")) {
+        simple->pseudo = PSEUDO_READ_ONLY;
+    } else if (sel_kw(name, name_len, "read-write")) {
+        simple->pseudo = PSEUDO_READ_WRITE;
+    } else if (sel_kw(name, name_len, "default")) {
+        simple->pseudo = PSEUDO_DEFAULT;
+    } else if (sel_kw(name, name_len, "lang")) {
+        langdir = PSEUDO_LANG;
+    } else if (sel_kw(name, name_len, "dir")) {
+        langdir = PSEUDO_DIR;
     } else {
-        parser->error = 1; /* an unknown pseudo-class invalidates the selector */
-        return;
+        for (size_t index = 0; index < sizeof(SEL_NEVER_PSEUDOS) / sizeof(SEL_NEVER_PSEUDOS[0]); index++) {
+            if (sel_kw(name, name_len, SEL_NEVER_PSEUDOS[index])) {
+                simple->pseudo = PSEUDO_NEVER;
+                break;
+            }
+        }
+        if (simple->pseudo == PSEUDO_NONE) {
+            parser->error = 1; /* an unknown pseudo-class invalidates the selector */
+            return;
+        }
     }
     if (functional != PSEUDO_NONE) {
         simple->pseudo = functional;
@@ -504,6 +603,26 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
         }
         parser->pos++;
         sel_parse_alts(parser, &simple->sub, &simple->sub_count, 1, listy == PSEUDO_HAS);
+    } else if (langdir != PSEUDO_NONE) {
+        simple->pseudo = langdir;
+        if (parser->pos >= parser->len || parser->src[parser->pos] != '(') {
+            parser->error = 1; /* :lang()/:dir() require an argument */
+            return;
+        }
+        parser->pos++;
+        if (langdir == PSEUDO_DIR) {
+            sel_parse_dir(parser, simple);
+        } else {
+            sel_parse_lang(parser, simple);
+        }
+        if (parser->error) {
+            return;
+        }
+        if (parser->pos >= parser->len || parser->src[parser->pos] != ')') {
+            parser->error = 1;
+            return;
+        }
+        parser->pos++;
     } else if (parser->pos < parser->len && parser->src[parser->pos] == '(') {
         parser->error = 1; /* a non-functional pseudo-class takes no argument list */
         return;
@@ -784,9 +903,9 @@ static sel_compiled *selector_compile(th_tree *tree, PyObject *selector_str) {
 /* The functional pseudo-classes recurse into the matcher: :is()/:where() test the
    element against a nested list, and :has() searches for a relative match, so the
    matching primitives they call are forward-declared here. */
-static int sel_match_compound(th_node *node, const sel_compound *compound, int quirks, th_tree *tree);
-static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, int quirks, th_tree *tree);
-static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, int quirks, th_tree *tree);
+static int sel_match_compound(th_node *node, const sel_compound *compound, const sel_ctx *ctx);
+static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, const sel_ctx *ctx);
+static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, const sel_ctx *ctx);
 
 static Py_UCS4 sel_fold(Py_UCS4 ch, int ci) {
     return (ci && ch >= 'A' && ch <= 'Z') ? ch + 32 : ch;
@@ -933,14 +1052,337 @@ static int sel_is_empty(const th_node *node, th_tree *tree) {
     return 1;
 }
 
-static int sel_match_pseudo(th_node *node, const sel_simple *simple, int quirks, th_tree *tree) {
+/* ---- the §12 input pseudo-classes, determinable from the static tree ---- */
+
+static int sel_has_attr(th_node *node, uint32_t atom) {
+    return sel_find_attr(node, atom) != NULL;
+}
+
+/* Whether node's type attribute equals kw (ASCII case-insensitive). */
+static int sel_input_type_is(th_node *node, const char *kw) {
+    const th_node_attr *attr = sel_find_attr(node, TH_ATTR_TYPE);
+    return attr != NULL && attr->value != NULL && sel_kw(attr->value, attr->value_len, kw);
+}
+
+/* The disableable HTML form controls :enabled/:disabled apply to. */
+static int sel_is_disableable(th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    switch (node->atom) {
+    case TH_TAG_BUTTON:
+    case TH_TAG_INPUT:
+    case TH_TAG_SELECT:
+    case TH_TAG_TEXTAREA:
+    case TH_TAG_OPTGROUP:
+    case TH_TAG_OPTION:
+    case TH_TAG_FIELDSET:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Whether node sits inside fieldset's first legend, the region a disabled
+   fieldset does not disable (HTML "the fieldset element"). */
+static int sel_in_first_legend(th_node *fieldset, th_node *node) {
+    th_node *legend = NULL;
+    /* a direct child with the legend atom is necessarily an HTML legend: foreign
+       content only enters through an svg/math subtree, never as a bare child here */
+    for (th_node *child = fieldset->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT && child->atom == TH_TAG_LEGEND) {
+            legend = child;
+            break;
+        }
+    }
+    if (legend == NULL) {
+        return 0;
+    }
+    for (th_node *ancestor = node; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor == legend) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether node is actually disabled: its own disabled attribute, an option whose
+   optgroup is disabled, or a control inside a disabled fieldset (HTML "disabled"). */
+static int sel_is_disabled(th_node *node) {
+    if (!sel_is_disableable(node)) {
+        return 0;
+    }
+    if (sel_has_attr(node, TH_ATTR_DISABLED)) {
+        return 1;
+    }
+    if (node->atom == TH_TAG_OPTION) {
+        /* an option always has an element parent (it is never the document root),
+           as the :root pseudo-class above also relies on; a parent with the optgroup
+           atom is necessarily HTML */
+        th_node *parent = node->parent;
+        return parent->atom == TH_TAG_OPTGROUP && sel_has_attr(parent, TH_ATTR_DISABLED);
+    }
+    if (node->atom == TH_TAG_OPTGROUP || node->atom == TH_TAG_FIELDSET) {
+        return 0; /* an optgroup/fieldset is disabled only by its own attribute */
+    }
+    for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        /* a fieldset-atom ancestor is necessarily HTML; the type guard skips the
+           document node that ends the chain */
+        if (ancestor->type == TH_NODE_ELEMENT && ancestor->atom == TH_TAG_FIELDSET &&
+            sel_has_attr(ancestor, TH_ATTR_DISABLED) && !sel_in_first_legend(ancestor, node)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* :checked: a checked checkbox/radio input or a selected option. */
+static int sel_is_checked(th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (node->atom == TH_TAG_INPUT) {
+        return (sel_input_type_is(node, "checkbox") || sel_input_type_is(node, "radio")) &&
+               sel_has_attr(node, TH_ATTR_CHECKED);
+    }
+    return node->atom == TH_TAG_OPTION && sel_has_attr(node, TH_ATTR_SELECTED);
+}
+
+/* :required/:optional apply to these mutable controls. */
+static int sel_is_required_capable(th_node *node) {
+    return node->ns == TH_NS_HTML &&
+           (node->atom == TH_TAG_INPUT || node->atom == TH_TAG_SELECT || node->atom == TH_TAG_TEXTAREA);
+}
+
+/* The input types that are mutable text fields, so :read-write rather than
+   :read-only (HTML "the input element"). */
+static const char *const SEL_MUTABLE_INPUT_TYPES[] = {
+    "text", "search", "url", "tel", "email", "password", "number", "date", "datetime-local", "month", "week", "time",
+};
+
+static int sel_is_mutable_input(th_node *node) {
+    const th_node_attr *attr = sel_find_attr(node, TH_ATTR_TYPE);
+    if (attr == NULL || attr->value == NULL) {
+        return 1; /* the default type is text, which is mutable */
+    }
+    for (size_t index = 0; index < sizeof(SEL_MUTABLE_INPUT_TYPES) / sizeof(SEL_MUTABLE_INPUT_TYPES[0]); index++) {
+        if (sel_kw(attr->value, attr->value_len, SEL_MUTABLE_INPUT_TYPES[index])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether the element is editable through contenteditable (true when the
+   attribute is present and empty or "true"; not inherited, matching browsers). */
+static int sel_is_contenteditable(th_node *node) {
+    const th_node_attr *attr = sel_find_attr(node, TH_ATTR_CONTENTEDITABLE);
+    if (attr == NULL) {
+        return 0;
+    }
+    /* an empty value is stored as NULL, so a present-but-empty contenteditable
+       (the editable case) is caught by the NULL test */
+    return attr->value == NULL || sel_kw(attr->value, attr->value_len, "true");
+}
+
+/* :read-write: a mutable text input, a writable textarea, or a contenteditable
+   element. Everything else is :read-only. */
+static int sel_is_read_write(th_node *node) {
+    if (node->ns == TH_NS_HTML && node->atom == TH_TAG_INPUT) {
+        return sel_is_mutable_input(node) && !sel_has_attr(node, TH_ATTR_READONLY) && !sel_is_disabled(node);
+    }
+    if (node->ns == TH_NS_HTML && node->atom == TH_TAG_TEXTAREA) {
+        return !sel_has_attr(node, TH_ATTR_READONLY) && !sel_is_disabled(node);
+    }
+    return sel_is_contenteditable(node);
+}
+
+/* A submit button: an input of type submit/image, or a button whose type is
+   submit (the missing-value default). */
+static int sel_is_submit_control(th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (node->atom == TH_TAG_INPUT) {
+        return sel_input_type_is(node, "submit") || sel_input_type_is(node, "image");
+    }
+    if (node->atom == TH_TAG_BUTTON) {
+        const th_node_attr *attr = sel_find_attr(node, TH_ATTR_TYPE);
+        return attr == NULL || attr->value == NULL || sel_kw(attr->value, attr->value_len, "submit");
+    }
+    return 0;
+}
+
+/* The nearest ancestor form element, or NULL. A form-atom ancestor is necessarily
+   HTML (foreign content has no form element); the document node ending the chain
+   never carries the form atom, so the walk stops there without a type guard. */
+static th_node *sel_form_owner(th_node *node) {
+    for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->atom == TH_TAG_FORM) {
+            return ancestor;
+        }
+    }
+    return NULL;
+}
+
+/* The first submit control under root in tree order, or NULL. */
+static th_node *sel_first_submit(th_node *root) {
+    for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        if (sel_is_submit_control(child)) {
+            return child;
+        }
+        th_node *deeper = sel_first_submit(child);
+        if (deeper != NULL) {
+            return deeper;
+        }
+    }
+    return NULL;
+}
+
+/* :default: a default-checked checkbox/radio, a default-selected option, or a
+   form's first submit button (HTML "the :default pseudo-class"). */
+static int sel_is_default(th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (node->atom == TH_TAG_INPUT && (sel_input_type_is(node, "checkbox") || sel_input_type_is(node, "radio"))) {
+        return sel_has_attr(node, TH_ATTR_CHECKED);
+    }
+    if (node->atom == TH_TAG_OPTION) {
+        return sel_has_attr(node, TH_ATTR_SELECTED);
+    }
+    if (sel_is_submit_control(node)) {
+        th_node *form = sel_form_owner(node);
+        return form != NULL && sel_first_submit(form) == node;
+    }
+    return 0;
+}
+
+/* Whether a language tag matches a range: equal, or the tag begins with the
+   range followed by '-' (BCP47 basic filtering, ASCII case-insensitive). */
+static int sel_lang_range_matches(const Py_UCS4 *tag, Py_ssize_t tag_len, const Py_UCS4 *range, Py_ssize_t range_len) {
+    if (range_len == 0 || range_len > tag_len) {
+        return 0;
+    }
+    if (!sel_eq(tag, range_len, range, range_len, 1)) {
+        return 0;
+    }
+    return tag_len == range_len || tag[range_len] == '-';
+}
+
+/* :lang(): the element's language is the nearest lang attribute on it or an
+   ancestor; it matches when any comma-separated range in the argument matches. */
+static int sel_matches_lang(th_node *node, const sel_simple *simple) {
+    const Py_UCS4 *tag = NULL;
+    Py_ssize_t tag_len = 0;
+    for (th_node *ancestor = node; ancestor != NULL && ancestor->type == TH_NODE_ELEMENT; ancestor = ancestor->parent) {
+        const th_node_attr *attr = sel_find_attr(ancestor, TH_ATTR_LANG);
+        if (attr != NULL && attr->value != NULL) { /* an empty lang is stored as NULL and skipped */
+            tag = attr->value;
+            tag_len = attr->value_len;
+            break;
+        }
+    }
+    if (tag == NULL) {
+        return 0;
+    }
+    Py_ssize_t cursor = 0;
+    while (cursor < simple->value_len) {
+        Py_ssize_t start = cursor;
+        while (cursor < simple->value_len && simple->value[cursor] != ',') {
+            cursor++;
+        }
+        Py_ssize_t end = cursor;
+        if (cursor < simple->value_len) {
+            cursor++; /* step over the comma */
+        }
+        while (start < end && is_space(simple->value[start])) {
+            start++;
+        }
+        while (end > start && is_space(simple->value[end - 1])) {
+            end--;
+        }
+        if (end - start >= 2 && (simple->value[start] == '"' || simple->value[start] == '\'') &&
+            simple->value[end - 1] == simple->value[start]) {
+            start++;
+            end--;
+        }
+        if (sel_lang_range_matches(tag, tag_len, simple->value + start, end - start)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The directional class of a code point used to resolve dir=auto: 2 RTL, 1 LTR,
+   0 neutral. An approximation of the Unicode bidi rule that covers the common RTL
+   blocks (Hebrew through Arabic Extended-A, and the Hebrew/Arabic presentation
+   forms); rarer RTL scripts resolve as if neutral. */
+static int sel_strong_dir(Py_UCS4 ch) {
+    if ((ch >= 0x0590 && ch <= 0x08FF) || (ch >= 0xFB1D && ch <= 0xFEFF)) {
+        return 2;
+    }
+    if (is_ascii_alpha(ch) || ch >= 0x00C0) {
+        return 1;
+    }
+    return 0;
+}
+
+/* The direction a dir=auto element resolves to from its text content: 2 rtl when
+   the first strong-directional character is RTL, else 1 ltr (HTML "auto"). */
+static int sel_auto_dir(th_tree *tree, th_node *node) {
+    Py_ssize_t len = 0;
+    Py_UCS4 *text = th_node_text(tree, node, &len);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return 1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int dir = 1;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        int strong = sel_strong_dir(text[index]);
+        if (strong != 0) {
+            dir = strong;
+            break;
+        }
+    }
+    PyMem_Free(text);
+    return dir;
+}
+
+/* The element's resolved direction: 1 ltr, 2 rtl. The nearest dir attribute wins
+   (auto and a dir-less bdi resolve from the content's first strong character);
+   with none, the document default is ltr (HTML "the dir attribute"). */
+static int sel_direction(th_tree *tree, th_node *node) {
+    for (th_node *ancestor = node; ancestor != NULL && ancestor->type == TH_NODE_ELEMENT; ancestor = ancestor->parent) {
+        const th_node_attr *attr = sel_find_attr(ancestor, TH_ATTR_DIR);
+        if (attr != NULL && attr->value != NULL) {
+            if (sel_kw(attr->value, attr->value_len, "ltr")) {
+                return 1;
+            }
+            if (sel_kw(attr->value, attr->value_len, "rtl")) {
+                return 2;
+            }
+            if (sel_kw(attr->value, attr->value_len, "auto")) {
+                return sel_auto_dir(tree, ancestor);
+            }
+            /* an invalid dir value is ignored; keep walking up the ancestor chain */
+        } else if (ancestor->ns == TH_NS_HTML && ancestor->atom == TH_TAG_BDI) {
+            return sel_auto_dir(tree, ancestor); /* a dir-less bdi defaults to auto */
+        }
+    }
+    return 1;
+}
+
+static int sel_match_pseudo(th_node *node, const sel_simple *simple, const sel_ctx *ctx) {
     switch (simple->pseudo) { /* GCOVR_EXCL_BR_LINE: the parser only stores known pseudo ids */
     case PSEUDO_ROOT:
         /* the root element's parent is the document, never an element (a matched
            node always has a parent, as the '>' combinator above relies on) */
         return node->parent->type != TH_NODE_ELEMENT;
     case PSEUDO_EMPTY:
-        return sel_is_empty(node, tree);
+        return sel_is_empty(node, ctx->tree);
     case PSEUDO_FIRST_CHILD:
         return sel_no_sibling(node, 0, 0);
     case PSEUDO_LAST_CHILD:
@@ -961,25 +1403,52 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, int quirks,
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 1));
     case PSEUDO_NTH_LAST_OF_TYPE:
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 1));
+    /* §6.6 the scoping root: the element the query was rooted at */
+    case PSEUDO_SCOPE:
+        return node == ctx->scope;
+    /* §12 the input pseudo-classes determinable from the static tree */
+    case PSEUDO_CHECKED:
+        return sel_is_checked(node);
+    case PSEUDO_DISABLED:
+        return sel_is_disabled(node);
+    case PSEUDO_ENABLED:
+        return sel_is_disableable(node) && !sel_is_disabled(node);
+    case PSEUDO_REQUIRED:
+        return sel_is_required_capable(node) && sel_has_attr(node, TH_ATTR_REQUIRED);
+    case PSEUDO_OPTIONAL:
+        return sel_is_required_capable(node) && !sel_has_attr(node, TH_ATTR_REQUIRED);
+    case PSEUDO_READ_ONLY:
+        return !sel_is_read_write(node);
+    case PSEUDO_READ_WRITE:
+        return sel_is_read_write(node);
+    case PSEUDO_DEFAULT:
+        return sel_is_default(node);
+    case PSEUDO_LANG:
+        return sel_matches_lang(node, simple);
+    case PSEUDO_DIR:
+        return sel_direction(ctx->tree, node) == simple->nth_a;
+    /* live UA/interaction or navigation state a static tree cannot express */
+    case PSEUDO_NEVER:
+        return 0;
     /* the functional pseudo-classes: :is()/:where() match the element against the
        nested list; :not() is its negation; :has() searches for a relative match
        anchored at it */
     case PSEUDO_IS:
     case PSEUDO_WHERE:
-        return sel_matches_alts(node, simple->sub, simple->sub_count, quirks, tree);
+        return sel_matches_alts(node, simple->sub, simple->sub_count, ctx);
     case PSEUDO_NOT:
-        return !sel_matches_alts(node, simple->sub, simple->sub_count, quirks, tree);
+        return !sel_matches_alts(node, simple->sub, simple->sub_count, ctx);
     default: /* PSEUDO_HAS */
-        return sel_has_match(node, simple->sub, simple->sub_count, quirks, tree);
+        return sel_has_match(node, simple->sub, simple->sub_count, ctx);
     }
 }
 
-static int sel_match_simple(th_node *node, const sel_simple *simple, int quirks, th_tree *tree) {
+static int sel_match_simple(th_node *node, const sel_simple *simple, const sel_ctx *ctx) {
     switch (simple->kind) {
     case '*':
         return 1;
     case ':':
-        return sel_match_pseudo(node, simple, quirks, tree);
+        return sel_match_pseudo(node, simple, ctx);
     case 'e':
         if (simple->tag_atom != TH_TAG_UNKNOWN) {
             return node->atom == simple->tag_atom;
@@ -992,14 +1461,14 @@ static int sel_match_simple(th_node *node, const sel_simple *simple, int quirks,
            case-insensitive in quirks mode (Selectors-4 §6.1/§6.2) */
         const th_node_attr *attr = sel_find_attr(node, TH_ATTR_ID);
         return attr != NULL && attr->value != NULL &&
-               sel_eq(attr->value, attr->value_len, simple->name, simple->name_len, quirks);
+               sel_eq(attr->value, attr->value_len, simple->name, simple->name_len, ctx->quirks);
     }
     case '.': {
         const th_node_attr *attr = sel_find_attr(node, TH_ATTR_CLASS);
         if (attr == NULL || attr->value == NULL) {
             return 0;
         }
-        return contains_ws_token(attr->value, attr->value_len, simple->name, simple->name_len, quirks);
+        return contains_ws_token(attr->value, attr->value_len, simple->name, simple->name_len, ctx->quirks);
     }
     default: { /* '[' */
         if (simple->attr_atom == UINT32_MAX) {
@@ -1018,12 +1487,12 @@ static int sel_match_simple(th_node *node, const sel_simple *simple, int quirks,
     }
 }
 
-static int sel_match_compound(th_node *node, const sel_compound *compound, int quirks, th_tree *tree) {
+static int sel_match_compound(th_node *node, const sel_compound *compound, const sel_ctx *ctx) {
     if (node->type != TH_NODE_ELEMENT) {
         return 0;
     }
     for (int index = 0; index < compound->count; index++) {
-        if (!sel_match_simple(node, &compound->simples[index], quirks, tree)) {
+        if (!sel_match_simple(node, &compound->simples[index], ctx)) {
             return 0;
         }
     }
@@ -1044,8 +1513,7 @@ static th_node *sel_prev_element(th_node *node) {
    ordinary selector (the leftmost compound is the end); for a :has() relative selector
    it is the element :has() tests, and the leftmost compound's leading combinator must
    connect to it. The interior-combinator machinery is shared by both. */
-static int sel_match_from(th_node *node, const sel_complex *complex, int index, th_node *anchor, int quirks,
-                          th_tree *tree) {
+static int sel_match_from(th_node *node, const sel_complex *complex, int index, th_node *anchor, const sel_ctx *ctx) {
     if (index == 0) {
         if (anchor == NULL) {
             return 1;
@@ -1077,26 +1545,24 @@ static int sel_match_from(th_node *node, const sel_complex *complex, int index, 
         /* a matched node is an element, so it always has a parent (the document
            at the root), which sel_match_compound rejects as a non-element */
         th_node *parent = node->parent;
-        return sel_match_compound(parent, target, quirks, tree) &&
-               sel_match_from(parent, complex, index - 1, anchor, quirks, tree);
+        return sel_match_compound(parent, target, ctx) && sel_match_from(parent, complex, index - 1, anchor, ctx);
     }
     case '+': {
         th_node *prev = sel_prev_element(node);
-        return prev != NULL && sel_match_compound(prev, target, quirks, tree) &&
-               sel_match_from(prev, complex, index - 1, anchor, quirks, tree);
+        return prev != NULL && sel_match_compound(prev, target, ctx) &&
+               sel_match_from(prev, complex, index - 1, anchor, ctx);
     }
     case '~':
         for (th_node *prev = sel_prev_element(node); prev != NULL; prev = sel_prev_element(prev)) {
-            if (sel_match_compound(prev, target, quirks, tree) &&
-                sel_match_from(prev, complex, index - 1, anchor, quirks, tree)) {
+            if (sel_match_compound(prev, target, ctx) && sel_match_from(prev, complex, index - 1, anchor, ctx)) {
                 return 1;
             }
         }
         return 0;
     default: /* descendant */
         for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
-            if (sel_match_compound(ancestor, target, quirks, tree) &&
-                sel_match_from(ancestor, complex, index - 1, anchor, quirks, tree)) {
+            if (sel_match_compound(ancestor, target, ctx) &&
+                sel_match_from(ancestor, complex, index - 1, anchor, ctx)) {
                 return 1;
             }
         }
@@ -1107,12 +1573,12 @@ static int sel_match_from(th_node *node, const sel_complex *complex, int index, 
 /* node matches some alternative in alts: it is the subject (rightmost compound) of
    one complex whose combinators to the left verify. The top-level match and the
    :is()/:where() pseudo-classes share this. */
-static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, int quirks, th_tree *tree) {
+static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, const sel_ctx *ctx) {
     for (int index = 0; index < count; index++) {
         const sel_complex *complex = &alts[index];
         int subject = complex->count - 1;
-        if (sel_match_compound(node, &complex->compounds[subject], quirks, tree) &&
-            sel_match_from(node, complex, subject, NULL, quirks, tree)) {
+        if (sel_match_compound(node, &complex->compounds[subject], ctx) &&
+            sel_match_from(node, complex, subject, NULL, ctx)) {
             return 1;
         }
     }
@@ -1121,15 +1587,14 @@ static int sel_matches_alts(th_node *node, const sel_complex *alts, int count, i
 
 /* Whether any element in the subtree below node is the subject of rel anchored at
    anchor (the element :has() is testing), checked recursively in document order. */
-static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, th_node *anchor, int quirks,
-                           th_tree *tree) {
+static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, th_node *anchor, const sel_ctx *ctx) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         if (child->type != TH_NODE_ELEMENT) {
             continue;
         }
-        if ((sel_match_compound(child, &rel->compounds[subject], quirks, tree) &&
-             sel_match_from(child, rel, subject, anchor, quirks, tree)) ||
-            sel_has_subtree(child, rel, subject, anchor, quirks, tree)) {
+        if ((sel_match_compound(child, &rel->compounds[subject], ctx) &&
+             sel_match_from(child, rel, subject, anchor, ctx)) ||
+            sel_has_subtree(child, rel, subject, anchor, ctx)) {
             return 1;
         }
     }
@@ -1139,11 +1604,11 @@ static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, t
 /* Whether the anchor element satisfies any :has() relative selector. A relative
    selector reaches the anchor's descendants and, through a leading sibling
    combinator, its following siblings and their subtrees. */
-static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, int quirks, th_tree *tree) {
+static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, const sel_ctx *ctx) {
     for (int index = 0; index < count; index++) {
         const sel_complex *rel = &alts[index];
         int subject = rel->count - 1;
-        if (sel_has_subtree(anchor, rel, subject, anchor, quirks, tree)) {
+        if (sel_has_subtree(anchor, rel, subject, anchor, ctx)) {
             return 1;
         }
         /* only a leading sibling combinator (:has(+ x) / :has(~ x)) can match outside
@@ -1157,9 +1622,9 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, in
             if (sibling->type != TH_NODE_ELEMENT) {
                 continue;
             }
-            if ((sel_match_compound(sibling, &rel->compounds[subject], quirks, tree) &&
-                 sel_match_from(sibling, rel, subject, anchor, quirks, tree)) ||
-                sel_has_subtree(sibling, rel, subject, anchor, quirks, tree)) {
+            if ((sel_match_compound(sibling, &rel->compounds[subject], ctx) &&
+                 sel_match_from(sibling, rel, subject, anchor, ctx)) ||
+                sel_has_subtree(sibling, rel, subject, anchor, ctx)) {
                 return 1;
             }
         }
@@ -1167,8 +1632,10 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, in
     return 0;
 }
 
-static int selector_matches(th_node *node, const sel_compiled *compiled) {
-    return sel_matches_alts(node, compiled->alts, compiled->count, compiled->quirks, compiled->tree);
+/* scope is the element :scope matches: the node the query was rooted at. */
+static int selector_matches(th_node *node, const sel_compiled *compiled, th_node *scope) {
+    sel_ctx ctx = {compiled->tree, scope, compiled->quirks};
+    return sel_matches_alts(node, compiled->alts, compiled->count, &ctx);
 }
 
 /* The lone simple selector of a selector that is one group, one compound, one
