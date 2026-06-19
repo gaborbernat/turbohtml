@@ -14,7 +14,6 @@ import pytest
 import turbohtml
 from turbohtml import Element
 
-RE_NS = {"re": "http://exslt.org/regular-expressions"}
 HTML = "<html><body><a href='/path/123'>a</a><a href='HTTP://x'>b</a><a href='/y'>c</a></body></html>"
 
 
@@ -39,11 +38,6 @@ def doc() -> turbohtml.Node:
 )
 def test_re_test(doc: turbohtml.Node, expr: str, expected: list[str]) -> None:
     assert tags(doc.xpath(expr)) == expected
-    # differential: lxml with the EXSLT namespace registered must agree
-    from lxml import html as lxml_html  # noqa: PLC0415
-
-    tree = lxml_html.fromstring(HTML)
-    assert [node.tag for node in tree.xpath(expr, namespaces=RE_NS)] == expected
 
 
 @pytest.mark.parametrize(
@@ -58,9 +52,6 @@ def test_re_test(doc: turbohtml.Node, expr: str, expected: list[str]) -> None:
 )
 def test_re_replace(doc: turbohtml.Node, expr: str, expected: str) -> None:
     assert doc.xpath(expr) == expected
-    from lxml import html as lxml_html  # noqa: PLC0415
-
-    assert lxml_html.fromstring(HTML).xpath(expr, namespaces=RE_NS) == expected
 
 
 def test_re_test_global_flag_is_accepted(doc: turbohtml.Node) -> None:

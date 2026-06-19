@@ -1,5 +1,4 @@
-"""
-Smart-string xpath results, mirroring lxml's ``_ElementUnicodeResult``.
+"""Smart-string xpath results, mirroring lxml's ``_ElementUnicodeResult``.
 
 When :meth:`turbohtml.Node.xpath` is called with ``smart_strings=True``, an
 attribute or ``text()`` value comes back as an :class:`XPathString`: a ``str``
@@ -11,15 +10,20 @@ registers the type with it.
 
 from __future__ import annotations
 
-from collections import UserString
+from typing import TYPE_CHECKING
 
-from typing_extensions import Self
+from ._html import Element, _register_xpath_string  # noqa: TC001  # Element stays importable so autodoc resolves it
 
-from ._html import Element, _register_xpath_string  # Element stays importable so autodoc resolves it
+if TYPE_CHECKING:
+    from typing_extensions import Self
 
 
-class XPathString(UserString):
+# isinstance(result, str) must hold for callers, and the C core builds the value
+# through str.__new__, so this stays a real str subclass (FURB189 suppressed).
+class XPathString(str):  # noqa: FURB189
     """A string xpath result that remembers the element it came from."""
+
+    __slots__ = ("_parent", "attrname", "is_attribute", "is_tail", "is_text")
 
     _parent: Element
     is_attribute: bool
@@ -28,7 +32,7 @@ class XPathString(UserString):
     attrname: str | None
 
     def __new__(cls, value: str, parent: Element, is_attribute: bool, attrname: str | None) -> Self:  # noqa: FBT001
-        self = super().__new__(cls, value)
+        self = str.__new__(cls, value)
         self._parent = parent
         self.is_attribute = is_attribute
         self.is_text = not is_attribute
