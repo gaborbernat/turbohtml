@@ -639,7 +639,12 @@ PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
                          "document order. The selector grammar covers type, #id, .class, and\n"
                          "attribute selectors, the four combinators, the structural pseudo-classes,\n"
-                         "and the :is(), :where(), :has(), and :not() functional pseudo-classes.");
+                         "the :is(), :where(), :has(), and :not() functional pseudo-classes, the\n"
+                         "form-state pseudo-classes (:checked, :enabled, :disabled, :required,\n"
+                         ":optional, :read-only, :read-write, :default), and :scope, :lang(), and\n"
+                         ":dir(). Live user-interaction pseudo-classes (:hover, :focus, :active,\n"
+                         ":target, :visited, :link, :any-link, :focus-within) parse but never match\n"
+                         "a static document.");
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");

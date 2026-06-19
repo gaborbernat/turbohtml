@@ -400,6 +400,28 @@ space, so a blank item matches while one holding a non-breaking space (``&nbsp;`
 
     [' ', '']
 
+The form-state pseudo-classes select controls by attribute and structure -- ``:checked``, ``:enabled``/``:disabled``
+(honoring a disabled ``<fieldset>`` and its ``<legend>`` exception), ``:required``/``:optional``,
+``:read-only``/``:read-write``, and ``:default`` -- while ``:scope`` is the element the query runs on and ``:lang()`` /
+``:dir()`` resolve the nearest ``lang`` / ``dir`` attribute (``:lang(en)`` also matches ``en-US``):
+
+.. testcode::
+
+    form = turbohtml.parse("<form><input name=a required><input name=b disabled><input name=c value=x></form>")
+    print([i.attrs["name"] for i in form.select(":required")])
+    print([i.attrs["name"] for i in form.select("input:enabled")])
+    page = turbohtml.parse("<article id=post><h1>Post</h1><p lang=fr>Bonjour</p></article>")
+    print([p.text for p in page.select_one("#post").select(":scope > :lang(fr)")])
+
+.. testoutput::
+
+    ['a']
+    ['a', 'c']
+    ['Bonjour']
+
+The live user-interaction pseudo-classes (``:hover``, ``:focus``, ``:focus-within``, ``:active``, ``:target``,
+``:visited``, ``:link``, ``:any-link``) parse as valid but never match, because a static document holds no such state.
+
 To test a node you already hold rather than search beneath it, use :meth:`~turbohtml.Node.matches` (does this node
 match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor):
 

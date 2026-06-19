@@ -189,17 +189,22 @@ The query surface builds on that node model. Navigation covers parents, siblings
 node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen
 :class:`~turbohtml.Axis` by tag and attributes, where a filter is a string, regex, callable, or list.
 :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.select_one` run a native CSS matcher -- type, id, class,
-attribute, the four combinators, and the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes -- and
-:meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place. Selectors compile against the
-tree, so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an integer
-compare. Compiling against the tree also captures its document mode, so ``#id`` and ``.class`` fold ASCII case in a
-quirks-mode document and compare exactly otherwise, as the Selectors standard requires. :meth:`~turbohtml.Node.xpath`,
-:meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` evaluate XPath 1.0 over the same model: a
-native-C engine compiles each expression once into an immutable, per-tree-cached program, resolves name tests to
-interned atoms, and collapses the ``//`` abbreviation to a single ``descendant`` walk, so the structural axes,
-predicates, operators, unions, and the core function library run at lxml's speed. Output runs back through
-:attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant
-by default with the escaping selectable through :class:`~turbohtml.Formatter`.
+attribute, the four combinators, the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, the
+form-state pseudo-classes (``:checked``, ``:enabled``/``:disabled``, ``:required``/``:optional``,
+``:read-only``/``:read-write``, ``:default``), and ``:scope``/``:lang()``/``:dir()`` -- and
+:meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place. The scope chosen is to support
+every pseudo-class a parsed tree can decide from attributes and structure; the live user-interaction pseudo-classes
+(``:hover``, ``:focus``, ``:target``, ``:visited``, and the rest) parse as valid but never match, since a static
+document has no such state to read. Selectors compile against the tree, so a tag or attribute name resolves to the same
+interned atom the parser assigned and each match is an integer compare. Compiling against the tree also captures its
+document mode, so ``#id`` and ``.class`` fold ASCII case in a quirks-mode document and compare exactly otherwise, as the
+Selectors standard requires. :meth:`~turbohtml.Node.xpath`, :meth:`~turbohtml.Node.xpath_one`, and
+:meth:`~turbohtml.Node.xpath_iter` evaluate XPath 1.0 over the same model: a native-C engine compiles each expression
+once into an immutable, per-tree-cached program, resolves name tests to interned atoms, and collapses the ``//``
+abbreviation to a single ``descendant`` walk, so the structural axes, predicates, operators, unions, and the core
+function library run at lxml's speed. Output runs back through :attr:`~turbohtml.Node.html`,
+:meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping
+selectable through :class:`~turbohtml.Formatter`.
 
 *******************
  Mutating the tree

@@ -213,6 +213,18 @@ descendants of ``body`` that are not links:
 
     ['h1', 'p']
 
+The state pseudo-classes select form controls by their attributes -- for example ``:checked`` finds the ticked boxes and
+selected options:
+
+.. testcode::
+
+    form = turbohtml.parse("<form><input checked type=checkbox><input type=checkbox></form>")
+    print([box.attrs.get("type") for box in form.select(":checked")])
+
+.. testoutput::
+
+    ['checkbox']
+
 Because the node types are a sealed hierarchy, structural pattern matching works: each subtype unpacks its defining
 field:
 

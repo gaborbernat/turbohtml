@@ -1,0 +1,9 @@
+Add the statically-determinable Selectors-4 pseudo-classes to the CSS matcher used by :meth:`~turbohtml.Node.select`,
+:meth:`~turbohtml.Node.select_one`, :meth:`~turbohtml.Node.matches`, and :meth:`~turbohtml.Node.closest`. The form-state
+set is supported -- ``:checked``, ``:enabled``, ``:disabled`` (honoring a disabled ``<fieldset>`` and its first
+``<legend>`` exception and a disabled ``<optgroup>``), ``:required``, ``:optional``, ``:read-only``, ``:read-write``
+(including ``contenteditable`` hosts), and ``:default`` -- along with ``:scope`` (the element the query runs on),
+``:lang()`` (RFC 4647 basic filtering, so ``:lang(en)`` matches ``en-US``), and ``:dir(ltr|rtl)``. The live
+user-interaction pseudo-classes (``:hover``, ``:focus``, ``:focus-within``, ``:active``, ``:target``, ``:visited``,
+``:link``, ``:any-link``) now parse as valid and resolve to a no-op instead of raising, since a static document cannot
+express them.
