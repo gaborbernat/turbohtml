@@ -898,6 +898,99 @@ def print_xpath_table(means: dict[str, float], suite: tuple[list[str], list[str]
             print(row)
 
 
+# --- xpath parity-feature suite: the lxml/parsel call options against lxml -- #
+# Each case exercises one option the parity work added: a $variable binding, an
+# EXSLT regex, a smart string, a custom extension. These reach past the all-C
+# fast path the structural queries use -- re: dispatches to Python's re where
+# lxml uses C libexslt, an extension runs a Python callable per match -- so the
+# table is honest about the cost of the Python-backed surface.
+_EXSLT_NS = {"re": "http://exslt.org/regular-expressions"}
+
+
+def _bench_count_ext(_context: object, nodes: list[object]) -> float:
+    """Count the node-set; a trivial extension registered for both engines."""
+    return float(len(nodes))
+
+
+_XPATH_EXTENSIONS: dict[tuple[str | None, str], Callable[..., object]] = {(None, "ext_count"): _bench_count_ext}
+
+
+def turbo_variable(doc: Document) -> None:
+    """Bind a $variable, turbohtml."""
+    doc.xpath("//a[@href=$href]", href="/x")
+
+
+def lxml_variable(tree: HtmlElement) -> None:
+    """Bind a $variable, lxml."""
+    tree.xpath("//a[@href=$href]", href="/x")
+
+
+def turbo_retest(doc: Document) -> None:
+    """Run an EXSLT re:test predicate, turbohtml (Python re)."""
+    doc.xpath("//a[re:test(@href, '[0-9]')]")
+
+
+def lxml_retest(tree: HtmlElement) -> None:
+    """Run an EXSLT re:test predicate, lxml (C libexslt)."""
+    tree.xpath("//a[re:test(@href, '[0-9]')]", namespaces=_EXSLT_NS)
+
+
+def turbo_smart(doc: Document) -> None:
+    """Collect attributes as smart strings, turbohtml."""
+    doc.xpath("//a/@href", smart_strings=True)
+
+
+def lxml_smart(tree: HtmlElement) -> None:
+    """Collect attributes as smart strings, lxml."""
+    tree.xpath("//a/@href", smart_strings=True)
+
+
+def turbo_extension(doc: Document) -> None:
+    """Call a custom extension function, turbohtml."""
+    doc.xpath("ext_count(//a)", extensions=_XPATH_EXTENSIONS)
+
+
+def lxml_extension(tree: HtmlElement) -> None:
+    """Call a custom extension function, lxml."""
+    tree.xpath("ext_count(//a)", extensions=_XPATH_EXTENSIONS)
+
+
+# Each parity feature paired with its turbohtml and lxml driver.
+XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[HtmlElement], None]], ...] = (
+    ("$variable binding", turbo_variable, lxml_variable),
+    ("EXSLT re:test", turbo_retest, lxml_retest),
+    ("smart_strings", turbo_smart, lxml_smart),
+    ("extension function", turbo_extension, lxml_extension),
+)
+
+
+def run_xpath_feature_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark each parity feature across the page sizes; return the case labels."""
+    for label, turbo_run, lxml_run in XPATH_FEATURE_CASES:
+        for size_name, path, enc in READPATH_CASES:
+            text = corpus_text(path, enc)
+            bench(f"feature {label} | {size_name} [turbohtml]", turbo_run, turbo_tree(text))
+            bench(f"feature {label} | {size_name} [lxml]", lxml_run, lxml_tree(text))
+    return [label for label, _, _ in XPATH_FEATURE_CASES]
+
+
+def print_xpath_feature_table(means: dict[str, float], labels: list[str]) -> None:
+    """Render one table per page size: turbohtml beside lxml across the parity features."""
+    if not labels:
+        return
+    for size_name, _, _ in READPATH_CASES:
+        print()
+        header = f"{'xpath feature / ' + size_name:34} {'turbohtml':>11}{'lxml':>18}"
+        print(header)
+        for label in labels:
+            if (turbo := means.get(f"feature {label} | {size_name} [turbohtml]")) is None:
+                continue
+            other = means.get(f"feature {label} | {size_name} [lxml]")
+            row = f"{label:34} {turbo * 1e6:8.1f} us"
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+            print(row)
+
+
 def stdlib_tokenize(text: str) -> None:
     """Drive the stdlib parser with its default no-op handlers."""
     parser = HTMLParser()
@@ -1033,6 +1126,7 @@ def main() -> None:
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     has_select_cases = run_readpath_suite(bench, 3, "select :has") if "query" in suites else []
     xpath_cases = run_xpath_suite(bench) if "xpath" in suites else ([], [])
+    xpath_feature_cases = run_xpath_feature_suite(bench) if "xpath" in suites else []
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     build_cases = run_build_suite(bench) if "build" in suites else []
     edit_cases = run_edit_suite(bench) if "edit" in suites else []
@@ -1050,6 +1144,7 @@ def main() -> None:
     print_readpath_table(means, "select", select_cases)
     print_readpath_table(means, "select :has", has_select_cases)
     print_xpath_table(means, xpath_cases)
+    print_xpath_feature_table(means, xpath_feature_cases)
     print_readpath_table(means, "serialize", serialize_cases)
     print_build_table(means, build_cases)
     print_edit_table(means, edit_cases)
