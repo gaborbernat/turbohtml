@@ -552,6 +552,19 @@ quotes or special characters cannot break the query:
 
     ['out']
 
+The EXSLT ``re:test`` and ``re:replace`` functions ``parsel`` and ``scrapy`` rely on work without registering a
+namespace; the ``re:`` prefix dispatches to Python's :mod:`re`:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<a href='/p/12'>a</a><a href='/q'>b</a>")
+    print([a.attrs["href"] for a in doc.xpath(r"//a[re:test(@href, '\d')]")])
+
+.. testoutput::
+
+    ['/p/12']
+
 ********************************
  Filter by attribute or pattern
 ********************************

@@ -277,12 +277,14 @@ def test_large_expression_grows_the_arena() -> None:
         pytest.param(".a", "trailing tokens", id="dot-then-name"),
         pytest.param("4a", "trailing tokens", id="digit-then-name"),
         pytest.param("1.5a", "trailing tokens", id="fraction-then-name"),
-        pytest.param("a:b", "invalid character", id="single-colon-name"),
+        pytest.param("a:b", "namespace-prefixed", id="single-colon-name"),
+        pytest.param("a:5", "invalid character", id="colon-then-non-name"),
         pytest.param("div::", "trailing tokens", id="bad-axis"),
         pytest.param("count(", "node test", id="unclosed-call"),
         pytest.param("1 2", "trailing tokens", id="two-numbers"),
         pytest.param("$5", "expected a name", id="dollar-then-number"),
         pytest.param("$", "expected a name", id="dollar-at-end"),
+        pytest.param("//svg:circle", "namespace-prefixed", id="prefixed-name-test"),
     ],
 )
 def test_rejects(expr: str, message: str) -> None:

@@ -2069,6 +2069,9 @@ static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree
 
 /* Translate an xp_eval status (-2 unsupported, -1 OOM) into a Python error. */
 static void *xpath_raise_status(int status, const char *feature) {
+    if (PyErr_Occurred()) { /* a borrowed Python call (e.g. a malformed regex) already set the exception */
+        return NULL;
+    }
     if (status == -2) {
         PyErr_Format(PyExc_NotImplementedError, "xpath: %s are not implemented yet", feature);
         return NULL;

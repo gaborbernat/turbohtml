@@ -6,3 +6,7 @@ Bind ``$name`` variables by passing them as keyword arguments to :meth:`~turboht
 :meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` (a ``str``, ``int``, ``float``, or ``bool``
 each), so ``doc.xpath("//a[@href=$url]", url=target)`` keeps the value out of the expression string the way ``lxml`` and
 ``parsel`` do.
+
+Support the EXSLT regular-expression functions ``re:test`` and ``re:replace`` that ``parsel`` and ``scrapy`` enable by
+default, so a predicate like ``//a[re:test(@href, '\\d+$', 'i')]`` ports across. The ``re:`` prefix dispatches to
+Python's :mod:`re`, with the EXSLT flag letters (``i``, ``m``, ``s``, ``x``, and ``g`` for a global replace) honored.
