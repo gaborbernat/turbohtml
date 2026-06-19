@@ -317,69 +317,87 @@ times faster.
 *********
 
 :func:`turbohtml.parse` builds a full WHATWG document tree, against the other Python tree builders: `lxml
-<https://lxml.de>`_, `selectolax <https://github.com/rushter/selectolax>`_ (`lexbor <https://lexbor.com>`_),
-`BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ over ``html.parser``, and html5lib. turbohtml
-runs roughly two to five times faster than the C parsers and 30 to 80 times faster than the pure-Python ones, while
-building the WHATWG tree that lxml's libxml2 does not.
+<https://lxml.de>`_, `selectolax <https://github.com/rushter/selectolax>`_ and `resiliparse
+<https://github.com/chatnoir-eu/chatnoir-resiliparse>`_ (both wrapping `lexbor <https://lexbor.com>`_), `BeautifulSoup
+<https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ over ``html.parser``, and html5lib. turbohtml runs on par
+with resiliparse, two to four times faster than lxml and selectolax, and 30 to 80 times faster than the pure-Python
+builders, while building the WHATWG tree that lxml's libxml2 does not.
+
+resiliparse reaches turbohtml's throughput because its ``HTMLTree.parse`` is a thin call straight into lexbor's native
+tree, while selectolax wraps that same engine behind a heavier object layer; the comparison here is parsing only.
+resiliparse's wider toolkit, boilerplate and main-content extraction, language detection, and the encoding and archive
+utilities it ships for large-scale web-crawl processing, sits outside turbohtml's scope. `gumbo
+<https://github.com/google/gumbo-parser>`_, the C WHATWG parser Google released and the engine behind `html5-parser
+<https://html5-parser.readthedocs.io>`_, has no row: it is read-oriented, archived upstream, and its Python binding no
+longer builds on a current toolchain. turbohtml is the maintained, mutable, typed alternative to that lineage.
 
 .. list-table::
     :header-rows: 1
-    :widths: 26 13 12 12 14 12
+    :widths: 26 12 11 11 12 13 11
 
     - - input
       - turbohtml
       - lxml
       - selectolax
+      - resiliparse
       - BeautifulSoup
       - html5lib
     - - wpt page (0.6 kB)
       - 1.3 µs
       - 3.3 µs
-      - 6.8 µs
+      - 7.0 µs
+      - 3.9 µs
       - 61.3 µs
       - 101 µs
     - - wpt page (4 kB)
-      - 10.6 µs
-      - 27.1 µs
-      - 42.0 µs
-      - 438 µs
+      - 10.9 µs
+      - 27.2 µs
+      - 42.3 µs
+      - 12.9 µs
+      - 435 µs
       - 615 µs
     - - wpt page (9.6 kB)
-      - 27.5 µs
-      - 73.2 µs
-      - 106 µs
-      - 836 µs
+      - 28.2 µs
+      - 72.8 µs
+      - 107 µs
+      - 28.0 µs
+      - 840 µs
       - 1.45 ms
     - - wpt page (92 kB)
-      - 254 µs
+      - 269 µs
       - 633 µs
-      - 917 µs
-      - 15.1 ms
-      - 16.6 ms
+      - 919 µs
+      - 282 µs
+      - 15.2 ms
+      - 16.7 ms
     - - wpt page, CJK (124 kB)
-      - 505 µs
+      - 536 µs
       - 1.43 ms
       - 2.29 ms
-      - 20.7 ms
-      - 29.5 ms
+      - 538 µs
+      - 21.8 ms
+      - 29.3 ms
     - - whatwg spec (235 kB)
-      - 498 µs
-      - 1.23 ms
-      - 1.78 ms
-      - 25.3 ms
-      - 31.0 ms
+      - 510 µs
+      - 1.24 ms
+      - 1.77 ms
+      - 505 µs
+      - 25.2 ms
+      - 30.9 ms
     - - ecmascript spec (3 MB)
-      - 4.31 ms
-      - 17.4 ms
+      - 4.48 ms
+      - 17.5 ms
       - 15.7 ms
-      - 193 ms
+      - 5.30 ms
+      - 192 ms
       - 260 ms
     - - whatwg spec source (7.9 MB)
-      - 26.8 ms
-      - 83.1 ms
-      - 94.0 ms
-      - 1.63 s
-      - 1.55 s
+      - 28.4 ms
+      - 84.1 ms
+      - 93.9 ms
+      - 30.0 ms
+      - 1.60 s
+      - 1.51 s
 
 **********
  Querying

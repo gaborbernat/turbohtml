@@ -1,0 +1,3 @@
+Add resiliparse to the parsing benchmark, the performance comparison, and the migration guide, and note gumbo, the
+unmaintained WHATWG C parser behind html5-parser, in prose as a read-only alternative turbohtml supersedes - by
+:user:`gaborbernat`.

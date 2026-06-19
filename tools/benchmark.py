@@ -8,7 +8,8 @@ Run with ``tox -e bench``; positional arguments pick the suites to run
 pyperf (pass ``--help`` to see them). pyperf runs every case in isolated worker
 processes and reports mean and stddev; the parent process then prints a speedup
 table: escape, unescape, and tokenize against the standard library, parse against
-the other HTML tree builders (lxml, selectolax, html5lib, and BeautifulSoup), the
+the other HTML tree builders (lxml, selectolax, resiliparse, html5lib, and
+BeautifulSoup), the
 read-path query and serialize suites against lxml, selectolax, and BeautifulSoup,
 and the xpath suite against lxml, the only other library with an XPath engine.
 
@@ -47,6 +48,7 @@ import pyperf
 from bs4 import BeautifulSoup
 from linkify_it import LinkifyIt
 from lxml import html as lxml_html
+from resiliparse.parse.html import HTMLTree  # ty: ignore[unresolved-import]  # Cython extension, ships no type stubs
 from selectolax.lexbor import LexborHTMLParser
 
 import turbohtml
@@ -280,6 +282,11 @@ def lxml_parse(text: str) -> None:
     lxml_html.document_fromstring(text)
 
 
+def resiliparse_parse(text: str) -> None:
+    """Parse with resiliparse, which wraps the same lexbor engine selectolax does."""
+    HTMLTree.parse(text)
+
+
 def html5lib_parse(text: str) -> None:
     """Parse with html5lib, the pure-Python WHATWG reference implementation."""
     html5lib.parse(text)
@@ -295,6 +302,7 @@ def soup_parse(text: str) -> None:
 PARSE_COMPETITORS: tuple[tuple[str, Callable[[str], None]], ...] = (
     ("lxml", lxml_parse),
     ("selectolax", lexbor_parse),
+    ("resiliparse", resiliparse_parse),
     ("BeautifulSoup", soup_parse),
     ("html5lib", html5lib_parse),
 )
