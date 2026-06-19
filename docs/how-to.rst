@@ -512,8 +512,8 @@ match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor
 (elements as nodes, attribute and ``text()`` values as ``str``, in document order), or the matching ``float`` / ``str``
 / ``bool`` for a scalar expression like ``count(...)`` or ``string(...)``. :meth:`~turbohtml.Node.xpath_one` returns the
 first result or ``None``, and :meth:`~turbohtml.Node.xpath_iter` returns an iterator. The engine supports the structural
-axes, the ``name`` / ``*`` / ``node()`` / ``text()`` / ``comment()`` node tests, predicates, the boolean, relational,
-and arithmetic operators, unions, and the core function library:
+axes, the ``name`` / ``*`` / ``node()`` / ``text()`` / ``comment()`` / ``processing-instruction()`` node tests,
+predicates, the boolean, relational, and arithmetic operators, unions, and the complete XPath 1.0 core function library:
 
 .. testcode::
 
@@ -533,6 +533,11 @@ and arithmetic operators, unions, and the core function library:
 
 An absolute path starts at the document root and a leading ``//`` rescans the whole document, so write ``.//`` for
 descendants of the context node. Migrating from ``lxml``, ``parsel``, or ``pyquery`` keeps your existing expressions.
+
+Two functions read the HTML document the way HTML means it, where ``lxml``'s legacy HTML parser returns nothing:
+``lang()`` honors the HTML ``lang`` attribute (``lxml`` only consults ``xml:lang``), and ``namespace-uri()`` reports the
+real SVG and MathML namespace for foreign content (``lxml`` leaves it empty). HTML elements report no namespace in both,
+so an unprefixed name test keeps matching them.
 
 ********************************
  Filter by attribute or pattern
