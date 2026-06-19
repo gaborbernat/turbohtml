@@ -373,6 +373,36 @@ relative selector finds a match anchored at it, and ``:not()`` keeps an element 
     ['h1', 'figure', 'h1']
     ['Note']
 
+The form and UI pseudo-classes select controls by the state the markup pins down: ``:checked``, ``:disabled`` /
+``:enabled``, ``:required`` / ``:optional``, ``:read-only`` / ``:read-write``, and ``:default``. ``:lang()`` matches the
+nearest ``lang`` attribute (with hyphen-prefix ranges, so ``:lang(en)`` also matches ``en-GB``) and ``:dir()`` the
+resolved text direction. ``:scope`` is the element the query is rooted at, which anchors a relative selector:
+
+.. testcode::
+
+    form = turbohtml.parse(
+        "<form><input name=agree type=checkbox checked>"
+        "<input name=email required><input name=token disabled></form>"
+    )
+    print([e.attrs["name"] for e in form.select(":checked")])
+    print([e.attrs["name"] for e in form.select(":required")])
+    page = turbohtml.parse("<p lang=en-GB>hi</p><p lang=fr>salut</p>")
+    print([p.text for p in page.select(":lang(en)")])
+    card = turbohtml.parse("<div id=card><h2>T</h2><p>body</p></div>").select_one("#card")
+    print([e.tag for e in card.select(":scope > p")])
+
+.. testoutput::
+
+    ['agree']
+    ['email']
+    ['hi']
+    ['p']
+
+The interaction- and navigation-state pseudo-classes -- ``:hover``, ``:focus``, ``:focus-within``, ``:focus-visible``,
+``:active``, ``:target``, ``:target-within``, ``:visited``, ``:link``, and ``:any-link`` -- parse as valid selectors but
+match nothing, since a parsed tree has no live UA state. They stay usable inside ``:is()`` and ``:not()`` rather than
+raising, so ``a:not(:visited)`` keeps every link.
+
 ``#id`` and ``.class`` selectors compare case-sensitively in a standards-mode document and ASCII case-insensitively in a
 quirks-mode one (a document with no doctype), matching how a browser resolves them. Add a ``<!doctype html>`` to keep
 the comparison exact:

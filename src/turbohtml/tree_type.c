@@ -639,7 +639,9 @@ PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
                          "document order. The selector grammar covers type, #id, .class, and\n"
                          "attribute selectors, the four combinators, the structural pseudo-classes,\n"
-                         "and the :is(), :where(), :has(), and :not() functional pseudo-classes.");
+                         "the :is(), :where(), :has(), and :not() functional pseudo-classes, and the\n"
+                         ":scope, form/UI, :lang() and :dir() pseudo-classes a static tree can\n"
+                         "determine; live-state pseudo-classes (:hover, :focus, ...) match nothing.");
 
 PyDoc_STRVAR(select_one_doc, "select_one(selector, /)\n--\n\n"
                              "Return the first descendant Element matching the CSS selector, or None.");
@@ -1924,14 +1926,15 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
            with sel_match_simple directly, skipping the group/combinator machinery */
         const sel_simple *single = sel_single_simple(compiled);
         uint16_t subject = selector_subject_atom(compiled);
+        sel_ctx ctx = {compiled->tree, origin, compiled->quirks}; /* :scope is the query root */
         if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
             /* only the candidate subjects need the matcher, drawn in document order
                from the atom bucket instead of a full pre-order walk */
             Py_ssize_t end = handle_obj->index_offsets[subject + 1];
             for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
                 th_node *node = handle_obj->index_nodes[pos];
-                int matched = single != NULL ? sel_match_simple(node, single, compiled->quirks, compiled->tree)
-                                             : selector_matches(node, compiled);
+                int matched =
+                    single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches(node, compiled, origin);
                 if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
                     break;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1942,8 +1945,8 @@ static PyObject *node_select(PyObject *self, PyObject *arg) {
                 if (node->type != TH_NODE_ELEMENT) {
                     continue;
                 }
-                int matched = single != NULL ? sel_match_simple(node, single, compiled->quirks, compiled->tree)
-                                             : selector_matches(node, compiled);
+                int matched =
+                    single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches(node, compiled, origin);
                 if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
                     break;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1975,12 +1978,12 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
     } else {
         const sel_simple *single = sel_single_simple(compiled);
         uint16_t subject = selector_subject_atom(compiled);
+        sel_ctx ctx = {compiled->tree, origin, compiled->quirks}; /* :scope is the query root */
         if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
             Py_ssize_t end = handle_obj->index_offsets[subject + 1];
             for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
                 th_node *node = handle_obj->index_nodes[pos];
-                if (single != NULL ? sel_match_simple(node, single, compiled->quirks, compiled->tree)
-                                   : selector_matches(node, compiled)) {
+                if (single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches(node, compiled, origin)) {
                     found = node;
                     break;
                 }
@@ -1990,8 +1993,7 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
                 if (node->type != TH_NODE_ELEMENT) {
                     continue;
                 }
-                if (single != NULL ? sel_match_simple(node, single, compiled->quirks, compiled->tree)
-                                   : selector_matches(node, compiled)) {
+                if (single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches(node, compiled, origin)) {
                     found = node;
                     break;
                 }
@@ -2193,7 +2195,8 @@ static PyObject *node_css_matches(PyObject *self, PyObject *arg) {
     if (compiled == NULL) {
         error = 1;
     } else {
-        matched = node->type == TH_NODE_ELEMENT && selector_matches(node, compiled);
+        /* matches() scopes :scope to the node being tested */
+        matched = node->type == TH_NODE_ELEMENT && selector_matches(node, compiled, node);
     }
     Py_END_CRITICAL_SECTION();
     if (error) {
@@ -2214,8 +2217,10 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg) {
     if (compiled == NULL) {
         error = 1;
     } else {
-        for (th_node *node = ((NodeObject *)self)->node; node != NULL; node = node->parent) {
-            if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled)) {
+        /* closest() scopes :scope to the element it was invoked on */
+        th_node *scope = ((NodeObject *)self)->node;
+        for (th_node *node = scope; node != NULL; node = node->parent) {
+            if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled, scope)) {
                 found = node;
                 break;
             }
