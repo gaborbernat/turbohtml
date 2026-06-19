@@ -348,8 +348,45 @@ A note on gumbo
 `gumbo <https://github.com/google/gumbo-parser>`_, the C WHATWG parser behind `html5-parser
 <https://html5-parser.readthedocs.io>`_, has no migration table here. It is read-oriented and archived upstream, and its
 Python binding no longer builds on a current toolchain, so there is nothing to port from in practice. Code that read a
-gumbo or html5-parser tree maps onto the same :meth:`~turbohtml.Node.find`/:meth:`~turbohtml.Node.select` read surface
-shown above, with turbohtml supplying the maintained, mutable, typed tree that lineage lacks.
+gumbo tree maps onto the same :meth:`~turbohtml.Node.find`/:meth:`~turbohtml.Node.select` read surface shown above, with
+turbohtml supplying the maintained, mutable, typed tree that lineage lacks. The maintained `html5-parser
+<https://github.com/kovidgoyal/html5-parser>`_ wraps the same gumbo engine and has its own section below.
+
+*******************
+ From html5-parser
+*******************
+
+`html5-parser <https://github.com/kovidgoyal/html5-parser>`_ wraps gumbo, the C WHATWG parser, and hands the result back
+as an `lxml <https://lxml.de>`_/ElementTree tree. It is turbohtml's closest direct competitor: a native parse with no
+pure-Python pass. The difference is what you get back. ``html5_parser.parse`` returns a read-oriented lxml element built
+on ``libxml2``, while :func:`turbohtml.parse` returns a :class:`~turbohtml.Document` with a mutable, natively typed tree
+and a real ``<template>`` content document, and no ``libxml2``/gumbo build dependency.
+
+.. code-block:: python
+
+    # html5-parser
+    from html5_parser import parse
+
+    root = parse(markup)  # an lxml.etree element
+
+.. testcode::
+
+    from turbohtml import parse
+    doc = parse("<table><tr><td>cell</td></table>")
+    print(doc.find("td").text)  # the tbody the WHATWG algorithm inserts is walked the same way
+
+.. testoutput::
+
+    cell
+
+Because the tree it returns is lxml's, the element accessors port exactly as in the `From lxml`_ section above:
+``el.get``/``el.attrib`` become ``el.attrs``, the ``el.text``/``el.tail`` string pair becomes child
+:class:`~turbohtml.Text` nodes, and ``el.getparent()`` becomes ``el.parent``. The one accessor with no equivalent is
+``el.xpath(...)``: html5-parser inherits ``libxml2``'s XPath, while turbohtml searches with CSS through
+:meth:`~turbohtml.Node.select` and the :meth:`~turbohtml.Node.find`/:meth:`~turbohtml.Node.find_all` grammar. The
+:doc:`performance` page benchmarks the WHATWG tree builders; html5-parser sits in the same native-gumbo tier as the C
+parsers measured there, so it is cross-linked rather than given a separate row, since its lxml tree is bound to a
+specific ``libxml2`` build that the benchmark cannot pin portably.
 
 *************
  From parsel
@@ -466,6 +503,60 @@ Pitfalls
 - html5lib's ElementTree output namespaces names; turbohtml keeps ``tag`` plain and carries the namespace separately as
   :attr:`~turbohtml.Element.namespace`.
 
+**************
+ From pyquery
+**************
+
+`pyquery <https://github.com/gawel/pyquery>`_ puts a jQuery-style fluent wrapper over `lxml
+<https://lxml.de>`_/`cssselect <https://github.com/scrapy/cssselect>`_. turbohtml ships the same chaining idiom as
+:class:`turbohtml.query.Query`, so the method chains port almost name for name; build one from a parsed document and
+call it with a selector:
+
+.. testcode::
+
+    from turbohtml import parse
+    from turbohtml.query import Query
+
+    query = Query(parse("<div><a href='/u'>l</a><a>m</a></div>"))
+    print(query("a").filter("[href]").eq(0).add_class("seen").attr("href"))
+    print([anchor.text() for anchor in query("a").items()])
+
+.. testoutput::
+
+    /u
+    ['l', 'm']
+
+The idiom translates directly:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - pyquery
+      - turbohtml
+    - - ``pq = PyQuery(html)``
+      - ``query = Query(parse(html))``
+    - - ``pq("div.foo")``, ``pq("a").find("span")``
+      - ``query("div.foo")``, ``query("a").find("span")``
+    - - ``.filter(sel)``, ``.eq(i)``, ``.closest(sel)``
+      - the same names
+    - - ``.attr("href")``, ``.attr("k", "v")``
+      - ``.attr("href")``, ``.attr("k", "v")``
+    - - ``.text()``, ``.html()``
+      - ``.text()``, ``.html()``
+    - - ``.add_class(c)``, ``.remove_class(c)``, ``.has_class(c)``
+      - the same names
+    - - ``.parent()``, ``.children()``, ``.siblings()``
+      - the same names
+    - - iterating ``for item in pq("a").items()``
+      - ``for item in query("a").items()``
+
+Two limits are worth stating. pyquery exposes lxml's ``.xpath(...)``; turbohtml's ``Query`` is CSS-only, so an XPath
+chain moves to a selector or to the node-level :meth:`~turbohtml.Node.find` grammar. And jQuery methods turbohtml does
+not mirror (DOM-mutation helpers like ``.wrap_all`` or pyquery's network-fetching constructor) drop down to the node API
+on :meth:`Query.items <turbohtml.query.Query.items>`. The :doc:`performance` page's fluent-chaining benchmark times the
+same chain against pyquery.
+
 ***************************
  From the standard library
 ***************************
@@ -490,6 +581,55 @@ To keep an existing :class:`python:html.parser.HTMLParser` subclass, swap its ba
 WHATWG-conformant tokenizer. Or drop the subclass and take the token stream from :func:`turbohtml.tokenize` (or
 :meth:`turbohtml.Tokenizer.feed` for incremental input), or skip tokens entirely and :func:`turbohtml.parse` straight to
 a tree. All three are WHATWG-conformant, unlike ``html.parser``. The :doc:`how-to` guide has a worked port.
+
+``HTMLParser`` is a SAX-style callback API; turbohtml gives you the events as a token stream you drive yourself, which
+inverts the control flow. Each ``handle_*`` override becomes a branch on :attr:`Token.type <turbohtml.Token.type>`:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - ``html.parser`` callback
+      - turbohtml token
+    - - ``handle_starttag(tag, attrs)``
+      - ``token.type is TokenType.START_TAG`` → ``token.tag``, ``token.attrs``
+    - - ``handle_startendtag(tag, attrs)``
+      - ``TokenType.START_TAG`` with ``token.self_closing``
+    - - ``handle_endtag(tag)``
+      - ``TokenType.END_TAG`` → ``token.tag``
+    - - ``handle_data(data)``
+      - ``TokenType.TEXT`` → ``token.data``
+    - - ``handle_comment(data)``
+      - ``TokenType.COMMENT`` → ``token.data``
+    - - ``handle_decl(decl)``
+      - ``TokenType.DOCTYPE`` → ``token.name``
+    - - ``handle_entityref``/``handle_charref``
+      - none needed; references are already resolved in ``token.data``
+
+.. testcode::
+
+    import turbohtml
+    from turbohtml import TokenType
+
+    events = []
+    for token in turbohtml.tokenize('<p class="x">Hi &amp; bye</p>'):
+        if token.type is TokenType.START_TAG:
+            events.append(("start", token.tag, token.attrs))
+        elif token.type is TokenType.TEXT:
+            events.append(("data", token.data))
+        elif token.type is TokenType.END_TAG:
+            events.append(("end", token.tag))
+    print(events)
+
+.. testoutput::
+
+    [('start', 'p', [('class', 'x')]), ('data', 'Hi & bye'), ('end', 'p')]
+
+There is no ``convert_charrefs`` switch to set: turbohtml always resolves character references the WHATWG way, so
+``handle_entityref`` and ``handle_charref`` have no counterpart and ``token.data`` already holds decoded text (``Hi &
+bye`` above, not ``Hi &amp; bye``). When the goal is the resulting structure rather than the event sequence, skip the
+loop and :func:`turbohtml.parse` to a tree, then walk it. The :doc:`performance` page's tokenizing benchmark times this
+token loop against ``html.parser``.
 
 *********************
  From w3lib (Scrapy)

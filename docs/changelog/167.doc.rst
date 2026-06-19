@@ -1,0 +1,3 @@
+Expand the standard-library migration guide with the ``html.parser`` SAX callback to token-loop mapping, noting that
+character references are always resolved (no ``convert_charrefs`` switch) and cross-linking the tokenizing benchmark -
+by :user:`gaborbernat`.
