@@ -4,12 +4,13 @@ Benchmark turbohtml's escape/unescape/tokenize/parse against other libraries.
 
 Run with ``tox -e bench``; positional arguments pick the suites to run
 (``escape``, ``unescape``, ``tokenize``, ``corpus``, ``parse``, ``query``,
-``serialize``; default all). Remaining arguments are forwarded to pyperf (pass
-``--help`` to see them). pyperf runs every case in isolated worker processes and
-reports mean and stddev; the parent process then prints a speedup table: escape,
-unescape, and tokenize against the standard library, parse against the other HTML
-tree builders (lxml, selectolax, html5lib, and BeautifulSoup), and the read-path
-query and serialize suites against lxml, selectolax, and BeautifulSoup.
+``xpath``, ``serialize``; default all). Remaining arguments are forwarded to
+pyperf (pass ``--help`` to see them). pyperf runs every case in isolated worker
+processes and reports mean and stddev; the parent process then prints a speedup
+table: escape, unescape, and tokenize against the standard library, parse against
+the other HTML tree builders (lxml, selectolax, html5lib, and BeautifulSoup), the
+read-path query and serialize suites against lxml, selectolax, and BeautifulSoup,
+and the xpath suite against lxml, the only other library with an XPath engine.
 
 The escape and unescape inputs span tiny strings (call overhead) and multi-MiB
 documents that stream well past the CPU caches: real corpora (Project
@@ -768,6 +769,62 @@ def print_readpath_table(means: dict[str, float], op: str, cases: list[str]) -> 
         print(row)
 
 
+# --- xpath suite: evaluate an XPath 1.0 expression over a pre-parsed tree --- #
+# turbohtml.xpath against lxml's libxml2 XPath engine, the de-facto XPath in
+# Python that parsel, pyquery, and html5-parser all delegate to. selectolax and
+# BeautifulSoup expose no XPath, so the table is a straight turbohtml-vs-lxml
+# race. The expression mirrors the CSS select case (div a[href]) so the two query
+# surfaces line up: every href-bearing anchor under a div, reached through the //
+# descendant abbreviation the engine collapses to a single walk.
+
+XPATH_EXPR = "//div//a[@href]"
+
+
+def turbo_xpath(doc: Document) -> None:
+    """Evaluate the XPath expression with turbohtml's compiled-program engine."""
+    doc.xpath(XPATH_EXPR)
+
+
+def lxml_xpath(tree: HtmlElement) -> None:
+    """Evaluate the same XPath expression with lxml's libxml2 engine."""
+    tree.xpath(XPATH_EXPR)
+
+
+# XPath competitors; only turbohtml and lxml expose an XPath engine.
+XPATH_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
+    ("turbohtml", turbo_tree, turbo_xpath),
+    ("lxml", lxml_tree, lxml_xpath),
+)
+
+
+def run_xpath_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark XPath evaluation across turbohtml and lxml; return the case names."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, evaluate in XPATH_LIBS:
+            bench(f"xpath {name} [{label}]", evaluate, build(text))
+        names.append(name)
+    return names
+
+
+def print_xpath_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's XPath engine beside lxml and its slowdown factor."""
+    if not cases:
+        return
+    others = [label for label, _, _ in XPATH_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'xpath benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"xpath {name} [turbohtml]"]
+        row = f"{'xpath ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"xpath {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def stdlib_tokenize(text: str) -> None:
     """Drive the stdlib parser with its default no-op handlers."""
     parser = HTMLParser()
@@ -867,6 +924,7 @@ def main() -> None:
             "corpus",
             "parse",
             "query",
+            "xpath",
             "serialize",
             "build",
             "edit",
@@ -886,7 +944,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,serialize,build,edit,markup,linkify,sanitize",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,markup,linkify,sanitize",
         ).split(",")
     )
     means: dict[str, float] = {}
@@ -900,6 +958,7 @@ def main() -> None:
     find_cases = run_readpath_suite(bench, 0, "find") if "query" in suites else []
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     has_select_cases = run_readpath_suite(bench, 3, "select :has") if "query" in suites else []
+    xpath_cases = run_xpath_suite(bench) if "xpath" in suites else []
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
     build_cases = run_build_suite(bench) if "build" in suites else []
     edit_cases = run_edit_suite(bench) if "edit" in suites else []
@@ -915,6 +974,7 @@ def main() -> None:
     print_readpath_table(means, "find", find_cases)
     print_readpath_table(means, "select", select_cases)
     print_readpath_table(means, "select :has", has_select_cases)
+    print_xpath_table(means, xpath_cases)
     print_readpath_table(means, "serialize", serialize_cases)
     print_build_table(means, build_cases)
     print_edit_table(means, edit_cases)

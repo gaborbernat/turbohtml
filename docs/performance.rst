@@ -8,8 +8,8 @@ documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/
 source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
-suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``serialize``, ``build``, or ``edit``.
-Numbers vary with input and hardware.
+suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``, or
+``edit``. Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -419,6 +419,30 @@ relational lookup keeps the same interned-atom comparison the flat selectors use
       - 33.6 µs
       - 37.8 µs
       - 1.40 ms
+
+XPath 1.0 evaluation runs through :meth:`~turbohtml.Node.xpath`, raced against lxml's libxml2 engine, the XPath that
+parsel, pyquery, and html5-parser all wrap (selectolax and BeautifulSoup have none). Both evaluate ``//div//a[@href]``,
+the XPath spelling of the ``div a[href]`` selector above: every href-bearing anchor under a ``div``. turbohtml compiles
+the expression against the tree once, resolves the name tests to interned atoms, and collapses the ``//`` abbreviation
+to a single ``descendant`` walk, so it runs about five times faster than libxml2 on the smaller pages and keeps a lead
+on the largest, where the subtree walk both engines must perform dominates the cost.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 18 18
+
+    - - xpath ``//div//a[@href]``
+      - turbohtml
+      - lxml
+    - - wpt page (4 kB)
+      - 1.3 µs
+      - 6.1 µs
+    - - wpt page (9.6 kB)
+      - 2.0 µs
+      - 9.8 µs
+    - - wpt page (92 kB)
+      - 13.9 µs
+      - 21.5 µs
 
 *************
  Serializing
