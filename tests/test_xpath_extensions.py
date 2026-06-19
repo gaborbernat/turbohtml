@@ -31,7 +31,7 @@ def shout(_context: SimpleNamespace, text: str) -> str:
     return text.upper()
 
 
-def echo(_context: SimpleNamespace, value: object) -> object:
+def echo(_context: SimpleNamespace, value: float | bool) -> float | bool:  # noqa: FBT001  # positional by convention
     return value
 
 
@@ -39,7 +39,7 @@ def context_tag(context: SimpleNamespace) -> str:
     return context.context_node.tag
 
 
-EXTENSIONS: dict[tuple[str | None, str], Callable[..., object]] = {
+EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {
     (None, "count_nodes"): count_nodes,
     (None, "shout"): shout,
     (None, "echo"): echo,
@@ -112,7 +112,7 @@ def test_extension_that_raises_propagates(doc: turbohtml.Node) -> None:
 
 def test_extension_returning_a_non_scalar_is_a_type_error(doc: turbohtml.Node) -> None:
     with pytest.raises(TypeError, match="extension result must be"):
-        doc.xpath("bad()", extensions={(None, "bad"): lambda _context: [1, 2]})
+        doc.xpath("bad()", extensions={(None, "bad"): lambda _context: [1, 2]})  # ty: ignore[invalid-argument-type]  # non-scalar return on purpose
 
 
 def test_extensions_must_be_a_dict(doc: turbohtml.Node) -> None:

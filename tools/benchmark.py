@@ -912,7 +912,9 @@ def _bench_count_ext(_context: object, nodes: list[object]) -> float:
     return float(len(nodes))
 
 
-_XPATH_EXTENSIONS: dict[tuple[str | None, str], Callable[..., object]] = {(None, "ext_count"): _bench_count_ext}
+_XPATH_EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {
+    (None, "ext_count"): _bench_count_ext
+}
 
 
 def turbo_variable(doc: Document) -> None:
