@@ -83,7 +83,7 @@ The renames
     - - ``soup.new_tag("div")``, ``soup.new_string("hi")``
       - ``Element("div")``, ``Text("hi")``
     - - ``tag.prettify()``
-      - ``node.serialize(indent=2)``
+      - ``node.serialize(layout=Indent(2))``
     - - ``tag.smooth()``
       - ``element.normalize()``
 

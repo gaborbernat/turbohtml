@@ -4085,3 +4085,4 @@ void th_tree_free(th_tree *tree) {
 }
 
 #include "treebuilder_serialize.h"
+#include "treebuilder_minify.h"

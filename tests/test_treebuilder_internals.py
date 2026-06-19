@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import _html, parse
+from turbohtml import Indent, _html, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -618,7 +618,7 @@ def test_deeply_nested_serializers_are_iterative() -> None:
     def run() -> None:
         document = parse(source)
         captured["compact"] = document.html
-        captured["pretty"] = document.serialize(indent=2)
+        captured["pretty"] = document.serialize(layout=Indent(2))
         captured["dump"] = _html._parse_tree(source)
 
     previous = threading.stack_size(256 * 1024)

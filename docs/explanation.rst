@@ -204,6 +204,16 @@ structural axes, predicates, operators, unions, and the core function library ru
 through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`,
 WHATWG-conformant by default with the escaping selectable through :class:`~turbohtml.Formatter`.
 
+A :class:`~turbohtml.Minify` is a serialization mode on that same conformant tree, and its design rule is that the
+minified bytes must reparse to the same tree -- the hard part, a spec-correct parse, is already done, so minifying is
+only allowed to drop or fold what the parser reconstructs on the way back in. That gives a single correctness gate:
+``minify(parse(minify(parse(src))))`` equals ``minify(parse(src))``, checked across the html5lib-tests corpus and real
+pages. Whitespace folds to one space rather than disappearing (a single space reparses in place, so the fold is
+idempotent); optional tags are omitted only away from open formatting elements, because the adoption agency would
+otherwise reconstruct one across the gap and shift the tree; and a value is unquoted only when no character could end or
+re-open it. The transforms that would *not* round-trip -- deleting whitespace between block elements, or omitting a tag
+whose reparse changes nesting -- are exactly the ones turbohtml declines to make.
+
 *******************
  Mutating the tree
 *******************

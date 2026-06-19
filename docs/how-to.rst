@@ -500,23 +500,60 @@ a token in the class list, and ``axis`` aims the search at something other than 
 
 :attr:`~turbohtml.Node.html` and :attr:`~turbohtml.Node.inner_html` are the default WHATWG-conformant forms (outer and
 children-only). :meth:`~turbohtml.Node.serialize` adds control: ``formatter`` selects the escaping through
-:class:`~turbohtml.Formatter`, and ``indent`` (an int or string) switches to a pretty form that adds whitespace and so
-does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes:
+:class:`~turbohtml.Formatter`, and ``layout`` selects the whitespace. The default ``None`` gives the compact form; a
+:class:`~turbohtml.Indent` (an int for that many spaces, or a string used verbatim) switches to a pretty form that adds
+whitespace and so does not preserve meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes:
 
 .. testcode::
 
     import turbohtml
-    from turbohtml import Formatter
+    from turbohtml import Formatter, Indent
     card = turbohtml.parse("<div><p>café &amp; co</p></div>").select_one("div")
     print(card.inner_html)
     print(card.serialize(formatter=Formatter.NAMED_ENTITIES))
+    print(card.serialize(layout=Indent(2)))
     print(card.encode("ascii", formatter=Formatter.NAMED_ENTITIES))
 
 .. testoutput::
 
     <p>café &amp; co</p>
     <div><p>caf&eacute; &amp; co</p></div>
+    <div>
+      <p>
+        café &amp; co
+      </p>
+    </div>
     b'<div><p>caf&eacute; &amp; co</p></div>'
+
+*******************
+ Minify the output
+*******************
+
+Pass ``layout=`` a :class:`~turbohtml.Minify` to ``serialize`` (or ``encode``) to shrink the markup. Every transform is
+round-trip safe: the minified bytes reparse to the same tree, so minifying never changes meaning. The four flags fold
+insignificant whitespace, omit the start/end tags the WHATWG rules make optional, drop redundant attribute quotes, and
+strip comments; all default on. Because ``layout`` holds one mode, a :class:`~turbohtml.Minify` and an
+:class:`~turbohtml.Indent` cannot be combined.
+
+.. testcode::
+
+    import turbohtml
+    from turbohtml import Minify
+    doc = turbohtml.parse(
+        "<html><head><title>Hi</title></head>"
+        "<body><p class='lead'>one</p>  <p>two</p><!--note--></body></html>"
+    )
+    print(doc.serialize(layout=Minify()))
+    print(doc.serialize(layout=Minify(omit_optional_tags=False, collapse_whitespace=False)))
+
+.. testoutput::
+
+    <title>Hi</title><p class=lead>one</p> <p>two
+    <html><head><title>Hi</title></head><body><p class=lead>one</p>  <p>two</p></body></html>
+
+Whitespace-significant elements (``pre``, ``textarea``, ``listing``) and raw-text elements (``script``, ``style``) keep
+their content verbatim, and a tag is never dropped when omitting it would let the reparse reconstruct a formatting
+element across the boundary.
 
 ************************************
  Parse bytes of an unknown encoding

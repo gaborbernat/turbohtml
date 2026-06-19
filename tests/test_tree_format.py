@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import Formatter, Node, parse
+from turbohtml import Formatter, Indent, Node, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -149,7 +149,8 @@ def test_formatter_serialize(html: str, selector: str, formatter: Formatter, exp
     ],
 )
 def test_serialize_indent(html: str, selector: str, indent: int | str | None, expected: str) -> None:
-    assert _one(html, selector).serialize(indent=indent) == expected
+    layout = None if indent is None else Indent(indent)
+    assert _one(html, selector).serialize(layout=layout) == expected
 
 
 # the parser drops one newline after <pre>; serialization restores it so a
@@ -172,13 +173,50 @@ def test_pre_leading_newline_rule(html: str, selector: str, expected: str) -> No
 
 
 def test_pretty_document_includes_doctype_and_comment() -> None:
-    pretty = parse("<!DOCTYPE html><!--c--><title>t").serialize(indent=2)
+    pretty = parse("<!DOCTYPE html><!--c--><title>t").serialize(layout=Indent(2))
     assert pretty.startswith("<!DOCTYPE html>\n<!--c-->\n<html>\n  <head>")
 
 
 def test_default_serialize_matches_html() -> None:
     div = _one("<div><p>hi</p></div>", "div")
     assert div.serialize() == div.html  # WHATWG, compact
+
+
+def test_indent_defaults_to_two_spaces() -> None:
+    assert Indent().unit == "  "
+
+
+def test_indent_int_and_str_units() -> None:
+    assert Indent(4).unit == "    "
+    assert Indent("\t").unit == "\t"
+    assert not Indent(0).unit
+
+
+def test_indent_repr() -> None:
+    assert repr(Indent(2)) == "Indent('  ')"
+
+
+def test_indent_equality_and_hash() -> None:
+    assert Indent(2) == Indent("  ")
+    assert Indent(2) != Indent(4)
+    assert Indent(2) != "Indent(2)"
+    assert (Indent(2) == 3) is False
+    assert hash(Indent(2)) == hash(Indent("  "))
+
+
+def test_indent_unorderable() -> None:
+    with pytest.raises(TypeError):
+        _ = Indent(2) < Indent(4)  # ty: ignore[unsupported-operator]  # ordering is unsupported on purpose
+
+
+def test_indent_not_equal_same_length() -> None:
+    # same unit length, different content: forces the value comparison, not the length shortcut
+    assert Indent(" ") != Indent("\t")
+
+
+def test_indent_rejects_extra_positional() -> None:
+    with pytest.raises(TypeError):
+        Indent(2, 4)  # ty: ignore[too-many-positional-arguments]  # takes one argument
 
 
 @pytest.mark.parametrize(
@@ -193,7 +231,11 @@ def test_default_serialize_matches_html() -> None:
             id="ascii-with-named-entities",
         ),
         pytest.param(
-            "<div><p>x</p></div>", "div", {"indent": 2}, b"<div>\n  <p>\n    x\n  </p>\n</div>", id="honours-indent"
+            "<div><p>x</p></div>",
+            "div",
+            {"layout": Indent(2)},
+            b"<div>\n  <p>\n    x\n  </p>\n</div>",
+            id="honours-indent",
         ),
     ],
 )
@@ -220,8 +262,14 @@ def test_encode_raises(html: str, kwargs: dict[str, object], exception: type[Exc
         pytest.param(
             lambda node: node.serialize(formatter="whatwg"), TypeError, "Formatter", id="serialize-non-formatter"
         ),
-        pytest.param(lambda node: node.serialize(indent=1.5), TypeError, "indent", id="serialize-bad-indent-type"),
-        pytest.param(lambda node: node.serialize(indent=-1), ValueError, "negative", id="serialize-negative-indent"),
+        pytest.param(
+            lambda node: node.serialize(layout=Indent(1.5)),  # ty: ignore[invalid-argument-type]  # non-int/str on purpose
+            TypeError,
+            "indent",
+            id="indent-bad-type",
+        ),
+        pytest.param(lambda node: node.serialize(layout=Indent(-1)), ValueError, "negative", id="indent-negative"),
+        pytest.param(lambda node: node.serialize(layout="whatwg"), TypeError, "layout", id="serialize-bad-layout"),
         pytest.param(lambda node: node.serialize("whatwg"), TypeError, None, id="serialize-positional"),
         pytest.param(lambda node: node.encode("utf-8", "extra"), TypeError, None, id="encode-extra-positional"),
         pytest.param(lambda node: node.encode(formatter="whatwg"), TypeError, "Formatter", id="encode-non-formatter"),
