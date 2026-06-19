@@ -37,7 +37,7 @@ def doc() -> turbohtml.Node:
 def test_variable_node_set(
     doc: turbohtml.Node, expr: str, kwargs: dict[str, str | int | float | bool], expected: list[str]
 ) -> None:
-    assert tags(doc.xpath(expr, **kwargs)) == expected
+    assert tags(doc.xpath(expr, **kwargs)) == expected  # ty: ignore[invalid-argument-type]  # variables unpacked as a dict
 
 
 @pytest.mark.parametrize(
@@ -56,7 +56,7 @@ def test_variable_node_set(
 def test_variable_scalar(
     doc: turbohtml.Node, expr: str, kwargs: dict[str, str | int | float | bool], expected: object
 ) -> None:
-    assert doc.xpath(expr, **kwargs) == expected
+    assert doc.xpath(expr, **kwargs) == expected  # ty: ignore[invalid-argument-type]  # variables unpacked as a dict
 
 
 def test_unbound_variable_without_any_binding(doc: turbohtml.Node) -> None:

@@ -2136,7 +2136,120 @@ static PyObject *xpath_scalar_to_py(const xp_result *result) {
 /* Evaluate an expression and marshal it to a Python object: a node-set becomes a
    list (elements as Element, attribute/text values as str); a scalar becomes the
    matching float / str / bool. */
-static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars, int smart_strings) {
+static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out, const char *what);
+
+/* The state an extension callback needs, threaded through xp_eval as a void *. */
+typedef struct {
+    PyObject *extensions; /* {(None, name): callable}; only set when non-empty */
+    PyObject *handle;
+    module_state *state;
+    th_tree *tree;
+} xpath_ext_ctx;
+
+/* Marshal one evaluated argument to the Python object an extension receives. */
+static PyObject *xpath_arg_to_py(xpath_ext_ctx *ec, const xp_result *value) {
+    if (value->kind == XP_NODESET) {
+        PyObject *list = PyList_New(value->nodes.len);
+        if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            return NULL;    /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < value->nodes.len; index++) {
+            PyObject *item = xpath_item_to_py(ec->state, ec->handle, ec->tree, value->nodes.items[index], 0);
+            if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+                Py_DECREF(list); /* GCOVR_EXCL_LINE */
+                return NULL;     /* GCOVR_EXCL_LINE */
+            }
+            PyList_SET_ITEM(list, index, item);
+        }
+        return list;
+    }
+    if (value->kind == XP_STRING) {
+        return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, value->string, value->string_len);
+    }
+    if (value->kind == XP_NUMBER) {
+        return PyFloat_FromDouble(value->number);
+    }
+    return PyBool_FromLong(value->boolean);
+}
+
+/* SimpleNamespace(context_node=element): the lightweight context lxml extensions
+   read .context_node off. */
+static PyObject *xpath_extension_context(PyObject *element) {
+    PyObject *types = PyImport_ImportModule("types");
+    if (types == NULL) { /* GCOVR_EXCL_BR_LINE: the types import cannot be forced to fail */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    PyObject *ns_type = PyObject_GetAttrString(types, "SimpleNamespace");
+    Py_DECREF(types);
+    if (ns_type == NULL) { /* GCOVR_EXCL_BR_LINE: SimpleNamespace is always present */
+        return NULL;       /* GCOVR_EXCL_LINE */
+    }
+    PyObject *context = PyObject_CallNoArgs(ns_type);
+    Py_DECREF(ns_type);
+    if (context == NULL) { /* GCOVR_EXCL_BR_LINE: a SimpleNamespace allocation cannot be forced */
+        return NULL;       /* GCOVR_EXCL_LINE */
+    }
+    if (PyObject_SetAttrString(context, "context_node", element) < 0) { /* GCOVR_EXCL_BR_LINE: cannot be forced */
+        Py_DECREF(context);                                             /* GCOVR_EXCL_LINE */
+        return NULL;                                                    /* GCOVR_EXCL_LINE */
+    }
+    return context;
+}
+
+/* xp_extension_fn: resolve `name` against the (None, name) extension keys and run
+   the callable over the marshaled context and arguments. */
+static int xpath_call_extension(void *vctx, th_node *context_node, const Py_UCS4 *name, Py_ssize_t name_len,
+                                const xp_result *args, int argc, xp_result *out) {
+    xpath_ext_ctx *ec = vctx;
+    PyObject *name_obj = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, name, name_len);
+    if (name_obj == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;          /* GCOVR_EXCL_LINE */
+    }
+    PyObject *key = Py_BuildValue("(OO)", Py_None, name_obj);
+    Py_DECREF(name_obj);
+    if (key == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
+    PyObject *func = PyDict_GetItem(ec->extensions, key); /* borrowed, no exception when absent */
+    Py_DECREF(key);
+    if (func == NULL) {
+        return -2; /* no such extension; the engine reports an unknown function */
+    }
+    PyObject *element = node_wrap(ec->state, ec->handle, context_node);
+    if (element == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;         /* GCOVR_EXCL_LINE */
+    }
+    PyObject *context = xpath_extension_context(element);
+    Py_DECREF(element);
+    if (context == NULL) { /* GCOVR_EXCL_BR_LINE: an import or allocation failure cannot be forced */
+        return -1;         /* GCOVR_EXCL_LINE */
+    }
+    PyObject *call_args = PyTuple_New((Py_ssize_t)argc + 1);
+    if (call_args == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        Py_DECREF(context);  /* GCOVR_EXCL_LINE */
+        return -1;           /* GCOVR_EXCL_LINE */
+    }
+    PyTuple_SET_ITEM(call_args, 0, context); /* steals the context reference */
+    for (int index = 0; index < argc; index++) {
+        PyObject *arg = xpath_arg_to_py(ec, &args[index]);
+        if (arg == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            Py_DECREF(call_args); /* GCOVR_EXCL_LINE */
+            return -1;            /* GCOVR_EXCL_LINE */
+        }
+        PyTuple_SET_ITEM(call_args, index + 1, arg); /* steals the argument reference */
+    }
+    PyObject *result = PyObject_CallObject(func, call_args);
+    Py_DECREF(call_args);
+    if (result == NULL) {
+        return -1; /* the extension raised */
+    }
+    int rc = xpath_pyobject_to_scalar(result, out, "an extension result");
+    Py_DECREF(result);
+    return rc;
+}
+
+static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars, int smart_strings,
+                                   PyObject *extensions) {
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
         return NULL;
@@ -2153,10 +2266,12 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindi
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: the compile cache and the eval read the tree */
     HandleObject *handle_obj = (HandleObject *)handle;
     th_tree *tree = handle_obj->tree;
+    xpath_ext_ctx ext_ctx = {extensions, handle, state, tree};
     xp_program *prog = cached_xpath_compile(handle_obj, arg);
     if (prog != NULL) {
         compiled = 1;
-        status = xp_eval(prog, tree, origin, vars, &result, &feature);
+        status = xp_eval(prog, tree, origin, vars, extensions != NULL ? xpath_call_extension : NULL,
+                         extensions != NULL ? &ext_ctx : NULL, &result, &feature);
     }
     if (compiled && status == 0) {
         if (result.kind == XP_NODESET) {
@@ -2196,7 +2311,9 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindi
 }
 
 /* Convert one keyword-argument value into an XPath variable binding value. */
-static int xpath_var_value(PyObject *obj, xp_result *out) {
+/* Convert a Python scalar (bool/int/float/str) to an xp_result; `what` names the
+   source for the type error a node-set or any other object triggers. */
+static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out, const char *what) {
     memset(out, 0, sizeof(*out));
     if (PyBool_Check(obj)) {
         out->kind = XP_BOOLEAN;
@@ -2218,11 +2335,15 @@ static int xpath_var_value(PyObject *obj, xp_result *out) {
         out->string = buf;
         out->string_len = length;
     } else {
-        PyErr_Format(PyExc_TypeError, "xpath variable must be str, int, float, or bool, not %.80s",
+        PyErr_Format(PyExc_TypeError, "xpath %s must be str, int, float, or bool, not %.80s", what,
                      Py_TYPE(obj)->tp_name);
         return -1;
     }
     return 0;
+}
+
+static int xpath_var_value(PyObject *obj, xp_result *out) {
+    return xpath_pyobject_to_scalar(obj, out, "variable");
 }
 
 static void free_xpath_vars(xp_binding *items, Py_ssize_t len) {
@@ -2252,7 +2373,8 @@ static int build_xpath_vars(PyObject *kwds, xp_binding **out_items, Py_ssize_t *
     PyObject *key;
     PyObject *value;
     while (PyDict_Next(kwds, &pos, &key, &value)) {
-        if (PyUnicode_CompareWithASCIIString(key, "smart_strings") == 0) {
+        if (PyUnicode_CompareWithASCIIString(key, "smart_strings") == 0 ||
+            PyUnicode_CompareWithASCIIString(key, "extensions") == 0) {
             continue; /* a reserved option the caller reads, not a $variable */
         }
         Py_UCS4 *name = PyUnicode_AsUCS4Copy(key);
@@ -2284,6 +2406,7 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
         return NULL;
     }
     int smart_strings = 0;
+    PyObject *extensions = NULL;
     if (kwds != NULL) {
         PyObject *flag = PyDict_GetItemString(kwds, "smart_strings"); /* borrowed, no exception when absent */
         if (flag != NULL) {
@@ -2292,6 +2415,14 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
                 return NULL;         /* GCOVR_EXCL_LINE */
             }
         }
+        PyObject *ext = PyDict_GetItemString(kwds, "extensions"); /* borrowed */
+        if (ext != NULL && ext != Py_None) {
+            if (!PyDict_Check(ext)) {
+                PyErr_SetString(PyExc_TypeError, "xpath extensions must be a dict of (namespace, name) -> callable");
+                return NULL;
+            }
+            extensions = PyDict_GET_SIZE(ext) > 0 ? ext : NULL;
+        }
     }
     xp_binding *items;
     Py_ssize_t len;
@@ -2299,7 +2430,7 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
         return NULL;
     }
     xp_bindings vars = {items, len};
-    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars, smart_strings);
+    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars, smart_strings, extensions);
     free_xpath_vars(items, len);
     return result;
 }

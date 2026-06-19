@@ -1673,6 +1673,8 @@ typedef struct {
     Py_ssize_t size;
     const char **feature;
     const xp_bindings *vars;
+    xp_extension_fn extension;
+    void *extension_ctx;
 } xp_ctx;
 
 void xp_result_free(xp_result *result) {
@@ -1895,7 +1897,8 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
         Py_ssize_t size = set->len;
         Py_ssize_t write_pos = 0;
         for (Py_ssize_t index = 0; index < set->len; index++) {
-            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1, size, ctx->feature, ctx->vars};
+            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1,         size, ctx->feature,
+                           ctx->vars, ctx->extension,         ctx->extension_ctx};
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
             if (rc < 0) {
@@ -2693,6 +2696,9 @@ static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_re
         PyMem_Free(text);
         PyMem_Free(from);
         PyMem_Free(to);
+    } else if (ctx->extension != NULL &&
+               (rc = ctx->extension(ctx->extension_ctx, ctx->node, fn->str, fn->str_len, args, argc, out)) != -2) {
+        /* a registered extension handled it (rc is 0 or a propagated error) */
     } else {
         *ctx->feature = "this function";
         rc = -2;
@@ -2885,8 +2891,8 @@ static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result
 }
 
 int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
-            xp_result *out, const char **feature) {
-    xp_ctx ctx = {tree, context, 1, 1, feature, vars};
+            xp_extension_fn extension, void *extension_ctx, xp_result *out, const char **feature) {
+    xp_ctx ctx = {tree, context, 1, 1, feature, vars, extension, extension_ctx};
     return eval_expr(prog, prog->root, &ctx, out);
 }
 

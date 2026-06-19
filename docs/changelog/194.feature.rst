@@ -15,3 +15,9 @@ Pass ``smart_strings=True`` to get :class:`~turbohtml.XPathString` results, ``st
 an attribute or ``text()`` value came from, the way ``lxml``'s smart strings do: ``result.getparent()`` returns the
 element and ``result.is_attribute`` / ``result.attrname`` identify the source. The default stays a plain ``str`` (the
 fast path ``parsel`` also chooses).
+
+Register custom XPath functions with ``extensions={(None, name): callable}``, like ``lxml``. The callable receives a
+context whose ``context_node`` is the current element and the evaluated arguments (a node-set as a list of elements, a
+string/number/boolean as the matching Python value), and returns a ``str``, number, or ``bool``. Calling a Python
+function from the evaluator runs outside the all-C fast path, so reserve it for what the built-in library cannot
+express.

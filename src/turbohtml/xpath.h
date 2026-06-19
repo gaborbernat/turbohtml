@@ -76,13 +76,22 @@ typedef struct {
     Py_ssize_t len;
 } xp_bindings;
 
+/* A user extension-function call: resolve `name` against the registered
+   extensions and run it over `args` with `context_node` as the XPath context.
+   Returns 0 with *out filled, -2 when no extension has that name (the engine then
+   reports an unknown function), -1 on a Python error (the exception is set). */
+struct th_node;
+typedef int (*xp_extension_fn)(void *ctx, struct th_node *context_node, const Py_UCS4 *name, Py_ssize_t name_len,
+                               const xp_result *args, int argc, xp_result *out);
+
 /* Evaluate a compiled program against a context node. vars supplies $name bindings
-   (NULL when none). Returns 0 with *out filled (the caller frees it with
-   xp_result_free). Returns -2 for a construct not yet implemented, or -3 for an
-   evaluation error (a reference to an unbound variable), with *feature set to a
-   short name for the message. Returns -1 on allocation failure. */
+   (NULL when none); extension/extension_ctx supply user functions (extension NULL
+   when none). Returns 0 with *out filled (the caller frees it with xp_result_free).
+   Returns -2 for a construct not yet implemented, or -3 for an evaluation error (a
+   reference to an unbound variable), with *feature set to a short name for the
+   message. Returns -1 on allocation failure (or a Python error from an extension). */
 struct th_tree;
 int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
-            xp_result *out, const char **feature);
+            xp_extension_fn extension, void *extension_ctx, xp_result *out, const char **feature);
 
 #endif /* TURBOHTML_XPATH_H */

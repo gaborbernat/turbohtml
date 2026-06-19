@@ -1,4 +1,5 @@
-"""Smart-string xpath results, mirroring lxml's ``_ElementUnicodeResult``.
+"""
+Smart-string xpath results, mirroring lxml's ``_ElementUnicodeResult``.
 
 When :meth:`turbohtml.Node.xpath` is called with ``smart_strings=True``, an
 attribute or ``text()`` value comes back as an :class:`XPathString`: a ``str``
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._html import Element, _register_xpath_string  # noqa: TC001  # Element stays importable so autodoc resolves it
+from ._html import Element, _register_xpath_string  # Element stays importable so autodoc resolves it
 
 if TYPE_CHECKING:
     from typing_extensions import Self
