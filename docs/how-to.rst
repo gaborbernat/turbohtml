@@ -442,8 +442,7 @@ and arithmetic operators, unions, and the core function library:
     3
 
 An absolute path starts at the document root and a leading ``//`` rescans the whole document, so write ``.//`` for
-descendants of the context node. Migrating from ``lxml``, ``parsel``, or ``pyquery`` keeps your existing expressions;
-only the ``namespace`` axis is unimplemented and raises :class:`NotImplementedError`.
+descendants of the context node. Migrating from ``lxml``, ``parsel``, or ``pyquery`` keeps your existing expressions.
 
 ********************************
  Filter by attribute or pattern

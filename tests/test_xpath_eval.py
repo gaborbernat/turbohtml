@@ -1,8 +1,7 @@
 """Evaluation of XPath location paths through ``Node.xpath`` / ``Node.xpath_one``.
 
 Covers the structural axes, the name/``*``/``node()``/``text()``/``comment()`` node
-tests, and attribute access. Only the ``namespace`` axis is unimplemented and raises
-``NotImplementedError``.
+tests, attribute access, and the namespace axis.
 """
 
 from __future__ import annotations
@@ -193,28 +192,21 @@ def test_xpath_iter_supports_partial_consumption(doc: turbohtml.Node) -> None:
 
 
 def test_xpath_iter_propagates_errors(doc: turbohtml.Node) -> None:
-    with pytest.raises(NotImplementedError, match="the namespace axis"):
-        doc.xpath_iter("//namespace::x")
+    with pytest.raises(NotImplementedError, match="this function"):
+        doc.xpath_iter("bogus-fn(1)")
     with pytest.raises(TypeError, match="must be a str"):
         doc.xpath_iter(123)  # ty: ignore[invalid-argument-type]  # non-str exercises the TypeError path
 
 
-@pytest.mark.parametrize(
-    "expr",
-    [
-        pytest.param("//namespace::x", id="namespace-a"),
-        pytest.param("//namespace::y", id="namespace-b"),
-        pytest.param("//namespace::x", id="namespace-c"),
-    ],
-)
-def test_unsupported_axes_raise(doc: turbohtml.Node, expr: str) -> None:
-    with pytest.raises(NotImplementedError, match="the namespace axis"):
-        doc.xpath(expr)
+def test_namespace_axis(doc: turbohtml.Node) -> None:
+    # every element exposes the implicit xml namespace node, named xml
+    assert doc.xpath("name(//p/namespace::*)") == "xml"
+    assert doc.xpath("//p/namespace::*") == ["http://www.w3.org/XML/1998/namespace"] * 2
 
 
 def test_xpath_one_unsupported_raises(doc: turbohtml.Node) -> None:
-    with pytest.raises(NotImplementedError, match="the namespace axis"):
-        doc.xpath_one("//namespace::x")
+    with pytest.raises(NotImplementedError, match="this function"):
+        doc.xpath_one("bogus-fn(1)")
 
 
 def test_invalid_expression_raises_value_error(doc: turbohtml.Node) -> None:

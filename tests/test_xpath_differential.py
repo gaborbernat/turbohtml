@@ -99,6 +99,10 @@ EXPRS = [
     "//p[count(//article)=2]",
     "boolean(//p)",
     "boolean(//zzz)",
+    # the namespace axis: the implicit xml namespace node per element
+    "count(//namespace::*)",
+    "name(//body/namespace::*)",
+    "string(//body/namespace::*)",
     "//article[position()=1]/h2/text()",
 ]
 

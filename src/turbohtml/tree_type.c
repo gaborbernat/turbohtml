@@ -2045,9 +2045,13 @@ static xp_program *cached_xpath_compile(HandleObject *handle, PyObject *arg) {
     return prog;
 }
 
-/* Marshal one evaluated node-set item: an attribute to its value as str, a text
-   node to its data as str, any other node to its element/comment/... wrapper. */
+/* Marshal one evaluated node-set item: a namespace node (attr == -2) and an attribute
+   to their string value as str, a text node to its data as str, any other node to its
+   element/comment/... wrapper. */
 static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
+    if (item.attr == -2) {
+        return PyUnicode_FromString("http://www.w3.org/XML/1998/namespace");
+    }
     if (item.attr >= 0) {
         const th_node_attr *attr = &item.node->attrs[item.attr];
         return attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);

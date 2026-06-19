@@ -183,25 +183,41 @@ def test_filter_base_node_set_continues_as_path(doc: turbohtml.Node) -> None:
         pytest.param("(1)[1]", "non-node-set", id="predicate-on-non-nodeset"),
         pytest.param("//a | 1", "non-node-set", id="union-of-non-nodesets"),
         pytest.param("1 | //a", "non-node-set", id="union-non-nodeset-left"),
-        pytest.param("(//p)[namespace::x]", "namespace", id="filter-predicate-axis"),
-        pytest.param("//namespace::x", "namespace", id="namespace-axis"),
-        # an unsupported axis nested in each expression form propagates the error out
-        pytest.param("count(//namespace::x)", "namespace", id="in-function-arg"),
-        pytest.param("concat('x', //namespace::x)", "namespace", id="in-later-function-arg"),
-        pytest.param("//p[namespace::x]", "namespace", id="in-predicate"),
-        pytest.param("(//namespace::x)[1]", "namespace", id="in-filter"),
-        pytest.param("(//namespace::x)/p", "namespace", id="in-filter-base"),
-        pytest.param("//namespace::x | //p", "namespace", id="in-union-left"),
-        pytest.param("//p | //namespace::x", "namespace", id="in-union-right"),
-        pytest.param("//namespace::x or 1", "namespace", id="in-or-left"),
-        pytest.param("false() or //namespace::x", "namespace", id="in-or-right"),
-        pytest.param("//namespace::x and 1", "namespace", id="in-and-left"),
-        pytest.param("true() and //namespace::x", "namespace", id="in-and-right"),
-        pytest.param("- //namespace::x", "namespace", id="in-negation"),
-        pytest.param("//namespace::x = 1", "namespace", id="in-compare-left"),
-        pytest.param("1 = //namespace::x", "namespace", id="in-compare-right"),
+        # an unknown function nested in each expression form propagates the error out
+        pytest.param("count(bogus-fn(1))", "this function", id="in-function-arg"),
+        pytest.param("concat('x', bogus-fn(1))", "this function", id="in-later-function-arg"),
+        pytest.param("//p[bogus-fn(1)]", "this function", id="in-predicate"),
+        pytest.param("(bogus-fn(1))[1]", "this function", id="in-filter-primary"),
+        pytest.param("(//p)[bogus-fn(1)]", "this function", id="in-filter-predicate"),
+        pytest.param("(bogus-fn(1))/p", "this function", id="in-filter-base"),
+        pytest.param("bogus-fn(1) | //p", "this function", id="in-union-left"),
+        pytest.param("//p | bogus-fn(1)", "this function", id="in-union-right"),
+        pytest.param("bogus-fn(1) or 1", "this function", id="in-or-left"),
+        pytest.param("false() or bogus-fn(1)", "this function", id="in-or-right"),
+        pytest.param("bogus-fn(1) and 1", "this function", id="in-and-left"),
+        pytest.param("true() and bogus-fn(1)", "this function", id="in-and-right"),
+        pytest.param("- bogus-fn(1)", "this function", id="in-negation"),
+        pytest.param("bogus-fn(1) = 1", "this function", id="in-compare-left"),
+        pytest.param("1 = bogus-fn(1)", "this function", id="in-compare-right"),
     ],
 )
 def test_unsupported_constructs_raise(doc: turbohtml.Node, expr: str, message: str) -> None:
     with pytest.raises(NotImplementedError, match=message):
         doc.xpath(expr)
+
+
+def test_namespace_axis(doc: turbohtml.Node) -> None:
+    # every element exposes the implicit xml namespace node; it marshals to its URI
+    uri = "http://www.w3.org/XML/1998/namespace"
+    assert doc.xpath("//p/namespace::*") == [uri, uri, uri]  # three <p> elements
+    assert doc.xpath("//p/namespace::xml") == [uri, uri, uri]
+    assert doc.xpath("//p/namespace::node()") == [uri, uri, uri]
+    assert doc.xpath("//p/namespace::other") == []  # wrong length
+    assert doc.xpath("//p/namespace::aml") == []  # wrong first character
+    assert doc.xpath("//p/namespace::xyz") == []  # wrong second character
+    assert doc.xpath("//p/namespace::xmz") == []  # wrong third character
+    assert doc.xpath("//p/namespace::text()") == []
+    assert doc.xpath("name(//p/namespace::*)") == "xml"
+    assert doc.xpath("//p/namespace::*/a") == []  # a namespace node has no axes
+    # an attribute and the namespace node of the same element sort node-then-namespace
+    assert doc.xpath("count(//p/@class | //p/namespace::*)") == pytest.approx(4.0)

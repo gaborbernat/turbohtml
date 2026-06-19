@@ -1522,6 +1522,18 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint
         reverse_items(out, from);
         return 0;
     }
+    case AX_NAMESPACE: {
+        /* Every element carries the implicit `xml` namespace node, the only namespace
+           node an HTML tree exposes; it is the item with attr == -2. The node test
+           matches it for *, node(), and the xml prefix, but not text()/comment()/pi(). */
+        int matches = step->test == NT_STAR || step->test == NT_NODE ||
+                      (step->test == NT_NAME && step->str_len == 3 && step->str[0] == 'x' && step->str[1] == 'm' &&
+                       step->str[2] == 'l');
+        if (ctx->type == TH_NODE_ELEMENT && matches) {
+            return ns_push(out, ctx, -2);
+        }
+        return 0;
+    }
     default: /* AX_PRECEDING_SIBLING */
         for (struct th_node *node = ctx->prev_sibling; node != NULL; node = node->prev_sibling) {
             if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
@@ -1569,11 +1581,25 @@ static int node_before(struct th_node *left, struct th_node *right) {
     return 1;
 }
 
+/* Order items sharing a node: the node itself first, then its attributes, then its
+   namespace node, mirroring document order within an element. */
+static Py_ssize_t item_rank(Py_ssize_t attr) {
+    if (attr == -1) {
+        return 0; /* the node */
+    }
+    if (attr == -2) {
+        return PY_SSIZE_T_MAX; /* the namespace node, after the attributes */
+    }
+    return attr + 1; /* an attribute */
+}
+
 static int item_cmp(const void *pa, const void *pb) {
     const xp_item *left = pa;
     const xp_item *right = pb;
     if (left->node == right->node) {
-        return left->attr < right->attr ? -1 : 1; /* same node: the node (-1) sorts before its attributes */
+        Py_ssize_t left_rank = item_rank(left->attr);
+        Py_ssize_t right_rank = item_rank(right->attr);
+        return left_rank < right_rank ? -1 : left_rank > right_rank ? 1 : 0;
     }
     return node_before(left->node, right->node);
 }
@@ -1591,10 +1617,6 @@ static void sort_unique(xp_nodeset *ns) {
         }
     }
     ns->len = write_pos;
-}
-
-static int axis_supported(uint8_t axis) {
-    return axis != AX_NAMESPACE;
 }
 
 /* --------------------------------------------------------- value model */
@@ -1649,7 +1671,26 @@ static Py_UCS4 *ucs4_dup(const Py_UCS4 *src, Py_ssize_t len) {
 }
 
 /* The XPath string-value of a node-set member, freshly allocated. */
+/* The implicit xml namespace, the only namespace node an HTML tree exposes. */
+#define XP_XML_NS_URI "http://www.w3.org/XML/1998/namespace"
+#define XP_XML_NS_PREFIX "xml"
+
+static Py_UCS4 *ucs4_from_ascii(const char *src, Py_ssize_t length, Py_ssize_t *len) {
+    *len = length;
+    Py_UCS4 *buffer = PyMem_Malloc((size_t)length * sizeof(Py_UCS4));
+    if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < length; index++) {
+        buffer[index] = (Py_UCS4)(unsigned char)src[index];
+    }
+    return buffer;
+}
+
 static Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
+    if (item.attr == -2) {
+        return ucs4_from_ascii(XP_XML_NS_URI, sizeof(XP_XML_NS_URI) - 1, len);
+    }
     if (item.attr >= 0) {
         const th_node_attr *attr_record = &item.node->attrs[item.attr];
         *len = attr_record->value == NULL ? 0 : attr_record->value_len;
@@ -1846,12 +1887,6 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
     xp_nodeset next = {0};
     for (int32_t si = root->first; si >= 0; si = prog->nodes[si].next) {
         const xn *step = &prog->nodes[si];
-        if (!axis_supported(step->axis)) {
-            *ctx->feature = "the namespace axis";
-            xp_nodeset_free(&cur);
-            xp_nodeset_free(&next);
-            return -2;
-        }
         int name_test = step->test == NT_NAME;
         uint16_t atom = name_test && step->axis != AX_ATTRIBUTE ? resolve_tag_atom(step->str, step->str_len) : 0;
         uint32_t attr_atom = name_test && step->axis == AX_ATTRIBUTE
@@ -1859,8 +1894,8 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
                                  : UINT32_MAX;
         next.len = 0;
         for (Py_ssize_t index = 0; index < cur.len; index++) {
-            if (cur.items[index].attr >= 0) {
-                continue; /* an attribute has no axes of its own */
+            if (cur.items[index].attr != -1) {
+                continue; /* an attribute or namespace node has no axes of its own */
             }
             Py_ssize_t before = next.len;
             if (apply_step(&next, cur.items[index].node, step, atom, attr_atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
@@ -2045,18 +2080,16 @@ static Py_UCS4 *node_name_string(xp_ctx *ctx, xp_result *args, int argc, Py_ssiz
         node = args[0].nodes.items[0].node;
         attr = args[0].nodes.items[0].attr;
     }
+    if (attr == -2) {
+        return ucs4_from_ascii(XP_XML_NS_PREFIX, sizeof(XP_XML_NS_PREFIX) - 1, len);
+    }
     if (attr >= 0) {
         Py_ssize_t blen;
         const char *bytes = th_attr_name(ctx->tree, node->attrs[attr].name_atom, &blen);
-        Py_UCS4 *buffer =
-            PyMem_Malloc((size_t)blen * sizeof(Py_UCS4)); /* GCOVR_EXCL_BR_LINE: attribute names are never empty */
-        if (buffer == NULL) {                             /* GCOVR_EXCL_BR_LINE: alloc */
-            return NULL;                                  /* GCOVR_EXCL_LINE */
+        Py_UCS4 *buffer = ucs4_from_ascii(bytes, blen, len);
+        if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return NULL;      /* GCOVR_EXCL_LINE */
         }
-        for (Py_ssize_t index = 0; index < blen; index++) {
-            buffer[index] = (Py_UCS4)(unsigned char)bytes[index];
-        }
-        *len = blen;
         return buffer;
     }
     if (node->type == TH_NODE_ELEMENT) {
