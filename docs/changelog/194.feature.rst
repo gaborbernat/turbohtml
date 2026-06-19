@@ -1,0 +1,3 @@
+Complete the XPath 1.0 core function library with ``id()``, ``namespace-uri()``, and ``lang()``. On an HTML document
+``lang()`` honors the HTML ``lang`` attribute and ``namespace-uri()`` reports the SVG and MathML namespace for foreign
+content, where ``lxml``'s legacy HTML parser returns nothing for both.
