@@ -530,6 +530,88 @@ to ``attribute_filter`` (turbohtml's may rewrite a value, not only drop it). tur
 default (``OnDisallowed.ESCAPE``), the mode ammonia blocked upstream; pass ``OnDisallowed.STRIP`` or
 ``OnDisallowed.REMOVE`` for nh3-style dropping.
 
+**********************
+ From lxml-html-clean
+**********************
+
+`lxml-html-clean <https://github.com/fedora-python/lxml_html_clean>`_ (the ``Cleaner`` split out of ``lxml.html.clean``)
+takes the opposite stance to ``turbohtml.sanitizer``: it is a **blocklist**. You toggle off categories of dangerous
+content (``scripts``, ``javascript``, ``style``, ``comments``, ``embedded``, ``frames``, ``forms``, ``meta``, ...) and
+everything else survives, so a tag the library has not heard of passes through. turbohtml is an **allowlist**: nothing
+survives unless a :class:`~turbohtml.sanitizer.Policy` names it, which is why the safety baseline holds against markup
+the author never anticipated.
+
+Porting inverts the model. Instead of switching dangerous things off, declare the small set you keep:
+
+.. code-block:: python
+
+    # lxml-html-clean: enumerate what to strip, keep the rest
+    from lxml_html_clean import Cleaner
+
+    Cleaner(
+        scripts=True, javascript=True, comments=True, style=True, forms=True
+    ).clean_html(text)
+
+.. testcode::
+
+    from turbohtml.sanitizer import sanitize, Policy
+
+    print(sanitize(
+        "<p>Hi<script>x()</script> <a href='javascript:1'>l</a></p>",
+        Policy(tags=frozenset({"p", "a"}), attributes={"a": frozenset({"href"})}),
+    ))
+
+.. testoutput::
+
+    <p>Hi&lt;script&gt;x()&lt;/script&gt; <a>l</a></p>
+
+The ``javascript:`` URL is gone because ``http``/``https``/``mailto`` are the only schemes the policy admits, and the
+``<script>`` is escaped rather than executed. ``Cleaner``'s ``host_whitelist`` and ``kill_tags``/``allow_tags`` lists
+fold into ``Policy.tags`` and ``attribute_filter``; its ``add_nofollow`` maps to ``Policy.add_link_rel``. The CSS
+scrubbing ``Cleaner`` does for ``style`` is not ported, and ``Cleaner`` rewrites a disallowed scheme to an empty
+``href`` where turbohtml drops the attribute outright.
+
+*********************
+ From html-sanitizer
+*********************
+
+`html-sanitizer <https://github.com/matthiask/html-sanitizer>`_ already shares turbohtml's allowlist stance, so the move
+is a settings-to-:class:`~turbohtml.sanitizer.Policy` translation rather than a rethink. Its ``settings`` dict carries
+``tags`` (a set), ``attributes`` (a per-tag dict), ``add_nofollow``, and a ``sanitize_href`` scheme check:
+
+.. code-block:: python
+
+    # html-sanitizer
+    from html_sanitizer import Sanitizer
+
+    Sanitizer(
+        {"tags": {"a", "p"}, "attributes": {"a": {"href"}}, "add_nofollow": True}
+    ).sanitize(text)
+
+.. testcode::
+
+    from turbohtml.sanitizer import sanitize, Policy
+
+    print(sanitize(
+        '<p>Hi <a href="http://x">l</a></p>',
+        Policy(
+            tags=frozenset({"p", "a"}),
+            attributes={"a": frozenset({"href"})},
+            add_link_rel=frozenset({"nofollow"}),
+        ),
+    ))
+
+.. testoutput::
+
+    <p>Hi <a href="http://x" rel="nofollow">l</a></p>
+
+``tags`` maps to ``Policy.tags``, ``attributes`` to ``Policy.attributes``, ``add_nofollow`` to
+``add_link_rel={"nofollow"}``, and ``sanitize_href``'s allowed schemes to ``url_schemes``. Two html-sanitizer features
+have no direct port: the whitespace normalization and tag-merging it performs (``empty``, ``separate``, ``whitespace``)
+and its ``element_preprocessors``/``element_postprocessors`` hooks. turbohtml's ``attribute_filter`` covers value-level
+rewriting, but structural post-processing is left to a walk over the returned tree. html-sanitizer parses through lxml;
+turbohtml runs the WHATWG tree builder in C.
+
 ******************************
  From html2text / markdownify
 ******************************
