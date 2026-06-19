@@ -1,0 +1,4 @@
+Add a migration entry and a performance comparison for ``w3lib.html``, mapping ``replace_entities`` onto
+:func:`turbohtml.unescape` (now benchmarked side by side) and the tag and comment strippers onto parsing plus
+:attr:`~turbohtml.Node.text`, and scoping the overlap to the HTML subset since the URL and HTTP helpers have no
+equivalent - by :user:`gaborbernat`.

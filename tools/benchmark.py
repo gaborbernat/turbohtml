@@ -7,9 +7,9 @@ Run with ``tox -e bench``; positional arguments pick the suites to run
 ``xpath``, ``serialize``; default all). Remaining arguments are forwarded to
 pyperf (pass ``--help`` to see them). pyperf runs every case in isolated worker
 processes and reports mean and stddev; the parent process then prints a speedup
-table: escape, unescape, and tokenize against the standard library, parse against
-the other HTML tree builders (lxml, selectolax, resiliparse, html5lib, and
-BeautifulSoup), the
+table: escape, unescape, and tokenize against the standard library (unescape also
+against w3lib's replace_entities), parse against the other HTML tree builders
+(lxml, selectolax, resiliparse, html5lib, and BeautifulSoup), the
 read-path query and serialize suites against lxml, selectolax, and BeautifulSoup,
 and the xpath suite against lxml, the only other library with an XPath engine.
 
@@ -47,6 +47,7 @@ import markupsafe
 import minify_html
 import nh3
 import pyperf
+import w3lib.html
 from bs4 import BeautifulSoup
 from linkify_it import LinkifyIt
 from lxml import html as lxml_html
@@ -1183,16 +1184,23 @@ def html5lib_tokenize(text: str) -> None:
         pass
 
 
+def w3lib_unescape(text: str) -> None:
+    """Resolve character references with w3lib's replace_entities, the closest competitor to unescape."""
+    w3lib.html.replace_entities(text)
+
+
 def print_table(means: dict[str, float], rows: list[tuple[str, str]]) -> None:
     """Render the speedup table from the collected per-benchmark means."""
     print()
-    print(f"{'benchmark':40} {'turbohtml':>12} {'stdlib':>12} {'speedup':>8} {'html5lib':>12} {'speedup':>8}")
+    header = f"{'benchmark':40} {'turbohtml':>12} {'stdlib':>12} {'speedup':>8}"
+    print(f"{header} {'html5lib/w3lib':>14} {'speedup':>8}")
     for op, name in rows:
         turbo = means[f"{op} {name} [turbohtml]"]
         stdlib = means[f"{op} {name} [stdlib]"]
         row = f"{op + ' ' + name:40} {turbo * 1e6:9.2f} us {stdlib * 1e6:9.2f} us {stdlib / turbo:7.1f}x"
-        if (five := means.get(f"{op} {name} [html5lib]")) is not None:
-            row += f" {five * 1e6:9.2f} us {five / turbo:7.1f}x"
+        # html5lib (tokenize) and w3lib (unescape) never both apply to one row, so they share the trailing column
+        if (other := means.get(f"{op} {name} [html5lib]") or means.get(f"{op} {name} [w3lib]")) is not None:
+            row += f" {other * 1e6:11.2f} us {other / turbo:7.1f}x"
         print(row)
 
 
@@ -1238,6 +1246,8 @@ def run_string_suites(bench: Callable[[str, object, object], None], suites: set[
         if op in suites:
             bench(f"{op} {name} [turbohtml]", getattr(turbohtml, op), arg)
             bench(f"{op} {name} [stdlib]", getattr(html, op), arg)
+            if op == "unescape":
+                bench(f"unescape {name} [w3lib]", w3lib_unescape, arg)
             rows.append((op, name))
     tokenize_cases = TOKENIZE_CASES if "tokenize" in suites else []
     if "corpus" in suites:
