@@ -166,6 +166,13 @@ parse = _html._xpath_parse
         pytest.param("1.5", "(num 1.5)", id="decimal"),
         pytest.param(".5", "(num 0.5)", id="leading-dot-number"),
         pytest.param("(1)", "(num 1)", id="parens"),
+        pytest.param("$foo", "(var 'foo')", id="variable"),
+        pytest.param("$x[1]", "(filter (var 'x') (pred (num 1)))", id="variable-filter"),
+        pytest.param(
+            "//a[@id=$wanted]",
+            "(path abs (step descendant name 'a' (pred (= (path rel (step attribute name 'id')) (var 'wanted')))))",
+            id="variable-in-predicate",
+        ),
         pytest.param(
             "count(//a)",
             "(call 'count' (path abs (step descendant name 'a')))",
@@ -270,10 +277,14 @@ def test_large_expression_grows_the_arena() -> None:
         pytest.param(".a", "trailing tokens", id="dot-then-name"),
         pytest.param("4a", "trailing tokens", id="digit-then-name"),
         pytest.param("1.5a", "trailing tokens", id="fraction-then-name"),
-        pytest.param("a:b", "invalid character", id="single-colon-name"),
+        pytest.param("a:b", "namespace-prefixed", id="single-colon-name"),
+        pytest.param("a:5", "invalid character", id="colon-then-non-name"),
         pytest.param("div::", "trailing tokens", id="bad-axis"),
         pytest.param("count(", "node test", id="unclosed-call"),
         pytest.param("1 2", "trailing tokens", id="two-numbers"),
+        pytest.param("$5", "expected a name", id="dollar-then-number"),
+        pytest.param("$", "expected a name", id="dollar-at-end"),
+        pytest.param("//svg:circle", "namespace-prefixed", id="prefixed-name-test"),
     ],
 )
 def test_rejects(expr: str, message: str) -> None:

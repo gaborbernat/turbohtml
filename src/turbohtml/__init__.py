@@ -27,6 +27,7 @@ from ._html import (
     tokenize,
     unescape,
 )
+from ._xpath import XPathString  # registers the smart-string type with the C core on import
 
 __version__ = version("turbohtml")
 """The installed package version."""
@@ -48,6 +49,7 @@ __all__ = [
     "Token",
     "TokenType",
     "Tokenizer",
+    "XPathString",
     "__version__",
     "escape",
     "parse",

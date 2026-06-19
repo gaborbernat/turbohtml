@@ -51,6 +51,7 @@ typedef struct {
     PyObject *indent_type;        /* Indent (a serialize(layout=...) mode) */
     PyObject *pattern_type;       /* re.Pattern, to recognize a compiled-regex filter */
     PyObject *markup_type;        /* turbohtml.markup.Markup, stamped onto escape() results */
+    PyObject *xpath_string_type;  /* turbohtml._xpath.XPathString, for smart_strings xpath() results */
 } module_state;
 
 /* Register the types and enum into module/state. Each returns 0 or -1. */

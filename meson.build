@@ -41,6 +41,7 @@ py.install_sources(
     [
         'src/turbohtml/__init__.py',
         'src/turbohtml/_html.pyi',
+        'src/turbohtml/_xpath.py',
         'src/turbohtml/bleach_compat.py',
         'src/turbohtml/html_parser.py',
         'src/turbohtml/linkify.py',

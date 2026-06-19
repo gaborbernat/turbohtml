@@ -512,8 +512,8 @@ match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor
 (elements as nodes, attribute and ``text()`` values as ``str``, in document order), or the matching ``float`` / ``str``
 / ``bool`` for a scalar expression like ``count(...)`` or ``string(...)``. :meth:`~turbohtml.Node.xpath_one` returns the
 first result or ``None``, and :meth:`~turbohtml.Node.xpath_iter` returns an iterator. The engine supports the structural
-axes, the ``name`` / ``*`` / ``node()`` / ``text()`` / ``comment()`` node tests, predicates, the boolean, relational,
-and arithmetic operators, unions, and the core function library:
+axes, the ``name`` / ``*`` / ``node()`` / ``text()`` / ``comment()`` / ``processing-instruction()`` node tests,
+predicates, the boolean, relational, and arithmetic operators, unions, and the complete XPath 1.0 core function library:
 
 .. testcode::
 
@@ -533,6 +533,37 @@ and arithmetic operators, unions, and the core function library:
 
 An absolute path starts at the document root and a leading ``//`` rescans the whole document, so write ``.//`` for
 descendants of the context node. Migrating from ``lxml``, ``parsel``, or ``pyquery`` keeps your existing expressions.
+
+Two functions read the HTML document the way HTML means it, where ``lxml``'s legacy HTML parser returns nothing:
+``lang()`` honors the HTML ``lang`` attribute (``lxml`` only consults ``xml:lang``), and ``namespace-uri()`` reports the
+real SVG and MathML namespace for foreign content (``lxml`` leaves it empty). HTML elements report no namespace in both,
+so an unprefixed name test keeps matching them.
+
+Pass ``$name`` variables as keyword arguments instead of formatting values into the expression string, so a value with
+quotes or special characters cannot break the query:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<a href='/in'>in</a><a href='/out'>out</a>")
+    print([a.text for a in doc.xpath("//a[@href=$href]", href="/out")])
+
+.. testoutput::
+
+    ['out']
+
+The EXSLT ``re:test`` and ``re:replace`` functions ``parsel`` and ``scrapy`` rely on work without registering a
+namespace; the ``re:`` prefix dispatches to Python's :mod:`re`:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<a href='/p/12'>a</a><a href='/q'>b</a>")
+    print([a.attrs["href"] for a in doc.xpath(r"//a[re:test(@href, '\d')]")])
+
+.. testoutput::
+
+    ['/p/12']
 
 ********************************
  Filter by attribute or pattern

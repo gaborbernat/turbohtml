@@ -40,6 +40,7 @@ enum xn_kind {
     XN_UNION,  /* a | b */
     XN_NUM,    /* num literal */
     XN_LIT,    /* string literal: str/str_len */
+    XN_VAR,    /* variable reference: str/str_len holds the name after '$' */
     XN_PATH,   /* absolute flag; a = first step; b = filter primary or -1 */
     XN_STEP,   /* axis/test/name; a = first predicate (XN_PRED chain); next = next step */
     XN_PRED,   /* predicate wrapper: a = expr; next = next predicate */
@@ -122,6 +123,7 @@ typedef enum {
     TK_LPAREN,
     TK_RPAREN,
     TK_AT,
+    TK_DOLLAR,
     TK_COMMA,
     TK_DOT,
     TK_DOTDOT,
@@ -152,9 +154,10 @@ typedef struct {
     tok_kind kind;
     const Py_UCS4 *tstart; /* NAME / LITERAL text (into src) */
     Py_ssize_t tlen;
-    double num;     /* NUM value */
-    int op_context; /* an operator may appear here (disambiguation state) */
-    int error;      /* a lexical error was hit */
+    Py_ssize_t tprefix; /* NAME: length of a "prefix:" before the local part, else 0 */
+    double num;         /* NUM value */
+    int op_context;     /* an operator may appear here (disambiguation state) */
+    int error;          /* a lexical error was hit */
 } lexer;
 
 static int xp_is_name_start(Py_UCS4 ch) {
@@ -184,6 +187,7 @@ static int xp_name_eq(const lexer *lx, const char *kw) {
 static int xp_op_follows(tok_kind kind) {
     switch (kind) {
     case TK_AT:
+    case TK_DOLLAR:
     case TK_COLONCOLON:
     case TK_LPAREN:
     case TK_LBRACK:
@@ -245,6 +249,10 @@ static void lex_next(lexer *lx) {
     case '@':
         lx->pos++;
         lx->kind = TK_AT;
+        break;
+    case '$':
+        lx->pos++;
+        lx->kind = TK_DOLLAR;
         break;
     case ',':
         lx->pos++;
@@ -332,6 +340,16 @@ static void lex_next(lexer *lx) {
             Py_ssize_t start = lx->pos;
             while (lx->pos < lx->len && xp_is_name_char(lx->src[lx->pos])) {
                 lx->pos++;
+            }
+            lx->tprefix = 0;
+            /* a prefixed QName "prefix:local"; the '::' axis separator is excluded */
+            if (lx->pos + 1 < lx->len && lx->src[lx->pos] == ':' && lx->src[lx->pos + 1] != ':' &&
+                xp_is_name_start(lx->src[lx->pos + 1])) {
+                lx->tprefix = lx->pos - start;
+                lx->pos++; /* the ':' */
+                while (lx->pos < lx->len && xp_is_name_char(lx->src[lx->pos])) {
+                    lx->pos++;
+                }
             }
             lx->tstart = lx->src + start;
             lx->tlen = lx->pos - start;
@@ -469,6 +487,10 @@ static void parse_node_test(parser *ps, int32_t step) {
             lex_next(lx);
         }
         expect(ps, TK_RPAREN, "expected ')'");
+        return;
+    }
+    if (lx->tprefix > 0) {
+        fail(ps, "a namespace-prefixed name test needs a namespaces mapping");
         return;
     }
     ps->prog->nodes[step].test = NT_NAME;
@@ -675,6 +697,22 @@ static int32_t parse_primary(parser *ps) {
         lex_next(lx);
         return num;
     }
+    if (lx->kind == TK_DOLLAR) {
+        lex_next(lx); /* the variable name */
+        if (lx->kind != TK_NAME) {
+            fail(ps, "expected a name after '$'");
+            return -1;
+        }
+        int32_t var = xn_new(ps->prog, XN_VAR);
+        if (var < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
+            return -1; /* GCOVR_EXCL_LINE */
+        }
+        if (copy_text(ps->prog, var, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            fail(ps, "out of memory");                            /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        lex_next(lx);
+        return var;
+    }
     /* The only remaining primary is a FunctionCall: starts_filter() guarantees a
        NAME here once '(', a literal, and a number have been ruled out above. */
     int32_t fn = xn_new(ps->prog, XN_FUNC);
@@ -713,7 +751,7 @@ static int32_t parse_primary(parser *ps) {
    else begins a LocationPath. */
 static int starts_filter(parser *ps) {
     tok_kind kind = ps->lx.kind;
-    if (kind == TK_LITERAL || kind == TK_NUM || kind == TK_LPAREN) {
+    if (kind == TK_LITERAL || kind == TK_NUM || kind == TK_LPAREN || kind == TK_DOLLAR) {
         return 1;
     }
     if (kind != TK_NAME) {
@@ -1249,6 +1287,11 @@ static void dump_node(dumper *out, const xp_program *prog, int32_t idx) {
         dput_run(out, expr->str, expr->str_len);
         dputs(out, "')");
         break;
+    case XN_VAR:
+        dputs(out, "(var '");
+        dput_run(out, expr->str, expr->str_len);
+        dputs(out, "')");
+        break;
     case XN_FUNC:
         dputs(out, "(call '");
         dput_run(out, expr->str, expr->str_len);
@@ -1629,6 +1672,9 @@ typedef struct {
     Py_ssize_t pos;
     Py_ssize_t size;
     const char **feature;
+    const xp_bindings *vars;
+    xp_extension_fn extension;
+    void *extension_ctx;
 } xp_ctx;
 
 void xp_result_free(xp_result *result) {
@@ -1674,6 +1720,12 @@ static Py_UCS4 *ucs4_dup(const Py_UCS4 *src, Py_ssize_t len) {
 /* The implicit xml namespace, the only namespace node an HTML tree exposes. */
 #define XP_XML_NS_URI "http://www.w3.org/XML/1998/namespace"
 #define XP_XML_NS_PREFIX "xml"
+
+/* Foreign-content namespaces. HTML elements report no namespace (matching lxml's
+   HTML parser, and keeping unprefixed name tests consistent); SVG and MathML
+   subtrees carry the real URI the tree builder tagged them with. */
+#define XP_SVG_NS_URI "http://www.w3.org/2000/svg"
+#define XP_MATHML_NS_URI "http://www.w3.org/1998/Math/MathML"
 
 static Py_UCS4 *ucs4_from_ascii(const char *src, Py_ssize_t length, Py_ssize_t *len) {
     *len = length;
@@ -1845,7 +1897,8 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
         Py_ssize_t size = set->len;
         Py_ssize_t write_pos = 0;
         for (Py_ssize_t index = 0; index < set->len; index++) {
-            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1, size, ctx->feature};
+            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1,         size, ctx->feature,
+                           ctx->vars, ctx->extension,         ctx->extension_ctx};
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
             if (rc < 0) {
@@ -2168,6 +2221,294 @@ static int substring(struct th_tree *tree, xp_result *args, int argc, xp_result 
     return 0;
 }
 
+/* namespace-uri(): empty for HTML elements, attributes, namespace nodes, and
+   non-elements; the foreign-content URI for an SVG or MathML element. */
+static Py_UCS4 *node_namespace_uri(xp_ctx *ctx, xp_result *args, int argc, Py_ssize_t *len) {
+    struct th_node *node = ctx->node;
+    Py_ssize_t attr = -1;
+    if (argc >= 1) {
+        if (args[0].kind != XP_NODESET || args[0].nodes.len == 0) {
+            *len = 0;
+            return ucs4_dup(NULL, 0);
+        }
+        node = args[0].nodes.items[0].node;
+        attr = args[0].nodes.items[0].attr;
+    }
+    const char *uri = "";
+    Py_ssize_t uri_len = 0;
+    if (attr == -1 && node->type == TH_NODE_ELEMENT) {
+        if (node->ns == TH_NS_SVG) {
+            uri = XP_SVG_NS_URI;
+            uri_len = sizeof(XP_SVG_NS_URI) - 1;
+        } else if (node->ns == TH_NS_MATHML) {
+            uri = XP_MATHML_NS_URI;
+            uri_len = sizeof(XP_MATHML_NS_URI) - 1;
+        }
+    }
+    return ucs4_from_ascii(uri, uri_len, len);
+}
+
+/* RFC 4647 prefix match, ASCII case-insensitive: the tag equals the wanted code
+   or extends it with a "-subtag" suffix (so "en" matches "en" and "en-US"). */
+static int lang_tag_matches(const Py_UCS4 *tag, Py_ssize_t tag_len, const Py_UCS4 *want, Py_ssize_t want_len) {
+    if (tag_len < want_len) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < want_len; index++) {
+        Py_UCS4 in_tag = tag[index] >= 'A' && tag[index] <= 'Z' ? tag[index] + 32 : tag[index];
+        Py_UCS4 in_want = want[index] >= 'A' && want[index] <= 'Z' ? want[index] + 32 : want[index];
+        if (in_tag != in_want) {
+            return 0;
+        }
+    }
+    return tag_len == want_len || tag[want_len] == '-';
+}
+
+/* lang(): true when the nearest self-or-ancestor element carrying a lang
+   attribute names a language the wanted code is a prefix of. */
+static int node_lang(xp_ctx *ctx, xp_result *arg) {
+    Py_ssize_t want_len;
+    Py_UCS4 *want = to_string(ctx->tree, arg, &want_len);
+    if (want == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    int result = 0;
+    for (struct th_node *node = ctx->node; node != NULL; node = node->parent) {
+        const th_node_attr *lang_attr = NULL;
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            if (node->attrs[index].name_atom == TH_ATTR_LANG) {
+                lang_attr = &node->attrs[index];
+                break;
+            }
+        }
+        if (lang_attr != NULL) {
+            result = lang_tag_matches(lang_attr->value, lang_attr->value_len, want, want_len);
+            break;
+        }
+    }
+    PyMem_Free(want);
+    return result;
+}
+
+/* True when `token` appears as a whitespace-delimited entry in `list`. */
+static int token_in_list(const Py_UCS4 *list, Py_ssize_t list_len, const Py_UCS4 *token, Py_ssize_t token_len) {
+    if (token_len == 0) {
+        return 0;
+    }
+    Py_ssize_t index = 0;
+    while (index < list_len) {
+        while (index < list_len && xp_is_space(list[index])) {
+            index++;
+        }
+        Py_ssize_t start = index;
+        while (index < list_len && !xp_is_space(list[index])) {
+            index++;
+        }
+        if (index - start == token_len && memcmp(list + start, token, (size_t)token_len * sizeof(Py_UCS4)) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* id(object): the elements whose id attribute is one of the whitespace-separated
+   tokens in the argument's string-value (a node-set argument contributes the
+   string-value of each member). */
+static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    Py_UCS4 *list = NULL;
+    Py_ssize_t list_len = 0;
+    if (arg->kind == XP_NODESET) {
+        for (Py_ssize_t index = 0; index < arg->nodes.len; index++) {
+            Py_ssize_t each;
+            Py_UCS4 *text = item_string(ctx->tree, arg->nodes.items[index], &each);
+            if (text == NULL) {   /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(list); /* GCOVR_EXCL_LINE */
+                return -1;        /* GCOVR_EXCL_LINE */
+            }
+            Py_UCS4 *grown = PyMem_Realloc(list, (size_t)(list_len + each + 1) * sizeof(Py_UCS4));
+            if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(text); /* GCOVR_EXCL_LINE */
+                PyMem_Free(list); /* GCOVR_EXCL_LINE */
+                return -1;        /* GCOVR_EXCL_LINE */
+            }
+            list = grown;
+            list[list_len++] = ' ';
+            memcpy(list + list_len, text, (size_t)each * sizeof(Py_UCS4));
+            list_len += each;
+            PyMem_Free(text);
+        }
+    } else {
+        list = to_string(ctx->tree, arg, &list_len);
+        if (list == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;      /* GCOVR_EXCL_LINE */
+        }
+    }
+    int rc = 0;
+    for (struct th_node *node = th_tree_document(ctx->tree); node != NULL; node = document_next(node)) {
+        if (node->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            if (node->attrs[index].name_atom == TH_ATTR_ID &&
+                token_in_list(list, list_len, node->attrs[index].value, node->attrs[index].value_len)) {
+                if (ns_push(&out->nodes, node, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    rc = -1;                              /* GCOVR_EXCL_LINE */
+                } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+                break;
+            }
+        }
+    }
+    PyMem_Free(list);
+    if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return rc;
+}
+
+/* --- EXSLT regular-expression functions (re:test / re:replace) ------------ */
+/* parsel and scrapy lean on these, so the engine borrows Python's re module.
+   Evaluation runs inside the tree's critical section, but re touches no turbohtml
+   handle, so the call cannot deadlock against it. */
+
+/* Build a Python pattern string, folding the EXSLT flag letters into an inline
+   "(?imsx)" group and reporting a 'g' (global) flag through *global. NULL with an
+   exception set on failure. */
+static PyObject *exslt_pattern(struct th_tree *tree, xp_result *pattern_arg, xp_result *flags_arg, int *global) {
+    *global = 0;
+    Py_ssize_t pat_len;
+    Py_UCS4 *pattern = to_string(tree, pattern_arg, &pat_len);
+    if (pattern == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return NULL;       /* GCOVR_EXCL_LINE */
+    }
+    Py_UCS4 inline_flags[4];
+    Py_ssize_t flag_count = 0;
+    if (flags_arg != NULL) {
+        Py_ssize_t flag_len;
+        Py_UCS4 *flags = to_string(tree, flags_arg, &flag_len);
+        if (flags == NULL) {     /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(pattern); /* GCOVR_EXCL_LINE */
+            return NULL;         /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < flag_len; index++) {
+            Py_UCS4 letter = flags[index];
+            if (letter == 'g') {
+                *global = 1;
+            } else if (letter == 'i' || letter == 'm' || letter == 's' || letter == 'x') {
+                inline_flags[flag_count++] = letter;
+            }
+        }
+        PyMem_Free(flags);
+    }
+    Py_ssize_t prefix_len = flag_count > 0 ? flag_count + 3 : 0; /* "(?" flags ")" */
+    Py_UCS4 *buf = PyMem_Malloc((size_t)(prefix_len + pat_len) * sizeof(Py_UCS4));
+    if (buf == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(pattern); /* GCOVR_EXCL_LINE */
+        return NULL;         /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t write = 0;
+    if (flag_count > 0) {
+        buf[write++] = '(';
+        buf[write++] = '?';
+        for (Py_ssize_t index = 0; index < flag_count; index++) {
+            buf[write++] = inline_flags[index];
+        }
+        buf[write++] = ')';
+    }
+    memcpy(buf + write, pattern, (size_t)pat_len * sizeof(Py_UCS4));
+    PyMem_Free(pattern);
+    PyObject *result = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, buf, prefix_len + pat_len);
+    PyMem_Free(buf);
+    return result;
+}
+
+/* re:test(input, regex, flags?): true when the regex matches anywhere in input. */
+static int exslt_re_test(struct th_tree *tree, xp_result *args, int argc, xp_result *out) {
+    int global;
+    PyObject *pattern = exslt_pattern(tree, &args[1], argc >= 3 ? &args[2] : NULL, &global);
+    Py_ssize_t input_len;
+    Py_UCS4 *input_text = to_string(tree, &args[0], &input_len);
+    if (pattern == NULL || input_text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        Py_XDECREF(pattern);                     /* GCOVR_EXCL_LINE */
+        PyMem_Free(input_text);                  /* GCOVR_EXCL_LINE */
+        return -1;                               /* GCOVR_EXCL_LINE */
+    }
+    PyObject *input = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, input_text, input_len);
+    PyMem_Free(input_text);
+    PyObject *re_module = PyImport_ImportModule("re");
+    if (input == NULL || re_module == NULL) { /* GCOVR_EXCL_BR_LINE: a UCS-4 alloc or re import cannot be forced */
+        Py_XDECREF(input);                    /* GCOVR_EXCL_LINE */
+        Py_XDECREF(re_module);                /* GCOVR_EXCL_LINE */
+        Py_DECREF(pattern);                   /* GCOVR_EXCL_LINE */
+        return -1;                            /* GCOVR_EXCL_LINE */
+    }
+    PyObject *match = PyObject_CallMethod(re_module, "search", "OO", pattern, input);
+    Py_DECREF(re_module);
+    Py_DECREF(input);
+    Py_DECREF(pattern);
+    if (match == NULL) {
+        return -1; /* a malformed pattern set re.error */
+    }
+    result_bool(out, match != Py_None);
+    Py_DECREF(match);
+    return 0;
+}
+
+/* re:replace(input, regex, flags, replacement): substitute matches, all of them
+   under a 'g' flag, otherwise the first. */
+static int exslt_re_replace(struct th_tree *tree, xp_result *args, xp_result *out) {
+    int global;
+    PyObject *pattern = exslt_pattern(tree, &args[1], &args[2], &global);
+    Py_ssize_t input_len;
+    Py_ssize_t repl_len;
+    Py_UCS4 *input_text = to_string(tree, &args[0], &input_len);
+    Py_UCS4 *repl_text = to_string(tree, &args[3], &repl_len);
+    PyObject *input = NULL;
+    PyObject *repl = NULL;
+    PyObject *re_module = NULL;
+    if (pattern != NULL && input_text != NULL && repl_text != NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        input = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, input_text, input_len);
+        repl = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, repl_text, repl_len);
+        re_module = PyImport_ImportModule("re");
+    }
+    PyMem_Free(input_text);
+    PyMem_Free(repl_text);
+    if (pattern == NULL || input == NULL || repl == NULL || re_module == NULL) { /* GCOVR_EXCL_BR_LINE: alloc/import */
+        Py_XDECREF(pattern);                                                     /* GCOVR_EXCL_LINE */
+        Py_XDECREF(input);                                                       /* GCOVR_EXCL_LINE */
+        Py_XDECREF(repl);                                                        /* GCOVR_EXCL_LINE */
+        Py_XDECREF(re_module);                                                   /* GCOVR_EXCL_LINE */
+        return -1;                                                               /* GCOVR_EXCL_LINE */
+    }
+    /* count is keyword-only since 3.13; 0 replaces every match, 1 only the first */
+    PyObject *call_args = Py_BuildValue("(OOO)", pattern, repl, input);
+    PyObject *call_kwargs = Py_BuildValue("{s:i}", "count", global ? 0 : 1);
+    PyObject *re_sub = PyObject_GetAttrString(re_module, "sub");
+    Py_DECREF(re_module);
+    Py_DECREF(input);
+    Py_DECREF(repl);
+    Py_DECREF(pattern);
+    PyObject *replaced = NULL;
+    if (call_args != NULL && call_kwargs != NULL && re_sub != NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        replaced = PyObject_Call(re_sub, call_args, call_kwargs);
+    }
+    Py_XDECREF(call_args);
+    Py_XDECREF(call_kwargs);
+    Py_XDECREF(re_sub);
+    if (replaced == NULL) {
+        return -1; /* a malformed pattern set re.error */
+    }
+    Py_ssize_t result_len = PyUnicode_GET_LENGTH(replaced);
+    Py_UCS4 *buf = PyUnicode_AsUCS4Copy(replaced);
+    Py_DECREF(replaced);
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
+    result_string(out, buf, result_len);
+    return 0;
+}
+
 static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) {
     const xn *fn = &prog->nodes[idx];
     xp_result args[8];
@@ -2259,6 +2600,25 @@ static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_re
         if (rc == 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
             result_string(out, text, length);
         }
+    } else if (func_is(fn, "namespace-uri")) {
+        Py_ssize_t length;
+        Py_UCS4 *text = node_namespace_uri(ctx, args, argc, &length);
+        rc = text == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+        if (rc == 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
+            result_string(out, text, length);
+        }
+    } else if (func_is(fn, "lang")) {
+        int matched = node_lang(ctx, &args[0]);
+        rc = matched < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+        if (rc == 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+            result_bool(out, matched);
+        }
+    } else if (func_is(fn, "id")) {
+        rc = eval_id(ctx, &args[0], out);
+    } else if (func_is(fn, "re:test")) {
+        rc = exslt_re_test(ctx->tree, args, argc, out);
+    } else if (func_is(fn, "re:replace")) {
+        rc = exslt_re_replace(ctx->tree, args, out);
     } else if (func_is(fn, "concat")) {
         Py_ssize_t total = 0;
         Py_UCS4 *parts[8];
@@ -2336,6 +2696,9 @@ static int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_re
         PyMem_Free(text);
         PyMem_Free(from);
         PyMem_Free(to);
+    } else if (ctx->extension != NULL &&
+               (rc = ctx->extension(ctx->extension_ctx, ctx->node, fn->str, fn->str_len, args, argc, out)) != -2) {
+        /* a registered extension handled it (rc is 0 or a propagated error) */
     } else {
         *ctx->feature = "this function";
         rc = -2;
@@ -2358,6 +2721,25 @@ static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
     return 0;
 }
 
+/* Deep-copy a bound variable's value so the reference owns its result. The C API
+   only ever binds the scalar kinds, so there is no node-set arm. */
+static int copy_result(const xp_result *src, xp_result *dst) {
+    memset(dst, 0, sizeof(*dst));
+    dst->kind = src->kind;
+    if (src->kind == XP_STRING) {
+        dst->string = ucs4_dup(src->string, src->string_len);
+        if (dst->string == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;             /* GCOVR_EXCL_LINE */
+        }
+        dst->string_len = src->string_len;
+    } else if (src->kind == XP_NUMBER) {
+        dst->number = src->number;
+    } else {
+        dst->boolean = src->boolean;
+    }
+    return 0;
+}
+
 static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) {
     const xn *expr = &prog->nodes[idx];
     switch (expr->kind) {
@@ -2371,6 +2753,17 @@ static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result
         }
         result_string(out, text, expr->str_len);
         return 0;
+    }
+    case XN_VAR: {
+        for (Py_ssize_t index = 0; ctx->vars != NULL && index < ctx->vars->len; index++) {
+            const xp_binding *binding = &ctx->vars->items[index];
+            if (binding->name_len == expr->str_len &&
+                memcmp(binding->name, expr->str, (size_t)expr->str_len * sizeof(Py_UCS4)) == 0) {
+                return copy_result(&binding->value, out);
+            }
+        }
+        *ctx->feature = "a reference to an unbound variable";
+        return -3;
     }
     case XN_PATH: {
         xp_nodeset ns = {0};
@@ -2497,9 +2890,9 @@ static int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result
     }
 }
 
-int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_result *out,
-            const char **feature) {
-    xp_ctx ctx = {tree, context, 1, 1, feature};
+int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
+            xp_extension_fn extension, void *extension_ctx, xp_result *out, const char **feature) {
+    xp_ctx ctx = {tree, context, 1, 1, feature, vars, extension, extension_ctx};
     return eval_expr(prog, prog->root, &ctx, out);
 }
 

@@ -25,6 +25,10 @@ PyObject *turbohtml_markup_escape_silent(PyObject *module, PyObject *s);
 PyObject *turbohtml_markup_soft_str(PyObject *module, PyObject *s);
 PyObject *turbohtml_register_markup(PyObject *module, PyObject *type);
 
+/* Implemented in tree_type.c. _register_xpath_string stores the str subclass that
+   smart_strings xpath() results carry; signature matches METH_O. */
+PyObject *turbohtml_register_xpath_string(PyObject *module, PyObject *type);
+
 /* Implemented in linkify.c. _linkify_scan finds URL/email spans in a text run;
    signature matches METH_VARARGS. */
 PyObject *turbohtml_linkify_scan(PyObject *module, PyObject *args);

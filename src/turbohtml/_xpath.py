@@ -1,0 +1,49 @@
+"""
+Smart-string xpath results, mirroring lxml's ``_ElementUnicodeResult``.
+
+When :meth:`turbohtml.Node.xpath` is called with ``smart_strings=True``, an
+attribute or ``text()`` value comes back as an :class:`XPathString`: a ``str``
+that also remembers the element it was selected from, so ``result.getparent()``
+walks back into the tree and ``result.is_attribute`` / ``result.attrname``
+identify where it came from. The C core constructs these; importing this module
+registers the type with it.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from ._html import Element, _register_xpath_string  # Element stays importable so autodoc resolves it
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
+
+
+# isinstance(result, str) must hold for callers, and the C core builds the value
+# through str.__new__, so this stays a real str subclass (FURB189 suppressed).
+class XPathString(str):  # noqa: FURB189
+    """A string xpath result that remembers the element it came from."""
+
+    __slots__ = ("_parent", "attrname", "is_attribute", "is_tail", "is_text")
+
+    _parent: Element
+    is_attribute: bool
+    is_text: bool
+    is_tail: bool
+    attrname: str | None
+
+    def __new__(cls, value: str, parent: Element, is_attribute: bool, attrname: str | None) -> Self:  # noqa: FBT001
+        self = str.__new__(cls, value)
+        self._parent = parent
+        self.is_attribute = is_attribute
+        self.is_text = not is_attribute
+        self.is_tail = False
+        self.attrname = attrname
+        return self
+
+    def getparent(self) -> Element:
+        """Return the element this attribute or text value was selected from."""
+        return self._parent
+
+
+_register_xpath_string(XPathString)
