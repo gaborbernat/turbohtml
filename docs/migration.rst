@@ -45,6 +45,18 @@ Bytes work too; pass the raw response and read the resolved encoding back from :
     café
     windows-1252
 
+Encoding detection
+==================
+
+``parse`` runs the WHATWG sniffing algorithm on bytes: a leading BOM, then a ``<meta charset>`` prescan, then a
+``windows-1252`` fallback. That covers what ``UnicodeDammit`` reads from the markup, and it stops there -- turbohtml
+does not guess an encoding from the byte distribution. ``UnicodeDammit``'s optional statistical pass and the dedicated
+detectors (`charset-normalizer <https://github.com/jawah/charset_normalizer>`_, `chardet
+<https://github.com/chardet/chardet>`_, ``cchardet``) read byte frequency, so a markup-less stream, or a document with
+no BOM and no declaration, lands on ``windows-1252`` here where they would name, say, ``koi8-r``. When there is nothing
+to sniff, detect the encoding with ``charset-normalizer`` first and hand turbohtml the decoded ``str`` (or the bytes
+with an explicit ``encoding=``).
+
 The renames
 ===========
 
