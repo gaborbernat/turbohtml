@@ -10,3 +10,8 @@ each), so ``doc.xpath("//a[@href=$url]", url=target)`` keeps the value out of th
 Support the EXSLT regular-expression functions ``re:test`` and ``re:replace`` that ``parsel`` and ``scrapy`` enable by
 default, so a predicate like ``//a[re:test(@href, '\\d+$', 'i')]`` ports across. The ``re:`` prefix dispatches to
 Python's :mod:`re`, with the EXSLT flag letters (``i``, ``m``, ``s``, ``x``, and ``g`` for a global replace) honored.
+
+Pass ``smart_strings=True`` to get :class:`~turbohtml.XPathString` results, ``str`` subclasses that remember the element
+an attribute or ``text()`` value came from, the way ``lxml``'s smart strings do: ``result.getparent()`` returns the
+element and ``result.is_attribute`` / ``result.attrname`` identify the source. The default stays a plain ``str`` (the
+fast path ``parsel`` also chooses).

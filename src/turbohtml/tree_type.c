@@ -2053,16 +2053,56 @@ static xp_program *cached_xpath_compile(HandleObject *handle, PyObject *arg) {
 /* Marshal one evaluated node-set item: a namespace node (attr == -2) and an attribute
    to their string value as str, a text node to its data as str, any other node to its
    element/comment/... wrapper. */
-static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
+PyObject *turbohtml_register_xpath_string(PyObject *module, PyObject *type) {
+    module_state *state = PyModule_GetState(module);
+    Py_XSETREF(state->xpath_string_type, Py_NewRef(type));
+    Py_RETURN_NONE;
+}
+
+/* Wrap an attribute or text string result as an XPathString that remembers the
+   element it came from (lxml's smart strings). Steals the value reference. */
+static PyObject *xpath_smart_string(module_state *state, PyObject *handle, th_node *owner, PyObject *value,
+                                    int is_attribute, PyObject *attrname) {
+    PyObject *parent = node_wrap(state, handle, owner);
+    if (parent == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        Py_DECREF(value);    /* GCOVR_EXCL_LINE */
+        Py_DECREF(attrname); /* GCOVR_EXCL_LINE */
+        return NULL;         /* GCOVR_EXCL_LINE */
+    }
+    PyObject *result = PyObject_CallFunction(state->xpath_string_type, "OOOO", value, parent,
+                                             is_attribute ? Py_True : Py_False, attrname);
+    Py_DECREF(value);
+    Py_DECREF(parent);
+    Py_DECREF(attrname);
+    return result;
+}
+
+static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item,
+                                  int smart_strings) {
     if (item.attr == -2) {
         return PyUnicode_FromString("http://www.w3.org/XML/1998/namespace");
     }
     if (item.attr >= 0) {
         const th_node_attr *attr = &item.node->attrs[item.attr];
-        return attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);
+        PyObject *value = attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);
+        if (!smart_strings || value == NULL) { /* GCOVR_EXCL_BR_LINE: value NULL is an unforced alloc */
+            return value;
+        }
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        PyObject *attrname = PyUnicode_FromStringAndSize(name, name_len);
+        if (attrname == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            Py_DECREF(value);   /* GCOVR_EXCL_LINE */
+            return NULL;        /* GCOVR_EXCL_LINE */
+        }
+        return xpath_smart_string(state, handle, item.node, value, 1, attrname);
     }
     if (item.node->type == TH_NODE_TEXT) {
-        return str_from_accessor(th_node_data, tree, item.node);
+        PyObject *value = str_from_accessor(th_node_data, tree, item.node);
+        if (!smart_strings || value == NULL) { /* GCOVR_EXCL_BR_LINE: value NULL is an unforced alloc */
+            return value;
+        }
+        return xpath_smart_string(state, handle, item.node->parent, value, 0, Py_NewRef(Py_None));
     }
     return node_wrap(state, handle, item.node);
 }
@@ -2096,7 +2136,7 @@ static PyObject *xpath_scalar_to_py(const xp_result *result) {
 /* Evaluate an expression and marshal it to a Python object: a node-set becomes a
    list (elements as Element, attribute/text values as str); a scalar becomes the
    matching float / str / bool. */
-static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars) {
+static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars, int smart_strings) {
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
         return NULL;
@@ -2125,7 +2165,7 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindi
                 build_error = 1; /* GCOVR_EXCL_LINE */
             } else {             /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
                 for (Py_ssize_t index = 0; index < result.nodes.len; index++) {
-                    PyObject *item = xpath_item_to_py(state, handle, tree, result.nodes.items[index]);
+                    PyObject *item = xpath_item_to_py(state, handle, tree, result.nodes.items[index], smart_strings);
                     if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                         build_error = 1; /* GCOVR_EXCL_LINE */
                         break;           /* GCOVR_EXCL_LINE */
@@ -2212,6 +2252,9 @@ static int build_xpath_vars(PyObject *kwds, xp_binding **out_items, Py_ssize_t *
     PyObject *key;
     PyObject *value;
     while (PyDict_Next(kwds, &pos, &key, &value)) {
+        if (PyUnicode_CompareWithASCIIString(key, "smart_strings") == 0) {
+            continue; /* a reserved option the caller reads, not a $variable */
+        }
         Py_UCS4 *name = PyUnicode_AsUCS4Copy(key);
         if (name == NULL) {                /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
             free_xpath_vars(items, count); /* GCOVR_EXCL_LINE */
@@ -2240,13 +2283,23 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
     if (!PyArg_ParseTuple(args, fmt, &expr_obj)) {
         return NULL;
     }
+    int smart_strings = 0;
+    if (kwds != NULL) {
+        PyObject *flag = PyDict_GetItemString(kwds, "smart_strings"); /* borrowed, no exception when absent */
+        if (flag != NULL) {
+            smart_strings = PyObject_IsTrue(flag);
+            if (smart_strings < 0) { /* GCOVR_EXCL_BR_LINE: a __bool__ that raises cannot be forced */
+                return NULL;         /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
     xp_binding *items;
     Py_ssize_t len;
     if (build_xpath_vars(kwds, &items, &len) < 0) {
         return NULL;
     }
     xp_bindings vars = {items, len};
-    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars);
+    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars, smart_strings);
     free_xpath_vars(items, len);
     return result;
 }
