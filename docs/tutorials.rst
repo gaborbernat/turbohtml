@@ -113,9 +113,10 @@ remains:
     ['span']
     []
 
-The incomplete ``<sp`` stayed buffered until the rest of the tag arrived. That is the whole tokenizer API. Head to the
-:doc:`how-to` guides for task-focused recipes, including porting an existing :class:`python:html.parser.HTMLParser`
-subclass, or the :doc:`reference` for the exact signatures.
+The incomplete ``<sp`` stayed buffered until the rest of the tag arrived. That is the whole tokenizer API. If you are
+porting an existing :class:`python:html.parser.HTMLParser` subclass, :class:`turbohtml.html_parser.HTMLParser` keeps the
+same ``handle_*`` callbacks over this tokenizer, so the migration is changing the base class. Head to the :doc:`how-to`
+guides for task-focused recipes or the :doc:`reference` for the exact signatures.
 
 ********************************
  Parsing a document into a tree

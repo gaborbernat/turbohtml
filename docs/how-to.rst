@@ -84,6 +84,37 @@ Unescaping follows the HTML5 rules, including longest-match for references that 
  Migrate from html.parser
 **************************
 
+The quickest port keeps your subclass: :class:`turbohtml.html_parser.HTMLParser` is a drop-in base class with the same
+``handle_*`` callbacks and ``feed``/``close`` methods, over the WHATWG-conformant tokenizer. Change the import and the
+base class and the handlers fire as before:
+
+.. testcode::
+
+    from turbohtml.html_parser import HTMLParser
+
+    class LinkCollector(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                self.links += [v for n, v in attrs if n == "href" and v]
+
+    collector = LinkCollector()
+    collector.feed('<a href="/x">x</a> <a href="/y">y</a>')
+    collector.close()
+    print(collector.links)
+
+.. testoutput::
+
+    ['/x', '/y']
+
+It differs from ``html.parser`` only where ``html.parser`` diverges from the WHATWG algorithm: references are always
+resolved (so ``handle_entityref``/``handle_charref`` never fire), and a processing instruction or CDATA section reaches
+``handle_comment`` rather than ``handle_pi``/``unknown_decl``, because the HTML spec treats both as comments.
+
+If you would rather drop the subclass entirely, turbohtml also exposes the raw token stream.
 :class:`python:html.parser.HTMLParser` is callback-driven: you subclass it and override a handler per event. turbohtml
 inverts that into a token stream you iterate, which removes the subclass, the mutable handler state, and the
 per-callback Python call overhead. A typical parser:

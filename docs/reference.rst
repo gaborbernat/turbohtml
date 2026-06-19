@@ -87,3 +87,15 @@ A drop-in for ``bleach.clean`` for projects migrating off bleach. It translates 
 an event handler or a ``javascript:`` URL.
 
 .. autofunction:: clean
+
+***********************
+ turbohtml.html_parser
+***********************
+
+.. module:: turbohtml.html_parser
+
+A drop-in base class for :class:`python:html.parser.HTMLParser` subclasses, over turbohtml's WHATWG-conformant
+tokenizer. Subclass it, override the ``handle_*`` methods, and feed input incrementally as with the standard library.
+
+.. autoclass:: HTMLParser
+    :members:

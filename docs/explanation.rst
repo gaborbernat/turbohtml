@@ -128,7 +128,9 @@ Two decisions bound the tokenizer's scope:
 
 Where behavior could drift, more than the suite pins it: a fuzz comparison runs the token stream against html5lib's
 tokenizer, and source positions use the same 1-based-line, 0-based-column convention as :mod:`python:html.parser`, so
-diagnostics line up with what the standard library reports.
+diagnostics line up with what the standard library reports. For code that prefers callbacks to a token stream,
+:class:`turbohtml.html_parser.HTMLParser` re-exposes the stream through ``html.parser``'s subclass-and-override surface,
+so an existing ``HTMLParser`` subclass migrates by swapping its base class.
 
 ****************************
  Tokenizing at native width

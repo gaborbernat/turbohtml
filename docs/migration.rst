@@ -339,10 +339,11 @@ Pitfalls
     True
     True
 
-In place of subclassing :class:`python:html.parser.HTMLParser` with ``handle_starttag`` and ``handle_data`` callbacks,
-take the token stream from :func:`turbohtml.tokenize` (or :meth:`turbohtml.Tokenizer.feed` for incremental input), or
-skip tokens entirely and :func:`turbohtml.parse` straight to a tree. Unlike ``html.parser``, both are WHATWG-conformant.
-The :doc:`how-to` guide has a worked port.
+To keep an existing :class:`python:html.parser.HTMLParser` subclass, swap its base class for
+:class:`turbohtml.html_parser.HTMLParser`: the same ``handle_*`` callbacks and ``feed``/``close`` methods run over the
+WHATWG-conformant tokenizer. Or drop the subclass and take the token stream from :func:`turbohtml.tokenize` (or
+:meth:`turbohtml.Tokenizer.feed` for incremental input), or skip tokens entirely and :func:`turbohtml.parse` straight to
+a tree. All three are WHATWG-conformant, unlike ``html.parser``. The :doc:`how-to` guide has a worked port.
 
 *****************
  From markupsafe

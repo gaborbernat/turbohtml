@@ -1,0 +1,9 @@
+Add :class:`turbohtml.html_parser.HTMLParser`, a drop-in base class for :class:`python:html.parser.HTMLParser`
+subclasses over the streaming tokenizer. It keeps the standard ``handle_starttag``/``handle_startendtag``/
+``handle_endtag``/``handle_data``/``handle_comment``/``handle_decl`` callbacks and the ``feed``/``close``/``reset``/
+``getpos`` methods, so an ``HTMLParser`` subclass migrates by changing its import and base class. Being
+WHATWG-conformant it differs from the standard library only where the standard library does: character references are
+always resolved (so ``handle_entityref``/``handle_charref`` never fire), and a processing instruction or CDATA section
+reaches ``handle_comment`` rather than ``handle_pi``/``unknown_decl``, because the HTML spec treats both as comments.
+The adapter is a Python-layer convenience over the existing token stream, kept out of the core API so the
+one-name-per-concept surface stays bounded.
