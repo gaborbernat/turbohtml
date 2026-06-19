@@ -1,0 +1,3 @@
+Add a "From html5-parser" migration guide mapping ``html5_parser.parse`` onto :func:`turbohtml.parse`, porting the lxml
+element accessors and noting XPath has no equivalent (CSS only), and cross-linking the parser comparison since
+html5-parser sits in the same native-gumbo tier - by :user:`gaborbernat`.
