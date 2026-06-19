@@ -427,7 +427,10 @@ a reverse axis, a union, and a computed name test) runs over the 9.6 kB wpt page
 the sweep across every page size. turbohtml compiles each expression against the tree once, resolves name tests to
 interned atoms, and folds ``//`` to a single ``descendant`` walk, so it leads across the surface. The exception is a
 predicate that references ``position()`` (``[1]`` or ``position() <= 3``): it pins the result to proximity order and
-disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap.
+disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap. The last four rows are
+the lxml/parsel options the parity work added -- a ``$variable`` binding, an EXSLT ``re:test`` predicate (turbohtml's
+Python :mod:`re` against lxml's C libexslt), a ``smart_strings`` attribute read, and a custom ``extensions=`` function
+-- which turbohtml still leads, since lxml resolves the namespace map and option set on every call.
 
 .. list-table::
     :header-rows: 1
@@ -469,6 +472,18 @@ disables the ``//`` collapse, so on the largest pages lxml's streaming evaluatio
     - - ``count(//a)``
       - 0.5 µs
       - 2.4 µs
+    - - ``//a[@href=$x]`` (variable)
+      - 0.6 µs
+      - 4.1 µs
+    - - ``//a[re:test(@href, ...)]`` (EXSLT)
+      - 0.5 µs
+      - 4.5 µs
+    - - ``//a/@href`` (smart_strings)
+      - 0.6 µs
+      - 2.3 µs
+    - - ``ext(//a)`` (extensions)
+      - 1.0 µs
+      - 2.9 µs
 
 *************
  Serializing
