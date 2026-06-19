@@ -235,6 +235,18 @@ one alternative does not break the query:
 
     ['h1']
 
+Structural pseudo-classes count positions, and ``:nth-child(An+B of S)`` counts only the siblings matching ``S`` -- here
+the first checked box, ignoring the unchecked ones in between:
+
+.. testcode::
+
+    boxes = turbohtml.parse("<p><input checked><input><input checked></p>")
+    print([e.attrs.get("checked") for e in boxes.select("input:nth-child(1 of [checked])")])
+
+.. testoutput::
+
+    ['']
+
 Because the node types are a sealed hierarchy, structural pattern matching works: each subtype unpacks its defining
 field:
 

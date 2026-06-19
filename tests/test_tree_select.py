@@ -251,6 +251,40 @@ def test_structural_pseudo_by_text(selector: str, texts: list[str]) -> None:
     assert [element.text for element in parse(_PSEUDO).select(selector)] == texts
 
 
+# a list whose items alternate a class, so An+B applies to the .x-matching subset
+_NTH_OF = "<ul><li class=x>1</li><li>2</li><li class=x>3</li><li>4</li><li class=x>5</li></ul>"
+
+
+@pytest.mark.parametrize(
+    ("selector", "texts"),
+    [
+        # An+B counts only the inclusive siblings matching S (here .x items 1, 3, 5)
+        pytest.param("li:nth-child(1 of .x)", ["1"], id="nth-of-first"),
+        pytest.param("li:nth-child(2n of .x)", ["3"], id="nth-of-even"),
+        pytest.param("li:nth-child(odd of .x)", ["1", "5"], id="nth-of-odd"),
+        pytest.param("li:nth-child(2 of .x)", ["3"], id="nth-of-second"),
+        pytest.param("li:nth-child(-n+2 of .x)", ["1", "3"], id="nth-of-negative-a"),
+        # the of-list filters from the end for :nth-last-child()
+        pytest.param("li:nth-last-child(1 of .x)", ["5"], id="nth-last-of-first"),
+        pytest.param("li:nth-last-child(2 of .x)", ["3"], id="nth-last-of-second"),
+        # S may be a type selector or a compound, and folds 'of' case
+        pytest.param("li:nth-child(2 of li)", ["2"], id="nth-of-type-selector"),
+        pytest.param("li:nth-child(1 of li.x)", ["1"], id="nth-of-compound"),
+        pytest.param("li:NTH-CHILD(1 OF .x)", ["1"], id="nth-of-uppercase"),
+        # an element that does not match S is never selected
+        pytest.param("li:nth-child(1 of .missing)", [], id="nth-of-no-match"),
+    ],
+)
+def test_nth_child_of_selector(selector: str, texts: list[str]) -> None:
+    assert [element.text for element in parse(_NTH_OF).select(selector)] == texts
+
+
+def test_nth_child_of_skips_non_element_siblings() -> None:
+    # a comment between two .x items must not count toward the of-list index
+    doc = "<ul><li class=x>1</li><!--c--><li class=x>2</li></ul>"
+    assert [element.text for element in parse(doc).select("li:nth-child(2 of .x)")] == ["2"]
+
+
 @pytest.mark.parametrize(
     ("selector", "tags"),
     [
@@ -503,6 +537,15 @@ def test_has_skips_non_element_following_sibling() -> None:
         pytest.param(":nth-child(2n", id="anb-eof-after-n"),
         pytest.param(":nth-child.x", id="functional-without-paren"),
         pytest.param(":nth-child(2n x)", id="anb-trailing-junk"),
+        pytest.param(":nth-child(2n*)", id="anb-non-ident-junk"),
+        # the Level-4 'of S' clause: a non-'of' keyword, an empty or unterminated S,
+        # a missing An+B, or 'of' on a pseudo-class that does not take it
+        pytest.param(":nth-child(2n ofx)", id="nth-of-not-of-keyword"),
+        pytest.param(":nth-child(2n of )", id="nth-of-empty-selector"),
+        pytest.param(":nth-child(2n of .x", id="nth-of-unterminated"),
+        pytest.param(":nth-child(of .x)", id="nth-of-without-anb"),
+        pytest.param(":nth-of-type(2n of .x)", id="nth-of-type-rejects-of"),
+        pytest.param(":nth-last-of-type(1 of p)", id="nth-last-of-type-rejects-of"),
     ],
 )
 def test_invalid_selectors_raise(selector: str) -> None:

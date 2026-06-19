@@ -189,7 +189,8 @@ The query surface builds on that node model. Navigation covers parents, siblings
 node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen
 :class:`~turbohtml.Axis` by tag and attributes, where a filter is a string, regex, callable, or list.
 :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.select_one` run a native CSS matcher -- type, id, class,
-attribute, the four combinators, the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, and the
+attribute, the four combinators, the structural pseudo-classes (including ``:nth-child(An+B of S)``, which indexes only
+the siblings matching ``S``), the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, and the
 ``:scope``, form/UI (``:checked``, ``:disabled``, ``:default``, ...), ``:lang()`` and ``:dir()`` pseudo-classes that a
 static tree can determine -- and :meth:`~turbohtml.Node.matches` / :meth:`~turbohtml.Node.closest` test a node in place.
 ``:is()`` and ``:where()`` parse their argument as a forgiving selector list (a bad arm is dropped, the rest stay
