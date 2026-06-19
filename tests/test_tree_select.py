@@ -413,6 +413,230 @@ def test_has_skips_non_element_following_sibling() -> None:
     assert [element.tag for element in doc.select("section:has(~ aside b)")] == ["section"]
 
 
+def _ids(html: str, selector: str, root: str = "#wrap") -> list[str]:
+    container = parse(html).select_one(root)
+    assert container is not None
+    result: list[str] = []
+    for element in container.select(selector):
+        ident = element.attrs.get("id")
+        result.append(ident if isinstance(ident, str) else element.tag)
+    return result
+
+
+# every form control kind, the disabled-fieldset / first-legend carve-out, a disabled
+# optgroup, contenteditable hosts, and read-only/read-write inputs in one tree
+_FORM = (
+    "<div id=wrap>"
+    "<input id=text><input id=text-ro readonly>"
+    "<input id=cb type=checkbox checked><input id=cb-off type=checkbox>"
+    "<input id=radio type=radio checked><input id=req required><input id=dis disabled>"
+    "<select id=sel required></select><textarea id=ta></textarea><textarea id=ta-ro readonly></textarea>"
+    "<fieldset id=fs disabled><legend><input id=in-legend></legend><input id=in-fs></fieldset>"
+    "<select id=sel2><optgroup id=og disabled><option id=opt-og>a</option></optgroup>"
+    "<optgroup id=og2><option id=opt-sel selected>b</option><option id=opt-plain>c</option></optgroup></select>"
+    "<div id=edit contenteditable><span id=edit-child>x</span></div>"
+    "<div id=noedit contenteditable=false></div><div id=plain></div>"
+    # a foreign (SVG) element is never a form control, exercising the namespace guards
+    "<svg id=svg></svg>"
+    "</div>"
+)
+
+
+@pytest.mark.parametrize(
+    ("selector", "ids"),
+    [
+        pytest.param(":checked", ["cb", "radio", "opt-sel"], id="checked"),
+        pytest.param(":default", ["cb", "radio", "opt-sel"], id="default"),
+        # actually-disabled: own attribute, a disabled fieldset's controls (but not its
+        # first legend's), and a disabled optgroup's options
+        pytest.param(":disabled", ["dis", "fs", "in-fs", "og", "opt-og"], id="disabled"),
+        pytest.param(
+            ":enabled",
+            [
+                "text",
+                "text-ro",
+                "cb",
+                "cb-off",
+                "radio",
+                "req",
+                "sel",
+                "ta",
+                "ta-ro",
+                "in-legend",
+                "sel2",
+                "og2",
+                "opt-sel",
+                "opt-plain",
+            ],
+            id="enabled",
+        ),
+        pytest.param(":required", ["req", "sel"], id="required"),
+        pytest.param(
+            ":optional",
+            ["text", "text-ro", "cb", "cb-off", "radio", "dis", "ta", "ta-ro", "in-legend", "in-fs", "sel2"],
+            id="optional",
+        ),
+        pytest.param(":read-write", ["text", "req", "ta", "in-legend", "edit", "edit-child"], id="read-write"),
+        pytest.param("input:read-only", ["text-ro", "cb", "cb-off", "radio", "dis", "in-fs"], id="read-only-input"),
+        pytest.param("div:read-write", ["edit"], id="read-write-div"),
+        pytest.param("div:read-only", ["noedit", "plain"], id="read-only-div"),
+    ],
+)
+def test_form_state_pseudo(selector: str, ids: list[str]) -> None:
+    assert _ids(_FORM, selector) == ids
+
+
+@pytest.mark.parametrize(
+    ("html", "selector", "ids"),
+    [
+        # an option disabled by its own attribute (not via an optgroup)
+        pytest.param(
+            "<div id=wrap><select><option id=t disabled>a</option></select></div>",
+            ":disabled",
+            ["t"],
+            id="option-own-disabled",
+        ),
+        # a disabled fieldset with no legend at all disables its controls
+        pytest.param(
+            "<div id=wrap><fieldset disabled><input id=t></fieldset></div>",
+            ":disabled",
+            ["fieldset", "t"],
+            id="disabled-fieldset-without-legend",
+        ),
+        # a disabled fieldset whose first child is not a legend still disables controls
+        pytest.param(
+            "<div id=wrap><fieldset disabled><p></p><legend></legend><input id=t></fieldset></div>",
+            ":disabled",
+            ["fieldset", "t"],
+            id="disabled-fieldset-non-legend-first-child",
+        ),
+        # an option directly in a select (no optgroup) is not disabled by association
+        pytest.param(
+            "<div id=wrap><select><option id=o>a</option></select></div>",
+            ":disabled",
+            [],
+            id="option-directly-in-select-not-disabled",
+        ),
+        # a control inside a fieldset that is not disabled stays enabled
+        pytest.param(
+            "<div id=wrap><fieldset><input id=o></fieldset></div>",
+            ":disabled",
+            [],
+            id="control-in-enabled-fieldset",
+        ),
+        # a disabled textarea is not read-write
+        pytest.param(
+            "<div id=wrap><textarea id=t disabled></textarea></div>", ":read-write", [], id="disabled-textarea"
+        ),
+        # a valueless or empty type attribute defaults to text, so it is not :checked
+        pytest.param("<div id=wrap><input id=t type></div>", ":checked", [], id="input-valueless-type"),
+        pytest.param('<div id=wrap><input id=t type=""></div>', ":checked", [], id="input-empty-type"),
+        # an empty contenteditable value is the "true" state
+        pytest.param(
+            '<div id=wrap><div id=t contenteditable=""></div></div>',
+            ":read-write",
+            ["t"],
+            id="contenteditable-empty-is-true",
+        ),
+        # an invalid contenteditable value is ignored, so editability inherits from above
+        pytest.param(
+            "<div id=wrap><div contenteditable=true><span id=t contenteditable=maybe>x</span></div></div>",
+            ":read-write",
+            ["div", "t"],
+            id="contenteditable-invalid-value-inherits",
+        ),
+    ],
+)
+def test_form_state_pseudo_edge_cases(html: str, selector: str, ids: list[str]) -> None:
+    assert _ids(html, selector) == ids
+
+
+_LANGDIR = (
+    "<div id=wrap><p id=en lang=en-US><b id=enb>x</b></p><p id=fr lang=fr>y</p>"
+    '<p id=de lang="de">z</p><p id=none>n</p><p id=langless lang>q</p>'
+    "<div id=rtl dir=rtl><span id=rtlc>a</span></div><div id=ltr dir=ltr></div>"
+    "<div id=auto dir=auto></div><div id=bad dir=weird></div></div>"
+)
+
+
+@pytest.mark.parametrize(
+    ("selector", "ids"),
+    [
+        # :lang() filters by the nearest lang attribute with RFC 4647 basic filtering
+        pytest.param(":lang(en)", ["en", "enb"], id="lang-prefix-matches-subtag"),
+        pytest.param(":lang(en-US)", ["en", "enb"], id="lang-exact"),
+        pytest.param(":lang(fr)", ["fr"], id="lang-other"),
+        pytest.param(":lang(EN)", ["en", "enb"], id="lang-case-insensitive"),
+        pytest.param(":lang(*)", ["en", "enb", "fr", "de"], id="lang-wildcard-any-language"),
+        pytest.param(":lang(de, fr)", ["fr", "de"], id="lang-comma-list"),
+        pytest.param(':lang("en")', ["en", "enb"], id="lang-double-quoted-range"),
+        pytest.param(":lang('en')", ["en", "enb"], id="lang-single-quoted-range"),
+        pytest.param(':lang("en)', [], id="lang-unbalanced-quote-not-stripped"),
+        pytest.param(":lang(es)", [], id="lang-no-match"),
+        # a single-character range that is not the wildcard, and a valueless lang
+        # attribute (never matches) and an empty range token (matches nothing)
+        pytest.param(":lang(d)", [], id="lang-single-char-non-wildcard"),
+        pytest.param(":lang(,)", [], id="lang-empty-range-token"),
+        # whitespace around the argument and around each range token is trimmed
+        pytest.param(":lang(en )", ["en", "enb"], id="lang-trailing-whitespace"),
+        pytest.param(":lang(en , fr)", ["en", "enb", "fr"], id="lang-whitespace-before-comma"),
+        # :dir() resolves the nearest dir attribute; auto and unknown values do not match
+        pytest.param(":dir(rtl)", ["rtl", "rtlc"], id="dir-rtl-inherited"),
+        pytest.param(":dir(ltr)", ["ltr"], id="dir-ltr"),
+        pytest.param(":dir(foo)", [], id="dir-unknown-keyword-never-matches"),
+    ],
+)
+def test_lang_dir_pseudo(selector: str, ids: list[str]) -> None:
+    assert _ids(_LANGDIR, selector) == ids
+
+
+_SCOPE_DOC = "<section id=s><p id=p1>a</p><div><p id=p2>b</p></div></section><p id=p3>c</p>"
+
+
+@pytest.mark.parametrize(
+    ("selector", "ids"),
+    [
+        pytest.param(":scope > p", ["p1"], id="scope-child"),
+        pytest.param(":scope p", ["p1", "p2"], id="scope-descendant"),
+        pytest.param(":scope", [], id="scope-excludes-the-origin-itself"),
+    ],
+)
+def test_scope_pseudo_in_select(selector: str, ids: list[str]) -> None:
+    assert _ids(_SCOPE_DOC, selector, root="#s") == ids
+
+
+def test_scope_pseudo_in_matches_and_closest() -> None:
+    # :scope is the contextual reference element, which for matches()/closest() is the
+    # receiver, so every element matches :scope and closest() resolves to itself
+    section = parse(_SCOPE_DOC).select_one("#s")
+    assert section is not None
+    assert section.matches(":scope")
+    nested = parse(_SCOPE_DOC).select_one("#p2")
+    assert nested is not None
+    assert nested.matches(":scope")
+    closest = nested.closest(":scope")  # the receiver, not an ancestor under test
+    assert closest is not None
+    assert closest.attrs.get("id") == "p2"
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        pytest.param(":hover", id="hover"),
+        pytest.param(":focus", id="focus"),
+        pytest.param(":focus-within", id="focus-within"),
+        pytest.param(":active", id="active"),
+        pytest.param(":target", id="target"),
+        pytest.param(":visited", id="visited"),
+        pytest.param(":link", id="link"),
+        pytest.param(":any-link", id="any-link"),
+    ],
+)
+def test_live_state_pseudo_never_matches(selector: str) -> None:
+    # accepted as valid syntax, but a static tree holds no live UA state
+    assert [element.tag for element in parse("<a href='/x'>y</a><input>").select(selector)] == []
+
+
 @pytest.mark.parametrize(
     "selector",
     [
@@ -482,6 +706,19 @@ def test_has_skips_non_element_following_sibling() -> None:
         pytest.param(":nth-child(2n", id="anb-eof-after-n"),
         pytest.param(":nth-child.x", id="functional-without-paren"),
         pytest.param(":nth-child(2n x)", id="anb-trailing-junk"),
+        # state pseudo-classes: non-functional ones reject an argument list, and
+        # :lang()/:dir() require a non-empty argument
+        pytest.param(":checked(x)", id="state-pseudo-with-args"),
+        pytest.param(":scope(x)", id="scope-with-args"),
+        pytest.param(":lang", id="lang-without-args"),
+        pytest.param(":lang()", id="lang-empty-args"),
+        pytest.param(":lang(  )", id="lang-whitespace-args"),
+        pytest.param(":lang(en", id="lang-unterminated"),
+        pytest.param(":dir", id="dir-without-args"),
+        pytest.param(":dir.x", id="dir-name-then-non-paren"),
+        pytest.param(":dir()", id="dir-empty-args"),
+        pytest.param(":dir(ltr", id="dir-unterminated"),
+        pytest.param(":dir(ltr x)", id="dir-junk-after-arg"),
     ],
 )
 def test_invalid_selectors_raise(selector: str) -> None:
