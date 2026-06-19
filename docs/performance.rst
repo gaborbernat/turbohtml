@@ -9,7 +9,7 @@ source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript spec
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
 suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``,
-``edit``, ``markup``, ``linkify``, ``markdown``, or ``sanitize``. Numbers vary with input and hardware.
+``edit``, ``chain``, ``markup``, ``linkify``, ``markdown``, or ``sanitize``. Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -675,3 +675,30 @@ selectolax mutation is limited, so it has no entry.
       - 18.4 µs
       - 40.9 µs
       - 215 µs
+
+*****************
+ Fluent chaining
+*****************
+
+A pyquery-style fluent chain over a pre-parsed tree: select every ``<a>``, keep the linked ones, take the first, tag it,
+and read its ``href`` (turbohtml's :class:`turbohtml.query.Query` against `pyquery <https://github.com/gawel/pyquery>`_,
+whose wrapper delegates to lxml). Both wrappers are thin Python over the underlying engine, so the gap is the engine's:
+turbohtml's selector and attribute primitives run in C, and the wrapper avoids a redundant de-duplication when the chain
+starts from one node, so it runs roughly ten times faster.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 36 36
+
+    - - select, filter, tag, read
+      - turbohtml
+      - pyquery
+    - - wpt page (4 kB)
+      - 0.9 µs
+      - 16.0 µs
+    - - wpt page (9.6 kB)
+      - 1.1 µs
+      - 16.5 µs
+    - - wpt page (92 kB)
+      - 21.2 µs
+      - 257 µs

@@ -99,3 +99,16 @@ tokenizer. Subclass it, override the ``handle_*`` methods, and feed input increm
 
 .. autoclass:: HTMLParser
     :members:
+
+*****************
+ turbohtml.query
+*****************
+
+.. module:: turbohtml.query
+
+A pyquery-style fluent, chainable query wrapper over the tree and selector engine, for code migrating off pyquery's
+jQuery-style chaining. Each traversal and mutation method returns a :class:`Query`, so calls compose.
+
+.. autoclass:: Query
+    :members:
+    :special-members: __call__
