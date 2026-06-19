@@ -414,6 +414,37 @@ match) or :meth:`~turbohtml.Node.closest` (the nearest matching self-or-ancestor
     True
     nav
 
+******************
+ Query with XPath
+******************
+
+:meth:`~turbohtml.Node.xpath` evaluates an XPath 1.0 expression relative to a node and returns a list for a node-set
+(elements as nodes, attribute and ``text()`` values as ``str``, in document order), or the matching ``float`` / ``str``
+/ ``bool`` for a scalar expression like ``count(...)`` or ``string(...)``. :meth:`~turbohtml.Node.xpath_one` returns the
+first result or ``None``, and :meth:`~turbohtml.Node.xpath_iter` returns an iterator. The engine supports the structural
+axes, the ``name`` / ``*`` / ``node()`` / ``text()`` / ``comment()`` node tests, predicates, the boolean, relational,
+and arithmetic operators, unions, and the core function library:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>")
+    print([td.text for td in doc.xpath("//td")])
+    print(doc.xpath("//tr[2]/td[1]/text()"))
+    print(doc.xpath("count(//td)"))
+    print(doc.xpath_one("//td[. = '3']").text)
+
+.. testoutput::
+
+    ['1', '2', '3', '4']
+    ['3']
+    4.0
+    3
+
+An absolute path starts at the document root and a leading ``//`` rescans the whole document, so write ``.//`` for
+descendants of the context node. Migrating from ``lxml``, ``parsel``, or ``pyquery`` keeps your existing expressions;
+only the ``namespace`` axis is unimplemented and raises :class:`NotImplementedError`.
+
 ********************************
  Filter by attribute or pattern
 ********************************
