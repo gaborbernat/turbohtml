@@ -86,7 +86,8 @@ static int is_url_attr(const char *name, Py_ssize_t len) {
     case 3:
         return memcmp(name, "src", 3) == 0;
     case 4:
-        return memcmp(name, "href", 4) == 0 || memcmp(name, "cite", 4) == 0 || memcmp(name, "data", 4) == 0;
+        return memcmp(name, "href", 4) == 0 || memcmp(name, "cite", 4) == 0 || memcmp(name, "data", 4) == 0 ||
+               memcmp(name, "ping", 4) == 0;
     case 6:
         return memcmp(name, "action", 6) == 0 || memcmp(name, "poster", 6) == 0;
     case 8:
@@ -153,6 +154,60 @@ static int scheme_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t len) {
         started = 1;
     }
     return s->allow_relative; /* no colon: a relative URL */
+}
+
+/* The ASCII whitespace that separates srcset candidates, minus CR: the WHATWG input preprocessor converts CR to LF, so
+   a parsed attribute value never carries a 0x0D. An array+loop keeps the branch count stable when clang inlines this
+   into srcset_allowed's two call sites. */
+static int is_ascii_ws(Py_UCS4 c) {
+    static const Py_UCS4 whitespace[] = {0x09, 0x0A, 0x0C, 0x20};
+    for (size_t index = 0; index < sizeof(whitespace) / sizeof(whitespace[0]); index++) {
+        if (c == whitespace[index]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* srcset and imagesrcset hold a comma-separated list of "URL descriptor" candidates. Each candidate's leading URL is
+   scheme-checked; the whole attribute is rejected if any candidate carries a disallowed scheme. Splitting on commas
+   can over-segment a URL that contains one, but that only adds scheme checks of schemeless tails (read as relative),
+   so it never lets a disallowed scheme through. Returns 1 allow, 0 drop, -1 error. */
+static int srcset_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t len) {
+    Py_ssize_t pos = 0;
+    while (pos < len) {
+        while (pos < len && (value[pos] == ',' || is_ascii_ws(value[pos]))) {
+            pos++; /* skip separators before the candidate URL */
+        }
+        Py_ssize_t start = pos;
+        while (pos < len && value[pos] != ',' && !is_ascii_ws(value[pos])) {
+            pos++; /* the URL runs up to a descriptor (whitespace) or the next candidate (comma) */
+        }
+        if (pos > start) {
+            int ok = scheme_allowed(s, value + start, pos - start);
+            if (ok < 0) {  /* GCOVR_EXCL_BR_LINE: scheme_allowed only fails on allocation failure */
+                return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            if (!ok) {
+                return 0;
+            }
+        }
+        while (pos < len && value[pos] != ',') {
+            pos++; /* skip the candidate's descriptor */
+        }
+    }
+    return 1;
+}
+
+/* srcset-valued attributes, matched on the interned name bytes. */
+static int is_srcset_attr(const char *name, Py_ssize_t len) {
+    if (len == 6) {
+        return memcmp(name, "srcset", 6) == 0;
+    }
+    if (len == 11) {
+        return memcmp(name, "imagesrcset", 11) == 0;
+    }
+    return 0;
 }
 
 /* Is `name` allowed on element `tag` by the policy? A "*" inside an attribute set allows every attribute name.
@@ -236,23 +291,32 @@ static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag) {
             }
             drop = !allowed;
         }
+        int url_disallowed = 0;
         if (!drop && is_url_attr(name, name_len)) {
             int ok = scheme_allowed(s, attr->value, attr->value_len);
             if (ok < 0) {  /* GCOVR_EXCL_BR_LINE: scheme_allowed only fails on allocation failure */
                 return -1; /* GCOVR_EXCL_LINE */
             }
-            if (!ok) {
-                /* A duplicate URL attribute desyncs the per-value scheme check from the
-                   single value a re-parsing browser keeps (WHATWG keeps the first): dropping
-                   only this occurrence deletes the first match by name, which may be a benign
-                   sibling, leaving the disallowed value as the lone attribute. Drop every
-                   occurrence of the name so no disallowed scheme survives, then rescan from
-                   the start because removing an earlier slot shifts the rest down. */
-                while (th_node_attr_del(s->tree, element, name, name_len)) {
-                }
-                index = 0;
-                continue;
+            url_disallowed = !ok;
+        }
+        if (!drop && is_srcset_attr(name, name_len)) {
+            int ok = srcset_allowed(s, attr->value, attr->value_len);
+            if (ok < 0) {  /* GCOVR_EXCL_BR_LINE: srcset_allowed only fails on allocation failure */
+                return -1; /* GCOVR_EXCL_LINE */
             }
+            url_disallowed = !ok;
+        }
+        if (url_disallowed) {
+            /* A duplicate URL attribute desyncs the per-value scheme check from the
+               single value a re-parsing browser keeps (WHATWG keeps the first): dropping
+               only this occurrence deletes the first match by name, which may be a benign
+               sibling, leaving the disallowed value as the lone attribute. Drop every
+               occurrence of the name so no disallowed scheme survives, then rescan from
+               the start because removing an earlier slot shifts the rest down. */
+            while (th_node_attr_del(s->tree, element, name, name_len)) {
+            }
+            index = 0;
+            continue;
         }
         if (drop) {
             th_node_attr_del(s->tree, element, name, name_len);
