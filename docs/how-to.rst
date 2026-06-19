@@ -334,8 +334,9 @@ node kind and unpacks the defining field (``tag`` for an :class:`~turbohtml.Elem
 :meth:`~turbohtml.Node.select_one` returns the first or ``None``. The matcher covers type, ``#id``, ``.class``, and
 attribute selectors with the ``=``, ``~=``, ``|=``, ``^=``, ``$=``, ``*=`` operators, the tree-structural pseudo-classes
 (``:root``, ``:empty``, ``:first-child``, ``:last-child``, ``:only-child``, their ``-of-type`` variants, and the
-``:nth-child()`` family with the ``An+B`` microsyntax), joined by the descendant, child (``>``), adjacent (``+``), and
-general-sibling (``~``) combinators, with comma groups:
+``:nth-child()`` family with the ``An+B`` microsyntax, and the Level-4 ``of S`` clause that filters the sibling list by
+a selector), joined by the descendant, child (``>``), adjacent (``+``), and general-sibling (``~``) combinators, with
+comma groups:
 
 .. testcode::
 
@@ -350,6 +351,21 @@ general-sibling (``~``) combinators, with comma groups:
     ['a']
     b
     ['a']
+
+``:nth-child(An+B of S)`` counts only the inclusive siblings that match the selector list ``S``, so ``An+B`` indexes
+that filtered subset rather than every sibling -- here the second ``.row`` item, skipping the separator between them:
+
+.. testcode::
+
+    table = turbohtml.parse(
+        "<ul><li class=row>a</li><li class=sep>-</li>"
+        "<li class=row>b</li><li class=row>c</li></ul>"
+    )
+    print([li.text for li in table.select("li:nth-child(2 of .row)")])
+
+.. testoutput::
+
+    ['b']
 
 The Selectors Level 4 functional pseudo-classes are supported too: ``:is()`` and ``:where()`` match an element against a
 nested selector list (they differ only in specificity, which a tree matcher ignores), ``:has()`` keeps an element when a

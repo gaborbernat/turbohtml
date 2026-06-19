@@ -638,8 +638,9 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
                          "document order. The selector grammar covers type, #id, .class, and\n"
-                         "attribute selectors, the four combinators, the structural pseudo-classes,\n"
-                         "the :is(), :where(), :has(), and :not() functional pseudo-classes, and the\n"
+                         "attribute selectors, the four combinators, the structural pseudo-classes\n"
+                         "(including :nth-child(An+B of S)), the :is(), :where(), :has(), and :not()\n"
+                         "functional pseudo-classes, and the\n"
                          ":scope, form/UI, :lang() and :dir() pseudo-classes a static tree can\n"
                          "determine; live-state pseudo-classes (:hover, :focus, ...) match nothing.\n"
                          ":is() and :where() take a forgiving list, so a bad arm is dropped.");

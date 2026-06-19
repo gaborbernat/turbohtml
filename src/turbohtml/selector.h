@@ -591,6 +591,22 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
         if (parser->error) {
             return;
         }
+        /* the Level-4 'of S' clause filters the sibling list by a selector; it is
+           valid only on :nth-child()/:nth-last-child(), not the -of-type variants */
+        if (parser->pos < parser->len && sel_is_ident(parser->src[parser->pos])) {
+            /* the leading character is an identifier char, so sel_ident reads a
+               non-empty run and cannot fail here */
+            const Py_UCS4 *kw;
+            Py_ssize_t kw_len;
+            sel_ident(parser, &kw, &kw_len);
+            if (!sel_kw(kw, kw_len, "of") || (functional != PSEUDO_NTH_CHILD && functional != PSEUDO_NTH_LAST_CHILD)) {
+                parser->error = 1;
+                return;
+            }
+            /* S is a real (non-forgiving) complex-selector-list; this consumes the ')' */
+            sel_parse_alts(parser, &simple->sub, &simple->sub_count, 1, 0, 0);
+            return;
+        }
         if (parser->pos >= parser->len || parser->src[parser->pos] != ')') {
             parser->error = 1;
             return;
@@ -1081,6 +1097,23 @@ static int sel_sibling_index(th_node *node, int from_end, int of_type) {
     return index;
 }
 
+/* The 1-based position of node among its inclusive siblings that match the
+   :nth-child(... of S) selector list (from the end when from_end), or 0 when node
+   itself does not match S, so a non-matching element is never selected. */
+static int sel_nth_of_index(th_node *node, int from_end, const sel_simple *simple, const sel_ctx *ctx) {
+    if (!sel_matches_alts(node, simple->sub, simple->sub_count, ctx)) {
+        return 0;
+    }
+    int index = 1;
+    for (th_node *sibling = from_end ? node->next_sibling : node->prev_sibling; sibling != NULL;
+         sibling = from_end ? sibling->next_sibling : sibling->prev_sibling) {
+        if (sibling->type == TH_NODE_ELEMENT && sel_matches_alts(sibling, simple->sub, simple->sub_count, ctx)) {
+            index++;
+        }
+    }
+    return index;
+}
+
 /* Whether a 1-based index satisfies An+B for some non-negative n. */
 static int sel_nth_matches(int a, int b, int index) {
     if (a == 0) {
@@ -1451,8 +1484,16 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, const sel_c
     case PSEUDO_ONLY_OF_TYPE:
         return sel_no_sibling(node, 0, 1) && sel_no_sibling(node, 1, 1);
     case PSEUDO_NTH_CHILD:
+        if (simple->sub != NULL) {
+            int of_index = sel_nth_of_index(node, 0, simple, ctx);
+            return of_index != 0 && sel_nth_matches(simple->nth_a, simple->nth_b, of_index);
+        }
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 0));
     case PSEUDO_NTH_LAST_CHILD:
+        if (simple->sub != NULL) {
+            int of_index = sel_nth_of_index(node, 1, simple, ctx);
+            return of_index != 0 && sel_nth_matches(simple->nth_a, simple->nth_b, of_index);
+        }
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 0));
     case PSEUDO_NTH_OF_TYPE:
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 1));
