@@ -120,11 +120,12 @@ Two decisions bound the tokenizer's scope:
   tree-construction rules. The one tree-construction duty it takes on is content-model switching: after a start tag for
   ``script``, ``style``, ``title`` and the other raw-text elements, the element's contents tokenize as the spec requires
   (a ``<b>`` inside a script body is text, not a tag).
-- The machine recovers from parse errors instead of reporting them. The spec defines a recovery transition for every
-  error and the machine takes it, so malformed input produces the same tokens a browser would see; the error stream is
-  not part of the API. A duplicate attribute name is one such recovery: the spec keeps the first occurrence and drops
-  the rest at tokenization, so ``<a href=x href=y>`` carries a single ``href`` of ``x`` everywhere it is observed — in
-  the token, the parsed tree, and the serialized output alike.
+- The machine recovers from parse errors rather than stopping on them. The spec defines a recovery transition for every
+  error and the machine takes it, so malformed input produces the same tokens a browser would see. A duplicate attribute
+  name is one such recovery: the spec keeps the first occurrence and drops the rest at tokenization, so ``<a href=x
+  href=y>`` carries a single ``href`` of ``x`` everywhere it is observed — in the token, the parsed tree, and the
+  serialized output alike. The recovery is silent in the token stream itself; the errors it papered over surface on
+  :attr:`Document.errors <turbohtml.Document.errors>` when you :func:`~turbohtml.parse` (see below).
 
 Where behavior could drift, more than the suite pins it: a fuzz comparison runs the token stream against html5lib's
 tokenizer, and source positions use the same 1-based-line, 0-based-column convention as :mod:`python:html.parser`, so
@@ -183,6 +184,14 @@ variables of the tree-construction loop, lifted out of the one-shot call into th
 bounded no matter how long the stream: you never hold the whole source at once, the concrete win over ``parse`` for a
 document that arrives over a socket or a file larger than the buffer you would otherwise join. ``bytes`` chunks decode
 through a stateful incremental codec, so a multi-byte character split across a chunk boundary still decodes correctly.
+The recovery a browser performs hides the spec's parse errors, but a linter or a strict pipeline still wants them.
+:func:`~turbohtml.parse` records each error it recovers from on :attr:`Document.errors <turbohtml.Document.errors>`, a
+list of :class:`~turbohtml.ParseError` carrying the spec error code and the source position (1-based line, 0-based
+column, the same convention :class:`~turbohtml.Token` uses). Collection costs nothing on well-formed input — there are
+no errors to record and the per-character paths are untouched — so it stays on by default rather than behind a flag; the
+standalone :func:`~turbohtml.tokenize` and :class:`~turbohtml.Tokenizer`, which expose the raw stream, do not collect.
+Pass ``strict=True`` to raise the first error as :class:`~turbohtml.HTMLParseError` (with the ``ParseError`` on its
+``error`` attribute) instead of returning a recovered tree.
 
 The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
 :class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`,
