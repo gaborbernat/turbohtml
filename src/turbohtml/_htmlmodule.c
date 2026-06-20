@@ -32,9 +32,13 @@ PyDoc_STRVAR(markup_soft_str_doc, "soft_str(s, /)\n--\n\n"
                                   "Convert s to str only if it is not already one, preserving a Markup so\n"
                                   "already-safe text is not escaped a second time.");
 
-PyDoc_STRVAR(tokenize_doc, "tokenize(s, /)\n--\n\n"
+PyDoc_STRVAR(tokenize_doc, "tokenize(s, /, *, resolve_references=True, capture_source=False)\n--\n\n"
                            "Tokenize a whole HTML string, returning an iterator of Token objects\n"
-                           "following the WHATWG tokenization algorithm.");
+                           "following the WHATWG tokenization algorithm. With resolve_references\n"
+                           "false each character reference in text becomes its own\n"
+                           "CHARACTER_REFERENCE token instead of folding into the run; with\n"
+                           "capture_source true every markup token records its verbatim source\n"
+                           "(Token.source).");
 
 PyDoc_STRVAR(parse_doc, "parse(markup, *, encoding=None)\n--\n\n"
                         "Parse a whole HTML document with the WHATWG tree-construction algorithm\n"
@@ -54,7 +58,7 @@ static PyMethodDef html_methods[] = {
     {"_markup_soft_str", turbohtml_markup_soft_str, METH_O, markup_soft_str_doc},
     {"_register_markup", turbohtml_register_markup, METH_O, NULL},
     {"_register_xpath_string", turbohtml_register_xpath_string, METH_O, NULL},
-    {"tokenize", turbohtml_tokenize, METH_O, tokenize_doc},
+    {"tokenize", (PyCFunction)(void (*)(void))turbohtml_tokenize, METH_VARARGS | METH_KEYWORDS, tokenize_doc},
     {"parse", (PyCFunction)(void (*)(void))turbohtml_parse, METH_VARARGS | METH_KEYWORDS, parse_doc},
     {"parse_fragment", (PyCFunction)(void (*)(void))turbohtml_tree_parse_fragment, METH_VARARGS | METH_KEYWORDS,
      parse_fragment_doc},

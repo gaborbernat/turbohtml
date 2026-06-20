@@ -273,6 +273,47 @@ the offending markup:
 
     ['img at 2:0']
 
+*****************************************
+ See each character reference separately
+*****************************************
+
+By default a character reference is decoded into the surrounding text, so ``Tom &amp; Jerry`` is one text token reading
+``Tom & Jerry``. Pass ``resolve_references=False`` to :func:`turbohtml.tokenize` (or :class:`turbohtml.Tokenizer`) to
+receive each reference in text as its own :attr:`~turbohtml.TokenType.CHARACTER_REFERENCE` token instead:
+:attr:`~turbohtml.Token.data` is the resolved value and :attr:`~turbohtml.Token.source` the verbatim ``&...;`` (so
+``source[1] == "#"`` tells a numeric reference from a named one). A bare ``&`` that is not a reference stays text, and
+attribute values are always decoded:
+
+.. testcode::
+
+    import turbohtml
+    from turbohtml import TokenType
+
+    tokens = turbohtml.tokenize("5 &lt; 10 &amp; rising", resolve_references=False)
+    print([(token.data, token.source) for token in tokens if token.type is TokenType.CHARACTER_REFERENCE])
+
+.. testoutput::
+
+    [('<', '&lt;'), ('&', '&amp;')]
+
+***********************************
+ Keep the verbatim source of a tag
+***********************************
+
+The tokenizer normalizes tags: names lowercase, attribute order and quoting collapse. When you need the exact bytes a
+token came from - to rewrite markup in place, or to report it untouched - pass ``capture_source=True`` and read
+:attr:`turbohtml.Token.source`, the verbatim slice of the input. It is set for start tags, end tags, comments, and
+DOCTYPEs (text tokens leave it ``None``):
+
+.. testcode::
+
+    tag = next(iter(turbohtml.tokenize("<IMG  SRC='a.png'>", capture_source=True)))
+    print(tag.tag, "from", repr(tag.source))
+
+.. testoutput::
+
+    img from "<IMG  SRC='a.png'>"
+
 ************************************
  Find elements in a parsed document
 ************************************

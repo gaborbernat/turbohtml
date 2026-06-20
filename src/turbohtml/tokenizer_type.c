@@ -147,9 +147,13 @@ static PyType_Spec iter_spec = {
 /* -------------------------------------------------------------- tokenizer */
 
 static PyObject *tokenizer_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, ":Tokenizer", keywords)) {
-        return NULL; /* a streaming tokenizer starts empty; reject any positional or keyword argument */
+    static char *keywords[] = {"resolve_references", "capture_source", NULL};
+    int resolve_references = 1;
+    int capture_source = 0;
+    /* a streaming tokenizer starts empty; the two options are keyword-only and
+       reject any other positional or keyword argument */
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pp:Tokenizer", keywords, &resolve_references, &capture_source)) {
+        return NULL;
     }
     TokenizerObject *self = (TokenizerObject *)type->tp_alloc(type, 0);
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -161,6 +165,7 @@ static PyObject *tokenizer_new(PyTypeObject *type, PyObject *args, PyObject *kwd
         Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    th_tok_set_options(self->sm, resolve_references, capture_source);
     return (PyObject *)self;
 }
 
@@ -259,12 +264,18 @@ static PyMethodDef tokenizer_methods[] = {
     {NULL, NULL, 0, NULL},
 };
 
-PyDoc_STRVAR(tokenizer_doc, "Tokenizer()\n--\n\n"
+PyDoc_STRVAR(tokenizer_doc, "Tokenizer(*, resolve_references=True, capture_source=False)\n--\n\n"
                             "Streaming HTML tokenizer. Feed markup with feed() and iterate the\n"
                             "returned iterators; call close() at the end, or use the tokenizer as a\n"
                             "context manager so leaving the with block signals end of input, then\n"
                             "iterate the tokenizer itself for the remaining tokens. For a whole\n"
-                            "string at once use tokenize().");
+                            "string at once use tokenize().\n\n"
+                            "With resolve_references false, each character reference in text is\n"
+                            "emitted as its own CHARACTER_REFERENCE token (its data the resolved\n"
+                            "value, its source the verbatim reference) rather than folding into the\n"
+                            "surrounding text run; attribute-value references are always resolved.\n"
+                            "With capture_source true, every markup token records the verbatim source\n"
+                            "slice it came from, available as Token.source.");
 
 static PyType_Slot tokenizer_slots[] = {
     {Py_tp_doc, (void *)tokenizer_doc},
@@ -286,7 +297,15 @@ static PyType_Spec tokenizer_spec = {
 /* --------------------------------------------------------------- tokenize */
 
 // NOLINTNEXTLINE(misc-use-internal-linkage): declared in turbohtml.h and called from _htmlmodule.c
-PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg) {
+PyObject *turbohtml_tokenize(PyObject *module, PyObject *args, PyObject *kwargs) {
+    static char *keywords[] = {"", "resolve_references", "capture_source", NULL};
+    PyObject *arg;
+    int resolve_references = 1;
+    int capture_source = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|$pp:tokenize", keywords, &arg, &resolve_references,
+                                     &capture_source)) {
+        return NULL;
+    }
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "tokenize() argument must be str");
         return NULL;
@@ -297,6 +316,7 @@ PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg) {
         return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_tokenizer *sm = ((TokenizerObject *)tokenizer)->sm;
+    th_tok_set_options(sm, resolve_references, capture_source);
     Py_ssize_t length = PyUnicode_GET_LENGTH(arg);
     if (PyUnicode_FindChar(arg, '\r', 0, length, 1) == -1) {
         /* nothing to normalize: borrow the string's storage instead of

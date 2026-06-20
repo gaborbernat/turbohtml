@@ -41,9 +41,9 @@ struct th_node;
 int turbohtml_node_borrow(PyObject *module, PyObject *obj, struct th_tree **tree, struct th_node **node);
 PyObject *turbohtml_sanitize(PyObject *module, PyObject *args);
 
-/* Implemented in tokenizer_type.c. tokenize() matches METH_O; the internal
-   conformance hook _tokenize_states matches METH_VARARGS. */
-PyObject *turbohtml_tokenize(PyObject *module, PyObject *arg);
+/* Implemented in tokenizer_type.c. tokenize() matches METH_VARARGS | METH_KEYWORDS;
+   the internal conformance hook _tokenize_states matches METH_VARARGS. */
+PyObject *turbohtml_tokenize(PyObject *module, PyObject *args, PyObject *kwargs);
 PyObject *turbohtml_tokenize_states(PyObject *module, PyObject *args);
 
 /* Implemented in treebuilder_py.c. The internal conformance hooks _parse_tree
