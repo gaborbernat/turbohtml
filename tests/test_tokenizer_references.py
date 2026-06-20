@@ -235,7 +235,9 @@ def test_capture_source_survives_many_streamed_tags() -> None:
     tokenizer = Tokenizer(capture_source=True)
     sources: list[str | None] = []
     for index in range(50):
-        sources.extend(token.source for token in tokenizer.feed(f"<p id={index}>x</p>") if token.type is TokenType.START_TAG)
+        sources.extend(
+            token.source for token in tokenizer.feed(f"<p id={index}>x</p>") if token.type is TokenType.START_TAG
+        )
     sources += [token.source for token in tokenizer.close() if token.type is TokenType.START_TAG]
     assert sources == [f"<p id={index}>" for index in range(50)]
 
