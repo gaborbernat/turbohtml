@@ -1129,6 +1129,28 @@ because not every page wants it. The default ``nofollow`` callback marks web lin
 
     email <a href="mailto:bob@example.com">bob@example.com</a> or visit <a href="https://example.com" rel="nofollow">https://example.com</a>
 
+By default the callbacks only see freshly detected links; pass ``process_existing=True`` to also run them over ``<a>``
+tags already in the input. A callback reads ``link.existing`` to tell an author's anchor from a detected one, and
+returning ``None`` for an existing anchor unwraps it to its text. Use ``extra_tlds`` to link bare domains on a private
+suffix the IANA table does not know, and ``schemes`` to autolink only an allowlist of explicit URL schemes:
+
+.. testcode::
+
+    from turbohtml.linkify import Link, linkify
+
+
+    def annotate(link: Link) -> Link:
+        link.attrs["data-seen"] = "author" if link.existing else "auto"
+        return link
+
+
+    html = '<a href="https://docs.example">docs</a>, ping app.internal, skip ftp://x.example'
+    print(linkify(html, callbacks=[annotate], process_existing=True, extra_tlds=["internal"], schemes=["https"]))
+
+.. testoutput::
+
+    <a href="https://docs.example" data-seen="author">docs</a>, ping <a href="http://app.internal" data-seen="auto">app.internal</a>, skip ftp://x.example
+
 **************************
  Find links in plain text
 **************************
