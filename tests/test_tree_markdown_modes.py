@@ -136,7 +136,7 @@ def test_html_passthrough(html: str, opts: _Opts, expected: str) -> None:
     [
         pytest.param("<p>café naïve</p>", "cafe naive", id="accented-latin1"),
         pytest.param("<p>œuvre Œ ß</p>", "oeuvre OE ss", id="latin-extended-a"),
-        pytest.param("<p>“q” ‘r’ — … ©</p>", '"q" \'r\' -- ... (C)', id="punctuation-and-symbols"),
+        pytest.param("<p>“q” ‘r’ — … ©</p>", "\"q\" 'r' -- ... (C)", id="punctuation-and-symbols"),
         pytest.param("<p>a → b ← c × d</p>", "a -> b <- c x d", id="arrows-and-times"),
         pytest.param("<p>中文 é</p>", "中文 e", id="unmapped-non-ascii-passthrough"),
     ],
