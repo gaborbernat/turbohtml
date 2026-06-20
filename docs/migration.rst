@@ -670,6 +670,23 @@ together with its subtree, has no single call: select the subtrees to keep with 
 join their ``text``, the allowlist-style filtering the :doc:`how-to` guide covers, or reach for ``turbohtml.sanitizer``
 when the goal is producing safe HTML rather than plain text.
 
+The two helpers that read a document's own URL hints, ``get_base_url`` and ``get_meta_refresh``, map to the
+:meth:`~turbohtml.Document.base_url` and :meth:`~turbohtml.Document.meta_refresh` methods on the parsed document. Each
+takes the fallback base URL w3lib calls ``baseurl`` and resolves the hint against it:
+
+.. testcode::
+
+    from turbohtml import parse
+
+    doc = parse('<base href="/sub/"><meta http-equiv=refresh content="5; url=next.html">')
+    print(doc.base_url("http://site.com/"))
+    print(doc.meta_refresh("http://site.com/"))
+
+.. testoutput::
+
+    http://site.com/sub/
+    (5.0, 'http://site.com/next.html')
+
 *****************
  From markupsafe
 *****************
