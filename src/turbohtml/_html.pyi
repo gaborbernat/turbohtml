@@ -205,9 +205,22 @@ class Node:
     ) -> Element | str | None: ...
     def matches(self, selector: str, /) -> bool: ...
     def closest(self, selector: str, /) -> Element | None: ...
-    def serialize(self, *, formatter: Formatter = ..., layout: Indent | Minify | None = ...) -> str: ...
+    def serialize(
+        self,
+        *,
+        formatter: Formatter = ...,
+        layout: Indent | Minify | None = ...,
+        sort_attributes: bool = ...,
+        meta_charset: bool = ...,
+    ) -> str: ...
     def encode(
-        self, encoding: str = "utf-8", *, formatter: Formatter = ..., layout: Indent | Minify | None = ...
+        self,
+        encoding: str = "utf-8",
+        *,
+        formatter: Formatter = ...,
+        layout: Indent | Minify | None = ...,
+        sort_attributes: bool = ...,
+        meta_charset: bool = ...,
     ) -> bytes: ...
     def to_markdown(
         self,

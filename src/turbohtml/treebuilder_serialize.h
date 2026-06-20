@@ -468,21 +468,173 @@ static int ser_needs_leading_newline(th_tree *tree, th_node *node) {
     return first != NULL && first->type == TH_NODE_TEXT && need_text(tree, first)[0] == '\n';
 }
 
-/* Write an element's start tag, "<tag attrs...>", with attributes in source order
-   and double-quoted values escaped under the formatter. */
-static void ser_open_tag(sbuf *out, th_tree *tree, th_node *node, int formatter) {
+/* ASCII case-insensitive compare of a UCS-4 attribute value against a lowercase
+   literal: the value matches when it has the same length and folds to the same
+   bytes (only A-Z fold, the only case mapping the labels here need). */
+static int ser_value_iequals(const Py_UCS4 *value, Py_ssize_t len, const char *ascii) {
+    Py_ssize_t index = 0;
+    for (; index < len && ascii[index] != '\0'; index++) {
+        Py_UCS4 character = value[index];
+        if (character >= 'A' && character <= 'Z') {
+            character += 'a' - 'A';
+        }
+        if (character != (Py_UCS4)(unsigned char)ascii[index]) {
+            return 0;
+        }
+    }
+    return index == len && ascii[index] == '\0';
+}
+
+/* How a <meta> element declares the document encoding, for the meta_charset
+   normalizer: 1 a `charset` attribute, 2 an http-equiv="content-type" with a
+   `content` attribute, 0 neither (or not an HTML <meta>). */
+static int ser_meta_charset_kind(th_tree *tree, const th_node *node) {
+    if (node->ns != TH_NS_HTML || node->atom != TH_TAG_META) {
+        return 0;
+    }
+    if (th_node_attr_find(tree, (th_node *)node, "charset", 7) >= 0) {
+        return 1;
+    }
+    Py_ssize_t equiv = th_node_attr_find(tree, (th_node *)node, "http-equiv", 10);
+    if (equiv >= 0 && th_node_attr_find(tree, (th_node *)node, "content", 7) >= 0 &&
+        ser_value_iequals(node->attrs[equiv].value, node->attrs[equiv].value_len, "content-type")) {
+        return 2;
+    }
+    return 0;
+}
+
+/* Whether head already declares a charset through a direct <meta> child, so the
+   meta_charset option normalizes that one in place instead of injecting another. */
+static int ser_head_has_charset_meta(th_tree *tree, const th_node *head) {
+    for (th_node *child = head->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT && ser_meta_charset_kind(tree, child) != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Emit a fresh charset declaration, <meta charset="LABEL">. */
+static void ser_emit_meta_charset(sbuf *out, const th_serialize_opts *opts) {
+    sbuf_puts(out, "<meta charset=\"");
+    sbuf_put_utf8(out, opts->charset, opts->charset_len);
+    sbuf_puts(out, "\">");
+}
+
+/* Lexicographic compare of two interned attribute names by bytes, the shorter
+   name ordering first on a shared prefix (the html5lib alphabetical-attributes
+   order over the stored, parser-lowercased name). */
+static int ser_name_cmp(const char *left, Py_ssize_t left_len, const char *right, Py_ssize_t right_len) {
+    Py_ssize_t min_len = left_len < right_len ? left_len : right_len;
+    int order = memcmp(left, right, (size_t)min_len);
+    if (order != 0) {
+        return order;
+    }
+    return left_len < right_len ? -1 : left_len > right_len;
+}
+
+/* Insertion-sort order[0..count) into ascending attribute-name order. Counts are
+   tiny, so the quadratic sort beats any setup an asymptotically faster one needs. */
+static void ser_sort_order(th_tree *tree, const th_node *node, Py_ssize_t *order, Py_ssize_t count) {
+    for (Py_ssize_t index = 0; index < count; index++) {
+        order[index] = index;
+    }
+    for (Py_ssize_t index = 1; index < count; index++) {
+        Py_ssize_t key = order[index];
+        Py_ssize_t key_len;
+        const char *key_name = th_attr_name(tree, node->attrs[key].name_atom, &key_len);
+        Py_ssize_t prev = index - 1;
+        while (prev >= 0) {
+            Py_ssize_t prev_len;
+            const char *prev_name = th_attr_name(tree, node->attrs[order[prev]].name_atom, &prev_len);
+            if (ser_name_cmp(prev_name, prev_len, key_name, key_len) <= 0) {
+                break;
+            }
+            order[prev + 1] = order[prev];
+            prev--;
+        }
+        order[prev + 1] = key;
+    }
+}
+
+/* The order to emit node's attributes in: NULL means source order (sorting off, or
+   fewer than two attributes), otherwise a filled index array — the caller's stack
+   buffer for up to MAX_SORTED_ATTRS attributes, else a heap block freed through
+   ser_attr_order_free. */
+static Py_ssize_t *ser_attr_order(th_tree *tree, const th_node *node, int sort, Py_ssize_t *stack) {
+    if (!sort || node->attr_count < 2) {
+        return NULL;
+    }
+    Py_ssize_t *order =
+        node->attr_count <= MAX_SORTED_ATTRS ? stack : PyMem_Malloc((size_t)node->attr_count * sizeof(Py_ssize_t));
+    if (order == NULL) { /* GCOVR_EXCL_BR_LINE: only the heap path can fail, and OOM is unforceable */
+        return NULL;     /* GCOVR_EXCL_LINE: degrade to source order on allocation failure */
+    }
+    ser_sort_order(tree, node, order, node->attr_count);
+    return order;
+}
+
+static void ser_attr_order_free(Py_ssize_t *order, const Py_ssize_t *stack) {
+    if (order != NULL && order != stack) {
+        PyMem_Free(order);
+    }
+}
+
+/* Under meta_charset, rewrite a charset meta's declaration to the target label:
+   charset="LABEL" (kind 1) or content="text/html; charset=LABEL" (kind 2). Returns
+   1 when it emitted the attribute, 0 when the caller should emit the stored value.
+   The element is an HTML <meta>, whose attribute names the parser has lowercased,
+   so a byte compare against the lowercase spelling is exact. */
+static int ser_put_charset_value(sbuf *out, const th_serialize_opts *opts, int kind, const char *name,
+                                 Py_ssize_t name_len) {
+    if (kind == 1 && name_len == 7 && memcmp(name, "charset", 7) == 0) {
+        sbuf_puts(out, "=\"");
+        sbuf_put_utf8(out, opts->charset, opts->charset_len);
+        sbuf_putc(out, '"');
+        return 1;
+    }
+    if (kind == 2 && name_len == 7 && memcmp(name, "content", 7) == 0) {
+        sbuf_puts(out, "=\"text/html; charset=");
+        sbuf_put_utf8(out, opts->charset, opts->charset_len);
+        sbuf_putc(out, '"');
+        return 1;
+    }
+    return 0;
+}
+
+/* When meta_charset is on and node is a <head> that declares no charset of its own,
+   emit the <meta charset> as its first child so the output names the encoding. The
+   atom guard means this is a no-op for every element but the document head. */
+static void ser_inject_head_meta(sbuf *out, th_tree *tree, const th_node *node, const th_serialize_opts *opts) {
+    if (opts->inject_meta && node->ns == TH_NS_HTML && node->atom == TH_TAG_HEAD &&
+        !ser_head_has_charset_meta(tree, node)) {
+        ser_emit_meta_charset(out, opts);
+    }
+}
+
+/* Write an element's start tag, "<tag attrs...>": attributes in source order, or in
+   name order when opts asks; values double-quoted and escaped under the formatter,
+   with a charset meta's declaration normalized when meta_charset is on. */
+static void ser_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_serialize_opts *opts) {
     sbuf_putc(out, '<');
     sbuf_put_ucs4(out, node->text, node->text_len);
-    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-        th_node_attr *attr = &node->attrs[index];
+    Py_ssize_t stack_order[MAX_SORTED_ATTRS];
+    Py_ssize_t *order = ser_attr_order(tree, node, opts->sort_attributes, stack_order);
+    int charset_kind = opts->inject_meta ? ser_meta_charset_kind(tree, node) : 0;
+    for (Py_ssize_t position = 0; position < node->attr_count; position++) {
+        th_node_attr *attr = &node->attrs[order != NULL ? order[position] : position];
         sbuf_putc(out, ' ');
         Py_ssize_t name_len;
         const char *name = th_attr_name(tree, attr->name_atom, &name_len);
         sbuf_put_utf8(out, name, name_len);
+        if (ser_put_charset_value(out, opts, charset_kind, name, name_len)) {
+            continue;
+        }
         sbuf_puts(out, "=\"");
-        sbuf_put_text(out, attr->value, attr->value_len, 1, formatter);
+        sbuf_put_text(out, attr->value, attr->value_len, 1, opts->formatter);
         sbuf_putc(out, '"');
     }
+    ser_attr_order_free(order, stack_order);
     sbuf_putc(out, '>');
 }
 
@@ -496,13 +648,14 @@ static void ser_close_tag(sbuf *out, th_node *node) {
    algorithm), parameterized by the escape formatter. The walk is iterative,
    descending through first_child and ascending through parent pointers, so a
    tree of any depth serializes without recursing one C stack frame per level. */
-static void serialize_compact(sbuf *out, th_tree *tree, th_node *root, int formatter) {
+static void serialize_compact(sbuf *out, th_tree *tree, th_node *root, const th_serialize_opts *opts) {
     th_node *node = root;
     while (1) {
         th_node *descend = NULL;
         switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
         case TH_NODE_ELEMENT:
-            ser_open_tag(out, tree, node, formatter);
+            ser_open_tag(out, tree, node, opts);
+            ser_inject_head_meta(out, tree, node, opts);
             if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
                 break; /* void elements have no children or end tag */
             }
@@ -524,7 +677,7 @@ static void serialize_compact(sbuf *out, th_tree *tree, th_node *root, int forma
             }
             break;
         case TH_NODE_TEXT:
-            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, formatter);
+            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
             break;
         case TH_NODE_COMMENT:
             sbuf_puts(out, "<!--");
@@ -572,9 +725,10 @@ static void serialize_compact(sbuf *out, th_tree *tree, th_node *root, int forma
     }
 }
 
-/* Indentation context for the pretty form: the per-level unit and the formatter. */
+/* Indentation context for the pretty form: the output options plus the per-level
+   unit the layout's Indent supplies. */
 typedef struct {
-    int formatter;
+    const th_serialize_opts *out;
     const Py_UCS4 *indent;
     Py_ssize_t indent_len;
 } ser_opts;
@@ -598,7 +752,7 @@ static void serialize_pretty(sbuf *out, th_tree *tree, th_node *root, const ser_
         th_node *descend = NULL;
         switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
         case TH_NODE_ELEMENT: {
-            ser_open_tag(out, tree, node, opts->formatter);
+            ser_open_tag(out, tree, node, opts->out);
             if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
                 break;
             }
@@ -617,13 +771,26 @@ static void serialize_pretty(sbuf *out, th_tree *tree, th_node *root, const ser_
                     if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
                         sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
                     } else {
-                        serialize_compact(out, tree, child, opts->formatter);
+                        serialize_compact(out, tree, child, opts->out);
                     }
                 }
                 ser_close_tag(out, node);
                 break;
             }
+            /* meta_charset injects the declaration as head's first child, on its own
+               indented line (head is never a preserve/raw element, so this is reached) */
+            int inject = opts->out->inject_meta && node->ns == TH_NS_HTML && node->atom == TH_TAG_HEAD &&
+                         !ser_head_has_charset_meta(tree, node);
+            if (node->first_child == NULL && !inject) {
+                ser_close_tag(out, node);
+                break;
+            }
+            if (inject) {
+                ser_newline_indent(out, opts, depth + 1);
+                ser_emit_meta_charset(out, opts->out);
+            }
             if (node->first_child == NULL) {
+                ser_newline_indent(out, opts, depth);
                 ser_close_tag(out, node);
                 break;
             }
@@ -632,7 +799,7 @@ static void serialize_pretty(sbuf *out, th_tree *tree, th_node *root, const ser_
             break;
         }
         case TH_NODE_TEXT:
-            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
+            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->out->formatter);
             break;
         case TH_NODE_COMMENT:
             sbuf_puts(out, "<!--");
@@ -780,30 +947,34 @@ static void sbuf_presize_for_root(sbuf *out, th_tree *tree, th_node *node) {
     }
 }
 
+/* The WHATWG-conformant defaults the html/inner_html accessors serialize under:
+   minimal escaping, source attribute order, no charset injection. */
+static const th_serialize_opts ser_default_opts = {TH_FMT_WHATWG, 0, 0, NULL, 0};
+
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     sbuf_presize_for_root(&out, tree, node);
-    serialize_compact(&out, tree, node, TH_FMT_WHATWG);
+    serialize_compact(&out, tree, node, &ser_default_opts);
     return sbuf_finish(&out, out_len);
 }
 
 Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        serialize_compact(&out, tree, child, TH_FMT_WHATWG);
+        serialize_compact(&out, tree, child, &ser_default_opts);
     }
     return sbuf_finish(&out, out_len);
 }
 
-Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
-                           Py_ssize_t *out_len) {
+Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, const th_serialize_opts *opts, const Py_UCS4 *indent,
+                           Py_ssize_t indent_len, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     sbuf_presize_for_root(&out, tree, node);
     if (indent == NULL) {
-        serialize_compact(&out, tree, node, formatter);
+        serialize_compact(&out, tree, node, opts);
     } else {
-        ser_opts opts = {formatter, indent, indent_len};
-        serialize_pretty(&out, tree, node, &opts, 0);
+        ser_opts pretty = {opts, indent, indent_len};
+        serialize_pretty(&out, tree, node, &pretty, 0);
     }
     return sbuf_finish(&out, out_len);
 }
