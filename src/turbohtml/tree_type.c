@@ -1973,8 +1973,7 @@ static int set_select_value(PyObject *self, th_node *select, PyObject *value) {
     int error = 0;
     int selected_one = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    for (th_node *option = next_option(select, select); option != NULL && !error;
-         option = next_option(option, select)) {
+    for (th_node *option = next_option(select, select); option != NULL; option = next_option(option, select)) {
         PyObject *option_value = option_value_str(tree, option);
         if (option_value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             error = 1;              /* GCOVR_EXCL_LINE: allocation-failure path */
