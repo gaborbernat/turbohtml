@@ -14,12 +14,16 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, TypeAlias
 
-from ._html import Element, Text, _linkify_scan, parse_fragment
+from ._html import Element, Text, _linkify_find, _linkify_scan, parse_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
 _EMAIL_KIND = 1
+
+# A scheme-less match (``tel:+1-800``, ``bitcoin:1abc``) already carries its scheme, so its url is the matched text
+# verbatim; only a bare domain (kind 0 without a ``scheme://``) is prefixed with ``http://``.
+_SCHEME_KIND = 2
 
 # A leading ``scheme://`` tells a matched URL already carries its scheme; a bare domain (``example.com``, ``www.x.com``)
 # does not and is prefixed with ``http://``. Anchoring at the start avoids treating a ``://`` deeper in a bare domain's
@@ -158,10 +162,96 @@ def linkify(
     return Linker(callbacks, skip_tags, parse_email).linkify(text)
 
 
+class LinkSpan:
+    """
+    One URL or email address found in a run of plain text.
+
+    ``start`` and ``end`` are the half-open offsets of the match in the scanned text, ``text`` is the matched substring
+    exactly as it appeared, and ``url`` is the normalized ``href`` (``mailto:`` for an email, ``http://`` for a bare
+    domain, the text itself for a ``scheme://`` or registered scheme-less URL). ``is_email`` flags the ``mailto:`` case.
+    """
+
+    __slots__ = ("end", "is_email", "start", "text", "url")
+
+    def __init__(self, start: int, end: int, text: str, url: str, is_email: bool) -> None:  # noqa: FBT001
+        """Store the offsets, the matched substring, the normalized ``url``, and whether the match is an email."""
+        self.start = start
+        self.end = end
+        self.text = text
+        self.url = url
+        self.is_email = is_email
+
+    def __repr__(self) -> str:
+        """Render the span with its offsets and url, the way a debugger or a failing test wants to see it."""
+        return f"LinkSpan(start={self.start}, end={self.end}, text={self.text!r}, url={self.url!r})"
+
+    def __eq__(self, other: object) -> bool:
+        """Two spans are equal when every field matches; comparing to a non-span defers to the other operand."""
+        if not isinstance(other, LinkSpan):
+            return NotImplemented
+        return (self.start, self.end, self.text, self.url, self.is_email) == (
+            other.start,
+            other.end,
+            other.text,
+            other.url,
+            other.is_email,
+        )
+
+    __hash__ = None  # a span carries offsets into one specific string, so it is not a stable dict key
+
+
+def _span_from_match(text: str, start: int, end: int, kind: int) -> LinkSpan:
+    """Normalize one matched span into a :class:`LinkSpan`, adding the ``mailto:``/``http://`` scheme it needs."""
+    matched = text[start:end]
+    if kind == _EMAIL_KIND:
+        url = "mailto:" + matched
+    elif kind == _SCHEME_KIND or _SCHEME.match(matched):
+        url = matched
+    else:
+        url = "http://" + matched
+    return LinkSpan(start, end, matched, url, kind == _EMAIL_KIND)
+
+
+class Detector:
+    """
+    Find the links in plain text, configured once and reused per call.
+
+    Unlike :class:`Linker`, which rewrites HTML, a detector only *locates* links and hands back :class:`LinkSpan`
+    objects, leaving the text untouched. ``tlds`` adds custom top-level domains for bare-domain matching (an internal
+    ``corp``, say), and ``schemes`` registers scheme-less schemes such as ``tel`` or ``bitcoin`` so ``tel:+1-800-555``
+    is found as an opaque URL; every ``scheme://`` URL is already detected without registration.
+    """
+
+    def __init__(
+        self,
+        *,
+        emails: bool = True,
+        bare_domains: bool = True,
+        tlds: Iterable[str] = (),
+        schemes: Iterable[str] = (),
+    ) -> None:
+        """Configure whether to detect emails and bare domains, and the extra TLDs and scheme-less schemes to accept."""
+        self.emails = emails
+        self.bare_domains = bare_domains
+        self._tlds = tuple({tld.lower().removeprefix(".") for tld in tlds})
+        self._schemes = tuple({scheme.lower().rstrip(":") for scheme in schemes})
+
+    def find(self, text: str) -> list[LinkSpan]:
+        """Return every link in ``text`` as a :class:`LinkSpan`, in the order it appears."""
+        spans = _linkify_find(text, self.emails, self.bare_domains, self._tlds, self._schemes)
+        return [_span_from_match(text, start, end, kind) for start, end, kind in spans]
+
+    def has_link(self, text: str) -> bool:
+        """Is there at least one link in ``text``? A cheaper question than :meth:`find` when only presence matters."""
+        return bool(_linkify_find(text, self.emails, self.bare_domains, self._tlds, self._schemes))
+
+
 __all__ = [
     "DEFAULT_CALLBACKS",
     "Callback",
+    "Detector",
     "Link",
+    "LinkSpan",
     "Linker",
     "linkify",
     "nofollow",

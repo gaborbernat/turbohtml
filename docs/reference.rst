@@ -55,6 +55,15 @@ or ``None`` to leave the text bare.
 
 .. autofunction:: target_blank
 
+To only *locate* links in plain text rather than rewrite HTML, use :class:`Detector`. It returns a :class:`LinkSpan` for
+each match and accepts custom ``tlds`` and scheme-less ``schemes``.
+
+.. autoclass:: Detector
+    :members: find, has_link
+
+.. autoclass:: LinkSpan
+    :members:
+
 *********************
  turbohtml.sanitizer
 *********************

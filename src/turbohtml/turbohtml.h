@@ -30,8 +30,10 @@ PyObject *turbohtml_register_markup(PyObject *module, PyObject *type);
 PyObject *turbohtml_register_xpath_string(PyObject *module, PyObject *type);
 
 /* Implemented in linkify.c. _linkify_scan finds URL/email spans in a text run;
-   signature matches METH_VARARGS. */
+   _linkify_find adds the detector's custom TLD and scheme-less scheme config.
+   Both signatures match METH_VARARGS. */
 PyObject *turbohtml_linkify_scan(PyObject *module, PyObject *args);
+PyObject *turbohtml_linkify_find(PyObject *module, PyObject *args);
 
 /* Implemented in sanitize.c. _sanitize filters a parsed fragment in place against
    a policy; signature matches METH_VARARGS. turbohtml_node_borrow is implemented

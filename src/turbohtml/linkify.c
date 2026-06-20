@@ -19,6 +19,7 @@
 enum th_link_kind {
     TH_LINK_URL = 0,
     TH_LINK_EMAIL = 1,
+    TH_LINK_SCHEME = 2,
 };
 
 static inline Py_UCS4 ascii_lower(Py_UCS4 c) {
@@ -109,17 +110,50 @@ static inline int is_url_tail_char(Py_UCS4 c) {
 /* Read one code point of any storage width. */
 #define READ(index) PyUnicode_READ(kind, data, index)
 
+/* Does the label [start, end) appear in a caller-supplied tuple of lowercased
+   names (the custom TLDs or scheme-less schemes)? The candidate is already lower,
+   so only the input is folded; the compare reads both strings in place and never
+   allocates. A NULL tuple (the default, scan-only path) matches nothing. */
+static int tuple_has_label(PyObject *names, int kind, const void *data, Py_ssize_t start, Py_ssize_t end) {
+    if (names == NULL) {
+        return 0;
+    }
+    Py_ssize_t length = end - start;
+    Py_ssize_t count = PyTuple_GET_SIZE(names);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *candidate = PyTuple_GET_ITEM(names, index);
+        if (PyUnicode_GET_LENGTH(candidate) != length) {
+            continue;
+        }
+        int candidate_kind = PyUnicode_KIND(candidate);
+        const void *candidate_data = PyUnicode_DATA(candidate);
+        int matched = 1;
+        for (Py_ssize_t offset = 0; offset < length; offset++) {
+            if (PyUnicode_READ(candidate_kind, candidate_data, offset) != ascii_lower(READ(start + offset))) {
+                matched = 0;
+                break;
+            }
+        }
+        if (matched) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Is the label [start, end) a known TLD? Matched case-insensitively in the
    first-byte bucket of the generated table, which includes the xn-- punycode
-   TLDs, so a real xn--p1ai matches and an invented xn--whatever does not. */
-static int is_known_tld(int kind, const void *data, Py_ssize_t start, Py_ssize_t end) {
+   TLDs, so a real xn--p1ai matches and an invented xn--whatever does not. A
+   caller's extra_tlds tuple extends the table with custom TLDs (e.g. an internal
+   .corp); a custom TLD whose first byte is not ASCII a-z still matches there. */
+static int is_known_tld(int kind, const void *data, Py_ssize_t start, Py_ssize_t end, PyObject *extra_tlds) {
     Py_ssize_t length = end - start;
     if (length < 2) {
         return 0;
     }
     Py_UCS4 first = ascii_lower(READ(start));
     if (first < 'a' || first > 'z') {
-        return 0;
+        return tuple_has_label(extra_tlds, kind, data, start, end);
     }
     for (int index = th_tld_first[first]; index < th_tld_first[first + 1]; index++) {
         if (th_tld_table[index].name_len != length) {
@@ -136,7 +170,7 @@ static int is_known_tld(int kind, const void *data, Py_ssize_t start, Py_ssize_t
             return 1;
         }
     }
-    return 0;
+    return tuple_has_label(extra_tlds, kind, data, start, end);
 }
 
 /* Scan a host of dot-separated labels starting at `start`, requiring at least
@@ -144,7 +178,8 @@ static int is_known_tld(int kind, const void *data, Py_ssize_t start, Py_ssize_t
    rule); a scheme URL passes 0 so a numeric host like 1.2.3.4 is accepted. Returns
    the index past the host on success, or -1. Hyphens are allowed inside a label,
    not at its edges. */
-static Py_ssize_t scan_host(int kind, const void *data, Py_ssize_t start, Py_ssize_t len, int require_tld) {
+static Py_ssize_t scan_host(int kind, const void *data, Py_ssize_t start, Py_ssize_t len, int require_tld,
+                            PyObject *extra_tlds) {
     Py_ssize_t pos = start;
     Py_ssize_t last_label_start = start;
     Py_ssize_t host_end = start;
@@ -179,30 +214,19 @@ static Py_ssize_t scan_host(int kind, const void *data, Py_ssize_t start, Py_ssi
     if (dots < 1 || label_ended_with_hyphen) {
         return -1;
     }
-    if (require_tld && !is_known_tld(kind, data, last_label_start, host_end)) {
+    if (require_tld && !is_known_tld(kind, data, last_label_start, host_end, extra_tlds)) {
         return -1;
     }
     return host_end;
 }
 
-/* Consume an optional ``:port`` and ``/``-or-``?``-led tail after the host,
-   trimming trailing punctuation and balancing brackets so a link in prose keeps
-   only what belongs to it. Returns the index past the link. */
-static Py_ssize_t scan_url_tail(int kind, const void *data, Py_ssize_t host_end, Py_ssize_t len) {
-    Py_ssize_t pos = host_end;
-    if (pos < len && READ(pos) == ':') {
-        Py_ssize_t port = pos + 1;
-        while (port < len && is_ascii_digit(READ(port))) {
-            port++;
-        }
-        if (port > pos + 1) {
-            pos = port;
-        }
-    }
-    if (pos >= len || (READ(pos) != '/' && READ(pos) != '?' && READ(pos) != '#')) {
-        return pos;
-    }
-    Py_ssize_t end = pos;
+/* Consume a run of URL tail characters from `begin`, balancing brackets and
+   trimming trailing punctuation so a link in prose keeps only what belongs to it.
+   Returns the index of the last byte that can legally end the link. Shared by the
+   scheme://host path tail and the opaque tail of a registered scheme-less URL. */
+static Py_ssize_t scan_balanced(int kind, const void *data, Py_ssize_t begin, Py_ssize_t len) {
+    Py_ssize_t pos = begin;
+    Py_ssize_t end = begin;
     int round = 0;
     int square = 0;
     while (pos < len) {
@@ -234,6 +258,26 @@ static Py_ssize_t scan_url_tail(int kind, const void *data, Py_ssize_t host_end,
         }
     }
     return end;
+}
+
+/* Consume an optional ``:port`` and ``/``-or-``?``-led tail after the host,
+   balancing brackets so a link in prose keeps only what belongs to it. Returns
+   the index past the link. */
+static Py_ssize_t scan_url_tail(int kind, const void *data, Py_ssize_t host_end, Py_ssize_t len) {
+    Py_ssize_t pos = host_end;
+    if (pos < len && READ(pos) == ':') {
+        Py_ssize_t port = pos + 1;
+        while (port < len && is_ascii_digit(READ(port))) {
+            port++;
+        }
+        if (port > pos + 1) {
+            pos = port;
+        }
+    }
+    if (pos >= len || (READ(pos) != '/' && READ(pos) != '?' && READ(pos) != '#')) {
+        return pos;
+    }
+    return scan_balanced(kind, data, pos, len);
 }
 
 /* True when the character before `start` blocks a link there: bleach's
@@ -275,7 +319,7 @@ static int match_url(int kind, const void *data, Py_ssize_t colon, Py_ssize_t st
        the common case stays a single host scan. The last '@' before the path wins,
        so http://user:pass@host links the host, not the embedded email. */
     Py_ssize_t host_start = colon + 3;
-    Py_ssize_t host_end = scan_host(kind, data, host_start, len, 0);
+    Py_ssize_t host_end = scan_host(kind, data, host_start, len, 0, NULL);
     if (host_end < 0 || (host_end < len && (READ(host_end) == ':' || READ(host_end) == '@'))) {
         Py_ssize_t userinfo_end = -1;
         for (Py_ssize_t scan = host_start; scan < len; scan++) {
@@ -288,7 +332,7 @@ static int match_url(int kind, const void *data, Py_ssize_t colon, Py_ssize_t st
         }
         if (userinfo_end >= 0) {
             host_start = userinfo_end + 1;
-            host_end = scan_host(kind, data, host_start, len, 0);
+            host_end = scan_host(kind, data, host_start, len, 0, NULL);
         }
     }
     if (host_end < 0) {
@@ -302,7 +346,7 @@ static int match_url(int kind, const void *data, Py_ssize_t colon, Py_ssize_t st
 /* Try to match a bare domain (no scheme) whose first label dot triggered it; the
    domain starts by expanding left over label characters from `dot`. */
 static int match_domain(int kind, const void *data, Py_ssize_t dot, Py_ssize_t start, Py_ssize_t len,
-                        Py_ssize_t *out_start, Py_ssize_t *out_end) {
+                        Py_ssize_t *out_start, Py_ssize_t *out_end, PyObject *extra_tlds) {
     Py_ssize_t pos = dot;
     while (pos > start) {
         Py_UCS4 before = READ(pos - 1);
@@ -318,7 +362,7 @@ static int match_domain(int kind, const void *data, Py_ssize_t dot, Py_ssize_t s
     if (pos == dot || blocked_on_left(kind, data, pos)) {
         return 0;
     }
-    Py_ssize_t host_end = scan_host(kind, data, pos, len, 1);
+    Py_ssize_t host_end = scan_host(kind, data, pos, len, 1, extra_tlds);
     if (host_end < 0) {
         return 0;
     }
@@ -330,7 +374,7 @@ static int match_domain(int kind, const void *data, Py_ssize_t dot, Py_ssize_t s
 /* Try to match an email whose ``@`` is at `at`; expand left over the local part
    and scan the domain to the right. */
 static int match_email(int kind, const void *data, Py_ssize_t at, Py_ssize_t start, Py_ssize_t len,
-                       Py_ssize_t *out_start, Py_ssize_t *out_end) {
+                       Py_ssize_t *out_start, Py_ssize_t *out_end, PyObject *extra_tlds) {
     Py_ssize_t pos = at;
     while (pos > start) {
         Py_UCS4 before = READ(pos - 1);
@@ -344,12 +388,35 @@ static int match_email(int kind, const void *data, Py_ssize_t at, Py_ssize_t sta
     if (pos == at || (pos > start && READ(pos - 1) == '@')) {
         return 0;
     }
-    Py_ssize_t host_end = scan_host(kind, data, at + 1, len, 1);
+    Py_ssize_t host_end = scan_host(kind, data, at + 1, len, 1, extra_tlds);
     if (host_end < 0) {
         return 0;
     }
     *out_start = pos;
     *out_end = host_end;
+    return 1;
+}
+
+/* Try to match a registered scheme-less URL whose ``:`` is at `colon`: a scheme
+   like ``tel`` or ``mailto`` that carries an opaque part with no ``//`` authority.
+   The scheme left of the colon must be one of the caller's `schemes`; the opaque
+   part is one run of URL tail characters, trimmed like a path. Returns the match
+   start at the scheme and end past the opaque part. */
+static int match_scheme_less(int kind, const void *data, Py_ssize_t colon, Py_ssize_t start, Py_ssize_t len,
+                             Py_ssize_t *out_start, Py_ssize_t *out_end, PyObject *schemes) {
+    Py_ssize_t scheme_start = scan_scheme_start(kind, data, colon, start);
+    if (scheme_start < 0 || blocked_on_left(kind, data, scheme_start)) {
+        return 0;
+    }
+    if (!tuple_has_label(schemes, kind, data, scheme_start, colon)) {
+        return 0;
+    }
+    Py_ssize_t end = scan_balanced(kind, data, colon + 1, len);
+    if (end <= colon + 1) {
+        return 0;
+    }
+    *out_start = scheme_start;
+    *out_end = end;
     return 1;
 }
 
@@ -363,14 +430,11 @@ static int append_span(PyObject *spans, Py_ssize_t start, Py_ssize_t end, enum t
     return rc; /* GCOVR_EXCL_BR_LINE: PyList_Append only fails on allocation failure */
 }
 
-/* _linkify_scan(text, parse_email, bare_domains) -> list[(start, end, kind)] */
-PyObject *turbohtml_linkify_scan(PyObject *Py_UNUSED(module), PyObject *args) {
-    PyObject *text;
-    int parse_email;
-    int bare_domains;
-    if (!PyArg_ParseTuple(args, "Upp:_linkify_scan", &text, &parse_email, &bare_domains)) {
-        return NULL;
-    }
+/* The shared scan: trigger on the few bytes that can begin a link and expand to
+   its bounds, appending each (start, end, kind) span. extra_tlds extends the
+   bare-domain/email TLD rule; schemes (NULL in the rewrite path) enables
+   registered scheme-less URLs. Returns the span list, or NULL on error. */
+static PyObject *do_scan(PyObject *text, int parse_email, int bare_domains, PyObject *extra_tlds, PyObject *schemes) {
     int kind = PyUnicode_KIND(text);
     const void *data = PyUnicode_DATA(text);
     Py_ssize_t len = PyUnicode_GET_LENGTH(text);
@@ -389,11 +453,15 @@ PyObject *turbohtml_linkify_scan(PyObject *Py_UNUSED(module), PyObject *args) {
         int found = 0;
         if (c == ':') {
             found = match_url(kind, data, pos, 0, len, &match_start, &match_end);
+            if (!found && schemes != NULL) {
+                found = match_scheme_less(kind, data, pos, 0, len, &match_start, &match_end, schemes);
+                link_kind = TH_LINK_SCHEME;
+            }
         } else if (c == '@' && parse_email) {
-            found = match_email(kind, data, pos, 0, len, &match_start, &match_end);
+            found = match_email(kind, data, pos, 0, len, &match_start, &match_end, extra_tlds);
             link_kind = TH_LINK_EMAIL;
         } else if (c == '.' && bare_domains) {
-            found = match_domain(kind, data, pos, 0, len, &match_start, &match_end);
+            found = match_domain(kind, data, pos, 0, len, &match_start, &match_end, extra_tlds);
         }
         if (found) {
             if (append_span(spans, match_start, match_end, link_kind) < 0) { /* GCOVR_EXCL_BR_LINE */
@@ -406,4 +474,32 @@ PyObject *turbohtml_linkify_scan(PyObject *Py_UNUSED(module), PyObject *args) {
         }
     }
     return spans;
+}
+
+/* _linkify_scan(text, parse_email, bare_domains) -> list[(start, end, kind)] */
+PyObject *turbohtml_linkify_scan(PyObject *Py_UNUSED(module), PyObject *args) {
+    PyObject *text;
+    int parse_email;
+    int bare_domains;
+    if (!PyArg_ParseTuple(args, "Upp:_linkify_scan", &text, &parse_email, &bare_domains)) {
+        return NULL;
+    }
+    return do_scan(text, parse_email, bare_domains, NULL, NULL);
+}
+
+/* _linkify_find(text, emails, bare_domains, extra_tlds, schemes)
+   -> list[(start, end, kind)]. extra_tlds and schemes are tuples of lowercased
+   names; an empty schemes tuple still enables the scheme-less path (matching
+   nothing), so the detector can register zero or more schemes uniformly. */
+PyObject *turbohtml_linkify_find(PyObject *Py_UNUSED(module), PyObject *args) {
+    PyObject *text;
+    int emails;
+    int bare_domains;
+    PyObject *extra_tlds;
+    PyObject *schemes;
+    if (!PyArg_ParseTuple(args, "UppO!O!:_linkify_find", &text, &emails, &bare_domains, &PyTuple_Type, &extra_tlds,
+                          &PyTuple_Type, &schemes)) {
+        return NULL;
+    }
+    return do_scan(text, emails, bare_domains, extra_tlds, schemes);
 }
