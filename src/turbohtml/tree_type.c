@@ -4874,6 +4874,279 @@ static PyObject *document_get_encoding(PyObject *self, void *Py_UNUSED(closure))
     return Py_NewRef(((HandleObject *)((NodeObject *)self)->handle)->encoding);
 }
 
+/* RFC 3986 resolution is intricate, so the URL helpers delegate the join to the standard library, which they call at
+   most once per document. PyImport caches urllib.parse in sys.modules after the first call. */
+static PyObject *url_join(PyObject *base, PyObject *target) {
+    PyObject *parse = PyImport_ImportModule("urllib.parse");
+    if (parse == NULL) { /* GCOVR_EXCL_BR_LINE: urllib.parse is always importable */
+        return NULL;     /* GCOVR_EXCL_LINE: import-failure path */
+    }
+    PyObject *joined = PyObject_CallMethod(parse, "urljoin", "OO", base, target);
+    Py_DECREF(parse);
+    return joined;
+}
+
+/* The value of `node`'s `name` attribute as a new str reference (the empty string when valueless), or NULL when the
+   attribute is absent (or, on the excluded allocation-failure path, with an error set). */
+static PyObject *element_attr_str(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    Py_ssize_t index = find_attr_index(tree, node, name, name_len);
+    if (index < 0) {
+        return NULL;
+    }
+    return attr_value_obj(&node->attrs[index]);
+}
+
+/* The ASCII whitespace HTML trims around these values, minus CR (the input preprocessor turns it into LF). An array
+   keeps the branch count stable when clang inlines this into several call sites. */
+static int meta_is_space(Py_UCS4 c) {
+    static const Py_UCS4 whitespace[] = {' ', '\t', '\n', '\f'};
+    for (size_t index = 0; index < sizeof(whitespace) / sizeof(whitespace[0]); index++) {
+        if (c == whitespace[index]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int meta_is_digit(Py_UCS4 c) {
+    return c >= '0' && c <= '9';
+}
+
+/* One code-point read for every meta-refresh scan loop. Routing all reads through a single site keeps Python 3.10's
+   dead PyUnicode_DATA/READ macro branches from multiplying across the loops; the coverage build runs at -O0 so this
+   stays a real call, while release inlines it. */
+static Py_UCS4 meta_char(int kind, const void *data, Py_ssize_t index) {
+    return PyUnicode_READ(kind, data, index);
+}
+
+/* Parse a meta-refresh `content` ("<delay>" or "<delay>;url=<url>") into ``(delay, url)``, resolving the url against
+   `fallback` and using `fallback` itself when the directive has none. Returns the tuple, None when there is no leading
+   delay, or NULL on error. */
+static PyObject *parse_meta_refresh(PyObject *content, PyObject *fallback) {
+    int kind = PyUnicode_KIND(content);
+    const void *data = PyUnicode_DATA(content);
+    Py_ssize_t len = PyUnicode_GET_LENGTH(content);
+    Py_ssize_t pos = 0;
+    while (pos < len && meta_is_space(meta_char(kind, data, pos))) {
+        pos++;
+    }
+    Py_ssize_t number_start = pos;
+    while (pos < len && meta_is_digit(meta_char(kind, data, pos))) {
+        pos++;
+    }
+    if (pos < len && meta_char(kind, data, pos) == '.') {
+        pos++;
+        while (pos < len && meta_is_digit(meta_char(kind, data, pos))) {
+            pos++;
+        }
+    }
+    if (pos == number_start) {
+        Py_RETURN_NONE; /* no leading number, so not a refresh directive */
+    }
+    PyObject *number = PyUnicode_Substring(content, number_start, pos);
+    if (number == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *delay = PyFloat_FromString(number);
+    Py_DECREF(number);
+    if (delay == NULL) { /* GCOVR_EXCL_BR_LINE: the substring is all digits and at most one dot */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    PyObject *url = NULL;
+    while (pos < len && meta_char(kind, data, pos) != ';' && meta_char(kind, data, pos) != ',') {
+        pos++;
+    }
+    if (pos < len) {
+        pos++; /* step past the ';' or ',' */
+        while (pos < len && meta_is_space(meta_char(kind, data, pos))) {
+            pos++;
+        }
+        /* an optional "url" "=" prefix, e.g. "url=next" or "URL = next" */
+        if (pos + 2 < len && (meta_char(kind, data, pos) | 0x20) == 'u' &&
+            (meta_char(kind, data, pos + 1) | 0x20) == 'r' && (meta_char(kind, data, pos + 2) | 0x20) == 'l') {
+            Py_ssize_t after = pos + 3;
+            while (after < len && meta_is_space(meta_char(kind, data, after))) {
+                after++;
+            }
+            if (after < len && meta_char(kind, data, after) == '=') {
+                after++;
+                while (after < len && meta_is_space(meta_char(kind, data, after))) {
+                    after++;
+                }
+                pos = after;
+            }
+        }
+        Py_ssize_t url_end = len;
+        while (url_end > pos && meta_is_space(meta_char(kind, data, url_end - 1))) {
+            url_end--;
+        }
+        if (url_end > pos) {
+            Py_UCS4 quote = meta_char(kind, data, pos);
+            if ((quote == '"' || quote == '\'') && url_end - 1 > pos && meta_char(kind, data, url_end - 1) == quote) {
+                pos++;
+                url_end--;
+            }
+        }
+        if (url_end > pos) {
+            PyObject *raw = PyUnicode_Substring(content, pos, url_end);
+            if (raw == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                Py_DECREF(delay); /* GCOVR_EXCL_LINE */
+                return NULL;      /* GCOVR_EXCL_LINE */
+            }
+            url = url_join(fallback, raw);
+            Py_DECREF(raw);
+            if (url == NULL) {    /* GCOVR_EXCL_BR_LINE: url_join only fails on the import path */
+                Py_DECREF(delay); /* GCOVR_EXCL_LINE */
+                return NULL;      /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    if (url == NULL) {
+        url = Py_NewRef(fallback);
+    }
+    PyObject *result = PyTuple_Pack(2, delay, url);
+    Py_DECREF(delay);
+    Py_DECREF(url);
+    return result; /* NULL on the excluded allocation-failure path */
+}
+
+/* Hold a borrowed fallback as an owned str, defaulting to "" when None was passed in. */
+static PyObject *refresh_fallback(PyObject *fallback) {
+    if (fallback == NULL) {
+        return PyUnicode_FromStringAndSize("", 0);
+    }
+    return Py_NewRef(fallback);
+}
+
+PyDoc_STRVAR(base_url_doc, "base_url(fallback='')\n--\n\n"
+                           "Return this document's base URL: its first <base href> resolved against fallback, or\n"
+                           "fallback itself when there is no <base href>.");
+
+static PyObject *document_base_url(PyObject *self, PyObject *args, PyObject *kwargs) {
+    static char *keywords[] = {"fallback", NULL};
+    PyObject *fallback = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|U:base_url", keywords, &fallback)) {
+        return NULL;
+    }
+    fallback = refresh_fallback(fallback);
+    if (fallback == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *href = NULL;
+    th_tree *tree = tree_of(self);
+    th_node *root = ((NodeObject *)self)->node;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
+        if (node->type == TH_NODE_ELEMENT && node->atom == TH_TAG_BASE &&
+            (href = element_attr_str(tree, node, "href", 4)) != NULL) {
+            break;
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (href == NULL) {
+        return fallback; /* no <base href>: the fallback is the base */
+    }
+    PyObject *stripped = PyObject_CallMethod(href, "strip", NULL);
+    Py_DECREF(href);
+    if (stripped == NULL) {  /* GCOVR_EXCL_BR_LINE: str.strip cannot fail here */
+        Py_DECREF(fallback); /* GCOVR_EXCL_LINE */
+        return NULL;         /* GCOVR_EXCL_LINE */
+    }
+    PyObject *result = PyUnicode_GET_LENGTH(stripped) == 0 ? Py_NewRef(fallback) : url_join(fallback, stripped);
+    Py_DECREF(stripped);
+    Py_DECREF(fallback);
+    return result;
+}
+
+PyDoc_STRVAR(meta_refresh_doc, "meta_refresh(fallback='')\n--\n\n"
+                               "Return (delay_seconds, url) from a <meta http-equiv=refresh>, or None when the\n"
+                               "document has none. The url is resolved against fallback (and is fallback when the\n"
+                               "directive omits one); a refresh tag inside <noscript> is ignored.");
+
+/* A <meta> nested in <noscript> is ignored, as w3lib does; <script> needs no entry because it is a raw-text element, so
+   the parser never nests a <meta> element inside one. */
+static int under_noscript(th_node *node) {
+    for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->atom == TH_TAG_NOSCRIPT) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether `equiv` is "refresh" once surrounding whitespace and case are ignored, matched in C to avoid Python calls
+   inside the tree walk. */
+static int equiv_is_refresh(PyObject *equiv) {
+    int kind = PyUnicode_KIND(equiv);
+    const void *data = PyUnicode_DATA(equiv);
+    Py_ssize_t start = 0;
+    Py_ssize_t end = PyUnicode_GET_LENGTH(equiv);
+    while (start < end && meta_is_space(meta_char(kind, data, start))) {
+        start++;
+    }
+    while (end > start && meta_is_space(meta_char(kind, data, end - 1))) {
+        end--;
+    }
+    static const char target[] = "refresh";
+    if (end - start != (Py_ssize_t)(sizeof(target) - 1)) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < end - start; index++) {
+        if ((meta_char(kind, data, start + index) | 0x20) != (Py_UCS4)target[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static PyObject *document_meta_refresh(PyObject *self, PyObject *args, PyObject *kwargs) {
+    static char *keywords[] = {"fallback", NULL};
+    PyObject *fallback = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|U:meta_refresh", keywords, &fallback)) {
+        return NULL;
+    }
+    fallback = refresh_fallback(fallback);
+    if (fallback == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *content = NULL;
+    th_tree *tree = tree_of(self);
+    th_node *root = ((NodeObject *)self)->node;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
+        if (node->type != TH_NODE_ELEMENT || node->atom != TH_TAG_META || under_noscript(node)) {
+            continue;
+        }
+        PyObject *equiv = element_attr_str(tree, node, "http-equiv", 10);
+        if (equiv == NULL) {
+            continue;
+        }
+        int refresh = equiv_is_refresh(equiv);
+        Py_DECREF(equiv);
+        if (refresh) {
+            content = element_attr_str(tree, node, "content", 7);
+            break;
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyObject *result;
+    if (content == NULL) {
+        result = Py_NewRef(Py_None);
+    } else {
+        result = parse_meta_refresh(content, fallback);
+        Py_DECREF(content);
+    }
+    Py_DECREF(fallback);
+    return result;
+}
+
+static PyMethodDef document_methods[] = {
+    {"base_url", (PyCFunction)(void (*)(void))document_base_url, METH_VARARGS | METH_KEYWORDS, base_url_doc},
+    {"meta_refresh", (PyCFunction)(void (*)(void))document_meta_refresh, METH_VARARGS | METH_KEYWORDS,
+     meta_refresh_doc},
+    {NULL, NULL, 0, NULL},
+};
+
 /* The parse errors are immutable once the parse returns, so this reads them
    lock-free (like the other accessors) and materializes a fresh list each call. */
 static PyObject *document_get_errors(PyObject *self, void *Py_UNUSED(closure)) {
@@ -4909,6 +5182,7 @@ PyDoc_STRVAR(document_doc, "A parsed document: the root of the tree returned by 
 static PyType_Slot document_slots[] = {
     {Py_tp_doc, (void *)document_doc},
     {Py_tp_getset, document_getset},
+    {Py_tp_methods, document_methods},
     {0, NULL},
 };
 
