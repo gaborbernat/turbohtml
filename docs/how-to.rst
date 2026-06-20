@@ -889,6 +889,29 @@ style, fixed-width fonts, and ``margin-left`` list nesting) turns into Markdown:
 
     **Bold** and *soft*.
 
+When an option cannot express the rule you need -- a custom element, or a tag that should render its own way -- pass
+``converters``: a mapping from a lowercased tag name to a ``callable(element, content) -> str``. The callable receives
+the :class:`~turbohtml.Element` and the already-converted Markdown of its children, and returns the Markdown for that
+element. A registered tag's built-in rendering is replaced; every other tag is untouched, and the hook costs nothing
+when the mapping is omitted.
+
+.. testcode::
+
+    html = '<p>Watch <video src="/clip.mp4">a clip</video> and <abbr title="Markdown">MD</abbr>.</p>'
+    converters = {
+        "video": lambda el, content: f"[{content}]({el.attrs['src']})",
+        "abbr": lambda el, content: f"{content} ({el.attrs['title']})",
+    }
+    print(turbohtml.parse(html).to_markdown(converters=converters))
+
+.. testoutput::
+
+    Watch [a clip](/clip.mp4) and MD (Markdown).
+
+Return ``""`` to drop an element, or return ``content`` unchanged to unwrap it. A registered block-level tag is laid out
+on its own line; any other tag flows inline. The callable runs inside the same per-tree lock the walk holds, so it may
+read the element's attributes and subtree freely.
+
 **********************
  Export to plain text
 **********************

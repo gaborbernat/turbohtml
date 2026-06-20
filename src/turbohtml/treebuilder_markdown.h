@@ -100,6 +100,9 @@ md_opts th_markdown_default_opts(void) {
     opt.google_doc = 0;
     opt.google_list_indent = 36;
     opt.hide_strikethrough = 0;
+    opt.converters = NULL;
+    opt.wrap_node = NULL;
+    opt.wrap_node_ctx = NULL;
     return opt;
 }
 
@@ -468,6 +471,7 @@ static int md_css_px(const Py_UCS4 *value, Py_ssize_t len) {
 }
 
 static void md_render_inline(md_ctx *ctx, th_node *node);
+static int md_apply_converter(md_ctx *ctx, th_node *node);
 
 static void md_inline_children(md_ctx *ctx, th_node *node) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -833,6 +837,9 @@ static void md_render_inline(md_ctx *ctx, th_node *node) {
     if (node->type != TH_NODE_ELEMENT && node->type != TH_NODE_CONTENT) {
         return;
     }
+    if (md_apply_converter(ctx, node)) {
+        return;
+    }
     if (ctx->opt->google_doc) {
         /* a content node carries no style, so it passes through unstyled */
         md_render_google(ctx, node);
@@ -911,6 +918,149 @@ static void md_block_children(md_ctx *ctx, th_node *node) {
         }
         md_render_inline(ctx, child);
     }
+}
+
+/* Render a node's children into a standalone Markdown string for a converter to
+   wrap. The walk runs on the live ctx with a swapped-in buffer and a reset layout
+   state, so the inner content carries no outer prefix, but the reference-link
+   accumulator stays shared so a link inside the subtree still registers globally.
+   The walk never begins a block with whitespace, so only a trailing line break is
+   trimmed off. NULL (with no Python error) only on allocation failure. */
+static PyObject *md_children_markdown(md_ctx *ctx, th_node *node) {
+    sbuf saved_out = ctx->out;
+    sbuf saved_prefix = ctx->prefix;
+    md_pending *saved_pending = ctx->pending;
+    int saved_started = ctx->started, saved_line = ctx->line_has_content, saved_column = ctx->column;
+    int saved_space = ctx->space_pending, saved_drop = ctx->drop_space, saved_loose = ctx->pending_loose;
+    int saved_suppress = ctx->suppress_break, saved_tight = ctx->tight, saved_list_depth = ctx->list_depth;
+    int saved_bold = ctx->g_bold, saved_italic = ctx->g_italic;
+    ctx->out = (sbuf){0};
+    ctx->prefix = (sbuf){0};
+    ctx->pending = NULL;
+    ctx->started = 0;
+    ctx->line_has_content = 0;
+    ctx->column = 0;
+    ctx->space_pending = 0;
+    ctx->drop_space = 1;
+    ctx->pending_loose = 0;
+    ctx->suppress_break = 0;
+    ctx->tight = 0;
+    ctx->list_depth = 0;
+    ctx->g_bold = 0;
+    ctx->g_italic = 0;
+    md_block_children(ctx, node);
+    Py_UCS4 *data = ctx->out.data;
+    Py_ssize_t end = ctx->out.len;
+    while (end > 0 && md_is_ws(data[end - 1])) {
+        end--;
+    }
+    PyObject *content = NULL;
+    if (!ctx->out.failed) { /* GCOVR_EXCL_BR_LINE: the sub-buffer fails only on an unforceable allocation */
+        content = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, data, end);
+    }
+    PyMem_Free(data);
+    PyMem_Free(ctx->prefix.data);
+    ctx->out = saved_out;
+    ctx->prefix = saved_prefix;
+    ctx->pending = saved_pending;
+    ctx->started = saved_started;
+    ctx->line_has_content = saved_line;
+    ctx->column = saved_column;
+    ctx->space_pending = saved_space;
+    ctx->drop_space = saved_drop;
+    ctx->pending_loose = saved_loose;
+    ctx->suppress_break = saved_suppress;
+    ctx->tight = saved_tight;
+    ctx->list_depth = saved_list_depth;
+    ctx->g_bold = saved_bold;
+    ctx->g_italic = saved_italic;
+    return content;
+}
+
+/* Splice a converter's returned Markdown into the output at the element's position:
+   a registered block tag opens its own block line, anything else flows inline. A
+   newline inside the string starts a fresh continuation line so an outer list or
+   blockquote prefix keeps applying; every other code point is copied verbatim,
+   since the converter already produced final Markdown. An empty result emits
+   nothing, leaving no stray blank line behind. */
+static void md_emit_converted(md_ctx *ctx, th_node *node, PyObject *text) {
+    Py_ssize_t len = PyUnicode_GET_LENGTH(text);
+    if (len == 0) {
+        return;
+    }
+    if (node->ns == TH_NS_HTML && is_md_block(node->atom)) {
+        md_block_line(ctx, 1);
+    } else {
+        md_before_visible(ctx);
+    }
+    int kind = PyUnicode_KIND(text);
+    const void *data = PyUnicode_DATA(text);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 character = PyUnicode_READ(kind, data, index);
+        if (character == '\n') {
+            md_newline(ctx);
+        } else {
+            sbuf_putc(&ctx->out, character);
+            ctx->line_has_content = 1;
+        }
+    }
+}
+
+/* Run the per-tag converter hook for an element. Returns 1 when the element was
+   handled (its built-in rendering replaced, or the walk aborted by an error that
+   leaves ctx->failed and a Python exception set), 0 when no converter applies and
+   the caller should render the element normally. */
+static int md_apply_converter(md_ctx *ctx, th_node *node) {
+    if (ctx->opt->converters == NULL || node->type != TH_NODE_ELEMENT) {
+        return 0;
+    }
+    PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, node->text, node->text_len);
+    if (tag == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        ctx->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *converter = PyDict_GetItemWithError(ctx->opt->converters, tag); /* borrowed */
+    if (converter == NULL) {
+        Py_DECREF(tag);
+        if (PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: a str key never raises on lookup */
+            ctx->failed = 1;    /* GCOVR_EXCL_LINE: unreachable hash-error path */
+            return 1;           /* GCOVR_EXCL_LINE: unreachable hash-error path */
+        }
+        return 0;
+    }
+    PyObject *content = md_children_markdown(ctx, node);
+    if (content == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(tag);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        ctx->failed = 1;   /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *element = ctx->opt->wrap_node(ctx->opt->wrap_node_ctx, node);
+    if (element == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(tag);     /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_DECREF(content); /* GCOVR_EXCL_LINE: allocation-failure path */
+        ctx->failed = 1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = PyObject_CallFunctionObjArgs(converter, element, content, NULL);
+    Py_DECREF(element);
+    Py_DECREF(content);
+    if (result == NULL) {
+        Py_DECREF(tag);
+        ctx->failed = 1;
+        return 1;
+    }
+    if (!PyUnicode_Check(result)) {
+        PyErr_Format(PyExc_TypeError, "to_markdown converter for <%U> must return a str, not %.200s", tag,
+                     Py_TYPE(result)->tp_name);
+        Py_DECREF(tag);
+        Py_DECREF(result);
+        ctx->failed = 1;
+        return 1;
+    }
+    Py_DECREF(tag);
+    md_emit_converted(ctx, node, result);
+    Py_DECREF(result);
+    return 1;
 }
 
 static void md_render_list(md_ctx *ctx, th_node *node, int ordered) {
@@ -1352,6 +1502,9 @@ static void md_render_pre(md_ctx *ctx, th_node *node) {
 }
 
 static void md_render_block(md_ctx *ctx, th_node *node) {
+    if (md_apply_converter(ctx, node)) {
+        return;
+    }
     /* only an HTML element is ever classified as a block, so the namespace check
        the callers already made guarantees node is HTML here */
     uint16_t atom = node->atom;
@@ -1503,6 +1656,8 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
         ctx.started = 1;
         ctx.line_has_content = 1;
         md_emit_text(&ctx, need_text(tree, node), node->text_len);
+    } else if (md_apply_converter(&ctx, node)) {
+        /* a converter registered for the root element renders it whole */
     } else if (is_md_block(node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN)) {
         md_render_block(&ctx, node);
     } else {
@@ -1511,6 +1666,10 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     md_flush_references(&ctx);
     PyMem_Free(ctx.prefix.data);
     PyMem_Free(ctx.refs);
+    if (ctx.failed) {
+        PyMem_Free(ctx.out.data);
+        return NULL;
+    }
     md_trim(&ctx.out, opt->document_strip);
     return sbuf_finish(&ctx.out, out_len);
 }

@@ -261,6 +261,15 @@ exporting two trees never interfere, and the binding takes the same per-tree cri
 mid-walk (a no-op under the GIL build). Where Go's ``html-to-markdown`` reaches for a mutex, the stateless visitor needs
 none.
 
+Where ``markdownify`` makes extensibility a subclass with a ``convert_<tag>`` method per tag, turbohtml exposes the same
+power as a ``converters`` mapping: tag name to ``callable(element, content) -> str``. The C walk checks it only on an
+element and only when the mapping is present -- one ``NULL`` test on the no-hook path -- so the dispatch is free unless
+a tag is actually registered. When one matches, the engine renders that element's children into a sub-buffer (sharing
+the document's reference-link accumulator), hands the callable a real :class:`~turbohtml.Element` and that inner
+Markdown, and splices the result back into the stream with block or inline framing from the tag. The callable runs
+inside the walk's critical section, so reading the element is safe; CPython suspends and resumes the section around any
+reentrant tree access the callable makes, so it cannot deadlock.
+
 *******************
  Mutating the tree
 *******************

@@ -305,6 +305,12 @@ typedef struct {
     int google_doc;         /* read inline-CSS styling the way a Google Docs export encodes it */
     int google_list_indent; /* px of margin-left per list-nesting level (>= 1); divides margin-left */
     int hide_strikethrough; /* in google_doc mode, drop text a CSS line-through struck */
+    /* Per-tag converter hook: a registered tag's built-in rendering is replaced by a
+       Python callable receiving the element and its rendered child Markdown. The
+       engine builds the element through wrap_node so it need not know the binding. */
+    PyObject *converters;                                       /* borrowed dict {tag name: callable}; NULL disables */
+    PyObject *(*wrap_node)(void *wrap_node_ctx, th_node *node); /* build an Element for a node; new ref or NULL */
+    void *wrap_node_ctx;                                        /* opaque, handed to wrap_node */
 } md_opts;
 
 /* The no-argument baseline configuration (opinionated GitHub-Flavored Markdown). */
