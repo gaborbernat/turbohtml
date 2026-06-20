@@ -25,7 +25,7 @@ _VOID_CASES = [
     ("param", "<param>"), ("source", "<source>"), ("track", "<track>"), ("wbr", "<wbr>"),
 ]  # fmt: skip
 _URL_ATTRS = [
-    "href", "src", "cite", "data", "action", "poster", "longdesc", "formaction", "background", "xlink:href",
+    "href", "src", "cite", "data", "ping", "action", "poster", "longdesc", "formaction", "background", "xlink:href",
 ]  # fmt: skip
 
 
@@ -144,6 +144,37 @@ def test_every_url_attribute_is_scheme_checked(attr: str) -> None:
     assert sanitize(f'<x {attr}="javascript:alert(1)">t</x>', policy) == "<x>t</x>"
 
 
+@pytest.mark.parametrize("attr", ["srcset", "imagesrcset"])
+@pytest.mark.parametrize(
+    ("value", "kept"),
+    [
+        pytest.param("a.jpg 1x, b.jpg 2x", True, id="relative-candidates"),
+        pytest.param("https://ok/a.jpg 1x, https://ok/b.jpg 2x", True, id="allowed-scheme"),
+        pytest.param("a.jpg", True, id="single-no-descriptor"),
+        pytest.param("", True, id="empty"),
+        pytest.param("a.jpg,", True, id="trailing-comma"),
+        pytest.param("  ,  a.jpg 1x", True, id="leading-separators"),
+        pytest.param("a.jpg\t1x,\nb.jpg\x0c2x", True, id="ascii-whitespace-separators"),
+        pytest.param("javascript:alert(1) 1x", False, id="first-candidate-script"),
+        pytest.param("a.jpg 1x, javascript:alert(1) 2x", False, id="later-candidate-script"),
+        pytest.param("https://ok/a.jpg 1x, vbscript:msgbox(1) 2x", False, id="later-candidate-vbscript"),
+    ],
+)
+def test_srcset_candidate_schemes_are_checked(attr: str, value: str, kept: bool) -> None:  # noqa: FBT001
+    # a srcset is a comma-separated list of "URL descriptor" candidates; every candidate's scheme is
+    # checked and the whole attribute is dropped if any candidate carries a disallowed scheme.
+    out = sanitize(f'<img {attr}="{value}">', _allow_all({"img"}, {attr}))
+    assert (attr in out) is kept
+
+
+def test_eleven_char_non_srcset_attribute_is_not_url_checked() -> None:
+    # placeholder is eleven characters but is not imagesrcset, so its value is never scheme-checked.
+    policy = _allow_all({"x"}, {"placeholder"})
+    assert (
+        sanitize('<x placeholder="javascript:not-a-url">t</x>', policy) == '<x placeholder="javascript:not-a-url">t</x>'
+    )
+
+
 @pytest.mark.parametrize(
     ("html", "expected"),
     [
@@ -170,6 +201,12 @@ def test_duplicate_url_attribute_keeps_only_the_first() -> None:
 def test_non_url_attribute_value_is_not_scheme_checked() -> None:
     policy = _allow_all({"x"}, {"title"})
     assert sanitize('<x title="javascript:not-a-url">t</x>', policy) == '<x title="javascript:not-a-url">t</x>'
+
+
+def test_four_char_non_url_attribute_is_not_scheme_checked() -> None:
+    # type is four characters but is none of href/cite/data/ping, so its value is never scheme-checked.
+    policy = _allow_all({"x"}, {"type"})
+    assert sanitize('<x type="javascript:not-a-url">t</x>', policy) == '<x type="javascript:not-a-url">t</x>'
 
 
 def test_ten_char_non_url_attribute_is_not_scheme_checked() -> None:
