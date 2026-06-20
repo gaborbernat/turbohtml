@@ -255,6 +255,43 @@ final tokens stuck behind an unfinished construct; iterate the tokenizer itself 
 
 Call ``reset()`` to reuse the same tokenizer for an unrelated document.
 
+*************************************
+ Parse a document arriving in chunks
+*************************************
+
+When a document arrives over a stream you do not have to buffer the whole thing before parsing. Feed each chunk to an
+:class:`turbohtml.IncrementalParser` and call ``close()`` for the finished :class:`~turbohtml.Document`; the parser
+holds only the bytes it has not yet consumed, never the whole source, and the result is identical to parsing the joined
+string with :func:`turbohtml.parse`:
+
+.. testcode::
+
+    parser = turbohtml.IncrementalParser()
+    for chunk in ("<ul><li>on", "e<li>two</", "ul>"):
+        parser.feed(chunk)
+    document = parser.close()
+    print([item.text for item in document.find_all("li")])
+
+.. testoutput::
+
+    ['one', 'two']
+
+``feed`` also accepts ``bytes``: a chunk is decoded with the parser's ``encoding`` (``utf-8`` by default), and a
+multi-byte character split across two chunks is held back until the rest of its bytes arrive. As a context manager the
+parser releases its work-in-progress when the block exits, so you can stop early without leaking the partial parse:
+
+.. testcode::
+
+    with turbohtml.IncrementalParser(encoding="utf-8") as parser:
+        parser.feed("<p>caf".encode("utf-8"))
+        parser.feed("é</p>".encode("utf-8"))
+        document = parser.close()
+    print(document.find("p").text)
+
+.. testoutput::
+
+    café
+
 ****************************************
  Report source positions in diagnostics
 ****************************************

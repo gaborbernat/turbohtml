@@ -238,6 +238,10 @@ Pitfalls
   for the concatenation.
 - lxml parses with libxml2, which is not WHATWG-conformant, so malformed input lands in a different tree than the one
   turbohtml (and a browser) builds.
+- For a document that arrives in pieces, ``etree.iterparse`` is replaced by :class:`turbohtml.IncrementalParser`: feed
+  ``str`` or ``bytes`` chunks with ``feed`` and call ``close`` for the finished :class:`~turbohtml.Document`. The parser
+  never holds the whole source at once, so you can parse a stream larger than the source buffer you would otherwise
+  materialize for :func:`turbohtml.parse`.
 
 *****************
  From selectolax

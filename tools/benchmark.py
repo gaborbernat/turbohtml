@@ -731,6 +731,53 @@ def print_htmlparser_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- stream suite: chunked incremental parse vs the whole-document parse ----- #
+# IncrementalParser feeds each document in fixed-size chunks and finishes with
+# close(); the baseline is turbohtml.parse() over the whole string. The push
+# parser does the same WHATWG tree construction plus the per-chunk feed
+# bookkeeping, so this measures the cost of streaming a document rather than
+# holding it whole.
+
+STREAM_CHUNK = 16 * 1024  # a typical socket or file read size
+
+
+def turbo_stream(text: str) -> None:
+    """Parse a document fed in fixed-size chunks through IncrementalParser."""
+    parser = turbohtml.IncrementalParser()
+    for start in range(0, len(text), STREAM_CHUNK):
+        parser.feed(text[start : start + STREAM_CHUNK])
+    parser.close()
+
+
+STREAM_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("IncrementalParser", turbo_stream),
+    ("parse", turbo_parse),
+)
+
+
+def run_stream_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark chunked incremental parsing against the whole-document parse; return the case names."""
+    names: list[str] = []
+    for name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, parse_fn in STREAM_LIBS:
+            bench(f"stream {name} [{label}]", parse_fn, text)
+        names.append(name)
+    return names
+
+
+def print_stream_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render the chunked parser beside the whole-document parse and its slowdown factor."""
+    if not cases:
+        return
+    print()
+    print(f"{'stream benchmark':28} {'IncrementalParser':>18} {'parse':>18}")
+    for name in cases:
+        stream = means[f"stream {name} [IncrementalParser]"]
+        whole = means[f"stream {name} [parse]"]
+        print(f"{'stream ' + name:28} {stream * 1e6:13.1f} us {whole * 1e6:13.1f} us {stream / whole:4.1f}x")
+
+
 # --- markup suite: markupsafe-compatible escape on autoescape-realistic input #
 # turbohtml.markup.escape against markupsafe's own C escape. The inputs are the
 # small, mostly-clean strings a template engine interpolates under autoescape
@@ -1489,6 +1536,7 @@ SIMPLE_SUITES: tuple[tuple[str, Callable[..., list[str]], Callable[[dict[str, fl
     ("edit", run_edit_suite, print_edit_table),
     ("chain", run_chain_suite, print_chain_table),
     ("htmlparser", run_htmlparser_suite, print_htmlparser_table),
+    ("stream", run_stream_suite, print_stream_table),
     ("markup", run_markup_suite, print_markup_table),
     ("minify", run_minify_suite, print_minify_table),
 )
@@ -1513,6 +1561,7 @@ def main() -> None:
             "edit",
             "chain",
             "htmlparser",
+            "stream",
             "markup",
             "minify",
             "linkify",
@@ -1531,7 +1580,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,markup,minify,linkify,markdown,sanitize",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,linkify,markdown,sanitize",
         ).split(",")
     )
     means: dict[str, float] = {}

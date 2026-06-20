@@ -37,6 +37,7 @@ typedef struct {
     PyObject *pi_type;            /* ProcessingInstruction */
     PyObject *cdata_type;         /* CData */
     PyObject *document_type;      /* Document */
+    PyObject *parser_type;        /* IncrementalParser (push parse to a tree) */
     PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
     PyObject *attrs_type;         /* _Attrs (the live mutable view of an element's attributes) */
     PyObject *walker_type;        /* _NodeIterator (descendants / ancestors / siblings) */
