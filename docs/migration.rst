@@ -851,9 +851,10 @@ bleach feature parity: it has no escape-instead-of-strip mode, no attribute-rewr
     sanitize(text, Policy(tags=frozenset({"a"}), attributes={"a": frozenset({"href"})}))
 
 nh3's ``link_rel`` maps to ``Policy.add_link_rel``, its ``url_schemes`` to ``url_schemes``, and its ``attribute_filter``
-to ``attribute_filter`` (turbohtml's may rewrite a value, not only drop it). turbohtml escapes disallowed tags by
-default (``OnDisallowed.ESCAPE``), the mode ammonia blocked upstream; pass ``OnDisallowed.STRIP`` or
-``OnDisallowed.REMOVE`` for nh3-style dropping.
+to ``attribute_filter`` (turbohtml's may rewrite a value, not only drop it). Its ``set_tag_attribute_values`` (force an
+attribute onto matching tags) maps to ``Policy.set_attributes``. turbohtml escapes disallowed tags by default
+(``OnDisallowed.ESCAPE``), the mode ammonia blocked upstream; pass ``OnDisallowed.STRIP`` or ``OnDisallowed.REMOVE`` for
+nh3-style dropping.
 
 **********************
  From lxml-html-clean
