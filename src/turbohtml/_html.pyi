@@ -33,6 +33,7 @@ def _sanitize(
     strip_comments: bool,
     add_link_rel: str | None,
     attribute_filter: Callable[[str, str, str], str | None] | None,
+    set_attributes: Mapping[str, Mapping[str, str]],
     /,
 ) -> None: ...
 

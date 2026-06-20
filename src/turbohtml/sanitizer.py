@@ -74,8 +74,10 @@ class Policy:
     Build one and reuse it across threads. ``tags`` is the allowed element set and ``attributes`` maps a tag (or
     ``"*"`` for every tag) to its allowed attribute names (a ``"*"`` inside a set allows every name). ``url_schemes`` is
     the allowlist for URL-bearing attributes; ``attribute_filter`` is an optional last word over every surviving
-    attribute, returning a replacement value or ``None`` to drop it. The baseline-unsafe set and the event-handler and
-    bad-scheme stripping are not configurable, so any policy is safe.
+    attribute, returning a replacement value or ``None`` to drop it. ``set_attributes`` maps a tag to attribute values
+    forced onto every kept instance of it (added if absent, overwritten if present) -- the one thing
+    ``attribute_filter`` cannot do, since it only sees attributes already there. The baseline-unsafe set and the
+    event-handler and bad-scheme stripping are not configurable, so any policy is safe.
     """
 
     tags: frozenset[str] = DEFAULT_TAGS
@@ -87,6 +89,7 @@ class Policy:
     strip_comments: bool = True
     add_link_rel: frozenset[str] = frozenset()
     attribute_filter: Callable[[str, str, str], str | None] | None = None
+    set_attributes: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
     @classmethod
     def strict(cls) -> Policy:
@@ -116,6 +119,7 @@ class Sanitizer:
         self.policy = policy if policy is not None else Policy()
         self._attributes = dict(self.policy.attributes)
         self._link_rel = " ".join(sorted(self.policy.add_link_rel)) or None
+        self._set_attributes = {tag: dict(values) for tag, values in self.policy.set_attributes.items()}
 
     def sanitize(self, html: str) -> str:
         """Sanitize an HTML fragment and return safe HTML."""
@@ -131,6 +135,7 @@ class Sanitizer:
             policy.strip_comments,
             self._link_rel,
             policy.attribute_filter,
+            self._set_attributes,
         )
         return root.inner_html
 

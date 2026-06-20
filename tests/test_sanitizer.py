@@ -115,6 +115,44 @@ def test_allowlisted_foreign_script_is_still_escaped() -> None:
     assert "<script>" not in out
 
 
+def test_set_attributes_adds_absent_attributes() -> None:
+    # set_attributes forces attributes onto kept elements even when the allowlist would not admit them
+    policy = Policy(
+        tags=frozenset({"a"}),
+        attributes={"a": frozenset({"href"})},
+        set_attributes={"a": {"target": "_blank", "rel": "noopener"}},
+    )
+    out = sanitize('<a href="http://x">t</a>', policy)
+    assert 'target="_blank"' in out
+    assert 'rel="noopener"' in out
+
+
+def test_set_attributes_overwrites_present_attribute() -> None:
+    policy = Policy(
+        tags=frozenset({"a"}),
+        attributes={"a": frozenset({"href", "target"})},
+        set_attributes={"a": {"target": "_blank"}},
+    )
+    out = sanitize('<a href="http://x" target="_self">t</a>', policy)
+    assert 'target="_blank"' in out
+    assert "_self" not in out
+
+
+def test_set_attributes_only_touches_named_tag() -> None:
+    # a kept element whose tag is not in set_attributes is left alone
+    policy = Policy(
+        tags=frozenset({"a", "b"}), attributes={"a": frozenset({"href"})}, set_attributes={"a": {"rel": "x"}}
+    )
+    out = sanitize('<a href="http://x">t</a><b>y</b>', policy)
+    assert out.count("rel=") == 1
+
+
+def test_set_attributes_skips_disallowed_elements() -> None:
+    # a disallowed tag is escaped, so its set_attributes entry is never applied
+    policy = Policy(tags=frozenset({"a"}), set_attributes={"script": {"rel": "x"}})
+    assert "rel=" not in sanitize("<a>t</a><script>z</script>", policy)
+
+
 @pytest.mark.parametrize(
     ("url", "kept"),
     [
@@ -357,7 +395,7 @@ def test_sanitize_rejects_non_element() -> None:
     from turbohtml._html import _sanitize  # noqa: PLC0415  # exercising the C argument guard directly
 
     with pytest.raises(TypeError):
-        _sanitize("not an element", frozenset(), {}, frozenset(), True, 0, True, None, None)  # ty: ignore[invalid-argument-type]  # noqa: FBT003
+        _sanitize("not an element", frozenset(), {}, frozenset(), True, 0, True, None, None, {})  # ty: ignore[invalid-argument-type]  # noqa: FBT003
 
 
 def test_sanitize_rejects_wrong_arguments() -> None:

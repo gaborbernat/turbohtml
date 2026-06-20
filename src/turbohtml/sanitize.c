@@ -25,6 +25,7 @@ typedef struct {
     PyObject *star;             /* the interned "*" string, for the any-name wildcard */
     PyObject *add_link_rel;     /* str to set as an <a> rel, or None */
     PyObject *attribute_filter; /* callable (tag, name, value) -> str | None, or None */
+    PyObject *set_attributes;   /* dict[str, dict[str, str]]: per-tag attribute values to force-set on kept elements */
     int allow_relative;
     int on_disallowed;
     int strip_comments;
@@ -277,6 +278,37 @@ static int run_attribute_filter(sanitizer *s, th_node *element, PyObject *tag, c
 }
 
 /* Strip every attribute the policy rejects from an allowed element, then add the configured link rel. */
+/* Force-set the policy's per-tag attribute values on a kept element, adding the attribute if absent and overwriting it
+   if present (what attribute_filter cannot do, since it only sees attributes already there). */
+static int apply_set_attributes(sanitizer *s, th_node *element, PyObject *tag) {
+    PyObject *per_tag = PyDict_GetItemWithError(s->set_attributes, tag);
+    if (per_tag == NULL) {
+        if (PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: PyDict_GetItemWithError only errors on a non-hashable key */
+            return -1;          /* GCOVR_EXCL_LINE: error path */
+        }
+        return 0; /* no forced attributes for this tag */
+    }
+    PyObject *name, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(per_tag, &pos, &name, &value)) {
+        Py_ssize_t name_len = 0;
+        const char *name_bytes = PyUnicode_AsUTF8AndSize(name, &name_len);
+        if (name_bytes == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;            /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_UCS4 *points = PyUnicode_AsUCS4Copy(value);
+        if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        int status = th_node_attr_set(s->tree, element, name_bytes, name_len, points, PyUnicode_GET_LENGTH(value), 1);
+        PyMem_Free(points);
+        if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return 0;
+}
+
 static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag) {
     Py_ssize_t index = 0;
     while (index < element->attr_count) {
@@ -343,6 +375,9 @@ static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag) {
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+    }
+    if (apply_set_attributes(s, element, tag) < 0) { /* GCOVR_EXCL_BR_LINE: only on allocation failure */
+        return -1;                                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return 0;
 }
@@ -518,13 +553,13 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
 }
 
 /* _sanitize(element, tags, attributes, url_schemes, allow_relative, on_disallowed, strip_comments, add_link_rel,
-   attribute_filter) -> None. Filters the parsed fragment in place; sanitizer.py serializes the result. */
+   attribute_filter, set_attributes) -> None. Filters the parsed fragment in place; sanitizer.py serializes it. */
 PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
     PyObject *element;
     sanitizer s = {0};
-    if (!PyArg_ParseTuple(args, "OOOOpipOO:_sanitize", &element, &s.tags, &s.attributes, &s.url_schemes,
-                          &s.allow_relative, &s.on_disallowed, &s.strip_comments, &s.add_link_rel,
-                          &s.attribute_filter)) {
+    if (!PyArg_ParseTuple(args, "OOOOpipOOO:_sanitize", &element, &s.tags, &s.attributes, &s.url_schemes,
+                          &s.allow_relative, &s.on_disallowed, &s.strip_comments, &s.add_link_rel, &s.attribute_filter,
+                          &s.set_attributes)) {
         return NULL;
     }
     th_node *root;
