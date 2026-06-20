@@ -34,6 +34,7 @@ def _sanitize(
     add_link_rel: str | None,
     attribute_filter: Callable[[str, str, str], str | None] | None,
     set_attributes: Mapping[str, Mapping[str, str]],
+    remove_with_content: frozenset[str],
     /,
 ) -> None: ...
 

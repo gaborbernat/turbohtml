@@ -26,6 +26,7 @@ typedef struct {
     PyObject *add_link_rel;     /* str to set as an <a> rel, or None */
     PyObject *attribute_filter; /* callable (tag, name, value) -> str | None, or None */
     PyObject *set_attributes;   /* dict[str, dict[str, str]]: per-tag attribute values to force-set on kept elements */
+    PyObject *remove_with_content; /* frozenset[str]: disallowed tags whose whole subtree is dropped, not escaped */
     int allow_relative;
     int on_disallowed;
     int strip_comments;
@@ -512,13 +513,17 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept) {
     if (allowed > 0 && !is_html && !parent_kept) {
         allowed = 0;
     }
+    /* only disallowed elements consult remove_with_content, so a kept element never pays the set lookup */
+    int remove_content = allowed > 0 ? 0 : PySet_Contains(s->remove_with_content, tag);
     int status = 0;
-    if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains only fails on a non-hashable member, impossible here */
-        status = -1;   /* GCOVR_EXCL_LINE */
+    if (allowed < 0 || remove_content < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains never fails on a str key */
+        status = -1;                         /* GCOVR_EXCL_LINE */
     } else if (allowed) {
         status = sanitize_attributes(s, element, tag) < 0 ? -1 : sanitize_children(s, element, 1);
-    } else if (s->on_disallowed == ON_REMOVE || (s->on_disallowed == ON_STRIP && !is_html)) {
-        th_node_remove(element); /* foreign content is removed rather than unwrapped, to avoid namespace confusion */
+    } else if (remove_content || s->on_disallowed == ON_REMOVE || (s->on_disallowed == ON_STRIP && !is_html)) {
+        /* drop the whole subtree: a content-removal tag (e.g. script/style, so its text never leaks), REMOVE mode, or
+           foreign content under STRIP (unwrapping it would invite namespace confusion) */
+        th_node_remove(element);
     } else if (s->on_disallowed == ON_STRIP) {
         if ((status = sanitize_children(s, element, 0)) == 0) {
             hoist_children(element);
@@ -553,13 +558,14 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
 }
 
 /* _sanitize(element, tags, attributes, url_schemes, allow_relative, on_disallowed, strip_comments, add_link_rel,
-   attribute_filter, set_attributes) -> None. Filters the parsed fragment in place; sanitizer.py serializes it. */
+   attribute_filter, set_attributes, remove_with_content) -> None. Filters the fragment in place; sanitizer.py
+   serializes it. */
 PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
     PyObject *element;
     sanitizer s = {0};
-    if (!PyArg_ParseTuple(args, "OOOOpipOOO:_sanitize", &element, &s.tags, &s.attributes, &s.url_schemes,
+    if (!PyArg_ParseTuple(args, "OOOOpipOOOO:_sanitize", &element, &s.tags, &s.attributes, &s.url_schemes,
                           &s.allow_relative, &s.on_disallowed, &s.strip_comments, &s.add_link_rel, &s.attribute_filter,
-                          &s.set_attributes)) {
+                          &s.set_attributes, &s.remove_with_content)) {
         return NULL;
     }
     th_node *root;
