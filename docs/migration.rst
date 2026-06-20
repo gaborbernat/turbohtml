@@ -775,8 +775,11 @@ candidates runs in C, so linkifying a page is faster than bleach's html5lib-base
 ********************
 
 `linkify-it-py <https://github.com/tsutsu3/linkify-it-py>`_ scans plain text and returns the link spans it finds;
-turning them into ``<a>`` tags, and skipping text that is already markup, is left to the caller. turbohtml does both.
-Where linkify-it-py hands back ``Match`` objects with ``url`` and offset fields, turbohtml returns the rewritten HTML:
+turning them into ``<a>`` tags, and skipping text that is already markup, is left to the caller. turbohtml does both,
+through two entry points. To rewrite HTML, use :func:`~turbohtml.linkify.linkify`. To match spans the way
+linkify-it-py's ``match`` does, use :class:`~turbohtml.linkify.Detector`; where linkify-it-py returns ``Match`` objects
+with ``index``/``last_index``/``url``/``schema``, turbohtml returns :class:`~turbohtml.linkify.LinkSpan` objects with
+``start``/``end``/``url``/``text``:
 
 .. code-block:: python
 
@@ -784,22 +787,25 @@ Where linkify-it-py hands back ``Match`` objects with ``url`` and offset fields,
     from linkify_it import LinkifyIt
 
     matches = LinkifyIt().match("see https://example.com")
-    # [Match(url="https://example.com", ...)] or None, and you build the <a> yourself
+    # [Match(url="https://example.com", index=4, last_index=23, ...)] or None
 
 .. testcode::
 
-    from turbohtml.linkify import linkify
+    from turbohtml.linkify import Detector
 
-    print(linkify("see https://example.com"))
+    span = Detector().find("see https://example.com")[0]
+    print(span.start, span.end, span.url)
 
 .. testoutput::
 
-    see <a href="https://example.com" rel="nofollow">https://example.com</a>
+    4 23 https://example.com
 
-Because turbohtml parses the input as HTML, it leaves alone a URL already inside an ``<a>`` or a ``<script>`` that
-linkify-it-py, working on the raw string, would match again. linkify-it-py is configurable down to custom schemes and
-fuzzy IP matching; turbohtml covers the common web, ``mailto:``, and bare-domain cases and trades that breadth for being
-HTML-aware and several times faster.
+linkify-it-py's ``test`` becomes :meth:`~turbohtml.linkify.Detector.has_link`, ``add(schema, rule)`` becomes the
+``schemes`` argument for scheme-less schemes, and ``tlds(...)`` becomes the ``tlds`` argument. Because
+:func:`~turbohtml.linkify.linkify` parses the input as HTML, it also leaves alone a URL already inside an ``<a>`` or a
+``<script>`` that linkify-it-py, working on the raw string, would match again. linkify-it-py still reaches further into
+fuzzy IP and email heuristics; turbohtml covers the common web, ``mailto:``, bare-domain, and registered-scheme cases
+and trades that breadth for being HTML-aware and several times faster.
 
 *********************
  From bleach (clean)

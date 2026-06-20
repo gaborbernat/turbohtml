@@ -1129,6 +1129,39 @@ because not every page wants it. The default ``nofollow`` callback marks web lin
 
     email <a href="mailto:bob@example.com">bob@example.com</a> or visit <a href="https://example.com" rel="nofollow">https://example.com</a>
 
+**************************
+ Find links in plain text
+**************************
+
+When the text is not HTML and you only need *where* the links are -- to highlight them, count them, or build your own
+markup -- use :class:`turbohtml.linkify.Detector`. ``find`` returns a :class:`~turbohtml.linkify.LinkSpan` per match,
+with offsets, the matched text, and the normalized ``url``; ``has_link`` answers the yes/no question more cheaply:
+
+.. testcode::
+
+    from turbohtml.linkify import Detector
+
+    detector = Detector()
+    for span in detector.find("ping bob@example.com about example.com"):
+        print(span.start, span.end, span.url)
+
+.. testoutput::
+
+    5 20 mailto:bob@example.com
+    27 38 http://example.com
+
+Register custom ``tlds`` to detect bare domains on an internal suffix, and scheme-less ``schemes`` such as ``tel`` so
+their opaque URLs are found too (every ``scheme://`` URL is detected without registration):
+
+.. testcode::
+
+    detector = Detector(tlds=["corp"], schemes=["tel"])
+    print([span.url for span in detector.find("wiki.corp or tel:+1-800-555-0100")])
+
+.. testoutput::
+
+    ['http://wiki.corp', 'tel:+1-800-555-0100']
+
 *************************
  Sanitize untrusted HTML
 *************************
