@@ -146,6 +146,20 @@ browsers run, including the error recovery that inserts the missing ``html``, ``
 
     Element('html')
 
+The recovery is not silent: each WHATWG parse error turbohtml recovered from is on :attr:`~turbohtml.Document.errors`, a
+list of :class:`~turbohtml.ParseError` with the spec ``code`` and source position. A clean document leaves it empty;
+malformed input fills it (and ``parse(..., strict=True)`` raises :class:`~turbohtml.HTMLParseError` on the first one):
+
+.. testcode::
+
+    print(doc.errors)
+    print(turbohtml.parse("<a b b>").errors[0].code)
+
+.. testoutput::
+
+    []
+    duplicate-attribute
+
 :meth:`~turbohtml.Node.find` returns the first descendant matching a tag (and any attributes you pass), or ``None``:
 
 .. testcode::

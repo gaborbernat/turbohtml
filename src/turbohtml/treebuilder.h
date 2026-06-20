@@ -194,6 +194,11 @@ th_node *th_tree_document(th_tree *tree);
    cached compiled selector whose attribute atoms were resolved against the tree. */
 uint32_t th_tree_attr_generation(const th_tree *tree);
 
+/* The WHATWG parse errors collected during the parse, in document order, and
+   their count via *out_count. The array (and its static code strings) lives as
+   long as the tree; it is empty for a programmatically built or well-formed tree. */
+const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count);
+
 /* Whether the tree was parsed in quirks mode (no doctype or a quirky one). In
    quirks mode CSS class and ID selectors match ASCII case-insensitively
    (Selectors-4 §6.1/§6.2); programmatic trees default to no-quirks. */

@@ -747,8 +747,9 @@ is identical:
 the ``nofollow``/``target_blank`` defaults work as before. Only custom callbacks change shape. bleach passed ``(attrs,
 new)`` where ``attrs`` was keyed by ``(namespace, name)`` tuples with a ``"_text"`` pseudo-key for the visible text;
 turbohtml passes a single :class:`~turbohtml.linkify.Link` with plain ``url``, ``text``, and ``attrs`` (a ``dict[str,
-str]``), and a callback returns it to keep the link or ``None`` to leave the text bare. Porting a callback means
-dropping the ``new`` argument and reading fields instead of tuple keys:
+str]``), and a callback returns it to keep the link or ``None`` to leave the text bare. bleach's ``new`` flag becomes
+``Link.existing`` (inverted: ``new=True`` is ``existing=False``). Porting a callback means reading fields instead of
+tuple keys:
 
 .. testcode::
 
@@ -764,11 +765,13 @@ dropping the ``new`` argument and reading fields instead of tuple keys:
 
     read <a href="https://example.com/page">example.com/page</a>
 
-Two behaviors differ from bleach, both deliberate. bleach also ran the callbacks over the links already present in the
-input; turbohtml leaves an existing ``<a>`` untouched, so linkifying is idempotent and never rewrites a link an author
-wrote, which is why the callback drops bleach's ``new`` flag. A bare domain such as ``example.com`` links only when its
-last label is a current IANA TLD, from a table you can regenerate, where bleach shipped a frozen list. The scan for link
-candidates runs in C, so linkifying a page is faster than bleach's html5lib-based pass.
+One default differs from bleach, deliberately: turbohtml leaves an existing ``<a>`` untouched so linkifying is
+idempotent, where bleach always reprocessed present links. Opt back in with ``process_existing=True`` to run the
+callbacks over author-written anchors too (the callback reads ``link.existing`` to branch). bleach's ``protocols`` maps
+to ``schemes``, which restricts the explicit URL schemes that autolink, and bleach's custom-TLD support maps to
+``extra_tlds``, on top of a current IANA table you can regenerate where bleach shipped a frozen list. A bare domain such
+as ``example.com`` still links only when its last label is a known TLD. The scan for link candidates runs in C, so
+linkifying a page is faster than bleach's html5lib-based pass.
 
 ********************
  From linkify-it-py
