@@ -176,6 +176,14 @@ turbohtml parses faster than the C parsers lxml and `selectolax <https://github.
 times faster than the pure-Python BeautifulSoup and html5lib, while building the WHATWG tree that lxml's libxml2 does
 not; the :doc:`performance` page has the per-document figures.
 
+The same tokenizer and tree builder also drive :class:`turbohtml.IncrementalParser`, the push form of
+:func:`turbohtml.parse`. The tokenizer is resumable -- it suspends mid-token when its input runs out -- and reclaims the
+prefix it has consumed on every chunk, so the only state the parser carries across a ``feed`` is the few insertion-mode
+variables of the tree-construction loop, lifted out of the one-shot call into the parser. The input side is therefore
+bounded no matter how long the stream: you never hold the whole source at once, the concrete win over ``parse`` for a
+document that arrives over a socket or a file larger than the buffer you would otherwise join. ``bytes`` chunks decode
+through a stateful incremental codec, so a multi-byte character split across a chunk boundary still decodes correctly.
+
 The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
 :class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`,
 :class:`~turbohtml.ProcessingInstruction`, :class:`~turbohtml.CData`) sharing the navigation defined on
