@@ -2,7 +2,7 @@
 
 A registered tag's built-in rendering is replaced by a callable that receives the
 element and its already-converted child Markdown and returns the element's
-Markdown. The cases pin the splice behaviour (inline vs block framing, dropping,
+Markdown. The cases pin the splice behavior (inline vs block framing, dropping,
 unwrapping, custom elements) and the binding's argument handling and errors.
 """
 
