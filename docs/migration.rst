@@ -181,6 +181,9 @@ Pitfalls
 - Default output is WHATWG-conformant; pick ``Formatter.NAMED_ENTITIES`` to come close to ``bs4``'s ``html`` formatter.
 - ``==`` compares identity, so two trees with the same markup are unequal. Where ``bs4`` code leaned on ``==`` between
   trees, compare serializations (``a.html == b.html``) or walk the nodes.
+- A few bs4 entry points are deliberate clean-break omissions: parse-time filtering with ``SoupStrainer``, the choice of
+  parser backend (turbohtml always runs the WHATWG algorithm), and registering a named output formatter -- pick a
+  :class:`~turbohtml.Formatter` per :meth:`~turbohtml.Node.serialize` call instead.
 
 ***********
  From lxml
@@ -241,8 +244,6 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
 Pitfalls
 ========
 
-- No XPath. Use the ``find``/``find_all`` filter grammar (an ``axis``, ``attrs``, and string, regex, or callable
-  filters) or CSS :meth:`~turbohtml.Node.select`.
 - No ``text``/``tail``. A node's children are its text runs and elements interleaved; read :attr:`~turbohtml.Node.text`
   for the concatenation.
 - lxml parses with libxml2, which is not WHATWG-conformant, so malformed input lands in a different tree than the one
@@ -251,6 +252,18 @@ Pitfalls
   ``str`` or ``bytes`` chunks with ``feed`` and call ``close`` for the finished :class:`~turbohtml.Document`. The parser
   never holds the whole source at once, so you can parse a stream larger than the source buffer you would otherwise
   materialize for :func:`turbohtml.parse`.
+
+Not yet ported / limitations
+============================
+
+XPath 1.0 (:meth:`~turbohtml.Node.xpath`), CSS :meth:`~turbohtml.Node.select`, the ``find``/``find_all`` filter grammar,
+:attr:`~turbohtml.Node.source_line`/:attr:`~turbohtml.Node.source_col`, and :meth:`~turbohtml.Node.links`/
+:meth:`~turbohtml.Node.resolve_links` all ship, but the wider libxml2 toolchain lxml exposes is a deliberate clean-break
+scope cut:
+
+- XSLT, DTD/RelaxNG/XML-Schema validation, and C14N have no turbohtml equivalent.
+- XPath is the 1.0 engine only; XPath 2.0+ and XQuery are out of scope.
+- The ``.text``/``.tail`` string model is replaced by real :class:`~turbohtml.Text` child nodes, not reproduced.
 
 *****************
  From selectolax
@@ -299,6 +312,8 @@ Pitfalls
 - ``node.text`` is a property; drop the parentheses.
 - selectolax mutation is limited; turbohtml's edit surface (``append``, ``insert``, ``wrap``, ``unwrap``,
   ``replace_with``, and the rest) is full.
+- selectolax's lexbor-specific knobs and its raw C-level node handles are not exposed; turbohtml's public surface is the
+  typed Python tree, not the underlying engine's C API.
 
 ******************
  From resiliparse
@@ -394,12 +409,21 @@ and a real ``<template>`` content document, and no ``libxml2``/gumbo build depen
 
 Because the tree it returns is lxml's, the element accessors port exactly as in the `From lxml`_ section above:
 ``el.get``/``el.attrib`` become ``el.attrs``, the ``el.text``/``el.tail`` string pair becomes child
-:class:`~turbohtml.Text` nodes, and ``el.getparent()`` becomes ``el.parent``. The one accessor with no equivalent is
-``el.xpath(...)``: html5-parser inherits ``libxml2``'s XPath, while turbohtml searches with CSS through
-:meth:`~turbohtml.Node.select` and the :meth:`~turbohtml.Node.find`/:meth:`~turbohtml.Node.find_all` grammar. The
-:doc:`performance` page benchmarks the WHATWG tree builders; html5-parser sits in the same native-gumbo tier as the C
-parsers measured there, so it is cross-linked rather than given a separate row, since its lxml tree is bound to a
-specific ``libxml2`` build that the benchmark cannot pin portably.
+:class:`~turbohtml.Text` nodes, ``el.getparent()`` becomes ``el.parent``, and ``el.xpath(...)`` maps to turbohtml's
+XPath 1.0 :meth:`~turbohtml.Node.xpath` (or CSS :meth:`~turbohtml.Node.select` and the
+:meth:`~turbohtml.Node.find`/:meth:`~turbohtml.Node.find_all` grammar). The :doc:`performance` page benchmarks the
+WHATWG tree builders; html5-parser sits in the same native-gumbo tier as the C parsers measured there, so it is
+cross-linked rather than given a separate row, since its lxml tree is bound to a specific ``libxml2`` build that the
+benchmark cannot pin portably.
+
+Not yet ported / limitations
+============================
+
+Like `From lxml`_, the gap is the rest of the libxml2 stack the returned tree would otherwise carry, dropped on purpose
+with the ``libxml2``/gumbo build dependency:
+
+- XSLT, DTD/RelaxNG/XML-Schema validation, and C14N have no equivalent; XPath is the 1.0 engine, not 2.0+/XQuery.
+- The ``.text``/``.tail`` model becomes real :class:`~turbohtml.Text` nodes rather than the two string fields.
 
 *************
  From parsel
@@ -468,6 +492,9 @@ Pitfalls
   explicitly per call.
 - A turbohtml ``xpath("//a/@href")`` already yields the attribute *values* as strings, so there is no ``.getall()`` to
   chain.
+- parsel's regex-on-selection convenience (``.re()`` / ``.re_first()``) and its JSON/JMESPath selectors
+  (``Selector(...).jmespath(...)``) are not ported; run Python's :mod:`re` over :attr:`~turbohtml.Node.text` and
+  :mod:`json`/``jmespath`` over parsed JSON yourself.
 
 ***************
  From html5lib
@@ -562,11 +589,11 @@ The idiom translates directly:
     - - iterating ``for item in pq("a").items()``
       - ``for item in query("a").items()``
 
-Two limits are worth stating. pyquery exposes lxml's ``.xpath(...)``; turbohtml's ``Query`` is CSS-only, so an XPath
-chain moves to a selector or to the node-level :meth:`~turbohtml.Node.find` grammar. And jQuery methods turbohtml does
-not mirror (DOM-mutation helpers like ``.wrap_all`` or pyquery's network-fetching constructor) drop down to the node API
-on :meth:`Query.items <turbohtml.query.Query.items>`. The :doc:`performance` page's fluent-chaining benchmark times the
-same chain against pyquery.
+Two limits are worth stating. pyquery exposes lxml's ``.xpath(...)`` on the fluent wrapper itself; turbohtml's ``Query``
+is CSS-only, so an XPath chain drops to the node-level :meth:`~turbohtml.Node.xpath` (XPath 1.0) or the
+:meth:`~turbohtml.Node.find` grammar via :meth:`Query.items <turbohtml.query.Query.items>`. And jQuery methods turbohtml
+does not mirror (DOM-mutation helpers like ``.wrap_all`` or pyquery's network-fetching constructor) drop down to that
+same node API. The :doc:`performance` page's fluent-chaining benchmark times the same chain against pyquery.
 
 ***************************
  From the standard library
@@ -1129,11 +1156,18 @@ Pitfalls
   ``strong_em_symbol``; set both to reproduce its behavior.
 - ``to_markdown`` is a method on any node, so convert a subtree by calling it on the element you selected
   (``doc.find("article").to_markdown()``) instead of slicing the HTML string first.
-- A few niche knobs are intentionally dropped: the parser-selection options (markdownify's ``bs4_options``) and the
-  per-call tag-handler callbacks, since turbohtml always runs the WHATWG algorithm and the walk holds no per-call state.
-  ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
 - Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is a separate method; for the unstructured
   concatenation read :attr:`~turbohtml.Node.text`.
+
+Not yet ported / limitations
+============================
+
+Custom per-tag conversion ships as the ``converters`` argument (markdownify's ``convert_<tag>`` overrides). What stays
+out of scope is narrow:
+
+- markdownify's parser-selection options (``bs4_options``) are dropped, since turbohtml always runs the WHATWG
+  algorithm.
+- ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
 
 *****************
  From inscriptis
@@ -1231,3 +1265,6 @@ Pitfalls
   concatenation with no layout at all, read :attr:`~turbohtml.Node.text`.
 - Annotation offsets count code points into the returned string; a table cell is labeled at its position in the laid-out
   grid, so the span covers the cell's column-aligned text rather than the source order.
+- :meth:`~turbohtml.Node.to_annotated_text` returns the ``(text, spans)`` list directly; inscriptis's annotation output
+  processors -- the surface-form and inline-tagged exporters that render those spans to HTML or XML -- are not ported,
+  so format the spans yourself.
