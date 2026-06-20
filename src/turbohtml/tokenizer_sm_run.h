@@ -248,6 +248,14 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             return RUN_NEED_MORE;
         }
 
+        /* The first time EOF is reached with a tag/comment/doctype construct
+           still open, report it once; eof_code names the construct (cleared when
+           it is emitted), so a clean DATA-state EOF leaves it NULL. */
+        if (at_eof && !self->eof_reported && self->eof_code != NULL) {
+            tok_error(self, self->eof_code);
+            self->eof_reported = 1;
+        }
+
         switch (self->state) { /* GCOVR_EXCL_BR_LINE: enum-complete switch; the out-of-range edge is unreachable */
         case ST_DATA:
             if (at_eof) {
@@ -430,6 +438,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '?') {
+                tok_error(self, "unexpected-question-mark-instead-of-tag-name");
                 init_markup(self, TH_COMMENT);
                 self->state = ST_BOGUS_COMMENT;
                 continue;
@@ -453,6 +462,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '>') {
+                tok_error(self, "missing-end-tag-name");
                 CONSUME();
                 self->state = ST_DATA;
                 continue;
@@ -1128,6 +1138,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 self->pos += 2;
                 self->col += 2;
                 init_markup(self, TH_COMMENT);
+                self->eof_code = "eof-in-comment"; /* the comment is now open */
                 self->state = ST_COMMENT_START;
                 continue;
             }
@@ -1138,6 +1149,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             if (match == 2) {
                 self->pos += 7;
                 self->col += 7;
+                self->eof_code = "eof-in-doctype"; /* the doctype is now open */
                 self->state = ST_DOCTYPE;
                 continue;
             }
@@ -1174,6 +1186,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (!at_eof && ch == '>') {
+                tok_error(self, "abrupt-closing-of-empty-comment");
                 CONSUME();
                 EMIT_MARKUP();
             }
@@ -1190,6 +1203,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '>') {
+                tok_error(self, "abrupt-closing-of-empty-comment");
                 CONSUME();
                 EMIT_MARKUP();
             }

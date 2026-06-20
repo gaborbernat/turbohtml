@@ -4738,6 +4738,111 @@ static PyType_Spec doctype_spec = {
     .slots = doctype_slots,
 };
 
+/* ------------------------------------------------------------ ParseError */
+
+/* An immutable value object describing one WHATWG parse error. code points at a
+   static literal owned by the C core, so the object holds no Python references
+   and needs no traversal; line/col mirror Token.line (1-based) and Token.col
+   (0-based). */
+typedef struct {
+    PyObject_HEAD const char *code;
+    Py_ssize_t line;
+    Py_ssize_t col;
+} ParseErrorObject;
+
+static PyObject *parse_error_new(module_state *state, const th_parse_error *error) {
+    PyTypeObject *type = (PyTypeObject *)state->parse_error_type;
+    ParseErrorObject *self = (ParseErrorObject *)type->tp_alloc(type, 0);
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->code = error->code;
+    self->line = error->line;
+    self->col = error->col;
+    return (PyObject *)self;
+}
+
+static PyObject *parse_error_get_code(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyUnicode_FromString(((ParseErrorObject *)self)->code);
+}
+
+static PyObject *parse_error_get_line(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyLong_FromSsize_t(((ParseErrorObject *)self)->line);
+}
+
+static PyObject *parse_error_get_col(PyObject *self, void *Py_UNUSED(closure)) {
+    return PyLong_FromSsize_t(((ParseErrorObject *)self)->col);
+}
+
+static PyGetSetDef parse_error_getset[] = {
+    {"code", parse_error_get_code, NULL,
+     "the WHATWG parse-error code, e.g. 'unexpected-question-mark-instead-of-tag-name'", NULL},
+    {"line", parse_error_get_line, NULL, "the 1-based source line where the error was detected", NULL},
+    {"col", parse_error_get_col, NULL, "the 0-based source column where the error was detected", NULL},
+    {NULL, NULL, NULL, NULL, NULL},
+};
+
+static PyObject *parse_error_repr(PyObject *self) {
+    ParseErrorObject *error = (ParseErrorObject *)self;
+    PyObject *code = PyUnicode_FromString(error->code);
+    if (code == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *repr = PyUnicode_FromFormat("ParseError(code=%R, line=%zd, col=%zd)", code, error->line, error->col);
+    Py_DECREF(code);
+    return repr;
+}
+
+static Py_hash_t parse_error_hash(PyObject *self) {
+    ParseErrorObject *error = (ParseErrorObject *)self;
+    Py_uhash_t hash = 14695981039346656037ULL;
+    for (const char *byte = error->code; *byte != '\0'; byte++) {
+        hash = (hash ^ (unsigned char)*byte) * 1099511628211ULL;
+    }
+    hash = (hash ^ (Py_uhash_t)error->line) * 1099511628211ULL;
+    hash = (hash ^ (Py_uhash_t)error->col) * 1099511628211ULL;
+    return (Py_hash_t)(hash & 0x7fffffffffffffffULL);
+}
+
+static PyObject *parse_error_richcompare(PyObject *self, PyObject *other, int op) {
+    if (!Py_IS_TYPE(other, Py_TYPE(self))) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (op != Py_EQ && op != Py_NE) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    ParseErrorObject *left = (ParseErrorObject *)self;
+    ParseErrorObject *right = (ParseErrorObject *)other;
+    int equal = left->line == right->line && left->col == right->col && strcmp(left->code, right->code) == 0;
+    return PyBool_FromLong(op == Py_EQ ? equal : !equal);
+}
+
+static void parse_error_dealloc(PyObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    type->tp_free(self);
+    Py_DECREF(type);
+}
+
+PyDoc_STRVAR(parse_error_doc, "One WHATWG parse error collected during parse(): a code and a source position.\n\n"
+                              "code is the spec error code, line is 1-based and col is 0-based (as for Token).");
+
+static PyType_Slot parse_error_slots[] = {
+    {Py_tp_doc, (void *)parse_error_doc},
+    {Py_tp_dealloc, parse_error_dealloc},
+    {Py_tp_repr, parse_error_repr},
+    {Py_tp_hash, parse_error_hash},
+    {Py_tp_richcompare, parse_error_richcompare},
+    {Py_tp_getset, parse_error_getset},
+    {0, NULL},
+};
+
+static PyType_Spec parse_error_spec = {
+    .name = "turbohtml._html.ParseError",
+    .basicsize = sizeof(ParseErrorObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .slots = parse_error_slots,
+};
+
 /* -------------------------------------------------------------- Document */
 
 static PyObject *document_get_root(PyObject *self, void *Py_UNUSED(closure)) {
@@ -4757,9 +4862,33 @@ static PyObject *document_get_encoding(PyObject *self, void *Py_UNUSED(closure))
     return Py_NewRef(((HandleObject *)((NodeObject *)self)->handle)->encoding);
 }
 
+/* The parse errors are immutable once the parse returns, so this reads them
+   lock-free (like the other accessors) and materializes a fresh list each call. */
+static PyObject *document_get_errors(PyObject *self, void *Py_UNUSED(closure)) {
+    th_tree *tree = ((HandleObject *)((NodeObject *)self)->handle)->tree;
+    Py_ssize_t count;
+    const th_parse_error *errors = th_tree_errors(tree, &count);
+    PyObject *list = PyList_New(count);
+    if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    module_state *state = state_of(self);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *error = parse_error_new(state, &errors[index]);
+        if (error == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(list); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyList_SET_ITEM(list, index, error);
+    }
+    return list;
+}
+
 static PyGetSetDef document_getset[] = {
     {"root", document_get_root, NULL, "the root <html> element, or None", NULL},
     {"encoding", document_get_encoding, NULL, "the resolved encoding name for bytes input, or None for str", NULL},
+    {"errors", document_get_errors, NULL, "the WHATWG parse errors detected, as a list of ParseError in document order",
+     NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -4839,10 +4968,49 @@ static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *sour
     return node;
 }
 
+/* In strict mode, raise HTMLParseError carrying the first parse error and free
+   the tree, returning -1; otherwise return 0 and leave the tree to be wrapped.
+   The exception's str is a readable summary and its .error is the ParseError. */
+static int strict_raise(module_state *state, th_tree *tree, int strict) {
+    if (!strict) {
+        return 0;
+    }
+    Py_ssize_t count;
+    const th_parse_error *errors = th_tree_errors(tree, &count);
+    if (count == 0) {
+        return 0;
+    }
+    PyObject *error = parse_error_new(state, &errors[0]);
+    PyObject *message =
+        PyUnicode_FromFormat("%s at line %zd, column %zd", errors[0].code, errors[0].line, errors[0].col);
+    /* allocation failure cannot be forced from a test */
+    if (error == NULL || message == NULL) { /* GCOVR_EXCL_BR_LINE */
+        Py_XDECREF(error);                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(message);                /* GCOVR_EXCL_LINE: allocation-failure path */
+        th_tree_free(tree);                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *exc = PyObject_CallOneArg(state->parse_error_exc, message);
+    Py_DECREF(message);
+    /* allocation failure cannot be forced from a test */
+    if (exc == NULL || PyObject_SetAttrString(exc, "error", error) < 0) { /* GCOVR_EXCL_BR_LINE */
+        Py_XDECREF(exc);                                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_DECREF(error);                                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        th_tree_free(tree);                                               /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_DECREF(error);
+    PyErr_SetObject(state->parse_error_exc, exc);
+    Py_DECREF(exc);
+    th_tree_free(tree);
+    return -1;
+}
+
 /* Parse bytes: sniff the encoding (BOM, then the encoding argument, then a <meta>
    prescan, then windows-1252), decode with that codec replacing malformed bytes,
    and parse the resulting str. The decoded str is retained as the tree's source. */
-static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *enc_arg, Py_ssize_t enc_len) {
+static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *enc_arg, Py_ssize_t enc_len,
+                             int strict) {
     Py_buffer view;
     if (PyObject_GetBuffer(markup, &view, PyBUF_SIMPLE) < 0) { /* GCOVR_EXCL_BR_LINE: bytes expose a simple buffer */
         return NULL;                                           /* GCOVR_EXCL_LINE: buffer-acquisition failure */
@@ -4890,6 +5058,10 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
         Py_DECREF(decoded);      /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    if (strict_raise(state, tree, strict) < 0) {
+        Py_DECREF(decoded);
+        return NULL;
+    }
     PyObject *canonical = PyUnicode_FromString(entry->canonical);
     if (canonical == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree);  /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -4903,11 +5075,12 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
 }
 
 PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs) {
-    static char *keywords[] = {"markup", "encoding", NULL};
+    static char *keywords[] = {"markup", "encoding", "strict", NULL};
     PyObject *markup;
     const char *enc_arg = NULL;
     Py_ssize_t enc_len = 0;
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|$z#:parse", keywords, &markup, &enc_arg, &enc_len)) {
+    int strict = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|$z#p:parse", keywords, &markup, &enc_arg, &enc_len, &strict)) {
         return NULL;
     }
     module_state *state = PyModule_GetState(module);
@@ -4916,13 +5089,16 @@ PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs) {
         if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
             return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+        if (strict_raise(state, tree, strict) < 0) {
+            return NULL;
+        }
         return tree_to_node(state, tree, markup, Py_None);
     }
     if (!PyObject_CheckBuffer(markup)) {
         PyErr_SetString(PyExc_TypeError, "parse() argument must be str or a bytes-like object");
         return NULL;
     }
-    return parse_bytes(state, markup, enc_arg, enc_len);
+    return parse_bytes(state, markup, enc_arg, enc_len, strict);
 }
 
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs) {
@@ -5524,6 +5700,20 @@ int tree_register(PyObject *module, module_state *state) {
     if (state->parser_type == NULL ||                                                 /* GCOVR_EXCL_BR_LINE */
         PyModule_AddObjectRef(module, "IncrementalParser", state->parser_type) < 0) { /* GCOVR_EXCL_BR_LINE */
         return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    state->parse_error_type = PyType_FromModuleAndSpec(module, &parse_error_spec, NULL);
+    /* allocation failure cannot be forced from a test */
+    if (state->parse_error_type == NULL ||                                          /* GCOVR_EXCL_BR_LINE */
+        PyModule_AddObjectRef(module, "ParseError", state->parse_error_type) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1;                                                                  /* GCOVR_EXCL_LINE: alloc-fail */
+    }
+    state->parse_error_exc = PyErr_NewExceptionWithDoc(
+        "turbohtml.HTMLParseError", "Raised by parse(strict=True) on the first parse error; .error is the ParseError.",
+        NULL, NULL);
+    /* allocation failure cannot be forced from a test */
+    if (state->parse_error_exc == NULL ||                                              /* GCOVR_EXCL_BR_LINE */
+        PyModule_AddObjectRef(module, "HTMLParseError", state->parse_error_exc) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1;                                                                     /* GCOVR_EXCL_LINE: alloc-fail */
     }
     return 0;
 }

@@ -417,6 +417,39 @@ skipped, and a ``select`` contributes one pair per selected option. Pass the res
     [('email', 'a@b.c'), ('plan', 'pro'), ('terms', 'yes')]
     email=a%40b.c&plan=pro&terms=yes
 
+****************************************
+ Inspect the parse errors of a document
+****************************************
+
+:func:`turbohtml.parse` recovers from malformed markup the way a browser does and records each WHATWG parse error it
+recovered from on :attr:`~turbohtml.Document.errors`. Each :class:`~turbohtml.ParseError` carries the spec ``code`` and
+the source position (1-based ``line``, 0-based ``col``); a well-formed document yields an empty list:
+
+.. testcode::
+
+    import turbohtml
+    document = turbohtml.parse("<a b b>")
+    for error in document.errors:
+        print(f"{error.code} at {error.line}:{error.col}")
+
+.. testoutput::
+
+    duplicate-attribute at 1:6
+
+To fail instead of recover -- in a linter or a strict ingest pipeline -- pass ``strict=True`` and catch
+:class:`~turbohtml.HTMLParseError`, whose ``error`` attribute is the first :class:`~turbohtml.ParseError`:
+
+.. testcode::
+
+    try:
+        turbohtml.parse("<!DOCTYPE", strict=True)
+    except turbohtml.HTMLParseError as exception:
+        print(exception.error.code)
+
+.. testoutput::
+
+    eof-in-doctype
+
 ************************************
  Collect the links of a parsed page
 ************************************
