@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import Element, Formatter, Indent, Minify, parse
+from turbohtml import Element, Indent, Minify, parse
 
 # ----------------------------------------------------------------- sort_attributes
 
@@ -43,7 +43,7 @@ def test_sort_attributes_orders_prefix_names(attrs: dict[str, str], expected: st
 
 def test_sort_attributes_beyond_stack_buffer_uses_heap() -> None:
     names = [f"a{index:02d}" for index in range(70)]
-    element = Element("x", {name: "" for name in reversed(names)})
+    element = Element("x", dict.fromkeys(reversed(names), ""))
     expected = "<x " + " ".join(f'{name}=""' for name in names) + "></x>"
     assert element.serialize(sort_attributes=True) == expected
 
@@ -142,9 +142,7 @@ def test_meta_charset_with_indent_leaves_foreign_element() -> None:
 
 def test_meta_charset_skips_non_element_head_children() -> None:
     out = parse("<head><!--note--><title>t").serialize(meta_charset=True)
-    assert out == (
-        '<html><head><meta charset="utf-8"><!--note--><title>t</title></head><body></body></html>'
-    )
+    assert out == ('<html><head><meta charset="utf-8"><!--note--><title>t</title></head><body></body></html>')
 
 
 def test_meta_charset_off_injects_nothing() -> None:
@@ -192,26 +190,13 @@ def test_meta_charset_with_indent_indents_injected_meta() -> None:
 def test_meta_charset_with_indent_non_empty_head() -> None:
     out = parse("<link rel=icon>").serialize(layout=Indent(2), meta_charset=True)
     assert out == (
-        "<html>\n"
-        "  <head>\n"
-        '    <meta charset="utf-8">\n'
-        '    <link rel="icon">\n'
-        "  </head>\n"
-        "  <body></body>\n"
-        "</html>"
+        '<html>\n  <head>\n    <meta charset="utf-8">\n    <link rel="icon">\n  </head>\n  <body></body>\n</html>'
     )
 
 
 def test_meta_charset_with_indent_normalizes_existing_meta() -> None:
     out = parse("<meta charset=ascii>").serialize(layout=Indent(2), meta_charset=True)
-    assert out == (
-        "<html>\n"
-        "  <head>\n"
-        '    <meta charset="utf-8">\n'
-        "  </head>\n"
-        "  <body></body>\n"
-        "</html>"
-    )
+    assert out == ('<html>\n  <head>\n    <meta charset="utf-8">\n  </head>\n  <body></body>\n</html>')
 
 
 def test_meta_charset_with_minify_injects() -> None:
@@ -235,9 +220,7 @@ def test_meta_charset_with_minify_normalizes_existing_meta() -> None:
 
 def test_encode_meta_charset_uses_target_encoding() -> None:
     out = parse("<p>x").encode("iso-8859-1", meta_charset=True)
-    assert out == (
-        '<html><head><meta charset="iso-8859-1"></head><body><p>x</p></body></html>'.encode("latin-1")
-    )
+    assert out == ('<html><head><meta charset="iso-8859-1"></head><body><p>x</p></body></html>'.encode("latin-1"))
 
 
 def test_encode_sort_attributes() -> None:
