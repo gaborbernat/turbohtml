@@ -56,7 +56,7 @@ def test_default_source_is_none() -> None:
     ],
 )
 def test_reference_becomes_its_own_token(document: str, data: str, source: str) -> None:
-    (reference,) = [token for token in tokenize(document, resolve_references=False)]
+    (reference,) = list(tokenize(document, resolve_references=False))
     assert reference.type is TokenType.CHARACTER_REFERENCE
     assert reference.data == data
     assert reference.source == source
@@ -235,9 +235,7 @@ def test_capture_source_survives_many_streamed_tags() -> None:
     tokenizer = Tokenizer(capture_source=True)
     sources: list[str | None] = []
     for index in range(50):
-        for token in tokenizer.feed(f"<p id={index}>x</p>"):
-            if token.type is TokenType.START_TAG:
-                sources.append(token.source)
+        sources.extend(token.source for token in tokenizer.feed(f"<p id={index}>x</p>") if token.type is TokenType.START_TAG)
     sources += [token.source for token in tokenizer.close() if token.type is TokenType.START_TAG]
     assert sources == [f"<p id={index}>" for index in range(50)]
 
