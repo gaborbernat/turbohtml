@@ -980,15 +980,21 @@ PyDoc_STRVAR(closest_doc, "closest(selector, /)\n--\n\n"
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds);
 
-PyDoc_STRVAR(serialize_doc, "serialize(*, formatter=Formatter.WHATWG, layout=None)\n--\n\n"
-                            "Serialize this node and its subtree to a str. formatter chooses the escape\n"
-                            "policy. layout chooses the whitespace: None gives the compact WHATWG form,\n"
-                            "an Indent pretty-prints (adding whitespace, so it does not preserve\n"
-                            "meaning), and a Minify shrinks the output while reparsing to the same tree.");
+PyDoc_STRVAR(serialize_doc,
+             "serialize(*, formatter=Formatter.WHATWG, layout=None, sort_attributes=False, meta_charset=False)\n--\n\n"
+             "Serialize this node and its subtree to a str. formatter chooses the escape\n"
+             "policy. layout chooses the whitespace: None gives the compact WHATWG form,\n"
+             "an Indent pretty-prints (adding whitespace, so it does not preserve\n"
+             "meaning), and a Minify shrinks the output while reparsing to the same tree.\n"
+             "sort_attributes emits each start tag's attributes in ascending name order.\n"
+             "meta_charset ensures the document <head> declares <meta charset=\"utf-8\">,\n"
+             "normalizing an existing charset declaration or injecting one.");
 
-PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG, layout=None)\n--\n\n"
-                         "Serialize this node and its subtree to bytes in the named encoding,\n"
-                         "with the same formatter and layout controls as serialize().");
+PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG, layout=None, sort_attributes=False, "
+                         "meta_charset=False)\n--\n\n"
+                         "Serialize this node and its subtree to bytes in the named encoding, with the\n"
+                         "same formatter, layout, and sort_attributes controls as serialize(). When\n"
+                         "meta_charset is set the injected/normalized <meta charset> names encoding.");
 
 PyDoc_STRVAR(find_doc, "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, **filters)\n--\n\n"
                        "Return the first Element along axis matching the tag filter and every\n"
@@ -3690,10 +3696,14 @@ static int resolve_layout(module_state *state, PyObject *layout_obj, enum th_lay
     return -1;
 }
 
-/* Serialize self to a str under the given Formatter member and layout mode. */
-static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *layout_obj) {
-    int formatter;
-    if (resolve_formatter(state_of(self), formatter_obj, &formatter) < 0) {
+/* Serialize self to a str under the given Formatter member, layout mode, and the
+   two output normalizations. charset is the label the meta_charset option writes
+   (the str output is conceptually UTF-8 for serialize, the target encoding for
+   encode); it is borrowed only for the duration of the call. */
+static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *layout_obj, int sort_attributes,
+                                    int meta_charset, const char *charset) {
+    th_serialize_opts opts = {0, sort_attributes, meta_charset, charset, (Py_ssize_t)strlen(charset)};
+    if (resolve_formatter(state_of(self), formatter_obj, &opts.formatter) < 0) {
         return NULL;
     }
     enum th_layout_mode mode;
@@ -3709,10 +3719,10 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
        mutate cannot rewire it mid-walk (a no-op on the GIL build) */
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     if (mode == TH_LAYOUT_MINIFY) {
-        data = th_node_minify(tree_of(self), ((NodeObject *)self)->node, &minify_opts, formatter, &out_len);
+        data = th_node_minify(tree_of(self), ((NodeObject *)self)->node, &minify_opts, &opts, &out_len);
     } else {
         const Py_UCS4 *indent = mode == TH_LAYOUT_INDENT ? indent_unit : NULL;
-        data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, formatter, indent, indent_len, &out_len);
+        data = th_node_serialize(tree_of(self), ((NodeObject *)self)->node, &opts, indent, indent_len, &out_len);
     }
     Py_END_CRITICAL_SECTION();
     if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -3724,24 +3734,30 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
 }
 
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"formatter", "layout", NULL};
+    static char *keywords[] = {"formatter", "layout", "sort_attributes", "meta_charset", NULL};
     PyObject *formatter_obj = NULL;
     PyObject *layout_obj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OO", keywords, &formatter_obj, &layout_obj)) {
+    int sort_attributes = 0;
+    int meta_charset = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OOpp", keywords, &formatter_obj, &layout_obj, &sort_attributes,
+                                     &meta_charset)) {
         return NULL;
     }
-    return node_serialize_str(self, formatter_obj, layout_obj);
+    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, "utf-8");
 }
 
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"encoding", "formatter", "layout", NULL};
+    static char *keywords[] = {"encoding", "formatter", "layout", "sort_attributes", "meta_charset", NULL};
     const char *encoding = "utf-8";
     PyObject *formatter_obj = NULL;
     PyObject *layout_obj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|s$OO", keywords, &encoding, &formatter_obj, &layout_obj)) {
+    int sort_attributes = 0;
+    int meta_charset = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|s$OOpp", keywords, &encoding, &formatter_obj, &layout_obj,
+                                     &sort_attributes, &meta_charset)) {
         return NULL;
     }
-    PyObject *text = node_serialize_str(self, formatter_obj, layout_obj);
+    PyObject *text = node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, encoding);
     if (text == NULL) {
         return NULL;
     }

@@ -222,12 +222,22 @@ Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
    compact. PyMem-allocated; *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 
-/* Serialize node and its subtree under a chosen escape formatter (0 WHATWG,
-   1 minimal, 2 named entities). When indent is non-NULL it is the per-level
-   whitespace unit for pretty output; NULL emits the compact form. PyMem-
+/* Output-shaping options shared by serialize() and encode(): the escape formatter
+   plus two opt-in normalizations that leave the tree untouched. Every field is
+   off (zero / NULL) by default, so the common serialize costs nothing. */
+typedef struct {
+    int formatter;       /* escape policy: 0 WHATWG, 1 minimal, 2 named entities */
+    int sort_attributes; /* emit each start tag's attributes in ascending name order */
+    int inject_meta;     /* ensure <head> declares <meta charset=charset> */
+    const char *charset; /* ASCII encoding label for the injected/normalized meta */
+    Py_ssize_t charset_len;
+} th_serialize_opts;
+
+/* Serialize node and its subtree under opts. When indent is non-NULL it is the
+   per-level whitespace unit for pretty output; NULL emits the compact form. PyMem-
    allocated; *out_len receives the length. NULL on failure. */
-Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
-                           Py_ssize_t *out_len);
+Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, const th_serialize_opts *opts, const Py_UCS4 *indent,
+                           Py_ssize_t indent_len, Py_ssize_t *out_len);
 
 /* The minification transforms serialize(minify=...) toggles, each round-trip safe
    (the minified bytes reparse to the same tree). */
@@ -238,9 +248,10 @@ typedef struct {
     int strip_comments;      /* skip comment nodes */
 } th_minify_opts;
 
-/* Serialize node and its subtree minified under opts and the escape formatter.
+/* Serialize node and its subtree minified under minify and the output options.
    PyMem-allocated; *out_len receives the length. NULL on failure. */
-Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatter, Py_ssize_t *out_len);
+Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *minify, const th_serialize_opts *opts,
+                        Py_ssize_t *out_len);
 
 /* The Markdown export configuration, a union of the markdownify and html2text
    knobs with one name per concept. The Python binding fills it from keyword

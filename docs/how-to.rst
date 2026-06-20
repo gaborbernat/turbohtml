@@ -791,6 +791,41 @@ Whitespace-significant elements (``pre``, ``textarea``, ``listing``) and raw-tex
 their content verbatim, and a tag is never dropped when omitting it would let the reparse reconstruct a formatting
 element across the boundary.
 
+***********************************
+ Normalize attributes and encoding
+***********************************
+
+Two more keyword options on ``serialize`` and ``encode`` normalize the output without touching the tree, and compose
+with any ``formatter`` or ``layout``. ``sort_attributes`` emits each start tag's attributes in ascending name order, so
+two serializations of equal trees diff cleanly:
+
+.. testcode::
+
+    import turbohtml
+    node = turbohtml.parse("<p id=main class=lead data-x=1>hi</p>").select_one("p")
+    print(node.serialize(sort_attributes=True))
+
+.. testoutput::
+
+    <p class="lead" data-x="1" id="main">hi</p>
+
+``meta_charset`` makes the document ``<head>`` declare the output encoding: an existing ``<meta charset>`` (or ``<meta
+http-equiv="content-type">``) is normalized in place, and a head that declares none gets a ``<meta charset>`` injected
+as its first child — never a duplicate. ``serialize`` declares ``utf-8`` (the encoding of the returned ``str``), while
+``encode`` declares the encoding it writes:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<title>Hi</title>")
+    print(doc.serialize(meta_charset=True))
+    print(doc.encode("iso-8859-1", meta_charset=True))
+
+.. testoutput::
+
+    <html><head><meta charset="utf-8"><title>Hi</title></head><body></body></html>
+    b'<html><head><meta charset="iso-8859-1"><title>Hi</title></head><body></body></html>'
+
 ********************
  Export to Markdown
 ********************
