@@ -1472,6 +1472,22 @@ static PyObject *element_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
 
 static PyObject *node_get_text(PyObject *self, void *closure);
 static int element_set_text(PyObject *self, PyObject *value, void *closure);
+static PyObject *element_get_field_value(PyObject *self, void *closure);
+static int element_set_field_value(PyObject *self, PyObject *value, void *closure);
+static PyObject *element_get_checked(PyObject *self, void *closure);
+static int element_set_checked(PyObject *self, PyObject *value, void *closure);
+
+PyDoc_STRVAR(field_value_doc, "the form control's value, with form semantics. Reading returns the value\n"
+                              "attribute (defaulting to \"on\" for a checkbox/radio), a textarea's text, an\n"
+                              "option's value (its stripped text when it has no value attribute), or the\n"
+                              "selected option value(s) of a select (a list[str] when it is multiple);\n"
+                              "non-controls read None. Assigning a str writes the value (selecting the\n"
+                              "matching option of a select), a list[str] selects a multiple select, and None\n"
+                              "clears it. The checked state lives in Element.checked, not here.");
+
+PyDoc_STRVAR(checked_doc, "whether a checkbox or radio input is checked. Assigning requires a checkbox or\n"
+                          "radio; setting a radio to True clears the other same-name radios in the owning\n"
+                          "form (or document), the radio-group exclusivity rule.");
 
 static PyGetSetDef element_getset[] = {
     {"tag", element_get_tag, NULL, "the lowercased tag name", NULL},
@@ -1482,6 +1498,8 @@ static PyGetSetDef element_getset[] = {
      NULL},
     {"text", node_get_text, element_set_text,
      "the element's text; assigning replaces all children with a single Text node", NULL},
+    {"field_value", element_get_field_value, element_set_field_value, field_value_doc, NULL},
+    {"checked", element_get_checked, element_set_checked, checked_doc, NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -1658,6 +1676,550 @@ static int class_matches(module_state *state, th_node *node, PyObject *filter) {
         }
     }
     return 0;
+}
+
+/* ------------------------------------------------------- form controls --- */
+
+/* Whether a code-point run equals a lowercase ASCII literal, comparing the run
+   case-insensitively (the literal must already be lowercase). */
+static int ucs4_iequals_ascii(const Py_UCS4 *value, Py_ssize_t len, const char *ascii) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (ascii[index] == '\0' || lower_ascii(value[index]) != (Py_UCS4)(unsigned char)ascii[index]) {
+            return 0;
+        }
+    }
+    return ascii[len] == '\0';
+}
+
+/* Whether two code-point runs are byte-for-byte equal (control name matching is
+   case-sensitive, like form submission). */
+static int ucs4_runs_equal(const Py_UCS4 *left, Py_ssize_t left_len, const Py_UCS4 *right, Py_ssize_t right_len) {
+    if (left_len != right_len) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < left_len; index++) {
+        if (left[index] != right[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Whether an input element's type attribute equals a lowercase ASCII literal. */
+static int input_type_is(th_node *node, const char *name) {
+    const th_node_attr *type = find_node_attr(node, TH_ATTR_TYPE);
+    return type != NULL && type->value != NULL && ucs4_iequals_ascii(type->value, type->value_len, name);
+}
+
+/* The submission category of an input by its type attribute. A missing or
+   unrecognized type is text-like, the WHATWG default. */
+enum field_kind { FIELD_TEXTLIKE, FIELD_CHECKABLE, FIELD_BUTTONLIKE, FIELD_FILE };
+
+static enum field_kind input_kind(th_node *node) {
+    const th_node_attr *type = find_node_attr(node, TH_ATTR_TYPE);
+    if (type == NULL || type->value == NULL) {
+        return FIELD_TEXTLIKE;
+    }
+    const Py_UCS4 *value = type->value;
+    Py_ssize_t len = type->value_len;
+    if (ucs4_iequals_ascii(value, len, "checkbox") || ucs4_iequals_ascii(value, len, "radio")) {
+        return FIELD_CHECKABLE;
+    }
+    if (ucs4_iequals_ascii(value, len, "submit") || ucs4_iequals_ascii(value, len, "reset") ||
+        ucs4_iequals_ascii(value, len, "button") || ucs4_iequals_ascii(value, len, "image")) {
+        return FIELD_BUTTONLIKE;
+    }
+    if (ucs4_iequals_ascii(value, len, "file")) {
+        return FIELD_FILE;
+    }
+    return FIELD_TEXTLIKE;
+}
+
+/* The value attribute as a str, or the fallback str when the attribute is absent;
+   a present-but-empty (or valueless) attribute is the empty string. */
+static PyObject *value_attr_or(th_node *node, const char *fallback) {
+    const th_node_attr *value = find_node_attr(node, TH_ATTR_VALUE);
+    if (value == NULL) {
+        return PyUnicode_FromString(fallback);
+    }
+    return value->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(value->value, value->value_len);
+}
+
+/* A str from a code-point run with leading and trailing ASCII whitespace removed. */
+static PyObject *stripped_str(const Py_UCS4 *buffer, Py_ssize_t len) {
+    Py_ssize_t start = 0;
+    Py_ssize_t end = len;
+    while (start < end && is_space(buffer[start])) {
+        start++;
+    }
+    while (end > start && is_space(buffer[end - 1])) {
+        end--;
+    }
+    return ucs4_to_str(buffer + start, end - start);
+}
+
+/* An option's value: its value attribute if present (empty string when valueless),
+   else its stripped text content (WHATWG option value rule). */
+static PyObject *option_value_str(th_tree *tree, th_node *option) {
+    const th_node_attr *value = find_node_attr(option, TH_ATTR_VALUE);
+    if (value != NULL) {
+        return value->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(value->value, value->value_len);
+    }
+    Py_ssize_t len;
+    Py_UCS4 *buffer = th_node_text(tree, option, &len);
+    if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = stripped_str(buffer, len);
+    PyMem_Free(buffer);
+    return result;
+}
+
+/* The next option element after current within root's subtree, in document order. */
+static th_node *next_option(th_node *current, th_node *root) {
+    for (th_node *node = preorder_next(current, root); node != NULL; node = preorder_next(node, root)) {
+        if (node->atom == TH_TAG_OPTION) { /* only option elements carry this atom (text nodes are TH_TAG_UNKNOWN) */
+            return node;
+        }
+    }
+    return NULL;
+}
+
+/* The value(s) of a select: a list[str] of the selected options for a multiple
+   select, else the selected option's value (the last marked selected, or the first
+   option as the default), or None when it has no options. */
+static PyObject *select_value(th_tree *tree, th_node *select) {
+    if (find_node_attr(select, TH_ATTR_MULTIPLE) != NULL) {
+        PyObject *values = PyList_New(0);
+        if (values == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (th_node *option = next_option(select, select); option != NULL; option = next_option(option, select)) {
+            if (find_node_attr(option, TH_ATTR_SELECTED) == NULL) {
+                continue;
+            }
+            PyObject *value = option_value_str(tree, option);
+            if (value == NULL || PyList_Append(values, value) < 0) { /* GCOVR_EXCL_BR_LINE: alloc failure */
+                Py_XDECREF(value);                                   /* GCOVR_EXCL_LINE: alloc-failure path */
+                Py_DECREF(values);                                   /* GCOVR_EXCL_LINE: alloc-failure path */
+                return NULL;                                         /* GCOVR_EXCL_LINE: alloc-failure path */
+            }
+            Py_DECREF(value);
+        }
+        return values;
+    }
+    th_node *chosen = NULL;
+    th_node *first = NULL;
+    for (th_node *option = next_option(select, select); option != NULL; option = next_option(option, select)) {
+        if (first == NULL) {
+            first = option;
+        }
+        if (find_node_attr(option, TH_ATTR_SELECTED) != NULL) {
+            chosen = option;
+        }
+    }
+    th_node *use = chosen != NULL ? chosen : first;
+    if (use == NULL) {
+        Py_RETURN_NONE;
+    }
+    return option_value_str(tree, use);
+}
+
+static PyObject *element_get_field_value(PyObject *self, void *Py_UNUSED(closure)) {
+    th_node *node = ((NodeObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    PyObject *result = NULL;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    switch (node->atom) {
+    case TH_TAG_INPUT:
+        result = value_attr_or(node, input_kind(node) == FIELD_CHECKABLE ? "on" : "");
+        break;
+    case TH_TAG_TEXTAREA:
+        result = str_from_accessor(th_node_text, tree, node);
+        break;
+    case TH_TAG_BUTTON:
+        result = value_attr_or(node, "");
+        break;
+    case TH_TAG_OPTION:
+        result = option_value_str(tree, node);
+        break;
+    case TH_TAG_SELECT:
+        result = select_value(tree, node);
+        break;
+    default:
+        result = Py_NewRef(Py_None);
+        break;
+    }
+    Py_END_CRITICAL_SECTION();
+    return result;
+}
+
+/* Write or, when value is None or a deletion, remove the value attribute. */
+static int set_value_attr(PyObject *self, th_node *node, PyObject *value) {
+    th_tree *tree = tree_of(self);
+    if (value == NULL || value == Py_None) {
+        Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+        th_node_attr_del(tree, node, "value", 5);
+        Py_END_CRITICAL_SECTION();
+        return 0;
+    }
+    if (!PyUnicode_Check(value)) {
+        PyErr_SetString(PyExc_TypeError, "field_value must be a str or None");
+        return -1;
+    }
+    Py_ssize_t len = PyUnicode_GET_LENGTH(value);
+    Py_UCS4 *points = PyUnicode_AsUCS4Copy(value);
+    if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int rc;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    rc = th_node_attr_set(tree, node, "value", 5, points, len, 1);
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(points);
+    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on OOM */
+}
+
+/* Replace a textarea's children with a single Text node holding value, or clear it
+   when value is None or a deletion. */
+static int set_textarea_value(PyObject *self, th_node *node, PyObject *value) {
+    int has_text = value != NULL && value != Py_None;
+    if (has_text && !PyUnicode_Check(value)) {
+        PyErr_SetString(PyExc_TypeError, "field_value must be a str or None");
+        return -1;
+    }
+    Py_UCS4 *points = NULL;
+    Py_ssize_t len = 0;
+    if (has_text) {
+        len = PyUnicode_GET_LENGTH(value);
+        points = PyUnicode_AsUCS4Copy(value);
+        if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    th_tree *tree = tree_of(self);
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    while (node->first_child != NULL) {
+        th_node_remove(node->first_child);
+    }
+    th_node *text = len > 0 ? th_tree_make_data_node(tree, TH_NODE_TEXT, points, len) : NULL;
+    /* GCOVR_EXCL_START: a make_data_node allocation failure cannot be forced from a test */
+    if (len > 0 && text == NULL) {
+        error = 1;
+    }
+    /* GCOVR_EXCL_STOP */
+    if (text != NULL) {
+        th_node_append_child(node, text);
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(points);
+    return error ? -1 : 0; /* GCOVR_EXCL_BR_LINE: error is set only on the excluded allocation failure */
+}
+
+/* The set of wanted option values for a select assignment: {value} for a single
+   select (a str), the list members for a multiple select, or empty for None. */
+static PyObject *wanted_values(th_node *select, PyObject *value) {
+    int multiple = find_node_attr(select, TH_ATTR_MULTIPLE) != NULL;
+    PyObject *wanted = PySet_New(NULL);
+    if (wanted == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (value == NULL || value == Py_None) {
+        return wanted;
+    }
+    if (multiple) {
+        if (!PyList_Check(value)) {
+            PyErr_SetString(PyExc_TypeError, "field_value of a multiple select must be a list of str or None");
+            Py_DECREF(wanted);
+            return NULL;
+        }
+        Py_ssize_t count = PyList_GET_SIZE(value);
+        for (Py_ssize_t index = 0; index < count; index++) {
+            PyObject *item = PyList_GET_ITEM(value, index);
+            if (!PyUnicode_Check(item)) {
+                PyErr_SetString(PyExc_TypeError, "field_value of a multiple select must be a list of str or None");
+                Py_DECREF(wanted);
+                return NULL;
+            }
+            if (PySet_Add(wanted, item) < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Add only fails on OOM */
+                Py_DECREF(wanted);             /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;                   /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        }
+        return wanted;
+    }
+    if (!PyUnicode_Check(value)) {
+        PyErr_SetString(PyExc_TypeError, "field_value of a single select must be a str or None");
+        Py_DECREF(wanted);
+        return NULL;
+    }
+    if (PySet_Add(wanted, value) < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Add only fails on OOM */
+        Py_DECREF(wanted);              /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return wanted;
+}
+
+/* Select the options whose value is in wanted (only the first match for a single
+   select) and deselect the rest. */
+static int set_select_value(PyObject *self, th_node *select, PyObject *value) {
+    PyObject *wanted = wanted_values(select, value);
+    if (wanted == NULL) {
+        return -1;
+    }
+    int multiple = find_node_attr(select, TH_ATTR_MULTIPLE) != NULL;
+    th_tree *tree = tree_of(self);
+    int error = 0;
+    int selected_one = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *option = next_option(select, select); option != NULL && !error;
+         option = next_option(option, select)) {
+        PyObject *option_value = option_value_str(tree, option);
+        if (option_value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            error = 1;              /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        int want = PySet_Contains(wanted, option_value);
+        Py_DECREF(option_value);
+        if (want < 0) { /* GCOVR_EXCL_BR_LINE: membership of a str in a str set cannot raise */
+            error = 1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        int select_it = want && (multiple || !selected_one);
+        if (select_it) {
+            selected_one = 1;
+            th_node_attr_set(tree, option, "selected", 8, NULL, 0, 0);
+        } else {
+            th_node_attr_del(tree, option, "selected", 8);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_DECREF(wanted);
+    return error ? -1 : 0; /* GCOVR_EXCL_BR_LINE: error is set only on the excluded allocation failures */
+}
+
+static int element_set_field_value(PyObject *self, PyObject *value, void *Py_UNUSED(closure)) {
+    th_node *node = ((NodeObject *)self)->node;
+    switch (node->atom) {
+    case TH_TAG_INPUT:
+    case TH_TAG_BUTTON:
+    case TH_TAG_OPTION:
+        return set_value_attr(self, node, value);
+    case TH_TAG_TEXTAREA:
+        return set_textarea_value(self, node, value);
+    case TH_TAG_SELECT:
+        return set_select_value(self, node, value);
+    default:
+        PyErr_SetString(PyExc_TypeError, "field_value can only be set on a form control");
+        return -1;
+    }
+}
+
+static PyObject *element_get_checked(PyObject *self, void *Py_UNUSED(closure)) {
+    th_node *node = ((NodeObject *)self)->node;
+    int present;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    present = find_node_attr(node, TH_ATTR_CHECKED) != NULL;
+    Py_END_CRITICAL_SECTION();
+    return PyBool_FromLong(present);
+}
+
+/* Remove the checked flag from the other same-name radios in the radio's owning
+   form (nearest ancestor form, else the document), enforcing group exclusivity. */
+static void clear_radio_group(th_tree *tree, th_node *radio) {
+    const th_node_attr *name = find_node_attr(radio, TH_ATTR_NAME);
+    if (name == NULL || name->value == NULL || name->value_len == 0) {
+        return;
+    }
+    th_node *root = radio;
+    th_node *form = NULL;
+    for (th_node *ancestor = radio->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        root = ancestor;
+        if (form == NULL && ancestor->type == TH_NODE_ELEMENT && ancestor->atom == TH_TAG_FORM) {
+            form = ancestor;
+        }
+    }
+    th_node *scope = form != NULL ? form : root;
+    for (th_node *node = preorder_next(scope, scope); node != NULL; node = preorder_next(node, scope)) {
+        if (node == radio || node->atom != TH_TAG_INPUT || !input_type_is(node, "radio")) {
+            continue;
+        }
+        const th_node_attr *other = find_node_attr(node, TH_ATTR_NAME);
+        if (other != NULL && other->value != NULL &&
+            ucs4_runs_equal(name->value, name->value_len, other->value, other->value_len)) {
+            th_node_attr_del(tree, node, "checked", 7);
+        }
+    }
+}
+
+static int element_set_checked(PyObject *self, PyObject *value, void *Py_UNUSED(closure)) {
+    th_node *node = ((NodeObject *)self)->node;
+    if (value == NULL) {
+        PyErr_SetString(PyExc_TypeError, "cannot delete checked");
+        return -1;
+    }
+    if (node->atom != TH_TAG_INPUT || (!input_type_is(node, "checkbox") && !input_type_is(node, "radio"))) {
+        PyErr_SetString(PyExc_TypeError, "checked can only be set on a checkbox or radio input");
+        return -1;
+    }
+    int on = PyObject_IsTrue(value);
+    if (on < 0) {
+        return -1;
+    }
+    th_tree *tree = tree_of(self);
+    int rc = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    if (on) {
+        rc = th_node_attr_set(tree, node, "checked", 7, NULL, 0, 0);
+        if (rc >= 0 && input_type_is(node, "radio")) { /* GCOVR_EXCL_BR_LINE: attr_set only fails on OOM */
+            clear_radio_group(tree, node);
+        }
+    } else {
+        th_node_attr_del(tree, node, "checked", 7);
+    }
+    Py_END_CRITICAL_SECTION();
+    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on OOM */
+}
+
+/* Whether a control is barred from submission: its own disabled attribute, or a
+   disabled fieldset between it and the form. */
+static int control_disabled(th_node *control, th_node *form) {
+    if (find_node_attr(control, TH_ATTR_DISABLED) != NULL) {
+        return 1;
+    }
+    /* form is always an ancestor (collect_control only walks its descendants), so the walk stops there */
+    for (th_node *ancestor = control->parent; ancestor != form; ancestor = ancestor->parent) {
+        if (ancestor->atom == TH_TAG_FIELDSET && find_node_attr(ancestor, TH_ATTR_DISABLED) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Append a (name, value) pair, taking ownership of value and stealing nothing from
+   name. Returns 0, or -1 with an exception set. */
+static int emit_pair(PyObject *pairs, const th_node_attr *name, PyObject *value) {
+    if (value == NULL) { /* GCOVR_EXCL_BR_LINE: a value builder only fails on OOM */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *name_obj = ucs4_to_str(name->value, name->value_len);
+    if (name_obj == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(value);   /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *pair = PyTuple_Pack(2, name_obj, value);
+    Py_DECREF(name_obj);
+    Py_DECREF(value);
+    if (pair == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int rc = PyList_Append(pairs, pair);
+    Py_DECREF(pair);
+    return rc; /* GCOVR_EXCL_BR_LINE: PyList_Append only fails on OOM */
+}
+
+/* Append each selected option of a select as a (name, value) pair: every selected
+   one for a multiple select, the selected (or default first) one otherwise,
+   skipping disabled options. */
+static int collect_select(th_tree *tree, th_node *select, const th_node_attr *name, PyObject *pairs) {
+    if (find_node_attr(select, TH_ATTR_MULTIPLE) != NULL) {
+        for (th_node *option = next_option(select, select); option != NULL; option = next_option(option, select)) {
+            if (find_node_attr(option, TH_ATTR_DISABLED) != NULL || find_node_attr(option, TH_ATTR_SELECTED) == NULL) {
+                continue;
+            }
+            if (emit_pair(pairs, name, option_value_str(tree, option)) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+                return -1;                                                    /* GCOVR_EXCL_LINE: alloc-failure */
+            }
+        }
+        return 0;
+    }
+    th_node *chosen = NULL;
+    th_node *first = NULL;
+    for (th_node *option = next_option(select, select); option != NULL; option = next_option(option, select)) {
+        if (find_node_attr(option, TH_ATTR_DISABLED) != NULL) {
+            continue;
+        }
+        if (first == NULL) {
+            first = option;
+        }
+        if (find_node_attr(option, TH_ATTR_SELECTED) != NULL) {
+            chosen = option;
+        }
+    }
+    th_node *use = chosen != NULL ? chosen : first;
+    if (use == NULL) {
+        return 0;
+    }
+    return emit_pair(pairs, name, option_value_str(tree, use));
+}
+
+/* Append node's submission pair(s) to pairs when it is a successful control. */
+static int collect_control(th_tree *tree, th_node *form, th_node *node, PyObject *pairs) {
+    uint16_t atom = node->atom;
+    if (atom != TH_TAG_INPUT && atom != TH_TAG_TEXTAREA && atom != TH_TAG_SELECT) {
+        return 0;
+    }
+    const th_node_attr *name = find_node_attr(node, TH_ATTR_NAME);
+    if (name == NULL || name->value == NULL || name->value_len == 0 || control_disabled(node, form)) {
+        return 0;
+    }
+    if (atom == TH_TAG_SELECT) {
+        return collect_select(tree, node, name, pairs);
+    }
+    if (atom == TH_TAG_TEXTAREA) {
+        Py_ssize_t len;
+        Py_UCS4 *buffer = th_node_text(tree, node, &len);
+        if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *value = ucs4_to_str(buffer, len);
+        PyMem_Free(buffer);
+        return emit_pair(pairs, name, value);
+    }
+    enum field_kind kind = input_kind(node);
+    if (kind == FIELD_BUTTONLIKE || kind == FIELD_FILE) {
+        return 0;
+    }
+    if (kind == FIELD_CHECKABLE && find_node_attr(node, TH_ATTR_CHECKED) == NULL) {
+        return 0;
+    }
+    return emit_pair(pairs, name, value_attr_or(node, kind == FIELD_CHECKABLE ? "on" : ""));
+}
+
+PyDoc_STRVAR(form_data_doc, "form_data()\n--\n\n"
+                            "Return the form's successful controls as a list of (name, value) pairs in\n"
+                            "document order, following the WHATWG form-submission entry-list rules.\n"
+                            "Controls without a non-empty name, disabled controls (their own disabled or a\n"
+                            "disabled ancestor fieldset), buttons, and file/submit/reset/image inputs are\n"
+                            "skipped; a checkbox or radio contributes only when checked, a select one pair\n"
+                            "per selected option. Controls are matched by containment in the form.");
+
+static PyObject *element_form_data(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((NodeObject *)self)->node;
+    if (node->atom != TH_TAG_FORM) {
+        PyErr_SetString(PyExc_TypeError, "form_data can only be called on a form element");
+        return NULL;
+    }
+    th_tree *tree = tree_of(self);
+    PyObject *pairs = PyList_New(0);
+    if (pairs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *control = preorder_next(node, node); control != NULL; control = preorder_next(control, node)) {
+        if (collect_control(tree, node, control, pairs) < 0) { /* GCOVR_EXCL_BR_LINE: fails only on OOM */
+            error = 1;                                         /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;                                             /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {          /* GCOVR_EXCL_BR_LINE: error is set only on an allocation failure */
+        Py_DECREF(pairs); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return pairs;
 }
 
 /* class_matches for a plain-string filter: compare the filter's code points to
@@ -3223,6 +3785,7 @@ static PyMethodDef element_methods[] = {
     {"insert", element_insert, METH_VARARGS, insert_doc},
     {"clear", element_clear, METH_NOARGS, clear_doc},
     {"normalize", element_normalize, METH_NOARGS, normalize_doc},
+    {"form_data", element_form_data, METH_NOARGS, form_data_doc},
     {NULL, NULL, 0, NULL},
 };
 
