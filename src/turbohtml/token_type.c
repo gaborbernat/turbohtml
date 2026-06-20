@@ -12,12 +12,16 @@
 
 typedef struct {
     PyObject_HEAD th_token record;
-    char *arena;        /* single allocation backing every buffer in record (NULL otherwise) */
-    PyObject *source;   /* string whose storage backs a still-unresolved slice (NULL otherwise) */
-    PyObject *data_str; /* resolved text for a slice record (NULL until needed) */
+    char *arena;         /* single allocation backing every buffer in record (NULL otherwise) */
+    PyObject *source;    /* string whose storage backs a still-unresolved slice (NULL otherwise) */
+    PyObject *data_str;  /* resolved text for a slice record (NULL until needed) */
+    PyObject *src_owner; /* borrowed input owning the verbatim-source storage (lazy .source) */
+    PyObject *src_str;   /* resolved verbatim source string (NULL until needed) */
 } TokenObject;
 
-static const char *const KIND_NAMES[5] = {"TEXT", "START_TAG", "END_TAG", "COMMENT", "DOCTYPE"};
+#define KIND_COUNT 6
+static const char *const KIND_NAMES[KIND_COUNT] = {"TEXT",    "START_TAG", "END_TAG",
+                                                   "COMMENT", "DOCTYPE",   "CHARACTER_REFERENCE"};
 
 static module_state *state_of(PyObject *self) {
     return PyType_GetModuleState(Py_TYPE(self));
@@ -124,6 +128,22 @@ PyObject *token_from_record(module_state *state, const th_tokenizer *sm, PyObjec
             return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: alloc-failure path */
         }
     }
+    if (record->has_source) {
+        if (source != NULL) {
+            /* borrowed one-shot input owns the storage: resolve .source on demand */
+            self->src_owner = Py_NewRef(source);
+        } else {
+            /* streaming: the machine owns the storage and a later feed may move it,
+               so resolve the span now while it is still valid */
+            int kind;
+            const char *data = th_tok_input_data(sm, &kind);
+            self->src_str = PyUnicode_FromKindAndData(kind, data + record->src_off * kind, record->src_span);
+            if (self->src_str == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;             /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        }
+    }
     return (PyObject *)self;
 }
 
@@ -132,6 +152,8 @@ static void token_dealloc(PyObject *self) {
     TokenObject *token = (TokenObject *)self;
     Py_XDECREF(token->source);
     Py_XDECREF(token->data_str);
+    Py_XDECREF(token->src_owner);
+    Py_XDECREF(token->src_str);
     if (token->arena != NULL) {
         PyMem_Free(token->arena);
     } else {
@@ -163,10 +185,31 @@ static PyObject *token_get_data(PyObject *self, void *Py_UNUSED(closure)) {
         }
         return Py_NewRef(token->data_str);
     }
-    if (token->record.kind == TH_TEXT || token->record.kind == TH_COMMENT) {
+    if (token->record.kind == TH_TEXT || token->record.kind == TH_COMMENT || token->record.kind == TH_CHARREF) {
         return buf_to_str(&token->record.text);
     }
     Py_RETURN_NONE;
+}
+
+/* The verbatim source slice a token came from: the raw reference text for a
+   character reference, and the raw markup source for a tag/comment/doctype when
+   the tokenizer captured it. None when no source was recorded. The string
+   resolves lazily against borrowed one-shot input and is built eagerly while
+   streaming (token_from_record), so a later feed cannot invalidate the span. */
+static PyObject *token_get_source(PyObject *self, void *Py_UNUSED(closure)) {
+    TokenObject *token = (TokenObject *)self;
+    if (token->src_str != NULL) {
+        return Py_NewRef(token->src_str);
+    }
+    if (!token->record.has_source) {
+        Py_RETURN_NONE;
+    }
+    token->src_str =
+        PyUnicode_Substring(token->src_owner, token->record.src_off, token->record.src_off + token->record.src_span);
+    if (token->src_str == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return Py_NewRef(token->src_str);
 }
 
 static PyObject *token_get_tag(PyObject *self, void *Py_UNUSED(closure)) {
@@ -265,7 +308,8 @@ static PyObject *token_get_col(PyObject *self, void *Py_UNUSED(closure)) {
    from _html.pyi, the single source of truth (see docs/conf.py). */
 static PyGetSetDef token_getset[] = {
     {"type", token_get_type, NULL, "the TokenType of this token", NULL},
-    {"data", token_get_data, NULL, "text run or comment data, else None", NULL},
+    {"data", token_get_data, NULL, "text run, comment, or resolved character-reference data, else None", NULL},
+    {"source", token_get_source, NULL, "verbatim source slice this token came from, else None", NULL},
     {"tag", token_get_tag, NULL, "lowercased tag name for start/end tags, else None", NULL},
     {"attrs", token_get_attrs, NULL, "attribute (name, value) pairs for tags, else None", NULL},
     {"self_closing", token_get_self_closing, NULL, "whether a start tag carried a trailing slash", NULL},
@@ -375,7 +419,7 @@ static int build_kind_enum(PyObject *module, module_state *state) {
     if (members == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    for (int index = 0; index < 5; index++) {
+    for (int index = 0; index < KIND_COUNT; index++) {
         PyObject *value = PyLong_FromLong(index);
         /* allocation failure cannot be forced from a test */
         if (value == NULL || PyDict_SetItemString(members, KIND_NAMES[index], value) < 0) { /* GCOVR_EXCL_BR_LINE */
@@ -417,7 +461,7 @@ static int build_kind_enum(PyObject *module, module_state *state) {
         return -1;            /* GCOVR_EXCL_LINE: alloc-failure path */
     }
     Py_DECREF(doc);
-    for (int index = 0; index < 5; index++) {
+    for (int index = 0; index < KIND_COUNT; index++) {
         state->kinds[index] = PyObject_GetAttrString(kind_enum, KIND_NAMES[index]);
         if (state->kinds[index] == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             Py_DECREF(kind_enum);          /* GCOVR_EXCL_LINE: allocation-failure path */

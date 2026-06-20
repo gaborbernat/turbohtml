@@ -15,10 +15,16 @@
    land on the sticky oom flag. The numeric rules follow the tokenizer spec,
    which emits control and noncharacter code points rather than dropping them
    the way unescape() does. */
-static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int in_attr) {
+/* is_reference (when non-NULL) reports whether the run decoded an actual
+   reference (1) rather than leaving a literal ampersand sequence (0), so the
+   text states can split a real reference into its own token. */
+static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int in_attr, int *is_reference) {
     Py_ssize_t len = self->input.len;
     Py_ssize_t amp = self->pos;
     Py_ssize_t after_amp = amp + 1;
+    if (is_reference != NULL) {
+        *is_reference = 0;
+    }
 
     if (after_amp >= len) {
         if (!self->eof) {
@@ -86,6 +92,9 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
             push(self, dest, replacement);
         } else {
             push(self, dest, num);
+        }
+        if (is_reference != NULL) {
+            *is_reference = 1;
         }
         return end - amp;
     }
@@ -169,7 +178,43 @@ static Py_ssize_t TH_NAME(consume_charref)(th_tokenizer *self, th_buf *dest, int
     for (int index = match_len; index < name_len; index++) {
         push(self, dest, chars[index]);
     }
+    if (is_reference != NULL) {
+        *is_reference = 1;
+    }
     return 1 + name_len + match_semicolon;
+}
+
+/* Handle a '&' in text content when references are split out (resolve_references
+   off). Decode it into the scratch buffer: a real reference becomes a queued
+   TH_CHARREF token (RUN_EMITTED), a literal ampersand sequence joins the
+   surrounding text run (RUN_DONE), and an incomplete reference suspends
+   (RUN_NEED_MORE). */
+static enum run_result TH_NAME(text_charref)(th_tokenizer *self) {
+    Py_ssize_t amp = self->pos;
+    Py_ssize_t ref_line = self->line;
+    Py_ssize_t ref_col = self->col;
+    int is_ref = 0;
+    buf_reset(&self->ref);
+    Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->ref, 0, &is_ref);
+    if (consumed == -1) {
+        return RUN_NEED_MORE;
+    }
+    if (is_ref) {
+        self->ref_line = ref_line;
+        self->ref_col = ref_col;
+        self->pos += consumed;
+        self->col += consumed;
+        emit_charref(self, amp, consumed);
+        return RUN_EMITTED;
+    }
+    text_begin(self);
+    text_materialize(self);
+    for (Py_ssize_t index = 0; index < self->ref.len; index++) {
+        push(self, &self->text, buf_read(&self->ref, index));
+    }
+    self->pos += consumed;
+    self->col += consumed;
+    return RUN_DONE;
 }
 
 /* Compare the available code points against keyword: 2 = full match,
@@ -231,15 +276,25 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             }
 #endif
             if (ch == '&') {
-                text_begin(self);
-                text_materialize(self);
-                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->text, 0);
-                if (consumed == -1) {
-                    return RUN_NEED_MORE;
+                if (self->resolve_references) {
+                    text_begin(self);
+                    text_materialize(self);
+                    Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->text, 0, NULL);
+                    if (consumed == -1) {
+                        return RUN_NEED_MORE;
+                    }
+                    self->pos += consumed;
+                    self->col += consumed;
+                    continue;
                 }
-                self->pos += consumed;
-                self->col += consumed;
-                continue;
+                switch (TH_NAME(text_charref)(self)) {
+                case RUN_NEED_MORE:
+                    return RUN_NEED_MORE;
+                case RUN_EMITTED:
+                    return RUN_EMITTED;
+                default: /* a literal ampersand sequence joined the text run */
+                    continue;
+                }
             }
 #if TH_UCS1
             /* the run branch consumed every character but '&' and '<', and '&' is
@@ -271,15 +326,25 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '&') {
-                text_begin(self);
-                text_materialize(self);
-                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->text, 0);
-                if (consumed == -1) {
-                    return RUN_NEED_MORE;
+                if (self->resolve_references) {
+                    text_begin(self);
+                    text_materialize(self);
+                    Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->text, 0, NULL);
+                    if (consumed == -1) {
+                        return RUN_NEED_MORE;
+                    }
+                    self->pos += consumed;
+                    self->col += consumed;
+                    continue;
                 }
-                self->pos += consumed;
-                self->col += consumed;
-                continue;
+                switch (TH_NAME(text_charref)(self)) {
+                case RUN_NEED_MORE:
+                    return RUN_NEED_MORE;
+                case RUN_EMITTED:
+                    return RUN_EMITTED;
+                default: /* a literal ampersand sequence joined the text run */
+                    continue;
+                }
             }
             if (ch == '<') {
                 MARK();
@@ -942,7 +1007,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '&') {
-                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1);
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1, NULL);
                 if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
@@ -971,7 +1036,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '&') {
-                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1);
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1, NULL);
                 if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }
@@ -993,7 +1058,7 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '&') {
-                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1);
+                Py_ssize_t consumed = TH_NAME(consume_charref)(self, &self->attr->value, 1, NULL);
                 if (consumed == -1) {
                     return RUN_NEED_MORE;
                 }

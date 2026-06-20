@@ -137,8 +137,9 @@ def test_token_repr() -> None:
 
 
 def test_token_type_enum() -> None:
-    assert [member.value for member in TokenType] == [0, 1, 2, 3, 4]
+    assert [member.value for member in TokenType] == [0, 1, 2, 3, 4, 5]
     assert TokenType.TEXT == 0
+    assert TokenType.CHARACTER_REFERENCE == 5
     assert isinstance(TokenType.START_TAG, int)
 
 

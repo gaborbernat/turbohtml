@@ -602,7 +602,9 @@ inverts the control flow. Each ``handle_*`` override becomes a branch on :attr:`
     - - ``handle_decl(decl)``
       - ``TokenType.DOCTYPE`` → ``token.name``
     - - ``handle_entityref``/``handle_charref``
-      - none needed; references are already resolved in ``token.data``
+      - ``tokenize(..., resolve_references=False)`` → ``TokenType.CHARACTER_REFERENCE``, else resolved in ``token.data``
+    - - ``get_starttag_text()``
+      - ``tokenize(..., capture_source=True)`` → ``token.source``
 
 .. testcode::
 
@@ -623,11 +625,13 @@ inverts the control flow. Each ``handle_*`` override becomes a branch on :attr:`
 
     [('start', 'p', [('class', 'x')]), ('data', 'Hi & bye'), ('end', 'p')]
 
-There is no ``convert_charrefs`` switch to set: turbohtml always resolves character references the WHATWG way, so
-``handle_entityref`` and ``handle_charref`` have no counterpart and ``token.data`` already holds decoded text (``Hi &
-bye`` above, not ``Hi &amp; bye``). When the goal is the resulting structure rather than the event sequence, skip the
-loop and :func:`turbohtml.parse` to a tree, then walk it. The :doc:`performance` page's tokenizing benchmark times this
-token loop against ``html.parser``.
+By default ``token.data`` already holds decoded text (``Hi & bye`` above, not ``Hi &amp; bye``), the equivalent of
+``convert_charrefs=True``. To recover the split stream that ``convert_charrefs=False`` gives - one event per character
+reference - pass ``resolve_references=False`` and handle ``TokenType.CHARACTER_REFERENCE`` tokens, whose
+``token.source`` is the verbatim reference (``&amp;``) and ``token.data`` its resolved value. The verbatim start-tag
+text that ``get_starttag_text()`` returns is ``token.source`` once you pass ``capture_source=True``. When the goal is
+the resulting structure rather than the event sequence, skip the loop and :func:`turbohtml.parse` to a tree, then walk
+it. The :doc:`performance` page's tokenizing benchmark times this token loop against ``html.parser``.
 
 *********************
  From w3lib (Scrapy)
