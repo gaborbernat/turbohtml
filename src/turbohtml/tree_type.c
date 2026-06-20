@@ -4310,6 +4310,216 @@ PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObje
     return tree_to_node(PyModule_GetState(module), tree, text, Py_None);
 }
 
+/* ------------------------------------------------- incremental (push) parser */
+
+/* The public IncrementalParser: a push parser that owns a C th_stream plus, once
+   the first bytes chunk arrives, a stateful incremental decoder for the chosen
+   encoding so a multi-byte character split across two chunks decodes correctly.
+   stream is NULL once close() has handed the tree off (or __exit__ discarded it),
+   marking the parser spent. */
+typedef struct {
+    PyObject_HEAD th_stream *stream;
+    PyObject *encoding; /* the encoding str used to decode bytes chunks */
+    PyObject *decoder;  /* the incremental decoder, created on the first bytes feed; else NULL */
+} StreamObject;
+
+static PyObject *stream_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"encoding", NULL};
+    PyObject *encoding = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$U:IncrementalParser", keywords, &encoding)) {
+        return NULL;
+    }
+    StreamObject *self = (StreamObject *)type->tp_alloc(type, 0);
+    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->decoder = NULL;
+    self->encoding = encoding != NULL ? Py_NewRef(encoding) : PyUnicode_FromString("utf-8");
+    if (self->encoding == NULL) { /* GCOVR_EXCL_BR_LINE: the literal "utf-8" always builds */
+        Py_DECREF(self);          /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    self->stream = th_stream_new();
+    if (self->stream == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return (PyObject *)self;
+}
+
+static void stream_dealloc(PyObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    StreamObject *parser = (StreamObject *)self;
+    if (parser->stream != NULL) {
+        th_stream_free(parser->stream);
+    }
+    Py_XDECREF(parser->encoding);
+    Py_XDECREF(parser->decoder);
+    type->tp_free(self);
+    Py_DECREF(type);
+}
+
+/* Decode a bytes chunk through the parser's incremental decoder, creating it on
+   first use (an unknown encoding raises LookupError here). final flushes any
+   bytes the decoder held back at a chunk boundary. */
+static PyObject *stream_decode(StreamObject *parser, PyObject *data, int final) {
+    if (parser->decoder == NULL) {
+        const char *name = PyUnicode_AsUTF8(parser->encoding);
+        if (name == NULL) { /* a lone-surrogate encoding name has no UTF-8 form */
+            return NULL;
+        }
+        parser->decoder = PyCodec_IncrementalDecoder(name, "replace");
+        if (parser->decoder == NULL) {
+            return NULL;
+        }
+    }
+    return PyObject_CallMethod(parser->decoder, "decode", "Oi", data, final);
+}
+
+/* Feed already-decoded code points to the C stream; -1 with an exception set on
+   allocation failure. */
+static int stream_feed_str(StreamObject *parser, PyObject *text) {
+    int rc = th_stream_feed(parser->stream, PyUnicode_KIND(text), PyUnicode_DATA(text), PyUnicode_GET_LENGTH(text));
+    if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: only an allocation failure returns -1 */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
+}
+
+static PyObject *stream_feed_locked(StreamObject *parser, PyObject *data) {
+    if (parser->stream == NULL) {
+        PyErr_SetString(PyExc_ValueError, "cannot feed a closed IncrementalParser");
+        return NULL;
+    }
+    if (PyUnicode_Check(data)) {
+        if (stream_feed_str(parser, data) < 0) { /* GCOVR_EXCL_BR_LINE: only an allocation failure returns -1 */
+            return NULL;                         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_RETURN_NONE;
+    }
+    if (!PyObject_CheckBuffer(data)) {
+        PyErr_SetString(PyExc_TypeError, "feed() argument must be str or a bytes-like object");
+        return NULL;
+    }
+    PyObject *decoded = stream_decode(parser, data, 0);
+    if (decoded == NULL) {
+        return NULL;
+    }
+    int failed = stream_feed_str(parser, decoded);
+    Py_DECREF(decoded);
+    if (failed < 0) { /* GCOVR_EXCL_BR_LINE: only an allocation failure returns -1 */
+        return NULL;  /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(stream_feed_doc, "feed(data)\n--\n\n"
+                              "Push a chunk of markup. data is str (fed as code points) or a bytes-like\n"
+                              "object decoded with the parser's encoding, with an incomplete trailing\n"
+                              "multi-byte sequence held back until the next chunk. The source need never\n"
+                              "be held whole in memory. Raises ValueError once the parser is closed.");
+
+static PyObject *stream_feed(PyObject *self, PyObject *data) {
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(self); /* the C stream is mutated as the chunk is consumed */
+    result = stream_feed_locked((StreamObject *)self, data);
+    Py_END_CRITICAL_SECTION();
+    return result;
+}
+
+static PyObject *stream_close_locked(StreamObject *parser, module_state *state) {
+    if (parser->stream == NULL) {
+        PyErr_SetString(PyExc_ValueError, "IncrementalParser is already closed");
+        return NULL;
+    }
+    if (parser->decoder != NULL) {
+        /* flush any bytes the decoder held back at the last chunk boundary */
+        PyObject *tail = PyObject_CallMethod(parser->decoder, "decode", "yi", "", 1);
+        if (tail == NULL) { /* GCOVR_EXCL_BR_LINE: a final empty decode cannot fail once the codec exists */
+            return NULL;    /* GCOVR_EXCL_LINE: decode-failure path */
+        }
+        int failed = stream_feed_str(parser, tail);
+        Py_DECREF(tail);
+        if (failed < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;  /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    th_tree *tree = th_stream_finish(parser->stream);
+    if (tree == NULL) {                 /* GCOVR_EXCL_BR_LINE: finish only fails on allocation */
+        th_stream_free(parser->stream); /* GCOVR_EXCL_LINE: allocation-failure path */
+        parser->stream = NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory();        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_stream_free(parser->stream); /* frees the tokenizer; the tree is the caller's now */
+    parser->stream = NULL;
+    return tree_to_node(state, tree, Py_None, parser->decoder != NULL ? parser->encoding : Py_None);
+}
+
+PyDoc_STRVAR(stream_close_doc, "close()\n--\n\n"
+                               "Signal end of input and return the finished Document, flushing the\n"
+                               "decoder and tokenizer and applying the missing html/head/body rules.\n"
+                               "Raises ValueError if the parser is already closed.");
+
+static PyObject *stream_close(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    module_state *state = PyType_GetModuleState(Py_TYPE(self));
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(self); /* the C stream is finished and handed off */
+    result = stream_close_locked((StreamObject *)self, state);
+    Py_END_CRITICAL_SECTION();
+    return result;
+}
+
+PyDoc_STRVAR(stream_enter_doc, "__enter__()\n--\n\nEnter a with block; returns the parser itself.");
+
+static PyObject *stream_enter(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return Py_NewRef(self);
+}
+
+PyDoc_STRVAR(stream_exit_doc, "__exit__(*exc)\n--\n\n"
+                              "Leave a with block. If close() was not called the in-progress parse is\n"
+                              "discarded and its memory released, so abandoning a stream early is cheap.");
+
+static PyObject *stream_exit(PyObject *self, PyObject *Py_UNUSED(args)) {
+    StreamObject *parser = (StreamObject *)self;
+    Py_BEGIN_CRITICAL_SECTION(self); /* the C stream is released if still open */
+    if (parser->stream != NULL) {
+        th_stream_free(parser->stream);
+        parser->stream = NULL;
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef stream_methods[] = {
+    {"feed", stream_feed, METH_O, stream_feed_doc},
+    {"close", stream_close, METH_NOARGS, stream_close_doc},
+    {"__enter__", stream_enter, METH_NOARGS, stream_enter_doc},
+    {"__exit__", stream_exit, METH_VARARGS, stream_exit_doc},
+    {NULL, NULL, 0, NULL},
+};
+
+PyDoc_STRVAR(stream_doc, "IncrementalParser(*, encoding='utf-8')\n--\n\n"
+                         "A push parser that builds a Document from chunks fed with feed(), so a\n"
+                         "document arriving over a stream never has to be held whole in memory. Feed\n"
+                         "str or bytes chunks in any size, then call close() for the finished\n"
+                         "Document. For a whole string or bytes at once use parse().");
+
+static PyType_Slot stream_slots[] = {
+    {Py_tp_doc, (void *)stream_doc},
+    {Py_tp_new, stream_new},
+    {Py_tp_dealloc, stream_dealloc},
+    {Py_tp_methods, stream_methods},
+    {0, NULL},
+};
+
+static PyType_Spec stream_spec = {
+    .name = "turbohtml._html.IncrementalParser",
+    .basicsize = sizeof(StreamObject),
+    .flags = Py_TPFLAGS_DEFAULT,
+    .slots = stream_slots,
+};
+
 /* ---------------------------------------------------------------- pickle */
 
 /* This node's children as a fresh list of wrappers, so pickling an element
@@ -4669,6 +4879,12 @@ int tree_register(PyObject *module, module_state *state) {
         /* allocation failure cannot be forced from a test */
         state->document_type == NULL) { /* GCOVR_EXCL_BR_LINE */
         return -1;                      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    state->parser_type = PyType_FromModuleAndSpec(module, &stream_spec, NULL);
+    /* allocation failure cannot be forced from a test */
+    if (state->parser_type == NULL ||                                                 /* GCOVR_EXCL_BR_LINE */
+        PyModule_AddObjectRef(module, "IncrementalParser", state->parser_type) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return 0;
 }

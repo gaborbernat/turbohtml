@@ -149,6 +149,33 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
 
 void th_tree_free(th_tree *tree);
 
+/* --- streaming (push) parse --- */
+
+/* A push parser driving the tokenizer and tree builder incrementally, so a
+   document can be fed in chunks without ever holding the whole source: the
+   tokenizer reclaims its consumed input on each feed and the insertion-mode
+   state persists across feeds. */
+typedef struct th_stream th_stream;
+
+/* Create an empty push parser. Returns NULL on allocation failure (no Python
+   error is set). */
+th_stream *th_stream_new(void);
+
+/* Append a chunk of code points (a borrowed PyUnicode buffer, copied) and build
+   as far as the now-available tokens allow. Returns 0, or -1 on allocation
+   failure. */
+int th_stream_feed(th_stream *stream, int kind, const void *data, Py_ssize_t length);
+
+/* Signal end of input, flush the remaining tokens, apply the EOF
+   missing-element rules, and hand the finished tree to the caller (who must
+   th_tree_free it). The stream no longer owns the tree afterwards. Returns NULL
+   on allocation failure. */
+th_tree *th_stream_finish(th_stream *stream);
+
+/* Free the parser and, unless th_stream_finish already handed it off, its
+   in-progress tree. */
+void th_stream_free(th_stream *stream);
+
 /* Serialize the tree in the html5lib tree-construction "#document" format (one
    "| " indented line per node) into a freshly PyMem-allocated UCS4 buffer;
    *out_len receives the length. Returns NULL on allocation failure. Used by the
