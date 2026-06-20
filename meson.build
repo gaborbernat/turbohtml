@@ -21,6 +21,7 @@ py.extension_module(
         'src/turbohtml/charref.c',
         'src/turbohtml/escape.c',
         'src/turbohtml/linkify.c',
+        'src/turbohtml/links.c',
         'src/turbohtml/markup.c',
         'src/turbohtml/sanitize.c',
         'src/turbohtml/token_type.c',
@@ -41,6 +42,7 @@ py.install_sources(
     [
         'src/turbohtml/__init__.py',
         'src/turbohtml/_html.pyi',
+        'src/turbohtml/_links.py',
         'src/turbohtml/_xpath.py',
         'src/turbohtml/bleach_compat.py',
         'src/turbohtml/html_parser.py',

@@ -219,6 +219,11 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
       - ``el.unwrap()``, ``el.decompose()``
     - - ``el.sourceline``
       - ``el.source_line`` (1-based, like lxml; plus ``el.source_col`` for the 0-based column lxml lacks)
+    - - ``el.iterlinks()``
+      - :meth:`el.links() <turbohtml.Node.links>`
+    - - ``el.make_links_absolute(base)``, ``el.rewrite_links(fn)``
+      - :meth:`el.resolve_links(base) <turbohtml.Node.resolve_links>`, :meth:`el.rewrite_links(fn)
+        <turbohtml.Node.rewrite_links>`
     - - ``lxml.html.tostring(el)``
       - ``el.html``
 
