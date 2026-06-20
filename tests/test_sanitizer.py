@@ -153,6 +153,39 @@ def test_set_attributes_skips_disallowed_elements() -> None:
     assert "rel=" not in sanitize("<a>t</a><script>z</script>", policy)
 
 
+def test_script_text_leaks_without_remove_with_content() -> None:
+    # baseline: under the default ESCAPE mode a disallowed <script> is escaped, so its text stays visible
+    out = sanitize("<b>ok</b><script>alert(1)</script>", Policy(tags=frozenset({"b"})))
+    assert "alert(1)" in out
+
+
+def test_remove_with_content_deletes_disallowed_subtree() -> None:
+    # naming the tag in remove_with_content drops the tag and its whole subtree, so the text never leaks
+    policy = Policy(tags=frozenset({"b"}), remove_with_content=frozenset({"script", "style"}))
+    assert sanitize("<b>ok</b><script>alert(1)</script><style>x{}</style>", policy) == "<b>ok</b>"
+
+
+def test_remove_with_content_does_not_drop_allowed_tags() -> None:
+    # an allowlisted tag is kept even when it also appears in remove_with_content
+    policy = Policy(tags=frozenset({"b"}), remove_with_content=frozenset({"b"}))
+    assert sanitize("<b>kept</b>", policy) == "<b>kept</b>"
+
+
+def test_remove_with_content_leaves_other_disallowed_tags_to_the_mode() -> None:
+    # a disallowed tag that is not in the set still follows on_disallowed (escaped here)
+    policy = Policy(tags=frozenset({"b"}), remove_with_content=frozenset({"script"}))
+    assert "&lt;unknown&gt;" in sanitize("<b>ok</b><unknown>x</unknown>", policy)
+
+
+@pytest.mark.parametrize("mode", [OnDisallowed.ESCAPE, OnDisallowed.STRIP, OnDisallowed.REMOVE])
+def test_remove_with_content_overrides_every_disposition(mode: OnDisallowed) -> None:
+    # content removal happens before the escape/strip/remove dispatch, so it wins in every mode
+    policy = Policy(tags=frozenset({"b"}), on_disallowed_tag=mode, remove_with_content=frozenset({"script"}))
+    out = sanitize("<b>ok</b><script>alert(1)</script>", policy)
+    assert "alert(1)" not in out
+    assert "<b>ok</b>" in out
+
+
 @pytest.mark.parametrize(
     ("url", "kept"),
     [
@@ -395,7 +428,7 @@ def test_sanitize_rejects_non_element() -> None:
     from turbohtml._html import _sanitize  # noqa: PLC0415  # exercising the C argument guard directly
 
     with pytest.raises(TypeError):
-        _sanitize("not an element", frozenset(), {}, frozenset(), True, 0, True, None, None, {})  # ty: ignore[invalid-argument-type]  # noqa: FBT003
+        _sanitize("not an element", frozenset(), {}, frozenset(), True, 0, True, None, None, {}, frozenset())  # ty: ignore[invalid-argument-type]  # noqa: FBT003
 
 
 def test_sanitize_rejects_wrong_arguments() -> None:

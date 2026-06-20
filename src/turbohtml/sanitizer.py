@@ -76,8 +76,10 @@ class Policy:
     the allowlist for URL-bearing attributes; ``attribute_filter`` is an optional last word over every surviving
     attribute, returning a replacement value or ``None`` to drop it. ``set_attributes`` maps a tag to attribute values
     forced onto every kept instance of it (added if absent, overwritten if present) -- the one thing
-    ``attribute_filter`` cannot do, since it only sees attributes already there. The baseline-unsafe set and the
-    event-handler and bad-scheme stripping are not configurable, so any policy is safe.
+    ``attribute_filter`` cannot do, since it only sees attributes already there. ``remove_with_content`` names
+    disallowed tags whose whole subtree is dropped (e.g. ``script``/``style``) rather than escaped or stripped, so their
+    text never leaks into the output. The baseline-unsafe set and the event-handler and bad-scheme stripping are not
+    configurable, so any policy is safe.
     """
 
     tags: frozenset[str] = DEFAULT_TAGS
@@ -90,6 +92,7 @@ class Policy:
     add_link_rel: frozenset[str] = frozenset()
     attribute_filter: Callable[[str, str, str], str | None] | None = None
     set_attributes: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    remove_with_content: frozenset[str] = frozenset()
 
     @classmethod
     def strict(cls) -> Policy:
@@ -136,6 +139,7 @@ class Sanitizer:
             self._link_rel,
             policy.attribute_filter,
             self._set_attributes,
+            policy.remove_with_content,
         )
         return root.inner_html
 

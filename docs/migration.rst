@@ -892,10 +892,11 @@ Porting inverts the model. Instead of switching dangerous things off, declare th
     <p>Hi&lt;script&gt;x()&lt;/script&gt; <a>l</a></p>
 
 The ``javascript:`` URL is gone because ``http``/``https``/``mailto`` are the only schemes the policy admits, and the
-``<script>`` is escaped rather than executed. ``Cleaner``'s ``host_whitelist`` and ``kill_tags``/``allow_tags`` lists
-fold into ``Policy.tags`` and ``attribute_filter``; its ``add_nofollow`` maps to ``Policy.add_link_rel``. The CSS
-scrubbing ``Cleaner`` does for ``style`` is not ported, and ``Cleaner`` rewrites a disallowed scheme to an empty
-``href`` where turbohtml drops the attribute outright.
+``<script>`` is escaped rather than executed. ``Cleaner``'s ``host_whitelist`` and ``allow_tags`` lists fold into
+``Policy.tags`` and ``attribute_filter``, its ``kill_tags`` (drop the element together with its content) maps to
+``Policy.remove_with_content``, and its ``add_nofollow`` maps to ``Policy.add_link_rel``. The CSS scrubbing ``Cleaner``
+does for ``style`` is not ported, and ``Cleaner`` rewrites a disallowed scheme to an empty ``href`` where turbohtml
+drops the attribute outright.
 
 *********************
  From html-sanitizer
