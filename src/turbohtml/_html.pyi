@@ -245,6 +245,7 @@ class Node:
         google_doc: bool = False,
         google_list_indent: int = 36,
         hide_strikethrough: bool = False,
+        converters: Mapping[str, Callable[[Element, str], str]] | None = None,
     ) -> str: ...
     def to_text(
         self,

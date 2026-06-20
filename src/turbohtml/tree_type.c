@@ -521,11 +521,13 @@ PyDoc_STRVAR(
     "skip_internal_links=False, base_url='', image_mode='markdown', default_image_alt='', table_mode='markdown', "
     "table_header='first', pad_tables=False, escape_mode='minimal', escape_asterisks=True, escape_underscores=True, "
     "line_break='spaces', block_spacing='double', document_strip='strip', quote_open='\"', quote_close='\"', "
-    "google_doc=False, google_list_indent=36, hide_strikethrough=False)\n--\n\n"
+    "google_doc=False, google_list_indent=36, hide_strikethrough=False, converters=None)\n--\n\n"
     "Render this node and its subtree as Markdown. The keyword options cover the\n"
     "markdownify and html2text configuration surface; the defaults emit opinionated\n"
     "GitHub-Flavored Markdown. google_doc reads the inline-CSS styling a Google Docs\n"
-    "export carries (bold/italic/strike weights and list margins).");
+    "export carries (bold/italic/strike weights and list margins). converters maps a\n"
+    "lowercased tag name to a callable(element, content) -> str that replaces how\n"
+    "that tag renders, receiving the element and its already-converted child Markdown.");
 
 /* Resolve a string option against its allowed values, writing the matched index
    into *out (an enum), or leave *out untouched when the argument was omitted. */
@@ -549,10 +551,47 @@ static int md_resolve_enum(const char *name, PyObject *value, const char *const 
     return -1;
 }
 
+/* The state a to_markdown converter hook needs to turn a th_node back into an
+   Element for the callback: the module's types and the tree handle to keep alive. */
+typedef struct {
+    module_state *state;
+    PyObject *handle;
+} md_wrap_ctx;
+
+static PyObject *md_wrap_node(void *wrap_ctx, th_node *node) {
+    md_wrap_ctx *ctx = wrap_ctx;
+    return node_wrap(ctx->state, ctx->handle, node);
+}
+
+/* Coerce the converters argument to a plain dict the C walker can look up in: a
+   dict is borrowed as-is, any other mapping is copied once. An empty mapping
+   yields NULL so the walk keeps its zero-overhead no-hook path. */
+static PyObject *md_converters_dict(PyObject *converters) {
+    PyObject *dict;
+    if (PyDict_Check(converters)) {
+        dict = Py_NewRef(converters);
+    } else {
+        dict = PyDict_New();
+        if (dict == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (PyDict_Update(dict, converters) < 0) {
+            Py_DECREF(dict);
+            return NULL;
+        }
+    }
+    if (PyDict_GET_SIZE(dict) == 0) {
+        Py_DECREF(dict);
+        Py_RETURN_NONE;
+    }
+    return dict;
+}
+
 static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds) {
     md_opts opt = th_markdown_default_opts();
     PyObject *heading = NULL, *strike = NULL, *code_style = NULL, *link = NULL, *image = NULL, *table = NULL;
     PyObject *header = NULL, *escape = NULL, *brk = NULL, *spacing = NULL, *docstrip = NULL;
+    PyObject *converters = NULL;
     int ignore_emphasis = 0, mark_code = 0;
     static char *kw[] = {"heading_style",
                          "bullets",
@@ -587,14 +626,15 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
                          "google_doc",
                          "google_list_indent",
                          "hide_strikethrough",
+                         "converters",
                          NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOOsspip", kw, &heading, &opt.bullets, &opt.strong, &opt.emphasis,
+            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOOsspipO", kw, &heading, &opt.bullets, &opt.strong, &opt.emphasis,
             &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code, &link,
             &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
             &opt.default_image_alt, &table, &header, &opt.pad_tables, &escape, &opt.escape_asterisks,
             &opt.escape_underscores, &brk, &spacing, &docstrip, &opt.quote_open, &opt.quote_close, &opt.google_doc,
-            &opt.google_list_indent, &opt.hide_strikethrough)) {
+            &opt.google_list_indent, &opt.hide_strikethrough, &converters)) {
         return NULL;
     }
     static const char *const headings[] = {"atx", "atx_closed", "setext"};
@@ -637,12 +677,33 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
         opt.code_mark_open = "[code]";
         opt.code_mark_close = "[/code]";
     }
+    PyObject *conv = NULL;
+    md_wrap_ctx wrap_ctx;
+    if (converters != NULL && converters != Py_None) {
+        conv = md_converters_dict(converters);
+        if (conv == NULL) {
+            return NULL;
+        }
+        if (conv != Py_None) {
+            wrap_ctx.state = state_of(self);
+            wrap_ctx.handle = ((NodeObject *)self)->handle;
+            opt.converters = conv;
+            opt.wrap_node = md_wrap_node;
+            opt.wrap_node_ctx = &wrap_ctx;
+        }
+    }
     Py_ssize_t out_len;
     Py_UCS4 *data;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     data = th_node_markdown(tree_of(self), ((NodeObject *)self)->node, &opt, &out_len);
     Py_END_CRITICAL_SECTION();
-    if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    Py_XDECREF(conv);
+    if (data == NULL) {
+        /* a converter that raised or returned a non-str leaves the exception set;
+           a bare NULL with no exception is the unforceable allocation failure */
+        if (PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: the no-exception NULL is an unforceable allocation failure */
+            return NULL;
+        }
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *result = ucs4_to_str(data, out_len);
