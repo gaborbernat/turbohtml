@@ -120,11 +120,12 @@ Two decisions bound the tokenizer's scope:
   tree-construction rules. The one tree-construction duty it takes on is content-model switching: after a start tag for
   ``script``, ``style``, ``title`` and the other raw-text elements, the element's contents tokenize as the spec requires
   (a ``<b>`` inside a script body is text, not a tag).
-- The machine recovers from parse errors instead of reporting them. The spec defines a recovery transition for every
-  error and the machine takes it, so malformed input produces the same tokens a browser would see; the error stream is
-  not part of the API. A duplicate attribute name is one such recovery: the spec keeps the first occurrence and drops
-  the rest at tokenization, so ``<a href=x href=y>`` carries a single ``href`` of ``x`` everywhere it is observed — in
-  the token, the parsed tree, and the serialized output alike.
+- The machine recovers from parse errors rather than stopping on them. The spec defines a recovery transition for every
+  error and the machine takes it, so malformed input produces the same tokens a browser would see. A duplicate attribute
+  name is one such recovery: the spec keeps the first occurrence and drops the rest at tokenization, so ``<a href=x
+  href=y>`` carries a single ``href`` of ``x`` everywhere it is observed — in the token, the parsed tree, and the
+  serialized output alike. The recovery is silent in the token stream itself; the errors it papered over surface on
+  :attr:`Document.errors <turbohtml.Document.errors>` when you :func:`~turbohtml.parse` (see below).
 
 Where behavior could drift, more than the suite pins it: a fuzz comparison runs the token stream against html5lib's
 tokenizer, and source positions use the same 1-based-line, 0-based-column convention as :mod:`python:html.parser`, so
@@ -175,6 +176,22 @@ raw C tree, and the wrappers add cost only for the nodes you touch.
 turbohtml parses faster than the C parsers lxml and `selectolax <https://github.com/rushter/selectolax>`_, and 30 to 80
 times faster than the pure-Python BeautifulSoup and html5lib, while building the WHATWG tree that lxml's libxml2 does
 not; the :doc:`performance` page has the per-document figures.
+
+The same tokenizer and tree builder also drive :class:`turbohtml.IncrementalParser`, the push form of
+:func:`turbohtml.parse`. The tokenizer is resumable -- it suspends mid-token when its input runs out -- and reclaims the
+prefix it has consumed on every chunk, so the only state the parser carries across a ``feed`` is the few insertion-mode
+variables of the tree-construction loop, lifted out of the one-shot call into the parser. The input side is therefore
+bounded no matter how long the stream: you never hold the whole source at once, the concrete win over ``parse`` for a
+document that arrives over a socket or a file larger than the buffer you would otherwise join. ``bytes`` chunks decode
+through a stateful incremental codec, so a multi-byte character split across a chunk boundary still decodes correctly.
+The recovery a browser performs hides the spec's parse errors, but a linter or a strict pipeline still wants them.
+:func:`~turbohtml.parse` records each error it recovers from on :attr:`Document.errors <turbohtml.Document.errors>`, a
+list of :class:`~turbohtml.ParseError` carrying the spec error code and the source position (1-based line, 0-based
+column, the same convention :class:`~turbohtml.Token` uses). Collection costs nothing on well-formed input — there are
+no errors to record and the per-character paths are untouched — so it stays on by default rather than behind a flag; the
+standalone :func:`~turbohtml.tokenize` and :class:`~turbohtml.Tokenizer`, which expose the raw stream, do not collect.
+Pass ``strict=True`` to raise the first error as :class:`~turbohtml.HTMLParseError` (with the ``ParseError`` on its
+``error`` attribute) instead of returning a recovered tree.
 
 The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :class:`~turbohtml.Element`,
 :class:`~turbohtml.Text`, :class:`~turbohtml.Comment`, :class:`~turbohtml.Doctype`,
@@ -252,6 +269,15 @@ exporting two trees never interfere, and the binding takes the same per-tree cri
 :attr:`~turbohtml.Node.text` and :attr:`~turbohtml.Node.html` use so a concurrent mutation cannot rewire the tree
 mid-walk (a no-op under the GIL build). Where Go's ``html-to-markdown`` reaches for a mutex, the stateless visitor needs
 none.
+
+Where ``markdownify`` makes extensibility a subclass with a ``convert_<tag>`` method per tag, turbohtml exposes the same
+power as a ``converters`` mapping: tag name to ``callable(element, content) -> str``. The C walk checks it only on an
+element and only when the mapping is present -- one ``NULL`` test on the no-hook path -- so the dispatch is free unless
+a tag is actually registered. When one matches, the engine renders that element's children into a sub-buffer (sharing
+the document's reference-link accumulator), hands the callable a real :class:`~turbohtml.Element` and that inner
+Markdown, and splices the result back into the stream with block or inline framing from the tag. The callable runs
+inside the walk's critical section, so reading the element is safe; CPython suspends and resumes the section around any
+reentrant tree access the callable makes, so it cannot deadlock.
 
 *******************
  Mutating the tree

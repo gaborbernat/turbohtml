@@ -193,9 +193,14 @@ enum state {
 
 struct th_tokenizer {
     enum state state;
-    int oom;      /* an allocation failed; reported once as TH_STEP_ERROR */
-    int cdata_ok; /* the adjusted current node is foreign, so <![CDATA[ opens a
-                     real CDATA section instead of a bogus comment */
+    int oom;                /* an allocation failed; reported once as TH_STEP_ERROR */
+    int cdata_ok;           /* the adjusted current node is foreign, so <![CDATA[ opens a
+                               real CDATA section instead of a bogus comment */
+    int resolve_references; /* fold references into text (1) or split them into
+                               TH_CHARREF tokens (0) */
+    int capture_source;     /* record the verbatim source span of markup tokens */
+    int building;           /* a markup token is mid-construction, so its source
+                               span's opening '<' must survive input compaction */
 
     th_buf input;    /* owned, newline-normalized code points */
     Py_ssize_t pos;  /* next code point to read */
@@ -206,6 +211,7 @@ struct th_tokenizer {
     Py_ssize_t mark_line; /* position of the '<' that opened the current tag-ish
                              construct; tokens and '<' text fallbacks begin here */
     Py_ssize_t mark_col;
+    Py_ssize_t mark_pos; /* input index of that '<', for the verbatim source span */
 
     th_buf text; /* coalesced character run */
     Py_ssize_t text_line;
@@ -221,13 +227,22 @@ struct th_tokenizer {
     th_buf last_tag;  /* last emitted start tag name, for appropriate end tags */
     th_buf temp;      /* spec "temporary buffer" for raw-text end tags and script */
 
-    th_token text_record; /* materialized text run handed to the caller */
+    th_token text_record;    /* materialized text run handed to the caller */
+    th_token charref_record; /* an unresolved character reference handed out */
+    th_buf ref;              /* scratch for a reference's resolved code points */
+    Py_ssize_t ref_line;     /* position of the '&' that opened the reference */
+    Py_ssize_t ref_col;
 
     th_token *queue[2];
     int queue_head;
     int queue_len;
     th_token *returned; /* reset at the next call so its buffers can be reused */
     int done;
+
+    th_error_sink *err_sink; /* parse errors are recorded here when non-NULL */
+    const char *eof_code;    /* the parse-error code to report if EOF arrives with
+                                this tag/comment/doctype construct still open */
+    int eof_reported;        /* the construct's EOF error has already been recorded */
 };
 
 static void token_reset(th_token *tok) {
@@ -245,6 +260,10 @@ static void token_reset(th_token *tok) {
     tok->has_public_id = 0;
     tok->has_system_id = 0;
     tok->force_quirks = 0;
+    tok->is_slice = 0;
+    tok->src_off = 0;
+    tok->src_span = 0;
+    tok->has_source = 0;
 }
 
 static void token_free(th_token *tok);
@@ -284,8 +303,15 @@ th_tokenizer *th_tok_new(void) {
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     memset(self, 0, sizeof(*self));
+    self->resolve_references = 1;
+    self->capture_source = 0;
     th_tok_reset(self);
     return self;
+}
+
+void th_tok_set_options(th_tokenizer *self, int resolve_references, int capture_source) {
+    self->resolve_references = resolve_references;
+    self->capture_source = capture_source;
 }
 
 /* Append ch to buf, recording any allocation failure on the tokenizer; the
@@ -294,6 +320,41 @@ th_tokenizer *th_tok_new(void) {
 static void push(th_tokenizer *self, th_buf *buf, Py_UCS4 ch) {
     if (buf_push(buf, ch) < 0) /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         self->oom = 1;         /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
+}
+
+int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col) {
+    if (sink->len == sink->cap) {
+        Py_ssize_t cap = sink->cap ? sink->cap * 2 : 8;
+        th_parse_error *grown =
+            PyMem_Resize(sink->items, th_parse_error, (size_t)cap); /* GCOVR_EXCL_BR_LINE: size-overflow guard */
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        }
+        sink->items = grown;
+        sink->cap = cap;
+    }
+    sink->items[sink->len++] = (th_parse_error){code, line, col};
+    return 0;
+}
+
+void th_error_sink_free(th_error_sink *sink) {
+    PyMem_Free(sink->items);
+    sink->items = NULL;
+    sink->len = 0;
+    sink->cap = 0;
+}
+
+void th_tok_set_error_sink(th_tokenizer *self, th_error_sink *sink) {
+    self->err_sink = sink;
+}
+
+/* Record a parse error at the current input position. The sink check keeps the
+   sink-free path (the standalone tokenizer) free of any per-error work; a sink's
+   own allocation failure silently drops the error rather than failing the parse. */
+static void tok_error(th_tokenizer *self, const char *code) {
+    if (self->err_sink != NULL) {
+        th_error_sink_push(self->err_sink, code, self->line, self->col);
+    }
 }
 
 void th_tok_reset(th_tokenizer *self) {
@@ -308,17 +369,25 @@ void th_tok_reset(th_tokenizer *self) {
     self->col = 0;
     self->mark_line = 1;
     self->mark_col = 0;
+    self->mark_pos = 0;
+    self->building = 0;
     buf_reset(&self->text);
     self->text_open = 0;
     self->slice_start = 0;
     self->slice_len = 0;
+    buf_reset(&self->ref);
     token_reset(&self->tok);
+    token_reset(&self->charref_record);
     buf_reset(&self->last_tag);
     buf_reset(&self->temp);
     self->queue_head = 0;
     self->queue_len = 0;
     self->returned = NULL;
     self->done = 0;
+    self->eof_code = NULL;
+    self->eof_reported = 0;
+    /* err_sink is owned and set by the caller (the tree builder); a reset of the
+       streaming tokenizer keeps it as configured rather than detaching it */
 }
 
 void th_tok_free(th_tokenizer *self) {
@@ -327,8 +396,10 @@ void th_tok_free(th_tokenizer *self) {
     }
     buf_free(&self->input);
     buf_free(&self->text);
+    buf_free(&self->ref);
     token_free(&self->tok);
     token_free(&self->text_record);
+    token_free(&self->charref_record);
     buf_free(&self->oom_attr.name);
     buf_free(&self->oom_attr.value);
     buf_free(&self->last_tag);
@@ -393,6 +464,11 @@ static void compact_input(th_tokenizer *self) {
         return;
     }
     Py_ssize_t keep_from = self->slice_len > 0 ? self->slice_start : self->pos;
+    /* a markup token whose source is being captured spans from its opening '<'
+       (mark_pos) to a '>' not yet seen, so its prefix must survive the reclaim */
+    if (self->capture_source && self->building && self->mark_pos < keep_from) {
+        keep_from = self->mark_pos;
+    }
     if (keep_from <= 0) {
         return;
     }
@@ -404,6 +480,7 @@ static void compact_input(th_tokenizer *self) {
     buf->len = remaining;
     self->pos -= keep_from;
     self->slice_start = 0;
+    self->mark_pos -= keep_from;
 }
 
 void th_tok_feed(th_tokenizer *self, int kind, const void *data, Py_ssize_t length) {
@@ -556,10 +633,26 @@ static void text_push(th_tokenizer *self, Py_UCS4 ch) {
     push(self, &self->text, ch);
 }
 
-/* Queue the markup token, flushing any pending text run ahead of it. */
+/* Queue the markup token, flushing any pending text run ahead of it. The
+   verbatim source runs from the opening '<' (src_off, stamped when the token
+   began) to the current cursor, just past the '>' the emit consumed. */
 static void emit_tok(th_tokenizer *self) {
+    if (self->capture_source) {
+        self->tok.src_span = self->pos - self->tok.src_off;
+        self->tok.has_source = 1;
+    }
+    self->building = 0;
+    /* the construct is complete, so a later EOF no longer reports against it */
+    self->eof_code = NULL;
     flush_text(self);
     enqueue(self, &self->tok);
+}
+
+/* Record where the markup token under construction began, so its source span
+   covers the opening '<' (still protected from compaction since MARK) once the
+   closing '>' is reached. */
+static void begin_markup_source(th_tokenizer *self) {
+    self->tok.src_off = self->mark_pos;
 }
 
 static void start_tag(th_tokenizer *self, int end_tag, Py_UCS4 first) {
@@ -567,6 +660,8 @@ static void start_tag(th_tokenizer *self, int end_tag, Py_UCS4 first) {
     self->tok.kind = end_tag ? TH_END_TAG : TH_START_TAG;
     self->tok.line = self->mark_line;
     self->tok.col = self->mark_col;
+    begin_markup_source(self);
+    self->eof_code = "eof-in-tag"; /* until the tag is emitted, EOF is eof-in-tag */
     push(self, &self->tok.name, first);
 }
 
@@ -617,6 +712,7 @@ static void finish_attr_name(th_tokenizer *self) {
     Py_ssize_t cur = tok->attr_count - 1;
     for (Py_ssize_t index = 0; index < cur; index++) {
         if (attr_name_dup(&tok->attrs[index], &tok->attrs[cur])) {
+            tok_error(self, "duplicate-attribute");
             tok->attr_count = cur;
             self->attr = &self->oom_attr;
             return;
@@ -652,8 +748,10 @@ static void text_begin(th_tokenizer *self) {
 }
 
 /* Open a text run at the marked '<', used when a tag-ish construct turns out to
-   be text after its opening characters were consumed. */
+   be text after its opening characters were consumed. The construct produced no
+   markup token, so its source mark no longer needs protecting. */
 static void text_begin_mark(th_tokenizer *self) {
+    self->building = 0;
     if (!self->text_open) {
         self->text_open = 1;
         self->text_line = self->mark_line;
@@ -705,6 +803,27 @@ static void init_markup(th_tokenizer *self, enum th_kind kind) {
     self->tok.kind = kind;
     self->tok.line = self->mark_line;
     self->tok.col = self->mark_col;
+    begin_markup_source(self);
+}
+
+/* Queue a TH_CHARREF token for an unresolved reference: the resolved code points
+   (already decoded into self->ref) become its data, and [amp, amp + consumed) is
+   its verbatim source. Flush any pending text run ahead of it so order holds. */
+static void emit_charref(th_tokenizer *self, Py_ssize_t amp, Py_ssize_t consumed) {
+    flush_text(self);
+    th_token *rec = &self->charref_record;
+    token_reset(rec);
+    rec->kind = TH_CHARREF;
+    th_buf swap = rec->text;
+    rec->text = self->ref;
+    self->ref = swap;
+    buf_reset(&self->ref);
+    rec->src_off = amp;
+    rec->src_span = consumed;
+    rec->has_source = 1;
+    rec->line = self->ref_line;
+    rec->col = self->ref_col;
+    enqueue(self, rec);
 }
 
 /* Emit "</" plus the raw end-tag-name characters held in temp as text, used
@@ -742,10 +861,15 @@ enum run_result { RUN_EMITTED, RUN_NEED_MORE, RUN_DONE };
 
 /* Remember the position of a '<' about to be consumed; tokens it opens and
    text fallbacks that re-emit it report this position (Token.line/col). */
+/* The marked '<' opens a construct that may become a token whose source span
+   starts here, so from now until it resolves to a token (emit_tok) or to text
+   (text_begin_mark) its prefix must survive input compaction. */
 #define MARK()                                                                                                         \
     do {                                                                                                               \
         self->mark_line = self->line;                                                                                  \
         self->mark_col = self->col;                                                                                    \
+        self->mark_pos = self->pos;                                                                                    \
+        self->building = 1;                                                                                            \
     } while (0)
 
 /* These two always return, so they are plain blocks rather than do/while(0)

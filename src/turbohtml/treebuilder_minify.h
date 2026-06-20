@@ -108,16 +108,24 @@ static int mini_attr_unquotable(const Py_UCS4 *value, Py_ssize_t len) {
 }
 
 /* Write an element's start tag, dropping redundant attribute quotes and writing a
-   valueless/empty attribute as just its name when unquoting is enabled. */
-static void mini_open_tag(sbuf *out, th_tree *tree, th_node *node, int formatter, int unquote) {
+   valueless/empty attribute as just its name when unquoting is enabled. Attribute
+   order and charset normalization come from the shared output options (a normalized
+   charset value always keeps its quotes). */
+static void mini_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_serialize_opts *opts, int unquote) {
     sbuf_putc(out, '<');
     sbuf_put_ucs4(out, node->text, node->text_len);
-    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-        th_node_attr *attr = &node->attrs[index];
+    Py_ssize_t stack_order[MAX_SORTED_ATTRS];
+    Py_ssize_t *order = ser_attr_order(tree, node, opts->sort_attributes, stack_order);
+    int charset_kind = opts->inject_meta ? ser_meta_charset_kind(tree, node) : 0;
+    for (Py_ssize_t position = 0; position < node->attr_count; position++) {
+        th_node_attr *attr = &node->attrs[order != NULL ? order[position] : position];
         sbuf_putc(out, ' ');
         Py_ssize_t name_len;
         const char *name = th_attr_name(tree, attr->name_atom, &name_len);
         sbuf_put_utf8(out, name, name_len);
+        if (ser_put_charset_value(out, opts, charset_kind, name, name_len)) {
+            continue;
+        }
         if (unquote && attr->value_len == 0) {
             continue; /* an empty value reparses identically as a bare attribute name */
         }
@@ -126,10 +134,11 @@ static void mini_open_tag(sbuf *out, th_tree *tree, th_node *node, int formatter
             sbuf_put_run(out, attr->value, attr->value_len); /* unquotable means no character needs escaping */
         } else {
             sbuf_puts(out, "=\"");
-            sbuf_put_text(out, attr->value, attr->value_len, 1, formatter);
+            sbuf_put_text(out, attr->value, attr->value_len, 1, opts->formatter);
             sbuf_putc(out, '"');
         }
     }
+    ser_attr_order_free(order, stack_order);
     sbuf_putc(out, '>');
 }
 
@@ -334,7 +343,8 @@ static int mini_omit_start_tag(th_tree *tree, th_node *node, int strip_comments)
    descending through first_child and ascending through parent pointers, with a
    preserve counter so text inside pre/textarea/listing skips whitespace
    collapsing. */
-static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_minify_opts *opts, int formatter) {
+static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_minify_opts *opts,
+                             const th_serialize_opts *st) {
     th_node *node = root;
     int preserve = 0;
     int formatting = 0;
@@ -348,8 +358,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
             /* the serialization root is what the caller asked to serialize, so its own tags
                always render (matching the plain serializer); only inner tags may be omitted */
             if (!(opts->omit_optional_tags && node != root && mini_omit_start_tag(tree, node, opts->strip_comments))) {
-                mini_open_tag(out, tree, node, formatter, opts->unquote_attributes);
+                mini_open_tag(out, tree, node, st, opts->unquote_attributes);
             }
+            ser_inject_head_meta(out, tree, node, st);
             if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
                 break; /* void elements have no children or end tag */
             }
@@ -377,9 +388,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
             break;
         case TH_NODE_TEXT:
             if (opts->collapse_whitespace && preserve == 0) {
-                mini_put_collapsed_text(out, need_text(tree, node), node->text_len, formatter, &last_was_space);
+                mini_put_collapsed_text(out, need_text(tree, node), node->text_len, st->formatter, &last_was_space);
             } else {
-                sbuf_put_text(out, need_text(tree, node), node->text_len, 0, formatter);
+                sbuf_put_text(out, need_text(tree, node), node->text_len, 0, st->formatter);
                 last_was_space = 0;
             }
             break;
@@ -445,9 +456,10 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
     }
 }
 
-Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatter, Py_ssize_t *out_len) {
+Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *minify, const th_serialize_opts *opts,
+                        Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     sbuf_presize_for_root(&out, tree, node);
-    serialize_minify(&out, tree, node, opts, formatter);
+    serialize_minify(&out, tree, node, minify, opts);
     return sbuf_finish(&out, out_len);
 }

@@ -149,6 +149,33 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
 
 void th_tree_free(th_tree *tree);
 
+/* --- streaming (push) parse --- */
+
+/* A push parser driving the tokenizer and tree builder incrementally, so a
+   document can be fed in chunks without ever holding the whole source: the
+   tokenizer reclaims its consumed input on each feed and the insertion-mode
+   state persists across feeds. */
+typedef struct th_stream th_stream;
+
+/* Create an empty push parser. Returns NULL on allocation failure (no Python
+   error is set). */
+th_stream *th_stream_new(void);
+
+/* Append a chunk of code points (a borrowed PyUnicode buffer, copied) and build
+   as far as the now-available tokens allow. Returns 0, or -1 on allocation
+   failure. */
+int th_stream_feed(th_stream *stream, int kind, const void *data, Py_ssize_t length);
+
+/* Signal end of input, flush the remaining tokens, apply the EOF
+   missing-element rules, and hand the finished tree to the caller (who must
+   th_tree_free it). The stream no longer owns the tree afterwards. Returns NULL
+   on allocation failure. */
+th_tree *th_stream_finish(th_stream *stream);
+
+/* Free the parser and, unless th_stream_finish already handed it off, its
+   in-progress tree. */
+void th_stream_free(th_stream *stream);
+
 /* Serialize the tree in the html5lib tree-construction "#document" format (one
    "| " indented line per node) into a freshly PyMem-allocated UCS4 buffer;
    *out_len receives the length. Returns NULL on allocation failure. Used by the
@@ -166,6 +193,11 @@ th_node *th_tree_document(th_tree *tree);
    resolved as absent may now exist: a monotonic generation for invalidating a
    cached compiled selector whose attribute atoms were resolved against the tree. */
 uint32_t th_tree_attr_generation(const th_tree *tree);
+
+/* The WHATWG parse errors collected during the parse, in document order, and
+   their count via *out_count. The array (and its static code strings) lives as
+   long as the tree; it is empty for a programmatically built or well-formed tree. */
+const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count);
 
 /* Whether the tree was parsed in quirks mode (no doctype or a quirky one). In
    quirks mode CSS class and ID selectors match ASCII case-insensitively
@@ -195,12 +227,22 @@ Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
    compact. PyMem-allocated; *out_len receives the length. NULL on failure. */
 Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 
-/* Serialize node and its subtree under a chosen escape formatter (0 WHATWG,
-   1 minimal, 2 named entities). When indent is non-NULL it is the per-level
-   whitespace unit for pretty output; NULL emits the compact form. PyMem-
+/* Output-shaping options shared by serialize() and encode(): the escape formatter
+   plus two opt-in normalizations that leave the tree untouched. Every field is
+   off (zero / NULL) by default, so the common serialize costs nothing. */
+typedef struct {
+    int formatter;       /* escape policy: 0 WHATWG, 1 minimal, 2 named entities */
+    int sort_attributes; /* emit each start tag's attributes in ascending name order */
+    int inject_meta;     /* ensure <head> declares <meta charset=charset> */
+    const char *charset; /* ASCII encoding label for the injected/normalized meta */
+    Py_ssize_t charset_len;
+} th_serialize_opts;
+
+/* Serialize node and its subtree under opts. When indent is non-NULL it is the
+   per-level whitespace unit for pretty output; NULL emits the compact form. PyMem-
    allocated; *out_len receives the length. NULL on failure. */
-Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, int formatter, const Py_UCS4 *indent, Py_ssize_t indent_len,
-                           Py_ssize_t *out_len);
+Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, const th_serialize_opts *opts, const Py_UCS4 *indent,
+                           Py_ssize_t indent_len, Py_ssize_t *out_len);
 
 /* The minification transforms serialize(minify=...) toggles, each round-trip safe
    (the minified bytes reparse to the same tree). */
@@ -211,9 +253,10 @@ typedef struct {
     int strip_comments;      /* skip comment nodes */
 } th_minify_opts;
 
-/* Serialize node and its subtree minified under opts and the escape formatter.
+/* Serialize node and its subtree minified under minify and the output options.
    PyMem-allocated; *out_len receives the length. NULL on failure. */
-Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatter, Py_ssize_t *out_len);
+Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *minify, const th_serialize_opts *opts,
+                        Py_ssize_t *out_len);
 
 /* The Markdown export configuration, a union of the markdownify and html2text
    knobs with one name per concept. The Python binding fills it from keyword
@@ -267,6 +310,12 @@ typedef struct {
     int google_doc;         /* read inline-CSS styling the way a Google Docs export encodes it */
     int google_list_indent; /* px of margin-left per list-nesting level (>= 1); divides margin-left */
     int hide_strikethrough; /* in google_doc mode, drop text a CSS line-through struck */
+    /* Per-tag converter hook: a registered tag's built-in rendering is replaced by a
+       Python callable receiving the element and its rendered child Markdown. The
+       engine builds the element through wrap_node so it need not know the binding. */
+    PyObject *converters;                                       /* borrowed dict {tag name: callable}; NULL disables */
+    PyObject *(*wrap_node)(void *wrap_node_ctx, th_node *node); /* build an Element for a node; new ref or NULL */
+    void *wrap_node_ctx;                                        /* opaque, handed to wrap_node */
 } md_opts;
 
 /* The no-argument baseline configuration (opinionated GitHub-Flavored Markdown). */

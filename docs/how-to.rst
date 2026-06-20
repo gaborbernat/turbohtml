@@ -255,6 +255,43 @@ final tokens stuck behind an unfinished construct; iterate the tokenizer itself 
 
 Call ``reset()`` to reuse the same tokenizer for an unrelated document.
 
+*************************************
+ Parse a document arriving in chunks
+*************************************
+
+When a document arrives over a stream you do not have to buffer the whole thing before parsing. Feed each chunk to an
+:class:`turbohtml.IncrementalParser` and call ``close()`` for the finished :class:`~turbohtml.Document`; the parser
+holds only the bytes it has not yet consumed, never the whole source, and the result is identical to parsing the joined
+string with :func:`turbohtml.parse`:
+
+.. testcode::
+
+    parser = turbohtml.IncrementalParser()
+    for chunk in ("<ul><li>on", "e<li>two</", "ul>"):
+        parser.feed(chunk)
+    document = parser.close()
+    print([item.text for item in document.find_all("li")])
+
+.. testoutput::
+
+    ['one', 'two']
+
+``feed`` also accepts ``bytes``: a chunk is decoded with the parser's ``encoding`` (``utf-8`` by default), and a
+multi-byte character split across two chunks is held back until the rest of its bytes arrive. As a context manager the
+parser releases its work-in-progress when the block exits, so you can stop early without leaking the partial parse:
+
+.. testcode::
+
+    with turbohtml.IncrementalParser(encoding="utf-8") as parser:
+        parser.feed("<p>caf".encode("utf-8"))
+        parser.feed("é</p>".encode("utf-8"))
+        document = parser.close()
+    print(document.find("p").text)
+
+.. testoutput::
+
+    café
+
 ****************************************
  Report source positions in diagnostics
 ****************************************
@@ -272,6 +309,47 @@ the offending markup:
 .. testoutput::
 
     ['img at 2:0']
+
+*****************************************
+ See each character reference separately
+*****************************************
+
+By default a character reference is decoded into the surrounding text, so ``Tom &amp; Jerry`` is one text token reading
+``Tom & Jerry``. Pass ``resolve_references=False`` to :func:`turbohtml.tokenize` (or :class:`turbohtml.Tokenizer`) to
+receive each reference in text as its own :attr:`~turbohtml.TokenType.CHARACTER_REFERENCE` token instead:
+:attr:`~turbohtml.Token.data` is the resolved value and :attr:`~turbohtml.Token.source` the verbatim ``&...;`` (so
+``source[1] == "#"`` tells a numeric reference from a named one). A bare ``&`` that is not a reference stays text, and
+attribute values are always decoded:
+
+.. testcode::
+
+    import turbohtml
+    from turbohtml import TokenType
+
+    tokens = turbohtml.tokenize("5 &lt; 10 &amp; rising", resolve_references=False)
+    print([(token.data, token.source) for token in tokens if token.type is TokenType.CHARACTER_REFERENCE])
+
+.. testoutput::
+
+    [('<', '&lt;'), ('&', '&amp;')]
+
+***********************************
+ Keep the verbatim source of a tag
+***********************************
+
+The tokenizer normalizes tags: names lowercase, attribute order and quoting collapse. When you need the exact bytes a
+token came from - to rewrite markup in place, or to report it untouched - pass ``capture_source=True`` and read
+:attr:`turbohtml.Token.source`, the verbatim slice of the input. It is set for start tags, end tags, comments, and
+DOCTYPEs (text tokens leave it ``None``):
+
+.. testcode::
+
+    tag = next(iter(turbohtml.tokenize("<IMG  SRC='a.png'>", capture_source=True)))
+    print(tag.tag, "from", repr(tag.source))
+
+.. testoutput::
+
+    img from "<IMG  SRC='a.png'>"
 
 ************************************
  Find elements in a parsed document
@@ -292,6 +370,85 @@ or from any element, searching its descendants:
 
     token
     ['email', 'token']
+
+********************************
+ Read and set form-field values
+********************************
+
+:attr:`~turbohtml.Element.field_value` is the control's value with form semantics: a textarea's text, an option's value,
+or the selected option value(s) of a ``select`` (a ``list`` for a ``multiple`` select). Assigning writes it back, and
+:attr:`~turbohtml.Element.checked` reads or sets a checkbox or radio (setting a radio to ``True`` clears the other
+same-name radios in the form):
+
+.. testcode::
+
+    form = turbohtml.parse(
+        "<form><input name=email value=a@b.c>"
+        "<select name=plan><option value=free>Free<option value=pro selected>Pro</select>"
+        "<input name=terms type=checkbox value=yes></form>"
+    ).find("form")
+    print(form.find("input", attrs={"name": "email"}).field_value)
+    print(form.find("select").field_value)
+    form.find("input", attrs={"name": "terms"}).checked = True
+
+.. testoutput::
+
+    a@b.c
+    pro
+
+**************************************
+ Serialize a form to name/value pairs
+**************************************
+
+:meth:`~turbohtml.Element.form_data` returns the form's successful controls as ``(name, value)`` pairs in document
+order, following the WHATWG submission rules: unnamed, disabled, button, and unchecked checkbox/radio controls are
+skipped, and a ``select`` contributes one pair per selected option. Pass the result straight to
+:func:`urllib.parse.urlencode`:
+
+.. testcode::
+
+    from urllib.parse import urlencode
+
+    print(form.form_data())
+    print(urlencode(form.form_data()))
+
+.. testoutput::
+
+    [('email', 'a@b.c'), ('plan', 'pro'), ('terms', 'yes')]
+    email=a%40b.c&plan=pro&terms=yes
+
+****************************************
+ Inspect the parse errors of a document
+****************************************
+
+:func:`turbohtml.parse` recovers from malformed markup the way a browser does and records each WHATWG parse error it
+recovered from on :attr:`~turbohtml.Document.errors`. Each :class:`~turbohtml.ParseError` carries the spec ``code`` and
+the source position (1-based ``line``, 0-based ``col``); a well-formed document yields an empty list:
+
+.. testcode::
+
+    import turbohtml
+    document = turbohtml.parse("<a b b>")
+    for error in document.errors:
+        print(f"{error.code} at {error.line}:{error.col}")
+
+.. testoutput::
+
+    duplicate-attribute at 1:6
+
+To fail instead of recover -- in a linter or a strict ingest pipeline -- pass ``strict=True`` and catch
+:class:`~turbohtml.HTMLParseError`, whose ``error`` attribute is the first :class:`~turbohtml.ParseError`:
+
+.. testcode::
+
+    try:
+        turbohtml.parse("<!DOCTYPE", strict=True)
+    except turbohtml.HTMLParseError as exception:
+        print(exception.error.code)
+
+.. testoutput::
+
+    eof-in-doctype
 
 ************************************
  Collect the links of a parsed page
@@ -667,6 +824,41 @@ Whitespace-significant elements (``pre``, ``textarea``, ``listing``) and raw-tex
 their content verbatim, and a tag is never dropped when omitting it would let the reparse reconstruct a formatting
 element across the boundary.
 
+***********************************
+ Normalize attributes and encoding
+***********************************
+
+Two more keyword options on ``serialize`` and ``encode`` normalize the output without touching the tree, and compose
+with any ``formatter`` or ``layout``. ``sort_attributes`` emits each start tag's attributes in ascending name order, so
+two serializations of equal trees diff cleanly:
+
+.. testcode::
+
+    import turbohtml
+    node = turbohtml.parse("<p id=main class=lead data-x=1>hi</p>").select_one("p")
+    print(node.serialize(sort_attributes=True))
+
+.. testoutput::
+
+    <p class="lead" data-x="1" id="main">hi</p>
+
+``meta_charset`` makes the document ``<head>`` declare the output encoding: an existing ``<meta charset>`` (or ``<meta
+http-equiv="content-type">``) is normalized in place, and a head that declares none gets a ``<meta charset>`` injected
+as its first child — never a duplicate. ``serialize`` declares ``utf-8`` (the encoding of the returned ``str``), while
+``encode`` declares the encoding it writes:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<title>Hi</title>")
+    print(doc.serialize(meta_charset=True))
+    print(doc.encode("iso-8859-1", meta_charset=True))
+
+.. testoutput::
+
+    <html><head><meta charset="utf-8"><title>Hi</title></head><body></body></html>
+    b'<html><head><meta charset="iso-8859-1"><title>Hi</title></head><body></body></html>'
+
 ********************
  Export to Markdown
 ********************
@@ -729,6 +921,29 @@ style, fixed-width fonts, and ``margin-left`` list nesting) turns into Markdown:
 .. testoutput::
 
     **Bold** and *soft*.
+
+When an option cannot express the rule you need -- a custom element, or a tag that should render its own way -- pass
+``converters``: a mapping from a lowercased tag name to a ``callable(element, content) -> str``. The callable receives
+the :class:`~turbohtml.Element` and the already-converted Markdown of its children, and returns the Markdown for that
+element. A registered tag's built-in rendering is replaced; every other tag is untouched, and the hook costs nothing
+when the mapping is omitted.
+
+.. testcode::
+
+    html = '<p>Watch <video src="/clip.mp4">a clip</video> and <abbr title="Markdown">MD</abbr>.</p>'
+    converters = {
+        "video": lambda el, content: f"[{content}]({el.attrs['src']})",
+        "abbr": lambda el, content: f"{content} ({el.attrs['title']})",
+    }
+    print(turbohtml.parse(html).to_markdown(converters=converters))
+
+.. testoutput::
+
+    Watch [a clip](/clip.mp4) and MD (Markdown).
+
+Return ``""`` to drop an element, or return ``content`` unchanged to unwrap it. A registered block-level tag is laid out
+on its own line; any other tag flows inline. The callable runs inside the same per-tree lock the walk holds, so it may
+read the element's attributes and subtree freely.
 
 **********************
  Export to plain text
@@ -946,6 +1161,61 @@ because not every page wants it. The default ``nofollow`` callback marks web lin
 .. testoutput::
 
     email <a href="mailto:bob@example.com">bob@example.com</a> or visit <a href="https://example.com" rel="nofollow">https://example.com</a>
+
+By default the callbacks only see freshly detected links; pass ``process_existing=True`` to also run them over ``<a>``
+tags already in the input. A callback reads ``link.existing`` to tell an author's anchor from a detected one, and
+returning ``None`` for an existing anchor unwraps it to its text. Use ``extra_tlds`` to link bare domains on a private
+suffix the IANA table does not know, and ``schemes`` to autolink only an allowlist of explicit URL schemes:
+
+.. testcode::
+
+    from turbohtml.linkify import Link, linkify
+
+
+    def annotate(link: Link) -> Link:
+        link.attrs["data-seen"] = "author" if link.existing else "auto"
+        return link
+
+
+    html = '<a href="https://docs.example">docs</a>, ping app.internal, skip ftp://x.example'
+    print(linkify(html, callbacks=[annotate], process_existing=True, extra_tlds=["internal"], schemes=["https"]))
+
+.. testoutput::
+
+    <a href="https://docs.example" data-seen="author">docs</a>, ping <a href="http://app.internal" data-seen="auto">app.internal</a>, skip ftp://x.example
+
+**************************
+ Find links in plain text
+**************************
+
+When the text is not HTML and you only need *where* the links are -- to highlight them, count them, or build your own
+markup -- use :class:`turbohtml.linkify.Detector`. ``find`` returns a :class:`~turbohtml.linkify.LinkSpan` per match,
+with offsets, the matched text, and the normalized ``url``; ``has_link`` answers the yes/no question more cheaply:
+
+.. testcode::
+
+    from turbohtml.linkify import Detector
+
+    detector = Detector()
+    for span in detector.find("ping bob@example.com about example.com"):
+        print(span.start, span.end, span.url)
+
+.. testoutput::
+
+    5 20 mailto:bob@example.com
+    27 38 http://example.com
+
+Register custom ``tlds`` to detect bare domains on an internal suffix, and scheme-less ``schemes`` such as ``tel`` so
+their opaque URLs are found too (every ``scheme://`` URL is detected without registration):
+
+.. testcode::
+
+    detector = Detector(tlds=["corp"], schemes=["tel"])
+    print([span.url for span in detector.find("wiki.corp or tel:+1-800-555-0100")])
+
+.. testoutput::
+
+    ['http://wiki.corp', 'tel:+1-800-555-0100']
 
 *************************
  Sanitize untrusted HTML

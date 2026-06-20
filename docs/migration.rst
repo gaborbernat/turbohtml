@@ -238,6 +238,10 @@ Pitfalls
   for the concatenation.
 - lxml parses with libxml2, which is not WHATWG-conformant, so malformed input lands in a different tree than the one
   turbohtml (and a browser) builds.
+- For a document that arrives in pieces, ``etree.iterparse`` is replaced by :class:`turbohtml.IncrementalParser`: feed
+  ``str`` or ``bytes`` chunks with ``feed`` and call ``close`` for the finished :class:`~turbohtml.Document`. The parser
+  never holds the whole source at once, so you can parse a stream larger than the source buffer you would otherwise
+  materialize for :func:`turbohtml.parse`.
 
 *****************
  From selectolax
@@ -602,7 +606,9 @@ inverts the control flow. Each ``handle_*`` override becomes a branch on :attr:`
     - - ``handle_decl(decl)``
       - ``TokenType.DOCTYPE`` → ``token.name``
     - - ``handle_entityref``/``handle_charref``
-      - none needed; references are already resolved in ``token.data``
+      - ``tokenize(..., resolve_references=False)`` → ``TokenType.CHARACTER_REFERENCE``, else resolved in ``token.data``
+    - - ``get_starttag_text()``
+      - ``tokenize(..., capture_source=True)`` → ``token.source``
 
 .. testcode::
 
@@ -623,11 +629,13 @@ inverts the control flow. Each ``handle_*`` override becomes a branch on :attr:`
 
     [('start', 'p', [('class', 'x')]), ('data', 'Hi & bye'), ('end', 'p')]
 
-There is no ``convert_charrefs`` switch to set: turbohtml always resolves character references the WHATWG way, so
-``handle_entityref`` and ``handle_charref`` have no counterpart and ``token.data`` already holds decoded text (``Hi &
-bye`` above, not ``Hi &amp; bye``). When the goal is the resulting structure rather than the event sequence, skip the
-loop and :func:`turbohtml.parse` to a tree, then walk it. The :doc:`performance` page's tokenizing benchmark times this
-token loop against ``html.parser``.
+By default ``token.data`` already holds decoded text (``Hi & bye`` above, not ``Hi &amp; bye``), the equivalent of
+``convert_charrefs=True``. To recover the split stream that ``convert_charrefs=False`` gives - one event per character
+reference - pass ``resolve_references=False`` and handle ``TokenType.CHARACTER_REFERENCE`` tokens, whose
+``token.source`` is the verbatim reference (``&amp;``) and ``token.data`` its resolved value. The verbatim start-tag
+text that ``get_starttag_text()`` returns is ``token.source`` once you pass ``capture_source=True``. When the goal is
+the resulting structure rather than the event sequence, skip the loop and :func:`turbohtml.parse` to a tree, then walk
+it. The :doc:`performance` page's tokenizing benchmark times this token loop against ``html.parser``.
 
 *********************
  From w3lib (Scrapy)
@@ -756,8 +764,9 @@ is identical:
 the ``nofollow``/``target_blank`` defaults work as before. Only custom callbacks change shape. bleach passed ``(attrs,
 new)`` where ``attrs`` was keyed by ``(namespace, name)`` tuples with a ``"_text"`` pseudo-key for the visible text;
 turbohtml passes a single :class:`~turbohtml.linkify.Link` with plain ``url``, ``text``, and ``attrs`` (a ``dict[str,
-str]``), and a callback returns it to keep the link or ``None`` to leave the text bare. Porting a callback means
-dropping the ``new`` argument and reading fields instead of tuple keys:
+str]``), and a callback returns it to keep the link or ``None`` to leave the text bare. bleach's ``new`` flag becomes
+``Link.existing`` (inverted: ``new=True`` is ``existing=False``). Porting a callback means reading fields instead of
+tuple keys:
 
 .. testcode::
 
@@ -773,19 +782,24 @@ dropping the ``new`` argument and reading fields instead of tuple keys:
 
     read <a href="https://example.com/page">example.com/page</a>
 
-Two behaviors differ from bleach, both deliberate. bleach also ran the callbacks over the links already present in the
-input; turbohtml leaves an existing ``<a>`` untouched, so linkifying is idempotent and never rewrites a link an author
-wrote, which is why the callback drops bleach's ``new`` flag. A bare domain such as ``example.com`` links only when its
-last label is a current IANA TLD, from a table you can regenerate, where bleach shipped a frozen list. The scan for link
-candidates runs in C, so linkifying a page is faster than bleach's html5lib-based pass.
+One default differs from bleach, deliberately: turbohtml leaves an existing ``<a>`` untouched so linkifying is
+idempotent, where bleach always reprocessed present links. Opt back in with ``process_existing=True`` to run the
+callbacks over author-written anchors too (the callback reads ``link.existing`` to branch). bleach's ``protocols`` maps
+to ``schemes``, which restricts the explicit URL schemes that autolink, and bleach's custom-TLD support maps to
+``extra_tlds``, on top of a current IANA table you can regenerate where bleach shipped a frozen list. A bare domain such
+as ``example.com`` still links only when its last label is a known TLD. The scan for link candidates runs in C, so
+linkifying a page is faster than bleach's html5lib-based pass.
 
 ********************
  From linkify-it-py
 ********************
 
 `linkify-it-py <https://github.com/tsutsu3/linkify-it-py>`_ scans plain text and returns the link spans it finds;
-turning them into ``<a>`` tags, and skipping text that is already markup, is left to the caller. turbohtml does both.
-Where linkify-it-py hands back ``Match`` objects with ``url`` and offset fields, turbohtml returns the rewritten HTML:
+turning them into ``<a>`` tags, and skipping text that is already markup, is left to the caller. turbohtml does both,
+through two entry points. To rewrite HTML, use :func:`~turbohtml.linkify.linkify`. To match spans the way
+linkify-it-py's ``match`` does, use :class:`~turbohtml.linkify.Detector`; where linkify-it-py returns ``Match`` objects
+with ``index``/``last_index``/``url``/``schema``, turbohtml returns :class:`~turbohtml.linkify.LinkSpan` objects with
+``start``/``end``/``url``/``text``:
 
 .. code-block:: python
 
@@ -793,22 +807,25 @@ Where linkify-it-py hands back ``Match`` objects with ``url`` and offset fields,
     from linkify_it import LinkifyIt
 
     matches = LinkifyIt().match("see https://example.com")
-    # [Match(url="https://example.com", ...)] or None, and you build the <a> yourself
+    # [Match(url="https://example.com", index=4, last_index=23, ...)] or None
 
 .. testcode::
 
-    from turbohtml.linkify import linkify
+    from turbohtml.linkify import Detector
 
-    print(linkify("see https://example.com"))
+    span = Detector().find("see https://example.com")[0]
+    print(span.start, span.end, span.url)
 
 .. testoutput::
 
-    see <a href="https://example.com" rel="nofollow">https://example.com</a>
+    4 23 https://example.com
 
-Because turbohtml parses the input as HTML, it leaves alone a URL already inside an ``<a>`` or a ``<script>`` that
-linkify-it-py, working on the raw string, would match again. linkify-it-py is configurable down to custom schemes and
-fuzzy IP matching; turbohtml covers the common web, ``mailto:``, and bare-domain cases and trades that breadth for being
-HTML-aware and several times faster.
+linkify-it-py's ``test`` becomes :meth:`~turbohtml.linkify.Detector.has_link`, ``add(schema, rule)`` becomes the
+``schemes`` argument for scheme-less schemes, and ``tlds(...)`` becomes the ``tlds`` argument. Because
+:func:`~turbohtml.linkify.linkify` parses the input as HTML, it also leaves alone a URL already inside an ``<a>`` or a
+``<script>`` that linkify-it-py, working on the raw string, would match again. linkify-it-py still reaches further into
+fuzzy IP and email heuristics; turbohtml covers the common web, ``mailto:``, bare-domain, and registered-scheme cases
+and trades that breadth for being HTML-aware and several times faster.
 
 *********************
  From bleach (clean)

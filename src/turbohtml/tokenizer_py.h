@@ -28,7 +28,7 @@ typedef struct {
     PyObject *tokenizer_type;     /* Tokenizer */
     PyObject *iter_type;          /* the iterator returned by feed()/close()/tokenize() */
     PyObject *kind_enum;          /* TokenType (enum.IntEnum) */
-    PyObject *kinds[5];           /* cached TokenType members, indexed by enum th_kind */
+    PyObject *kinds[6];           /* cached TokenType members, indexed by enum th_kind */
     PyObject *node_type;          /* Node (the sealed-hierarchy base) */
     PyObject *element_type;       /* Element */
     PyObject *text_type;          /* Text */
@@ -37,6 +37,9 @@ typedef struct {
     PyObject *pi_type;            /* ProcessingInstruction */
     PyObject *cdata_type;         /* CData */
     PyObject *document_type;      /* Document */
+    PyObject *parser_type;        /* IncrementalParser (push parse to a tree) */
+    PyObject *parse_error_type;   /* ParseError (a collected WHATWG parse error) */
+    PyObject *parse_error_exc;    /* HTMLParseError (raised by parse(strict=True)) */
     PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
     PyObject *attrs_type;         /* _Attrs (the live mutable view of an element's attributes) */
     PyObject *walker_type;        /* _NodeIterator (descendants / ancestors / siblings) */

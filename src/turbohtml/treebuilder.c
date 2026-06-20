@@ -73,6 +73,10 @@ struct th_tree {
     uint32_t attr_rec_cap;
     uint32_t *attr_slots; /* slot -> record index + 1; 0 marks an empty slot */
     uint32_t attr_slot_mask;
+    /* WHATWG parse errors collected during the parse, in document order. The
+       tokenizer fills it through this sink while the tree builder adds its own
+       construction errors; read-only once the parse returns. */
+    th_error_sink errors;
 };
 
 static void *arena_alloc(th_tree *tree, Py_ssize_t size) {
@@ -399,6 +403,11 @@ uint32_t th_tree_attr_generation(const th_tree *tree) {
 
 int th_tree_quirks(const th_tree *tree) {
     return tree->quirks;
+}
+
+const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count) {
+    *out_count = tree->errors.len;
+    return tree->errors.items;
 }
 
 int th_node_text_is_blank(th_tree *tree, th_node *node) {
@@ -2153,14 +2162,37 @@ static th_node *insert_implicit(th_tree *tree, const char *name, uint16_t atom, 
 }
 
 /* The driver: pull tokens, dispatch by mode, reprocess on mode change. */
-static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
-    enum mode mode = start_mode;
-    enum mode original_mode = M_IN_BODY;
+/* The insertion-mode state that must persist across a streaming parser's feeds.
+   A one-shot parse keeps it on the stack for one run_drain; a streaming parse
+   stores it in th_stream so a feed that suspends mid-document resumes exactly
+   where it left off. table_origin is reset at the top of every token iteration,
+   so it never crosses a feed and stays a run_drain local. */
+typedef struct {
+    enum mode mode;
+    enum mode original_mode;
+    enum mode foster_return;
+    int foster_pending;
+} th_run_state;
+
+static void run_state_init(th_run_state *run_state, enum mode start_mode) {
+    run_state->mode = start_mode;
+    run_state->original_mode = M_IN_BODY;
+    run_state->foster_return = M_IN_TABLE;
+    run_state->foster_pending = 0;
+}
+
+/* Drive tree construction over the tokens the tokenizer can produce now,
+   returning when it stalls (TH_STEP_NEED_MORE), reaches EOF (TH_STEP_DONE), or
+   fails. The insertion-mode state is restored from run_state on entry and saved
+   back on exit so a later call resumes the WHATWG algorithm in place. */
+static void run_drain(th_tree *tree, th_tokenizer *sm, th_run_state *run_state) {
+    enum mode mode = run_state->mode;
+    enum mode original_mode = run_state->original_mode;
     /* a table mode foster-parents a stray token by processing it once under
        in-body rules and then returning to the table mode; foster_return holds
        the mode to restore once that one token has been consumed */
-    enum mode foster_return = M_IN_TABLE;
-    int foster_pending = 0;
+    enum mode foster_return = run_state->foster_return;
+    int foster_pending = run_state->foster_pending;
     /* the row/section modes delegate unhandled tokens to the in-table rules;
        per spec that delegation does not change the insertion mode, so the
        delegating mode is remembered and restored after the token is consumed */
@@ -2243,6 +2275,7 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
            ignored without changing the insertion mode (foreign content already handled
            its own DOCTYPE above); only the initial mode builds the doctype node */
         if (tok->kind == TH_DOCTYPE && mode != M_INITIAL) {
+            th_error_sink_push(&tree->errors, "unexpected-doctype", tok->line, tok->col);
             continue;
         }
         /* every insertion mode has an explicit case, so the compiler default arm is unreachable */
@@ -3784,8 +3817,15 @@ static void run(th_tree *tree, th_tokenizer *sm, enum mode start_mode) {
             break; /* everything else is a parse error and ignored */
         }
     }
-    /* stop parsing: the remaining open elements are popped, which runs the
-       option-into-selectedcontent clone for a still-open selected option */
+    run_state->mode = mode;
+    run_state->original_mode = original_mode;
+    run_state->foster_return = foster_return;
+    run_state->foster_pending = foster_pending;
+}
+
+/* Stop parsing at EOF: pop the remaining open elements, which runs the
+   option-into-selectedcontent clone for a still-open selected option. */
+static void run_close(th_tree *tree) {
     while (tree->open_len > 0) {
         stack_pop(tree);
     }
@@ -3896,28 +3936,42 @@ static void finalize_document(th_tree *tree) {
     ensure_head_body(tree, html);
 }
 
-th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length) {
+/* Allocate a fresh document tree ready for token-driven construction (the shared
+   start of one-shot and streaming parses). NULL on allocation failure. */
+static th_tree *tree_new_document(void) {
     th_tree *tree = PyMem_Calloc(1, sizeof(th_tree));
     if (tree == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
-    tree->kind = kind;
-    tree->data = data;
-    tree->length = length;
     tree->document = node_new(tree, TH_NODE_DOCUMENT);
     if (tree->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree);       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     tree->frameset_ok = 1;
+    return tree;
+}
+
+th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length) {
+    th_tree *tree = tree_new_document();
+    if (tree == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    tree->kind = kind;
+    tree->data = data;
+    tree->length = length;
 
     th_tokenizer *sm = th_tok_new();
     if (sm == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
+    th_tok_set_error_sink(sm, &tree->errors);
     setup_input(tree, sm, kind, data, length);
-    run(tree, sm, M_INITIAL);
+    th_run_state run_state;
+    run_state_init(&run_state, M_INITIAL);
+    run_drain(tree, sm, &run_state);
+    run_close(tree);
     th_tok_free(sm);
     finalize_document(tree);
 
@@ -4052,7 +4106,10 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
         th_tok_set_initial(sm, (enum th_initial_state)model, NULL, 0);
     }
     setup_input(tree, sm, kind, data, length);
-    run(tree, sm, ctx_ns == TH_NS_HTML ? fragment_mode(ctx_atom) : M_IN_BODY);
+    th_run_state run_state;
+    run_state_init(&run_state, ctx_ns == TH_NS_HTML ? fragment_mode(ctx_atom) : M_IN_BODY);
+    run_drain(tree, sm, &run_state);
+    run_close(tree);
     th_tok_free(sm);
 
     /* an html-context fragment starts in "before head"; at EOF the same
@@ -4081,7 +4138,103 @@ void th_tree_free(th_tree *tree) {
     PyMem_Free(tree->tmpl);
     PyMem_Free(tree->attr_slots);
     PyMem_Free(tree->attr_recs);
+    th_error_sink_free(&tree->errors);
     PyMem_Free(tree);
+}
+
+/* ----------------------------------------------------------- streaming parse */
+
+/* A push parser: a document tree under construction, the resumable tokenizer
+   feeding it, and the insertion-mode state that lets a feed suspend mid-document
+   and the next resume in place. th_tok_feed copies each chunk and reclaims its
+   consumed prefix, so the input side stays bounded across an arbitrarily long
+   stream; the tree itself owns every node it has built so far. */
+struct th_stream {
+    th_tree *tree;
+    th_tokenizer *sm;
+    th_run_state run_state;
+};
+
+th_stream *th_stream_new(void) {
+    th_stream *stream = PyMem_Calloc(1, sizeof(th_stream));
+    if (stream == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    stream->tree = tree_new_document();
+    stream->sm = th_tok_new();
+    if (stream->tree == NULL || stream->sm == NULL) { /* GCOVR_EXCL_BR_LINE: alloc cannot be forced */
+        th_stream_free(stream);                       /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    run_state_init(&stream->run_state, M_INITIAL);
+    return stream;
+}
+
+/* Point the tree's slice base at the tokenizer's current input storage, which a
+   feed may have moved by compaction or reallocation. Slice tokens emitted during
+   the drain that follows resolve against this base before the next th_tok_next. */
+static void stream_sync_input(th_stream *stream) {
+    stream->tree->data = th_tok_input_data(stream->sm, &stream->tree->kind);
+}
+
+/* Whether a fed chunk holds a U+0000. The whole-input scan setup_input does has no
+   place in a streaming parse, so each chunk is scanned and the result folded into
+   the tree's has_nul flag, which gates the text builder's NUL dropping. */
+static int chunk_has_nul(int kind, const void *data, Py_ssize_t length) {
+    if (kind == PyUnicode_1BYTE_KIND) {
+        return memchr(data, '\0', (size_t)length) != NULL;
+    }
+    if (kind == PyUnicode_2BYTE_KIND) {
+        const uint16_t *units = data;
+        for (Py_ssize_t index = 0; index < length; index++) {
+            if (units[index] == 0) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    const uint32_t *units = data;
+    for (Py_ssize_t index = 0; index < length; index++) {
+        if (units[index] == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int th_stream_feed(th_stream *stream, int kind, const void *data, Py_ssize_t length) {
+    stream->tree->has_nul |= chunk_has_nul(kind, data, length);
+    th_tok_feed(stream->sm, kind, data, length);
+    stream_sync_input(stream);
+    run_drain(stream->tree, stream->sm, &stream->run_state);
+    if (stream->tree->failed) { /* GCOVR_EXCL_BR_LINE: only an allocation failure sets failed */
+        return -1;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
+}
+
+th_tree *th_stream_finish(th_stream *stream) {
+    th_tok_close(stream->sm);
+    stream_sync_input(stream);
+    run_drain(stream->tree, stream->sm, &stream->run_state);
+    run_close(stream->tree);
+    finalize_document(stream->tree);
+    if (stream->tree->failed) { /* GCOVR_EXCL_BR_LINE: only an allocation failure sets failed */
+        return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_tree *tree = stream->tree;
+    stream->tree = NULL; /* the caller owns the tree now; th_stream_free must not touch it */
+    return tree;
+}
+
+void th_stream_free(th_stream *stream) {
+    if (stream->sm != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on a partially-built stream from th_stream_new */
+        th_tok_free(stream->sm);
+    }
+    if (stream->tree != NULL) { /* still owned: a stream freed before finish, or a failed allocation */
+        th_tree_free(stream->tree);
+    }
+    PyMem_Free(stream);
 }
 
 #include "treebuilder_serialize.h"

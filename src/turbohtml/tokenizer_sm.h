@@ -18,13 +18,15 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-/* Emitted token kinds. Character tokens are coalesced into TEXT runs. */
+/* Emitted token kinds. Character tokens are coalesced into TEXT runs, except
+   when resolve_references is off and a reference becomes its own TH_CHARREF. */
 enum th_kind {
     TH_TEXT,
     TH_START_TAG,
     TH_END_TAG,
     TH_COMMENT,
     TH_DOCTYPE,
+    TH_CHARREF,
 };
 
 /* Growable code-point buffer stored at the narrowest PyUnicode kind its
@@ -71,10 +73,42 @@ typedef struct {
     int has_public_id;
     int has_system_id;
     int force_quirks;
+    /* Verbatim source span: the input slice [src_off, src_off + src_span) the
+       token came from. Set for a TH_CHARREF (the raw reference text) always, and
+       for a markup token when capture_source is on (the raw tag/comment/doctype
+       source). has_source gates whether Token.source resolves a string. */
+    Py_ssize_t src_off;
+    Py_ssize_t src_span;
+    int has_source;
     /* 1-based source position where the token began */
     Py_ssize_t line;
     Py_ssize_t col;
 } th_token;
+
+/* One reported WHATWG parse error: a static error-code string (so reporting
+   never allocates the code) and the 1-based line / 0-based column where the
+   machine detected it, matching Token.line / Token.col. */
+typedef struct {
+    const char *code;
+    Py_ssize_t line;
+    Py_ssize_t col;
+} th_parse_error;
+
+/* A growable sink the tokenizer and tree builder append parse errors to. A
+   zeroed sink is a valid empty one; the owner frees items with PyMem_Free. */
+typedef struct {
+    th_parse_error *items;
+    Py_ssize_t len;
+    Py_ssize_t cap;
+} th_error_sink;
+
+/* Append one error to a sink, growing it as needed; -1 on allocation failure
+   (the error is then dropped, leaving the sink usable). Shared so the tree
+   builder reports its construction errors into the same sink the tokenizer fills. */
+int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col);
+
+/* Release a sink's storage and reset it to empty. */
+void th_error_sink_free(th_error_sink *sink);
 
 /* Content-model states a consumer may start in. The public tokenizer always
    starts in DATA; the others are reachable through tag transitions and are
@@ -90,10 +124,22 @@ enum th_initial_state {
 
 typedef struct th_tokenizer th_tokenizer;
 
+/* Point the tokenizer at a caller-owned sink, or NULL to stop collecting. With
+   no sink the per-character paths take no extra work; while one is set the
+   machine records each parse error it detects. */
+void th_tok_set_error_sink(th_tokenizer *self, th_error_sink *sink);
+
 /* Lifecycle. th_tok_new returns NULL on allocation failure. */
 th_tokenizer *th_tok_new(void);
 void th_tok_free(th_tokenizer *self);
 void th_tok_reset(th_tokenizer *self);
+
+/* Select the output surface. resolve_references off splits each character
+   reference in text into a TH_CHARREF token; capture_source on records the
+   verbatim source span of every markup token. Both default off-equivalent
+   (resolve on, capture off) and survive th_tok_reset, since they are
+   configuration rather than input state. */
+void th_tok_set_options(th_tokenizer *self, int resolve_references, int capture_source);
 
 /* Configure the starting content model and the last start tag name used for
    appropriate-end-tag checks. Call before the first feed; used by the harness. */

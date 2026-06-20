@@ -14,12 +14,16 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, TypeAlias
 
-from ._html import Element, Text, _linkify_scan, parse_fragment
+from ._html import Element, Text, _linkify_find, _linkify_scan, parse_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
 _EMAIL_KIND = 1
+
+# A scheme-less match (``tel:+1-800``, ``bitcoin:1abc``) already carries its scheme, so its url is the matched text
+# verbatim; only a bare domain (kind 0 without a ``scheme://``) is prefixed with ``http://``.
+_SCHEME_KIND = 2
 
 # A leading ``scheme://`` tells a matched URL already carries its scheme; a bare domain (``example.com``, ``www.x.com``)
 # does not and is prefixed with ``http://``. Anchoring at the start avoids treating a ``://`` deeper in a bare domain's
@@ -33,24 +37,43 @@ _NEVER_LINKIFY = frozenset({"a", "script", "style"})
 
 class Link:
     """
-    A link about to be generated, handed to each callback to mutate or veto.
+    A link handed to each callback to mutate or veto.
 
     ``url`` is the ``href``, ``text`` is what the reader sees, and ``attrs`` holds any extra attributes to put on the
-    ``<a>`` (``rel``, ``target``, ``class``, ...). A callback returns the link to keep it, or ``None`` to leave the
-    matched text unlinked.
+    ``<a>`` (``rel``, ``target``, ``class``, ...). ``existing`` is ``True`` when the link is an ``<a>`` already in the
+    input being reprocessed (only when ``process_existing`` is on) and ``False`` for a freshly detected one, so a
+    callback can treat the two differently. A callback returns the link to keep it, or ``None`` to drop the anchor:
+    a detected link stays plain text, an existing one is unwrapped to its contents.
     """
 
-    __slots__ = ("attrs", "text", "url")
+    __slots__ = ("attrs", "existing", "text", "url")
 
-    def __init__(self, url: str, text: str, attrs: dict[str, str] | None = None) -> None:
-        """Create a link from its ``href``, visible ``text``, and optional extra anchor ``attrs``."""
+    def __init__(
+        self,
+        url: str,
+        text: str,
+        attrs: dict[str, str] | None = None,
+        *,
+        existing: bool = False,
+    ) -> None:
+        """Create a link from its ``href``, visible ``text``, optional extra anchor ``attrs``, and ``existing`` flag."""
         self.url = url
         self.text = text
         self.attrs = attrs if attrs is not None else {}
+        self.existing = existing
 
 
 # A callback receives the generated :class:`Link` and returns it to keep the link, or ``None`` to leave the text bare.
 Callback: TypeAlias = "Callable[[Link], Link | None]"
+
+
+def _attr_str(value: str | list[str] | None) -> str:
+    """Flatten an attribute value to a string for a callback: a token list joins, a bare name is empty."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return " ".join(value)
+    return value
 
 
 def _is_web_url(url: str) -> bool:
@@ -84,16 +107,30 @@ DEFAULT_CALLBACKS = (nofollow,)
 class Linker:
     """A reusable linkifier; build it once with a configuration and call :meth:`linkify` per document."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # configuration knobs, each independent, not a refactor candidate
         self,
         callbacks: Iterable[Callback] = DEFAULT_CALLBACKS,
         skip_tags: Iterable[str] | None = None,
         parse_email: bool = False,  # noqa: FBT001, FBT002  # parse_email is a flag, not a boolean trap, and stays positional
+        *,
+        process_existing: bool = False,
+        extra_tlds: Iterable[str] | None = None,
+        schemes: Iterable[str] | None = None,
     ) -> None:
-        """Configure the callbacks, the tags whose text to leave alone, and whether to autolink email addresses."""
+        """
+        Configure callbacks, skipped tags, email autolinking, anchor reprocessing, and detection overrides.
+
+        ``process_existing`` runs the callbacks over ``<a>`` tags already present, not only freshly detected links.
+        ``extra_tlds`` adds top-level domains that make a bare domain a link, on top of the built-in IANA table.
+        ``schemes`` restricts which explicit-scheme URLs autolink (``None`` keeps every scheme); a bare domain is
+        always treated as ``http`` and is governed by the TLD table, not ``schemes``.
+        """
         self.callbacks = list(callbacks)
         self.skip_tags = frozenset(skip_tags or ())
         self.parse_email = parse_email
+        self.process_existing = process_existing
+        self.extra_tlds = tuple(sorted({tld.lower() for tld in extra_tlds})) if extra_tlds else ()
+        self.schemes = frozenset(scheme.lower() for scheme in schemes) if schemes is not None else None
 
     def linkify(self, text: str) -> str:
         """Linkify HTML and return it, leaving everything but eligible text runs untouched."""
@@ -108,13 +145,40 @@ class Linker:
                 if linkifiable:
                     self._linkify_text(child)
             elif isinstance(child, Element):
-                nested = linkifiable and child.tag not in _NEVER_LINKIFY and child.tag not in self.skip_tags
-                self._walk(child, linkifiable=nested)
+                if linkifiable and child.tag == "a" and self.process_existing:
+                    self._process_existing_anchor(child)
+                else:
+                    nested = linkifiable and child.tag not in _NEVER_LINKIFY and child.tag not in self.skip_tags
+                    self._walk(child, linkifiable=nested)
+
+    def _process_existing_anchor(self, anchor: Element) -> None:
+        """Run the callbacks over an ``<a>`` already in the input; unwrap it if one vetoes, else rewrite its attrs."""
+        original_text = anchor.text
+        href = anchor.attrs.get("href")
+        attrs = {name: _attr_str(value) for name, value in anchor.attrs.items() if name != "href"}
+        link = Link(_attr_str(href), original_text, attrs, existing=True)
+        for callback in self.callbacks:
+            result = callback(link)
+            if result is None:
+                anchor.unwrap()
+                return
+            link = result
+        merged: dict[str, str] = {"href": link.url} if link.url else {}
+        merged.update(link.attrs)
+        anchor_attrs = anchor.attrs
+        for name in list(anchor_attrs):
+            if name not in merged:
+                del anchor_attrs[name]
+        for name, value in merged.items():
+            anchor_attrs[name] = value
+        if link.text != original_text:
+            anchor.clear()
+            anchor.append(Text(link.text))
 
     def _linkify_text(self, node: Text) -> None:
         """Replace a text node with the text and anchors that the link spans in it imply."""
         data = node.data
-        spans = _linkify_scan(data, self.parse_email, True)  # noqa: FBT003  # C call is positional; True enables bare domains
+        spans = _linkify_scan(data, self.parse_email, True, self.extra_tlds)  # noqa: FBT003  # True enables bare domains
         if not spans:
             return
         pieces: list[Element | Text] = []
@@ -133,7 +197,9 @@ class Linker:
         """Build the ``<a>`` for one matched link, running the callbacks; return ``None`` if a callback vetoes it."""
         if kind == _EMAIL_KIND:
             url = "mailto:" + matched
-        elif _SCHEME.match(matched):
+        elif scheme := _SCHEME.match(matched):
+            if self.schemes is not None and scheme.group()[:-3].lower() not in self.schemes:
+                return None
             url = matched
         else:
             url = "http://" + matched
@@ -148,20 +214,123 @@ class Linker:
         return anchor
 
 
-def linkify(
+def linkify(  # noqa: PLR0913  # configuration knobs, each independent, not a refactor candidate
     text: str,
     callbacks: Iterable[Callback] = DEFAULT_CALLBACKS,
     skip_tags: Iterable[str] | None = None,
     parse_email: bool = False,  # noqa: FBT001, FBT002  # parse_email is a flag, not a boolean trap, and stays positional
+    *,
+    process_existing: bool = False,
+    extra_tlds: Iterable[str] | None = None,
+    schemes: Iterable[str] | None = None,
 ) -> str:
-    """Find URLs and email addresses in HTML and wrap them in ``<a>`` links, leaving existing markup untouched."""
-    return Linker(callbacks, skip_tags, parse_email).linkify(text)
+    """
+    Find URLs and email addresses in HTML and wrap them in ``<a>`` links, leaving existing markup untouched.
+
+    ``process_existing`` also runs the callbacks over ``<a>`` tags already in the input, ``extra_tlds`` adds top-level
+    domains for bare-domain detection, and ``schemes`` restricts which explicit-scheme URLs autolink. See
+    :class:`Linker` for the details.
+    """
+    return Linker(
+        callbacks,
+        skip_tags,
+        parse_email,
+        process_existing=process_existing,
+        extra_tlds=extra_tlds,
+        schemes=schemes,
+    ).linkify(text)
+
+
+class LinkSpan:
+    """
+    One URL or email address found in a run of plain text.
+
+    ``start`` and ``end`` are the half-open offsets of the match in the scanned text, ``text`` is the matched substring
+    exactly as it appeared, and ``url`` is the normalized ``href`` (``mailto:`` for an email, ``http://`` for a bare
+    domain, the text itself for a ``scheme://`` or registered scheme-less URL). ``is_email`` flags the ``mailto:`` case.
+    """
+
+    __slots__ = ("end", "is_email", "start", "text", "url")
+
+    def __init__(self, start: int, end: int, text: str, url: str, is_email: bool) -> None:  # noqa: FBT001
+        """Store the offsets, the matched substring, the normalized ``url``, and whether the match is an email."""
+        self.start = start
+        self.end = end
+        self.text = text
+        self.url = url
+        self.is_email = is_email
+
+    def __repr__(self) -> str:
+        """Render the span with its offsets and url, the way a debugger or a failing test wants to see it."""
+        return f"LinkSpan(start={self.start}, end={self.end}, text={self.text!r}, url={self.url!r})"
+
+    def __eq__(self, other: object) -> bool:
+        """Two spans are equal when every field matches; comparing to a non-span defers to the other operand."""
+        if not isinstance(other, LinkSpan):
+            return NotImplemented
+        return (self.start, self.end, self.text, self.url, self.is_email) == (
+            other.start,
+            other.end,
+            other.text,
+            other.url,
+            other.is_email,
+        )
+
+    __hash__ = None  # a span carries offsets into one specific string, so it is not a stable dict key
+
+
+def _span_from_match(text: str, start: int, end: int, kind: int) -> LinkSpan:
+    """Normalize one matched span into a :class:`LinkSpan`, adding the ``mailto:``/``http://`` scheme it needs."""
+    matched = text[start:end]
+    if kind == _EMAIL_KIND:
+        url = "mailto:" + matched
+    elif kind == _SCHEME_KIND or _SCHEME.match(matched):
+        url = matched
+    else:
+        url = "http://" + matched
+    return LinkSpan(start, end, matched, url, kind == _EMAIL_KIND)
+
+
+class Detector:
+    """
+    Find the links in plain text, configured once and reused per call.
+
+    Unlike :class:`Linker`, which rewrites HTML, a detector only *locates* links and hands back :class:`LinkSpan`
+    objects, leaving the text untouched. ``tlds`` adds custom top-level domains for bare-domain matching (an internal
+    ``corp``, say), and ``schemes`` registers scheme-less schemes such as ``tel`` or ``bitcoin`` so ``tel:+1-800-555``
+    is found as an opaque URL; every ``scheme://`` URL is already detected without registration.
+    """
+
+    def __init__(
+        self,
+        *,
+        emails: bool = True,
+        bare_domains: bool = True,
+        tlds: Iterable[str] = (),
+        schemes: Iterable[str] = (),
+    ) -> None:
+        """Configure whether to detect emails and bare domains, and the extra TLDs and scheme-less schemes to accept."""
+        self.emails = emails
+        self.bare_domains = bare_domains
+        self._tlds = tuple({tld.lower().removeprefix(".") for tld in tlds})
+        self._schemes = tuple({scheme.lower().rstrip(":") for scheme in schemes})
+
+    def find(self, text: str) -> list[LinkSpan]:
+        """Return every link in ``text`` as a :class:`LinkSpan`, in the order it appears."""
+        spans = _linkify_find(text, self.emails, self.bare_domains, self._tlds, self._schemes)
+        return [_span_from_match(text, start, end, kind) for start, end, kind in spans]
+
+    def has_link(self, text: str) -> bool:
+        """Is there at least one link in ``text``? A cheaper question than :meth:`find` when only presence matters."""
+        return bool(_linkify_find(text, self.emails, self.bare_domains, self._tlds, self._schemes))
 
 
 __all__ = [
     "DEFAULT_CALLBACKS",
     "Callback",
+    "Detector",
     "Link",
+    "LinkSpan",
     "Linker",
     "linkify",
     "nofollow",
