@@ -476,15 +476,19 @@ static PyObject *do_scan(PyObject *text, int parse_email, int bare_domains, PyOb
     return spans;
 }
 
-/* _linkify_scan(text, parse_email, bare_domains) -> list[(start, end, kind)] */
+/* _linkify_scan(text, parse_email, bare_domains, extra_tlds=()) -> list[(start, end, kind)]
+   extra_tlds is a tuple of lowercased custom TLDs extending the built-in table for
+   bare-domain and email host recognition; the rewrite path passes it, the bare scan omits it. */
 PyObject *turbohtml_linkify_scan(PyObject *Py_UNUSED(module), PyObject *args) {
     PyObject *text;
     int parse_email;
     int bare_domains;
-    if (!PyArg_ParseTuple(args, "Upp:_linkify_scan", &text, &parse_email, &bare_domains)) {
+    PyObject *extra_tlds = NULL;
+    if (!PyArg_ParseTuple(args, "Upp|O!:_linkify_scan", &text, &parse_email, &bare_domains, &PyTuple_Type,
+                          &extra_tlds)) {
         return NULL;
     }
-    return do_scan(text, parse_email, bare_domains, NULL, NULL);
+    return do_scan(text, parse_email, bare_domains, extra_tlds, NULL);
 }
 
 /* _linkify_find(text, emails, bare_domains, extra_tlds, schemes)
