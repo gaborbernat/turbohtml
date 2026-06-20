@@ -238,6 +238,11 @@ struct th_tokenizer {
     int queue_len;
     th_token *returned; /* reset at the next call so its buffers can be reused */
     int done;
+
+    th_error_sink *err_sink; /* parse errors are recorded here when non-NULL */
+    const char *eof_code;    /* the parse-error code to report if EOF arrives with
+                                this tag/comment/doctype construct still open */
+    int eof_reported;        /* the construct's EOF error has already been recorded */
 };
 
 static void token_reset(th_token *tok) {
@@ -317,6 +322,41 @@ static void push(th_tokenizer *self, th_buf *buf, Py_UCS4 ch) {
         self->oom = 1;         /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
 }
 
+int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col) {
+    if (sink->len == sink->cap) {
+        Py_ssize_t cap = sink->cap ? sink->cap * 2 : 8;
+        th_parse_error *grown =
+            PyMem_Resize(sink->items, th_parse_error, (size_t)cap); /* GCOVR_EXCL_BR_LINE: size-overflow guard */
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        }
+        sink->items = grown;
+        sink->cap = cap;
+    }
+    sink->items[sink->len++] = (th_parse_error){code, line, col};
+    return 0;
+}
+
+void th_error_sink_free(th_error_sink *sink) {
+    PyMem_Free(sink->items);
+    sink->items = NULL;
+    sink->len = 0;
+    sink->cap = 0;
+}
+
+void th_tok_set_error_sink(th_tokenizer *self, th_error_sink *sink) {
+    self->err_sink = sink;
+}
+
+/* Record a parse error at the current input position. The sink check keeps the
+   sink-free path (the standalone tokenizer) free of any per-error work; a sink's
+   own allocation failure silently drops the error rather than failing the parse. */
+static void tok_error(th_tokenizer *self, const char *code) {
+    if (self->err_sink != NULL) {
+        th_error_sink_push(self->err_sink, code, self->line, self->col);
+    }
+}
+
 void th_tok_reset(th_tokenizer *self) {
     self->state = ST_DATA;
     self->oom = 0;
@@ -344,6 +384,10 @@ void th_tok_reset(th_tokenizer *self) {
     self->queue_len = 0;
     self->returned = NULL;
     self->done = 0;
+    self->eof_code = NULL;
+    self->eof_reported = 0;
+    /* err_sink is owned and set by the caller (the tree builder); a reset of the
+       streaming tokenizer keeps it as configured rather than detaching it */
 }
 
 void th_tok_free(th_tokenizer *self) {
@@ -598,6 +642,8 @@ static void emit_tok(th_tokenizer *self) {
         self->tok.has_source = 1;
     }
     self->building = 0;
+    /* the construct is complete, so a later EOF no longer reports against it */
+    self->eof_code = NULL;
     flush_text(self);
     enqueue(self, &self->tok);
 }
@@ -615,6 +661,7 @@ static void start_tag(th_tokenizer *self, int end_tag, Py_UCS4 first) {
     self->tok.line = self->mark_line;
     self->tok.col = self->mark_col;
     begin_markup_source(self);
+    self->eof_code = "eof-in-tag"; /* until the tag is emitted, EOF is eof-in-tag */
     push(self, &self->tok.name, first);
 }
 
@@ -665,6 +712,7 @@ static void finish_attr_name(th_tokenizer *self) {
     Py_ssize_t cur = tok->attr_count - 1;
     for (Py_ssize_t index = 0; index < cur; index++) {
         if (attr_name_dup(&tok->attrs[index], &tok->attrs[cur])) {
+            tok_error(self, "duplicate-attribute");
             tok->attr_count = cur;
             self->attr = &self->oom_attr;
             return;

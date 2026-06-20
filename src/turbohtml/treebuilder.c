@@ -73,6 +73,10 @@ struct th_tree {
     uint32_t attr_rec_cap;
     uint32_t *attr_slots; /* slot -> record index + 1; 0 marks an empty slot */
     uint32_t attr_slot_mask;
+    /* WHATWG parse errors collected during the parse, in document order. The
+       tokenizer fills it through this sink while the tree builder adds its own
+       construction errors; read-only once the parse returns. */
+    th_error_sink errors;
 };
 
 static void *arena_alloc(th_tree *tree, Py_ssize_t size) {
@@ -399,6 +403,11 @@ uint32_t th_tree_attr_generation(const th_tree *tree) {
 
 int th_tree_quirks(const th_tree *tree) {
     return tree->quirks;
+}
+
+const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count) {
+    *out_count = tree->errors.len;
+    return tree->errors.items;
 }
 
 int th_node_text_is_blank(th_tree *tree, th_node *node) {
@@ -2266,6 +2275,7 @@ static void run_drain(th_tree *tree, th_tokenizer *sm, th_run_state *run_state) 
            ignored without changing the insertion mode (foreign content already handled
            its own DOCTYPE above); only the initial mode builds the doctype node */
         if (tok->kind == TH_DOCTYPE && mode != M_INITIAL) {
+            th_error_sink_push(&tree->errors, "unexpected-doctype", tok->line, tok->col);
             continue;
         }
         /* every insertion mode has an explicit case, so the compiler default arm is unreachable */
@@ -3956,6 +3966,7 @@ th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length) {
         th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
+    th_tok_set_error_sink(sm, &tree->errors);
     setup_input(tree, sm, kind, data, length);
     th_run_state run_state;
     run_state_init(&run_state, M_INITIAL);
@@ -4127,6 +4138,7 @@ void th_tree_free(th_tree *tree) {
     PyMem_Free(tree->tmpl);
     PyMem_Free(tree->attr_slots);
     PyMem_Free(tree->attr_recs);
+    th_error_sink_free(&tree->errors);
     PyMem_Free(tree);
 }
 
