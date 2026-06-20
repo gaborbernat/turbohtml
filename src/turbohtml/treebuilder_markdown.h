@@ -94,6 +94,10 @@ md_opts th_markdown_default_opts(void) {
     opt.escape_asterisks = 1;
     opt.escape_underscores = 1;
     opt.line_break = TH_MD_BREAK_SPACES;
+    opt.wrap_width = 0;
+    opt.wrap_list_items = 0;
+    opt.wrap_links = 1;
+    opt.transliterate = 0;
     opt.document_strip = TH_MD_DOC_STRIP;
     opt.sub = "";
     opt.sup = "";
@@ -140,6 +144,8 @@ typedef struct {
     int line_has_content; /* real content past the prefix/marker on the current line */
     int column;           /* visible width on the current line, for word wrapping */
     int space_pending;    /* a collapsed-away whitespace run is owed one space */
+    int pending_word;     /* code points in the word the owed space precedes, for greedy wrapping */
+    int no_wrap;          /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
     int drop_space;       /* swallow the next pending space (block/inline start) without emitting */
     int pending_loose;    /* the previous block wants a blank line after it */
     int suppress_break;   /* the next block attaches to the current (list marker) line */
@@ -220,18 +226,39 @@ static void md_newline(md_ctx *ctx) {
     ctx->drop_space = 1;
 }
 
+/* Visible width of the current (unfinished) output line: the code points since
+   the last newline, which already include the continuation prefix. */
+static Py_ssize_t md_line_column(md_ctx *ctx) {
+    Py_ssize_t start = ctx->out.len;
+    while (start > 0 && ctx->out.data[start - 1] != '\n') {
+        start--;
+    }
+    return ctx->out.len - start;
+}
+
 /* Emit the one space a collapsed whitespace run owes, unless it falls at a line
-   start or has been marked for dropping (the start of a block). */
+   start or has been marked for dropping (the start of a block). When word
+   wrapping is on, a break replaces the space once the following word would carry
+   the line past wrap_width (greedy: never split a word, honor the prefix). */
 static void md_flush_space(md_ctx *ctx) {
     int drop = ctx->drop_space;
     ctx->drop_space = 0;
+    int word = ctx->pending_word;
+    ctx->pending_word = 0;
     if (!ctx->space_pending) {
         return;
     }
     ctx->space_pending = 0;
     /* every line start sets drop_space, so a line-start space is already covered
-       by drop and no separate line_has_content test is needed here */
+       by drop and the wrap check below only ever sees a mid-line space */
     if (drop) {
+        return;
+    }
+    if (ctx->opt->wrap_width > 0 && ctx->no_wrap == 0 && md_line_column(ctx) + 1 + word > ctx->opt->wrap_width) {
+        md_newline(ctx);
+        /* the break consumed the owed space and the wrapped word follows it with
+           no leading space, so clear the drop md_newline raised for a real <br> */
+        ctx->drop_space = 0;
         return;
     }
     sbuf_putc(&ctx->out, ' ');
@@ -281,7 +308,54 @@ static int md_needs_escape(const md_opts *opt, Py_UCS4 c) {
                                                     c == '=' || c == '~' || c == '|' || c == '!' || c == '&');
 }
 
+/* The transliterate map: common non-ASCII typography folded to an ASCII spelling.
+   Punctuation/symbols plus the Latin-1 and a few Latin-Extended-A accented
+   letters, kept as data so the scan is one branch and the ASCII path is free. */
+typedef struct {
+    Py_UCS4 cp;
+    const char *ascii;
+} md_translit_entry;
+
+static const md_translit_entry MD_TRANSLIT[] = {
+    {0x00A0, " "},  {0x00A9, "(C)"}, {0x00AB, "\""}, {0x00AE, "(R)"}, {0x00B7, "*"},  {0x00BB, "\""}, {0x00C0, "A"},
+    {0x00C1, "A"},  {0x00C2, "A"},   {0x00C3, "A"},  {0x00C4, "A"},   {0x00C5, "A"},  {0x00C6, "AE"}, {0x00C7, "C"},
+    {0x00C8, "E"},  {0x00C9, "E"},   {0x00CA, "E"},  {0x00CB, "E"},   {0x00CC, "I"},  {0x00CD, "I"},  {0x00CE, "I"},
+    {0x00CF, "I"},  {0x00D0, "D"},   {0x00D1, "N"},  {0x00D2, "O"},   {0x00D3, "O"},  {0x00D4, "O"},  {0x00D5, "O"},
+    {0x00D6, "O"},  {0x00D7, "x"},   {0x00D8, "O"},  {0x00D9, "U"},   {0x00DA, "U"},  {0x00DB, "U"},  {0x00DC, "U"},
+    {0x00DD, "Y"},  {0x00DE, "Th"},  {0x00DF, "ss"}, {0x00E0, "a"},   {0x00E1, "a"},  {0x00E2, "a"},  {0x00E3, "a"},
+    {0x00E4, "a"},  {0x00E5, "a"},   {0x00E6, "ae"}, {0x00E7, "c"},   {0x00E8, "e"},  {0x00E9, "e"},  {0x00EA, "e"},
+    {0x00EB, "e"},  {0x00EC, "i"},   {0x00ED, "i"},  {0x00EE, "i"},   {0x00EF, "i"},  {0x00F0, "d"},  {0x00F1, "n"},
+    {0x00F2, "o"},  {0x00F3, "o"},   {0x00F4, "o"},  {0x00F5, "o"},   {0x00F6, "o"},  {0x00F8, "o"},  {0x00F9, "u"},
+    {0x00FA, "u"},  {0x00FB, "u"},   {0x00FC, "u"},  {0x00FD, "y"},   {0x00FE, "th"}, {0x00FF, "y"},  {0x0152, "OE"},
+    {0x0153, "oe"}, {0x0160, "S"},   {0x0161, "s"},  {0x0178, "Y"},   {0x017D, "Z"},  {0x017E, "z"},  {0x2010, "-"},
+    {0x2011, "-"},  {0x2013, "-"},   {0x2014, "--"}, {0x2018, "'"},   {0x2019, "'"},  {0x201A, "'"},  {0x201C, "\""},
+    {0x201D, "\""}, {0x201E, "\""},  {0x2022, "*"},  {0x2026, "..."}, {0x2190, "<-"}, {0x2192, "->"}, {0x2122, "(TM)"},
+};
+
+/* The ASCII spelling for a code point, or NULL to emit it unchanged. ASCII never
+   maps, so the common path costs one comparison. */
+static const char *md_translit(Py_UCS4 c) {
+    if (c < 0x80) {
+        return NULL;
+    }
+    for (size_t index = 0; index < sizeof(MD_TRANSLIT) / sizeof(MD_TRANSLIT[0]); index++) {
+        if (MD_TRANSLIT[index].cp == c) {
+            return MD_TRANSLIT[index].ascii;
+        }
+    }
+    return NULL;
+}
+
 static void md_put_char(md_ctx *ctx, Py_UCS4 c) {
+    if (ctx->opt->transliterate) {
+        const char *ascii = md_translit(c);
+        if (ascii != NULL) {
+            for (const char *cursor = ascii; *cursor != '\0'; cursor++) {
+                md_put_char(ctx, (Py_UCS4)(unsigned char)*cursor);
+            }
+            return;
+        }
+    }
     int line_start_marker = !ctx->line_has_content && (c == '#' || c == '>' || c == '-' || c == '+');
     if (md_needs_escape(ctx->opt, c) || line_start_marker) {
         sbuf_putc(&ctx->out, '\\');
@@ -314,6 +388,7 @@ static Py_ssize_t md_escape_line_number(md_ctx *ctx, const Py_UCS4 *text, Py_ssi
    (which resolves the deferred space, markers and escapes) the rest of the run —
    no whitespace, nothing to escape — is bulk-copied in one memcpy. */
 static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
+    int translit = ctx->opt->transliterate;
     Py_ssize_t i = 0;
     while (i < len) {
         Py_UCS4 c = text[i];
@@ -322,6 +397,13 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
             i++;
             continue;
         }
+        /* the upcoming word's code-point count tells md_flush_space whether the
+           owed space should become a wrap break before the word is laid down */
+        Py_ssize_t word_end = i;
+        while (word_end < len && !md_is_ws(text[word_end])) {
+            word_end++;
+        }
+        ctx->pending_word = (int)(word_end - i);
         md_before_visible(ctx);
         if (!ctx->line_has_content && c >= '0' && c <= '9') {
             Py_ssize_t consumed = md_escape_line_number(ctx, text, i, len);
@@ -333,7 +415,7 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
         md_put_char(ctx, c);
         i++;
         Py_ssize_t start = i;
-        while (i < len && !md_is_ws(text[i]) && !md_needs_escape(ctx->opt, text[i])) {
+        while (i < len && !md_is_ws(text[i]) && !md_needs_escape(ctx->opt, text[i]) && !(translit && text[i] >= 0x80)) {
             i++;
         }
         if (i > start) {
@@ -661,6 +743,23 @@ static void md_emit_link(md_ctx *ctx, th_node *node) {
     sbuf_putc(&ctx->out, ')');
 }
 
+static void md_emit_pre_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t end);
+
+/* Pass a node's outer HTML through verbatim (the image/table escape hatch),
+   restarting the continuation prefix at each newline so a list or blockquote
+   marker carries down every line of the embedded markup. */
+static void md_emit_raw_html(md_ctx *ctx, th_node *node) {
+    Py_ssize_t len;
+    Py_UCS4 *html = th_node_html(ctx->tree, node, &len);
+    if (html == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        ctx->out.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    md_emit_pre_text(ctx, html, len);
+    ctx->line_has_content = 1;
+    PyMem_Free(html);
+}
+
 /* Write an image's alt text, falling back to the configured default. */
 static void md_emit_alt(md_ctx *ctx, const Py_UCS4 *alt, Py_ssize_t alt_len) {
     if (alt != NULL) {
@@ -676,9 +775,13 @@ static void md_emit_image(md_ctx *ctx, th_node *node) {
     if (opt->image_mode == TH_MD_IMAGE_IGNORE) {
         return;
     }
+    md_before_visible(ctx);
+    if (opt->image_mode == TH_MD_IMAGE_HTML) {
+        md_emit_raw_html(ctx, node);
+        return;
+    }
     Py_ssize_t alt_len;
     const Py_UCS4 *alt = md_attr(ctx->tree, node, "alt", &alt_len);
-    md_before_visible(ctx);
     if (opt->image_mode == TH_MD_IMAGE_ALT) {
         md_emit_alt(ctx, alt, alt_len);
         return;
@@ -739,7 +842,14 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
         md_emit_code_span(ctx, node);
         return;
     case TH_TAG_A:
+        /* wrap_links off keeps the whole [text](url) construct on one line */
+        if (!opt->wrap_links) {
+            ctx->no_wrap++;
+        }
         md_emit_link(ctx, node);
+        if (!opt->wrap_links) {
+            ctx->no_wrap--;
+        }
         return;
     case TH_TAG_IMG:
         md_emit_image(ctx, node);
@@ -1134,7 +1244,13 @@ static void md_render_list(md_ctx *ctx, th_node *node, int ordered) {
         int saved_tight = ctx->tight;
         ctx->tight = 1;
         ctx->suppress_break = md_leads_with_inline(ctx, child);
+        if (!ctx->opt->wrap_list_items) {
+            ctx->no_wrap++;
+        }
         md_block_children(ctx, child);
+        if (!ctx->opt->wrap_list_items) {
+            ctx->no_wrap--;
+        }
         ctx->tight = saved_tight;
         ctx->prefix.len = base;
     }
@@ -1350,6 +1466,12 @@ static void md_render_table(md_ctx *ctx, th_node *node) {
         return;
     }
     const md_opts *opt = ctx->opt;
+    if (opt->table_mode == TH_MD_TABLE_HTML) {
+        md_block_line(ctx, 1);
+        md_emit_raw_html(ctx, node);
+        PyMem_Free(rows);
+        return;
+    }
     if (opt->table_mode == TH_MD_TABLE_STRIP) {
         /* drop the grid, keep each cell's text as a space-joined block per row */
         for (Py_ssize_t r = 0; r < count; r++) {
@@ -1564,7 +1686,11 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
         md_render_pre(ctx, node);
         return;
     case TH_TAG_TABLE:
+        /* a wrap break inside a cell would corrupt the pipe grid, so the whole
+           table renders unbreakable regardless of wrap_width */
+        ctx->no_wrap++;
         md_render_table(ctx, node);
+        ctx->no_wrap--;
         return;
     case TH_TAG_BLOCKQUOTE: {
         Py_ssize_t base = ctx->prefix.len;

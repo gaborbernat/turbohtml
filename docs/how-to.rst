@@ -877,6 +877,22 @@ guide maps each old option to its turbohtml name.
 
     [1]: /x
 
+Three output modes shape the result further. ``wrap_width`` word-wraps prose at a column (``0``, the default, leaves
+paragraphs unwrapped), honoring list and blockquote indentation; ``wrap_list_items`` extends wrapping into list items
+and ``wrap_links=False`` keeps a ``[text](url)`` construct on one line. ``image_mode="html"`` and ``table_mode="html"``
+pass the original ``<img>`` or ``<table>`` through verbatim, for readers that render embedded HTML. ``transliterate``
+folds common non-ASCII typography in prose -- smart quotes, dashes, ellipsis, accented letters -- to ASCII:
+
+.. testcode::
+
+    doc = turbohtml.parse("<p>The “quick” brown fox — jumps over the lazy dog today.</p>")
+    print(doc.to_markdown(wrap_width=30, transliterate=True))
+
+.. testoutput::
+
+    The "quick" brown fox -- jumps
+    over the lazy dog today.
+
 To convert a Google Docs HTML export, pass ``google_doc=True`` so the inline-CSS styling it carries (font weight, font
 style, fixed-width fonts, and ``margin-left`` list nesting) turns into Markdown:
 

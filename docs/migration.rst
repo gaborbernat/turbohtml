@@ -1047,14 +1047,18 @@ The html2text options map as:
       - ``skip_internal_links``
     - - ``inline_links``
       - ``link_style`` (``"inline"``/``"reference"``)
-    - - ``ignore_images``, ``images_to_alt``
-      - ``image_mode`` (``"markdown"``/``"alt"``/``"ignore"``)
+    - - ``ignore_images``, ``images_to_alt``, ``images_as_html``, ``images_with_size``
+      - ``image_mode`` (``"markdown"``/``"alt"``/``"ignore"``/``"html"``)
     - - ``default_image_alt``
       - ``default_image_alt``
     - - ``ignore_tables``, ``bypass_tables``
-      - ``table_mode`` (``"markdown"``/``"strip"``)
+      - ``table_mode`` (``"markdown"``/``"strip"``/``"html"``)
     - - ``pad_tables``
       - ``pad_tables``
+    - - ``body_width``, ``wrap_list_items``, ``wrap_links``
+      - ``wrap_width``, ``wrap_list_items``, ``wrap_links``
+    - - ``unicode_snob`` (and the ``UNIFIABLE`` table)
+      - ``transliterate``
     - - ``mark_code``
       - ``mark_code``
     - - ``backquote_code_style``
