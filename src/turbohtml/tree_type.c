@@ -520,12 +520,15 @@ PyDoc_STRVAR(
     "mark_code=False, link_style='inline', autolink=True, link_title=False, ignore_links=False, "
     "skip_internal_links=False, base_url='', image_mode='markdown', default_image_alt='', table_mode='markdown', "
     "table_header='first', pad_tables=False, escape_mode='minimal', escape_asterisks=True, escape_underscores=True, "
-    "line_break='spaces', block_spacing='double', document_strip='strip', quote_open='\"', quote_close='\"', "
+    "line_break='spaces', block_spacing='double', wrap_width=0, wrap_list_items=False, wrap_links=True, "
+    "transliterate=False, document_strip='strip', quote_open='\"', quote_close='\"', "
     "google_doc=False, google_list_indent=36, hide_strikethrough=False, converters=None)\n--\n\n"
     "Render this node and its subtree as Markdown. The keyword options cover the\n"
     "markdownify and html2text configuration surface; the defaults emit opinionated\n"
-    "GitHub-Flavored Markdown. google_doc reads the inline-CSS styling a Google Docs\n"
-    "export carries (bold/italic/strike weights and list margins). converters maps a\n"
+    "GitHub-Flavored Markdown. wrap_width word-wraps prose at a column (0 disables);\n"
+    "image_mode='html' and table_mode='html' pass the element through verbatim;\n"
+    "transliterate folds common non-ASCII typography in prose to ASCII. google_doc\n"
+    "reads the inline-CSS styling a Google Docs export carries. converters maps a\n"
     "lowercased tag name to a callable(element, content) -> str that replaces how\n"
     "that tag renders, receiving the element and its already-converted child Markdown.");
 
@@ -620,6 +623,10 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
                          "escape_underscores",
                          "line_break",
                          "block_spacing",
+                         "wrap_width",
+                         "wrap_list_items",
+                         "wrap_links",
+                         "transliterate",
                          "document_strip",
                          "quote_open",
                          "quote_close",
@@ -629,20 +636,21 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
                          "converters",
                          NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOOsspipO", kw, &heading, &opt.bullets, &opt.strong, &opt.emphasis,
-            &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code, &link,
-            &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
+            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOipppOsspipO", kw, &heading, &opt.bullets, &opt.strong,
+            &opt.emphasis, &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code,
+            &link, &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
             &opt.default_image_alt, &table, &header, &opt.pad_tables, &escape, &opt.escape_asterisks,
-            &opt.escape_underscores, &brk, &spacing, &docstrip, &opt.quote_open, &opt.quote_close, &opt.google_doc,
-            &opt.google_list_indent, &opt.hide_strikethrough, &converters)) {
+            &opt.escape_underscores, &brk, &spacing, &opt.wrap_width, &opt.wrap_list_items, &opt.wrap_links,
+            &opt.transliterate, &docstrip, &opt.quote_open, &opt.quote_close, &opt.google_doc, &opt.google_list_indent,
+            &opt.hide_strikethrough, &converters)) {
         return NULL;
     }
     static const char *const headings[] = {"atx", "atx_closed", "setext"};
     static const char *const strikes[] = {"keep", "hide"};
     static const char *const codes[] = {"fenced", "indented"};
     static const char *const links[] = {"inline", "reference"};
-    static const char *const images[] = {"markdown", "alt", "ignore"};
-    static const char *const tables[] = {"markdown", "strip"};
+    static const char *const images[] = {"markdown", "alt", "ignore", "html"};
+    static const char *const tables[] = {"markdown", "strip", "html"};
     static const char *const headers[] = {"first", "detect", "none"};
     static const char *const escapes[] = {"minimal", "all"};
     static const char *const breaks[] = {"spaces", "backslash"};
@@ -653,8 +661,8 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
         md_resolve_enum("strikethrough", strike, strikes, 2, &keep_strike) < 0 ||
         md_resolve_enum("code_block_style", code_style, codes, 2, &opt.code_block_style) < 0 ||
         md_resolve_enum("link_style", link, links, 2, &opt.link_style) < 0 ||
-        md_resolve_enum("image_mode", image, images, 3, &opt.image_mode) < 0 ||
-        md_resolve_enum("table_mode", table, tables, 2, &opt.table_mode) < 0 ||
+        md_resolve_enum("image_mode", image, images, 4, &opt.image_mode) < 0 ||
+        md_resolve_enum("table_mode", table, tables, 3, &opt.table_mode) < 0 ||
         md_resolve_enum("table_header", header, headers, 3, &opt.table_header) < 0 ||
         md_resolve_enum("escape_mode", escape, escapes, 2, &opt.escape_mode) < 0 ||
         md_resolve_enum("line_break", brk, breaks, 2, &opt.line_break) < 0 ||
@@ -668,6 +676,10 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
     }
     if (opt.google_list_indent < 1) {
         PyErr_SetString(PyExc_ValueError, "google_list_indent must be a positive number of pixels");
+        return NULL;
+    }
+    if (opt.wrap_width < 0) {
+        PyErr_SetString(PyExc_ValueError, "wrap_width must be a non-negative number of columns");
         return NULL;
     }
     opt.keep_emphasis = !ignore_emphasis;

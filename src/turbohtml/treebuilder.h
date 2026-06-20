@@ -265,8 +265,8 @@ Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *mini
 enum th_md_heading { TH_MD_HEADING_ATX, TH_MD_HEADING_ATX_CLOSED, TH_MD_HEADING_SETEXT };
 enum th_md_code { TH_MD_CODE_FENCED, TH_MD_CODE_INDENTED };
 enum th_md_link { TH_MD_LINK_INLINE, TH_MD_LINK_REFERENCE };
-enum th_md_image { TH_MD_IMAGE_MARKDOWN, TH_MD_IMAGE_ALT, TH_MD_IMAGE_IGNORE };
-enum th_md_table { TH_MD_TABLE_MARKDOWN, TH_MD_TABLE_STRIP };
+enum th_md_image { TH_MD_IMAGE_MARKDOWN, TH_MD_IMAGE_ALT, TH_MD_IMAGE_IGNORE, TH_MD_IMAGE_HTML };
+enum th_md_table { TH_MD_TABLE_MARKDOWN, TH_MD_TABLE_STRIP, TH_MD_TABLE_HTML };
 enum th_md_escape { TH_MD_ESCAPE_MINIMAL, TH_MD_ESCAPE_ALL };
 enum th_md_break { TH_MD_BREAK_SPACES, TH_MD_BREAK_BACKSLASH };
 enum th_md_doc_strip { TH_MD_DOC_STRIP, TH_MD_DOC_LSTRIP, TH_MD_DOC_RSTRIP, TH_MD_DOC_NONE };
@@ -303,13 +303,15 @@ typedef struct {
     int line_break;           /* enum th_md_break */
     int block_spacing_single; /* one newline between blocks instead of a blank line */
     int wrap_width;           /* word-wrap column, 0 disables */
-    int wrap_list_items;
-    int document_strip;     /* enum th_md_doc_strip */
-    const char *sub;        /* <sub> wrapper */
-    const char *sup;        /* <sup> wrapper */
-    int google_doc;         /* read inline-CSS styling the way a Google Docs export encodes it */
-    int google_list_indent; /* px of margin-left per list-nesting level (>= 1); divides margin-left */
-    int hide_strikethrough; /* in google_doc mode, drop text a CSS line-through struck */
+    int wrap_list_items;      /* extend word wrapping into list-item text */
+    int wrap_links;           /* 0 keeps a link/image construct unbroken across a wrap */
+    int transliterate;        /* fold common non-ASCII typography in prose to ASCII */
+    int document_strip;       /* enum th_md_doc_strip */
+    const char *sub;          /* <sub> wrapper */
+    const char *sup;          /* <sup> wrapper */
+    int google_doc;           /* read inline-CSS styling the way a Google Docs export encodes it */
+    int google_list_indent;   /* px of margin-left per list-nesting level (>= 1); divides margin-left */
+    int hide_strikethrough;   /* in google_doc mode, drop text a CSS line-through struck */
     /* Per-tag converter hook: a registered tag's built-in rendering is replaced by a
        Python callable receiving the element and its rendered child Markdown. The
        engine builds the element through wrap_node so it need not know the binding. */
