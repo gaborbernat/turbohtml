@@ -125,6 +125,9 @@ print(doc.to_markdown())
 # - water
 ```
 
+The keyword options cover the markdownify and html2text surface; `google_doc=True` adds html2text's Google-Docs mode,
+reading the inline-CSS styling such an export carries.
+
 Or to layout-aware plain text (the `inscriptis` role), with tables laid out as aligned columns:
 
 ```python
@@ -132,6 +135,15 @@ doc = turbohtml.parse("<table><tr><th>Item</th><th>Qty</th></tr><tr><td>Apples</
 print(doc.to_text())
 # Item    Qty
 # Apples  3
+```
+
+`to_annotated_text` returns that text with `(start, end, label)` spans for elements matching an `annotation_rules`
+mapping, the inscriptis annotation role:
+
+```python
+doc = turbohtml.parse("<h1>Q3</h1><p>Up <b>12%</b></p>")
+text, labels = doc.to_annotated_text({"h1": ["heading"], "b": ["metric"]})
+# ("Q3\n\nUp 12%", [(0, 2, "heading"), (6, 9, "metric")])
 ```
 
 Pass `bytes` to sniff the encoding the WHATWG way (byte-order mark, then a `<meta>` declaration):

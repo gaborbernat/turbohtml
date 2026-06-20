@@ -1049,6 +1049,27 @@ The html2text options map as:
       - ``quote_open``, ``quote_close``
     - - ``escape_snob``
       - ``escape_mode="all"``
+    - - ``google_doc``
+      - ``google_doc``
+    - - ``google_list_indent``
+      - ``google_list_indent``
+    - - ``hide_strikethrough``
+      - ``hide_strikethrough``
+
+``google_doc=True`` reads the inline-CSS styling a Google Docs HTML export carries: a ``font-weight`` of ``bold`` or
+``700``--``900`` becomes ``strong``, ``font-style:italic`` becomes ``emphasis``, a ``Courier New``/``Consolas``
+``font-family`` becomes an inline code span, ``list-style-type`` picks the list marker, and each ``google_list_indent``
+pixels of ``margin-left`` add one list-nesting level. With ``hide_strikethrough=True`` a
+``text-decoration:line-through`` drops the struck text.
+
+.. testcode::
+
+    export = '<p><span style="font-weight:700">Quarterly</span> revenue</p>'
+    print(parse(export).to_markdown(google_doc=True))
+
+.. testoutput::
+
+    **Quarterly** revenue
 
 Pitfalls
 ========
@@ -1057,9 +1078,9 @@ Pitfalls
   ``strong_em_symbol``; set both to reproduce its behavior.
 - ``to_markdown`` is a method on any node, so convert a subtree by calling it on the element you selected
   (``doc.find("article").to_markdown()``) instead of slicing the HTML string first.
-- A few niche knobs are intentionally dropped: html2text's Google-Docs heuristics (``google_doc``,
-  ``google_list_indent``), the parser-selection options (markdownify's ``bs4_options``), and the per-call tag-handler
-  callbacks. ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
+- A few niche knobs are intentionally dropped: the parser-selection options (markdownify's ``bs4_options``) and the
+  per-call tag-handler callbacks, since turbohtml always runs the WHATWG algorithm and the walk holds no per-call state.
+  ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
 - Layout-aware plain text (the ``inscriptis`` role, ``to_text(layout=...)``) is a separate method; for the unstructured
   concatenation read :attr:`~turbohtml.Node.text`.
 
@@ -1116,6 +1137,40 @@ The ``ParserConfig`` options map as:
     - - (no equivalent)
       - ``width`` adds word wrapping, which inscriptis leaves to the caller
 
+inscriptis can also tag the rendered text with labeled spans through ``get_annotated_text`` and an ``annotation_rules``
+mapping. :meth:`~turbohtml.Node.to_annotated_text` is the same call: it returns the rendered text together with a list
+of ``(start, end, label)`` triples over its code-point offsets, taking every ``to_text`` option as well.
+
+.. code-block:: python
+
+    # inscriptis
+    from inscriptis import get_annotated_text, ParserConfig
+
+    rules = {"h1": ["heading"], "b": ["emphasis"]}
+    get_annotated_text(html, ParserConfig(annotation_rules=rules))
+
+    # turbohtml
+    turbohtml.parse(html).to_annotated_text(rules)
+
+.. testcode::
+
+    text, labels = parse("<h1>Title</h1><p>Some <b>bold</b> words.</p>").to_annotated_text(
+        {"h1": ["heading"], "b": ["emphasis"]}
+    )
+    print(text)
+    print([(label, text[start:end]) for start, end, label in labels])
+
+.. testoutput::
+
+    Title
+
+    Some bold words.
+    [('heading', 'Title'), ('emphasis', 'bold')]
+
+Rule keys follow inscriptis: a bare tag (``"h1"``), a ``tag#attr`` to require an attribute, a ``tag#attr=value`` to
+match one whitespace-separated token of it, and the tag-less ``#attr`` / ``#attr=value`` forms to match across any tag.
+The value is the list of labels to attach.
+
 Pitfalls
 ========
 
@@ -1123,4 +1178,5 @@ Pitfalls
   for numbered references collected at the end.
 - ``to_text`` renders structure, not styling: there is no bold or color, and headings are plain text. For the raw
   concatenation with no layout at all, read :attr:`~turbohtml.Node.text`.
-- The annotation API (inscriptis's ``get_annotated_text`` and ``annotation_rules``) is not ported.
+- Annotation offsets count code points into the returned string; a table cell is labeled at its position in the laid-out
+  grid, so the span covers the cell's column-aligned text rather than the source order.
