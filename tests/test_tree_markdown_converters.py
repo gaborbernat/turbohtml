@@ -101,7 +101,7 @@ def test_block_converter_multiline_keeps_prefix() -> None:
 
 def test_empty_converter_result_emits_nothing() -> None:
     out = parse("<section><div>x</div></section>").to_markdown(converters={"div": lambda _e, _t: ""})
-    assert out == ""
+    assert not out
 
 
 def test_converter_on_root_element() -> None:
