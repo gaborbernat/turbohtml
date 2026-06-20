@@ -111,8 +111,7 @@ def test_multiple_select_submits_each_selected_option() -> None:
 
 def test_multiple_select_skips_disabled_options() -> None:
     form = _form(
-        "<form><select name=t multiple><option value=a selected disabled>A"
-        "<option value=b selected>B</select></form>"
+        "<form><select name=t multiple><option value=a selected disabled>A<option value=b selected>B</select></form>"
     )
     assert form.form_data() == [("t", "b")]
 

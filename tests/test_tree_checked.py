@@ -50,7 +50,8 @@ def test_set_checked_accepts_truthy_values() -> None:
 def test_set_checked_propagates_a_failing_bool() -> None:
     class Boom:
         def __bool__(self) -> bool:
-            raise ValueError("nope")
+            msg = "nope"
+            raise ValueError(msg)
 
     field: Any = _control("<input type=checkbox>", "input")
     with pytest.raises(ValueError, match="nope"):
@@ -170,8 +171,7 @@ def test_radio_group_falls_back_to_the_document() -> None:
 
 def test_radio_group_is_scoped_to_the_owning_form() -> None:
     document = parse(
-        "<input type=radio name=g value=outside checked>"
-        "<form><input type=radio name=g value=inside></form>"
+        "<input type=radio name=g value=outside checked><form><input type=radio name=g value=inside></form>"
     )
     form = document.find("form")
     assert form is not None
