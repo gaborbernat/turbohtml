@@ -43,6 +43,13 @@ struct th_node;
 int turbohtml_node_borrow(PyObject *module, PyObject *obj, struct th_tree **tree, struct th_node **node);
 PyObject *turbohtml_sanitize(PyObject *module, PyObject *args);
 
+/* Implemented in annotation.c, the inscriptis annotation output processors over
+   the (text, spans) pair Node.to_annotated_text() returns. annotation_surface
+   groups the matched substrings by label; annotation_tags weaves them back into
+   the text as inline <label>...</label> markup. Both match METH_VARARGS. */
+PyObject *turbohtml_annotation_surface(PyObject *module, PyObject *args);
+PyObject *turbohtml_annotation_tags(PyObject *module, PyObject *args);
+
 /* Implemented in links.c, the engine behind Node.links()/rewrite_links()/
    resolve_links(). Each takes the wrapping node (owner, for the per-tree handle
    and the Element wrappers) and the already-derived tree+root the thin C methods

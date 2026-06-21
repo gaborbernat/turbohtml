@@ -106,6 +106,29 @@ def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
 
     _run(reader, child_wrapper, sibling_wrapper)
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent wrapping
+def test_concurrent_annotation_export_is_memory_safe() -> None:
+    doc = _doc(300)
+    body = doc.find("body")
+    assert body is not None
+    children = list(body.children)
+    rules = {"p": ["para"], "span": ["note"]}
+    start = threading.Barrier(2)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            text, spans = doc.to_annotated_text(rules)  # walks the tree under the per-tree lock
+            turbohtml.annotation_surface(text, spans)  # pure transform over the snapshotted result
+            turbohtml.annotation_tags(text, spans)
+
+    def mutator() -> None:
+        start.wait()
+        for child in children:
+            child.extract()
+
+    _run(reader, mutator)
+    text, spans = doc.to_annotated_text(rules)
+    assert isinstance(turbohtml.annotation_surface(text, spans), dict)  # still usable after the churn
 
 
 def test_concurrent_prune_and_reads_are_memory_safe() -> None:

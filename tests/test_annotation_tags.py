@@ -1,0 +1,65 @@
+"""turbohtml.annotation_tags(): weave the annotated spans into inline markup.
+
+The inscriptis inline-tagged (XML) exporter over the (text, spans) pair
+Node.to_annotated_text() returns. Properly nested spans stay well-formed because
+the innermost span always closes first.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from turbohtml import annotation_tags, parse
+
+
+@pytest.mark.parametrize(
+    ("text", "spans", "expected"),
+    [
+        pytest.param("Title", [(0, 5, "h")], "<h>Title</h>", id="single-span"),
+        pytest.param("ab", [], "ab", id="no-spans-returns-text"),
+        pytest.param(
+            "a b",
+            [(0, 1, "x"), (2, 3, "y")],
+            "<x>a</x> <y>b</y>",
+            id="two-disjoint-spans",
+        ),
+        pytest.param(
+            "abcdef",
+            [(0, 6, "outer"), (2, 4, "inner")],
+            "<outer>ab<inner>cd</inner>ef</outer>",
+            id="nested-inner-closes-first",
+        ),
+        pytest.param(
+            "abcd",
+            [(0, 4, "a"), (0, 2, "b")],
+            "<a><b>ab</b>cd</a>",
+            id="shared-start-outer-opens-first",
+        ),
+        pytest.param(
+            "abcd",
+            [(0, 4, "a"), (2, 4, "b")],
+            "<a>ab<b>cd</b></a>",
+            id="shared-end-inner-closes-first",
+        ),
+        pytest.param(
+            "ab",
+            [(0, 2, "x"), (0, 2, "y")],
+            "<x><y>ab</y></x>",
+            id="identical-range-lifo",
+        ),
+        pytest.param("ab", [(0, 0, "z")], "<z></z>ab", id="zero-width-span"),
+        pytest.param("x", [(0, 1, "")], "<>x</>", id="empty-label"),
+    ],
+)
+def test_tags_weave_spans(text: str, spans: list[tuple[int, int, str]], expected: str) -> None:
+    assert annotation_tags(text, spans) == expected
+
+
+def test_non_ascii_text_and_label_widen_the_result() -> None:
+    # the output kind grows to cover the widest of the text and every label
+    assert annotation_tags("héllo", [(0, 5, "ünïcode")]) == "<ünïcode>héllo</ünïcode>"
+
+
+def test_round_trips_nested_annotations_to_well_formed_markup() -> None:
+    text, spans = parse("<p>a <b><i>both</i></b> c</p>").to_annotated_text({"b": ["bold"], "i": ["italic"]})
+    assert annotation_tags(text, spans) == "a <italic><bold>both</bold></italic> c"

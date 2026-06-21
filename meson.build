@@ -18,6 +18,7 @@ py.extension_module(
     '_html',
     [
         'src/turbohtml/_htmlmodule.c',
+        'src/turbohtml/annotation.c',
         'src/turbohtml/charref.c',
         'src/turbohtml/escape.c',
         'src/turbohtml/linkify.c',
