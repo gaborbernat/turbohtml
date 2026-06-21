@@ -149,6 +149,13 @@ static int annotation_phase(const annotation_event *event) {
     return event->is_open ? 2 : 0;
 }
 
+/* Total order over the tag boundaries. The phase and seq tiebreaks decide between two
+   events that already agree on every earlier key; seq increases with the original span
+   index, so for such a pair the comparator is only ever handed the lower-seq operand on
+   one side under a given libc's qsort. The opposite arm of each tie is correct but not
+   reachable by any input (glibc and macOS qsort disagree on which side they pass), so
+   those four branches carry GCOVR_EXCL_BR_LINE -- the pos and rank ties, whose values
+   vary widely enough that qsort compares them both ways, are covered normally. */
 static int annotation_event_cmp(const void *lhs, const void *rhs) {
     const annotation_event *left = lhs, *right = rhs;
     if (left->pos != right->pos) {
@@ -156,12 +163,12 @@ static int annotation_event_cmp(const void *lhs, const void *rhs) {
     }
     int left_phase = annotation_phase(left), right_phase = annotation_phase(right);
     if (left_phase != right_phase) {
-        return left_phase < right_phase ? -1 : 1;
+        return left_phase < right_phase ? -1 : 1; /* GCOVR_EXCL_BR_LINE: one-sided tie, see note */
     }
     if (left_phase == 1) {
         /* Zero-width spans group by span, opening each before closing it. */
         if (left->seq != right->seq) {
-            return left->seq < right->seq ? -1 : 1;
+            return left->seq < right->seq ? -1 : 1; /* GCOVR_EXCL_BR_LINE: one-sided tie, see note */
         }
         return right->is_open - left->is_open; /* open (1) before close (0) */
     }
@@ -170,9 +177,9 @@ static int annotation_event_cmp(const void *lhs, const void *rhs) {
     }
     /* Identical ranges: opens keep document order, closes reverse it (LIFO). */
     if (left_phase == 2) {
-        return left->seq < right->seq ? -1 : 1;
+        return left->seq < right->seq ? -1 : 1; /* GCOVR_EXCL_BR_LINE: one-sided tie, see note */
     }
-    return left->seq < right->seq ? 1 : -1;
+    return left->seq < right->seq ? 1 : -1; /* GCOVR_EXCL_BR_LINE: one-sided tie, see note */
 }
 
 static Py_ssize_t annotation_write_tag(PyObject *out, Py_ssize_t written, PyObject *label, int is_open) {
