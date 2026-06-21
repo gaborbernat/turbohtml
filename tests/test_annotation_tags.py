@@ -42,6 +42,23 @@ from turbohtml import annotation_tags, parse
             id="shared-end-inner-closes-first",
         ),
         pytest.param(
+            "abcdef",
+            [
+                (0, 0, "z1"),
+                (0, 0, "z2"),
+                (0, 0, "z3"),
+                (1, 4, "r1"),
+                (1, 4, "r2"),
+                (1, 4, "r3"),
+                (1, 4, "r4"),
+                (1, 4, "r5"),
+                (1, 4, "r6"),
+                (4, 5, "after"),
+            ],
+            "<z1></z1><z2></z2><z3></z3>a<r1><r2><r3><r4><r5><r6>bcd</r6></r5></r4></r3></r2></r1><after>e</after>f",
+            id="coincident-events-order-deterministically",
+        ),
+        pytest.param(
             "ab",
             [(0, 2, "x"), (0, 2, "y")],
             "<x><y>ab</y></x>",
