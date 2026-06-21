@@ -1199,6 +1199,7 @@ static PyObject *node_xpath_iter(PyObject *self, PyObject *args, PyObject *kwds)
 static PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_css_matches(PyObject *self, PyObject *arg);
 static PyObject *node_css_closest(PyObject *self, PyObject *arg);
+static PyObject *node_prune(PyObject *self, PyObject *arg);
 
 PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
@@ -1231,6 +1232,14 @@ PyDoc_STRVAR(matches_doc, "matches(selector, /)\n--\n\n"
 PyDoc_STRVAR(closest_doc, "closest(selector, /)\n--\n\n"
                           "Return the nearest Element matching the CSS selector, testing this node\n"
                           "then each ancestor, or None.");
+
+PyDoc_STRVAR(prune_doc, "prune(selector, /)\n--\n\n"
+                        "Keep only the descendants matching the CSS selector, together with their\n"
+                        "ancestors up to this node and the whole subtree under each match, and\n"
+                        "remove every other descendant in place. Return this node. With no match\n"
+                        "the subtree is emptied. This trims a parsed document to the parts of\n"
+                        "interest after a normal WHATWG parse, the way BeautifulSoup's\n"
+                        "SoupStrainer filters a document while parsing it.");
 
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds);
@@ -1318,6 +1327,7 @@ static PyMethodDef node_methods[] = {
     {"xpath_one", (PyCFunction)(void (*)(void))node_xpath_one, METH_VARARGS | METH_KEYWORDS, xpath_one_doc},
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
+    {"prune", node_prune, METH_O, prune_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
     {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
     {"to_markdown", (PyCFunction)(void (*)(void))node_to_markdown, METH_VARARGS | METH_KEYWORDS, to_markdown_doc},
@@ -3670,6 +3680,164 @@ static PyObject *node_css_closest(PyObject *self, PyObject *arg) {
         return NULL;
     }
     return node_wrap(state_of(self), handle, found);
+}
+
+/* One entry in prune()'s keep set: a node the prune must retain. full marks a
+   match, whose whole subtree stays; a cleared full marks an ancestor of a match,
+   whose other children are still pruned. */
+typedef struct {
+    th_node *node;
+    int full;
+} prune_keep;
+
+/* Append (node, full) to the keep buffer, doubling its capacity on demand.
+   Returns 0, or -1 on allocation failure. */
+static int prune_push(prune_keep **buffer, Py_ssize_t *count, Py_ssize_t *capacity, th_node *node, int full) {
+    if (*count == *capacity) {
+        Py_ssize_t grown = *capacity != 0 ? *capacity * 2 : 16;
+        prune_keep *resized = PyMem_Realloc(*buffer, (size_t)grown * sizeof(prune_keep));
+        if (resized == NULL) { /* GCOVR_EXCL_BR_LINE: a realloc failure cannot be forced from a test */
+            return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        *buffer = resized;
+        *capacity = grown;
+    }
+    (*buffer)[*count].node = node;
+    (*buffer)[*count].full = full;
+    (*count)++;
+    return 0;
+}
+
+/* Order keep entries by node address so prune_kept can binary-search them. */
+static int prune_compare(const void *left, const void *right) {
+    uintptr_t left_node = (uintptr_t)((const prune_keep *)left)->node;
+    uintptr_t right_node = (uintptr_t)((const prune_keep *)right)->node;
+    if (left_node < right_node) {
+        return -1;
+    }
+    return left_node > right_node ? 1 : 0;
+}
+
+/* Binary-search the address-sorted keep set; on a hit set *full and return 1. */
+static int prune_kept(const prune_keep *keep, Py_ssize_t count, th_node *node, int *full) {
+    Py_ssize_t low = 0;
+    Py_ssize_t high = count;
+    uintptr_t target = (uintptr_t)node;
+    while (low < high) {
+        Py_ssize_t mid = low + (high - low) / 2;
+        uintptr_t at = (uintptr_t)keep[mid].node;
+        if (at < target) {
+            low = mid + 1;
+        } else if (at > target) {
+            high = mid;
+        } else {
+            *full = keep[mid].full;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Record a match and its ancestor chain up to (but excluding) origin in the keep
+   set. Returns 0, or -1 on allocation failure. */
+static int prune_keep_match(prune_keep **buffer, Py_ssize_t *count, Py_ssize_t *capacity, th_node *node,
+                            th_node *origin) {
+    if (prune_push(buffer, count, capacity, node, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (th_node *ancestor = node->parent; ancestor != origin; ancestor = ancestor->parent) {
+        if (prune_push(buffer, count, capacity, ancestor, 0) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                              /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return 0;
+}
+
+/* The next node after node's whole subtree in document order, bounded to root's
+   subtree (NULL once the walk leaves root). Like subtree_next but stopping at
+   root, so pruning one node's subtree never escapes into the rest of the tree. */
+static th_node *subtree_after(th_node *node, th_node *root) {
+    while (node != root) {
+        if (node->next_sibling != NULL) {
+            return node->next_sibling;
+        }
+        node = node->parent;
+    }
+    return NULL;
+}
+
+static PyObject *node_prune(PyObject *self, PyObject *arg) {
+    if (check_selector_arg(arg) < 0) {
+        return NULL;
+    }
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    prune_keep *keep = NULL;
+    Py_ssize_t count = 0;
+    Py_ssize_t capacity = 0;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
+    sel_compiled *compiled = cached_compile((HandleObject *)handle, arg);
+    if (compiled == NULL) {
+        error = 1;
+    } else {
+        /* Pass 1: snapshot each match and its ancestor chain while the tree is
+           intact. A string/regex selector can call back into Python, so no edit
+           may run here; matching alone never rewires a node, so the snapshot lets
+           pass 2 edit in pure C without dereferencing a stale pointer. */
+        const sel_simple *single = sel_single_simple(compiled);
+        sel_ctx ctx = {compiled->tree, origin, compiled->quirks};
+        for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+            if (node->type != TH_NODE_ELEMENT) {
+                continue;
+            }
+            if (!(single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches(node, compiled, origin))) {
+                continue;
+            }
+            if (prune_keep_match(&keep, &count, &capacity, node, origin) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+                error = 1;                                                      /* GCOVR_EXCL_LINE: allocation path */
+                break;                                                          /* GCOVR_EXCL_LINE: allocation path */
+            }
+        }
+        if (!error) { /* GCOVR_EXCL_BR_LINE: the false arm is the pass-1 allocation-failure bail, unforceable */
+            /* Sort by address and fold duplicates so a node that is both a match and
+               an ancestor of a deeper match keeps its whole subtree (full wins). */
+            if (count > 0) {
+                qsort(keep, (size_t)count, sizeof(prune_keep), prune_compare);
+            }
+            Py_ssize_t unique = 0;
+            for (Py_ssize_t read = 0; read < count; read++) {
+                if (unique > 0 && keep[unique - 1].node == keep[read].node) {
+                    keep[unique - 1].full |= keep[read].full;
+                } else {
+                    keep[unique++] = keep[read];
+                }
+            }
+            /* Pass 2: pure-C edit. Removing one node rewires only links outside the
+               nodes still to visit, and subtree_after reads them before the remove,
+               so no snapshot pointer is dereferenced after it goes stale. */
+            handle_drop_index(handle);
+            th_node *node = origin->first_child;
+            while (node != NULL) {
+                int full = 0;
+                if (!prune_kept(keep, unique, node, &full)) {
+                    th_node *after = subtree_after(node, origin);
+                    th_node_remove(node);
+                    node = after;
+                } else if (full) {
+                    node = subtree_after(node, origin); /* a match: keep its whole subtree, skip it */
+                } else {
+                    node = node->first_child; /* an ancestor of a match always has a child to descend into */
+                }
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(keep);
+    if (error) {
+        return NULL;
+    }
+    return Py_NewRef(self);
 }
 
 /* The serialize(minify=...) options object: four independent round-trip-safe

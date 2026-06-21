@@ -349,6 +349,15 @@ a node a descendant of itself is refused. The bulk wraps (:meth:`~turbohtml.Elem
 and relink it in pure C under the one per-tree lock, never dereferencing a sibling pointer across a Python call that
 could rewire the tree, so a group moves in a single atomic edit rather than node by node.
 
+:meth:`~turbohtml.Node.prune` is the bulk version of that subtractive edit, and answers the gap a ``SoupStrainer``
+filled by filtering *during* the parse. turbohtml keeps the parse whole and conformant, then trims afterward: it runs
+the CSS matcher over the subtree once, snapshots every match together with its ancestor chain, and only then removes
+everything the snapshot does not cover. Doing the match before any edit is what keeps it correct under free-threading --
+a selector can call back into Python (a regex or string filter), and a structural pointer must never be dereferenced
+across such a call once an edit could have rewired it, so the matching pass touches no links the removal pass will
+change and the removal pass calls into no Python. A match keeps its whole subtree and its ancestors keep their place, so
+a large document collapses to just the parts of interest in one locked pass over the arena.
+
 Construction reuses the same arena machinery: :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and the rest build
 a standalone single-node tree that owns its data, ready to adopt into a document, and tag and attribute names are
 ASCII-lowercased so they resolve to the same interned atoms the parser assigns. :attr:`Element.attrs
