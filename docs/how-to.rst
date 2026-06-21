@@ -1165,6 +1165,7 @@ result:
 .. testoutput::
 
     None
+
 To turn those spans into something printable, pass the returned ``(text, labels)`` pair to one of the two output
 processors. :func:`turbohtml.annotation_surface` groups each label's matched substrings into a dict, in document order
 -- the surface forms an NLP or information-extraction pipeline consumes:
