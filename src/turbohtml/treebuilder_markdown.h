@@ -67,6 +67,18 @@ static int is_md_skipped(uint16_t atom) {
     return atom == TH_TAG_HEAD || atom == TH_TAG_SCRIPT || atom == TH_TAG_STYLE;
 }
 
+/* Whether an element's own Markdown markup is dropped under the strip/convert
+   filter, leaving its children to render transparently in the surrounding flow.
+   A strip set names the tags to drop; a convert set names the only tags to keep,
+   so every tag outside it is dropped. */
+static int md_tag_filtered(const md_opts *opt, uint16_t atom) {
+    if (opt->tag_filter == TH_MD_FILTER_NONE) {
+        return 0;
+    }
+    int present = (opt->filter_tags[atom >> 6] >> (atom & 63)) & 1;
+    return opt->tag_filter == TH_MD_FILTER_STRIP ? present : !present;
+}
+
 /* ----------------------------------------------------------------- options */
 
 md_opts th_markdown_default_opts(void) {
@@ -104,6 +116,7 @@ md_opts th_markdown_default_opts(void) {
     opt.google_doc = 0;
     opt.google_list_indent = 36;
     opt.hide_strikethrough = 0;
+    opt.tag_filter = TH_MD_FILTER_NONE;
     opt.converters = NULL;
     opt.wrap_node = NULL;
     opt.wrap_node_ctx = NULL;
@@ -950,6 +963,13 @@ static void md_render_inline(md_ctx *ctx, th_node *node) {
     if (md_apply_converter(ctx, node)) {
         return;
     }
+    uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
+    if (md_tag_filtered(ctx->opt, atom) && !is_md_skipped(atom)) {
+        /* drop this tag's markup but keep its inline content (a skipped tag, e.g.
+           <script>, still vanishes whole, so it falls through to the no-op below) */
+        md_inline_children(ctx, node);
+        return;
+    }
     if (ctx->opt->google_doc) {
         /* a content node carries no style, so it passes through unstyled */
         md_render_google(ctx, node);
@@ -1630,6 +1650,11 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
     /* only an HTML element is ever classified as a block, so the namespace check
        the callers already made guarantees node is HTML here */
     uint16_t atom = node->atom;
+    if (md_tag_filtered(ctx->opt, atom)) {
+        /* drop the block's own markup but keep laying its children out as blocks */
+        md_block_children(ctx, node);
+        return;
+    }
     switch (atom) {
     case TH_TAG_H1:
     case TH_TAG_H2:

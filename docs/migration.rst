@@ -1103,6 +1103,8 @@ libraries with one name per concept. The markdownify options map as:
       - ``document_strip`` (``"strip"``/``"lstrip"``/``"rstrip"``/``"none"``)
     - - ``code_language``
       - ``code_language``
+    - - ``strip``, ``convert``
+      - ``strip``, ``convert`` (mutually exclusive tag filters)
 
 The html2text options map as:
 

@@ -560,15 +560,18 @@ PyDoc_STRVAR(
     "table_header='first', pad_tables=False, escape_mode='minimal', escape_asterisks=True, escape_underscores=True, "
     "line_break='spaces', block_spacing='double', wrap_width=0, wrap_list_items=False, wrap_links=True, "
     "transliterate=False, document_strip='strip', quote_open='\"', quote_close='\"', "
-    "google_doc=False, google_list_indent=36, hide_strikethrough=False, converters=None)\n--\n\n"
+    "google_doc=False, google_list_indent=36, hide_strikethrough=False, strip=None, convert=None, "
+    "converters=None)\n--\n\n"
     "Render this node and its subtree as Markdown. The keyword options cover the\n"
     "markdownify and html2text configuration surface; the defaults emit opinionated\n"
     "GitHub-Flavored Markdown. wrap_width word-wraps prose at a column (0 disables);\n"
     "image_mode='html' and table_mode='html' pass the element through verbatim;\n"
     "transliterate folds common non-ASCII typography in prose to ASCII. google_doc\n"
-    "reads the inline-CSS styling a Google Docs export carries. converters maps a\n"
-    "lowercased tag name to a callable(element, content) -> str that replaces how\n"
-    "that tag renders, receiving the element and its already-converted child Markdown.");
+    "reads the inline-CSS styling a Google Docs export carries. strip names tags\n"
+    "whose markup is dropped (their text stays); convert names the only tags to keep\n"
+    "markup for; the two are mutually exclusive. converters maps a lowercased tag\n"
+    "name to a callable(element, content) -> str that replaces how that tag renders,\n"
+    "receiving the element and its already-converted child Markdown.");
 
 /* Resolve a string option against its allowed values, writing the matched index
    into *out (an enum), or leave *out untouched when the argument was omitted. */
@@ -628,11 +631,59 @@ static PyObject *md_converters_dict(PyObject *converters) {
     return dict;
 }
 
+/* Mark every tag named in seq in opt->filter_tags and switch opt to the given
+   filter mode. Each name is matched as a lowercased atom, so a name outside the
+   tag table matches nothing and is skipped, the way markdownify ignores a tag it
+   has no converter for. A bare str is rejected so it never iterates per character.
+   Returns -1 with an exception set on a non-string element or an iteration error. */
+static int md_build_tag_filter(PyObject *seq, md_opts *opt, int mode) {
+    if (PyUnicode_Check(seq)) {
+        PyErr_SetString(PyExc_TypeError,
+                        "to_markdown strip/convert must be an iterable of tag names, not a single str");
+        return -1;
+    }
+    PyObject *iter = PyObject_GetIter(seq);
+    if (iter == NULL) {
+        return -1;
+    }
+    PyObject *item;
+    while ((item = PyIter_Next(iter)) != NULL) {
+        if (!PyUnicode_Check(item)) {
+            PyErr_Format(PyExc_TypeError, "to_markdown strip/convert tags must be str, not %.200s",
+                         Py_TYPE(item)->tp_name);
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return -1;
+        }
+        Py_ssize_t utf8_len;
+        const char *utf8 = PyUnicode_AsUTF8AndSize(item, &utf8_len);
+        char lowered[64];
+        if (utf8 != NULL && utf8_len <= (Py_ssize_t)sizeof(lowered)) {
+            for (Py_ssize_t byte = 0; byte < utf8_len; byte++) {
+                lowered[byte] = utf8[byte] >= 'A' && utf8[byte] <= 'Z' ? (char)(utf8[byte] + 32) : utf8[byte];
+            }
+            uint16_t atom = th_tag_lookup(lowered, utf8_len);
+            if (atom != TH_TAG_UNKNOWN) {
+                opt->filter_tags[atom >> 6] |= (uint64_t)1 << (atom & 63);
+            }
+        } else {
+            PyErr_Clear(); /* a surrogate or over-long name matches no known tag */
+        }
+        Py_DECREF(item);
+    }
+    Py_DECREF(iter);
+    if (PyErr_Occurred()) {
+        return -1;
+    }
+    opt->tag_filter = mode;
+    return 0;
+}
+
 static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds) {
     md_opts opt = th_markdown_default_opts();
     PyObject *heading = NULL, *strike = NULL, *code_style = NULL, *link = NULL, *image = NULL, *table = NULL;
     PyObject *header = NULL, *escape = NULL, *brk = NULL, *spacing = NULL, *docstrip = NULL;
-    PyObject *converters = NULL;
+    PyObject *converters = NULL, *strip = NULL, *convert = NULL;
     int ignore_emphasis = 0, mark_code = 0;
     static char *kw[] = {"heading_style",
                          "bullets",
@@ -671,16 +722,18 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
                          "google_doc",
                          "google_list_indent",
                          "hide_strikethrough",
+                         "strip",
+                         "convert",
                          "converters",
                          NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOipppOsspipO", kw, &heading, &opt.bullets, &opt.strong,
+            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOipppOsspipOOO", kw, &heading, &opt.bullets, &opt.strong,
             &opt.emphasis, &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code,
             &link, &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
             &opt.default_image_alt, &table, &header, &opt.pad_tables, &escape, &opt.escape_asterisks,
             &opt.escape_underscores, &brk, &spacing, &opt.wrap_width, &opt.wrap_list_items, &opt.wrap_links,
             &opt.transliterate, &docstrip, &opt.quote_open, &opt.quote_close, &opt.google_doc, &opt.google_list_indent,
-            &opt.hide_strikethrough, &converters)) {
+            &opt.hide_strikethrough, &strip, &convert, &converters)) {
         return NULL;
     }
     static const char *const headings[] = {"atx", "atx_closed", "setext"};
@@ -726,6 +779,18 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
     if (mark_code) {
         opt.code_mark_open = "[code]";
         opt.code_mark_close = "[/code]";
+    }
+    int has_strip = strip != NULL && strip != Py_None;
+    int has_convert = convert != NULL && convert != Py_None;
+    if (has_strip && has_convert) {
+        PyErr_SetString(PyExc_ValueError, "strip and convert are mutually exclusive");
+        return NULL;
+    }
+    if (has_strip && md_build_tag_filter(strip, &opt, TH_MD_FILTER_STRIP) < 0) {
+        return NULL;
+    }
+    if (has_convert && md_build_tag_filter(convert, &opt, TH_MD_FILTER_CONVERT) < 0) {
+        return NULL;
     }
     PyObject *conv = NULL;
     md_wrap_ctx wrap_ctx;
