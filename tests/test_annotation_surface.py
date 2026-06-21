@@ -54,6 +54,11 @@ def test_accepts_any_iterable_of_spans() -> None:
     assert annotation_surface("ab", iter([(0, 1, "x"), (1, 2, "x")])) == {"x": ["a", "b"]}
 
 
+def test_accepts_spans_as_a_tuple() -> None:
+    # a tuple (not a list) exercises the non-list branch of the PySequence_Fast access macros
+    assert annotation_surface("ab", ((0, 1, "x"), (1, 2, "x"))) == {"x": ["a", "b"]}
+
+
 def test_round_trips_to_annotated_text() -> None:
     text, spans = parse("<h1>Q3</h1><p>Up <b>12%</b> on the year.</p>").to_annotated_text({
         "h1": ["heading"],
