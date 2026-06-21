@@ -1,10 +1,6 @@
-/* Python glue for the tree builder.
-
-   Increment 1 exposes only the internal conformance hook _parse_tree, which
-   parses a document and returns its html5lib "#document" serialization so the
-   tree-construction test suite can diff against the .dat expectations. The
-   public, navigable Node tree type is a follow-up increment; keeping the engine
-   (treebuilder.c) Python-free means it is tested in isolation first. */
+/* The internal parse hooks behind turbohtml's own test and benchmark harness:
+   _parse_tree returns the html5lib "#document" dump the conformance suite diffs against, _parse_fragment does the same
+   for fragment parsing, and _parse_only builds and frees a tree to time the raw parse against lexbor. */
 
 #include "core/common.h"
 
