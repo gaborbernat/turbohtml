@@ -15,7 +15,7 @@
    accumulates a frequency score and drops out on the first unmapped byte. The CJK
    multi-byte candidates land in a later phase. */
 
-#include "encoding_detect_data.h"
+#include "encoding/detect_data.h"
 
 /* chardetng scoring weights (lib.rs). */
 #define TH_DETECT_LATIN_ADJACENCY_PENALTY (-50)

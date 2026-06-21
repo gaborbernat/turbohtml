@@ -6,7 +6,7 @@
    attribute access, so inspecting only a token's kind never pays to build a
    string or a list. */
 
-#include "tokenizer_py.h"
+#include "tokenizer/binding.h"
 
 #include <stdint.h>
 

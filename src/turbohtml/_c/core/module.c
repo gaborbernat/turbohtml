@@ -6,9 +6,9 @@
    the free-threaded build. These sources use only public, version-portable
    APIs, so they build on CPython 3.10 through 3.15. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
-#include "tokenizer_py.h"
+#include "tokenizer/binding.h"
 
 PyDoc_STRVAR(escape_doc, "escape(s, quote=True)\n--\n\n"
                          "Replace special characters \"&\", \"<\" and \">\" with HTML-safe sequences.\n\n"

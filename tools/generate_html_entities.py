@@ -1,5 +1,5 @@
 """
-Generate src/turbohtml/html_entities.h from the HTML5 specification data.
+Generate src/turbohtml/_c/data/html_entities.h from the HTML5 specification data.
 
 The C accelerator binary-searches the HTML5 named-reference table and the
 numeric-charref correction tables. The named table comes from the public
@@ -8,7 +8,7 @@ directly from the `WHATWG HTML specification
 <https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-end-state>`_
 so we do not depend on any private standard-library internals.
 
-Usage:  python tools/generate_html_entities.py src/turbohtml/html_entities.h
+Usage:  python tools/generate_html_entities.py src/turbohtml/_c/data/html_entities.h
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@
 #ifndef TURBOHTML_ASCII_H
 #define TURBOHTML_ASCII_H
 
-#include "tokenizer_sm.h" /* th_buf */
+#include "tokenizer/statemachine.h" /* th_buf */
 
 /* The storage width a code point needs; matches the PyUnicode kind values. */
 static inline int ucs_width(Py_UCS4 ch) {

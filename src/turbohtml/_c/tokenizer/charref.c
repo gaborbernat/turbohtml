@@ -5,7 +5,7 @@
    searches over the numeric-correction tables. They hold no state and never
    touch Python objects. */
 
-#include "charref.h"
+#include "tokenizer/charref.h"
 
 #include <string.h>
 

@@ -7,10 +7,10 @@
    list attributes. URL resolution itself (resolve_links) is stdlib urllib.parse.urljoin, bound through
    functools.partial here, so RFC 3986 is not reinvented. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
-#include "tokenizer_py.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
-#include "treebuilder.h"
+#include "tokenizer/binding.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
+#include "dom/tree.h"
 
 #include <string.h>
 

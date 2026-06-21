@@ -10,12 +10,12 @@
    a wider character (e.g. "&#127881;" in ASCII text); unescape never lengthens
    the text, so the input length is a safe upper bound for the staging. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
 #include <stdint.h>
 #include <string.h>
 
-#include "charref.h"
+#include "tokenizer/charref.h"
 
 static inline int is_name_char(Py_UCS4 character) {
     /* the [^\t\n\f <&#;] class from the reference HTML5 charref regex */

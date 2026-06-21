@@ -16,9 +16,9 @@
    stamped with it through str's own constructor, bypassing Markup.__new__ since
    the bytes are already escaped and safe. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
-#include "tokenizer_py.h"
+#include "tokenizer/binding.h"
 
 #include <stdint.h>
 #include <string.h>

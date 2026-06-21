@@ -11,7 +11,7 @@
    _tokenize_states drives the machine directly without this switch, so the
    state machine stays a faithful, separately testable implementation. */
 
-#include "tokenizer_py.h"
+#include "tokenizer/binding.h"
 
 #include <string.h>
 

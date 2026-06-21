@@ -13,4 +13,4 @@ Checks: >
   -*, bugprone-*, performance-*, portability-*, -bugprone-easily-swappable-parameters, -bugprone-reserved-identifier, -bugprone-multi-level-implicit-pointer-conversion, -bugprone-narrowing-conversions, -bugprone-assignment-in-if-condition
 
 WarningsAsErrors: "*"
-HeaderFilterRegex: "src/turbohtml/[^/]*\\.h$"
+HeaderFilterRegex: "src/turbohtml/_c/.*\\.h$"

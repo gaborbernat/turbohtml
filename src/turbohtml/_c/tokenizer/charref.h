@@ -15,7 +15,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "html_entities.h" /* html5_entity, HTML5_MAX_NAME_LEN */
+#include "data/html_entities.h" /* html5_entity, HTML5_MAX_NAME_LEN */
 
 /* Binary search the named-reference table for the exact ASCII name. The
    trailing ';' is part of the name for entities that require it, so callers

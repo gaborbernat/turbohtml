@@ -10,9 +10,9 @@
    same rule bleach used. Matches are returned as (start, end, kind) spans into
    the input; the scan never allocates per match. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
-#include "tld_table.h"
+#include "data/tld_table.h"
 
 #include <stdint.h>
 

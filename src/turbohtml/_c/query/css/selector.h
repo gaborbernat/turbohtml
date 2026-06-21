@@ -9,8 +9,8 @@
 #ifndef TURBOHTML_SELECTOR_H
 #define TURBOHTML_SELECTOR_H
 
-#include "ascii.h"
-#include "treebuilder.h"
+#include "core/ascii.h"
+#include "dom/tree.h"
 
 enum sel_attr_op { OP_EXISTS, OP_EQ, OP_INCLUDE, OP_DASH, OP_PREFIX, OP_SUFFIX, OP_SUBSTR };
 

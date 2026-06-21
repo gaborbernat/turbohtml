@@ -2,7 +2,7 @@
    #included into treebuilder.c (one translation unit, so the static helpers
    here still inline against the node tree). */
 
-#include "entity_names.h"
+#include "data/entity_names.h"
 
 /* ---------------------------------------------------------- serialization */
 

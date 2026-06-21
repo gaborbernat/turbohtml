@@ -17,9 +17,9 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "attr_atom.h"
-#include "tag_atom.h"
-#include "tokenizer_sm.h"
+#include "data/attr_atom.h"
+#include "data/tag_atom.h"
+#include "tokenizer/statemachine.h"
 
 enum th_node_type {
     TH_NODE_DOCUMENT,

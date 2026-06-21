@@ -10,10 +10,10 @@
    by the html5lib tree-construction suite, whose pass rate this engine grows
    toward 100%. */
 
-#include "treebuilder.h"
+#include "dom/tree.h"
 
-#include "ascii.h"
-#include "turbohtml.h" /* SWAR lane probes for the serializer's clean-run scan */
+#include "core/ascii.h"
+#include "core/common.h" /* SWAR lane probes for the serializer's clean-run scan */
 
 #include <string.h>
 
@@ -1114,7 +1114,7 @@ static th_node *insert_element(th_tree *tree, const th_token *token) {
     return node;
 }
 
-#include "treebuilder_quirks.h"
+#include "dom/quirks.h"
 
 /* Build a doctype node's serialized text: the name, plus ` "public" "system"`
    when either identifier is present (html5lib's #document format). */
@@ -1981,7 +1981,7 @@ static void any_other_end_tag(th_tree *tree, uint16_t atom, const th_token *toke
     }
 }
 
-#include "treebuilder_foreign.h"
+#include "dom/foreign.h"
 
 /* --------------------------------------------------- insertion-mode engine */
 
@@ -4284,8 +4284,8 @@ void th_stream_free(th_stream *stream) {
     PyMem_Free(stream);
 }
 
-#include "treebuilder_serialize.h"
-#include "treebuilder_minify.h"
-#include "treebuilder_markdown.h"
-#include "treebuilder_text.h"
-#include "treebuilder_readability.h"
+#include "serialize/document.h"
+#include "serialize/minify.h"
+#include "serialize/markdown.h"
+#include "serialize/text.h"
+#include "serialize/readability.h"

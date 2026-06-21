@@ -12,7 +12,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "tokenizer_sm.h"
+#include "tokenizer/statemachine.h"
 
 /* Py_BEGIN_CRITICAL_SECTION arrived in 3.13 for the free-threaded build; on a GIL
    build it is a brace no-op, and before 3.13 (always GIL) we define the same no-op,

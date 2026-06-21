@@ -13,9 +13,9 @@
    token is not one of @ :: ( [ , or an operator), and `*` is a wildcard in a node
    test but a multiply operator after a node test or value. */
 
-#include "turbohtml.h"
-#include "treebuilder.h"
-#include "xpath.h"
+#include "core/common.h"
+#include "dom/tree.h"
+#include "query/xpath/xpath.h"
 
 #include <math.h>
 #include <string.h>

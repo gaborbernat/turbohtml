@@ -7,9 +7,9 @@
    safety baseline (scripting/framing elements, on* handlers, non-allowlisted URL schemes) is enforced here, not in
    Python, so a policy cannot route around it. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
-#include "treebuilder.h"
+#include "dom/tree.h"
 
 #include <string.h>
 

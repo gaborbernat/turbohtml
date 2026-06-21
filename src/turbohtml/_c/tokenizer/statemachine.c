@@ -18,9 +18,9 @@
    The spec's parse errors take their recovery transitions but go unreported;
    the public API exposes the token stream, not the error stream. */
 
-#include "tokenizer_sm.h"
+#include "tokenizer/statemachine.h"
 
-#include "ascii.h"
+#include "core/ascii.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -33,7 +33,7 @@
 #define TH_SCAN_SSE2 1
 #endif
 
-#include "charref.h"
+#include "tokenizer/charref.h"
 
 #define REPLACEMENT 0xFFFD
 
@@ -1088,7 +1088,7 @@ static Py_ssize_t scan_stops_ucs4(const th_tokenizer *self, Py_ssize_t index, Py
 #define TH_KIND PyUnicode_1BYTE_KIND
 #define TH_UCS1 1
 #define TH_SCAN scan_stops_ucs1
-#include "tokenizer_sm_run.h"
+#include "tokenizer/statemachine_run.h"
 #undef TH_NAME
 #undef TH_CHAR
 #undef TH_KIND
@@ -1100,7 +1100,7 @@ static Py_ssize_t scan_stops_ucs4(const th_tokenizer *self, Py_ssize_t index, Py
 #define TH_KIND PyUnicode_2BYTE_KIND
 #define TH_UCS1 0
 #define TH_SCAN scan_stops_ucs2
-#include "tokenizer_sm_run.h"
+#include "tokenizer/statemachine_run.h"
 #undef TH_NAME
 #undef TH_CHAR
 #undef TH_KIND
@@ -1112,7 +1112,7 @@ static Py_ssize_t scan_stops_ucs4(const th_tokenizer *self, Py_ssize_t index, Py
 #define TH_KIND PyUnicode_4BYTE_KIND
 #define TH_UCS1 0
 #define TH_SCAN scan_stops_ucs4
-#include "tokenizer_sm_run.h"
+#include "tokenizer/statemachine_run.h"
 #undef TH_NAME
 #undef TH_CHAR
 #undef TH_KIND

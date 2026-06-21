@@ -11,15 +11,15 @@
    Doctype, plus the bare Node for a <template>'s content fragment) sharing one C
    struct; the node's th_node type selects which Python type wraps it. */
 
-#include "tokenizer_py.h"
-#include "turbohtml.h"
+#include "tokenizer/binding.h"
+#include "core/common.h"
 
-#include "ascii.h"
-#include "encoding.h"
-#include "encoding_detect.h"
-#include "selector.h"
-#include "treebuilder.h"
-#include "xpath.h"
+#include "core/ascii.h"
+#include "encoding/encoding.h"
+#include "encoding/detect.h"
+#include "query/css/selector.h"
+#include "dom/tree.h"
+#include "query/xpath/xpath.h"
 
 /* A per-tree cache of compiled CSS selectors. A repeated select()/select_one()
    with the same selector string then reuses the parse instead of re-running the

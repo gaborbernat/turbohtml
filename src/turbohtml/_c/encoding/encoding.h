@@ -9,7 +9,7 @@
 #ifndef TURBOHTML_ENCODING_H
 #define TURBOHTML_ENCODING_H
 
-#include "ascii.h"
+#include "core/ascii.h"
 
 #include <string.h>
 

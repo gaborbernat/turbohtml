@@ -6,9 +6,9 @@
    public, navigable Node tree type is a follow-up increment; keeping the engine
    (treebuilder.c) Python-free means it is tested in isolation first. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
-#include "treebuilder.h"
+#include "dom/tree.h"
 
 PyObject *turbohtml_parse_tree(PyObject *Py_UNUSED(module), PyObject *arg) {
     if (!PyUnicode_Check(arg)) {

@@ -12,7 +12,7 @@
    by construction: the input str is immutable and the spans sequence is only
    read. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
 #include <stdlib.h>
 

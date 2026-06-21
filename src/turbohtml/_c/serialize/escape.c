@@ -10,7 +10,7 @@
    a 64-bit word holding four / two code points with SWAR, so all specials are
    matched in one pass instead of one PyUnicode_FindChar() sweep per special. */
 
-#include "turbohtml.h"
+#include "core/common.h"
 
 #include <stdint.h>
 #include <string.h>
