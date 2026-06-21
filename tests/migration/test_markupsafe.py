@@ -404,8 +404,8 @@ _MIGRATION_SCRIPT = dedent(
 
 
 def test_jinja2_migrates_to_turbohtml_markup() -> None:
-    # Run in a clean interpreter so markupsafe can be swapped for turbohtml.migration.markupsafe before jinja2 imports it; this
-    # proves a jinja2-based project migrates by changing only the import.
+    # Run in a clean interpreter so markupsafe can be swapped for turbohtml.migration.markupsafe before jinja2
+    # imports it; this proves a jinja2-based project migrates by changing only the import.
     result = subprocess.run(  # noqa: S603  # fixed argv (this interpreter + a literal script), no external input
         [sys.executable, "-c", _MIGRATION_SCRIPT],
         capture_output=True,
