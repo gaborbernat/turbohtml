@@ -302,6 +302,121 @@ def test_wrap_a_document_is_rejected() -> None:
         parse("<p></p>").wrap(Element("div"))
 
 
+def test_wrap_siblings_groups_a_run_up_to_until() -> None:
+    doc = parse("<ul><li>a</li><li>b</li><li>c</li><li>d</li></ul>")
+    items = list(_found(doc, "ul").children)
+    wrapper = items[1].wrap_siblings(Element("div"), until=items[2])
+    assert wrapper.tag == "div"  # wrap_siblings returns the wrapper
+    assert _found(doc, "ul").html == "<ul><li>a</li><div><li>b</li><li>c</li></div><li>d</li></ul>"
+
+
+def test_wrap_siblings_with_no_until_reaches_the_last_sibling() -> None:
+    doc = parse("<ul><li>a</li><li>b</li><li>c</li></ul>")
+    second = list(_found(doc, "ul").children)[1]
+    second.wrap_siblings(Element("div"))
+    assert _found(doc, "ul").html == "<ul><li>a</li><div><li>b</li><li>c</li></div></ul>"
+
+
+def test_wrap_siblings_of_a_single_node_until_self() -> None:
+    doc = parse("<ul><li>a</li><li>b</li></ul>")
+    first = next(iter(_found(doc, "ul").children))
+    first.wrap_siblings(Element("div"), until=first)
+    assert _found(doc, "ul").html == "<ul><div><li>a</li></div><li>b</li></ul>"
+
+
+def test_wrap_siblings_adopts_a_wrapper_from_another_tree() -> None:
+    doc = parse("<ul><li>a</li><li>b</li></ul>")
+    first = next(iter(_found(doc, "ul").children))
+    wrapper = first.wrap_siblings(_found(parse("<section></section>"), "section"))
+    assert _found(doc, "ul").html == "<ul><section><li>a</li><li>b</li></section></ul>"
+    assert wrapper.parent == _found(doc, "ul")  # the returned wrapper is the adopted copy in the live tree
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    [pytest.param(Text("y"), id="text"), pytest.param("y", id="non-node")],
+)
+def test_wrap_siblings_rejects_a_non_element_wrapper(wrapper: object) -> None:
+    li = _found(parse("<ul><li>a</li></ul>"), "li")
+    with pytest.raises(TypeError, match="must be an element"):
+        li.wrap_siblings(wrapper)  # ty: ignore[invalid-argument-type]  # wrapper must be an element node
+
+
+def test_wrap_siblings_rejects_a_non_node_until() -> None:
+    li = _found(parse("<ul><li>a</li></ul>"), "li")
+    with pytest.raises(TypeError, match="until must be a node"):
+        li.wrap_siblings(Element("div"), until="a")  # ty: ignore[invalid-argument-type]  # until is a node or None
+
+
+def test_wrap_siblings_needs_a_parent() -> None:
+    with pytest.raises(ValueError, match="no parent"):
+        Element("div").wrap_siblings(Element("section"))
+
+
+def test_wrap_siblings_rejects_an_until_in_another_parent() -> None:
+    doc = parse("<ul><li>a</li></ul><ol><li>b</li></ol>")
+    first = next(iter(_found(doc, "ul").children))
+    outsider = next(iter(_found(doc, "ol").children))
+    with pytest.raises(ValueError, match="following siblings"):
+        first.wrap_siblings(Element("div"), until=outsider)
+
+
+def test_wrap_siblings_rejects_an_until_before_the_node() -> None:
+    doc = parse("<ul><li>a</li><li>b</li></ul>")
+    items = list(_found(doc, "ul").children)
+    with pytest.raises(ValueError, match="following siblings"):
+        items[1].wrap_siblings(Element("div"), until=items[0])
+
+
+def test_wrap_siblings_rejects_a_wrapper_inside_the_run() -> None:
+    doc = parse("<ul><li>a</li><li>b</li></ul>")
+    items = _found(doc, "ul").find_all("li")
+    with pytest.raises(ValueError, match="one of the wrapped nodes"):
+        items[0].wrap_siblings(items[1])
+
+
+def test_wrap_siblings_in_an_ancestor_is_a_cycle() -> None:
+    doc = parse("<section><ul><li>a</li></ul></section>")
+    first = _found(doc, "li")
+    with pytest.raises(ValueError, match="own subtree"):
+        first.wrap_siblings(_found(doc, "section"))
+
+
+def test_wrap_siblings_requires_a_wrapper_argument() -> None:
+    li = _found(parse("<ul><li>a</li></ul>"), "li")
+    with pytest.raises(TypeError):
+        li.wrap_siblings()  # ty: ignore[missing-argument]  # wrapper is required
+
+
+def test_wrap_children_boxes_every_child() -> None:
+    doc = parse("<div>a<b>x</b>c</div>")
+    wrapper = _found(doc, "div").wrap_children(Element("section"))
+    assert wrapper.tag == "section"  # wrap_children returns the wrapper
+    assert _found(doc, "div").html == "<div><section>a<b>x</b>c</section></div>"
+
+
+def test_wrap_children_of_an_empty_element_nests_an_empty_wrapper() -> None:
+    div = Element("div")
+    div.wrap_children(Element("section"))
+    assert div.html == "<div><section></section></div>"
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    [pytest.param(Text("y"), id="text"), pytest.param("y", id="non-node")],
+)
+def test_wrap_children_rejects_a_non_element_wrapper(wrapper: object) -> None:
+    div = _found(parse("<div>x</div>"), "div")
+    with pytest.raises(TypeError, match="must be an element"):
+        div.wrap_children(wrapper)  # ty: ignore[invalid-argument-type]  # wrapper must be an element node
+
+
+def test_wrap_children_into_self_is_a_cycle() -> None:
+    div = _found(parse("<div>x</div>"), "div")
+    with pytest.raises(ValueError, match="own subtree"):
+        div.wrap_children(div)
+
+
 def test_unwrap_replaces_an_element_with_its_children() -> None:
     doc = parse("<div><b>x<i>y</i></b></div>")
     bold = _found(doc, "b")

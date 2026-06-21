@@ -80,6 +80,34 @@ def test_concurrent_reads_and_mixed_mutations_are_memory_safe() -> None:
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent churn
 
 
+def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
+    doc = _doc(300)
+    body = doc.find("body")
+    assert body is not None
+    divs = body.find_all("div")
+    firsts = [next(iter(div.children)) for div in divs]  # each <div> opens with a <p>
+    start = threading.Barrier(3)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.find_all("p")  # walks the tree while the wrappers relink runs of children
+            body.serialize()
+
+    def child_wrapper() -> None:
+        start.wait()
+        for div in divs:
+            div.wrap_children(turbohtml.Element("box"))  # boxes each div's children under the per-tree lock
+
+    def sibling_wrapper() -> None:
+        start.wait()
+        for first in firsts:
+            first.wrap_siblings(turbohtml.Element("run"))  # wraps the run after each div's first child
+
+    _run(reader, child_wrapper, sibling_wrapper)
+    assert body.serialize().startswith("<body>")  # still well-formed after the concurrent wrapping
+
+
 def test_concurrent_link_enumeration_and_resolve_is_memory_safe() -> None:
     anchors = "".join(f'<a href="p{index}/"><img src="i{index}.png"></a>' for index in range(300))
     doc = turbohtml.parse(f"<html><body>{anchors}</body></html>")
