@@ -638,7 +638,8 @@ static PyObject *md_converters_dict(PyObject *converters) {
    Returns -1 with an exception set on a non-string element or an iteration error. */
 static int md_build_tag_filter(PyObject *seq, md_opts *opt, int mode) {
     if (PyUnicode_Check(seq)) {
-        PyErr_SetString(PyExc_TypeError, "to_markdown strip/convert must be an iterable of tag names, not a single str");
+        PyErr_SetString(PyExc_TypeError,
+                        "to_markdown strip/convert must be an iterable of tag names, not a single str");
         return -1;
     }
     PyObject *iter = PyObject_GetIter(seq);

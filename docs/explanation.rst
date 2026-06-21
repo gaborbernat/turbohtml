@@ -288,6 +288,12 @@ Markdown, and splices the result back into the stream with block or inline frami
 inside the walk's critical section, so reading the element is safe; CPython suspends and resumes the section around any
 reentrant tree access the callable makes, so it cannot deadlock.
 
+A lighter knob unwraps whole tags without a callable: ``strip`` (a denylist) and ``convert`` (an allowlist), the same
+pair ``markdownify`` carries. Both compile to one 256-bit set indexed by the interned tag atom, so the per-element test
+is a constant-time bit lookup with no bound check -- a stripped element simply renders its children in place of its own
+markup. The interning is what makes a name the tag table does not know fold to no entry, mirroring how ``markdownify``
+ignores a tag it has no converter for.
+
 *******************
  Mutating the tree
 *******************

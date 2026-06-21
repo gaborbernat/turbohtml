@@ -984,6 +984,22 @@ Return ``""`` to drop an element, or return ``content`` unchanged to unwrap it. 
 on its own line; any other tag flows inline. The callable runs inside the same per-tree lock the walk holds, so it may
 read the element's attributes and subtree freely.
 
+To unwrap whole tags without a callable, pass ``strip`` or ``convert`` -- the two mutually exclusive filters
+``markdownify`` exposes under the same names. ``strip`` names tags whose markup is dropped while their text keeps
+flowing; ``convert`` names the only tags to keep markup for, so every other tag is unwrapped. A name the tag table does
+not know is ignored, and ``<script>``, ``<style>``, and ``<head>`` still vanish whole regardless:
+
+.. testcode::
+
+    doc = turbohtml.parse('<p>see <a href="/x">the docs</a> and <b>note</b> this</p>')
+    print(doc.to_markdown(strip=["a"]))
+    print(doc.to_markdown(convert=["b"]))
+
+.. testoutput::
+
+    see the docs and **note** this
+    see the docs and **note** this
+
 **********************
  Export to plain text
 **********************

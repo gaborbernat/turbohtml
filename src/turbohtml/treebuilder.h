@@ -310,19 +310,19 @@ typedef struct {
     int escape_mode; /* enum th_md_escape */
     int escape_asterisks;
     int escape_underscores;
-    int line_break;           /* enum th_md_break */
-    int block_spacing_single; /* one newline between blocks instead of a blank line */
-    int wrap_width;           /* word-wrap column, 0 disables */
-    int wrap_list_items;      /* extend word wrapping into list-item text */
-    int wrap_links;           /* 0 keeps a link/image construct unbroken across a wrap */
-    int transliterate;        /* fold common non-ASCII typography in prose to ASCII */
-    int document_strip;       /* enum th_md_doc_strip */
-    const char *sub;          /* <sub> wrapper */
-    const char *sup;          /* <sup> wrapper */
-    int google_doc;           /* read inline-CSS styling the way a Google Docs export encodes it */
-    int google_list_indent;   /* px of margin-left per list-nesting level (>= 1); divides margin-left */
-    int hide_strikethrough;   /* in google_doc mode, drop text a CSS line-through struck */
-    int tag_filter;           /* enum th_md_filter selecting how filter_tags reads */
+    int line_break;                           /* enum th_md_break */
+    int block_spacing_single;                 /* one newline between blocks instead of a blank line */
+    int wrap_width;                           /* word-wrap column, 0 disables */
+    int wrap_list_items;                      /* extend word wrapping into list-item text */
+    int wrap_links;                           /* 0 keeps a link/image construct unbroken across a wrap */
+    int transliterate;                        /* fold common non-ASCII typography in prose to ASCII */
+    int document_strip;                       /* enum th_md_doc_strip */
+    const char *sub;                          /* <sub> wrapper */
+    const char *sup;                          /* <sup> wrapper */
+    int google_doc;                           /* read inline-CSS styling the way a Google Docs export encodes it */
+    int google_list_indent;                   /* px of margin-left per list-nesting level (>= 1); divides margin-left */
+    int hide_strikethrough;                   /* in google_doc mode, drop text a CSS line-through struck */
+    int tag_filter;                           /* enum th_md_filter selecting how filter_tags reads */
     uint64_t filter_tags[TH_MD_FILTER_WORDS]; /* atoms named by strip (denylist) or convert (allowlist) */
     /* Per-tag converter hook: a registered tag's built-in rendering is replaced by a
        Python callable receiving the element and its rendered child Markdown. The
