@@ -279,6 +279,8 @@ class Node:
         google_doc: bool = False,
         google_list_indent: int = 36,
         hide_strikethrough: bool = False,
+        strip: Iterable[str] | None = None,
+        convert: Iterable[str] | None = None,
         converters: Mapping[str, Callable[[Element, str], str]] | None = None,
     ) -> str: ...
     def to_text(

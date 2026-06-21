@@ -274,6 +274,13 @@ enum th_md_escape { TH_MD_ESCAPE_MINIMAL, TH_MD_ESCAPE_ALL };
 enum th_md_break { TH_MD_BREAK_SPACES, TH_MD_BREAK_BACKSLASH };
 enum th_md_doc_strip { TH_MD_DOC_STRIP, TH_MD_DOC_LSTRIP, TH_MD_DOC_RSTRIP, TH_MD_DOC_NONE };
 enum th_md_table_header { TH_MD_HEADER_FIRST, TH_MD_HEADER_DETECT, TH_MD_HEADER_NONE };
+/* No filter, a strip denylist (listed tags lose their markup), or a convert
+   allowlist (only listed tags keep their markup). */
+enum th_md_filter { TH_MD_FILTER_NONE, TH_MD_FILTER_STRIP, TH_MD_FILTER_CONVERT };
+
+/* Words in the tag-filter bitset: 256 bits cover every interned tag atom (there
+   are ~150, all < 256) with headroom, so a set membership test needs no bound. */
+#define TH_MD_FILTER_WORDS 4
 
 typedef struct {
     int heading_style;          /* enum th_md_heading */
@@ -315,6 +322,8 @@ typedef struct {
     int google_doc;           /* read inline-CSS styling the way a Google Docs export encodes it */
     int google_list_indent;   /* px of margin-left per list-nesting level (>= 1); divides margin-left */
     int hide_strikethrough;   /* in google_doc mode, drop text a CSS line-through struck */
+    int tag_filter;           /* enum th_md_filter selecting how filter_tags reads */
+    uint64_t filter_tags[TH_MD_FILTER_WORDS]; /* atoms named by strip (denylist) or convert (allowlist) */
     /* Per-tag converter hook: a registered tag's built-in rendering is replaced by a
        Python callable receiving the element and its rendered child Markdown. The
        engine builds the element through wrap_node so it need not know the binding. */
