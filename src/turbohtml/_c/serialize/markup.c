@@ -1,7 +1,7 @@
 /* markupsafe-compatible HTML escaping that returns a Markup safe-string.
 
    turbohtml.markup mirrors markupsafe's escape/Markup surface so a project can
-   replace `from markupsafe import ...` with `from turbohtml.markup import ...`.
+   replace `from markupsafe import ...` with `from turbohtml.migration.markupsafe import ...`.
    This escape differs from turbohtml.escape() in the two ways markupsafe's
    contract fixes: it always escapes both quotes, and it writes the numeric
    references markupsafe emits (&#34; / &#39;) rather than the stdlib forms

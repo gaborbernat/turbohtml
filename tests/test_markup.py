@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from turbohtml.markup import EscapeFormatter, Markup, escape, escape_silent, soft_str
+from turbohtml.migration.markupsafe import EscapeFormatter, Markup, escape, escape_silent, soft_str
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -379,7 +379,7 @@ def test_escape_formatter_is_public_and_subclassable() -> None:
 _MIGRATION_SCRIPT = dedent(
     """
     import sys, types
-    import turbohtml.markup as tm
+    import turbohtml.migration.markupsafe as tm
 
     fake = types.ModuleType("markupsafe")
     fake.Markup = tm.Markup
@@ -404,7 +404,7 @@ _MIGRATION_SCRIPT = dedent(
 
 
 def test_jinja2_migrates_to_turbohtml_markup() -> None:
-    # Run in a clean interpreter so markupsafe can be swapped for turbohtml.markup before jinja2 imports it; this
+    # Run in a clean interpreter so markupsafe can be swapped for turbohtml.migration.markupsafe before jinja2 imports it; this
     # proves a jinja2-based project migrates by changing only the import.
     result = subprocess.run(  # noqa: S603  # fixed argv (this interpreter + a literal script), no external input
         [sys.executable, "-c", _MIGRATION_SCRIPT],

@@ -59,13 +59,20 @@ py.install_sources(
         'src/turbohtml/_html.pyi',
         'src/turbohtml/_links.py',
         'src/turbohtml/_xpath.py',
-        'src/turbohtml/bleach_compat.py',
-        'src/turbohtml/html_parser.py',
         'src/turbohtml/linkify.py',
-        'src/turbohtml/markup.py',
         'src/turbohtml/query.py',
         'src/turbohtml/sanitizer.py',
         'src/turbohtml/py.typed',
     ],
     subdir: 'turbohtml',
+)
+
+py.install_sources(
+    [
+        'src/turbohtml/migration/__init__.py',
+        'src/turbohtml/migration/bleach.py',
+        'src/turbohtml/migration/markupsafe.py',
+        'src/turbohtml/migration/stdlib.py',
+    ],
+    subdir: 'turbohtml/migration',
 )

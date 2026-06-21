@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml.bleach_compat import ALLOWED_ATTRIBUTES, ALLOWED_PROTOCOLS, ALLOWED_TAGS, clean
+from turbohtml.migration.bleach import ALLOWED_ATTRIBUTES, ALLOWED_PROTOCOLS, ALLOWED_TAGS, clean
 
 
 def test_clean_defaults_match_bleach() -> None:

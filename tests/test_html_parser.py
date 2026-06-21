@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml.html_parser import HTMLParser
+from turbohtml.migration.stdlib import HTMLParser
 
 
 class _Recorder(HTMLParser):
