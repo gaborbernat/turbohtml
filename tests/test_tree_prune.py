@@ -23,7 +23,9 @@ def test_keeps_match_and_drops_unrelated_siblings() -> None:
 def test_keeps_the_whole_subtree_under_a_match() -> None:
     document = parse("<main><article>text<b>bold</b><span>more</span></article><p>gone</p></main>")
     document.prune("article")
-    assert _body(document).serialize() == "<body><main><article>text<b>bold</b><span>more</span></article></main></body>"
+    assert (
+        _body(document).serialize() == "<body><main><article>text<b>bold</b><span>more</span></article></main></body>"
+    )
 
 
 def test_keeps_each_of_several_matches() -> None:
@@ -90,7 +92,10 @@ def test_keeps_a_deep_match_through_its_ancestor_chain() -> None:
     markup = "<main><section><article class=keep>deep</article></section><aside>drop</aside></main>"
     document = parse(markup)
     document.prune(".keep")
-    assert _body(document).serialize() == '<body><main><section><article class="keep">deep</article></section></main></body>'
+    assert (
+        _body(document).serialize()
+        == '<body><main><section><article class="keep">deep</article></section></main></body>'
+    )
 
 
 def test_rejects_a_non_str_selector() -> None:
