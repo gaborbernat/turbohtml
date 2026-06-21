@@ -82,7 +82,7 @@ def test_main_text_renders_the_winner() -> None:
 def test_no_main_content(html: str) -> None:
     doc = parse(html)
     assert doc.main_content() is None
-    assert doc.main_text() == ""
+    assert not doc.main_text()
 
 
 def test_unlikely_subtree_rescued_by_maybe_hint() -> None:
@@ -156,7 +156,10 @@ def test_link_text_lowers_but_does_not_eliminate_prose() -> None:
 
 
 def test_foreign_namespace_subtree_is_skipped() -> None:
-    html = f"<svg><text>vector caption text goes here in the drawing</text></svg><article class=post><p>{PROSE}</p></article>"
+    html = (
+        "<svg><text>vector caption text goes here in the drawing</text></svg>"
+        f"<article class=post><p>{PROSE}</p></article>"
+    )
     assert main_tag(html) == "article"
 
 
