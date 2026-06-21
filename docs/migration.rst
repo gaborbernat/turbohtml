@@ -350,6 +350,10 @@ turbohtml folds into the one ``find``/``find_all``/``select`` grammar.
       - ``Element("div")``, ``node.append(...)``, ``node.decompose()``
     - - ``extract_plain_text(html)`` (from ``resiliparse.extract``)
       - ``node.to_text()`` for layout, ``node.text`` for the raw concatenation
+    - - ``extract_plain_text(html, main_content=True)``
+      - ``node.main_text()`` (the dominant article body as text)
+    - - ``ExtractNode`` / boilerplate-stripped main content
+      - ``node.main_content()`` (the dominant article element, or ``None``)
 
 .. testcode::
 
@@ -365,8 +369,10 @@ turbohtml folds into the one ``find``/``find_all``/``select`` grammar.
 Pitfalls
 ========
 
-- resiliparse's boilerplate and main-content extraction, language detection, and the encoding and archive utilities it
-  ships for web-crawl processing have no turbohtml equivalent; the overlap is parsing and DOM access only.
+- resiliparse's main-content extraction maps to :py:meth:`~turbohtml.Node.main_content` and
+  :py:meth:`~turbohtml.Node.main_text`, a content-density (readability) heuristic over the parsed tree. Its language
+  detection and the WARC/archive and crawl utilities it ships for web-crawl processing have no turbohtml equivalent and
+  are out of scope; reach for a dedicated tool there.
 - turbohtml compares nodes by value, not identity, so ``find("p") == find("p")`` is ``False`` where resiliparse returns
   the same wrapped node; compare serializations or walk the tree instead.
 

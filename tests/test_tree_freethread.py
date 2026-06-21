@@ -106,6 +106,36 @@ def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
 
     _run(reader, child_wrapper, sibling_wrapper)
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent wrapping
+def test_concurrent_main_content_extraction_is_memory_safe() -> None:
+    paragraphs = "".join(
+        f"<p>Paragraph {index}, a clause, with prose, holds enough words to score as real content here.</p>"
+        for index in range(40)
+    )
+    doc = turbohtml.parse(
+        f"<html><body><nav><a href='/'>Home</a></nav><article class=post>{paragraphs}</article></body></html>"
+    )
+    body = doc.find("body")
+    assert body is not None
+    children = list(body.children)
+    start = threading.Barrier(3)
+
+    def scorer() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.main_content()  # scores the whole tree in C while it is rewired
+
+    def renderer() -> None:
+        start.wait()
+        for _ in range(200):
+            assert isinstance(doc.main_text(), str)  # scores then renders the winner under the lock
+
+    def extractor() -> None:
+        start.wait()
+        for child in children:
+            child.extract()
+
+    _run(scorer, renderer, extractor)
+    assert isinstance(doc.main_text(), str)  # the tree is still walkable after the concurrent churn
 
 
 def test_concurrent_link_enumeration_and_resolve_is_memory_safe() -> None:

@@ -1060,6 +1060,54 @@ A rule key is a tag (``"b"``), a ``tag#attr`` requiring the attribute, a ``tag#a
 whitespace-separated token, or the tag-less ``#attr`` / ``#attr=value`` to match across any tag; its value is the list
 of labels to attach.
 
+**************************
+ Extract the main article
+**************************
+
+:meth:`~turbohtml.Node.main_content` returns the dominant content element -- the article body with the navigation,
+sidebars, advertising and comment boilerplate scored out -- so you can work on just the prose. It is the role
+`resiliparse <https://github.com/chatnoir-eu/chatnoir-resiliparse>`_ fills with its main-content extractor.
+:meth:`~turbohtml.Node.main_text` is the shortcut that renders that element with :meth:`~turbohtml.Node.to_text`:
+
+.. testcode::
+
+    import turbohtml
+    page = turbohtml.parse(
+        "<body>"
+        "<nav><a href='/'>Home</a> <a href='/about'>About</a></nav>"
+        "<article class='post'><h1>Comets</h1>"
+        "<p>A comet is an icy body that releases gas, forming a visible tail, as it nears the Sun.</p>"
+        "<p>The tail always points away from the Sun, pushed out by the solar wind and radiation.</p>"
+        "</article>"
+        "<aside class='sidebar'><p>Related: meteors, asteroids, the Oort cloud, and more links here.</p></aside>"
+        "</body>"
+    )
+    print(page.main_content().tag)
+    print(page.main_text())
+
+.. testoutput::
+
+    article
+    Comets
+
+    A comet is an icy body that releases gas, forming a visible tail, as it nears the Sun.
+
+    The tail always points away from the Sun, pushed out by the solar wind and radiation.
+
+The score is a content-density heuristic: long paragraphs with prose punctuation raise their container, while a class or
+id like ``sidebar``, ``comment`` or ``nav`` lowers it or drops the subtree outright. A page with no real article -- only
+short snippets or pure navigation -- yields ``None`` from ``main_content`` and ``""`` from ``main_text``, so guard the
+result:
+
+.. testcode::
+
+    stub = turbohtml.parse("<nav><a href='/'>Home</a></nav>")
+    print(stub.main_content())
+
+.. testoutput::
+
+    None
+
 ************************************
  Parse bytes of an unknown encoding
 ************************************

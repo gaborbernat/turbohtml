@@ -377,5 +377,31 @@ so a scraping script ends with Markdown instead of a tag soup:
 
     Steep *green* tea for **3** minutes.
 
+**********************
+ Pull out the article
+**********************
+
+A real page wraps that prose in navigation, sidebars and footers. When you only want the article and do not know its
+selector, :meth:`~turbohtml.Node.main_content` finds the dominant content element for you by scoring the tree, and
+:meth:`~turbohtml.Node.main_text` hands you its text directly:
+
+.. testcode::
+
+    page = turbohtml.parse(
+        "<nav><a href='/'>Home</a></nav>"
+        "<main class='post'><h2>Tea</h2>"
+        "<p>Steeping green tea for three minutes draws out its flavor without turning it bitter.</p></main>"
+        "<footer>(c) 2026</footer>"
+    )
+    print(page.main_content().tag)
+    print(page.main_text())
+
+.. testoutput::
+
+    main
+    Tea
+
+    Steeping green tea for three minutes draws out its flavor without turning it bitter.
+
 That is the whole tree API. Head to the :doc:`how-to` guides for task-focused recipes, the :doc:`migration` guide if you
 are coming from another HTML library, or the :doc:`reference` for the exact signatures.

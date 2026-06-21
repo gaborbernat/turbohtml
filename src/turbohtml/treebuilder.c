@@ -4288,3 +4288,4 @@ void th_stream_free(th_stream *stream) {
 #include "treebuilder_minify.h"
 #include "treebuilder_markdown.h"
 #include "treebuilder_text.h"
+#include "treebuilder_readability.h"
