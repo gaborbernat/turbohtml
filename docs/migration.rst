@@ -88,6 +88,8 @@ The renames
       - ``element.find_all("a", axis=Axis.CHILDREN)``
     - - ``soup.select(".cls")``, ``soup.select_one(".cls")``
       - ``node.select(".cls")``, ``node.select_one(".cls")``
+    - - ``BeautifulSoup(markup, parse_only=SoupStrainer("article"))``
+      - ``turbohtml.parse(markup).prune("article")``
     - - ``tag.decompose()``, ``tag.extract()``, ``tag.unwrap()``, ``tag.wrap(...)``
       - ``node.decompose()``, ``node.extract()``, ``node.unwrap()``, ``node.wrap(...)``
     - - ``tag.insert_before(...)``, ``tag.insert_after(...)``, ``tag.replace_with(...)``
@@ -181,9 +183,12 @@ Pitfalls
 - Default output is WHATWG-conformant; pick ``Formatter.NAMED_ENTITIES`` to come close to ``bs4``'s ``html`` formatter.
 - ``==`` compares identity, so two trees with the same markup are unequal. Where ``bs4`` code leaned on ``==`` between
   trees, compare serializations (``a.html == b.html``) or walk the nodes.
-- A few bs4 entry points are deliberate clean-break omissions: parse-time filtering with ``SoupStrainer``, the choice of
-  parser backend (turbohtml always runs the WHATWG algorithm), and registering a named output formatter -- pick a
-  :class:`~turbohtml.Formatter` per :meth:`~turbohtml.Node.serialize` call instead.
+- ``SoupStrainer`` filtered the tree *during* parsing; turbohtml always runs the full WHATWG algorithm, then
+  :meth:`~turbohtml.Node.prune` trims the parsed tree to a CSS selector in one C pass, so a large document still yields
+  a small tree.
+- A couple of bs4 entry points are deliberate clean-break omissions: the choice of parser backend (turbohtml always runs
+  the WHATWG algorithm) and registering a named output formatter -- pick a :class:`~turbohtml.Formatter` per
+  :meth:`~turbohtml.Node.serialize` call instead.
 
 ***********
  From lxml

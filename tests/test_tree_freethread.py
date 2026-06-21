@@ -106,6 +106,30 @@ def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
 
     _run(reader, child_wrapper, sibling_wrapper)
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent wrapping
+def test_concurrent_prune_and_reads_are_memory_safe() -> None:
+    doc = _doc(400)
+    body = doc.find("body")
+    assert body is not None
+    start = threading.Barrier(3)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.find_all("span")  # walks the tree while prune snapshots and rewires it
+            body.serialize()
+
+    def selector() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.select("div p")
+
+    def pruner() -> None:
+        start.wait()
+        body.prune("p")  # keeps every <p> (and its <div>), drops the <span> siblings
+
+    _run(reader, selector, pruner)
+    assert doc.find_all("span") == []  # prune removed every <span>, leaving the <p> subtrees
+    assert len(doc.find_all("p")) == 400
 
 
 def test_concurrent_main_content_extraction_is_memory_safe() -> None:
