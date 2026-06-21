@@ -422,7 +422,7 @@ def test_roundtrip_preserves_text(html: str) -> None:
 def _corpus_inputs() -> list[str]:
     """HTML fragments pulled from the vendored html5lib-tests tree-construction
     .dat files: small, deliberately malformed markup that stresses the walker."""
-    root = Path(__file__).parent / "html5lib-tests" / "tree-construction"
+    root = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
     inputs: list[str] = []
     for dat in sorted(root.glob("*.dat")):
         for block in dat.read_text(encoding="utf-8").split("#data\n")[1:]:

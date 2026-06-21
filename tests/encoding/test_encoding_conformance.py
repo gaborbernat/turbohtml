@@ -8,7 +8,7 @@ import pytest
 
 from turbohtml import parse
 
-_SUITE = Path(__file__).parent / "html5lib-tests" / "encoding"
+_SUITE = Path(__file__).parents[1] / "html5lib-tests" / "encoding"
 
 # A few tests1.dat cases place the only <meta charset> well past byte 1024 (the
 # "N characters" boundary fixtures and the multi-script test, meta at 2026..8323)

@@ -21,7 +21,7 @@ import pytest
 
 from turbohtml import Minify, parse
 
-_TREE_DIR = Path(__file__).parent / "html5lib-tests" / "tree-construction"
+_TREE_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
 _MINIFY = Minify()
 
 

@@ -23,7 +23,7 @@ import pytest
 
 from turbohtml import _html
 
-TOKENIZER_DIR = Path(__file__).parent / "html5lib-tests" / "tokenizer"
+TOKENIZER_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tokenizer"
 
 _DOUBLE_ESCAPE = re.compile(r"\\u([0-9A-Fa-f]{4})")
 

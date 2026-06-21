@@ -24,7 +24,7 @@ import turbohtml
 if TYPE_CHECKING:
     import pytest
 
-_TOKENIZER = Path(__file__).parent / "html5lib-tests" / "tokenizer"
+_TOKENIZER = Path(__file__).parents[1] / "html5lib-tests" / "tokenizer"
 _FILES = ["entities.test", "namedEntities.test", "numericEntities.test"]
 
 
