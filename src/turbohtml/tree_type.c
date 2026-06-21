@@ -3278,8 +3278,8 @@ static long pattern_group_count(PyObject *compiled) {
    tuples, so fall back to the whole match per finditer. */
 static PyObject *regex_find_all(PyObject *compiled, PyObject *source) {
     long count = pattern_group_count(compiled);
-    if (count < 0) {     /* GCOVR_EXCL_BR_LINE: .groups is always a readable non-negative int */
-        return NULL;     /* GCOVR_EXCL_LINE: unreachable on a real re.Pattern */
+    if (count < 0) { /* GCOVR_EXCL_BR_LINE: .groups is always a readable non-negative int */
+        return NULL; /* GCOVR_EXCL_LINE: unreachable on a real re.Pattern */
     }
     if (count <= 1) {
         return PyObject_CallMethod(compiled, "findall", "O", source);
@@ -3289,9 +3289,9 @@ static PyObject *regex_find_all(PyObject *compiled, PyObject *source) {
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *out = PyList_New(0);
-    if (out == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        Py_DECREF(iterator);  /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (out == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(iterator); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *match;
     int error = 0;
@@ -3306,9 +3306,9 @@ static PyObject *regex_find_all(PyObject *compiled, PyObject *source) {
         Py_DECREF(whole);
     }
     Py_DECREF(iterator);
-    if (error) {           /* GCOVR_EXCL_BR_LINE: the loop body only breaks on unforceable allocation failure */
-        Py_DECREF(out);    /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (error) {        /* GCOVR_EXCL_BR_LINE: the loop body only breaks on unforceable allocation failure */
+        Py_DECREF(out); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return out;
 }
@@ -3318,8 +3318,8 @@ static PyObject *regex_find_all(PyObject *compiled, PyObject *source) {
    fallback when nothing matches. */
 static PyObject *regex_find_first(PyObject *compiled, PyObject *source, PyObject *fallback) {
     PyObject *match = PyObject_CallMethod(compiled, "search", "O", source);
-    if (match == NULL) {  /* GCOVR_EXCL_BR_LINE: search over a str cannot raise */
-        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (match == NULL) { /* GCOVR_EXCL_BR_LINE: search over a str cannot raise */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (match == Py_None) {
         Py_DECREF(match);
@@ -3370,9 +3370,13 @@ static PyObject *node_re(PyObject *self, PyObject *args, PyObject *kwds) {
     NodeObject *node = (NodeObject *)self;
     PyObject *source = regex_source(node->handle, tree_of(self), node->node, attr_name, attr_len, &absent);
     PyMem_Free(attr_name);
-    if (source == NULL) {
+    if (absent) {
         Py_DECREF(compiled);
-        return absent ? PyList_New(0) : NULL;
+        return PyList_New(0);
+    }
+    if (source == NULL) {    /* GCOVR_EXCL_BR_LINE: with absent ruled out, only an allocation failure reaches here */
+        Py_DECREF(compiled); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *result = regex_find_all(compiled, source);
     Py_DECREF(compiled);
@@ -3403,9 +3407,13 @@ static PyObject *node_re_first(PyObject *self, PyObject *args, PyObject *kwds) {
     NodeObject *node = (NodeObject *)self;
     PyObject *source = regex_source(node->handle, tree_of(self), node->node, attr_name, attr_len, &absent);
     PyMem_Free(attr_name);
-    if (source == NULL) {
+    if (absent) {
         Py_DECREF(compiled);
-        return absent ? Py_NewRef(fallback) : NULL;
+        return Py_NewRef(fallback);
+    }
+    if (source == NULL) {    /* GCOVR_EXCL_BR_LINE: with absent ruled out, only an allocation failure reaches here */
+        Py_DECREF(compiled); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *result = regex_find_first(compiled, source, fallback);
     Py_DECREF(compiled);

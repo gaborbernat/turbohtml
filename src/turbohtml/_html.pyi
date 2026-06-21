@@ -1,11 +1,11 @@
-import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from enum import Enum, IntEnum
+from re import Pattern
 from typing import Literal, TypeAlias, final
 
 from ._links import Link
 
-_Filter: TypeAlias = str | re.Pattern[str] | bool | Callable[[str | None], bool] | list[_Filter]
+_Filter: TypeAlias = str | Pattern[str] | bool | Callable[[str | None], bool] | list[_Filter]
 
 class Axis(IntEnum):
     DESCENDANTS = 0
@@ -224,8 +224,9 @@ class Node:
     def closest(self, selector: str, /) -> Element | None: ...
     def prune(self, selector: str, /) -> Node: ...
     def re(self, pattern: str | re.Pattern[str], /, *, attr: str | None = None) -> list[str]: ...
+    def re(self, pattern: str | Pattern[str], /, *, attr: str | None = None) -> list[str]: ...
     def re_first(
-        self, pattern: str | re.Pattern[str], /, default: str | None = None, *, attr: str | None = None
+        self, pattern: str | Pattern[str], /, default: str | None = None, *, attr: str | None = None
     ) -> str | None: ...
     def serialize(
         self,

@@ -293,6 +293,27 @@ pair ``markdownify`` carries. Both compile to one 256-bit set indexed by the int
 is a constant-time bit lookup with no bound check -- a stripped element simply renders its children in place of its own
 markup. The interning is what makes a name the tag table does not know fold to no entry, mirroring how ``markdownify``
 ignores a tag it has no converter for.
+*****************************
+ Extracting strings (parsel)
+*****************************
+
+Scraping is string work: the caller wants ``"/p/42"`` or ``"42"``, not a node to read an attribute off. Scrapy's
+``parsel`` made that the center of its API with ``::text`` / ``::attr()`` pseudo-elements and ``Selector.re()`` /
+``.re_first()``, and the migration path needs the same primitives without bolting non-standard pseudo-elements onto the
+CSS engine. turbohtml keeps the selector pure and adds the extraction step as three node methods instead.
+
+:meth:`~turbohtml.Element.attr` returns the *raw* attribute value as one string -- ``class="a b c"`` reads back as ``"a
+b c"`` rather than the token list :attr:`Element.attrs <turbohtml.Element.attrs>` exposes, a valueless attribute as
+``""``, and an absent one as the supplied default -- so it is the single-string counterpart to the live mapping, and the
+one ``parsel``'s ``::attr(name)`` translates to. :meth:`~turbohtml.Node.re` and :meth:`~turbohtml.Node.re_first` run a
+pattern (a ``str`` compiled once through :func:`re.compile`, or a pattern you compiled yourself) over the node's
+:attr:`~turbohtml.Node.text`, or over an attribute value when ``attr=`` is given. They follow ``parsel``'s group rule --
+yield the lone capturing group when the pattern has exactly one, else the whole match -- because that is what makes a
+single pattern pull just the digits out of ``Order 1138``. The regex itself stays in Python's battle-tested :mod:`re`;
+only the source string is produced in C, under the same per-tree critical section :attr:`~turbohtml.Node.text` takes so
+a concurrent mutation cannot rewire the subtree mid-read. Unlike ``parsel``, these run on one node rather than a whole
+``SelectorList``, so a comprehension over :meth:`~turbohtml.Node.select` covers a page -- the explicit loop the rest of
+the query API also asks for, rather than a hidden fan-out.
 
 **************************
  Finding the main content

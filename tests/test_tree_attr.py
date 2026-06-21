@@ -51,12 +51,12 @@ def test_attr_present_ignores_default() -> None:
 
 def test_attr_name_must_be_str() -> None:
     with pytest.raises(TypeError, match="attribute name must be a str"):
-        first('<a href="/x">', "a").attr(123)  # type: ignore[arg-type]
+        first('<a href="/x">', "a").attr(123)  # ty: ignore[invalid-argument-type]
 
 
 def test_attr_requires_a_name() -> None:
     with pytest.raises(TypeError):
-        first('<a href="/x">', "a").attr()  # type: ignore[call-arg]
+        first('<a href="/x">', "a").attr()  # ty: ignore[missing-argument]
 
 
 def test_attr_getall_over_a_selection_is_a_comprehension() -> None:

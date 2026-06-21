@@ -62,9 +62,13 @@ def test_re_attr_none_runs_over_text() -> None:
     assert paragraph.re(r"\d+", attr=None) == ["2026"]
 
 
+def test_re_over_valueless_attribute_is_empty() -> None:
+    assert first("<input disabled>", "input").re(r".+", attr="disabled") == []
+
+
 def test_re_bad_pattern_type() -> None:
-    with pytest.raises(TypeError, match="pattern must be a str or a compiled re.Pattern"):
-        first("<p>x</p>", "p").re(123)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"pattern must be a str or a compiled re\.Pattern"):
+        first("<p>x</p>", "p").re(123)  # ty: ignore[invalid-argument-type]
 
 
 def test_re_invalid_regex_propagates() -> None:
@@ -74,7 +78,7 @@ def test_re_invalid_regex_propagates() -> None:
 
 def test_re_attr_name_must_be_str() -> None:
     with pytest.raises(TypeError, match="attribute name must be a str"):
-        first("<p>x</p>", "p").re(r"\d+", attr=123)  # type: ignore[arg-type]
+        first("<p>x</p>", "p").re(r"\d+", attr=123)  # ty: ignore[invalid-argument-type]
 
 
 def test_re_first_returns_first_whole_match() -> None:
@@ -110,21 +114,25 @@ def test_re_first_over_absent_attribute_uses_default() -> None:
     assert first('<a href="/x">x</a>', "a").re_first(r"\d+", "none", attr="title") == "none"
 
 
+def test_re_first_over_valueless_attribute_uses_default() -> None:
+    assert first("<input disabled>", "input").re_first(r".+", "none", attr="disabled") == "none"
+
+
 def test_re_first_bad_pattern_type() -> None:
-    with pytest.raises(TypeError, match="pattern must be a str or a compiled re.Pattern"):
-        first("<p>x</p>", "p").re_first(123)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"pattern must be a str or a compiled re\.Pattern"):
+        first("<p>x</p>", "p").re_first(123)  # ty: ignore[invalid-argument-type]
 
 
 def test_re_first_attr_name_must_be_str() -> None:
     with pytest.raises(TypeError, match="attribute name must be a str"):
-        first("<p>x</p>", "p").re_first(r"\d+", attr=123)  # type: ignore[arg-type]
+        first("<p>x</p>", "p").re_first(r"\d+", attr=123)  # ty: ignore[invalid-argument-type]
 
 
 def test_re_requires_a_pattern() -> None:
     with pytest.raises(TypeError):
-        first("<p>x</p>", "p").re()  # type: ignore[call-arg]
+        first("<p>x</p>", "p").re()  # ty: ignore[missing-argument]
 
 
 def test_re_first_requires_a_pattern() -> None:
     with pytest.raises(TypeError):
-        first("<p>x</p>", "p").re_first()  # type: ignore[call-arg]
+        first("<p>x</p>", "p").re_first()  # ty: ignore[missing-argument]
