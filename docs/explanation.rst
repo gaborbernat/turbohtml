@@ -299,7 +299,10 @@ the same root, :meth:`~turbohtml.Node.insert_before`, :meth:`~turbohtml.Node.unw
 arena nodes, so the node keeps its identity and any wrapper you hold stays valid. Inserting a node from a different tree
 (a freshly constructed one, or a node lifted out of another document) deep-copies its subtree into the destination's
 arena and re-points the moved wrapper at the copy, so the two arenas never alias and the source frees on its own. Making
-a node a descendant of itself is refused.
+a node a descendant of itself is refused. The bulk wraps (:meth:`~turbohtml.Element.wrap_children`,
+:meth:`~turbohtml.Node.wrap_siblings`) are the same pointer swaps applied to a whole run at once: they resolve the run
+and relink it in pure C under the one per-tree lock, never dereferencing a sibling pointer across a Python call that
+could rewire the tree, so a group moves in a single atomic edit rather than node by node.
 
 Construction reuses the same arena machinery: :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and the rest build
 a standalone single-node tree that owns its data, ready to adopt into a document, and tag and attribute names are

@@ -1153,6 +1153,7 @@ static PyObject *node_insert_before(PyObject *self, PyObject *nodes);
 static PyObject *node_insert_after(PyObject *self, PyObject *nodes);
 static PyObject *node_replace_with(PyObject *self, PyObject *nodes);
 static PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj);
+static PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_unwrap(PyObject *self, PyObject *ignored);
 static PyObject *node_extract(PyObject *self, PyObject *ignored);
 static PyObject *node_decompose(PyObject *self, PyObject *ignored);
@@ -1177,6 +1178,12 @@ PyDoc_STRVAR(replace_with_doc, "replace_with(*nodes)\n--\n\n"
 PyDoc_STRVAR(wrap_doc, "wrap(wrapper, /)\n--\n\n"
                        "Put this node inside wrapper, an element, in this node's place and return\n"
                        "wrapper.");
+
+PyDoc_STRVAR(wrap_siblings_doc, "wrap_siblings(wrapper, /, *, until=None)\n--\n\n"
+                                "Wrap this node and the siblings that follow it in wrapper, an element, in\n"
+                                "one move, and return wrapper. The run reaches through until (this node or a\n"
+                                "later sibling, included) or to the last sibling when until is None; wrapper\n"
+                                "lands where this node was. The bulk form of wrap() for a contiguous run.");
 
 PyDoc_STRVAR(unwrap_doc, "unwrap()\n--\n\n"
                          "Replace this node with its children and return it detached (the inverse of\n"
@@ -1212,6 +1219,7 @@ static PyMethodDef node_methods[] = {
     {"insert_after", node_insert_after, METH_VARARGS, insert_after_doc},
     {"replace_with", node_replace_with, METH_VARARGS, replace_with_doc},
     {"wrap", node_wrap_in, METH_O, wrap_doc},
+    {"wrap_siblings", (PyCFunction)(void (*)(void))node_wrap_siblings, METH_VARARGS | METH_KEYWORDS, wrap_siblings_doc},
     {"unwrap", node_unwrap, METH_NOARGS, unwrap_doc},
     {"extract", node_extract, METH_NOARGS, extract_doc},
     {"decompose", node_decompose, METH_NOARGS, decompose_doc},
@@ -3920,6 +3928,7 @@ static PyObject *element_extend(PyObject *self, PyObject *iterable);
 static PyObject *element_insert(PyObject *self, PyObject *args);
 static PyObject *element_clear(PyObject *self, PyObject *ignored);
 static PyObject *element_normalize(PyObject *self, PyObject *ignored);
+static PyObject *element_wrap_children(PyObject *self, PyObject *wrapper_obj);
 
 PyDoc_STRVAR(append_doc, "append(child, /)\n--\n\n"
                          "Add child as the last child of this element. A node already in a tree is\n"
@@ -3940,12 +3949,18 @@ PyDoc_STRVAR(normalize_doc, "normalize()\n--\n\n"
                             "Merge each run of adjacent Text descendants into one node and drop empty\n"
                             "Text nodes, throughout this element's subtree.");
 
+PyDoc_STRVAR(wrap_children_doc, "wrap_children(wrapper, /)\n--\n\n"
+                                "Move every child of this element into wrapper, an element, make wrapper the\n"
+                                "sole child, and return wrapper. The bulk form of wrap() for a container's\n"
+                                "whole content; an empty element gains an empty wrapper.");
+
 static PyMethodDef element_methods[] = {
     {"append", element_append, METH_O, append_doc},
     {"extend", element_extend, METH_O, extend_doc},
     {"insert", element_insert, METH_VARARGS, insert_doc},
     {"clear", element_clear, METH_NOARGS, clear_doc},
     {"normalize", element_normalize, METH_NOARGS, normalize_doc},
+    {"wrap_children", element_wrap_children, METH_O, wrap_children_doc},
     {"form_data", element_form_data, METH_NOARGS, form_data_doc},
     {NULL, NULL, 0, NULL},
 };
@@ -4449,6 +4464,38 @@ static PyObject *element_normalize(PyObject *self, PyObject *Py_UNUSED(ignored))
     Py_RETURN_NONE;
 }
 
+/* adopt_into detaches the wrapper before the child walk, so the loop only sees this
+   element's own children; the moves are pure C under the per-tree lock. */
+static PyObject *element_wrap_children(PyObject *self, PyObject *wrapper_obj) {
+    module_state *state = state_of(self);
+    if (!PyObject_TypeCheck(wrapper_obj, (PyTypeObject *)state->node_type) ||
+        ((NodeObject *)wrapper_obj)->node->type != TH_NODE_ELEMENT) {
+        PyErr_SetString(PyExc_TypeError, "wrapper must be an element");
+        return NULL;
+    }
+    NodeObject *node = (NodeObject *)self;
+    th_node *parent = node->node;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    handle_drop_index(node->handle);
+    th_node *wrapper = adopt_into(node, parent, wrapper_obj);
+    if (wrapper == NULL) {
+        error = 1;
+    } else {
+        while (parent->first_child != NULL) {
+            th_node *child = parent->first_child;
+            th_node_remove(child);
+            th_node_append_child(wrapper, child);
+        }
+        th_node_append_child(parent, wrapper);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
+    }
+    return Py_NewRef(wrapper_obj);
+}
+
 /* The shared parent for a sibling edit, or NULL with a ValueError set when this
    node stands alone and so has nowhere to place a sibling. */
 static th_node *sibling_parent(PyObject *self) {
@@ -4584,6 +4631,98 @@ static PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
         }
     }
     Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
+    }
+    return Py_NewRef(wrapper_obj);
+}
+
+/* Wrap this node and the contiguous run of siblings after it in one new element.
+   Everything happens under the per-tree lock and the run is resolved and rewired in
+   pure C, so the sibling pointers are never dereferenced across a Python call that
+   could relink the tree under free-threading. */
+static PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"wrapper", "until", NULL};
+    PyObject *wrapper_obj;
+    PyObject *until_obj = Py_None;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", keywords, &wrapper_obj, &until_obj)) {
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    if (!PyObject_TypeCheck(wrapper_obj, (PyTypeObject *)state->node_type) ||
+        ((NodeObject *)wrapper_obj)->node->type != TH_NODE_ELEMENT) {
+        PyErr_SetString(PyExc_TypeError, "wrapper must be an element");
+        return NULL;
+    }
+    th_node *until_node = NULL;
+    if (until_obj != Py_None) {
+        if (!PyObject_TypeCheck(until_obj, (PyTypeObject *)state->node_type)) {
+            PyErr_SetString(PyExc_TypeError, "until must be a node or None");
+            return NULL;
+        }
+        until_node = ((NodeObject *)until_obj)->node;
+    }
+    NodeObject *node = (NodeObject *)self;
+    th_node *first = node->node;
+    th_node *parent = sibling_parent(self);
+    if (parent == NULL) {
+        return NULL;
+    }
+    th_node *wrapper_node = ((NodeObject *)wrapper_obj)->node;
+    int error = 0;
+    const char *value_error = NULL;
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    handle_drop_index(node->handle);
+    th_node *last = NULL;
+    if (until_node == NULL) {
+        last = parent->last_child; /* the whole run from this node to the end */
+    } else if (until_node->parent != parent) {
+        value_error = "until must be this node or one of its following siblings";
+    } else {
+        for (th_node *walk = first; walk != NULL; walk = walk->next_sibling) {
+            if (walk == until_node) {
+                last = walk;
+                break;
+            }
+        }
+        if (last == NULL) {
+            value_error = "until must be this node or one of its following siblings";
+        }
+    }
+    if (value_error == NULL) {
+        for (th_node *walk = first;; walk = walk->next_sibling) {
+            if (walk == wrapper_node) {
+                value_error = "wrapper cannot be one of the wrapped nodes";
+                break;
+            }
+            if (walk == last) {
+                break;
+            }
+        }
+    }
+    if (value_error == NULL) {
+        th_node *wrapper = adopt_into(node, parent, wrapper_obj);
+        if (wrapper == NULL) {
+            error = 1;
+        } else {
+            th_node_insert_before(parent, wrapper, first);
+            for (th_node *cursor = first;;) {
+                th_node *next = cursor->next_sibling;
+                int is_last = cursor == last;
+                th_node_remove(cursor);
+                th_node_append_child(wrapper, cursor);
+                if (is_last) {
+                    break;
+                }
+                cursor = next;
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (value_error != NULL) {
+        PyErr_SetString(PyExc_ValueError, value_error);
+        return NULL;
+    }
     if (error) {
         return NULL;
     }

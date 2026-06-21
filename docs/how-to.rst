@@ -1158,6 +1158,28 @@ children and ``decompose`` drops a subtree:
     Element('b')
     <p>keep bold </p>
 
+****************************
+ Wrap a group of nodes once
+****************************
+
+:meth:`~turbohtml.Node.wrap` nests a single node; the bulk forms wrap a whole group in one new container without
+relocating each node by hand. :meth:`~turbohtml.Element.wrap_children` boxes every child of an element, and
+:meth:`~turbohtml.Node.wrap_siblings` wraps a node and the contiguous run of siblings after it (through an ``until`` node,
+or to the last sibling when omitted), placing the wrapper where the run began. Both take a fresh element and return it:
+
+.. testcode::
+
+    from turbohtml import Element
+    doc = turbohtml.parse("<section><h2>Title</h2><p>one</p><p>two</p></section>")
+    section = doc.find("section")
+    paragraphs = section.find_all("p")
+    paragraphs[0].wrap_siblings(Element("div", {"class": "body"}), until=paragraphs[-1])
+    print(section.html)
+
+.. testoutput::
+
+    <section><h2>Title</h2><div class="body"><p>one</p><p>two</p></div></section>
+
 *********************************
  Rewrite an element's attributes
 *********************************
