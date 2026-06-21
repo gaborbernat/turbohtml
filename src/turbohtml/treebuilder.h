@@ -364,6 +364,13 @@ text_opts th_text_default_opts(void);
    NULL on allocation failure. */
 Py_UCS4 *th_node_layout_text(th_tree *tree, th_node *node, const text_opts *opt, Py_ssize_t *out_len);
 
+/* The dominant content element under root by the readability content-density
+   heuristic (text length, comma count, tag and class/id weight, discounted by link
+   density), or NULL when nothing scores as content. Pure C: the caller holds the
+   per-tree critical section and wraps the node (or renders its text with
+   th_node_layout_text) afterwards. The engine for Node.main_content()/main_text(). */
+th_node *th_node_main_content(th_tree *tree, th_node *root);
+
 /* One annotation rule (the inscriptis annotation_rules surface): match an element
    by tag and, optionally, by an attribute whose value contains a token, and
    attach its labels to the element's text span. any_tag matches every tag (the
