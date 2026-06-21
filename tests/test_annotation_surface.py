@@ -38,9 +38,7 @@ from turbohtml import annotation_surface, parse
         pytest.param("ab", [(0, 2, "all")], {"all": ["ab"]}, id="whole-text"),
     ],
 )
-def test_surface_groups_by_label(
-    text: str, spans: list[tuple[int, int, str]], expected: dict[str, list[str]]
-) -> None:
+def test_surface_groups_by_label(text: str, spans: list[tuple[int, int, str]], expected: dict[str, list[str]]) -> None:
     assert annotation_surface(text, spans) == expected
 
 
@@ -57,7 +55,8 @@ def test_accepts_any_iterable_of_spans() -> None:
 
 
 def test_round_trips_to_annotated_text() -> None:
-    text, spans = parse("<h1>Q3</h1><p>Up <b>12%</b> on the year.</p>").to_annotated_text(
-        {"h1": ["heading"], "b": ["metric"]}
-    )
+    text, spans = parse("<h1>Q3</h1><p>Up <b>12%</b> on the year.</p>").to_annotated_text({
+        "h1": ["heading"],
+        "b": ["metric"],
+    })
     assert annotation_surface(text, spans) == {"heading": ["Q3"], "metric": ["12%"]}

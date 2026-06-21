@@ -48,6 +48,18 @@ from turbohtml import annotation_tags, parse
             id="identical-range-lifo",
         ),
         pytest.param("ab", [(0, 0, "z")], "<z></z>ab", id="zero-width-span"),
+        pytest.param(
+            "ab",
+            [(0, 0, "a"), (0, 0, "b")],
+            "<a></a><b></b>ab",
+            id="two-zero-width-spans-keep-span-order",
+        ),
+        pytest.param(
+            "abcd",
+            [(0, 2, "a"), (2, 4, "b")],
+            "<a>ab</a><b>cd</b>",
+            id="adjacent-spans-close-before-open",
+        ),
         pytest.param("x", [(0, 1, "")], "<>x</>", id="empty-label"),
     ],
 )
@@ -58,6 +70,11 @@ def test_tags_weave_spans(text: str, spans: list[tuple[int, int, str]], expected
 def test_non_ascii_text_and_label_widen_the_result() -> None:
     # the output kind grows to cover the widest of the text and every label
     assert annotation_tags("héllo", [(0, 5, "ünïcode")]) == "<ünïcode>héllo</ünïcode>"
+
+
+def test_non_ascii_label_widens_ascii_text() -> None:
+    # a label wider than the text alone still widens the output kind
+    assert annotation_tags("ab", [(0, 2, "ü")]) == "<ü>ab</ü>"
 
 
 def test_round_trips_nested_annotations_to_well_formed_markup() -> None:

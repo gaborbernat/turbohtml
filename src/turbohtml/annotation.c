@@ -85,7 +85,7 @@ PyObject *turbohtml_annotation_surface(PyObject *Py_UNUSED(module), PyObject *ar
         return NULL;
     }
     PyObject *result = PyDict_New();
-    if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    if (result == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(items); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -107,8 +107,8 @@ PyObject *turbohtml_annotation_surface(PyObject *Py_UNUSED(module), PyObject *ar
                 goto error;         /* GCOVR_EXCL_LINE: allocation-failure path */
             }
             int stored = PyDict_SetItem(result, label, bucket);
-            Py_DECREF(bucket); /* the dict now owns the only reference; bucket stays valid through it */
-            if (stored < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(bucket);      /* the dict now owns the only reference; bucket stays valid through it */
+            if (stored < 0) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 Py_DECREF(surface); /* GCOVR_EXCL_LINE: allocation-failure path */
                 goto error;         /* GCOVR_EXCL_LINE: allocation-failure path */
             }
@@ -121,10 +121,10 @@ PyObject *turbohtml_annotation_surface(PyObject *Py_UNUSED(module), PyObject *ar
     }
     PyMem_Free(items);
     return result;
-error:           /* GCOVR_EXCL_LINE: shared cleanup for the unreachable allocation-failure arms */
-    Py_DECREF(result);   /* GCOVR_EXCL_LINE: allocation-failure path */
-    PyMem_Free(items);   /* GCOVR_EXCL_LINE: allocation-failure path */
-    return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+error:                 /* GCOVR_EXCL_LINE: shared cleanup for the unreachable allocation-failure arms */
+    Py_DECREF(result); /* GCOVR_EXCL_LINE: allocation-failure path */
+    PyMem_Free(items); /* GCOVR_EXCL_LINE: allocation-failure path */
+    return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
 }
 
 /* One tag boundary. rank holds the span's other endpoint (an open's is the end,
@@ -201,8 +201,8 @@ PyObject *turbohtml_annotation_tags(PyObject *Py_UNUSED(module), PyObject *args)
         return NULL;
     }
     annotation_event *events = PyMem_Calloc((size_t)(count > 0 ? 2 * count : 1), sizeof(annotation_event));
-    if (events == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(items); /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (events == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(items);       /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t out_len = text_len;
@@ -219,10 +219,10 @@ PyObject *turbohtml_annotation_tags(PyObject *Py_UNUSED(module), PyObject *args)
     }
     qsort(events, (size_t)(2 * count), sizeof(annotation_event), annotation_event_cmp);
     PyObject *out = PyUnicode_New(out_len, maxchar);
-    if (out == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(events);  /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(items);   /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (out == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(events); /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(items);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t cursor = 0, written = 0;
     for (Py_ssize_t index = 0; index < 2 * count; index++) {

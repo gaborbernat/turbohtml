@@ -1299,6 +1299,39 @@ Rule keys follow inscriptis: a bare tag (``"h1"``), a ``tag#attr`` to require an
 match one whitespace-separated token of it, and the tag-less ``#attr`` / ``#attr=value`` forms to match across any tag.
 The value is the list of labels to attach.
 
+inscriptis also ships *annotation output processors* that render those spans. Both are ported as pure functions over the
+``(text, spans)`` pair: :func:`turbohtml.annotation_surface` is the surface-form extractor (group the matched substrings
+by label) and :func:`turbohtml.annotation_tags` is the inline-tagged (XML) exporter (weave the spans back into the text
+as ``<label>...</label>`` markup, innermost span closing first).
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - inscriptis output processor
+      - turbohtml
+    - - ``SurfaceExtractor`` (``surface`` annotation processor)
+      - :func:`turbohtml.annotation_surface`
+    - - the XML / inline-tag annotation processor
+      - :func:`turbohtml.annotation_tags`
+
+.. testcode::
+
+    from turbohtml import annotation_surface, annotation_tags, parse
+
+    text, spans = parse("<h1>Q3</h1><p>Up <b>12%</b> on the year.</p>").to_annotated_text(
+        {"h1": ["heading"], "b": ["metric"]}
+    )
+    print(annotation_surface(text, spans))
+    print(annotation_tags(text, spans))
+
+.. testoutput::
+
+    {'heading': ['Q3'], 'metric': ['12%']}
+    <heading>Q3</heading>
+
+    Up <metric>12%</metric> on the year.
+
 Pitfalls
 ========
 
@@ -1308,6 +1341,6 @@ Pitfalls
   concatenation with no layout at all, read :attr:`~turbohtml.Node.text`.
 - Annotation offsets count code points into the returned string; a table cell is labeled at its position in the laid-out
   grid, so the span covers the cell's column-aligned text rather than the source order.
-- :meth:`~turbohtml.Node.to_annotated_text` returns the ``(text, spans)`` list directly; inscriptis's annotation output
-  processors -- the surface-form and inline-tagged exporters that render those spans to HTML or XML -- are not ported,
-  so format the spans yourself.
+- :meth:`~turbohtml.Node.to_annotated_text` returns the ``(text, spans)`` list directly; render it with
+  :func:`turbohtml.annotation_surface` or :func:`turbohtml.annotation_tags`, the ports of inscriptis's surface-form and
+  inline-tagged output processors, or format the spans yourself.
