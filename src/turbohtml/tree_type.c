@@ -4664,61 +4664,69 @@ static PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kw
     }
     NodeObject *node = (NodeObject *)self;
     th_node *first = node->node;
-    th_node *parent = sibling_parent(self);
-    if (parent == NULL) {
-        return NULL;
-    }
     th_node *wrapper_node = ((NodeObject *)wrapper_obj)->node;
     int error = 0;
+    int no_parent = 0;
     const char *value_error = NULL;
     Py_BEGIN_CRITICAL_SECTION(node->handle);
     handle_drop_index(node->handle);
-    th_node *last = NULL;
-    if (until_node == NULL) {
-        last = parent->last_child; /* the whole run from this node to the end */
-    } else if (until_node->parent != parent) {
-        value_error = "until must be this node or one of its following siblings";
+    /* The parent and the run are resolved under the lock; reading them earlier could
+       stale them against a concurrent move that relinks this node to another parent. */
+    th_node *parent = first->parent;
+    if (parent == NULL) {
+        no_parent = 1;
     } else {
-        for (th_node *walk = first; walk != NULL; walk = walk->next_sibling) {
-            if (walk == until_node) {
-                last = walk;
-                break;
-            }
-        }
-        if (last == NULL) {
+        th_node *last = NULL;
+        if (until_node == NULL) {
+            last = parent->last_child; /* the whole run from this node to the end */
+        } else if (until_node->parent != parent) {
             value_error = "until must be this node or one of its following siblings";
-        }
-    }
-    if (value_error == NULL) {
-        for (th_node *walk = first;; walk = walk->next_sibling) {
-            if (walk == wrapper_node) {
-                value_error = "wrapper cannot be one of the wrapped nodes";
-                break;
-            }
-            if (walk == last) {
-                break;
-            }
-        }
-    }
-    if (value_error == NULL) {
-        th_node *wrapper = adopt_into(node, parent, wrapper_obj);
-        if (wrapper == NULL) {
-            error = 1;
         } else {
-            th_node_insert_before(parent, wrapper, first);
-            for (th_node *cursor = first;;) {
-                th_node *next = cursor->next_sibling;
-                int is_last = cursor == last;
-                th_node_remove(cursor);
-                th_node_append_child(wrapper, cursor);
-                if (is_last) {
+            for (th_node *walk = first; walk != NULL; walk = walk->next_sibling) {
+                if (walk == until_node) {
+                    last = walk;
                     break;
                 }
-                cursor = next;
+            }
+            if (last == NULL) {
+                value_error = "until must be this node or one of its following siblings";
+            }
+        }
+        if (value_error == NULL) {
+            for (th_node *walk = first;; walk = walk->next_sibling) {
+                if (walk == wrapper_node) {
+                    value_error = "wrapper cannot be one of the wrapped nodes";
+                    break;
+                }
+                if (walk == last) {
+                    break;
+                }
+            }
+        }
+        if (value_error == NULL) {
+            th_node *wrapper = adopt_into(node, parent, wrapper_obj);
+            if (wrapper == NULL) {
+                error = 1;
+            } else {
+                th_node_insert_before(parent, wrapper, first);
+                for (th_node *cursor = first;;) {
+                    th_node *next = cursor->next_sibling;
+                    int is_last = cursor == last;
+                    th_node_remove(cursor);
+                    th_node_append_child(wrapper, cursor);
+                    if (is_last) {
+                        break;
+                    }
+                    cursor = next;
+                }
             }
         }
     }
     Py_END_CRITICAL_SECTION();
+    if (no_parent) {
+        PyErr_SetString(PyExc_ValueError, "node has no parent");
+        return NULL;
+    }
     if (value_error != NULL) {
         PyErr_SetString(PyExc_ValueError, value_error);
         return NULL;

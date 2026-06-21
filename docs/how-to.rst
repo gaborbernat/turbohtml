@@ -1164,8 +1164,9 @@ children and ``decompose`` drops a subtree:
 
 :meth:`~turbohtml.Node.wrap` nests a single node; the bulk forms wrap a whole group in one new container without
 relocating each node by hand. :meth:`~turbohtml.Element.wrap_children` boxes every child of an element, and
-:meth:`~turbohtml.Node.wrap_siblings` wraps a node and the contiguous run of siblings after it (through an ``until`` node,
-or to the last sibling when omitted), placing the wrapper where the run began. Both take a fresh element and return it:
+:meth:`~turbohtml.Node.wrap_siblings` wraps a node and the contiguous run of siblings after it (through an ``until``
+node, or to the last sibling when omitted), placing the wrapper where the run began. Both take a fresh element and
+return it:
 
 .. testcode::
 

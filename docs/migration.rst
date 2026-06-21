@@ -607,7 +607,7 @@ node, or to the last sibling), so ``query("p").wrap_all("<div/>")`` over a run o
       - ``first.wrap_siblings(Element("div"), until=last)``
 
 Three limits are worth stating. ``.wrap_all`` over an **arbitrary, non-contiguous** set of nodes has no single
-node-method analogue (the set has no shared anchor to place the wrapper at); wrap the contiguous run, or
+node-method counterpart (the set has no shared anchor to place the wrapper at); wrap the contiguous run, or
 :meth:`~turbohtml.Element.append` the scattered nodes into one new element and place it yourself. pyquery's
 **network-fetching constructor** (``PyQuery(url=...)``) is also out of scope: fetch with `httpx
 <https://www.python-httpx.org>`_ (or any client) and hand the bytes to :func:`turbohtml.parse`. And pyquery exposes

@@ -319,14 +319,14 @@ def test_wrap_siblings_with_no_until_reaches_the_last_sibling() -> None:
 
 def test_wrap_siblings_of_a_single_node_until_self() -> None:
     doc = parse("<ul><li>a</li><li>b</li></ul>")
-    first = list(_found(doc, "ul").children)[0]
+    first = next(iter(_found(doc, "ul").children))
     first.wrap_siblings(Element("div"), until=first)
     assert _found(doc, "ul").html == "<ul><div><li>a</li></div><li>b</li></ul>"
 
 
 def test_wrap_siblings_adopts_a_wrapper_from_another_tree() -> None:
     doc = parse("<ul><li>a</li><li>b</li></ul>")
-    first = list(_found(doc, "ul").children)[0]
+    first = next(iter(_found(doc, "ul").children))
     wrapper = first.wrap_siblings(_found(parse("<section></section>"), "section"))
     assert _found(doc, "ul").html == "<ul><section><li>a</li><li>b</li></section></ul>"
     assert wrapper.parent == _found(doc, "ul")  # the returned wrapper is the adopted copy in the live tree
@@ -355,8 +355,8 @@ def test_wrap_siblings_needs_a_parent() -> None:
 
 def test_wrap_siblings_rejects_an_until_in_another_parent() -> None:
     doc = parse("<ul><li>a</li></ul><ol><li>b</li></ol>")
-    first = list(_found(doc, "ul").children)[0]
-    outsider = list(_found(doc, "ol").children)[0]
+    first = next(iter(_found(doc, "ul").children))
+    outsider = next(iter(_found(doc, "ol").children))
     with pytest.raises(ValueError, match="following siblings"):
         first.wrap_siblings(Element("div"), until=outsider)
 
@@ -370,7 +370,7 @@ def test_wrap_siblings_rejects_an_until_before_the_node() -> None:
 
 def test_wrap_siblings_rejects_a_wrapper_inside_the_run() -> None:
     doc = parse("<ul><li>a</li><li>b</li></ul>")
-    items = list(_found(doc, "ul").children)
+    items = _found(doc, "ul").find_all("li")
     with pytest.raises(ValueError, match="one of the wrapped nodes"):
         items[0].wrap_siblings(items[1])
 

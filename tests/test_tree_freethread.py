@@ -84,7 +84,8 @@ def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
     doc = _doc(300)
     body = doc.find("body")
     assert body is not None
-    divs = list(body.children)
+    divs = body.find_all("div")
+    firsts = [next(iter(div.children)) for div in divs]  # each <div> opens with a <p>
     start = threading.Barrier(3)
 
     def reader() -> None:
@@ -100,10 +101,8 @@ def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
 
     def sibling_wrapper() -> None:
         start.wait()
-        for div in divs:
-            first = next(iter(div.children), None)
-            if first is not None:
-                first.wrap_siblings(turbohtml.Element("run"))  # wraps the sibling run in the same div
+        for first in firsts:
+            first.wrap_siblings(turbohtml.Element("run"))  # wraps the run after each div's first child
 
     _run(reader, child_wrapper, sibling_wrapper)
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent wrapping
