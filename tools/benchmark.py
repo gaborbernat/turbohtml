@@ -59,9 +59,9 @@ from selectolax.lexbor import LexborHTMLParser
 
 import turbohtml
 from turbohtml import sanitizer as turbo_sanitizer
-from turbohtml.html_parser import HTMLParser as TurboHTMLParser
 from turbohtml.linkify import linkify as turbo_linkify_html
-from turbohtml.markup import escape as turbo_markup_escape
+from turbohtml.migration.markupsafe import escape as turbo_markup_escape
+from turbohtml.migration.stdlib import HTMLParser as TurboHTMLParser
 from turbohtml.query import Query as TurboQuery
 
 _SANITIZER = turbo_sanitizer.Sanitizer(turbo_sanitizer.Policy.relaxed())
@@ -779,14 +779,14 @@ def print_stream_table(means: dict[str, float], cases: list[str]) -> None:
 
 
 # --- markup suite: markupsafe-compatible escape on autoescape-realistic input #
-# turbohtml.markup.escape against markupsafe's own C escape. The inputs are the
+# turbohtml.migration.markupsafe.escape against markupsafe's own C escape. The inputs are the
 # small, mostly-clean strings a template engine interpolates under autoescape
 # (markupsafe's hottest path), plus an escape-heavy fragment. Both return Markup,
 # so the comparison includes the safe-string construction each pays per call.
 
 
 def turbo_markup(text: str) -> None:
-    """Escape with turbohtml.markup.escape, returning a Markup."""
+    """Escape with turbohtml.migration.markupsafe.escape, returning a Markup."""
     turbo_markup_escape(text)
 
 
