@@ -1166,6 +1166,36 @@ result:
 
     None
 
+To turn those spans into something printable, pass the returned ``(text, labels)`` pair to one of the two output
+processors. :func:`turbohtml.annotation_surface` groups each label's matched substrings into a dict, in document order
+-- the surface forms an NLP or information-extraction pipeline consumes:
+
+.. testcode::
+
+    import turbohtml
+    text, labels = turbohtml.parse("<h1>Q3</h1><p>Up <b>12%</b> on the year.</p>").to_annotated_text(
+        {"h1": ["heading"], "b": ["metric"]}
+    )
+    print(turbohtml.annotation_surface(text, labels))
+
+.. testoutput::
+
+    {'heading': ['Q3'], 'metric': ['12%']}
+
+:func:`turbohtml.annotation_tags` weaves the spans back into the text as inline ``<label>...</label>`` markup. The
+innermost span always closes first, so properly nested spans stay well-formed:
+
+.. testcode::
+
+    text, labels = turbohtml.parse("<p>a <b><i>both</i></b> c</p>").to_annotated_text(
+        {"b": ["bold"], "i": ["italic"]}
+    )
+    print(turbohtml.annotation_tags(text, labels))
+
+.. testoutput::
+
+    a <italic><bold>both</bold></italic> c
+
 ************************************
  Parse bytes of an unknown encoding
 ************************************

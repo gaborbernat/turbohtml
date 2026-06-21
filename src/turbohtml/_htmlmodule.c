@@ -58,6 +58,19 @@ PyDoc_STRVAR(parse_fragment_doc, "parse_fragment(html, context='div', *, positio
                                  "tag name, optionally namespaced (e.g. 'td', 'svg path'). positions records\n"
                                  "element source_line/source_col; pass False to skip it.");
 
+PyDoc_STRVAR(annotation_surface_doc, "annotation_surface(text, spans, /)\n--\n\n"
+                                     "Group the annotated substrings by label. Given the (text, spans) pair\n"
+                                     "Node.to_annotated_text() returns, build a dict mapping each label to the\n"
+                                     "list of text[start:end] slices its spans cover, in document order. This\n"
+                                     "is the inscriptis surface-form extractor.");
+
+PyDoc_STRVAR(annotation_tags_doc, "annotation_tags(text, spans, /)\n--\n\n"
+                                  "Weave the annotated spans back into the text as inline markup. Given the\n"
+                                  "(text, spans) pair Node.to_annotated_text() returns, wrap each span in\n"
+                                  "<label>...</label> tags and return the tagged string. The innermost span\n"
+                                  "closes first, so properly nested spans stay well-formed. This is the\n"
+                                  "inscriptis inline-tagged (XML) exporter.");
+
 static PyMethodDef html_methods[] = {
     {"escape", (PyCFunction)(void (*)(void))turbohtml_escape, METH_VARARGS | METH_KEYWORDS, escape_doc},
     {"unescape", turbohtml_unescape, METH_O, unescape_doc},
@@ -71,6 +84,8 @@ static PyMethodDef html_methods[] = {
     {"parse", (PyCFunction)(void (*)(void))turbohtml_parse, METH_VARARGS | METH_KEYWORDS, parse_doc},
     {"parse_fragment", (PyCFunction)(void (*)(void))turbohtml_tree_parse_fragment, METH_VARARGS | METH_KEYWORDS,
      parse_fragment_doc},
+    {"annotation_surface", turbohtml_annotation_surface, METH_VARARGS, annotation_surface_doc},
+    {"annotation_tags", turbohtml_annotation_tags, METH_VARARGS, annotation_tags_doc},
     {"_reconstruct", turbohtml_reconstruct, METH_VARARGS, NULL},
     {"_tokenize_states", turbohtml_tokenize_states, METH_VARARGS, NULL},
     {"_parse_tree", turbohtml_parse_tree, METH_O, NULL},

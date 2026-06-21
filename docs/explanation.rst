@@ -294,6 +294,28 @@ is a constant-time bit lookup with no bound check -- a stripped element simply r
 markup. The interning is what makes a name the tag table does not know fold to no entry, mirroring how ``markdownify``
 ignores a tag it has no converter for.
 
+******************************
+ Annotation output processors
+******************************
+
+:meth:`~turbohtml.Node.to_annotated_text` walks the tree once and returns the rendered text together with a list of
+``(start, end, label)`` spans over its code points. inscriptis pairs that extraction step with a separate set of *output
+processors* that turn the spans into a usable artifact, and turbohtml keeps the same split:
+:func:`~turbohtml.annotation_surface` and :func:`~turbohtml.annotation_tags` are pure transforms over the ``(text,
+spans)`` pair, never the tree. They take no node, no arena, and no shared handle, so unlike the serializers they need no
+critical section at all -- the input string is immutable and the spans sequence is only read, which makes them
+free-threading safe by construction rather than by locking. Keeping extraction (the tree walk) and rendering (the span
+transform) apart means one walk can feed several renderings, and the renderings compose with any spans of that shape,
+not only the ones :meth:`~turbohtml.Node.to_annotated_text` happens to emit.
+
+The surface extractor is the easy half: bucket each span's ``text[start:end]`` slice under its label, in document order.
+The inline-tagged exporter is where nesting has to be handled, because two spans can share a boundary. It expands each
+span into an open and a close event and sorts them so the result is always well-formed: at one position a non-zero-width
+span closes before any opens, an outer span opens before an inner one and closes after it (the innermost always closes
+first), and a zero-width span emits its own ``<label></label>`` intact rather than splitting it across a neighbor's
+boundary. The sort key carries the span's other endpoint and its original index, so the order is total and the output
+deterministic even when several spans coincide.
+
 *****************************
  Extracting strings (parsel)
 *****************************
