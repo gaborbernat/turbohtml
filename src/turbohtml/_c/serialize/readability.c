@@ -1,11 +1,20 @@
-/* Readability-style main-content extraction, #included into treebuilder.c after
-   treebuilder_text.h so it shares need_text(), the tag atoms, and the attribute
-   lookup. It scores the DOM by content density -- text length, comma count, tag
-   weight and class/id weight, discounted by link density, the well-known
-   readability heuristic -- and returns the single highest-scoring container
-   element. Everything here is pure C: tree_type.c wraps the returned node (or
-   renders its text with th_node_layout_text) under the per-tree critical section,
-   so no Python API is touched while the structure is walked. */
+/* Pulls the real article out of a cluttered page — stripping nav, sidebars, and
+   boilerplate — so a reader view or a clean extract keeps only the main content.
+
+   It scores the DOM by content density -- text length, comma count, tag weight
+   and class/id weight, discounted by link density, the well-known readability
+   heuristic -- and returns the single highest-scoring container element. It
+   shares need_text(), the tag atoms, and the attribute lookup from
+   serialize/internal.h. Everything here is pure C: the node bindings wrap the
+   returned node (or render its text with th_node_layout_text) under the per-tree
+   critical section, so no Python API is touched while the structure is walked. */
+
+#include "serialize/internal.h"
+
+#include "dom/tree.h"
+#include "dom/tree_internal.h"
+
+#include <string.h>
 
 /* A paragraph shorter than this is treated as noise, not content. */
 #define READ_MIN_PARAGRAPH_CHARS 25

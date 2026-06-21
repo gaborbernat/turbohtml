@@ -1,12 +1,21 @@
-/* HTML minification serializer, #included into treebuilder.c after
-   treebuilder_serialize.h so it reuses sbuf, the escape helpers, ser_close_tag,
-   is_rawtext_element, ser_needs_leading_newline and doctype_name_len.
+/* Shrinks a parsed document to the smallest equivalent HTML — dropping the
+   optional tags, quotes, and whitespace the spec lets us fold without changing
+   what the bytes reparse to.
 
    Minification is a serialization mode over the already-conformant parse tree:
    the four transforms below only ever drop or fold what the WHATWG parser
    reconstructs on the way back in, so the minified bytes reparse to the same
    tree. That round-trip equivalence is the correctness gate, enforced by the
-   idempotence test over the conformance corpus. */
+   idempotence test over the conformance corpus. It reuses the shared sbuf
+   buffer, the escape helpers, ser_close_tag, is_rawtext_element,
+   ser_needs_leading_newline and doctype_name_len from serialize/internal.h. */
+
+#include "serialize/internal.h"
+
+#include "dom/tree.h"
+#include "dom/tree_internal.h"
+
+#include <string.h>
 
 /* HTML ASCII whitespace, the set the tree-construction whitespace rules use. */
 static inline int mini_is_ascii_ws(Py_UCS4 character) {

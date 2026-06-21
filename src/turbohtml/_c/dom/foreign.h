@@ -150,23 +150,6 @@ static const char *foreign_adjust_attr(const char *lower, Py_ssize_t len, uint8_
     return NULL;
 }
 
-/* True only for the foreign attribute names the spec puts in a namespace; those
-   serialize with a space (prefix localname). Plain "xmlns" has no prefix in its
-   stored name but still belongs to the xmlns namespace, so the renderer prepends
-   one. An arbitrary xml:/xlink: name not in the table keeps its literal colon. */
-static int foreign_attr_namespaced(const char *lower, Py_ssize_t len) {
-    static const char *const NAMESPACED[] = {
-        "xlink:actuate", "xlink:arcrole", "xlink:href", "xlink:role", "xlink:show",  "xlink:title",
-        "xlink:type",    "xml:lang",      "xml:space",  "xmlns",      "xmlns:xlink",
-    };
-    for (size_t index = 0; index < sizeof(NAMESPACED) / sizeof(NAMESPACED[0]); index++) {
-        if ((Py_ssize_t)strlen(NAMESPACED[index]) == len && memcmp(NAMESPACED[index], lower, (size_t)len) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 static int is_mathml_text_integration(const th_node *node) {
     return node->ns == TH_NS_MATHML && (node->atom == TH_TAG_MI || node->atom == TH_TAG_MO || node->atom == TH_TAG_MN ||
                                         node->atom == TH_TAG_MS || node->atom == TH_TAG_MTEXT);

@@ -1,9 +1,18 @@
-/* Layout-aware HTML-to-text export (the inscriptis role), #included into
-   treebuilder.c after treebuilder_markdown.h so it shares sbuf, need_text(), the
-   tag atoms, the attribute lookup, and md_is_ws()/is_md_block()/is_md_skipped().
+/* Renders a page as readable plain text the way a browser would lay it out —
+   blocks split by blank lines, lists indented under their bullets, tables drawn
+   as a column-aligned grid — for search indexing, diffing, or a terminal view.
+
+   It shares sbuf, need_text(), the tag atoms, the attribute lookup, and the
+   md_is_ws()/is_md_block()/is_md_skipped() predicates from serialize/internal.h.
    Unlike to_markdown it emits no markup: it keeps the visual structure of the
-   page as plain text, with blocks separated by blank lines, lists indented under
-   their bullets, and tables laid out as a column-aligned grid. */
+   page as plain text. */
+
+#include "serialize/internal.h"
+
+#include "dom/tree.h"
+#include "dom/tree_internal.h"
+
+#include <string.h>
 
 /* ----------------------------------------------------------------- options */
 

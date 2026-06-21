@@ -1,11 +1,14 @@
-/* GitHub-Flavored-Markdown export, #included into treebuilder.c after
-   treebuilder_serialize.h so it shares the sbuf buffer, need_text(), the tag
-   atoms, and the attribute lookup. The walk is a recursive descent over the
-   finished tree (the same shape collect_text() uses): block elements are laid
-   out vertically with collapsed blank-line margins, inline elements wrap their
-   content in markdown markers, and runs of whitespace collapse to one space the
-   way the CSS normal flow does. Output is opinionated GFM with no options, so a
-   `scrape -> markdown` pipeline needs no second dependency.
+/* Turns a scraped page into clean GitHub-Flavored Markdown — headings, lists,
+   tables, links and emphasis — so a `scrape -> markdown` pipeline needs no
+   second dependency.
+
+   It shares the sbuf buffer, need_text(), the tag atoms, the attribute lookup,
+   and the block/whitespace predicates from serialize/internal.h. The walk is a
+   recursive descent over the finished tree (the same shape collect_text() uses):
+   block elements are laid out vertically with collapsed blank-line margins,
+   inline elements wrap their content in markdown markers, and runs of whitespace
+   collapse to one space the way the CSS normal flow does. Output is opinionated
+   GFM with no options.
 
    The single non-obvious piece is whitespace. Text whitespace is never emitted
    eagerly: a run sets space_pending, and the deferred space is flushed (as one
@@ -15,57 +18,14 @@
    trailing inner space out of `**bold** ` instead of leaving `**bold **`, which
    is invalid markdown. */
 
+#include "serialize/internal.h"
+
+#include "dom/tree.h"
+#include "dom/tree_internal.h"
+
+#include <string.h>
+
 /* ----------------------------------------------------------- block classes */
-
-/* A block-level element opens its own line(s); everything else is inline and
-   flows into the surrounding text. Unknown (custom) tags flow inline, matching
-   how a browser lays out an undisplayed custom element's text. */
-static int is_md_block(uint16_t atom) {
-    switch (atom) {
-    case TH_TAG_HTML:
-    case TH_TAG_BODY:
-    case TH_TAG_P:
-    case TH_TAG_DIV:
-    case TH_TAG_SECTION:
-    case TH_TAG_ARTICLE:
-    case TH_TAG_HEADER:
-    case TH_TAG_FOOTER:
-    case TH_TAG_NAV:
-    case TH_TAG_ASIDE:
-    case TH_TAG_MAIN:
-    case TH_TAG_FIGURE:
-    case TH_TAG_FIGCAPTION:
-    case TH_TAG_ADDRESS:
-    case TH_TAG_BLOCKQUOTE:
-    case TH_TAG_PRE:
-    case TH_TAG_HR:
-    case TH_TAG_H1:
-    case TH_TAG_H2:
-    case TH_TAG_H3:
-    case TH_TAG_H4:
-    case TH_TAG_H5:
-    case TH_TAG_H6:
-    case TH_TAG_UL:
-    case TH_TAG_OL:
-    case TH_TAG_LI:
-    case TH_TAG_DL:
-    case TH_TAG_DT:
-    case TH_TAG_DD:
-    case TH_TAG_MENU:
-    case TH_TAG_DETAILS:
-    case TH_TAG_SUMMARY:
-    case TH_TAG_TABLE:
-        return 1;
-    default:
-        return 0;
-    }
-}
-
-/* Tags whose entire subtree contributes nothing to a text/markdown rendering:
-   document metadata and scripts. */
-static int is_md_skipped(uint16_t atom) {
-    return atom == TH_TAG_HEAD || atom == TH_TAG_SCRIPT || atom == TH_TAG_STYLE;
-}
 
 /* Whether an element's own Markdown markup is dropped under the strip/convert
    filter, leaving its children to render transparently in the surrounding flow.
@@ -173,12 +133,6 @@ typedef struct {
    quote, a unicode bullet), decoding its UTF-8 to code points. */
 static void md_puts8(sbuf *out, const char *s) {
     sbuf_put_utf8(out, s, (Py_ssize_t)strlen(s));
-}
-
-static int md_is_ws(Py_UCS4 c) {
-    /* the tokenizer has already normalized CR to LF, so a tree text node never
-       holds a carriage return; classifying it here would be a dead branch */
-    return c == ' ' || c == '\t' || c == '\n' || c == '\f';
 }
 
 /* Append n spaces to the continuation prefix and return the start offset, so the
@@ -435,32 +389,6 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
             sbuf_put_run(&ctx->out, &text[start], i - start);
         }
     }
-}
-
-/* Write decimal digits of a non-negative number and return how many. */
-static Py_ssize_t md_put_decimal(sbuf *out, Py_ssize_t n) {
-    Py_UCS4 digits[20];
-    Py_ssize_t count = 0;
-    do {
-        digits[count++] = (Py_UCS4)('0' + (int)(n % 10));
-        n /= 10;
-    } while (n > 0);
-    for (Py_ssize_t i = count - 1; i >= 0; i--) {
-        sbuf_putc(out, digits[i]);
-    }
-    return count;
-}
-
-/* The value of one attribute by interned name, or NULL with *len 0 when the
-   attribute is absent or valueless. */
-static const Py_UCS4 *md_attr(th_tree *tree, th_node *node, const char *name, Py_ssize_t *len) {
-    Py_ssize_t index = th_node_attr_find(tree, node, name, (Py_ssize_t)strlen(name));
-    if (index < 0 || node->attrs[index].value == NULL) {
-        *len = 0;
-        return NULL;
-    }
-    *len = node->attrs[index].value_len;
-    return node->attrs[index].value;
 }
 
 /* Case-insensitive ASCII compare of a code-point slice to a lowercase C key. */
@@ -1326,16 +1254,6 @@ static void md_cell_text(md_ctx *ctx, th_node *node, sbuf *dst) {
 /* A row's element children come only from HTML table parsing (foreign content is
    foster-parented out of the table), so the td/th atoms already imply the HTML
    namespace and no separate ns test is needed in these loops. */
-static Py_ssize_t md_row_cells(th_node *row) {
-    Py_ssize_t count = 0;
-    for (th_node *cell = row->first_child; cell != NULL; cell = cell->next_sibling) {
-        if (cell->type == TH_NODE_ELEMENT && (cell->atom == TH_TAG_TD || cell->atom == TH_TAG_TH)) {
-            count++;
-        }
-    }
-    return count;
-}
-
 /* A row reads as a header when it sits in a <thead> or holds a <th> cell. A
    collected row always has an element parent (the table or a section), so its
    namespace and type need no guard. */
@@ -1749,30 +1667,6 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
         md_block_children(ctx, node);
         return;
     }
-}
-
-/* Trim whitespace off the finished buffer in place per the document_strip mode:
-   both ends, the left only, the right only, or neither. */
-static Py_ssize_t md_trim(sbuf *out, int mode) {
-    Py_ssize_t start = 0;
-    if (mode == TH_MD_DOC_STRIP || mode == TH_MD_DOC_LSTRIP) {
-        /* strip leading blank lines only; block content never starts with a space
-           except an indented code block, whose indent must survive */
-        while (start < out->len && out->data[start] == '\n') {
-            start++;
-        }
-    }
-    Py_ssize_t end = out->len;
-    if (mode == TH_MD_DOC_STRIP || mode == TH_MD_DOC_RSTRIP) {
-        while (end > start && md_is_ws(out->data[end - 1])) {
-            end--;
-        }
-    }
-    if (start > 0) {
-        memmove(out->data, out->data + start, (size_t)(end - start) * sizeof(Py_UCS4));
-    }
-    out->len = end - start;
-    return start; /* how many leading code points were removed, to shift annotations */
 }
 
 /* Append the collected reference definitions ("[n]: url \"title\"") after the
