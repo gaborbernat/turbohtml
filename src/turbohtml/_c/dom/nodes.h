@@ -319,6 +319,94 @@ static inline Py_ssize_t find_attr_index(th_tree *tree, th_node *node, const cha
     return th_node_attr_find(tree, node, name, name_len);
 }
 
+/* The attribute carrying name_atom on a node, or NULL when absent. */
+static inline const th_node_attr *find_node_attr(th_node *node, uint32_t atom) {
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == atom) {
+            return &node->attrs[index];
+        }
+    }
+    return NULL;
+}
+
+/* Build the per-atom element index for the whole tree. Returns 0 on success (the
+   index is cached on the handle), -1 on allocation failure. The caller holds the
+   handle's critical section. */
+static inline int handle_build_index(HandleObject *handle) {
+    th_node *document = th_tree_document(handle->tree);
+    Py_ssize_t *offsets = PyMem_Calloc((size_t)th_tag_count + 2, sizeof(Py_ssize_t));
+    if (offsets == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t total = 0;
+    for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
+        if (node->type == TH_NODE_ELEMENT) {
+            offsets[node->atom + 1]++;
+            total++;
+        }
+    }
+    for (int atom = 0; atom <= th_tag_count; atom++) {
+        offsets[atom + 1] += offsets[atom];
+    }
+    th_node **nodes = PyMem_Malloc(((size_t)total + 1) * sizeof(th_node *));
+    if (nodes == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(offsets); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t *cursor = PyMem_Malloc(((size_t)th_tag_count + 1) * sizeof(Py_ssize_t));
+    if (cursor == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(offsets); /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(nodes);   /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (int atom = 0; atom <= th_tag_count; atom++) {
+        cursor[atom] = offsets[atom];
+    }
+    for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
+        if (node->type == TH_NODE_ELEMENT) {
+            nodes[cursor[node->atom]++] = node;
+        }
+    }
+    PyMem_Free(cursor);
+    handle->index_offsets = offsets;
+    handle->index_nodes = nodes;
+    handle->index_built = 1;
+    return 0;
+}
+
+/* Whether a query rooted at origin may use the whole-tree atom index: the index
+   covers every element under the document node, so only a query whose origin is
+   that document node enumerates the right candidate set. */
+static inline int handle_index_usable(HandleObject *handle, th_node *origin) {
+    return origin == th_tree_document(handle->tree);
+}
+
+/* Whether an eligible query (a known subject tag, rooted at the document) can read
+   the whole-tree atom index, building it on the first such query and reusing it
+   after. Returns 0 when the query is ineligible, the origin is a subtree, or a
+   build fails (out of memory); the caller then falls back to a pre-order walk. */
+static inline int handle_use_index(HandleObject *handle, th_node *origin, int eligible) {
+    if (!eligible || !handle_index_usable(handle, origin)) {
+        return 0;
+    }
+    if (handle->index_built) {
+        return 1;
+    }
+    return handle_build_index(handle) ==
+           0; /* GCOVR_EXCL_BR_LINE: an index build only fails on unforceable allocation */
+}
+
+/* Wrap node and append it to the result list; -1 on allocation failure. */
+static inline int append_wrapped(PyObject *out, module_state *state, PyObject *handle, th_node *node) {
+    PyObject *wrapped = node_wrap(state, handle, node);
+    if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        Py_XDECREF(wrapped);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_DECREF(wrapped);
+    return 0;
+}
+
 /* ---- definitions living in one unit, referenced from others ---- */
 
 /* Free a handle's compiled-selector and compiled-XPath caches. Lives in element.c so the
