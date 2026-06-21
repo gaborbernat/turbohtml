@@ -2733,4 +2733,3 @@ static int element_set_text(PyObject *self, PyObject *value, void *Py_UNUSED(clo
     PyMem_Free(points);
     return error ? -1 : 0; /* GCOVR_EXCL_BR_LINE: error is set only on the excluded allocation failure */
 }
-

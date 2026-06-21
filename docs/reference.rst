@@ -11,9 +11,9 @@
     :members:
     :undoc-members:
 
-******************
+********************************
  turbohtml.migration.markupsafe
-******************
+********************************
 
 .. module:: turbohtml.migration.markupsafe
 
@@ -87,9 +87,9 @@ preset), then sanitize. A non-overridable baseline removes scripting elements, e
 .. autoclass:: OnDisallowed
     :members:
 
-*************************
+****************************
  turbohtml.migration.bleach
-*************************
+****************************
 
 .. module:: turbohtml.migration.bleach
 
@@ -99,9 +99,9 @@ an event handler or a ``javascript:`` URL.
 
 .. autofunction:: clean
 
-***********************
+****************************
  turbohtml.migration.stdlib
-***********************
+****************************
 
 .. module:: turbohtml.migration.stdlib
 

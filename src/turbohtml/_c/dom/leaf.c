@@ -418,4 +418,3 @@ PyType_Spec parse_error_spec = {
     .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_DISALLOW_INSTANTIATION,
     .slots = parse_error_slots,
 };
-

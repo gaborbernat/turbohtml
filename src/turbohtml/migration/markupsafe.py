@@ -19,10 +19,10 @@ from __future__ import annotations
 import string
 from typing import TYPE_CHECKING, SupportsIndex, cast
 
-from .._html import _markup_escape as escape
-from .._html import _markup_escape_silent as escape_silent
-from .._html import _markup_soft_str as soft_str
-from .._html import _register_markup, parse_fragment, unescape
+from turbohtml._html import _markup_escape as escape
+from turbohtml._html import _markup_escape_silent as escape_silent
+from turbohtml._html import _markup_soft_str as soft_str
+from turbohtml._html import _register_markup, parse_fragment, unescape
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping

@@ -1151,4 +1151,3 @@ int tree_register(PyObject *module, module_state *state) {
     }
     return 0;
 }
-

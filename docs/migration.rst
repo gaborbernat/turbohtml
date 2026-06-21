@@ -656,8 +656,8 @@ pyquery.
     True
 
 To keep an existing :class:`python:html.parser.HTMLParser` subclass, swap its base class for
-:class:`turbohtml.migration.stdlib.HTMLParser`: the same ``handle_*`` callbacks and ``feed``/``close`` methods run over the
-WHATWG-conformant tokenizer. Or drop the subclass and take the token stream from :func:`turbohtml.tokenize` (or
+:class:`turbohtml.migration.stdlib.HTMLParser`: the same ``handle_*`` callbacks and ``feed``/``close`` methods run over
+the WHATWG-conformant tokenizer. Or drop the subclass and take the token stream from :func:`turbohtml.tokenize` (or
 :meth:`turbohtml.Tokenizer.feed` for incremental input), or skip tokens entirely and :func:`turbohtml.parse` straight to
 a tree. All three are WHATWG-conformant, unlike ``html.parser``. The :doc:`how-to` guide has a worked port.
 
@@ -776,8 +776,8 @@ takes the fallback base URL w3lib calls ``baseurl`` and resolves the hint agains
  From markupsafe
 *****************
 
-``turbohtml.migration.markupsafe`` is a drop-in for `markupsafe <https://markupsafe.palletsprojects.com>`_'s public surface, so a
-`Jinja2 <https://jinja.palletsprojects.com>`_, `WTForms <https://wtforms.readthedocs.io>`_, or `Werkzeug
+``turbohtml.migration.markupsafe`` is a drop-in for `markupsafe <https://markupsafe.palletsprojects.com>`_'s public
+surface, so a `Jinja2 <https://jinja.palletsprojects.com>`_, `WTForms <https://wtforms.readthedocs.io>`_, or `Werkzeug
 <https://werkzeug.palletsprojects.com>`_ project changes only the import line:
 
 .. code-block:: python
@@ -786,14 +786,20 @@ takes the fallback base URL w3lib calls ``baseurl`` and resolves the hint agains
     from markupsafe import Markup, escape, escape_silent, soft_str, EscapeFormatter
 
     # turbohtml
-    from turbohtml.migration.markupsafe import Markup, escape, escape_silent, soft_str, EscapeFormatter
+    from turbohtml.migration.markupsafe import (
+        Markup,
+        escape,
+        escape_silent,
+        soft_str,
+        EscapeFormatter,
+    )
 
-``escape`` returns a :class:`~turbohtml.migration.markupsafe.Markup` with the same numeric quote references markupsafe emits, honors
-the ``__html__`` protocol, and leaves an existing ``Markup`` untouched. ``Markup`` overrides the full :class:`str`
-method surface, so a value that flows through a template filter such as ``upper`` or ``replace`` stays a ``Markup`` and
-autoescaping does not escape it a second time. The operations that combine text (``+``, ``%``,
-:meth:`~turbohtml.migration.markupsafe.Markup.format`, :meth:`~turbohtml.migration.markupsafe.Markup.join`, ``replace``, ...) escape their untrusted
-operands:
+``escape`` returns a :class:`~turbohtml.migration.markupsafe.Markup` with the same numeric quote references markupsafe
+emits, honors the ``__html__`` protocol, and leaves an existing ``Markup`` untouched. ``Markup`` overrides the full
+:class:`str` method surface, so a value that flows through a template filter such as ``upper`` or ``replace`` stays a
+``Markup`` and autoescaping does not escape it a second time. The operations that combine text (``+``, ``%``,
+:meth:`~turbohtml.migration.markupsafe.Markup.format`, :meth:`~turbohtml.migration.markupsafe.Markup.join`, ``replace``,
+...) escape their untrusted operands:
 
 .. testcode::
 
@@ -812,8 +818,8 @@ operands:
     True
 
 Two methods are upgrades rather than reimplementations: :meth:`~turbohtml.migration.markupsafe.Markup.striptags` and
-:meth:`~turbohtml.migration.markupsafe.Markup.unescape` run on turbohtml's tokenizer and HTML5 reference resolution, so they are
-faster and resolve references markupsafe's regex-based stripping can miss.
+:meth:`~turbohtml.migration.markupsafe.Markup.unescape` run on turbohtml's tokenizer and HTML5 reference resolution, so
+they are faster and resolve references markupsafe's regex-based stripping can miss.
 
 These differences from markupsafe do not affect migration: the escape runs in C, every ``Markup`` method runs faster
 than markupsafe's, the ``soft_unicode`` alias that markupsafe 3.0 removed is absent here too, and turbohtml does not

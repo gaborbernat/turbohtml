@@ -1,4 +1,5 @@
-"""Drop-in compatibility shims for moving an existing codebase onto turbohtml.
+"""
+Drop-in compatibility shims for moving an existing codebase onto turbohtml.
 
 Each submodule mirrors the public API of the library it replaces, so a migration is an import
 swap rather than a rewrite: :mod:`turbohtml.migration.bleach` for ``bleach``,

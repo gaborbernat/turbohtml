@@ -221,4 +221,3 @@ PyType_Spec indent_spec = {
     .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE,
     .slots = indent_slots,
 };
-

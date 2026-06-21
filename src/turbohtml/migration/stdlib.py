@@ -23,10 +23,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .._html import Tokenizer, TokenType
+from turbohtml._html import Tokenizer, TokenType
 
 if TYPE_CHECKING:
-    from .._html import Token
+    from turbohtml._html import Token
 
 __all__ = ["HTMLParser"]
 

@@ -1249,4 +1249,3 @@ static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
     Py_DECREF(text);
     return encoded;
 }
-

@@ -203,16 +203,16 @@ max_supported_python = "3.15"
 src.exclude = [ "tests/html5lib-tests", "tools/html5lib-python" ]  # vendored suites, not our code
 environment.python-version = "3.15"
 
-[tool.pytest.ini_options]
-addopts = [
-  "--ignore=tests/html5lib-tests", # vendored conformance data, not our test modules
-  "--import-mode=importlib", # tests mirror the source tree in nested dirs without __init__.py
-]
-filterwarnings = [
-  "error",
-]
-testpaths = [
+[tool.pytest]
+ini_options.testpaths = [
   "tests",
+]
+ini_options.addopts = [
+  "--ignore=tests/html5lib-tests", # vendored conformance data, not our test modules
+  "--import-mode=importlib",       # tests mirror the source tree in nested dirs without __init__.py
+]
+ini_options.filterwarnings = [
+  "error",
 ]
 
 [tool.coverage]

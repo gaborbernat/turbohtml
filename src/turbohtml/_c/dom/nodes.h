@@ -133,7 +133,7 @@ static inline PyObject *ucs4_to_str(const Py_UCS4 *data, Py_ssize_t len) {
 /* Realize one of the th_node_* accessors (which return a PyMem UCS4 buffer) into
    a str, freeing the buffer. */
 static inline PyObject *str_from_accessor(Py_UCS4 *(*accessor)(th_tree *, th_node *, Py_ssize_t *), th_tree *tree,
-                                   th_node *node) {
+                                          th_node *node) {
     Py_ssize_t len;
     Py_UCS4 *buf = accessor(tree, node, &len);
     if (buf == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
