@@ -1,9 +1,9 @@
 /* WHATWG HTML tree construction: pure C, no Python objects.
 
    This file is the algorithm half of the parser: it drives the tokenizer state
-   machine (tokenizer_sm.h), applies the WHATWG tree-construction rules, and
+   machine (tokenizer/statemachine.h), applies the WHATWG tree-construction rules, and
    builds a node tree. Like the tokenizer it creates no PyObjects; the Python
-   layer in treebuilder_type.c walks the finished C tree and wraps only the
+   layer in dom/node.c walks the finished C tree and wraps only the
    nodes the caller touches.
 
    Nodes are bump-allocated from an arena owned by the tree and freed in one

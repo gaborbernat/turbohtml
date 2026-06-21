@@ -1,4 +1,4 @@
-/* WHATWG encoding sniffing for parse(bytes), #included into tree_type.c (the
+/* WHATWG encoding sniffing for parse(bytes), #included into dom/node.c (the
    decode delegates to a CPython codec). Covers the BOM, the byte-order-mark
    override, and the "prescan a byte stream to determine its encoding" algorithm
    restricted to the first 1024 bytes, plus a label table mapping the common

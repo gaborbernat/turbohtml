@@ -1,8 +1,8 @@
 /* Internal glue between the state machine and the Python types.
 
-   token_type.c defines the Token type and the TokenType enum; tokenizer_type.c
+   tokenizer/token.c defines the Token type and the TokenType enum; tokenizer/tokenizer.c
    defines the Tokenizer type, its token iterator, and the tokenize() helper;
-   _htmlmodule.c creates the module and calls the register functions. All three
+   core/module.c creates the module and calls the register functions. All three
    share the per-module state declared here, which owns the heap types so the
    module stays compatible with sub-interpreters and the free-threaded build. */
 
@@ -64,7 +64,7 @@ int token_register(PyObject *module, module_state *state);
 int tokenizer_register(PyObject *module, module_state *state);
 int tree_register(PyObject *module, module_state *state);
 
-/* Public navigable-tree entry points (tree_type.c), wired as parse() and
+/* Public navigable-tree entry points (dom/node.c), wired as parse() and
    parse_fragment(). parse() matches METH_O; parse_fragment() matches
    METH_VARARGS | METH_KEYWORDS. */
 PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs);

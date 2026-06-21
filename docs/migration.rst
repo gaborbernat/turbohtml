@@ -656,7 +656,7 @@ pyquery.
     True
 
 To keep an existing :class:`python:html.parser.HTMLParser` subclass, swap its base class for
-:class:`turbohtml.html_parser.HTMLParser`: the same ``handle_*`` callbacks and ``feed``/``close`` methods run over the
+:class:`turbohtml.migration.stdlib.HTMLParser`: the same ``handle_*`` callbacks and ``feed``/``close`` methods run over the
 WHATWG-conformant tokenizer. Or drop the subclass and take the token stream from :func:`turbohtml.tokenize` (or
 :meth:`turbohtml.Tokenizer.feed` for incremental input), or skip tokens entirely and :func:`turbohtml.parse` straight to
 a tree. All three are WHATWG-conformant, unlike ``html.parser``. The :doc:`how-to` guide has a worked port.
@@ -776,7 +776,7 @@ takes the fallback base URL w3lib calls ``baseurl`` and resolves the hint agains
  From markupsafe
 *****************
 
-``turbohtml.markup`` is a drop-in for `markupsafe <https://markupsafe.palletsprojects.com>`_'s public surface, so a
+``turbohtml.migration.markupsafe`` is a drop-in for `markupsafe <https://markupsafe.palletsprojects.com>`_'s public surface, so a
 `Jinja2 <https://jinja.palletsprojects.com>`_, `WTForms <https://wtforms.readthedocs.io>`_, or `Werkzeug
 <https://werkzeug.palletsprojects.com>`_ project changes only the import line:
 
@@ -786,18 +786,18 @@ takes the fallback base URL w3lib calls ``baseurl`` and resolves the hint agains
     from markupsafe import Markup, escape, escape_silent, soft_str, EscapeFormatter
 
     # turbohtml
-    from turbohtml.markup import Markup, escape, escape_silent, soft_str, EscapeFormatter
+    from turbohtml.migration.markupsafe import Markup, escape, escape_silent, soft_str, EscapeFormatter
 
-``escape`` returns a :class:`~turbohtml.markup.Markup` with the same numeric quote references markupsafe emits, honors
+``escape`` returns a :class:`~turbohtml.migration.markupsafe.Markup` with the same numeric quote references markupsafe emits, honors
 the ``__html__`` protocol, and leaves an existing ``Markup`` untouched. ``Markup`` overrides the full :class:`str`
 method surface, so a value that flows through a template filter such as ``upper`` or ``replace`` stays a ``Markup`` and
 autoescaping does not escape it a second time. The operations that combine text (``+``, ``%``,
-:meth:`~turbohtml.markup.Markup.format`, :meth:`~turbohtml.markup.Markup.join`, ``replace``, ...) escape their untrusted
+:meth:`~turbohtml.migration.markupsafe.Markup.format`, :meth:`~turbohtml.migration.markupsafe.Markup.join`, ``replace``, ...) escape their untrusted
 operands:
 
 .. testcode::
 
-    from turbohtml.markup import Markup, escape, escape_silent
+    from turbohtml.migration.markupsafe import Markup, escape, escape_silent
 
     print(escape('<a href="x">Tom & Jerry</a>'))
     print(Markup("<b>{}</b>").format("<i>"))
@@ -811,8 +811,8 @@ operands:
     <B>SAFE</B>
     True
 
-Two methods are upgrades rather than reimplementations: :meth:`~turbohtml.markup.Markup.striptags` and
-:meth:`~turbohtml.markup.Markup.unescape` run on turbohtml's tokenizer and HTML5 reference resolution, so they are
+Two methods are upgrades rather than reimplementations: :meth:`~turbohtml.migration.markupsafe.Markup.striptags` and
+:meth:`~turbohtml.migration.markupsafe.Markup.unescape` run on turbohtml's tokenizer and HTML5 reference resolution, so they are
 faster and resolve references markupsafe's regex-based stripping can miss.
 
 These differences from markupsafe do not affect migration: the escape runs in C, every ``Markup`` method runs faster
@@ -917,7 +917,7 @@ bleach-compatible shim keeps ``clean``'s signature so the import is the only cha
     from bleach import clean
 
     # turbohtml
-    from turbohtml.bleach_compat import clean
+    from turbohtml.migration.bleach import clean
 
 ``clean(text, tags=..., attributes=..., protocols=..., strip=..., strip_comments=...)`` maps onto a
 :class:`~turbohtml.sanitizer.Policy`. ``attributes`` accepts bleach's list, per-tag dict, or callable forms; ``strip``
@@ -925,7 +925,7 @@ chooses between dropping a disallowed tag and keeping its children (``True``) an
 
 .. testcode::
 
-    from turbohtml.bleach_compat import clean
+    from turbohtml.migration.bleach import clean
 
     print(clean("<p>Hi <a href='http://x'>link</a></p><script>evil()</script>"))
 

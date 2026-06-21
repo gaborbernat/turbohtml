@@ -1,5 +1,5 @@
 /* Link enumeration and rewriting over a parsed tree, the C engine behind the Node.links()/rewrite_links()/
-   resolve_links() methods (wired in tree_type.c).
+   resolve_links() methods (wired in dom/node.c).
 
    This file is the walk that locates every link-bearing location and, for the rewrite path, splices a replacement back
    in place. The genuinely new capability over iterating <a href> by hand is the URLs embedded in CSS url()/@import (in
@@ -581,7 +581,7 @@ static int collect_subtree(link_walk *walk, th_node *root) {
 }
 
 /* Shared engine: run the walk over `root` under `owner`'s per-tree critical section. The thin Node methods in
-   tree_type.c derive (owner, tree, root) straight from the node and hand them here; the module state for the Link
+   dom/node.c derive (owner, tree, root) straight from the node and hand them here; the module state for the Link
    record type and the per-tree handle for the lock come off `owner`. */
 static PyObject *run_walk(PyObject *owner, th_tree *tree, th_node *root, PyObject *result, PyObject *replace) {
     link_walk walk = {.tree = tree, .owner = owner, .result = result, .replace = replace};

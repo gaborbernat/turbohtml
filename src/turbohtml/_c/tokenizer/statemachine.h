@@ -3,7 +3,7 @@
    This file is the algorithm. It reads code points from an internal buffer and
    emits token records through a small queue; it never creates PyObjects (only
    PyMem allocations for its growable buffers). The Python layer in
-   tokenizer_type.c owns an instance, feeds it code points, and turns the
+   tokenizer/tokenizer.c owns an instance, feeds it code points, and turns the
    emitted records into Token objects. Keeping the machine free of Python lets
    it be read straight against the spec and tested in isolation.
 

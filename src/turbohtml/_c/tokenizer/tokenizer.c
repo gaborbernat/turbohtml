@@ -296,7 +296,7 @@ static PyType_Spec tokenizer_spec = {
 
 /* --------------------------------------------------------------- tokenize */
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): declared in turbohtml.h and called from _htmlmodule.c
+// NOLINTNEXTLINE(misc-use-internal-linkage): declared in core/common.h and called from core/module.c
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *args, PyObject *kwargs) {
     static char *keywords[] = {"", "resolve_references", "capture_source", NULL};
     PyObject *arg;
@@ -436,7 +436,7 @@ static int initial_state_from_name(const char *name, enum th_initial_state *out)
     return 0;
 }
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): declared in turbohtml.h and called from _htmlmodule.c
+// NOLINTNEXTLINE(misc-use-internal-linkage): declared in core/common.h and called from core/module.c
 PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args) {
     PyObject *text;
     const char *state_name;

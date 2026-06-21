@@ -1,4 +1,4 @@
-/* WHATWG HTML tree construction — see treebuilder.h.
+/* WHATWG HTML tree construction — see dom/tree.h.
 
    Implements the linear document path (initial → before html → before head →
    in head → after head → in body → text → after body), generic nesting, void

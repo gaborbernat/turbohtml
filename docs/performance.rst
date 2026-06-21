@@ -62,7 +62,7 @@ narrows on tiny strings, where call overhead dominates.
  Markup (escaping)
 *******************
 
-:func:`turbohtml.markup.escape` against `markupsafe <https://markupsafe.palletsprojects.com>`_'s own C escape, both
+:func:`turbohtml.migration.markupsafe.escape` against `markupsafe <https://markupsafe.palletsprojects.com>`_'s own C escape, both
 returning a ``Markup``. The inputs are the small, mostly-clean strings a template engine interpolates under autoescape,
 markupsafe's hottest path. turbohtml builds the safe string in C in a single call, where markupsafe pays a Python
 ``escape`` frame and ``Markup`` construction per call, so it runs roughly two to three times faster.
@@ -730,7 +730,7 @@ starts from one node, so it runs roughly ten times faster.
  html.parser adapter
 *********************
 
-:class:`turbohtml.html_parser.HTMLParser` against the standard library's :class:`python:html.parser.HTMLParser`, both
+:class:`turbohtml.migration.stdlib.HTMLParser` against the standard library's :class:`python:html.parser.HTMLParser`, both
 subclassed with the same minimal handler so the comparison is the parser and dispatch cost for the identical
 callback-driven programming model. The per-tag Python handler call is a floor both pay, so the margin is narrower than
 raw tokenization, but turbohtml's C tokenizer feeding the dispatch still runs it three to four times faster.

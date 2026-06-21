@@ -12,10 +12,10 @@
     :undoc-members:
 
 ******************
- turbohtml.markup
+ turbohtml.migration.markupsafe
 ******************
 
-.. module:: turbohtml.markup
+.. module:: turbohtml.migration.markupsafe
 
 A safe-string for composing HTML, a drop-in for `markupsafe <https://markupsafe.palletsprojects.com>`_'s public surface.
 Import it in place of ``markupsafe``. ``Markup`` overrides every ``str`` method that returns text so the result stays a
@@ -88,10 +88,10 @@ preset), then sanitize. A non-overridable baseline removes scripting elements, e
     :members:
 
 *************************
- turbohtml.bleach_compat
+ turbohtml.migration.bleach
 *************************
 
-.. module:: turbohtml.bleach_compat
+.. module:: turbohtml.migration.bleach
 
 A drop-in for ``bleach.clean`` for projects migrating off bleach. It translates bleach's arguments onto a
 :class:`~turbohtml.sanitizer.Policy`; the safety baseline still applies, so an ``attributes`` callable cannot re-admit
@@ -100,10 +100,10 @@ an event handler or a ``javascript:`` URL.
 .. autofunction:: clean
 
 ***********************
- turbohtml.html_parser
+ turbohtml.migration.stdlib
 ***********************
 
-.. module:: turbohtml.html_parser
+.. module:: turbohtml.migration.stdlib
 
 A drop-in base class for :class:`python:html.parser.HTMLParser` subclasses, over turbohtml's WHATWG-conformant
 tokenizer. Subclass it, override the ``handle_*`` methods, and feed input incrementally as with the standard library.

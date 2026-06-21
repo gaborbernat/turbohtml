@@ -1,6 +1,6 @@
 /* Foreign-content (SVG / MathML) handling: name/attribute case adjustments,
    integration-point and breakout checks, and the foreign insertion-mode step.
-   #included into treebuilder.c so the static helpers inline against the tree. */
+   #included into dom/tree.c so the static helpers inline against the tree. */
 
 /* ------------------------------------------------------- foreign content */
 

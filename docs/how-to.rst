@@ -37,14 +37,14 @@ and keep the output smaller:
  Build safe HTML strings for a template
 ****************************************
 
-When you assemble HTML from a mix of trusted markup and untrusted values, use :mod:`turbohtml.markup`. Wrapping a value
-in :class:`~turbohtml.markup.Markup` declares it safe; combining it with plain text escapes that text, so a forgotten
+When you assemble HTML from a mix of trusted markup and untrusted values, use :mod:`turbohtml.migration.markupsafe`. Wrapping a value
+in :class:`~turbohtml.migration.markupsafe.Markup` declares it safe; combining it with plain text escapes that text, so a forgotten
 escape cannot inject markup. It is a drop-in for `markupsafe <https://markupsafe.palletsprojects.com>`_, so a `Jinja2
 <https://jinja.palletsprojects.com>`_ project migrates by changing the import:
 
 .. testcode::
 
-    from turbohtml.markup import Markup, escape
+    from turbohtml.migration.markupsafe import Markup, escape
 
     user = "<script>alert(1)</script>"
     row = Markup("<li>{}</li>").format(user)
@@ -84,13 +84,13 @@ Unescaping follows the HTML5 rules, including longest-match for references that 
  Migrate from html.parser
 **************************
 
-The quickest port keeps your subclass: :class:`turbohtml.html_parser.HTMLParser` is a drop-in base class with the same
+The quickest port keeps your subclass: :class:`turbohtml.migration.stdlib.HTMLParser` is a drop-in base class with the same
 ``handle_*`` callbacks and ``feed``/``close`` methods, over the WHATWG-conformant tokenizer. Change the import and the
 base class and the handlers fire as before:
 
 .. testcode::
 
-    from turbohtml.html_parser import HTMLParser
+    from turbohtml.migration.stdlib import HTMLParser
 
     class LinkCollector(HTMLParser):
         def __init__(self):

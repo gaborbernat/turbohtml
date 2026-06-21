@@ -6,5 +6,5 @@ thread-safe ``Policy`` describes what to keep -- ``tags``, per-tag ``attributes`
 ``<script>``, event-handler attributes, and ``javascript:`` URLs even when a policy would admit them, so a no-argument
 ``sanitize`` is safe by construction. It parses to a real tree, filters it, and serializes once -- no reparse round
 trip, the step that lets mutation XSS back in -- and the whole filtering walk runs in C, so it sanitizes several times
-faster than the Rust nh3 and far faster than bleach. A separate ``turbohtml.bleach_compat`` shim offers ``clean(text,
+faster than the Rust nh3 and far faster than bleach. A separate ``turbohtml.migration.bleach`` shim offers ``clean(text,
 tags=..., attributes=..., protocols=..., strip=...)`` for migrating bleach users with only an import change.

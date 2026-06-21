@@ -1,4 +1,4 @@
-/* A CSS selector engine over the node tree, #included into tree_type.c. A
+/* A CSS selector engine over the node tree, #included into dom/node.c. A
    selector is compiled against the tree it will run on, so tag and attribute
    names resolve to interned atoms once and every match is an integer compare.
    Matching is right-to-left with backtracking on the descendant and general

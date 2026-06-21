@@ -1,4 +1,4 @@
-/* Kind-stamped tokenizer core. tokenizer_sm.c #includes this file three times,
+/* Kind-stamped tokenizer core. tokenizer/statemachine.c #includes this file three times,
    once per PyUnicode storage width, with TH_NAME, TH_CHAR and TH_KIND defined,
    the way CPython's stringlib specializes per kind. Every input read compiles
    to direct indexing, so the per-character paths and run scanners carry no

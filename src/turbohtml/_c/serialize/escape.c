@@ -201,7 +201,7 @@ static inline uint64_t block_special_mask(const uint8_t *block, int quote) {
 
 #endif
 
-/* The wide write phase keeps the fine-grained SWAR probes from turbohtml.h on
+/* The wide write phase keeps the fine-grained SWAR probes from core/common.h on
    every arch: one special poisons only four / two code points into the scalar
    rewrite, where a full SIMD step would poison eight / four. The wide sizing
    scan uses the per-arch UCS2_STEP / UCS4_STEP tests above instead, because

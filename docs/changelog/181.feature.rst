@@ -1,4 +1,4 @@
-Add :class:`turbohtml.html_parser.HTMLParser`, a drop-in base class for :class:`python:html.parser.HTMLParser`
+Add :class:`turbohtml.migration.stdlib.HTMLParser`, a drop-in base class for :class:`python:html.parser.HTMLParser`
 subclasses over the streaming tokenizer. It keeps the standard ``handle_starttag``/``handle_startendtag``/
 ``handle_endtag``/``handle_data``/``handle_comment``/``handle_decl`` callbacks and the ``feed``/``close``/``reset``/
 ``getpos`` methods, so an ``HTMLParser`` subclass migrates by changing its import and base class. Being

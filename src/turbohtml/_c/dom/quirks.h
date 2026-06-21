@@ -1,4 +1,4 @@
-/* Quirks-mode doctype detection. Included into treebuilder.c ahead of the
+/* Quirks-mode doctype detection. Included into dom/tree.c ahead of the
    initial insertion mode so the mode can consult these legacy public/system
    identifier tables and their case-insensitive compare. */
 
