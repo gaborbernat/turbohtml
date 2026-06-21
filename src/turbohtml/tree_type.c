@@ -1200,6 +1200,20 @@ static PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds);
 static PyObject *node_css_matches(PyObject *self, PyObject *arg);
 static PyObject *node_css_closest(PyObject *self, PyObject *arg);
 static PyObject *node_prune(PyObject *self, PyObject *arg);
+static PyObject *node_re(PyObject *self, PyObject *args, PyObject *kwds);
+static PyObject *node_re_first(PyObject *self, PyObject *args, PyObject *kwds);
+
+PyDoc_STRVAR(re_doc, "re(pattern, /, *, attr=None)\n--\n\n"
+                     "Run pattern (a str or a compiled re.Pattern) over this node's text and\n"
+                     "return every match as a list of str. With attr set, run it over that\n"
+                     "attribute's value instead, or return [] when the attribute is absent.\n"
+                     "Each match yields its one capturing group when the pattern has exactly\n"
+                     "one, otherwise the whole match.");
+
+PyDoc_STRVAR(re_first_doc, "re_first(pattern, /, default=None, *, attr=None)\n--\n\n"
+                           "Return the first match of pattern over this node's text (or the attr\n"
+                           "attribute's value), with the same group rule as re(), or default when\n"
+                           "nothing matches.");
 
 PyDoc_STRVAR(select_doc, "select(selector, /)\n--\n\n"
                          "Return the list of descendant Elements matching the CSS selector, in\n"
@@ -1328,6 +1342,8 @@ static PyMethodDef node_methods[] = {
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
     {"prune", node_prune, METH_O, prune_doc},
+    {"re", (PyCFunction)(void (*)(void))node_re, METH_VARARGS | METH_KEYWORDS, re_doc},
+    {"re_first", (PyCFunction)(void (*)(void))node_re_first, METH_VARARGS | METH_KEYWORDS, re_first_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},
     {"encode", (PyCFunction)(void (*)(void))node_encode, METH_VARARGS | METH_KEYWORDS, encode_doc},
     {"to_markdown", (PyCFunction)(void (*)(void))node_to_markdown, METH_VARARGS | METH_KEYWORDS, to_markdown_doc},
@@ -2505,6 +2521,43 @@ static PyObject *element_form_data(PyObject *self, PyObject *Py_UNUSED(ignored))
     return pairs;
 }
 
+PyDoc_STRVAR(attr_doc, "attr(name, /, default=None)\n--\n\n"
+                       "Return the named attribute's value as a single str, or default when the\n"
+                       "attribute is absent. The raw value is returned, so a token-list attribute\n"
+                       "like class reads back as \"a b c\" rather than a list, and a valueless\n"
+                       "attribute reads back as the empty string.");
+
+static PyObject *element_attr(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *kw[] = {"", "default", NULL};
+    PyObject *name_obj;
+    PyObject *fallback = Py_None;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O:attr", kw, &name_obj, &fallback)) {
+        return NULL;
+    }
+    Py_ssize_t name_len;
+    char *name = attr_key_utf8(name_obj, &name_len);
+    if (name == NULL) {
+        return NULL;
+    }
+    NodeObject *node = (NodeObject *)self;
+    PyObject *value = NULL;
+    int absent = 0;
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    Py_ssize_t index = find_attr_index(tree_of(self), node->node, name, name_len);
+    if (index < 0) {
+        absent = 1;
+    } else {
+        const th_node_attr *attr = &node->node->attrs[index];
+        value = attr->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(attr->value, attr->value_len);
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(name);
+    if (absent) {
+        return Py_NewRef(fallback);
+    }
+    return value;
+}
+
 /* class_matches for a plain-string filter: compare the filter's code points to
    the whole class value and then each token directly, allocating nothing. */
 static int class_matches_plain(th_node *node, const Py_UCS4 *want, Py_ssize_t want_len) {
@@ -3167,6 +3220,197 @@ static PyObject *node_select_one(PyObject *self, PyObject *arg) {
         return NULL;
     }
     return node_wrap(state_of(self), handle, found);
+}
+
+/* Turn the pattern argument into a compiled re.Pattern: a str is compiled through
+   re.compile, an already-compiled pattern is returned with a new reference. NULL
+   with an exception set on a bad type or a compile error. */
+static PyObject *coerce_pattern(module_state *state, PyObject *pattern) {
+    if (PyUnicode_Check(pattern)) {
+        return PyObject_CallOneArg(state->re_compile, pattern);
+    }
+    if (PyObject_TypeCheck(pattern, (PyTypeObject *)state->pattern_type)) {
+        return Py_NewRef(pattern);
+    }
+    PyErr_SetString(PyExc_TypeError, "pattern must be a str or a compiled re.Pattern");
+    return NULL;
+}
+
+/* Snapshot the string a regex runs over: the node's text when attr_name is NULL,
+   else the named attribute's value ("" for a valueless attribute). *absent is set
+   when attr_name names an attribute the node does not carry, so the caller yields
+   no match. Holds the per-tree lock so a concurrent mutate cannot rewire the
+   subtree or resize the attribute array mid-read. NULL with *absent set and no
+   exception for the absent case, or NULL with an exception on allocation failure. */
+static PyObject *regex_source(PyObject *handle, th_tree *tree, th_node *node, const char *attr_name,
+                              Py_ssize_t attr_len, int *absent) {
+    *absent = 0;
+    PyObject *source = NULL;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    if (attr_name == NULL) {
+        source = str_from_accessor(th_node_text, tree, node);
+    } else {
+        Py_ssize_t index = find_attr_index(tree, node, attr_name, attr_len);
+        if (index < 0) {
+            *absent = 1;
+        } else {
+            const th_node_attr *attr = &node->attrs[index];
+            source = attr->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(attr->value, attr->value_len);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    return source;
+}
+
+/* The number of capturing groups in a compiled pattern, or -1 with an exception. */
+static long pattern_group_count(PyObject *compiled) {
+    PyObject *groups = PyObject_GetAttrString(compiled, "groups");
+    if (groups == NULL) { /* GCOVR_EXCL_BR_LINE: a compiled pattern always exposes .groups */
+        return -1;        /* GCOVR_EXCL_LINE: unreachable on a real re.Pattern */
+    }
+    long count = PyLong_AsLong(groups);
+    Py_DECREF(groups);
+    return count; /* .groups is a non-negative int, so the AsLong overflow path cannot fire */
+}
+
+/* Every match of compiled over source as a list[str]: with zero or one capturing
+   group re.findall already yields the strings; with two or more groups it yields
+   tuples, so fall back to the whole match per finditer. */
+static PyObject *regex_find_all(PyObject *compiled, PyObject *source) {
+    long count = pattern_group_count(compiled);
+    if (count < 0) {     /* GCOVR_EXCL_BR_LINE: .groups is always a readable non-negative int */
+        return NULL;     /* GCOVR_EXCL_LINE: unreachable on a real re.Pattern */
+    }
+    if (count <= 1) {
+        return PyObject_CallMethod(compiled, "findall", "O", source);
+    }
+    PyObject *iterator = PyObject_CallMethod(compiled, "finditer", "O", source);
+    if (iterator == NULL) { /* GCOVR_EXCL_BR_LINE: finditer over a str cannot raise */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *out = PyList_New(0);
+    if (out == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(iterator);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *match;
+    int error = 0;
+    while ((match = PyIter_Next(iterator)) != NULL) {
+        PyObject *whole = PyObject_CallMethod(match, "group", "i", 0);
+        Py_DECREF(match);
+        if (whole == NULL || PyList_Append(out, whole) < 0) { /* GCOVR_EXCL_BR_LINE: group(0)/append cannot fail */
+            Py_XDECREF(whole);                                /* GCOVR_EXCL_LINE: allocation-failure path */
+            error = 1;                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_DECREF(whole);
+    }
+    Py_DECREF(iterator);
+    if (error) {           /* GCOVR_EXCL_BR_LINE: the loop body only breaks on unforceable allocation failure */
+        Py_DECREF(out);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return out;
+}
+
+/* The first match of compiled over source as a str (its one capturing group when
+   the pattern has exactly one, else the whole match), or a new reference to
+   fallback when nothing matches. */
+static PyObject *regex_find_first(PyObject *compiled, PyObject *source, PyObject *fallback) {
+    PyObject *match = PyObject_CallMethod(compiled, "search", "O", source);
+    if (match == NULL) {  /* GCOVR_EXCL_BR_LINE: search over a str cannot raise */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (match == Py_None) {
+        Py_DECREF(match);
+        return Py_NewRef(fallback);
+    }
+    long count = pattern_group_count(compiled);
+    if (count < 0) {      /* GCOVR_EXCL_BR_LINE: .groups is always a readable non-negative int */
+        Py_DECREF(match); /* GCOVR_EXCL_LINE: unreachable on a real re.Pattern */
+        return NULL;      /* GCOVR_EXCL_LINE: unreachable on a real re.Pattern */
+    }
+    PyObject *value = PyObject_CallMethod(match, "group", "i", count == 1 ? 1 : 0);
+    Py_DECREF(match);
+    return value;
+}
+
+/* Resolve the optional attr keyword into a lowercased UTF-8 name (the caller frees
+   it with PyMem_Free), leaving *name NULL when the regex should run over text. A
+   non-str, non-None attr raises TypeError. Returns 0, or -1 with an exception. */
+static int regex_attr_name(PyObject *attr_obj, char **name, Py_ssize_t *name_len) {
+    *name = NULL;
+    *name_len = 0;
+    if (attr_obj == NULL || attr_obj == Py_None) {
+        return 0;
+    }
+    *name = attr_key_utf8(attr_obj, name_len);
+    return *name == NULL ? -1 : 0;
+}
+
+static PyObject *node_re(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *kw[] = {"", "attr", NULL};
+    PyObject *pattern;
+    PyObject *attr_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O:re", kw, &pattern, &attr_obj)) {
+        return NULL;
+    }
+    char *attr_name;
+    Py_ssize_t attr_len;
+    if (regex_attr_name(attr_obj, &attr_name, &attr_len) < 0) {
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    PyObject *compiled = coerce_pattern(state, pattern);
+    if (compiled == NULL) {
+        PyMem_Free(attr_name);
+        return NULL;
+    }
+    int absent;
+    NodeObject *node = (NodeObject *)self;
+    PyObject *source = regex_source(node->handle, tree_of(self), node->node, attr_name, attr_len, &absent);
+    PyMem_Free(attr_name);
+    if (source == NULL) {
+        Py_DECREF(compiled);
+        return absent ? PyList_New(0) : NULL;
+    }
+    PyObject *result = regex_find_all(compiled, source);
+    Py_DECREF(compiled);
+    Py_DECREF(source);
+    return result;
+}
+
+static PyObject *node_re_first(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *kw[] = {"", "default", "attr", NULL};
+    PyObject *pattern;
+    PyObject *fallback = Py_None;
+    PyObject *attr_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O$O:re_first", kw, &pattern, &fallback, &attr_obj)) {
+        return NULL;
+    }
+    char *attr_name;
+    Py_ssize_t attr_len;
+    if (regex_attr_name(attr_obj, &attr_name, &attr_len) < 0) {
+        return NULL;
+    }
+    module_state *state = state_of(self);
+    PyObject *compiled = coerce_pattern(state, pattern);
+    if (compiled == NULL) {
+        PyMem_Free(attr_name);
+        return NULL;
+    }
+    int absent;
+    NodeObject *node = (NodeObject *)self;
+    PyObject *source = regex_source(node->handle, tree_of(self), node->node, attr_name, attr_len, &absent);
+    PyMem_Free(attr_name);
+    if (source == NULL) {
+        Py_DECREF(compiled);
+        return absent ? Py_NewRef(fallback) : NULL;
+    }
+    PyObject *result = regex_find_first(compiled, source, fallback);
+    Py_DECREF(compiled);
+    Py_DECREF(source);
+    return result;
 }
 
 /* Return the compiled program for arg from handle's per-tree cache, compiling and
@@ -4244,6 +4488,7 @@ static PyMethodDef element_methods[] = {
     {"normalize", element_normalize, METH_NOARGS, normalize_doc},
     {"wrap_children", element_wrap_children, METH_O, wrap_children_doc},
     {"form_data", element_form_data, METH_NOARGS, form_data_doc},
+    {"attr", (PyCFunction)(void (*)(void))element_attr, METH_VARARGS | METH_KEYWORDS, attr_doc},
     {NULL, NULL, 0, NULL},
 };
 
@@ -6400,9 +6645,14 @@ static int cache_pattern_type(module_state *state) {
         return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     state->pattern_type = PyObject_GetAttrString(re_module, "Pattern");
-    Py_DECREF(re_module);
     if (state->pattern_type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(re_module);          /* GCOVR_EXCL_LINE: allocation-failure path */
         return -1;                     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    state->re_compile = PyObject_GetAttrString(re_module, "compile");
+    Py_DECREF(re_module);
+    if (state->re_compile == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return 0;
 }
