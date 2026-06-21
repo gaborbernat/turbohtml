@@ -76,12 +76,12 @@ corpus.
 
 Template engines need a different contract: `markupsafe <https://markupsafe.palletsprojects.com>`_'s, where escaping
 produces a ``Markup`` safe-string that records "this is already HTML" and combining it with untrusted text escapes that
-text. :mod:`turbohtml.markup` is a drop-in for markupsafe's public surface, down to the numeric ``&#34;``/``&#39;``
-quote references, so a `Jinja2 <https://jinja.palletsprojects.com>`_ or `WTForms <https://wtforms.readthedocs.io>`_
-project migrates by changing the import. It lives in a module apart from :func:`turbohtml.escape` so each stays
-byte-exact with its own target: ``turbohtml.escape`` with the standard library, ``turbohtml.markup.escape`` with
-markupsafe. turbohtml builds the ``Markup`` in C in one call, where markupsafe pays a Python call and a ``Markup``
-construction on every interpolation, so it runs faster.
+text. :mod:`turbohtml.migration.markupsafe` is a drop-in for markupsafe's public surface, down to the numeric
+``&#34;``/``&#39;`` quote references, so a `Jinja2 <https://jinja.palletsprojects.com>`_ or `WTForms
+<https://wtforms.readthedocs.io>`_ project migrates by changing the import. It lives in a module apart from
+:func:`turbohtml.escape` so each stays byte-exact with its own target: ``turbohtml.escape`` with the standard library,
+``turbohtml.migration.markupsafe.escape`` with markupsafe. turbohtml builds the ``Markup`` in C in one call, where
+markupsafe pays a Python call and a ``Markup`` construction on every interpolation, so it runs faster.
 
 Linkifying needs the same HTML awareness from the other direction. :mod:`turbohtml.linkify` parses the input first, so
 it can see that a URL already sits inside an ``<a>`` or a ``<script>`` and leave it alone, which a regex over the raw
@@ -139,8 +139,8 @@ Two decisions bound the tokenizer's scope:
 Where behavior could drift, more than the suite pins it: a fuzz comparison runs the token stream against html5lib's
 tokenizer, and source positions use the same 1-based-line, 0-based-column convention as :mod:`python:html.parser`, so
 diagnostics line up with what the standard library reports. For code that prefers callbacks to a token stream,
-:class:`turbohtml.html_parser.HTMLParser` re-exposes the stream through ``html.parser``'s subclass-and-override surface,
-so an existing ``HTMLParser`` subclass migrates by swapping its base class.
+:class:`turbohtml.migration.stdlib.HTMLParser` re-exposes the stream through ``html.parser``'s subclass-and-override
+surface, so an existing ``HTMLParser`` subclass migrates by swapping its base class.
 
 ****************************
  Tokenizing at native width

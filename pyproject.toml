@@ -204,14 +204,15 @@ src.exclude = [ "tests/html5lib-tests", "tools/html5lib-python" ]  # vendored su
 environment.python-version = "3.15"
 
 [tool.pytest]
-addopts = [
-  "--ignore=tests/html5lib-tests", # vendored conformance data, not our test modules
-]
-filterwarnings = [
-  "error",
-]
-testpaths = [
+ini_options.testpaths = [
   "tests",
+]
+ini_options.addopts = [
+  "--ignore=tests/html5lib-tests", # vendored conformance data, not our test modules
+  "--import-mode=importlib",       # tests mirror the source tree in nested dirs without __init__.py
+]
+ini_options.filterwarnings = [
+  "error",
 ]
 
 [tool.coverage]
@@ -219,7 +220,7 @@ testpaths = [
 # the free-threaded builds, or Windows, so the module importorskips itself there; measuring
 # it would make the gate interpreter-dependent. It still runs and validates wherever lxml exists.
 run.omit = [
-  "tests/test_xpath_differential.py",
+  "tests/query/xpath/test_xpath_differential.py",
 ]
 run.parallel = true
 run.plugins = [

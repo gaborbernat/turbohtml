@@ -1,5 +1,5 @@
 """
-Generate src/turbohtml/attr_atom.h from the common HTML attribute names.
+Generate src/turbohtml/_c/data/attr_atom.h from the common HTML attribute names.
 
 The finder and CSS selector engine compare attribute identities as integers, not
 strings: an attribute name is interned once at element insertion. Names in the
@@ -12,7 +12,7 @@ The table is sorted by name, so the atom assigned to each entry is its 1-based
 position; th_attr_table[atom - 1] therefore recovers the name bytes for an atom
 in O(1), which Element.attrs and the serializer use to render names back to text.
 
-Usage:  python tools/generate_attrs.py src/turbohtml/attr_atom.h
+Usage:  python tools/generate_attrs.py src/turbohtml/_c/data/attr_atom.h
 """
 
 from __future__ import annotations

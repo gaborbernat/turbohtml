@@ -1,0 +1,84 @@
+/* Internal glue between the state machine and the Python types.
+
+   tokenizer/token.c defines the Token type and the TokenType enum; tokenizer/tokenizer.c
+   defines the Tokenizer type, its token iterator, and the tokenize() helper;
+   core/module.c creates the module and calls the register functions. All three
+   share the per-module state declared here, which owns the heap types so the
+   module stays compatible with sub-interpreters and the free-threaded build. */
+
+#ifndef TURBOHTML_TOKENIZER_PY_H
+#define TURBOHTML_TOKENIZER_PY_H
+
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
+#include "tokenizer/statemachine.h"
+
+/* Py_BEGIN_CRITICAL_SECTION arrived in 3.13 for the free-threaded build; on a GIL
+   build it is a brace no-op, and before 3.13 (always GIL) we define the same no-op,
+   so the tokenizer's per-object locking compiles on every supported interpreter
+   while only the free-threaded build pays for a real lock. */
+#ifndef Py_BEGIN_CRITICAL_SECTION
+#define Py_BEGIN_CRITICAL_SECTION(op) {
+#define Py_END_CRITICAL_SECTION() }
+#endif
+
+typedef struct {
+    PyObject *token_type;         /* Token */
+    PyObject *tokenizer_type;     /* Tokenizer */
+    PyObject *iter_type;          /* the iterator returned by feed()/close()/tokenize() */
+    PyObject *kind_enum;          /* TokenType (enum.IntEnum) */
+    PyObject *kinds[6];           /* cached TokenType members, indexed by enum th_kind */
+    PyObject *node_type;          /* Node (the sealed-hierarchy base) */
+    PyObject *element_type;       /* Element */
+    PyObject *text_type;          /* Text */
+    PyObject *comment_type;       /* Comment */
+    PyObject *doctype_type;       /* Doctype */
+    PyObject *pi_type;            /* ProcessingInstruction */
+    PyObject *cdata_type;         /* CData */
+    PyObject *document_type;      /* Document */
+    PyObject *parser_type;        /* IncrementalParser (push parse to a tree) */
+    PyObject *parse_error_type;   /* ParseError (a collected WHATWG parse error) */
+    PyObject *parse_error_exc;    /* HTMLParseError (raised by parse(strict=True)) */
+    PyObject *handle_type;        /* _TreeHandle (owns th_tree + the input str) */
+    PyObject *attrs_type;         /* _Attrs (the live mutable view of an element's attributes) */
+    PyObject *walker_type;        /* _NodeIterator (descendants / ancestors / siblings) */
+    PyObject *string_walker_type; /* _StringIterator (strings / stripped_strings) */
+    PyObject *namespace_enum;     /* Namespace (enum.Enum) */
+    PyObject *namespaces[3];      /* cached Namespace members, indexed by enum th_ns */
+    PyObject *axis_enum;          /* Axis (enum.Enum) for find()/find_all() */
+    PyObject *axes[7];            /* cached Axis members, indexed by enum th_axis */
+    PyObject *formatter_enum;     /* Formatter (enum.Enum) for serialize()/encode() */
+    PyObject *formatters[3];      /* cached Formatter members, indexed by enum th_formatter */
+    PyObject *minify_type;        /* Minify (a serialize(layout=...) mode) */
+    PyObject *indent_type;        /* Indent (a serialize(layout=...) mode) */
+    PyObject *pattern_type;       /* re.Pattern, to recognize a compiled-regex filter */
+    PyObject *re_compile;         /* re.compile, to turn a str pattern into a program for re()/re_first() */
+    PyObject *markup_type;        /* turbohtml.markup.Markup, stamped onto escape() results */
+    PyObject *xpath_string_type;  /* turbohtml._xpath.XPathString, for smart_strings xpath() results */
+    PyObject *link_type;          /* turbohtml._links.Link, the (element, attribute, url) record links() yields */
+} module_state;
+
+/* Register the types and enum into module/state. Each returns 0 or -1. */
+int token_register(PyObject *module, module_state *state);
+int tokenizer_register(PyObject *module, module_state *state);
+int tree_register(PyObject *module, module_state *state);
+
+/* Public navigable-tree entry points (dom/node.c), wired as parse() and
+   parse_fragment(). parse() matches METH_O; parse_fragment() matches
+   METH_VARARGS | METH_KEYWORDS. */
+PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs);
+PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs);
+
+/* Rebuild a node and its subtree from a pickle (kind, data, children) triple,
+   wired as the private _reconstruct() the node __reduce__ points pickle at. */
+PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args);
+
+/* Build a Token from a freshly emitted record. Small records are copied and a
+   large text run is moved out of the record (which then regrows). A slice
+   record resolves lazily against source when the input is borrowed from it
+   (the Token keeps source alive), and immediately against sm's own storage
+   otherwise (a later feed may move it). */
+PyObject *token_from_record(module_state *state, const th_tokenizer *sm, PyObject *source, th_token *record);
+
+#endif /* TURBOHTML_TOKENIZER_PY_H */

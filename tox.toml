@@ -92,7 +92,7 @@ commands = [
   # (pytest-run-parallel) to surface data races the single-threaded coverage run hides
   { replace = "if", condition = "factor['3.14t'] or factor['3.15t']", then = [
     "pytest",
-    "{tox_root}{/}tests{/}test_tree_freethread.py",
+    "{tox_root}{/}tests{/}dom{/}test_tree_freethread.py",
     "--no-cov",
     "--parallel-threads=auto",
     "--iterations=20",
@@ -226,10 +226,10 @@ commands_pre = [
 commands = [
   [
     "pytest",
-    "-s",                                           # let TSan reports reach the console; pytest otherwise captures them
+    "-s",                                                 # let TSan reports reach the console; pytest otherwise captures them
     "--no-cov",
     "--parallel-threads=auto",
     "--iterations=20",
-    "{tox_root}{/}tests{/}test_tree_freethread.py",
+    "{tox_root}{/}tests{/}dom{/}test_tree_freethread.py",
   ],
 ]

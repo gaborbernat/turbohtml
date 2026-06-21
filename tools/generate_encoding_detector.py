@@ -1,5 +1,5 @@
 """
-Generate src/turbohtml/encoding_detect_data.h from Firefox's chardetng.
+Generate src/turbohtml/_c/encoding/detect_data.h from Firefox's chardetng.
 
 The content-based encoding detector (issue #182) is a native-C port of chardetng
 (https://github.com/hsivonen/chardetng, MIT/Apache-2.0, Copyright Mozilla
@@ -10,7 +10,7 @@ hand-transcribed copy.
 
 Run it against a chardetng checkout::
 
-    python tools/generate_encoding_detector.py <chardetng> src/turbohtml/encoding_detect_data.h
+    python tools/generate_encoding_detector.py <chardetng> src/turbohtml/_c/encoding/detect_data.h
 
 The generated header is committed; regenerate it only when bumping the pinned
 chardetng revision (recorded in the header banner).

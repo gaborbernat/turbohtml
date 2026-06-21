@@ -1,5 +1,5 @@
 """
-Generate src/turbohtml/tag_atom.h from the HTML element categories.
+Generate src/turbohtml/_c/data/tag_atom.h from the HTML element categories.
 
 The tree builder compares element identities as integers, never strings: the
 tokenizer's lowercased tag name is interned once at element insertion via a
@@ -9,7 +9,7 @@ atom and its category bitmask. The category sets (special / formatting / scoping
 ones the WHATWG tree-construction algorithm special-cases; keeping them in a
 generated table means a spec change is a regeneration, not a code edit.
 
-Usage:  python tools/generate_tags.py src/turbohtml/tag_atom.h
+Usage:  python tools/generate_tags.py src/turbohtml/_c/data/tag_atom.h
 """
 
 from __future__ import annotations

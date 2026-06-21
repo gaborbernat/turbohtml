@@ -1,0 +1,474 @@
+/* Shrinks a parsed document to the smallest equivalent HTML — dropping the
+   optional tags, quotes, and whitespace the spec lets us fold without changing
+   what the bytes reparse to.
+
+   Minification is a serialization mode over the already-conformant parse tree:
+   the four transforms below only ever drop or fold what the WHATWG parser
+   reconstructs on the way back in, so the minified bytes reparse to the same
+   tree. That round-trip equivalence is the correctness gate, enforced by the
+   idempotence test over the conformance corpus. It reuses the shared sbuf
+   buffer, the escape helpers, ser_close_tag, is_rawtext_element,
+   ser_needs_leading_newline and doctype_name_len from serialize/internal.h. */
+
+#include "serialize/internal.h"
+
+#include "dom/tree.h"
+#include "dom/tree_internal.h"
+
+#include <string.h>
+
+/* HTML ASCII whitespace, the set the tree-construction whitespace rules use. */
+static inline int mini_is_ascii_ws(Py_UCS4 character) {
+    return character == ' ' || character == '\t' || character == '\n' || character == '\f' || character == '\r';
+}
+
+/* pre/textarea/listing keep their text verbatim: a collapse inside them would
+   change rendered content. Raw-text elements (script/style/...) are emitted as
+   leaves by the walker, so they need no entry here. */
+static int mini_is_preserve_atom(const th_node *node) {
+    return node->ns == TH_NS_HTML &&
+           (node->atom == TH_TAG_PRE || node->atom == TH_TAG_TEXTAREA || node->atom == TH_TAG_LISTING);
+}
+
+/* The whitespace lanes of a 2-code-point word, folded into the same SWAR probe the
+   serializer uses for escapable characters so the collapse scan hops clean runs. */
+static inline uint64_t mini_ws_mask(uint64_t word) {
+    return swar_haslane32(word, ' ') | swar_haslane32(word, '\t') | swar_haslane32(word, '\n') |
+           swar_haslane32(word, '\f') | swar_haslane32(word, '\r');
+}
+
+/* Whether a code point must be escaped when it appears in collapsed text: the
+   structural characters (text never escapes the double quote), the no-break space
+   under WHATWG, and -- under the NAMED formatter -- any character with a reference. */
+static int mini_text_special(Py_UCS4 character, int formatter, int escape_nbsp) {
+    if (formatter == TH_FMT_NAMED) {
+        return sbuf_named_special(character);
+    }
+    return character == '&' || character == '<' || character == '>' || (escape_nbsp && character == 0xA0);
+}
+
+/* Collapse each run of ASCII whitespace to a single space, escaping the runs
+   between under the formatter. A single pass bulk-copies the clean spans (hopped
+   with the SWAR whitespace+special probe for the WHATWG/MINIMAL formatters) and
+   rewrites only the whitespace and the escapable characters, so collapsed prose
+   costs about what the plain serializer's one-shot escape does rather than a
+   separate call per word. Folding to one space (rather than deleting) keeps the
+   transform idempotent: a single space reparses to a single-space text node in the
+   same place, so the tree is unchanged. */
+static void mini_put_collapsed_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int formatter,
+                                    int *last_was_space) {
+    int escape_nbsp = formatter == TH_FMT_WHATWG;
+    Py_ssize_t index = 0;
+    while (index < len) {
+        if (mini_is_ascii_ws(text[index])) {
+            if (!*last_was_space) {
+                /* a stripped comment can leave two whitespace text nodes adjacent; suppressing
+                   the second's leading space keeps the fold idempotent, since the reparse merges
+                   them into one node that folds to a single space */
+                sbuf_putc(out, ' ');
+                *last_was_space = 1;
+            }
+            do {
+                index++;
+            } while (index < len && mini_is_ascii_ws(text[index]));
+            continue;
+        }
+        Py_ssize_t start = index;
+        if (formatter != TH_FMT_NAMED) {
+            while (index + UCS4_LANES <= len) {
+                uint64_t word;
+                memcpy(&word, &text[index], sizeof(word));
+                if ((sbuf_special_mask(word, 1, 0, escape_nbsp) | mini_ws_mask(word)) != 0) {
+                    break;
+                }
+                index += UCS4_LANES;
+            }
+        }
+        while (index < len && !mini_is_ascii_ws(text[index]) &&
+               !mini_text_special(text[index], formatter, escape_nbsp)) {
+            index++;
+        }
+        if (index > start) {
+            sbuf_put_run(out, &text[start], index - start);
+        }
+        if (index < len && !mini_is_ascii_ws(text[index])) {
+            sbuf_put_special(out, text[index], formatter);
+            index++;
+        }
+        *last_was_space = 0;
+    }
+}
+
+/* An attribute value may drop its quotes when it is non-empty, contains no ASCII
+   whitespace and none of the characters that would end or re-open the value
+   (" ' ` = < >), no ampersand (which could start a character reference), and does
+   not end in a slash (which would merge with a following >). Anything else keeps
+   the quoted form. The caller (mini_open_tag) writes an empty value as a bare name
+   before reaching here, so len is always >= 1 and value[len - 1] is in bounds. */
+static int mini_attr_unquotable(const Py_UCS4 *value, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 character = value[index];
+        if (mini_is_ascii_ws(character) || character == '"' || character == '\'' || character == '`' ||
+            character == '=' || character == '<' || character == '>' || character == '&') {
+            return 0;
+        }
+    }
+    return value[len - 1] != '/';
+}
+
+/* Write an element's start tag, dropping redundant attribute quotes and writing a
+   valueless/empty attribute as just its name when unquoting is enabled. Attribute
+   order and charset normalization come from the shared output options (a normalized
+   charset value always keeps its quotes). */
+static void mini_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_serialize_opts *opts, int unquote) {
+    sbuf_putc(out, '<');
+    sbuf_put_ucs4(out, node->text, node->text_len);
+    Py_ssize_t stack_order[MAX_SORTED_ATTRS];
+    Py_ssize_t *order = ser_attr_order(tree, node, opts->sort_attributes, stack_order);
+    int charset_kind = opts->inject_meta ? ser_meta_charset_kind(tree, node) : 0;
+    for (Py_ssize_t position = 0; position < node->attr_count; position++) {
+        th_node_attr *attr = &node->attrs[order != NULL ? order[position] : position];
+        sbuf_putc(out, ' ');
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        sbuf_put_utf8(out, name, name_len);
+        if (ser_put_charset_value(out, opts, charset_kind, name, name_len)) {
+            continue;
+        }
+        if (unquote && attr->value_len == 0) {
+            continue; /* an empty value reparses identically as a bare attribute name */
+        }
+        if (unquote && mini_attr_unquotable(attr->value, attr->value_len)) {
+            sbuf_putc(out, '=');
+            sbuf_put_run(out, attr->value, attr->value_len); /* unquotable means no character needs escaping */
+        } else {
+            sbuf_puts(out, "=\"");
+            sbuf_put_text(out, attr->value, attr->value_len, 1, opts->formatter);
+            sbuf_putc(out, '"');
+        }
+    }
+    ser_attr_order_free(order, stack_order);
+    sbuf_putc(out, '>');
+}
+
+/* The next sibling that counts as content for a tag-omission "immediately
+   followed by" / "no more content" test: a stripped comment is invisible to the
+   reparse, so it is skipped when comment stripping is on. */
+static th_node *mini_next_content(th_node *node, int strip_comments) {
+    th_node *sibling = node->next_sibling;
+    while (sibling != NULL && strip_comments && sibling->type == TH_NODE_COMMENT) {
+        sibling = sibling->next_sibling;
+    }
+    return sibling;
+}
+
+/* The first child that counts as content, skipping leading stripped comments so
+   the start-tag omission test sees what the reparse will. */
+static th_node *mini_first_content(th_node *node, int strip_comments) {
+    th_node *child = node->first_child;
+    while (child != NULL && strip_comments && child->type == TH_NODE_COMMENT) {
+        child = child->next_sibling;
+    }
+    return child;
+}
+
+/* Whether node's rightmost descendant path runs through a formatting element
+   (a, b, i, ...). Such an element was open when the parser closed node and is
+   reconstructed as a following sibling, so omitting node's end tag would let the
+   reparse fold that reconstruction back inside node. The walker also blocks
+   omission while a formatting element is open as an ancestor; together they keep
+   tag omission away from every adoption-agency reconstruction. */
+static int mini_trailing_formatting(const th_node *node) {
+    for (const th_node *child = node->last_child; child != NULL; child = child->last_child) {
+        if (child->type == TH_NODE_ELEMENT && (child->tag_flags & TH_TAG_FORMATTING)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The elements a </p> may be omitted before (WHATWG § 13.1.2.4). */
+static int mini_is_p_follow(uint16_t atom) {
+    switch (atom) {
+    case TH_TAG_ADDRESS:
+    case TH_TAG_ARTICLE:
+    case TH_TAG_ASIDE:
+    case TH_TAG_BLOCKQUOTE:
+    case TH_TAG_DETAILS:
+    case TH_TAG_DIV:
+    case TH_TAG_DL:
+    case TH_TAG_FIELDSET:
+    case TH_TAG_FIGCAPTION:
+    case TH_TAG_FIGURE:
+    case TH_TAG_FOOTER:
+    case TH_TAG_FORM:
+    case TH_TAG_H1:
+    case TH_TAG_H2:
+    case TH_TAG_H3:
+    case TH_TAG_H4:
+    case TH_TAG_H5:
+    case TH_TAG_H6:
+    case TH_TAG_HEADER:
+    case TH_TAG_HGROUP:
+    case TH_TAG_HR:
+    case TH_TAG_MAIN:
+    case TH_TAG_MENU:
+    case TH_TAG_NAV:
+    case TH_TAG_OL:
+    case TH_TAG_P:
+    case TH_TAG_PRE:
+    case TH_TAG_SECTION:
+    case TH_TAG_TABLE:
+    case TH_TAG_UL:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* A </p> may not be omitted at the end of its parent when that parent is one of
+   these (its content model would make the reparsed <p> close differently), nor
+   when the parent is an autonomous custom element (an unknown HTML tag). */
+static int mini_p_parent_excluded(uint16_t atom) {
+    switch (atom) {
+    case TH_TAG_A:
+    case TH_TAG_AUDIO:
+    case TH_TAG_DEL:
+    case TH_TAG_INS:
+    case TH_TAG_MAP:
+    case TH_TAG_NOSCRIPT:
+    case TH_TAG_VIDEO:
+    case TH_TAG_UNKNOWN:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Whether a following sibling begins with ASCII whitespace (used by the head/
+   body/caption "not followed by whitespace" omission tests). */
+static int mini_starts_with_ws(th_tree *tree, th_node *node) {
+    return node->type == TH_NODE_TEXT && node->text_len > 0 && mini_is_ascii_ws(need_text(tree, node)[0]);
+}
+
+/* The WHATWG optional-tag rule for node's end tag, evaluated against next (the next
+   content sibling, stripped comments already skipped). This is the cheap test; the
+   formatting-reconstruction guard is applied separately so its rightmost-path walk
+   only runs for an element the rule already deems omittable, not every element.
+   "No more content in the parent" is just next == NULL: the parent's own close (or
+   its omission) reconstructs the element, so dropping the end tag stays round-trip
+   safe even when the parent is a document or template content node. */
+static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next) {
+    int last = next == NULL;
+    uint16_t na =
+        (next != NULL && next->type == TH_NODE_ELEMENT && next->ns == TH_NS_HTML) ? next->atom : TH_TAG_UNKNOWN;
+    switch (node->atom) {
+    case TH_TAG_LI:
+        return na == TH_TAG_LI || last;
+    case TH_TAG_DT:
+        return na == TH_TAG_DT || na == TH_TAG_DD;
+    case TH_TAG_DD:
+        return na == TH_TAG_DD || na == TH_TAG_DT || last;
+    case TH_TAG_RT:
+    case TH_TAG_RP:
+        return na == TH_TAG_RT || na == TH_TAG_RP || last;
+    case TH_TAG_OPTGROUP:
+        return na == TH_TAG_OPTGROUP || last;
+    case TH_TAG_OPTION:
+        return na == TH_TAG_OPTION || na == TH_TAG_OPTGROUP || last;
+    case TH_TAG_THEAD:
+        return na == TH_TAG_TBODY || na == TH_TAG_TFOOT;
+    case TH_TAG_TBODY:
+        return na == TH_TAG_TBODY || na == TH_TAG_TFOOT || last;
+    case TH_TAG_TFOOT:
+        return last;
+    case TH_TAG_TR:
+        return na == TH_TAG_TR || last;
+    case TH_TAG_TD:
+    case TH_TAG_TH:
+        return na == TH_TAG_TD || na == TH_TAG_TH || last;
+    case TH_TAG_P:
+        return mini_is_p_follow(na) ||
+               (last && node->parent->ns == TH_NS_HTML && !mini_p_parent_excluded(node->parent->atom));
+    case TH_TAG_HTML:
+    case TH_TAG_BODY:
+        return next == NULL || next->type != TH_NODE_COMMENT; /* not immediately followed by a comment */
+    case TH_TAG_HEAD:
+        return next == NULL || (next->type != TH_NODE_COMMENT && !mini_starts_with_ws(tree, next));
+    default:
+        return 0;
+    }
+}
+
+/* Whether node's end tag may be omitted: the WHATWG rule, blocked whenever a
+   formatting element is open as an ancestor (formatting_depth), lies on node's
+   trailing path, or is the following sibling, since the reparse would then
+   reconstruct it across the boundary. The expensive trailing-path walk is deferred
+   until the cheap rule has already accepted the element. */
+static int mini_omit_end_tag(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatting_depth) {
+    if (node->ns != TH_NS_HTML || formatting_depth > 0) {
+        return 0;
+    }
+    th_node *next = mini_next_content(node, opts->strip_comments);
+    if (!mini_end_tag_rule(tree, node, next)) {
+        return 0;
+    }
+    /* the rule only fires when next is empty or a specific non-formatting element, so a
+       reconstructed formatting element can only be reached through the trailing path */
+    return !mini_trailing_formatting(node);
+}
+
+/* Whether node's start tag may be omitted. An element carrying attributes never
+   qualifies (the omitted tag would lose them); only html/head/body have a rule, so
+   everything else rejects before the first-content lookup. */
+static int mini_omit_start_tag(th_tree *tree, th_node *node, int strip_comments) {
+    if (node->ns != TH_NS_HTML || node->attr_count != 0) {
+        return 0;
+    }
+    if (node->atom != TH_TAG_HTML && node->atom != TH_TAG_HEAD && node->atom != TH_TAG_BODY) {
+        return 0;
+    }
+    th_node *first = mini_first_content(node, strip_comments);
+    if (node->atom == TH_TAG_HTML) {
+        return first == NULL || first->type != TH_NODE_COMMENT;
+    }
+    if (node->atom == TH_TAG_HEAD) {
+        return first == NULL || first->type == TH_NODE_ELEMENT;
+    }
+    /* body: omit when empty or when the first thing is not whitespace, a comment, or
+       one of the elements the WHATWG rule keeps the body tag before */
+    if (first == NULL) {
+        return 1;
+    }
+    if (first->type == TH_NODE_COMMENT || mini_starts_with_ws(tree, first)) {
+        return 0;
+    }
+    return !(first->type == TH_NODE_ELEMENT &&
+             (first->atom == TH_TAG_META || first->atom == TH_TAG_LINK || first->atom == TH_TAG_SCRIPT ||
+              first->atom == TH_TAG_STYLE || first->atom == TH_TAG_TEMPLATE));
+}
+
+/* Minified outer serialization. The walk is iterative like serialize_compact,
+   descending through first_child and ascending through parent pointers, with a
+   preserve counter so text inside pre/textarea/listing skips whitespace
+   collapsing. */
+static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_minify_opts *opts,
+                             const th_serialize_opts *st) {
+    th_node *node = root;
+    int preserve = 0;
+    int formatting = 0;
+    int last_was_space =
+        0; /* whether the last byte emitted is a folded space, so a space across a stripped comment is dropped */
+    while (1) {
+        th_node *descend = NULL;
+        switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+        case TH_NODE_ELEMENT:
+            last_was_space = 0;
+            /* the serialization root is what the caller asked to serialize, so its own tags
+               always render (matching the plain serializer); only inner tags may be omitted */
+            if (!(opts->omit_optional_tags && node != root && mini_omit_start_tag(tree, node, opts->strip_comments))) {
+                mini_open_tag(out, tree, node, st, opts->unquote_attributes);
+            }
+            ser_inject_head_meta(out, tree, node, st);
+            if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
+                break; /* void elements have no children or end tag */
+            }
+            if (ser_needs_leading_newline(tree, node)) {
+                sbuf_putc(out, '\n');
+            }
+            if (is_rawtext_element(node)) {
+                for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+                    sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
+                }
+                ser_close_tag(out, node); /* a raw-text element's end tag is never one the optional-tag rules omit */
+                break;
+            }
+            if (node->first_child != NULL) {
+                if (mini_is_preserve_atom(node)) {
+                    preserve++;
+                }
+                if (node->tag_flags & TH_TAG_FORMATTING) {
+                    formatting++;
+                }
+                descend = node->first_child;
+            } else if (!(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
+                ser_close_tag(out, node);
+            }
+            break;
+        case TH_NODE_TEXT:
+            if (opts->collapse_whitespace && preserve == 0) {
+                mini_put_collapsed_text(out, need_text(tree, node), node->text_len, st->formatter, &last_was_space);
+            } else {
+                sbuf_put_text(out, need_text(tree, node), node->text_len, 0, st->formatter);
+                last_was_space = 0;
+            }
+            break;
+        case TH_NODE_COMMENT:
+            if (!opts->strip_comments) {
+                sbuf_puts(out, "<!--");
+                sbuf_put_ucs4(out, node->text, node->text_len);
+                sbuf_puts(out, "-->");
+                last_was_space = 0;
+            }
+            break; /* a stripped comment emits nothing, so last_was_space carries across it */
+        case TH_NODE_DOCTYPE:
+            last_was_space = 0;
+            sbuf_puts(out, "<!DOCTYPE ");
+            sbuf_put_ucs4(out, node->text, doctype_name_len(node));
+            sbuf_putc(out, '>');
+            break;
+        /* GCOVR_EXCL_START: a WHATWG-conformant parse folds a PI to a comment and
+           a CDATA section to text, so the minifier, which only serves parsed
+           trees, never reaches these node types. */
+        case TH_NODE_PI:
+            sbuf_puts(out, "<?");
+            sbuf_put_ucs4(out, node->text, node->text_len);
+            sbuf_putc(out, '>');
+            break;
+        case TH_NODE_CDATA:
+            sbuf_puts(out, "<![CDATA[");
+            sbuf_put_ucs4(out, node->text, node->text_len);
+            sbuf_puts(out, "]]>");
+            break;
+        /* GCOVR_EXCL_STOP */
+        case TH_NODE_CONTENT:
+        case TH_NODE_DOCUMENT:
+            descend = node->first_child; /* a transparent container emits only its children */
+            break;
+        }
+        if (descend != NULL) {
+            node = descend;
+            continue;
+        }
+        while (node != root) {
+            if (node->next_sibling != NULL) {
+                node = node->next_sibling;
+                break;
+            }
+            node = node->parent;
+            if (node->type == TH_NODE_ELEMENT) {
+                if (mini_is_preserve_atom(node)) {
+                    preserve--;
+                }
+                if (node->tag_flags & TH_TAG_FORMATTING) {
+                    formatting--;
+                }
+                if (!(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
+                    ser_close_tag(out, node);
+                    last_was_space = 0;
+                }
+            }
+        }
+        if (node == root) {
+            break;
+        }
+    }
+}
+
+Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *minify, const th_serialize_opts *opts,
+                        Py_ssize_t *out_len) {
+    sbuf out = {NULL, 0, 0, 0};
+    sbuf_presize_for_root(&out, tree, node);
+    serialize_minify(&out, tree, node, minify, opts);
+    return sbuf_finish(&out, out_len);
+}

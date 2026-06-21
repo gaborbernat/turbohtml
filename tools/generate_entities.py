@@ -1,5 +1,5 @@
 """
-Generate src/turbohtml/entity_names.h: the codepoint to named-entity table.
+Generate src/turbohtml/_c/data/entity_names.h: the codepoint to named-entity table.
 
 The NAMED_ENTITIES serializer formatter renders any character that has an HTML
 named reference as ``&name;`` (so U+00E9 becomes ``&eacute;``), matching the
@@ -8,7 +8,7 @@ HTML4 name set, which the standard library exposes as
 ``html.entities.codepoint2name``; this script bakes the same mapping into a C
 table sorted by codepoint for a binary search at serialization time.
 
-Usage:  python tools/generate_entities.py src/turbohtml/entity_names.h
+Usage:  python tools/generate_entities.py src/turbohtml/_c/data/entity_names.h
 """
 
 from __future__ import annotations

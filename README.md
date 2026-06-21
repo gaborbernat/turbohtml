@@ -10,9 +10,9 @@ A fast, fully typed HTML toolkit for Python with a C-accelerated core. turbohtml
 standard library byte for byte, tokenizes markup with a WHATWG-conformant streaming tokenizer, and parses whole
 documents into a navigable element tree you query with CSS selectors, edit in place, build from scratch, serialize back
 to conformant HTML, and export to GitHub-Flavored Markdown or layout-aware plain text. A
-[markupsafe](https://markupsafe.palletsprojects.com)-compatible `turbohtml.markup` covers template autoescaping, and
-`turbohtml.linkify` auto-links URLs and emails the way [bleach](https://github.com/mozilla/bleach) did. Each operation
-runs several times faster than its pure-Python counterpart and supports the free-threaded build.
+[markupsafe](https://markupsafe.palletsprojects.com)-compatible `turbohtml.migration.markupsafe` covers template
+autoescaping, and `turbohtml.linkify` auto-links URLs and emails the way [bleach](https://github.com/mozilla/bleach)
+did. Each operation runs several times faster than its pure-Python counterpart and supports the free-threaded build.
 
 ## Install
 
@@ -51,11 +51,12 @@ print(turbohtml.unescape("caf&eacute; &amp; r&eacute;sum&eacute; &#127881;"))
 `escape` and `unescape` reproduce `html.escape` and `html.unescape` exactly, so turbohtml is a drop-in replacement on
 hot paths.
 
-For template output, `turbohtml.markup` is a markupsafe drop-in: `Markup` marks trusted HTML, and combining it with
-untrusted values escapes them. Swap `from markupsafe import ...` for `from turbohtml.markup import ...`:
+For template output, `turbohtml.migration.markupsafe` is a markupsafe drop-in: `Markup` marks trusted HTML, and
+combining it with untrusted values escapes them. Swap `from markupsafe import ...` for
+`from turbohtml.migration.markupsafe import ...`:
 
 ```python
-from turbohtml.markup import Markup, escape
+from turbohtml.migration.markupsafe import Markup, escape
 
 print(Markup("<li>{}</li>").format("<script>alert(1)</script>"))
 # <li>&lt;script&gt;alert(1)&lt;/script&gt;</li>
@@ -205,7 +206,8 @@ the other C libraries on the read-path benchmarks. Measured with [pyperf](https:
 
 - `escape` and `unescape` match the standard library byte for byte while running several times faster, up to 22× on
   no-op text and 13× on entity-dense input.
-- `turbohtml.markup.escape` matches markupsafe and runs 2–3× faster on the small strings template autoescaping escapes.
+- `turbohtml.migration.markupsafe.escape` matches markupsafe and runs 2–3× faster on the small strings template
+  autoescaping escapes.
 - `turbohtml.linkify` auto-links HTML 5–20× faster than bleach and 6–11× faster than the plain-text
   [linkify-it-py](https://github.com/tsutsu3/linkify-it-py) scanner, which only finds links without rewriting them.
 - `tokenize` is 9–16× faster than `html.parser` wherever markup appears.
