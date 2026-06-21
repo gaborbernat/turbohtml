@@ -40,8 +40,7 @@ def main_tag(html: str) -> str | None:
             id="article-beats-nav-and-footer",
         ),
         pytest.param(
-            f"<div id=main-content><p>{PROSE}</p><p>{PROSE}</p></div>"
-            f"<div class=sidebar><p>{PROSE}</p></div>",
+            f"<div id=main-content><p>{PROSE}</p><p>{PROSE}</p></div><div class=sidebar><p>{PROSE}</p></div>",
             "div",
             id="content-id-beats-sidebar-class",
         ),
@@ -63,7 +62,9 @@ def test_main_content_returns_element() -> None:
 
 
 def test_main_text_renders_the_winner() -> None:
-    text = parse(f"<nav><a href='/'>Home</a></nav><article class=post><h1>Comets</h1><p>{PROSE}</p></article>").main_text()
+    text = parse(
+        f"<nav><a href='/'>Home</a></nav><article class=post><h1>Comets</h1><p>{PROSE}</p></article>"
+    ).main_text()
     assert text.startswith("Comets")
     assert "A comet is an icy" in text
     assert "Home" not in text
