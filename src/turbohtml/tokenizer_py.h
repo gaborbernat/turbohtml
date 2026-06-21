@@ -53,6 +53,7 @@ typedef struct {
     PyObject *minify_type;        /* Minify (a serialize(layout=...) mode) */
     PyObject *indent_type;        /* Indent (a serialize(layout=...) mode) */
     PyObject *pattern_type;       /* re.Pattern, to recognize a compiled-regex filter */
+    PyObject *re_compile;         /* re.compile, to turn a str pattern into a program for re()/re_first() */
     PyObject *markup_type;        /* turbohtml.markup.Markup, stamped onto escape() results */
     PyObject *xpath_string_type;  /* turbohtml._xpath.XPathString, for smart_strings xpath() results */
     PyObject *link_type;          /* turbohtml._links.Link, the (element, attribute, url) record links() yields */

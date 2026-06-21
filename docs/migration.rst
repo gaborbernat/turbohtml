@@ -444,8 +444,10 @@ with the ``libxml2``/gumbo build dependency:
 returns a ``SelectorList`` and you pull *strings* out of it with ``.get()`` / ``.getall()``, using the ``::text`` and
 ``::attr(name)`` pseudo-elements to reach text and attribute values. turbohtml instead returns :class:`~turbohtml.Node`
 objects from :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.xpath`, and you read
-:attr:`~turbohtml.Node.text`, ``attrs``, or :attr:`~turbohtml.Node.html` off each node -- so the non-standard ``::text``
-/ ``::attr()`` pseudo-elements become ordinary attribute and text access.
+:attr:`~turbohtml.Node.text`, :meth:`~turbohtml.Element.attr`, or :attr:`~turbohtml.Node.html` off each node -- so the
+non-standard ``::text`` / ``::attr()`` pseudo-elements become ordinary text and attribute access. The string-extraction
+helpers :meth:`~turbohtml.Node.re` and :meth:`~turbohtml.Node.re_first` carry over directly, including their ``attr``
+keyword for running a pattern over an attribute value instead of the text.
 
 .. list-table::
     :header-rows: 1
@@ -462,28 +464,34 @@ objects from :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.xpath`, a
     - - ``sel.css("a::text").get()``, ``.getall()``
       - ``node.select_one("a").text``, ``[a.text for a in node.select("a")]``
     - - ``sel.css("a::attr(href)").get()``, ``.getall()``
-      - ``node.select_one("a").attrs.get("href")``, ``[a.attrs.get("href") for a in node.select("a")]``
+      - ``node.select_one("a").attr("href")``, ``[a.attr("href") for a in node.select("a")]``
     - - ``sel.xpath("//a/@href").getall()``
       - ``node.xpath("//a/@href")``
     - - ``sel.attrib``
       - ``node.attrs``
     - - ``sel.re(pattern)``, ``sel.re_first(pattern)``
-      - ``re`` over ``node.text`` (use Python's :mod:`re` directly)
+      - ``node.re(pattern)``, ``node.re_first(pattern)``
+    - - ``sel.css("a::attr(href)").re(pattern)``
+      - ``node.select_one("a").re(pattern, attr="href")``
     - - ``sel.root`` (an lxml element)
       - the :class:`~turbohtml.Node` itself
 
 .. testcode::
 
     doc = parse('<a href="/x">home</a><a href="/y">about</a>')
-    print([a.attrs.get("href") for a in doc.select("a")])
+    print([a.attr("href") for a in doc.select("a")])
     print(doc.select_one("a").text)
     print(doc.xpath("//a/@href"))
+    print([a.re_first(r"\w+") for a in doc.select("a")])
+    print(doc.select_one("a").re_first(r"/(\w+)", attr="href"))
 
 .. testoutput::
 
     ['/x', '/y']
     home
     ['/x', '/y']
+    ['home', 'about']
+    x
 
 Performance
 ===========
@@ -498,14 +506,15 @@ Pitfalls
 ========
 
 - parsel's ``::text`` and ``::attr()`` pseudo-elements are not CSS standard and turbohtml does not parse them; read
-  :attr:`~turbohtml.Node.text` and ``attrs`` off the selected node instead.
-- ``.get()`` / ``.getall()`` return strings; turbohtml returns nodes, so choose ``.text``, ``.html``, or an attribute
-  explicitly per call.
+  :attr:`~turbohtml.Node.text` and :meth:`~turbohtml.Element.attr` off the selected node instead.
+- ``.get()`` / ``.getall()`` return strings; turbohtml returns nodes, so choose ``.text``, ``.html``,
+  :meth:`~turbohtml.Element.attr`, or :meth:`~turbohtml.Node.re` explicitly per call.
 - A turbohtml ``xpath("//a/@href")`` already yields the attribute *values* as strings, so there is no ``.getall()`` to
   chain.
-- parsel's regex-on-selection convenience (``.re()`` / ``.re_first()``) and its JSON/JMESPath selectors
-  (``Selector(...).jmespath(...)``) are not ported; run Python's :mod:`re` over :attr:`~turbohtml.Node.text` and
-  :mod:`json`/``jmespath`` over parsed JSON yourself.
+- :meth:`~turbohtml.Node.re` and :meth:`~turbohtml.Node.re_first` mirror parsel's regex helpers but run over one node at
+  a time rather than a whole ``SelectorList``; map them across :meth:`~turbohtml.Node.select` to cover every match.
+  parsel's JSON/JMESPath selectors (``Selector(...).jmespath(...)``) are not ported; run :mod:`json`/``jmespath`` over
+  parsed JSON yourself.
 
 ***************
  From html5lib
