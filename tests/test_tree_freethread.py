@@ -106,6 +106,8 @@ def test_concurrent_reads_and_bulk_wrap_is_memory_safe() -> None:
 
     _run(reader, child_wrapper, sibling_wrapper)
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent wrapping
+
+
 def test_concurrent_main_content_extraction_is_memory_safe() -> None:
     paragraphs = "".join(
         f"<p>Paragraph {index}, a clause, with prose, holds enough words to score as real content here.</p>"
