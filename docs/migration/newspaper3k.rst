@@ -1,6 +1,6 @@
-#################
+##################
  From newspaper3k
-#################
+##################
 
 .. image:: https://static.pepy.tech/badge/newspaper3k
     :alt: newspaper3k downloads

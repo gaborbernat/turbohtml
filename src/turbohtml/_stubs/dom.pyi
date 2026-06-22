@@ -4,7 +4,7 @@ from enum import Enum, IntEnum
 from re import Pattern
 from typing import Literal, TypeAlias, final
 
-from turbohtml._article import Article
+from turbohtml._article import Article as Article
 from turbohtml._links import Link
 from turbohtml._structured_data import JSONValue, MicrodataItem, StructuredData
 

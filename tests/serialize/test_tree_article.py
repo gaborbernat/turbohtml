@@ -31,7 +31,7 @@ def test_returns_article_record() -> None:
 def test_no_content_yields_none_element_and_empty_text() -> None:
     art = parse("<title>Just a title</title><p>Too short.</p>").article()
     assert art.element is None
-    assert art.text == ""
+    assert not art.text
     assert art.title == "Just a title"
 
 
@@ -147,7 +147,9 @@ def test_byline_skips_anchor_without_rel() -> None:
 
 
 def test_empty_rel_author_link_falls_through_to_meta() -> None:
-    art = parse(f"<head><meta name=author content='Meta'></head><body><a rel=author href='/u'></a>{BODY}</body>").article()
+    art = parse(
+        f"<head><meta name=author content='Meta'></head><body><a rel=author href='/u'></a>{BODY}</body>"
+    ).article()
     assert art.byline == "Meta"
 
 
@@ -186,7 +188,9 @@ def test_valueless_datetime_falls_back_to_time_text() -> None:
 
 
 def test_date_empty_time_falls_through_to_meta() -> None:
-    html = f"<html><head><meta name=date content='2016-01-01'></head><body><time datetime=''> </time>{BODY}</body></html>"
+    html = (
+        f"<html><head><meta name=date content='2016-01-01'></head><body><time datetime=''> </time>{BODY}</body></html>"
+    )
     assert parse(html).article().date == "2016-01-01"
 
 

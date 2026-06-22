@@ -37,4 +37,11 @@ candidate set is just the parents and grandparents of scored paragraphs). It tou
 chosen, at which point the binding (holding the same per-tree critical section the other walks use) wraps that one node,
 or renders its text for :meth:`~turbohtml.Node.main_text`. Two threads extracting from two trees never interfere.
 
-:meth:`~turbohtml.Node.article` builds on that walk to fill the rest of trafilatura's and newspaper3k's contract. After the content body is scored it harvests the page metadata -- title, byline, date, description and language -- in the same pure-C pass over the arena: the title from the first ``<h1>``, then an ``og:title``, then ``<title>``; the byline from a ``rel="author"`` link or an author meta; the date from a ``<time>``, an ``article:published_time``, or a common date meta (the htmldate use case); the description from ``og:description`` or a ``description`` meta; and the language from ``<html lang>``. Each field takes the first source that supplies a non-empty value, and the values are whitespace-folded before any Python string is built. This is harvesting declared metadata, not inference: the ``lang`` field reports the document's own ``<html lang>`` attribute and does *not* detect the language from the prose, which stays out of scope.
+:meth:`~turbohtml.Node.article` builds on that walk to fill the rest of trafilatura's and newspaper3k's contract. After
+the content body is scored it harvests the page metadata -- title, byline, date, description and language -- in the same
+pure-C pass over the arena: the title from the first ``<h1>``, then an ``og:title``, then ``<title>``; the byline from a
+``rel="author"`` link or an author meta; the date from a ``<time>``, an ``article:published_time``, or a common date
+meta (the htmldate use case); the description from ``og:description`` or a ``description`` meta; and the language from
+``<html lang>``. Each field takes the first source that supplies a non-empty value, and the values are whitespace-folded
+before any Python string is built. This is harvesting declared metadata, not inference: the ``lang`` field reports the
+document's own ``<html lang>`` attribute and does *not* detect the language from the prose, which stays out of scope.
