@@ -65,7 +65,9 @@ def test_sibling_positions_keep_argument_order(position: str) -> None:
     element.insert_adjacent_html(position, "<a></a><b></b>")
     parent = element.parent
     assert parent is not None
-    expected = "<ul><a></a><b></b><li>one</li></ul>" if position == "beforebegin" else "<ul><li>one</li><a></a><b></b></ul>"
+    expected = (
+        "<ul><a></a><b></b><li>one</li></ul>" if position == "beforebegin" else "<ul><li>one</li><a></a><b></b></ul>"
+    )
     assert parent.html == expected
 
 

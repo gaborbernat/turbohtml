@@ -104,9 +104,9 @@ node, or to the last sibling), so ``query("p").wrap_all("<div/>")`` over a run o
 
 pyquery's content setters -- ``.html(markup)`` reparses a matched element's children and ``.text(s)`` replaces them with
 one verbatim text node -- map onto three element methods. :meth:`~turbohtml.Element.set_inner_html` parses the markup as
-a fragment in the element's context and replaces its children; :meth:`~turbohtml.Element.set_text` replaces them with one
-verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` splices a parsed fragment at a DOM position (the
-``.append(markup)`` / ``insertAdjacentHTML`` shape):
+a fragment in the element's context and replaces its children; :meth:`~turbohtml.Element.set_text` replaces them with
+one verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` splices a parsed fragment at a DOM position
+(the ``.append(markup)`` / ``insertAdjacentHTML`` shape):
 
 .. list-table::
     :header-rows: 1
