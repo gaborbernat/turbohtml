@@ -33,6 +33,10 @@ from ._html import (
     unescape,
 )
 from ._links import Link  # registers the Link record type with the C core on import
+from ._structured_data import (  # registers the JSON-LD parser and record classes with the C core on import
+    MicrodataItem,
+    StructuredData,
+)
 from ._xpath import XPathString  # registers the smart-string type with the C core on import
 
 __version__ = version("turbohtml")
@@ -50,11 +54,13 @@ __all__ = [
     "IncrementalParser",
     "Indent",
     "Link",
+    "MicrodataItem",
     "Minify",
     "Namespace",
     "Node",
     "ParseError",
     "ProcessingInstruction",
+    "StructuredData",
     "Text",
     "Token",
     "TokenType",

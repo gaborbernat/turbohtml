@@ -23,6 +23,7 @@ treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
     w3lib
     selectolax
     parsel
+    extruct
     pyquery
     inscriptis
     resiliparse

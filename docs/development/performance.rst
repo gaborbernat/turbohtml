@@ -9,8 +9,8 @@ source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript spec
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
 suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``,
-``edit``, ``chain``, ``htmlparser``, ``markup``, ``linkify``, ``markdown``, or ``sanitize``. Numbers vary with input and
-hardware.
+``edit``, ``chain``, ``htmlparser``, ``markup``, ``linkify``, ``markdown``, ``sanitize``, or ``structured``. Numbers
+vary with input and hardware.
 
 **********
  Escaping
@@ -228,6 +228,30 @@ builds an lxml tree and a CSS model in Python, where turbohtml does the whole la
 
 The ``annotated`` row labels matching elements with spans through :meth:`~turbohtml.Node.to_annotated_text` against
 inscriptis's ``get_annotated_text``.
+
+*****************
+ Structured data
+*****************
+
+:meth:`turbohtml.Document.structured_data` against `extruct <https://github.com/scrapinghub/extruct>`_, the scraper
+toolkit it succeeds, extracting JSON-LD, Microdata, and OpenGraph from a product page that carries all three. Both start
+from the raw HTML string, so each parses first; extruct builds an lxml tree and runs a separate extractor per syntax,
+where turbohtml parses to the WHATWG tree and gathers every format in one C walk, handing back the typed
+:class:`~turbohtml.StructuredData` record. The single pass runs roughly nine to eleven times faster.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 28 28
+
+    - - input
+      - turbohtml
+      - extruct
+    - - product page
+      - 5.4 µs
+      - 59.0 µs
+    - - catalog (8 KiB)
+      - 54.5 µs
+      - 494.9 µs
 
 ************
  Unescaping

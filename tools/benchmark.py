@@ -11,7 +11,8 @@ table: escape, unescape, and tokenize against the standard library (unescape als
 against w3lib's replace_entities), parse against the other HTML tree builders
 (lxml, selectolax, resiliparse, html5lib, and BeautifulSoup), the
 read-path query and serialize suites against lxml, selectolax, and BeautifulSoup,
-and the xpath suite against lxml, the only other library with an XPath engine.
+the xpath suite against lxml, the only other library with an XPath engine, and the
+structured suite (JSON-LD / Microdata / OpenGraph extraction) against extruct.
 
 The escape and unescape inputs span tiny strings (call overhead) and multi-MiB
 documents that stream well past the CPU caches: real corpora (Project
@@ -63,6 +64,13 @@ try:
     import html5_parser  # gumbo-backed WHATWG parser, returns an lxml tree, no type stubs
 except (ImportError, RuntimeError):
     html5_parser = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
+# extruct is the JSON-LD / Microdata / OpenGraph extractor turbohtml.structured_data() succeeds; it builds an lxml tree
+# and runs one extractor per syntax. Optional so the structured suite still runs (turbohtml-only) without it.
+try:
+    import extruct  # structured-data extractor over lxml, no type stubs
+except ImportError:
+    extruct = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
 
 import turbohtml
 from turbohtml import sanitizer as turbo_sanitizer
@@ -1251,6 +1259,66 @@ def print_sanitize_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+def turbo_structured(text: str) -> None:
+    """Extract JSON-LD, Microdata, and OpenGraph from a page with turbohtml (parse plus one C walk)."""
+    turbohtml.parse(text).structured_data()
+
+
+def extruct_structured(text: str) -> None:
+    """Extract the same three formats with extruct, which builds an lxml tree and runs one extractor per syntax."""
+    extruct.extract(text, syntaxes=["json-ld", "microdata", "opengraph"])
+
+
+STRUCTURED_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_structured),
+    *((("extruct", extruct_structured),) if extruct is not None else ()),
+)
+
+# A product page carrying all three formats at once: an OpenGraph/Twitter meta block, a JSON-LD Product script, and an
+# equivalent Microdata subtree. The larger case tiles it so the walk has real depth to cover.
+_STRUCTURED_PAGE = (
+    '<head><meta property="og:title" content="Widget"><meta property="og:type" content="product">'
+    '<meta property="og:image" content="https://x/i.png"><meta name="twitter:card" content="summary"></head>'
+    '<body><script type="application/ld+json">'
+    '{"@context": "https://schema.org", "@type": "Product", "name": "Widget", "sku": "W-1", '
+    '"offers": {"@type": "Offer", "price": "9.99", "priceCurrency": "USD", "availability": "InStock"}}</script>'
+    '<div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Widget</span>'
+    '<meta itemprop="sku" content="W-1"><div itemprop="offers" itemscope itemtype="https://schema.org/Offer">'
+    '<span itemprop="price">9.99</span><meta itemprop="priceCurrency" content="USD">'
+    '<link itemprop="availability" href="https://schema.org/InStock"></div></div></body>'
+)
+
+STRUCTURED_CASES: tuple[tuple[str, str], ...] = (
+    ("product", _STRUCTURED_PAGE),
+    ("catalog 8 KiB", _STRUCTURED_PAGE * 12),
+)
+
+
+def run_structured_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark structured-data extraction against extruct; return the case names."""
+    for name, text in STRUCTURED_CASES:
+        for label, run in STRUCTURED_LIBS:
+            bench(f"structured {name} [{label}]", run, text)
+    return [name for name, _ in STRUCTURED_CASES]
+
+
+def print_structured_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's structured_data() beside extruct and the speedup factor."""
+    if not cases:
+        return
+    others = [label for label, _ in STRUCTURED_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'structured benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"structured {name} [turbohtml]"]
+        row = f"{'structured ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"structured {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
     """Benchmark one read-path operation (find/select/serialize) across every library."""
     names: list[str] = []
@@ -1580,6 +1648,7 @@ def main() -> None:
             "linkify",
             "markdown",
             "sanitize",
+            "structured",
             [],
         ],
         help="suites to run (default: all)",
@@ -1593,7 +1662,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,linkify,markdown,sanitize",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,linkify,markdown,sanitize,structured",
         ).split(",")
     )
     means: dict[str, float] = {}
@@ -1617,6 +1686,8 @@ def main() -> None:
         run_markdown_suite(bench)
     if "sanitize" in suites:
         run_sanitize_suite(bench)
+    if "structured" in suites:
+        run_structured_suite(bench)
     if args.worker or not means:
         return
     print_table(means, rows)
@@ -1633,6 +1704,7 @@ def main() -> None:
     print_markdown_table(means, MARKDOWN_CASE_NAMES if "markdown" in suites else [])
     print_text_table(means, TEXT_CASE_NAMES if "markdown" in suites else [])
     print_sanitize_table(means, [n for n, _ in SANITIZE_CASES] if "sanitize" in suites else [])
+    print_structured_table(means, [n for n, _ in STRUCTURED_CASES] if "structured" in suites else [])
 
 
 if __name__ == "__main__":

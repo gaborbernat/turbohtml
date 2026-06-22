@@ -66,6 +66,18 @@ PyObject *turbohtml_node_links(PyObject *owner, struct th_tree *tree, struct th_
 PyObject *turbohtml_node_rewrite_links(PyObject *owner, struct th_tree *tree, struct th_node *root, PyObject *replace);
 PyObject *turbohtml_node_resolve_links(PyObject *owner, struct th_tree *tree, struct th_node *root, PyObject *base_url);
 
+/* Implemented in features/structured_data.c, the engine behind the Document.structured_data()/json_ld()/opengraph()/
+   microdata() methods (wired into the document method table in dom/document.c). Each gathers one structured-data format
+   from the document in a pure-C tree walk under the per-tree critical section and matches METH_NOARGS; json_ld()
+   gathers the raw <script type=application/ld+json> texts and parses them through the Python facade. structured_data()
+   and microdata() hand their gathered fields to the StructuredData / MicrodataItem record classes the facade defines.
+   _register_structured_data (METH_VARARGS) stores the JSON-LD parser and those two classes. */
+PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *unused);
+PyObject *turbohtml_document_json_ld(PyObject *self, PyObject *unused);
+PyObject *turbohtml_document_opengraph(PyObject *self, PyObject *unused);
+PyObject *turbohtml_document_microdata(PyObject *self, PyObject *unused);
+PyObject *turbohtml_register_structured_data(PyObject *module, PyObject *args);
+
 /* Implemented in tokenizer/tokenizer.c. tokenize() matches METH_VARARGS | METH_KEYWORDS;
    the internal conformance hook _tokenize_states matches METH_VARARGS. */
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *args, PyObject *kwargs);
