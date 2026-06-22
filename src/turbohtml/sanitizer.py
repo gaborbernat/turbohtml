@@ -82,17 +82,25 @@ class Policy:
     """
     An immutable, thread-safe description of what sanitizing keeps.
 
-    Build one and reuse it across threads. ``tags`` is the allowed element set and ``attributes`` maps a tag (or
-    ``"*"`` for every tag) to its allowed attribute names (a ``"*"`` inside a set allows every name). ``url_schemes`` is
-    the allowlist for URL-bearing attributes; ``attribute_filter`` is an optional last word over every surviving
-    attribute, returning a replacement value or ``None`` to drop it. ``set_attributes`` maps a tag to attribute values
-    forced onto every kept instance of it (added if absent, overwritten if present) -- the one thing
-    ``attribute_filter`` cannot do, since it only sees attributes already there. ``remove_with_content`` names
-    disallowed tags whose whole subtree is dropped (e.g. ``script``/``style``) rather than escaped or stripped, so their
-    text never leaks into the output. When ``style`` is an allowed attribute, its value is scrubbed against
-    ``css_properties``: each declaration whose property name is not in the set is dropped, so dangerous CSS cannot ride
-    in on a kept ``style``. The baseline-unsafe set and the event-handler and bad-scheme stripping are not configurable,
-    so any policy is safe.
+    Build one and reuse it across threads. Whatever a policy allows, a non-configurable baseline still removes the
+    unsafe element set, event-handler attributes, and dangerous URL schemes, so every policy is safe by construction.
+
+    :param tags: the allowed element set; any tag outside it is handled per ``on_disallowed_tag``.
+    :param attributes: allowed attribute names keyed by tag (``"*"`` as the key matches every tag, and ``"*"`` inside a
+        set allows every name).
+    :param url_schemes: the allowlist for URL-bearing attributes such as ``href`` and ``src``.
+    :param allow_relative_urls: keep relative (scheme-less) URLs, which carry no scheme to check.
+    :param on_disallowed_tag: how to treat a tag not in ``tags`` (:class:`OnDisallowed`: escape, strip, or remove).
+    :param strip_comments: drop HTML comments from the output.
+    :param add_link_rel: ``rel`` tokens forced onto every kept ``<a href>`` (e.g. ``noopener``).
+    :param attribute_filter: an optional last word over every surviving attribute, returning a replacement value or
+        ``None`` to drop it.
+    :param set_attributes: attribute values forced onto every kept instance of a tag (added if absent, overwritten if
+        present); unlike ``attribute_filter``, this can add attributes that were not there.
+    :param remove_with_content: disallowed tags whose whole subtree is dropped (e.g. ``script``/``style``) rather than
+        escaped or stripped, so their text never leaks into the output.
+    :param css_properties: when ``style`` is allowed, its value is scrubbed against this set and any declaration whose
+        property name is not in it is dropped, so dangerous CSS cannot ride in on a kept ``style``.
     """
 
     tags: frozenset[str] = DEFAULT_TAGS
@@ -110,17 +118,29 @@ class Policy:
 
     @classmethod
     def strict(cls) -> Policy:
-        """Allow no markup at all: every tag is escaped to text and every attribute dropped."""
+        """
+        Allow no markup at all: every tag is escaped to text and every attribute dropped.
+
+        :returns: the strict policy.
+        """
         return cls(tags=frozenset(), attributes=MappingProxyType({}))
 
     @classmethod
     def basic(cls) -> Policy:
-        """Allow bleach's default 12-tag set, for migration parity."""
+        """
+        Allow bleach's default 12-tag set, for migration parity.
+
+        :returns: the basic policy.
+        """
         return cls()
 
     @classmethod
     def relaxed(cls) -> Policy:
-        """Allow the richer set typical user-generated content needs: headings, tables, images, and figures."""
+        """
+        Allow the richer set typical user-generated content needs: headings, tables, images, and figures.
+
+        :returns: the relaxed policy.
+        """
         return cls(
             tags=frozenset(_RELAXED_TAGS),
             attributes=_RELAXED_ATTRIBUTES,
@@ -129,17 +149,26 @@ class Policy:
 
 
 class Sanitizer:
-    """A reusable sanitizer; build it once from a :class:`Policy` and call :meth:`sanitize` from any thread."""
+    """
+    A reusable sanitizer; build it once from a :class:`Policy` and call :meth:`sanitize` from any thread.
+
+    :param policy: the policy to enforce; None uses bleach's default allowlist.
+    """
 
     def __init__(self, policy: Policy | None = None) -> None:
-        """Compile a policy into the form the C walk consumes, defaulting to bleach's allowlist."""
+        """Compile a policy into the form the C walk consumes."""
         self.policy = policy if policy is not None else Policy()
         self._attributes = dict(self.policy.attributes)
         self._link_rel = " ".join(sorted(self.policy.add_link_rel)) or None
         self._set_attributes = {tag: dict(values) for tag, values in self.policy.set_attributes.items()}
 
     def sanitize(self, html: str) -> str:
-        """Sanitize an HTML fragment and return safe HTML."""
+        """
+        Sanitize an HTML fragment.
+
+        :param html: the untrusted HTML fragment.
+        :returns: the sanitized, safe HTML.
+        """
         policy = self.policy
         root = parse_fragment(html)
         _sanitize(
@@ -160,7 +189,13 @@ class Sanitizer:
 
 
 def sanitize(html: str, policy: Policy | None = None) -> str:
-    """Sanitize an HTML fragment against ``policy`` (bleach's allowlist by default) and return safe HTML."""
+    """
+    Sanitize an HTML fragment against a policy.
+
+    :param html: the untrusted HTML fragment.
+    :param policy: the policy to enforce; None uses bleach's default allowlist.
+    :returns: the sanitized, safe HTML.
+    """
     return Sanitizer(policy).sanitize(html)
 
 

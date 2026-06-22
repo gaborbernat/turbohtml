@@ -39,12 +39,11 @@ The documentation follows the `Diátaxis <https://diataxis.fr>`_ framework.
 .. toctree::
     :maxdepth: 1
 
-    tutorials
-    how-to
-    migration
+    tutorials/index
+    how-to/index
+    migration/index
     reference
-    explanation
-    performance
-    development
+    explanation/index
+    development/index
     changelog
     license

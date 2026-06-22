@@ -23,6 +23,7 @@ py.extension_module(
         'src/turbohtml/_c/tokenizer/token.c',
         'src/turbohtml/_c/tokenizer/tokenizer.c',
         'src/turbohtml/_c/dom/tree.c',
+        'src/turbohtml/_c/dom/mutate.c',
         'src/turbohtml/_c/dom/binding.c',
         'src/turbohtml/_c/dom/node.c',
         'src/turbohtml/_c/dom/element.c',
@@ -65,6 +66,18 @@ py.install_sources(
         'src/turbohtml/py.typed',
     ],
     subdir: 'turbohtml',
+)
+
+py.install_sources(
+    [
+        'src/turbohtml/_stubs/__init__.pyi',
+        'src/turbohtml/_stubs/dom.pyi',
+        'src/turbohtml/_stubs/features.pyi',
+        'src/turbohtml/_stubs/query.pyi',
+        'src/turbohtml/_stubs/serialize.pyi',
+        'src/turbohtml/_stubs/tokenizer.pyi',
+    ],
+    subdir: 'turbohtml/_stubs',
 )
 
 py.install_sources(

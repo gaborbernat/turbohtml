@@ -22,15 +22,26 @@ if TYPE_CHECKING:
 # isinstance(result, str) must hold for callers, and the C core builds the value
 # through str.__new__, so this stays a real str subclass (FURB189 suppressed).
 class XPathString(str):  # noqa: FURB189
-    """A string xpath result that remembers the element it came from."""
+    """
+    A string xpath result that remembers the element it came from.
+
+    :param value: the string value itself, the attribute or ``text()`` result.
+    :param parent: the element the value was selected from, returned by :meth:`getparent`.
+    :param is_attribute: whether the value came from an attribute rather than element text.
+    :param attrname: the attribute name the value came from, or ``None`` for a text value.
+    """
 
     __slots__ = ("_parent", "attrname", "is_attribute", "is_tail", "is_text")
 
     _parent: Element
     is_attribute: bool
+    """Whether the value was selected from an attribute."""
     is_text: bool
+    """Whether the value was selected from element text."""
     is_tail: bool
+    """Whether the value is tail text; always False, kept for lxml compatibility."""
     attrname: str | None
+    """The attribute name the value came from, or None for a text value."""
 
     def __new__(cls, value: str, parent: Element, is_attribute: bool, attrname: str | None) -> Self:  # noqa: FBT001
         self = str.__new__(cls, value)
