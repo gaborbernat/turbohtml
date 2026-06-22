@@ -30,6 +30,9 @@ treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
     inscriptis
     html-text
     resiliparse
+    trafilatura
+    newspaper3k
+    readability-lxml
     html-sanitizer
     html5-parser
     pandas

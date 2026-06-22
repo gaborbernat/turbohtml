@@ -324,6 +324,64 @@ result:
 
     None
 
+***********************************
+ Extract the article with metadata
+***********************************
+
+:meth:`~turbohtml.Node.article` returns an :class:`~turbohtml.Article` record: the scored content element and its plain
+text, plus the page metadata harvested beside it -- ``title``, ``byline``, ``date``, ``description`` and ``lang``. This
+is the one call that replaces trafilatura or newspaper3k, and folds in the publication-date lookup (the htmldate use
+case):
+
+.. testcode::
+
+    import turbohtml
+    page = turbohtml.parse(
+        "<html lang='en'>"
+        "<head><title>Comets — Astronomy Today</title>"
+        "<meta property='og:description' content='A short guide to comets and their tails.'>"
+        "<meta property='article:published_time' content='2024-05-06'></head>"
+        "<body><article class='post'>"
+        "<h1>Comets</h1>"
+        "<p>By <a rel='author' href='/u/ada'>Ada Lovelace</a></p>"
+        "<p>A comet is an icy body that releases gas, forming a visible tail, as it nears the Sun.</p>"
+        "<p>The tail always points away from the Sun, pushed out by the solar wind and radiation.</p>"
+        "</article></body></html>"
+    )
+    art = page.article()
+    print(art.title)
+    print(art.byline)
+    print(art.date)
+    print(art.description)
+    print(art.lang)
+    print(art.element.tag)
+
+.. testoutput::
+
+    Comets
+    Ada Lovelace
+    2024-05-06
+    A short guide to comets and their tails.
+    en
+    article
+
+Each field is harvested from the first source that supplies it, so a partial page still yields what it can. ``title``
+prefers the first ``<h1>``, then ``og:title``, then ``<title>``; ``byline`` a ``rel="author"`` link, then a ``author``
+meta, then ``article:author``; ``date`` a ``<time>`` (its ``datetime`` or text), then ``article:published_time``, then a
+common date meta; ``description`` ``og:description`` then a ``description`` meta; and ``lang`` the ``<html lang>``
+attribute. A field with no source is ``None``, and a page with no article body leaves ``element`` ``None`` and ``text``
+empty while the metadata is still filled:
+
+.. testcode::
+
+    bare = turbohtml.parse("<html lang='fr'><head><title>Sommaire</title></head><body><p>x</p></body></html>")
+    art = bare.article()
+    print(art.element, repr(art.text), art.title, art.lang)
+
+.. testoutput::
+
+    None '' Sommaire fr
+
 To turn those spans into something printable, pass the returned ``(text, labels)`` pair to one of the two output
 processors. :func:`turbohtml.annotation_surface` groups each label's matched substrings into a dict, in document order,
 the surface forms an NLP or information-extraction pipeline consumes:

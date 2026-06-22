@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from importlib.metadata import version
 
+from ._article import Article  # registers the Article record type with the C core on import
 from ._html import (
     Axis,
     CData,
@@ -45,6 +46,7 @@ __version__ = version("turbohtml")
 """The installed package version."""
 
 __all__ = [
+    "Article",
     "Axis",
     "CData",
     "Comment",

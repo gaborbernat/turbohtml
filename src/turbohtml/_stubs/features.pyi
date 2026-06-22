@@ -19,6 +19,7 @@ def _register_structured_data(
     structured_data: type[StructuredData],
     /,
 ) -> None: ...
+def _register_article(article_type: type, /) -> None: ...
 def _sanitize(
     element: Element,
     tags: frozenset[str],

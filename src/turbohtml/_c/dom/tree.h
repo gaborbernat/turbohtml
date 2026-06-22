@@ -371,6 +371,35 @@ Py_UCS4 *th_node_layout_text(th_tree *tree, th_node *node, const text_opts *opt,
    th_node_layout_text) afterwards. The engine for Node.main_content()/main_text(). */
 th_node *th_node_main_content(th_tree *tree, th_node *root);
 
+/* The page-level article metadata Node.article() returns beside the content body:
+   each field is a freshly PyMem-allocated, whitespace-normalized code-point buffer
+   (NULL with a zero length when the source is absent), harvested in pure C from the
+   document the content sits in -- title from <h1> / og:title / <title>, byline from
+   a rel=author link / meta author / article:author, date from <time> / article:
+   published_time / a common date meta, description from og:description / meta
+   description, and lang from <html lang>. The caller holds the per-tree critical
+   section, materializes each buffer into a str (or None), then th_article_meta_clear
+   frees them. */
+typedef struct {
+    Py_UCS4 *title;
+    Py_ssize_t title_len;
+    Py_UCS4 *byline;
+    Py_ssize_t byline_len;
+    Py_UCS4 *date;
+    Py_ssize_t date_len;
+    Py_UCS4 *description;
+    Py_ssize_t description_len;
+    Py_UCS4 *lang;
+    Py_ssize_t lang_len;
+} th_article_meta;
+
+/* Fill meta by harvesting the article metadata fields from root (the document the
+   content body belongs to). Pure C; the caller holds the per-tree critical section. */
+void th_article_metadata(th_tree *tree, th_node *root, th_article_meta *meta);
+
+/* Free every buffer th_article_metadata allocated into meta. */
+void th_article_meta_clear(th_article_meta *meta);
+
 /* One annotation rule (the inscriptis annotation_rules surface): match an element
    by tag and, optionally, by an attribute whose value contains a token, and
    attach its labels to the element's text span. any_tag matches every tag (the

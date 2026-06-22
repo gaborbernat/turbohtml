@@ -36,3 +36,8 @@ shape), so there is no text/tail split.
 
 .. autoclass:: Link
     :members:
+
+:meth:`Node.article` returns an :class:`Article` record: the scored content body and the page metadata harvested beside it.
+
+.. autoclass:: Article
+    :members:

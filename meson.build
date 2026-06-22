@@ -59,6 +59,7 @@ py.extension_module(
 py.install_sources(
     [
         'src/turbohtml/__init__.py',
+        'src/turbohtml/_article.py',
         'src/turbohtml/_html.pyi',
         'src/turbohtml/_links.py',
         'src/turbohtml/_structured_data.py',
