@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import TypeAlias
 
-    TextFilter: TypeAlias = "str | re.Pattern[str] | Callable[[str | None], bool]"
+    TextFilter: TypeAlias = str | re.Pattern[str] | Callable[[str | None], bool]
 
 _DOC = (
     "<section>"

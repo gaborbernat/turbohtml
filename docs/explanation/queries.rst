@@ -33,27 +33,27 @@ node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_al
 predicate adds the same grammar over each element's collected text, the search ``bs4`` spelled ``find(string=...)``.
 Because a regex or callable ``text`` predicate runs Python mid-walk -- which suspends the per-tree lock -- the C side
 snapshots the candidate elements and their gathered text under the lock first, then runs the predicate over that
-snapshot, so a concurrent mutation can never tear the walk.
-:meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.select_one` run a native CSS matcher covering type, id, class,
-attribute, the four combinators, the structural pseudo-classes (including ``:nth-child(An+B of S)``, which indexes only
-the siblings matching ``S``), the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, and the
-``:scope``, form/UI (``:checked``, ``:disabled``, ``:default``, ...), ``:lang()`` and ``:dir()`` pseudo-classes a static
-tree can determine. :meth:`~turbohtml.Node.matches` and :meth:`~turbohtml.Node.closest` test a node in place. ``:is()``
-and ``:where()`` parse their argument as a forgiving selector list (a bad arm is dropped, the rest stay usable), while
-``:not()`` and ``:has()`` take a real list where any bad arm is an error, as the Selectors standard specifies. The
-pseudo-classes that depend on live interaction or navigation state (``:hover``, ``:focus``, ``:target``, ``:visited``,
-``:link``, ...) parse but match nothing, since a parsed document has no such state. Selectors compile against the tree,
-so a tag or attribute name resolves to the same interned atom the parser assigned and each match is an integer compare.
-Compiling against the tree also captures its document mode, so ``#id`` and ``.class`` fold ASCII case in a quirks-mode
-document and compare exactly otherwise, as the Selectors standard requires. :meth:`~turbohtml.Node.xpath`,
-:meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` evaluate XPath 1.0 over the same model: a
-native-C engine compiles each expression once into an immutable, per-tree-cached program, resolves name tests to
-interned atoms, and collapses the ``//`` abbreviation to a single ``descendant`` walk, so the structural axes,
-predicates, operators, unions, and the core function library run at lxml's speed. The core API stays
-one-name-per-concept and returns plain lists, so the jQuery-style chaining pyquery users expect lives in an optional
-Python-side wrapper, :class:`turbohtml.query.Query`, whose traversal and mutation methods each return a wrapper. Output
-runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`,
-WHATWG-conformant by default with the escaping selectable through :class:`~turbohtml.Formatter`.
+snapshot, so a concurrent mutation can never tear the walk. :meth:`~turbohtml.Node.select` and
+:meth:`~turbohtml.Node.select_one` run a native CSS matcher covering type, id, class, attribute, the four combinators,
+the structural pseudo-classes (including ``:nth-child(An+B of S)``, which indexes only the siblings matching ``S``), the
+``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, and the ``:scope``, form/UI (``:checked``,
+``:disabled``, ``:default``, ...), ``:lang()`` and ``:dir()`` pseudo-classes a static tree can determine.
+:meth:`~turbohtml.Node.matches` and :meth:`~turbohtml.Node.closest` test a node in place. ``:is()`` and ``:where()``
+parse their argument as a forgiving selector list (a bad arm is dropped, the rest stay usable), while ``:not()`` and
+``:has()`` take a real list where any bad arm is an error, as the Selectors standard specifies. The pseudo-classes that
+depend on live interaction or navigation state (``:hover``, ``:focus``, ``:target``, ``:visited``, ``:link``, ...) parse
+but match nothing, since a parsed document has no such state. Selectors compile against the tree, so a tag or attribute
+name resolves to the same interned atom the parser assigned and each match is an integer compare. Compiling against the
+tree also captures its document mode, so ``#id`` and ``.class`` fold ASCII case in a quirks-mode document and compare
+exactly otherwise, as the Selectors standard requires. :meth:`~turbohtml.Node.xpath`, :meth:`~turbohtml.Node.xpath_one`,
+and :meth:`~turbohtml.Node.xpath_iter` evaluate XPath 1.0 over the same model: a native-C engine compiles each
+expression once into an immutable, per-tree-cached program, resolves name tests to interned atoms, and collapses the
+``//`` abbreviation to a single ``descendant`` walk, so the structural axes, predicates, operators, unions, and the core
+function library run at lxml's speed. The core API stays one-name-per-concept and returns plain lists, so the
+jQuery-style chaining pyquery users expect lives in an optional Python-side wrapper, :class:`turbohtml.query.Query`,
+whose traversal and mutation methods each return a wrapper. Output runs back through :attr:`~turbohtml.Node.html`,
+:meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping
+selectable through :class:`~turbohtml.Formatter`.
 
 *****************************
  Extracting strings (parsel)
