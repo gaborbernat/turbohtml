@@ -93,6 +93,9 @@ from ._stubs.features import (
     annotation_tags as annotation_tags,
 )
 from ._stubs.query import (
+    XPath as XPath,
+)
+from ._stubs.query import (
     _register_xpath_string as _register_xpath_string,
 )
 from ._stubs.query import (

@@ -116,6 +116,19 @@ typedef struct {
     Py_ssize_t unit_len;
 } IndentObject;
 
+/* A precompiled, reusable XPath 1.0 expression (issue #267). It owns the immutable
+   compiled program, which holds no tree pointers and no mutable state, so one
+   instance is shareable across threads: evaluation reads only the program and the
+   per-call context node and variables. smart_strings and the extensions dict are
+   bound here at construction. It keeps Python references (the source string and the
+   extensions dict, which a callable could cycle back to), so it is garbage-collected. */
+typedef struct {
+    PyObject_HEAD xp_program *prog;
+    PyObject *expression; /* the source expression str, for .path and repr */
+    PyObject *extensions; /* {(namespace, name): callable}, or NULL when none was bound */
+    int smart_strings;
+} XPathObject;
+
 /* ---- hot inline helpers shared across the split units ---- */
 
 static inline module_state *state_of(PyObject *self) {
@@ -457,6 +470,7 @@ extern PyType_Spec attrs_spec;
 extern PyType_Spec element_spec;
 extern PyType_Spec minify_spec;
 extern PyType_Spec indent_spec;
+extern PyType_Spec xpath_compiled_spec;
 extern PyType_Spec text_spec;
 extern PyType_Spec comment_spec;
 extern PyType_Spec cdata_spec;

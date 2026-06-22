@@ -2,6 +2,13 @@
 
 Covers the structural axes, the name/``*``/``node()``/``text()``/``comment()`` node
 tests, attribute access, and the namespace axis.
+
+The second half exercises the precompiled, reusable :class:`turbohtml.XPath` object
+(issue #267): ``XPath(expr)`` parses an expression once, and calling it with a context
+node plus optional ``$name`` keyword variables evaluates it, returning the same results
+as :meth:`turbohtml.Node.xpath`. The compiled program is tree-independent, so one object
+runs against many nodes and documents, with ``smart_strings`` and ``extensions`` bound at
+construction (mirroring ``lxml.etree.XPath``).
 """
 
 from __future__ import annotations
@@ -11,10 +18,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 import turbohtml
-from turbohtml import Element
+from turbohtml import Element, XPath, XPathString
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
+    from types import SimpleNamespace
 
 HTML = (
     "<!doctype html><html><head><title>T</title></head><body>"
@@ -219,3 +227,193 @@ def test_non_string_argument(doc: turbohtml.Node) -> None:
         doc.xpath(123)  # ty: ignore[invalid-argument-type]  # non-str exercises the TypeError path
     with pytest.raises(TypeError, match="must be a str"):
         doc.xpath_one(123)  # ty: ignore[invalid-argument-type]  # non-str exercises the TypeError path
+
+
+# --- The precompiled, reusable turbohtml.XPath object (issue #267) ---
+
+TABLE_HTML = (
+    '<table><tr><td class="num">1</td><td>2</td></tr><tr><td class="num">3</td><td class="num">4</td></tr></table>'
+)
+LINKS_HTML = "<html><body><a href='/x'>one</a><a href='/y'>two</a></body></html>"
+
+
+@pytest.fixture
+def table_doc() -> turbohtml.Node:
+    return turbohtml.parse(TABLE_HTML)
+
+
+@pytest.fixture
+def links_doc() -> turbohtml.Node:
+    return turbohtml.parse(LINKS_HTML)
+
+
+@pytest.fixture
+def paragraph_doc() -> turbohtml.Node:
+    return turbohtml.parse("<p id='a'>one</p>")
+
+
+def test_compiled_evaluate_node_set(table_doc: turbohtml.Node) -> None:
+    selector = XPath("//td")
+    assert [cell.text for cell in selector(table_doc) if isinstance(cell, Element)] == ["1", "2", "3", "4"]
+
+
+def test_compiled_reuse_across_many_context_nodes(table_doc: turbohtml.Node) -> None:
+    selector = XPath(".//td[@class=$cls]")
+    rows = [row for row in table_doc.xpath("//tr") if isinstance(row, Element)]
+    matched = [[cell.text for cell in selector(row, cls="num") if isinstance(cell, Element)] for row in rows]
+    assert matched == [["1"], ["3", "4"]]
+
+
+def test_compiled_reuse_across_documents() -> None:
+    selector = XPath("//p")
+    first = turbohtml.parse("<p>a</p><p>b</p>")
+    second = turbohtml.parse("<div><p>c</p></div>")
+    assert tags(selector(first)) == ["p", "p"]
+    assert tags(selector(second)) == ["p"]
+
+
+def test_compiled_variable_binding_is_per_call(table_doc: turbohtml.Node) -> None:
+    selector = XPath("//td[@class=$cls]")
+    assert tags(selector(table_doc, cls="num")) == ["td", "td", "td"]
+    assert tags(selector(table_doc, cls="missing")) == []
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("count(//td)", 4.0, id="number"),
+        pytest.param("string(//td)", "1", id="string"),
+        pytest.param("count(//td) > 3", True, id="boolean"),
+    ],
+)
+def test_compiled_scalar_result(table_doc: turbohtml.Node, expr: str, *, expected: float | str | bool) -> None:
+    result = XPath(expr)(table_doc)
+    assert result == expected
+    assert type(result) is type(expected)
+
+
+def test_compiled_context_node_scopes_relative_path(table_doc: turbohtml.Node) -> None:
+    selector = XPath("td")
+    second_row = [row for row in table_doc.xpath("//tr") if isinstance(row, Element)][1]
+    assert [cell.text for cell in selector(second_row) if isinstance(cell, Element)] == ["3", "4"]
+
+
+@pytest.mark.parametrize(
+    ("introspect", "expected"),
+    [
+        pytest.param(lambda selector: selector.path, "//td[@class=$cls]", id="path-attribute"),
+        pytest.param(repr, "XPath('//td[@class=$cls]')", id="repr"),
+    ],
+)
+def test_compiled_source_introspection(introspect: Callable[[XPath], str], expected: str) -> None:
+    assert introspect(XPath("//td[@class=$cls]")) == expected
+
+
+def test_compiled_variable_named_like_an_option_is_a_variable(table_doc: turbohtml.Node) -> None:
+    # smart_strings/extensions are constructor options, never call-time variables,
+    # so a $smart_strings variable binds normally rather than being swallowed
+    selector = XPath("//td[@class=$smart_strings]")
+    assert tags(selector(table_doc, smart_strings="num")) == ["td", "td", "td"]
+
+
+@pytest.mark.parametrize(
+    ("construct", "argument", "exc", "match"),
+    [
+        pytest.param(XPath, "//[bad", ValueError, "node test", id="syntax-error"),
+        pytest.param(XPath, 123, TypeError, "must be str", id="non-str"),
+        pytest.param(
+            lambda argument: XPath("//a", extensions=argument),
+            [1, 2],
+            TypeError,
+            "extensions",
+            id="extensions-not-dict",
+        ),
+    ],
+)
+def test_compiled_construction_rejects(
+    construct: Callable[[object], object], argument: object, exc: type[Exception], match: str
+) -> None:
+    with pytest.raises(exc, match=match):
+        construct(argument)
+
+
+@pytest.mark.parametrize(
+    ("expr", "invoke", "exc", "match"),
+    [
+        pytest.param("//p", lambda selector, _doc: selector(), TypeError, "exactly one context node", id="no-context"),
+        pytest.param(
+            "//p",
+            lambda selector, doc: selector(doc, doc),
+            TypeError,
+            "exactly one context node",
+            id="extra-positional",
+        ),
+        pytest.param(
+            "//p", lambda selector, _doc: selector("not a node"), TypeError, "must be a turbohtml Node", id="not-a-node"
+        ),
+        pytest.param("//p[@id=$want]", lambda selector, doc: selector(doc), ValueError, "xpath", id="unbound-variable"),
+        pytest.param(
+            "//p[@id=$want]",
+            lambda selector, doc: selector(doc, want=[1, 2]),
+            TypeError,
+            "variable",
+            id="unsupported-variable-type",
+        ),
+    ],
+)
+def test_compiled_call_site_rejects(
+    paragraph_doc: turbohtml.Node,
+    expr: str,
+    invoke: Callable[[XPath, turbohtml.Node], object],
+    exc: type[Exception],
+    match: str,
+) -> None:
+    selector = XPath(expr)
+    with pytest.raises(exc, match=match):
+        invoke(selector, paragraph_doc)
+
+
+def test_compiled_smart_strings_off_yields_plain_str(links_doc: turbohtml.Node) -> None:
+    result = XPath("//a/@href")(links_doc)
+    assert result == ["/x", "/y"]
+    assert not any(isinstance(value, XPathString) for value in result)
+
+
+def test_compiled_smart_strings_on_yields_xpath_string(links_doc: turbohtml.Node) -> None:
+    result = XPath("//a/@href", smart_strings=True)(links_doc)
+    assert all(isinstance(value, XPathString) for value in result)
+    first = result[0]
+    assert isinstance(first, XPathString)
+    assert first.getparent().tag == "a"
+    assert first.is_attribute is True
+    assert first.attrname == "href"
+
+
+def test_compiled_extensions_bound_at_construction(links_doc: turbohtml.Node) -> None:
+    def count_nodes(_context: SimpleNamespace, nodes: list[object]) -> float:
+        return float(len(nodes))
+
+    extensions: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {(None, "count_nodes"): count_nodes}
+    selector = XPath("count_nodes(//a)", extensions=extensions)
+    assert selector(links_doc) == pytest.approx(2.0)
+
+
+def test_compiled_extension_receives_context_node(links_doc: turbohtml.Node) -> None:
+    def context_tag(context: SimpleNamespace) -> str:
+        return context.context_node.tag
+
+    extensions: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {(None, "tag"): context_tag}
+    matched = XPath("//a[tag()='a']", extensions=extensions)(links_doc)
+    assert all(isinstance(node, Element) and node.tag == "a" for node in matched)
+    assert len(matched) == 2
+
+
+@pytest.mark.parametrize(
+    "extensions",
+    [pytest.param({}, id="empty-dict"), pytest.param(None, id="none")],
+)
+def test_compiled_falsy_extensions_bind_nothing(
+    links_doc: turbohtml.Node,
+    extensions: dict[tuple[str | None, str], Callable[..., str | float | bool]] | None,
+) -> None:
+    assert XPath("//a/@href", extensions=extensions)(links_doc) == ["/x", "/y"]

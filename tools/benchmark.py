@@ -1592,6 +1592,24 @@ XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[Html
     ("extension function", turbo_extension, lxml_extension),
 )
 
+# The reuse path turbohtml.XPath adds: parse the expression once into an immutable
+# program, then evaluate it on every call without the per-call parse doc.xpath pays.
+# lxml's etree.XPath is the same compile-once design, so both objects are built once
+# here and pyperf re-evaluates them, isolating the per-evaluation cost.
+REUSE_EXPR = "//a[@href]"
+
+
+def turbo_reuse(state: tuple[turbohtml.XPath, Document]) -> None:
+    """Evaluate a precompiled turbohtml.XPath, reusing the compiled program each call."""
+    compiled, doc = state
+    compiled(doc)
+
+
+def lxml_reuse(state: tuple[Callable[..., object], HtmlElement]) -> None:
+    """Evaluate a precompiled lxml etree.XPath, lxml's matching compile-once path."""
+    compiled, tree = state
+    compiled(tree)
+
 
 def run_xpath_feature_suite(bench: Callable[[str, object, object], None]) -> list[str]:
     """Benchmark each parity feature across the page sizes; return the case labels."""
@@ -1600,7 +1618,19 @@ def run_xpath_feature_suite(bench: Callable[[str, object, object], None]) -> lis
             text = corpus_text(path, enc)
             bench(f"feature {label} | {size_name} [turbohtml]", turbo_run, turbo_tree(text))
             bench(f"feature {label} | {size_name} [lxml]", lxml_run, lxml_tree(text))
-    return [label for label, _, _ in XPATH_FEATURE_CASES]
+    for size_name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        bench(
+            f"feature precompiled reuse | {size_name} [turbohtml]",
+            turbo_reuse,
+            (turbohtml.XPath(REUSE_EXPR), turbo_tree(text)),
+        )
+        bench(
+            f"feature precompiled reuse | {size_name} [lxml]",
+            lxml_reuse,
+            (lxml_html.etree.XPath(REUSE_EXPR), lxml_tree(text)),
+        )
+    return [label for label, _, _ in XPATH_FEATURE_CASES] + ["precompiled reuse"]
 
 
 def print_xpath_feature_table(means: dict[str, float], labels: list[str]) -> None:

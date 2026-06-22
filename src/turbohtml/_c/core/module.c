@@ -168,6 +168,7 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     Py_VISIT(state->re_compile);           /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->markup_type);          /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->xpath_string_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->xpath_type);           /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->link_type);            /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->json_ld_parser);       /* GCOVR_EXCL_BR_LINE: same */
     Py_VISIT(state->microdata_item_type);  /* GCOVR_EXCL_BR_LINE: same */
@@ -217,6 +218,7 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->re_compile);
     Py_CLEAR(state->markup_type);
     Py_CLEAR(state->xpath_string_type);
+    Py_CLEAR(state->xpath_type);
     Py_CLEAR(state->link_type);
     Py_CLEAR(state->json_ld_parser);
     Py_CLEAR(state->microdata_item_type);

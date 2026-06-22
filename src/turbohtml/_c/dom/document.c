@@ -1157,6 +1157,12 @@ int tree_register(PyObject *module, module_state *state) {
         PyModule_AddObjectRef(module, "Indent", state->indent_type) < 0) { /* GCOVR_EXCL_BR_LINE */
         return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    state->xpath_type = PyType_FromModuleAndSpec(module, &xpath_compiled_spec, NULL);
+    /* allocation failure cannot be forced from a test */
+    if (state->xpath_type == NULL ||                                     /* GCOVR_EXCL_BR_LINE */
+        PyModule_AddObjectRef(module, "XPath", state->xpath_type) < 0) { /* GCOVR_EXCL_BR_LINE */
+        return -1;                                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     state->walker_type = PyType_FromModuleAndSpec(module, &walker_spec, NULL);
     state->string_walker_type = PyType_FromModuleAndSpec(module, &string_walker_spec, NULL);
     state->handle_type = PyType_FromModuleAndSpec(module, &handle_spec, NULL);
