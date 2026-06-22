@@ -190,5 +190,7 @@ wpt page with ``tox -e bench xpath``:
   never holds the whole source at once, so you can parse a stream larger than the source buffer you would otherwise
   materialize for :func:`turbohtml.parse`.
 - The wider libxml2 toolchain is a deliberate clean-break scope cut: XSLT, DTD/RelaxNG/XML-Schema validation, and C14N
-  have no turbohtml equivalent. XPath is at parity, not a gap: both are XPath 1.0 with EXSLT (libxml2 has no XPath
-  2.0/XQuery either), so an lxml ``xpath()`` call ports directly.
+  have no turbohtml equivalent. XPath is at parity, not a gap: both are XPath 1.0, and the EXSLT ``re:``, ``set:``,
+  ``str:``, ``math:``, and ``date:`` namespaces ``libexslt`` adds are built in here (lxml has to register them, and has
+  no XPath 2.0/XQuery either), so an lxml ``xpath()`` call ports directly — only the node-synthesizing
+  ``str:tokenize``/``str:split`` and the implicit current-date ``date:`` forms stay out of scope.
