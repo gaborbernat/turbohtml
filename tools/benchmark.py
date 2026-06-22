@@ -576,6 +576,32 @@ EDIT_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] 
     ("BeautifulSoup", bs4_tree, bs4_edit),
 )
 
+# A second edit pass: a classList churn (add then remove the same token on every
+# link), the work a CSS-state toggle does. add then remove is a net no-op, so
+# pyperf's repeated calls each do equal work. Raced against lxml's classes set, the
+# only other library with a dedicated class-token mutator; run on the largest
+# read-path page only. BeautifulSoup has no such helper, so it keeps no entry.
+CLASS_EDIT_CASE = "class add/remove (92 kB)"
+
+
+def turbo_classes_edit(doc: Document) -> None:
+    """Add then drop a class token on every link with turbohtml's classList mutators."""
+    for anchor in doc.find_all("a"):
+        anchor.add_class("seen").remove_class("seen")
+
+
+def lxml_classes_edit(tree: HtmlElement) -> None:
+    """Add then drop a class token on every link with lxml's classes set."""
+    for anchor in tree.findall(".//a"):
+        anchor.classes.add("seen")
+        anchor.classes.discard("seen")
+
+
+CLASS_EDIT_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
+    ("turbohtml", turbo_tree, turbo_classes_edit),
+    ("lxml", lxml_tree, lxml_classes_edit),
+)
+
 
 def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
     """Benchmark a link-rewriting edit across every library; return the case names."""
@@ -585,6 +611,11 @@ def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
         for label, build, edit in EDIT_LIBS:
             bench(f"edit {name} [{label}]", edit, build(text))
         names.append(name)
+    _, path, enc = READPATH_CASES[-1]
+    text = corpus_text(path, enc)
+    for label, build, edit in CLASS_EDIT_LIBS:
+        bench(f"edit {CLASS_EDIT_CASE} [{label}]", edit, build(text))
+    names.append(CLASS_EDIT_CASE)
     return names
 
 

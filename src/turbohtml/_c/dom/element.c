@@ -2046,6 +2046,184 @@ PyDoc_STRVAR(wrap_children_doc, "wrap_children(wrapper, /)\n--\n\n"
                                 ":param wrapper: the element to move the children into.\n"
                                 ":returns: wrapper, now holding the moved children.");
 
+/* --- classList: the space-separated class token set ------------------------ */
+
+/* Whether the value run [start, end) equals the token. */
+static int class_token_equals(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end, const Py_UCS4 *token,
+                              Py_ssize_t token_len) {
+    if (end - start != token_len) {
+        return 0;
+    }
+    for (Py_ssize_t offset = 0; offset < token_len; offset++) {
+        if (value[start + offset] != token[offset]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Whether token appears among value's ASCII-whitespace-separated tokens. */
+static int class_has_token(const Py_UCS4 *value, Py_ssize_t value_len, const Py_UCS4 *token, Py_ssize_t token_len) {
+    Py_ssize_t cursor = 0;
+    while (cursor < value_len) {
+        while (cursor < value_len && is_space(value[cursor])) {
+            cursor++;
+        }
+        Py_ssize_t start = cursor;
+        while (cursor < value_len && !is_space(value[cursor])) {
+            cursor++;
+        }
+        if (cursor > start && class_token_equals(value, start, cursor, token, token_len)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Decode a class-name argument to a UCS4 buffer the caller frees. Requires a str
+   (TypeError otherwise). When require_token is set, also rejects an empty name or
+   one carrying ASCII whitespace (ValueError) so the token round-trips through the
+   space-separated class value; has_class skips that check, since such a string can
+   never equal a stored token. NULL with an exception set on a rejection. */
+static Py_UCS4 *class_token_arg(PyObject *arg, Py_ssize_t *out_len, int require_token) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "class name must be a str");
+        return NULL;
+    }
+    Py_ssize_t length = PyUnicode_GET_LENGTH(arg);
+    if (require_token) {
+        if (length == 0) {
+            PyErr_SetString(PyExc_ValueError, "class name must not be empty");
+            return NULL;
+        }
+        int kind = PyUnicode_KIND(arg);
+        const void *data = PyUnicode_DATA(arg);
+        for (Py_ssize_t index = 0; index < length; index++) {
+            if (is_space(PyUnicode_READ(kind, data, index))) {
+                PyErr_SetString(PyExc_ValueError, "class name must not contain whitespace");
+                return NULL;
+            }
+        }
+    }
+    Py_UCS4 *points = PyUnicode_AsUCS4Copy(arg);
+    if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    *out_len = length;
+    return points;
+}
+
+PyDoc_STRVAR(has_class_doc, "has_class(name, /)\n--\n\n"
+                            "Return whether name is one of this element's space-separated class tokens.");
+
+static PyObject *element_has_class(PyObject *self, PyObject *arg) {
+    Py_ssize_t token_len;
+    Py_UCS4 *token = class_token_arg(arg, &token_len, 0);
+    if (token == NULL) {
+        return NULL;
+    }
+    NodeObject *node = (NodeObject *)self;
+    int present = 0;
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    const th_node_attr *attr = find_node_attr(node->node, TH_ATTR_CLASS);
+    if (attr != NULL && attr->value != NULL) {
+        present = class_has_token(attr->value, attr->value_len, token, token_len);
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(token);
+    return PyBool_FromLong(present);
+}
+
+/* The three mutating classList operations. */
+enum class_op { CLASS_ADD, CLASS_REMOVE, CLASS_TOGGLE };
+
+/* Apply op for token to self's class attribute, rewriting it as single-space-
+   separated tokens (so redundant whitespace collapses, matching an attrs write).
+   Returns a new reference to self, or NULL with an exception set. */
+static PyObject *class_mutate(PyObject *self, PyObject *arg, enum class_op op) {
+    Py_ssize_t token_len;
+    Py_UCS4 *token = class_token_arg(arg, &token_len, 1);
+    if (token == NULL) {
+        return NULL;
+    }
+    NodeObject *node = (NodeObject *)self;
+    th_tree *tree = tree_of(self);
+    int failed = 0;
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    const th_node_attr *attr = find_node_attr(node->node, TH_ATTR_CLASS);
+    const Py_UCS4 *value = attr != NULL ? attr->value : NULL;
+    Py_ssize_t value_len = value != NULL ? attr->value_len : 0;
+    int present = value != NULL && class_has_token(value, value_len, token, token_len);
+    int write = op == CLASS_TOGGLE || (op == CLASS_ADD && !present) || (op == CLASS_REMOVE && present);
+    Py_UCS4 *rebuilt = write ? PyMem_Malloc((size_t)(value_len + token_len + 1) * sizeof(Py_UCS4)) : NULL;
+    if (write && rebuilt == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        failed = 1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+    } /* GCOVR_EXCL_LINE: fall-through brace of the unforceable alloc-failure arm */
+    if (rebuilt != NULL) {
+        Py_ssize_t out_len = 0;
+        Py_ssize_t cursor = 0;
+        while (cursor < value_len) {
+            while (cursor < value_len && is_space(value[cursor])) {
+                cursor++;
+            }
+            Py_ssize_t start = cursor;
+            while (cursor < value_len && !is_space(value[cursor])) {
+                cursor++;
+            }
+            if (cursor == start || (present && class_token_equals(value, start, cursor, token, token_len))) {
+                continue;
+            }
+            if (out_len > 0) {
+                rebuilt[out_len++] = ' ';
+            }
+            for (Py_ssize_t offset = start; offset < cursor; offset++) {
+                rebuilt[out_len++] = value[offset];
+            }
+        }
+        if (!present) {
+            if (out_len > 0) {
+                rebuilt[out_len++] = ' ';
+            }
+            for (Py_ssize_t offset = 0; offset < token_len; offset++) {
+                rebuilt[out_len++] = token[offset];
+            }
+        }
+        failed = th_node_attr_set(tree, node->node, "class", 5, rebuilt, out_len, 1);
+        PyMem_Free(rebuilt);
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(token);
+    if (failed) {                /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return Py_NewRef(self);
+}
+
+PyDoc_STRVAR(add_class_doc, "add_class(name, /)\n--\n\n"
+                            "Add name to this element's class tokens when absent and return the element.\n"
+                            "Existing tokens keep their order; on a change the class value is rewritten\n"
+                            "with single-space separators.");
+
+static PyObject *element_add_class(PyObject *self, PyObject *arg) {
+    return class_mutate(self, arg, CLASS_ADD);
+}
+
+PyDoc_STRVAR(remove_class_doc, "remove_class(name, /)\n--\n\n"
+                               "Remove every occurrence of name from this element's class tokens and return\n"
+                               "the element. Removing the last token leaves an empty class attribute.");
+
+static PyObject *element_remove_class(PyObject *self, PyObject *arg) {
+    return class_mutate(self, arg, CLASS_REMOVE);
+}
+
+PyDoc_STRVAR(toggle_class_doc, "toggle_class(name, /)\n--\n\n"
+                               "Remove name from this element's class tokens when present, add it when\n"
+                               "absent, and return the element.");
+
+static PyObject *element_toggle_class(PyObject *self, PyObject *arg) {
+    return class_mutate(self, arg, CLASS_TOGGLE);
+}
+
 static PyMethodDef element_methods[] = {
     {"append", element_append, METH_O, append_doc},
     {"extend", element_extend, METH_O, extend_doc},
@@ -2055,6 +2233,10 @@ static PyMethodDef element_methods[] = {
     {"wrap_children", element_wrap_children, METH_O, wrap_children_doc},
     {"form_data", element_form_data, METH_NOARGS, form_data_doc},
     {"attr", (PyCFunction)(void (*)(void))element_attr, METH_VARARGS | METH_KEYWORDS, attr_doc},
+    {"has_class", element_has_class, METH_O, has_class_doc},
+    {"add_class", element_add_class, METH_O, add_class_doc},
+    {"remove_class", element_remove_class, METH_O, remove_class_doc},
+    {"toggle_class", element_toggle_class, METH_O, toggle_class_doc},
     {NULL, NULL, 0, NULL},
 };
 
