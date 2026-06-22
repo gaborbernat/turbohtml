@@ -49,16 +49,20 @@ exactly otherwise, as the Selectors standard requires. :meth:`~turbohtml.Node.xp
 and :meth:`~turbohtml.Node.xpath_iter` evaluate XPath 1.0 over the same model: a native-C engine compiles each
 expression once into an immutable, per-tree-cached program, resolves name tests to interned atoms, and collapses the
 ``//`` abbreviation to a single ``descendant`` walk, so the structural axes, predicates, operators, unions, and the core
-function library run at lxml's speed. Because that program holds no tree pointers and no mutable state,
-:class:`turbohtml.XPath` exposes it directly: a hot expression compiles once and a single re-entrant, thread-shareable
-object evaluates against many context nodes, the same design lxml's ``etree.XPath`` uses. The EXSLT ``re:``, ``set:``,
-``str:``, ``math:``, and ``date:`` namespaces dispatch in the same C engine, so the regexp, node-set, string, numeric,
-and date helpers ``libexslt`` gives lxml work without registering a namespace. A prefix-to-URI mapping passed as
-``namespaces`` is resolved during evaluation rather than baked into the compiled program, so the one cached program
-serves every mapping; a prefixed name test then constrains the match to the foreign-content namespace the tree builder
-tagged (SVG or MathML), while unprefixed tests stay namespace-agnostic over the null-namespace HTML tree. The core API
-stays one-name-per-concept and returns plain lists, so the jQuery-style chaining pyquery users expect lives in an
-optional Python-side wrapper, :class:`turbohtml.query.Query`, whose traversal and mutation methods each return a
+function library run at lxml's speed. A ``$name`` variable bound through a keyword argument carries a scalar or a
+node-set across that boundary: an :class:`~turbohtml.Element` or an iterable of them is marshaled into the engine's
+node-set value, ordered and de-duplicated like any other, so a prior result can feed a later expression
+(``doc.xpath("$rows/td", rows=doc.xpath("//tr"))``) without re-walking the tree; elements wrapped against a different
+document are rejected rather than dereferenced into a foreign arena. Because that program holds no tree pointers and no
+mutable state, :class:`turbohtml.XPath` exposes it directly: a hot expression compiles once and a single re-entrant,
+thread-shareable object evaluates against many context nodes, the same design lxml's ``etree.XPath`` uses. The EXSLT
+``re:``, ``set:``, ``str:``, ``math:``, and ``date:`` namespaces dispatch in the same C engine, so the regexp, node-set,
+string, numeric, and date helpers ``libexslt`` gives lxml work without registering a namespace. A prefix-to-URI mapping
+passed as ``namespaces`` is resolved during evaluation rather than baked into the compiled program, so the one cached
+program serves every mapping; a prefixed name test then constrains the match to the foreign-content namespace the tree
+builder tagged (SVG or MathML), while unprefixed tests stay namespace-agnostic over the null-namespace HTML tree. The
+core API stays one-name-per-concept and returns plain lists, so the jQuery-style chaining pyquery users expect lives in
+an optional Python-side wrapper, :class:`turbohtml.query.Query`, whose traversal and mutation methods each return a
 wrapper. Output runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and
 :meth:`~turbohtml.Node.encode`, WHATWG-conformant by default with the escaping selectable through
 :class:`~turbohtml.Formatter`. A registered ``extensions=`` function crosses the same value boundary in both directions:

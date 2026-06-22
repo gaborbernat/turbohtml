@@ -173,8 +173,8 @@ typedef struct {
     void *extension_ctx;
 } xp_ctx;
 
-/* Node-set append and pre-order successor, shared by the evaluator and id(). */
-int ns_push(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr);
+/* Pre-order successor, shared by the evaluator and id(). ns_push is declared in the
+   public xpath.h because the marshaling boundary also builds node-sets through it. */
 struct th_node *document_next(struct th_node *node);
 
 /* The XPath string-value of a node-set member, freshly allocated. */

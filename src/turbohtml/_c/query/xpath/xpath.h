@@ -49,6 +49,11 @@ typedef struct {
 
 void xp_nodeset_free(xp_nodeset *ns);
 
+/* Append a member to a node-set, growing it as needed; -1 on allocation failure.
+   attr == -1 is the node itself, attr >= 0 one of its attributes. The marshaling
+   boundary uses this to build a node-set variable from caller-supplied elements. */
+int ns_push(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr);
+
 /* The four XPath 1.0 value types an expression can evaluate to. */
 enum xp_result_kind { XP_NODESET, XP_NUMBER, XP_STRING, XP_BOOLEAN };
 
