@@ -71,6 +71,17 @@ returned element or iterable of elements becomes a node-set the engine can feed 
 ever sees live wrappers bound to the queried tree, never the C node model, so a returned element from another document
 is rejected rather than silently mixing arenas.
 
+:meth:`~turbohtml.Element.css_path` and :meth:`~turbohtml.Element.xpath_path` invert the query surface: given a node,
+they return the locator that finds it again, the way browser devtools "copy selector" and lxml's ``getpath`` do. The
+design rule is round-trip identity -- feeding ``css_path()`` back to :meth:`~turbohtml.Node.select` or ``xpath_path()``
+to :meth:`~turbohtml.Node.xpath` on the document returns exactly the original node -- which dictates the form. The CSS
+path anchors at the nearest ancestor (or the element itself) carrying a document-unique ``id`` so the result stays short
+and survives reordering, falling back to ``:nth-of-type()`` steps from the root; an ``id`` is used only when it is a
+bare identifier the selector parser reads back verbatim and is unique under the document's own case-folding mode, so the
+shortcut can never resolve to a different node. The XPath form is always positional (``/html/body/div[2]/p[3]``), the
+shape ``getpath`` produces. Both walk only the ancestor chain, a pure read snapshotted under the per-tree lock, so no
+mutation can rewire the path mid-build.
+
 *****************************
  Extracting strings (parsel)
 *****************************

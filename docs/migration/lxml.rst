@@ -95,6 +95,9 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
     - - ``etree.FunctionNamespace(None)["f"] = fn``; ``el.xpath("f(//a)")``
       - :meth:`el.xpath("f(//a)", extensions={(None, "f"): fn}) <turbohtml.Node.xpath>` (the function may return a
         scalar, an :class:`~turbohtml.Element`, or an iterable of elements)
+    - - ``el.getroottree().getpath(el)``
+      - :meth:`el.xpath_path() <turbohtml.Element.xpath_path>` (or :meth:`el.css_path() <turbohtml.Element.css_path>`
+        for a CSS selector)
     - - ``lxml.html.Element("div")``, ``etree.SubElement(p, "div")``
       - :class:`~turbohtml.Element`, :meth:`p.append(Element("div")) <turbohtml.Element.append>`
     - - ``el.drop_tag()``, ``el.drop_tree()``
@@ -234,7 +237,30 @@ xpath``, over a page carrying an SVG block):
       - 22.5 µs
       - 1.5x
 
-The :doc:`/development/performance` page benchmarks the rest of the XPath surface against lxml.
+``el.getroottree().getpath(el)`` ports to :meth:`~turbohtml.Element.xpath_path` (a positional XPath) or
+:meth:`~turbohtml.Element.css_path` (a unique CSS selector, which lxml has no equivalent for). Both walk only the
+element's ancestor chain under the per-tree lock instead of indexing siblings from the root, so generating the locator
+for every node in the 9.6 kB wpt page runs several times ahead of ``getpath`` (``tox -e bench path``):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - node locator (9.6 kB page)
+      - turbohtml
+      - lxml ``getpath``
+      - speed-up
+    - - :meth:`~turbohtml.Element.css_path`
+      - 15.6 µs
+      - 55.2 µs
+      - 3.5x
+    - - :meth:`~turbohtml.Element.xpath_path`
+      - 14.3 µs
+      - 55.2 µs
+      - 3.9x
+
+The :doc:`/development/performance` page benchmarks the rest of the XPath surface against lxml, and sweeps the node-path
+generators across every page size.
 
 **********
  Pitfalls

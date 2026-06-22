@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import parse
+from turbohtml import Document, Element, parse
 
 _DOC = (
     '<section id="s" class="box wide">'
@@ -562,3 +562,142 @@ def test_select_one_rejects_invalid_selector() -> None:
 def test_rejects_non_str(method: str) -> None:
     with pytest.raises(TypeError):
         getattr(parse(_DOC), method)(123)
+
+
+# Element.css_path(): the unique CSS selector locating a node from the root. It
+# anchors at the nearest document-unique, safely serializable id and otherwise
+# descends with child combinators, adding :nth-of-type() only among same-type siblings.
+def _css_path(html: str, selector: str, index: int = 0) -> str:
+    return parse(html).select(selector)[index].css_path()
+
+
+@pytest.mark.parametrize(
+    ("html", "selector", "index", "expected"),
+    [
+        pytest.param("<html><body><p>x</p></body></html>", "html", 0, "html", id="root-is-its-tag"),
+        pytest.param("<html><body><p>x</p></body></html>", "p", 0, "html > body > p", id="child-combinators"),
+        pytest.param(
+            "<body><div>a</div><div>b</div><div>c</div></body>",
+            "div",
+            2,
+            "html > body > div:nth-of-type(3)",
+            id="nth-of-type-among-same-type",
+        ),
+        # distinct-type siblings need no index on either one
+        pytest.param("<body><h1>t</h1><p>x</p></body>", "h1", 0, "html > body > h1", id="distinct-type-heading"),
+        pytest.param("<body><h1>t</h1><p>x</p></body>", "p", 0, "html > body > p", id="distinct-type-paragraph"),
+        pytest.param('<body><div id="main"><p>x</p></div></body>', "#main", 0, "#main", id="unique-id-anchors"),
+        pytest.param(
+            '<body><section id="main"><div><p>x</p></div></section></body>',
+            "p",
+            0,
+            "#main > div > p",
+            id="ancestor-id-shortens",
+        ),
+        pytest.param(
+            '<body><div id="outer"><span id="inner"><b>x</b></span></div></body>',
+            "b",
+            0,
+            "#inner > b",
+            id="nearest-unique-id-wins",
+        ),
+        pytest.param(
+            '<body><div id="dup">a</div><div id="dup"><p>x</p></div></body>',
+            "p",
+            0,
+            "html > body > div:nth-of-type(2) > p",
+            id="duplicate-id-is-not-an-anchor",
+        ),
+        # an id carrying whitespace or a CSS delimiter cannot serialize, so it is skipped
+        pytest.param(
+            '<body><div id="a b"><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-space"
+        ),
+        pytest.param('<body><div id="a.b"><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-dot"),
+        pytest.param(
+            '<body><div id="a:b"><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-colon"
+        ),
+        pytest.param('<body><div id=""><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-empty"),
+        pytest.param("<body><div id><p>x</p></div></body>", "p", 0, "html > body > div > p", id="valueless-id"),
+        pytest.param(
+            '<body><span id></span><div id="main"><p>x</p></div></body>',
+            "p",
+            0,
+            "#main > p",
+            id="valueless-id-on-other-element-is-skipped",
+        ),
+        pytest.param(
+            '<!doctype html><body><div id="main"><p>x</p></div></body>',
+            "p",
+            0,
+            "#main > p",
+            id="anchor-id-under-no-quirks-doctype",
+        ),
+        pytest.param(
+            '<body><div id="Main">a</div><div id="main"><p>x</p></div></body>',
+            "p",
+            0,
+            "html > body > div:nth-of-type(2) > p",
+            id="quirks-mode-case-insensitive-id-collision",
+        ),
+        pytest.param(
+            "<body><my-widget>a</my-widget><my-widget>b</my-widget></body>",
+            "my-widget",
+            1,
+            "html > body > my-widget:nth-of-type(2)",
+            id="unknown-tag-uses-its-name",
+        ),
+        pytest.param(
+            "<ul>" + "".join(f"<li>{number}</li>" for number in range(12)) + "</ul>",
+            "li",
+            11,
+            "html > body > ul > li:nth-of-type(12)",
+            id="multi-digit-index",
+        ),
+        pytest.param(
+            "<body>" + "<div>" * 40 + "x" + "</div>" * 40 + "</body>",
+            "div",
+            39,
+            "html > body > " + " > ".join(["div"] * 40),
+            id="deeply-nested-path-grows-buffer",
+        ),
+    ],
+)
+def test_css_path(html: str, selector: str, index: int, expected: str) -> None:
+    assert _css_path(html, selector, index) == expected
+
+
+def test_css_path_of_detached_element_is_its_tag() -> None:
+    assert Element("div").css_path() == "div"
+
+
+def test_css_path_constructed_empty_string_id_is_not_an_anchor() -> None:
+    container = Element("div", {"id": ""})
+    paragraph = Element("p")
+    container.append(paragraph)
+    assert paragraph.css_path() == "div > p"
+
+
+# css_path() round-trips: re-selecting the path returns exactly the node it came from.
+_CSS_PATH_DOC = (
+    "<!doctype html><html><head><title>t</title></head><body>"
+    "<header><h1>Title</h1></header>"
+    '<main id="content">'
+    "<article><p>one</p><p>two</p><p>three</p></article>"
+    '<article class="aside"><p>alpha</p><ul><li>a</li><li>b</li><li>c</li></ul></article>'
+    "</main>"
+    '<footer><a href="/x">x</a><a href="/y">y</a></footer>'
+    "</body></html>"
+)
+
+_CSS_PATH_DOCUMENT = parse(_CSS_PATH_DOC)
+
+
+def _every_element(document: Document) -> list[Element]:
+    root = document.root
+    assert root is not None
+    return [root, *(node for node in root.descendants if isinstance(node, Element))]
+
+
+@pytest.mark.parametrize("element", _every_element(_CSS_PATH_DOCUMENT), ids=lambda element: element.css_path())
+def test_css_path_reselects_only_this_element(element: Element) -> None:
+    assert _CSS_PATH_DOCUMENT.select(element.css_path()) == [element]

@@ -2784,6 +2784,234 @@ PyDoc_STRVAR(insert_adjacent_html_doc, "insert_adjacent_html(position, html, /)\
                                        "parent; 'afterbegin' and 'beforeend' add them as the first or last children.\n"
                                        "The fragment parses in the context of the element that will hold it.");
 
+/* ---- css_path() / xpath_path(): the unique locator for a node ---- */
+
+/* A growable code-point buffer for assembling a path string. failed records an
+   allocation failure so the caller raises once, after the walk. */
+typedef struct {
+    Py_UCS4 *data;
+    Py_ssize_t len;
+    Py_ssize_t cap;
+    int failed;
+} path_buf;
+
+/* Grow so at least extra more code points fit, doubling for amortized O(1). */
+static void path_reserve(path_buf *buf, Py_ssize_t extra) {
+    if (buf->len + extra <= buf->cap) {
+        return;
+    }
+    Py_ssize_t cap = buf->cap ? buf->cap : 64;
+    while (cap < buf->len + extra) {
+        cap *= 2;
+    }
+    Py_UCS4 *grown = PyMem_Realloc(buf->data, (size_t)cap * sizeof(Py_UCS4));
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        buf->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    buf->data = grown;
+    buf->cap = cap;
+}
+
+static void path_put_ucs4(path_buf *buf, const Py_UCS4 *text, Py_ssize_t len) {
+    path_reserve(buf, len);
+    if (buf->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(buf->data + buf->len, text, (size_t)len * sizeof(Py_UCS4));
+    buf->len += len;
+}
+
+static void path_puts(path_buf *buf, const char *ascii) {
+    Py_ssize_t len = (Py_ssize_t)strlen(ascii);
+    path_reserve(buf, len);
+    if (buf->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        buf->data[buf->len + index] = (Py_UCS4)(unsigned char)ascii[index];
+    }
+    buf->len += len;
+}
+
+/* Write a positive integer in decimal. */
+static void path_put_int(path_buf *buf, Py_ssize_t value) {
+    char digits[20];
+    int count = 0;
+    do {
+        digits[count++] = (char)('0' + (int)(value % 10));
+        value /= 10;
+    } while (value > 0);
+    path_reserve(buf, count);
+    if (buf->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    while (count > 0) {
+        buf->data[buf->len++] = (Py_UCS4)digits[--count];
+    }
+}
+
+/* Whether an id value is a bare CSS identifier the selector parser reads back
+   verbatim (every code point an identifier char), so #value round-trips with no
+   escaping. An empty value (a valueless id) never qualifies. */
+static int path_id_safe(const Py_UCS4 *value, Py_ssize_t len) {
+    if (len == 0) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (!sel_is_ident(value[index])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Whether candidate is the only element in the document carrying this id value,
+   so #value selects it alone. Matched case-insensitively in quirks mode, where
+   the id selector itself folds case. */
+static int path_id_unique(th_tree *tree, th_node *document, th_node *candidate, const Py_UCS4 *value, Py_ssize_t len,
+                          int ci) {
+    for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
+        if (node == candidate || node->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        const th_node_attr *id = find_node_attr(node, TH_ATTR_ID);
+        if (id != NULL && id->value != NULL && sel_eq(id->value, id->value_len, value, len, ci)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Whether node has an element sibling of its own type on either side, so a
+   positional index is needed to single it out among same-type siblings. */
+static int path_needs_index(th_node *node) {
+    return !sel_no_sibling(node, 0, 1) || !sel_no_sibling(node, 1, 1);
+}
+
+/* Snapshot the element ancestor chain, node first up to the topmost element
+   (its parent is the document or a non-element). Returns the count, fills *out
+   with a PyMem array the caller frees, or -1 on allocation failure. */
+static Py_ssize_t path_collect_chain(th_node *node, th_node ***out) {
+    Py_ssize_t depth = 0;
+    for (th_node *cursor = node; cursor != NULL && cursor->type == TH_NODE_ELEMENT; cursor = cursor->parent) {
+        depth++;
+    }
+    th_node **chain = PyMem_Malloc((size_t)depth * sizeof(th_node *));
+    if (chain == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t count = 0;
+    for (th_node *cursor = node; cursor != NULL && cursor->type == TH_NODE_ELEMENT; cursor = cursor->parent) {
+        chain[count++] = cursor;
+    }
+    *out = chain;
+    return count;
+}
+
+PyDoc_STRVAR(css_path_doc, "css_path()\n--\n\n"
+                           "Return a CSS selector that uniquely locates this element from the document\n"
+                           "root, the way browser devtools \"copy selector\" does. The path is anchored at\n"
+                           "the nearest ancestor (or the element itself) carrying a document-unique id\n"
+                           "(\"#main > ...\"), otherwise it descends from the root with positional\n"
+                           ":nth-of-type() steps (\"html > body > div > p:nth-of-type(3)\"). Feeding the\n"
+                           "result back to select() on the document returns exactly this element.");
+
+static PyObject *element_css_path(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *node = ((NodeObject *)self)->node;
+    path_buf buf = {0};
+    th_node **chain = NULL;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    th_tree *tree = ((HandleObject *)handle)->tree;
+    Py_ssize_t count = path_collect_chain(node, &chain);
+    if (count < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        error = 1;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    } else {         /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        th_node *document = th_tree_document(tree);
+        int quirks = th_tree_quirks(tree);
+        Py_ssize_t top = count - 1;
+        int anchored = 0;
+        for (Py_ssize_t index = 0; index < count; index++) {
+            const th_node_attr *id = find_node_attr(chain[index], TH_ATTR_ID);
+            if (id != NULL && id->value != NULL && path_id_safe(id->value, id->value_len) &&
+                path_id_unique(tree, document, chain[index], id->value, id->value_len, quirks)) {
+                top = index;
+                anchored = 1;
+                break;
+            }
+        }
+        for (Py_ssize_t index = top; index >= 0; index--) {
+            th_node *element = chain[index];
+            if (index != top) {
+                path_puts(&buf, " > ");
+            }
+            if (anchored && index == top) {
+                const th_node_attr *id = find_node_attr(element, TH_ATTR_ID);
+                path_puts(&buf, "#");
+                path_put_ucs4(&buf, id->value, id->value_len);
+            } else {
+                path_put_ucs4(&buf, element->text, element->text_len);
+                if (path_needs_index(element)) {
+                    path_puts(&buf, ":nth-of-type(");
+                    path_put_int(&buf, sel_sibling_index(element, 0, 1));
+                    path_puts(&buf, ")");
+                }
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(chain);
+    if (error || buf.failed) {   /* GCOVR_EXCL_BR_LINE: set only on an allocation failure */
+        PyMem_Free(buf.data);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = ucs4_to_str(buf.data, buf.len);
+    PyMem_Free(buf.data);
+    return result;
+}
+
+PyDoc_STRVAR(xpath_path_doc, "xpath_path()\n--\n\n"
+                             "Return the positional XPath that locates this element from the document\n"
+                             "root, like lxml's getroottree().getpath(). Each step is the tag name with a\n"
+                             "1-based [n] index among same-name siblings when more than one exists\n"
+                             "(\"/html/body/div[2]/p[3]\"). Feeding the result back to xpath() on the\n"
+                             "document returns exactly this element.");
+
+static PyObject *element_xpath_path(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *node = ((NodeObject *)self)->node;
+    path_buf buf = {0};
+    th_node **chain = NULL;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    Py_ssize_t count = path_collect_chain(node, &chain);
+    if (count < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        error = 1;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    } else {         /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        for (Py_ssize_t index = count - 1; index >= 0; index--) {
+            th_node *element = chain[index];
+            path_puts(&buf, "/");
+            path_put_ucs4(&buf, element->text, element->text_len);
+            if (path_needs_index(element)) {
+                path_puts(&buf, "[");
+                path_put_int(&buf, sel_sibling_index(element, 0, 1));
+                path_puts(&buf, "]");
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(chain);
+    if (error || buf.failed) {   /* GCOVR_EXCL_BR_LINE: set only on an allocation failure */
+        PyMem_Free(buf.data);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = ucs4_to_str(buf.data, buf.len);
+    PyMem_Free(buf.data);
+    return result;
+}
+
 static PyMethodDef element_methods[] = {
     {"append", element_append, METH_O, append_doc},
     {"extend", element_extend, METH_O, extend_doc},
@@ -2797,6 +3025,8 @@ static PyMethodDef element_methods[] = {
     {"form_data", element_form_data, METH_NOARGS, form_data_doc},
     {"rows", element_rows, METH_NOARGS, rows_doc},
     {"records", element_records, METH_NOARGS, records_doc},
+    {"css_path", element_css_path, METH_NOARGS, css_path_doc},
+    {"xpath_path", element_xpath_path, METH_NOARGS, xpath_path_doc},
     {"attr", (PyCFunction)(void (*)(void))element_attr, METH_VARARGS | METH_KEYWORDS, attr_doc},
     {"has_class", element_has_class, METH_O, has_class_doc},
     {"add_class", element_add_class, METH_O, add_class_doc},
