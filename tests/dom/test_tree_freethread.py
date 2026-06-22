@@ -191,6 +191,36 @@ def test_concurrent_main_content_extraction_is_memory_safe() -> None:
     assert isinstance(doc.main_text(), str)  # the tree is still walkable after the concurrent churn
 
 
+def test_concurrent_classlist_edits_are_memory_safe() -> None:
+    doc = _doc(300)
+    body = doc.find("body")
+    assert body is not None
+    divs = body.find_all("div")
+    start = threading.Barrier(3)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.select("div.on")  # matches against the class value while it is rewritten
+            for div in divs:
+                div.has_class("on")
+
+    def toggler() -> None:
+        start.wait()
+        for _ in range(200):
+            for div in divs:
+                div.toggle_class("on")  # rewrites the class attribute under the per-tree lock
+
+    def adder() -> None:
+        start.wait()
+        for div in divs:
+            div.add_class("seen").remove_class("seen")
+
+    _run(reader, toggler, adder)
+    for div in divs:
+        assert isinstance(div.has_class("on"), bool)  # still readable after the concurrent churn
+
+
 def test_concurrent_link_enumeration_and_resolve_is_memory_safe() -> None:
     anchors = "".join(f'<a href="p{index}/"><img src="i{index}.png"></a>' for index in range(300))
     doc = turbohtml.parse(f"<html><body>{anchors}</body></html>")

@@ -76,8 +76,10 @@ almost name for name:
       - the same names
     - - ``.text()``, ``.html()``
       - the same names
-    - - ``.add_class(c)``, ``.remove_class(c)``, ``.has_class(c)``
-      - the same names
+    - - ``.add_class(c)``, ``.remove_class(c)``, ``.toggle_class(c)``, ``.has_class(c)``
+      - :meth:`~turbohtml.Element.add_class`, :meth:`~turbohtml.Element.remove_class`,
+        :meth:`~turbohtml.Element.toggle_class`, :meth:`~turbohtml.Element.has_class` (also on
+        :class:`~turbohtml.query.Query`)
     - - ``.parent()``, ``.children()``, ``.siblings()``
       - the same names
     - - iterating ``for item in pq("a").items()``

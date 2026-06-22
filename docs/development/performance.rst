@@ -679,6 +679,11 @@ outside the timed region, then the timed call walks its links and sets the attri
 :attr:`~turbohtml.Element.attrs` mapping, lxml through ``Element.set``, BeautifulSoup through item assignment).
 selectolax mutation is limited, so it has no entry.
 
+The last row is a second pass: a classList churn that adds then drops a token on every link (turbohtml's
+:meth:`~turbohtml.Element.add_class`/:meth:`~turbohtml.Element.remove_class` against lxml's ``classes`` set). The
+add-then-remove is a net no-op, so each repeat does equal work. BeautifulSoup has no class-token mutator, so it has no
+entry.
+
 .. list-table::
     :header-rows: 1
     :widths: 28 24 24 24
@@ -699,6 +704,10 @@ selectolax mutation is limited, so it has no entry.
       - 8.4 µs
       - 41.6 µs
       - 212 µs
+    - - add/remove a class (92 kB)
+      - 11.2 µs
+      - 163 µs
+      - —
 
 *****************
  Fluent chaining

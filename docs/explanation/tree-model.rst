@@ -31,4 +31,9 @@ The node types are a small sealed hierarchy (:class:`~turbohtml.Document`, :clas
 ``.text``/``.tail`` split lxml-style trees use, so a node's children are its text runs and elements interleaved in
 document order. Each type sets ``__match_args__``, so structural pattern matching unpacks a node's defining field, and
 node equality is identity over the underlying arena node, so two wrappers for the same element compare equal and hash
-alike.
+alike. An element's attributes are a live mapping, with the space-separated token-list attributes (``class``, ``rel``,
+...) surfacing as a ``list[str]``; on top of that, :meth:`~turbohtml.Element.has_class`,
+:meth:`~turbohtml.Element.add_class`, :meth:`~turbohtml.Element.remove_class`, and
+:meth:`~turbohtml.Element.toggle_class` edit the ``class`` set without a read-split-rejoin dance. The token scan and the
+rewrite both run in C under the per-tree lock, so the read-modify-write of the attribute is one atomic step rather than
+the several Python list operations a hand-rolled version would take.

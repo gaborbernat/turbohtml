@@ -68,6 +68,10 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
       - :attr:`~turbohtml.Element.tag` (same)
     - - ``el.get("x")``, ``el.attrib``, ``el.set("x", "v")``
       - :attr:`~turbohtml.Element.attrs` (``attrs.get("x")``, ``attrs["x"] = "v"``)
+    - - ``el.classes.add("x")``, ``el.classes.discard("x")``, ``el.classes.toggle("x")``, ``"x" in el.classes``
+      - :meth:`el.add_class("x") <turbohtml.Element.add_class>`, :meth:`el.remove_class("x")
+        <turbohtml.Element.remove_class>`, :meth:`el.toggle_class("x") <turbohtml.Element.toggle_class>`,
+        :meth:`el.has_class("x") <turbohtml.Element.has_class>`
     - - ``el.text``, ``el.tail``
       - child :class:`~turbohtml.Text` nodes; iterate :attr:`~turbohtml.Node.children`
     - - ``el.text_content()``

@@ -84,6 +84,26 @@ return it:
 
     <a href="/new" class="btn primary">go</a>
 
+***************************
+ Edit an element's classes
+***************************
+
+For the common case of toggling a single class you do not have to read, split, and rewrite the whole ``class`` value by
+hand. :meth:`~turbohtml.Element.add_class`, :meth:`~turbohtml.Element.remove_class`, and
+:meth:`~turbohtml.Element.toggle_class` edit the space-separated token set in place and return the element, so the calls
+chain; :meth:`~turbohtml.Element.has_class` tests membership. Adding a token already present is a no-op, removing the
+last token leaves an empty ``class``, and a write collapses redundant whitespace to single spaces:
+
+.. testcode::
+
+    button = turbohtml.parse('<button class="btn  btn">Save</button>').find("button")
+    button.add_class("primary").toggle_class("btn")  # btn was present, so it is removed
+    print((button.has_class("primary"), button.attr("class")))
+
+.. testoutput::
+
+    (True, 'primary')
+
 ***********************************
  Merge adjacent text after editing
 ***********************************
