@@ -539,6 +539,29 @@ comparison the flat selectors use.
       - 37.2 µs
       - 1.38 ms
 
+A text-content search runs through :meth:`~turbohtml.Node.find_all` with ``text=`` (a regex matched against each
+element's collected subtree text), raced against ``BeautifulSoup.find_all(string=...)``; lxml, selectolax, and parsel
+expose no equivalent, so this is a two-way race. The predicate runs Python mid-walk, so turbohtml gathers each
+candidate's text in C and searches once, staying roughly two to three times ahead of BeautifulSoup and narrowing on the
+largest page where the text gathering dominates both sides.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 44 14 14
+
+    - - find ``text=`` regex
+      - turbohtml
+      - BeautifulSoup
+    - - wpt page (4 kB)
+      - 9.3 µs
+      - 19.7 µs
+    - - wpt page (9.6 kB)
+      - 13.9 µs
+      - 38.2 µs
+    - - wpt page (92 kB)
+      - 741 µs
+      - 989 µs
+
 XPath 1.0 evaluation runs through :meth:`~turbohtml.Node.xpath`, raced against lxml's libxml2 engine, the XPath that
 parsel, pyquery, and html5-parser all wrap (selectolax and BeautifulSoup have none). One expression per feature class
 (name tests, the ``//`` abbreviation, attribute, positional, and arithmetic predicates, string and aggregate functions,

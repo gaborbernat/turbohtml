@@ -31,6 +31,7 @@ import functools
 import html
 import os
 import random
+import re
 import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
@@ -380,6 +381,23 @@ def lexbor_find(tree: LexborHTMLParser) -> None:
     tree.css("a")
 
 
+# A text-content search: turbohtml matches elements by their collected text, the search bs4
+# spells find_all(string=...) over text nodes. A regex predicate runs Python mid-walk, so the
+# C side snapshots the candidates and their text under the lock first. lxml/selectolax/parsel
+# expose no equivalent text search, so only turbohtml and BeautifulSoup race here.
+FIND_TEXT_PATTERN = re.compile(r"test")  # ubiquitous in the wpt corpus, so the predicate does real work
+
+
+def turbo_find_text(doc: Document) -> None:
+    """Collect every element whose collected text matches the regex with turbohtml's find_all."""
+    doc.find_all(text=FIND_TEXT_PATTERN)
+
+
+def bs4_find_text(soup: BeautifulSoup) -> None:
+    """Collect every matching string with BeautifulSoup's find_all(string=...)."""
+    soup.find_all(string=FIND_TEXT_PATTERN)
+
+
 def turbo_select(doc: Document) -> None:
     """Run the CSS selector with turbohtml's select."""
     doc.select(CSS_SELECTOR)
@@ -530,14 +548,15 @@ def print_build_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
-# Read-path competitors, fastest-first: a tree builder plus the find/select/serialize/:has ops. turbohtml leads each.
-# A None op means the library does not offer it (parsel has no serializer, and its cssselect cannot compile :has()).
+# Read-path competitors, fastest-first: a tree builder plus the find/select/serialize/:has/find-text ops.
+# turbohtml leads each. A None op means the library does not offer it (parsel has no serializer and its
+# cssselect cannot compile :has(); only turbohtml and bs4 search by text content).
 READPATH_LIBS: tuple[tuple[str, Callable[[str], object], tuple[Callable[..., None] | None, ...]], ...] = (
-    ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize, turbo_has_select)),
-    ("lxml", lxml_tree, (lxml_find, lxml_select, lxml_serialize, lxml_has_select)),
-    ("selectolax", lexbor_tree, (lexbor_find, lexbor_select, lexbor_serialize, lexbor_has_select)),
-    ("BeautifulSoup", bs4_tree, (bs4_find, bs4_select, bs4_serialize, bs4_has_select)),
-    ("parsel", parsel_tree, (parsel_find, parsel_select, None, None)),
+    ("turbohtml", turbo_tree, (turbo_find, turbo_select, turbo_serialize, turbo_has_select, turbo_find_text)),
+    ("lxml", lxml_tree, (lxml_find, lxml_select, lxml_serialize, lxml_has_select, None)),
+    ("selectolax", lexbor_tree, (lexbor_find, lexbor_select, lexbor_serialize, lexbor_has_select, None)),
+    ("BeautifulSoup", bs4_tree, (bs4_find, bs4_select, bs4_serialize, bs4_has_select, bs4_find_text)),
+    ("parsel", parsel_tree, (parsel_find, parsel_select, None, None, None)),
 )
 
 # wpt pages from 4 kB to 92 kB; the multi-MB specs are skipped here since every
@@ -1638,6 +1657,7 @@ def main() -> None:
     find_cases = run_readpath_suite(bench, 0, "find") if "query" in suites else []
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     has_select_cases = run_readpath_suite(bench, 3, "select :has") if "query" in suites else []
+    find_text_cases = run_readpath_suite(bench, 4, "find-text") if "query" in suites else []
     xpath_cases = run_xpath_suite(bench) if "xpath" in suites else ([], [])
     xpath_feature_cases = run_xpath_feature_suite(bench) if "xpath" in suites else []
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
@@ -1655,6 +1675,7 @@ def main() -> None:
     print_readpath_table(means, "find", find_cases)
     print_readpath_table(means, "select", select_cases)
     print_readpath_table(means, "select :has", has_select_cases)
+    print_readpath_table(means, "find-text", find_text_cases)
     print_xpath_table(means, xpath_cases)
     print_xpath_feature_table(means, xpath_feature_cases)
     print_readpath_table(means, "serialize", serialize_cases)
