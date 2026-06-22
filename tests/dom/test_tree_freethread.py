@@ -221,6 +221,33 @@ def test_concurrent_classlist_edits_are_memory_safe() -> None:
         assert isinstance(div.has_class("on"), bool)  # still readable after the concurrent churn
 
 
+def test_concurrent_reads_and_fragment_splicing_is_memory_safe() -> None:
+    doc = _doc(300)
+    body = doc.find("body")
+    assert body is not None
+    divs = body.find_all("div")
+    start = threading.Barrier(3)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.find_all("p")  # walks the tree while the splices relink each div's children
+            body.serialize()
+
+    def inner_setter() -> None:
+        start.wait()
+        for div in divs:
+            div.set_inner_html("<p>fresh</p><span>x</span>")  # clears then splices under the lock
+
+    def adjacent_inserter() -> None:
+        start.wait()
+        for div in divs:
+            div.insert_adjacent_html("beforeend", "<em>more</em>")  # appends a parsed fragment
+
+    _run(reader, inner_setter, adjacent_inserter)
+    assert body.serialize().startswith("<body>")  # still well-formed after the concurrent splicing
+
+
 def test_concurrent_link_enumeration_and_resolve_is_memory_safe() -> None:
     anchors = "".join(f'<a href="p{index}/"><img src="i{index}.png"></a>' for index in range(300))
     doc = turbohtml.parse(f"<html><body>{anchors}</body></html>")

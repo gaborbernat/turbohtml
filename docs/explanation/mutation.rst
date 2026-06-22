@@ -14,6 +14,17 @@ a node a descendant of itself is refused. The bulk wraps (:meth:`~turbohtml.Elem
 and relink it in pure C under the one per-tree lock, never dereferencing a sibling pointer across a Python call that
 could rewire the tree, so a group moves in a single atomic edit rather than node by node.
 
+Setting content from a string -- :meth:`~turbohtml.Element.set_inner_html` (the write side of
+:attr:`~turbohtml.Node.inner_html`) and :meth:`~turbohtml.Element.insert_adjacent_html` -- runs the same fragment parser
+the read path exposes, in the context of the element that will hold the result, so its content model and namespace are
+honored exactly as the DOM ``innerHTML`` setter requires. Because parsing allocates and can re-enter Python, the
+fragment is parsed first into a private detached tree, *before* the per-tree lock is taken and without holding any
+pointer into the live tree; only then does a pure-C pass under the lock copy the parsed nodes into the destination arena
+and splice them at the chosen position. That ordering is the same discipline the bulk wraps follow, and it is what keeps
+the splice safe under free-threading: no structural pointer is dereferenced across the parse that could rewire the tree.
+:meth:`~turbohtml.Element.set_text` is the degenerate case that needs no parser at all -- it drops the children for a
+single verbatim text node, so any markup in the string is escaped rather than interpreted.
+
 :meth:`~turbohtml.Node.prune` is the bulk version of that subtractive edit, and answers the gap a ``SoupStrainer``
 filled by filtering *during* the parse. turbohtml keeps the parse whole and conformant, then trims afterward: it runs
 the CSS matcher over the subtree once, snapshots every match together with its ancestor chain, and only then removes

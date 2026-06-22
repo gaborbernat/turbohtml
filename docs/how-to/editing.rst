@@ -66,6 +66,52 @@ return it:
 
     <section><h2>Title</h2><div class="body"><p>one</p><p>two</p></div></section>
 
+****************************************
+ Set an element's content from a string
+****************************************
+
+:meth:`~turbohtml.Element.set_inner_html` parses an HTML string as a fragment in the element's own context and replaces
+its children with the result, the write side of :attr:`~turbohtml.Node.inner_html`. The string runs through the same
+parser as :func:`~turbohtml.parse`, so malformed markup is repaired the same way:
+
+.. testcode::
+
+    doc = turbohtml.parse("<ul><li>old</li></ul>")
+    ul = doc.find("ul")
+    ul.set_inner_html("<li>one<li>two")
+    print(ul.html)
+
+.. testoutput::
+
+    <ul><li>one</li><li>two</li></ul>
+
+:meth:`~turbohtml.Element.set_text` replaces the children with a single text node, taking the string verbatim, so any
+markup in it is escaped rather than parsed (the same as assigning :attr:`~turbohtml.Element.text`):
+
+.. testcode::
+
+    ul.find("li").set_text("a <b> & c")
+    print(ul.find("li").html)
+
+.. testoutput::
+
+    <li>a &lt;b&gt; &amp; c</li>
+
+:meth:`~turbohtml.Element.insert_adjacent_html` parses a fragment and splices it relative to the element at a DOM
+position: ``"beforebegin"`` and ``"afterend"`` place the nodes among the element's siblings (so they need an element
+parent), while ``"afterbegin"`` and ``"beforeend"`` add them as the first or last children:
+
+.. testcode::
+
+    doc = turbohtml.parse("<ul><li>one</li></ul>")
+    first = doc.find("li")
+    first.insert_adjacent_html("afterend", "<li>two</li>")
+    print(doc.find("ul").html)
+
+.. testoutput::
+
+    <ul><li>one</li><li>two</li></ul>
+
 *********************************
  Rewrite an element's attributes
 *********************************
