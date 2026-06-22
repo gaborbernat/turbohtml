@@ -71,5 +71,5 @@ def test_date_invalid_is_nan(doc: turbohtml.Node, expr: str) -> None:
         pytest.param("date:leap-year('bad')", False, id="invalid-is-false"),
     ],
 )
-def test_date_leap_year(doc: turbohtml.Node, expr: str, expected: bool) -> None:
+def test_date_leap_year(doc: turbohtml.Node, expr: str, *, expected: bool) -> None:
     assert doc.xpath(expr) is expected

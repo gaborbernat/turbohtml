@@ -12,14 +12,7 @@ import pytest
 import turbohtml
 from turbohtml import Element
 
-HTML = (
-    "<ul>"
-    "<li id='a' class='x'>1</li>"
-    "<li id='b' class='y'>2</li>"
-    "<li id='c' class='x'>3</li>"
-    "<li id='d'>1</li>"
-    "</ul>"
-)
+HTML = "<ul><li id='a' class='x'>1</li><li id='b' class='y'>2</li><li id='c' class='x'>3</li><li id='d'>1</li></ul>"
 
 
 @pytest.fixture
@@ -63,7 +56,7 @@ def test_set_nodeset_results(doc: turbohtml.Node, expr: str, expected: list[str]
         pytest.param("set:has-same-node(//li[@id='a'], //li[@id='b'])", False, id="disjoint"),
     ],
 )
-def test_set_has_same_node(doc: turbohtml.Node, expr: str, expected: bool) -> None:
+def test_set_has_same_node(doc: turbohtml.Node, expr: str, *, expected: bool) -> None:
     assert doc.xpath(expr) is expected
 
 
@@ -107,7 +100,7 @@ def test_set_over_attribute_nodesets(attr_doc: turbohtml.Node, expr: str, expect
         pytest.param("set:has-same-node(//a/@id, //a/@class)", False, id="attr-same-node-different-index"),
     ],
 )
-def test_set_has_same_node_attributes(attr_doc: turbohtml.Node, expr: str, expected: bool) -> None:
+def test_set_has_same_node_attributes(attr_doc: turbohtml.Node, expr: str, *, expected: bool) -> None:
     assert attr_doc.xpath(expr) is expected
 
 

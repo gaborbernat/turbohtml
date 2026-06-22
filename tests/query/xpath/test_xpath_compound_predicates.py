@@ -32,9 +32,7 @@ def doc() -> turbohtml.Node:
         pytest.param("//a[@x='1'] | //b[@y='2']", None, id="union-root"),
     ],
 )
-def test_predicate_survives_in_compound_expression(
-    doc: turbohtml.Node, expr: str, expected: float | None
-) -> None:
+def test_predicate_survives_in_compound_expression(doc: turbohtml.Node, expr: str, expected: float | None) -> None:
     result = doc.xpath(expr)
     if expected is None:
         assert len(result) == 2

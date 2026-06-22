@@ -14,10 +14,7 @@ import pytest
 import turbohtml
 from turbohtml import Element
 
-HTML = (
-    "<div id='nums'><n>3</n><n>1</n><n>5</n><n>5</n></div>"
-    "<div id='mixed'><m>3</m><m>nope</m></div>"
-)
+HTML = "<div id='nums'><n>3</n><n>1</n><n>5</n><n>5</n></div><div id='mixed'><m>3</m><m>nope</m></div>"
 
 
 @pytest.fixture
