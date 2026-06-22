@@ -64,6 +64,9 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
         :attr:`~turbohtml.Node.stripped_strings`
     - - ``node.html``, ``node.decompose()``, ``node.unwrap()``
       - :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.decompose`, :meth:`~turbohtml.Node.unwrap`
+    - - ``parser.strip_tags(["script"])``, ``node.unwrap_tags(["b"])``
+      - :meth:`node.remove("script") <turbohtml.Node.remove>`, :meth:`node.strip_tags("b")
+        <turbohtml.Node.strip_tags>`
 
 .. testcode::
 
@@ -81,5 +84,8 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
 - selectolax queries are CSS-only; turbohtml adds the ``find``/``find_all`` filter grammar with axes and regex or
   callable filters.
 - ``node.text`` is a property; drop the parentheses.
+- the bulk tag strippers are named the other way around: selectolax's ``strip_tags`` drops the tags *with* their content
+  (turbohtml's :meth:`~turbohtml.Node.remove`), while its ``unwrap_tags`` keeps the content (turbohtml's
+  :meth:`~turbohtml.Node.strip_tags`). Both turbohtml methods take a full CSS selector, not just a tag-name list.
 - selectolax's lexbor-specific knobs and its raw C-level node handles are not exposed; turbohtml's public surface is the
   typed Python tree, not the underlying engine's C API.

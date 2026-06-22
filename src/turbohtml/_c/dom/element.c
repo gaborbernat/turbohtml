@@ -1997,6 +1997,126 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
     return Py_NewRef(self);
 }
 
+/* A growable array of matched nodes, the snapshot the bulk edits walk. */
+typedef struct {
+    th_node **items;
+    Py_ssize_t count;
+    Py_ssize_t capacity;
+} node_snapshot;
+
+/* Append node to the snapshot, doubling its capacity on demand. Returns 0, or
+   -1 on allocation failure. */
+static int snapshot_push(node_snapshot *snapshot, th_node *node) {
+    if (snapshot->count == snapshot->capacity) {
+        Py_ssize_t grown = snapshot->capacity != 0 ? snapshot->capacity * 2 : 16;
+        th_node **resized = PyMem_Realloc(snapshot->items, (size_t)grown * sizeof(th_node *));
+        if (resized == NULL) { /* GCOVR_EXCL_BR_LINE: a realloc failure cannot be forced from a test */
+            return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        snapshot->items = resized;
+        snapshot->capacity = grown;
+    }
+    snapshot->items[snapshot->count++] = node;
+    return 0;
+}
+
+/* Record every element descendant of origin matching compiled, in document
+   order, into snapshot. A string/regex selector can call back into Python, so
+   matching must finish before any edit; matching alone never rewires a node, so
+   the snapshot lets the edit pass run in pure C. Returns 0, or -1 on allocation
+   failure. */
+static int snapshot_matches(sel_compiled *compiled, th_node *origin, node_snapshot *snapshot) {
+    const sel_simple *single = sel_single_simple(compiled);
+    sel_ctx ctx = {compiled->tree, origin, compiled->quirks};
+    for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+        if (node->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        if (!(single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches(node, compiled, origin))) {
+            continue;
+        }
+        if (snapshot_push(snapshot, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return 0;
+}
+
+PyObject *node_remove(PyObject *self, PyObject *arg) {
+    if (check_selector_arg(arg) < 0) {
+        return NULL;
+    }
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    node_snapshot snapshot = {NULL, 0, 0};
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
+    sel_compiled *compiled = cached_compile((HandleObject *)handle, arg);
+    if (compiled == NULL) {
+        error = 1;
+    } else {
+        if (snapshot_matches(compiled, origin, &snapshot) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            error = 1;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+        } else if (snapshot.count > 0) {
+            /* Pure-C edit: detach each match. A node never frees on remove, only
+               unlinks, and re-detaching an already-detached node is a no-op, so a
+               nested match whose ancestor already left the tree drops harmlessly. */
+            handle_drop_index(handle);
+            for (Py_ssize_t at = 0; at < snapshot.count; at++) {
+                th_node_remove(snapshot.items[at]);
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(snapshot.items);
+    if (error) {
+        return NULL;
+    }
+    return Py_NewRef(self);
+}
+
+PyObject *node_strip_tags(PyObject *self, PyObject *arg) {
+    if (check_selector_arg(arg) < 0) {
+        return NULL;
+    }
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    node_snapshot snapshot = {NULL, 0, 0};
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
+    sel_compiled *compiled = cached_compile((HandleObject *)handle, arg);
+    if (compiled == NULL) {
+        error = 1;
+    } else {
+        if (snapshot_matches(compiled, origin, &snapshot) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            error = 1;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+        } else if (snapshot.count > 0) {
+            /* Pure-C edit: unwrap each match, splicing its children into its parent
+               in its place, then detach it. Unwrapping only relinks, so a nested
+               match stays live, reparented to the surviving ancestor, until its own
+               turn; its parent is re-read here and is always set (a match is a
+               strict descendant of origin). */
+            handle_drop_index(handle);
+            for (Py_ssize_t at = 0; at < snapshot.count; at++) {
+                th_node *node = snapshot.items[at];
+                th_node *parent = node->parent;
+                while (node->first_child != NULL) {
+                    th_node *child = node->first_child;
+                    th_node_remove(child);
+                    th_node_insert_before(parent, child, node);
+                }
+                th_node_remove(node);
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyMem_Free(snapshot.items);
+    if (error) {
+        return NULL;
+    }
+    return Py_NewRef(self);
+}
+
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.\n\n"
                           ":param tag: the tag name.\n"
                           ":param attrs: initial attributes; a list value sets a token-list attribute and\n"

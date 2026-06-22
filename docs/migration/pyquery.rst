@@ -84,6 +84,10 @@ almost name for name:
       - the same names
     - - iterating ``for item in pq("a").items()``
       - :meth:`for item in query("a").items() <turbohtml.query.Query.items>`
+    - - jQuery ``pq("script").remove()``, ``pq(".box b").remove()``
+      - :meth:`node.remove("script") <turbohtml.Node.remove>`, :meth:`node.remove(".box b") <turbohtml.Node.remove>`
+    - - jQuery ``$(".box b").contents().unwrap()`` (drop the tag, keep the text)
+      - :meth:`node.strip_tags(".box b") <turbohtml.Node.strip_tags>`
 
 pyquery's ``.wrap_all(html)`` wraps a whole matched set in one new container in place; the node API has two methods for
 the shapes that fit a tree model cleanly. :meth:`~turbohtml.Element.wrap_children` boxes every child of a container, and
