@@ -43,9 +43,9 @@ children and ``decompose`` drops a subtree:
     Element('b')
     <p>keep bold </p>
 
-*********************************
+********************************
  Strip tags matching a selector
-*********************************
+********************************
 
 Where :meth:`~turbohtml.Node.prune` keeps the matches, its two inverses drop them in bulk.
 :meth:`~turbohtml.Node.remove` deletes every matching element and its whole subtree, and
@@ -66,8 +66,8 @@ take one CSS selector, edit in place, and return the node, so they chain like ``
 
 ``remove`` is the destructive counterpart of ``prune``: the same snapshot-then-edit pass, but it deletes what ``prune``
 would keep. ``strip_tags`` is the bulk form of :meth:`~turbohtml.Node.unwrap`, applied to every match at once; nested
-matches collapse to their innermost content. Both snapshot the matches under the per-tree lock before touching the
-tree, so a selector that calls back into Python never sees a half-edited document.
+matches collapse to their innermost content. Both snapshot the matches under the per-tree lock before touching the tree,
+so a selector that calls back into Python never sees a half-edited document.
 
 ****************************
  Wrap a group of nodes once

@@ -65,8 +65,7 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
     - - ``node.html``, ``node.decompose()``, ``node.unwrap()``
       - :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.decompose`, :meth:`~turbohtml.Node.unwrap`
     - - ``parser.strip_tags(["script"])``, ``node.unwrap_tags(["b"])``
-      - :meth:`node.remove("script") <turbohtml.Node.remove>`, :meth:`node.strip_tags("b")
-        <turbohtml.Node.strip_tags>`
+      - :meth:`node.remove("script") <turbohtml.Node.remove>`, :meth:`node.strip_tags("b") <turbohtml.Node.strip_tags>`
 
 .. testcode::
 
