@@ -1,14 +1,20 @@
-"""The live mutable attribute view and the data/text setters."""
+"""The live mutable attribute view, the data/text setters, and the HTML content setters."""
 
 from __future__ import annotations
 
 import pytest
 
-from turbohtml import Comment, Element, Text, parse
+from turbohtml import Comment, Element, Namespace, Text, parse
 
 
 def _div(markup: str = '<div id="a" class="x y">') -> Element:
     element = parse(markup).find("div")
+    assert element is not None
+    return element
+
+
+def _ctx(source: str, selector: str) -> Element:
+    element = parse(source).find(selector)
     assert element is not None
     return element
 
@@ -208,3 +214,262 @@ def test_text_cannot_be_deleted() -> None:
     element = _div()
     with pytest.raises(TypeError, match="cannot delete text"):
         del element.text  # ty: ignore[invalid-assignment]  # text has no deleter
+
+
+# --- set_inner_html: parse a fragment in context and replace the children ---
+
+
+@pytest.mark.parametrize(
+    ("source", "selector", "fragment", "expected"),
+    [
+        pytest.param("<div><b>old</b>text</div>", "div", "<i>new</i>", "<div><i>new</i></div>", id="replaces-children"),
+        pytest.param("<div><b>old</b>text</div>", "div", "", "<div></div>", id="empty-clears"),
+        pytest.param("<div></div>", "div", "<p>a<p>b", "<div><p>a</p><p>b</p></div>", id="repairs-malformed"),
+        pytest.param(
+            "<table><tbody></tbody></table>",
+            "tbody",
+            "<tr><td>cell</td></tr>",
+            "<tbody><tr><td>cell</td></tr></tbody>",
+            id="table-context",
+        ),
+    ],
+)
+def test_set_inner_html_replaces_with_parsed_fragment(source: str, selector: str, fragment: str, expected: str) -> None:
+    element = _ctx(source, selector)
+    element.set_inner_html(fragment)
+    assert element.html == expected
+
+
+@pytest.mark.parametrize(
+    ("fragment", "length"),
+    [pytest.param("<i>new</i>", 1, id="one-child"), pytest.param("", 0, id="empty")],
+)
+def test_set_inner_html_sets_the_child_count(fragment: str, length: int) -> None:
+    element = _ctx("<div><b>old</b>text</div>", "div")
+    element.set_inner_html(fragment)
+    assert len(element) == length
+
+
+def test_set_inner_html_parses_markup_into_a_subtree() -> None:
+    element = _ctx("<div></div>", "div")
+    element.set_inner_html("<ul><li>a</li><li>b</li></ul>")
+    assert [item.text for item in element.find_all("li")] == ["a", "b"]
+
+
+def test_set_inner_html_round_trips_escaped_text() -> None:
+    element = _ctx("<div></div>", "div")
+    element.set_inner_html("a &amp; b &lt; c")
+    assert element.text == "a & b < c"
+
+
+@pytest.mark.parametrize(
+    ("source", "selector", "fragment", "child", "namespace"),
+    [
+        pytest.param("<svg></svg>", "svg", "<rect></rect>", "rect", Namespace.SVG, id="svg"),
+        pytest.param("<math></math>", "math", "<mi>x</mi>", "mi", Namespace.MATHML, id="math"),
+    ],
+)
+def test_set_inner_html_parses_in_a_foreign_context(
+    source: str, selector: str, fragment: str, child: str, namespace: Namespace
+) -> None:
+    element = _ctx(source, selector)
+    element.set_inner_html(fragment)
+    found = element.find(child)
+    assert found is not None
+    assert found.namespace is namespace
+
+
+def test_set_inner_html_on_a_constructed_element() -> None:
+    element = Element("section")
+    element.set_inner_html("<h1>Title</h1>")
+    assert element.html == "<section><h1>Title</h1></section>"
+
+
+@pytest.mark.parametrize(
+    ("tag", "fragment", "exception", "match"),
+    [
+        # the type check rejects a non-str before the parse; an int reaches it via parametrize
+        pytest.param("div", 5, TypeError, "html must be a str", id="non-str"),
+        # the tag name is the fragment context, which must encode to UTF-8
+        pytest.param("\ud800", "<b>x</b>", UnicodeEncodeError, None, id="lone-surrogate-context"),
+    ],
+)
+def test_set_inner_html_rejects(tag: str, fragment: str, exception: type[Exception], match: str | None) -> None:
+    with pytest.raises(exception, match=match):
+        Element(tag).set_inner_html(fragment)
+
+
+# --- set_text: replace the children with one verbatim Text node ---
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("Tom & Jerry", "<p>Tom &amp; Jerry</p>", id="escapes-ampersand"),
+        pytest.param("", "<p></p>", id="empty-clears"),
+    ],
+)
+def test_set_text_replaces_children(text: str, expected: str) -> None:
+    element = _ctx("<p><b>x</b>y</p>", "p")
+    element.set_text(text)
+    assert element.html == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "length"),
+    [pytest.param("Tom & Jerry", 1, id="one-text-node"), pytest.param("", 0, id="empty")],
+)
+def test_set_text_sets_the_child_count(text: str, length: int) -> None:
+    element = _ctx("<p><b>x</b>y</p>", "p")
+    element.set_text(text)
+    assert len(element) == length
+
+
+def test_set_text_does_not_parse_markup() -> None:
+    element = _ctx("<p></p>", "p")
+    element.set_text("<b>not bold</b>")
+    assert element.text == "<b>not bold</b>"  # the angle brackets are text, not an element
+    assert element.find("b") is None
+
+
+def test_set_text_matches_the_text_setter() -> None:
+    one = _ctx("<p><b>x</b>y</p>", "p")
+    other = _ctx("<p><b>x</b>y</p>", "p")
+    one.set_text("same")
+    other.text = "same"
+    assert one.html == other.html
+
+
+def test_set_text_on_a_constructed_element() -> None:
+    element = Element("span")
+    element.set_text("hi")
+    assert element.html == "<span>hi</span>"
+
+
+@pytest.mark.parametrize("value", [pytest.param(5, id="int")])
+def test_set_text_rejects_non_str(value: str) -> None:
+    with pytest.raises(TypeError, match="text must be a str"):
+        Element("p").set_text(value)
+
+
+# --- insert_adjacent_html: parse a fragment and splice it at a DOM position ---
+
+
+@pytest.mark.parametrize(
+    ("source", "position", "fragment", "expected"),
+    [
+        pytest.param(
+            "<ul><li><span>kept</span></li></ul>",
+            "afterbegin",
+            "<em>new</em>",
+            "<li><em>new</em><span>kept</span></li>",
+            id="afterbegin-first",
+        ),
+        pytest.param(
+            "<ul><li></li></ul>", "afterbegin", "<em>new</em>", "<li><em>new</em></li>", id="afterbegin-empty"
+        ),
+        pytest.param(
+            "<ul><li><span>kept</span></li></ul>",
+            "beforeend",
+            "<em>new</em>",
+            "<li><span>kept</span><em>new</em></li>",
+            id="beforeend-last",
+        ),
+        pytest.param(
+            "<ul><li>one</li></ul>", "BeforeEnd", "<em>x</em>", "<li>one<em>x</em></li>", id="case-insensitive"
+        ),
+    ],
+)
+def test_insert_adjacent_html_on_self(source: str, position: str, fragment: str, expected: str) -> None:
+    element = _ctx(source, "li")
+    element.insert_adjacent_html(position, fragment)
+    assert element.html == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "selector", "position", "fragment", "expected"),
+    [
+        pytest.param(
+            "<ul><li>one</li></ul>",
+            "li",
+            "beforebegin",
+            "<li>zero</li>",
+            "<ul><li>zero</li><li>one</li></ul>",
+            id="beforebegin",
+        ),
+        pytest.param(
+            "<ul><li>one</li></ul>",
+            "li",
+            "afterend",
+            "<li>two</li>",
+            "<ul><li>one</li><li>two</li></ul>",
+            id="afterend",
+        ),
+        pytest.param(
+            "<ul><li>one</li></ul>",
+            "li",
+            "beforebegin",
+            "<a></a><b></b>",
+            "<ul><a></a><b></b><li>one</li></ul>",
+            id="beforebegin-keeps-order",
+        ),
+        pytest.param(
+            "<ul><li>one</li></ul>",
+            "li",
+            "afterend",
+            "<a></a><b></b>",
+            "<ul><li>one</li><a></a><b></b></ul>",
+            id="afterend-keeps-order",
+        ),
+        pytest.param(
+            "<table><tr><td>a</td></tr></table>",
+            "td",
+            "afterend",
+            "<td>b</td>",
+            "<tr><td>a</td><td>b</td></tr>",
+            id="parent-context",
+        ),
+    ],
+)
+def test_insert_adjacent_html_among_siblings(
+    source: str, selector: str, position: str, fragment: str, expected: str
+) -> None:
+    element = _ctx(source, selector)
+    element.insert_adjacent_html(position, fragment)
+    parent = element.parent
+    assert parent is not None
+    assert parent.html == expected
+
+
+def test_insert_adjacent_html_beforebegin_needs_an_element_parent() -> None:
+    with pytest.raises(ValueError, match="need an element parent"):
+        Element("div").insert_adjacent_html("beforebegin", "<b>x</b>")
+
+
+def test_insert_adjacent_html_afterend_on_the_root_needs_an_element_parent() -> None:
+    html = parse("<p>x</p>").find("html")
+    assert html is not None  # its parent is the document, not an element
+    with pytest.raises(ValueError, match="need an element parent"):
+        html.insert_adjacent_html("afterend", "<b>x</b>")
+
+
+@pytest.mark.parametrize(
+    ("position", "fragment", "exception", "match"),
+    [
+        pytest.param("middle", "<b>x</b>", ValueError, "position must be", id="unknown-position"),
+        pytest.param(5, "<b>x</b>", TypeError, None, id="non-str-position"),
+        pytest.param("beforeend", 5, TypeError, None, id="non-str-html"),
+    ],
+)
+def test_insert_adjacent_html_rejects(
+    position: str, fragment: str, exception: type[Exception], match: str | None
+) -> None:
+    element = _ctx("<ul><li>one</li></ul>", "li")
+    with pytest.raises(exception, match=match):
+        element.insert_adjacent_html(position, fragment)
+
+
+def test_insert_adjacent_html_rejects_a_lone_surrogate_context() -> None:
+    # 'beforeend' parses in the element's own context, whose tag must encode to UTF-8
+    with pytest.raises(UnicodeEncodeError):
+        Element("\ud800").insert_adjacent_html("beforeend", "<b>x</b>")

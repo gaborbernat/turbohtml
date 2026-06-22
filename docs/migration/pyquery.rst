@@ -121,6 +121,29 @@ one verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` spli
     - - ``pq(el).append(markup)``
       - :meth:`el.insert_adjacent_html("beforeend", markup) <turbohtml.Element.insert_adjacent_html>`
 
+*************
+ Performance
+*************
+
+The content setters carry the same C advantage as the rest of the wrapper. Both libraries parse the page once outside
+the timed call, then replace a ``<body>``'s content on every run: turbohtml reparses the fragment and splices it in one
+C call, where pyquery's ``.html()`` routes through lxml's ``fromstring`` and reassembly. The numbers come from the 9.6
+kB ``wpt`` page in the ``edit`` suite (``tox -e bench edit``):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 30 30
+
+    - - content setter (9.6 kB page)
+      - turbohtml
+      - pyquery
+    - - :meth:`~turbohtml.Element.set_inner_html` vs ``.html()``
+      - 1.3 µs
+      - 7.7 µs
+    - - :meth:`~turbohtml.Element.set_text` vs ``.text()``
+      - 0.13 µs
+      - 4.6 µs
+
 **********
  Pitfalls
 **********

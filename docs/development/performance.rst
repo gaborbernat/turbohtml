@@ -677,7 +677,10 @@ objects. selectolax is parse-only, so it has no entry.
 Editing a parsed tree: tag every ``<a>`` with ``rel="nofollow"``, a link-rewriting pass. Each library parses once
 outside the timed region, then the timed call walks its links and sets the attribute (turbohtml through the live
 :attr:`~turbohtml.Element.attrs` mapping, lxml through ``Element.set``, BeautifulSoup through item assignment).
-selectolax mutation is limited, so it has no entry.
+selectolax mutation is limited, so it has no entry. The last row is a content-setter pass:
+:meth:`~turbohtml.Element.set_inner_html` reparses a fixed fragment in the ``<body>``'s context and replaces its
+children, against lxml clearing the body and appending ``fragments_fromstring`` and BeautifulSoup clearing it and
+appending a reparsed soup. turbohtml does the parse and splice in one C call.
 
 The last row is a second pass: a classList churn that adds then drops a token on every link (turbohtml's
 :meth:`~turbohtml.Element.add_class`/:meth:`~turbohtml.Element.remove_class` against lxml's ``classes`` set). The
@@ -708,6 +711,10 @@ entry.
       - 11.2 µs
       - 163 µs
       - —
+    - - set inner html (9.6 kB)
+      - 1.3 µs
+      - 5.1 µs
+      - 60.6 µs
 
 *****************
  Fluent chaining
