@@ -52,6 +52,28 @@ def test_concurrent_find_all_and_extract_is_memory_safe() -> None:
     assert doc.find_all("p") == []  # every <div> was extracted, so no <p> remains
 
 
+def test_concurrent_find_by_text_and_extract_is_memory_safe() -> None:
+    doc = _doc(400)
+    body = doc.find("body")
+    assert body is not None
+    children = list(body.children)
+    start = threading.Barrier(2)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(300):
+            # the callable predicate runs Python mid-walk, suspending the per-tree lock;
+            # the C side snapshots the candidates and their text under the lock first
+            doc.find_all(text=lambda value: value is not None and value.startswith("x"))
+
+    def mutator() -> None:
+        start.wait()
+        for child in children:
+            child.extract()
+
+    _run(reader, mutator)
+
+
 def test_concurrent_reads_and_mixed_mutations_are_memory_safe() -> None:
     doc = _doc(300)
     body = doc.find("body")

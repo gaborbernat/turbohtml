@@ -29,7 +29,11 @@ The query surface builds on that node model. Navigation covers parents, siblings
 :attr:`~turbohtml.Node.descendants`, :attr:`~turbohtml.Node.ancestors`, and document-order
 :attr:`~turbohtml.Node.following` / :attr:`~turbohtml.Node.preceding` iterators, plus the sequence protocol over a
 node's children. :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filter a chosen
-:class:`~turbohtml.Axis` by tag and attributes, where a filter is a string, regex, callable, or list.
+:class:`~turbohtml.Axis` by tag and attributes, where a filter is a string, regex, callable, or list; a ``text``
+predicate adds the same grammar over each element's collected text, the search ``bs4`` spelled ``find(string=...)``.
+Because a regex or callable ``text`` predicate runs Python mid-walk -- which suspends the per-tree lock -- the C side
+snapshots the candidate elements and their gathered text under the lock first, then runs the predicate over that
+snapshot, so a concurrent mutation can never tear the walk.
 :meth:`~turbohtml.Node.select` and :meth:`~turbohtml.Node.select_one` run a native CSS matcher covering type, id, class,
 attribute, the four combinators, the structural pseudo-classes (including ``:nth-child(An+B of S)``, which indexes only
 the siblings matching ``S``), the ``:is()``/``:where()``/``:has()``/``:not()`` functional pseudo-classes, and the

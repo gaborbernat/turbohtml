@@ -393,3 +393,37 @@ a token in the class list, and ``axis`` aims the search at something other than 
 
     ['/a']
     A
+
+********************
+ Find nodes by text
+********************
+
+``text`` matches an element against its collected text (every :class:`~turbohtml.Text` descendant concatenated, the same
+string :attr:`~turbohtml.Node.text` returns). It takes the same kinds as the other filters except that a plain string is
+the *whole* collected text rather than a substring: pass a compiled regex to search, or a callable predicate for
+anything else. It composes with the tag, ``class_``, and attribute filters:
+
+.. testcode::
+
+    import re, turbohtml
+    doc = turbohtml.parse(
+        "<section>"
+        '<button class="buy">Add to cart</button>'
+        "<p>Price: $19</p>"
+        "<span>SKU-7788</span>"
+        "</section>"
+    ).find("section")
+    print(doc.find(text="Add to cart").tag)
+    print([node.tag for node in doc.find_all(text=re.compile(r"\$\d+"))])
+    print([node.tag for node in doc.find_all(text=lambda value: value.startswith("SKU"))])
+    print(doc.find("button", text="Add to cart", class_="buy").tag)
+
+.. testoutput::
+
+    button
+    ['p']
+    ['span']
+    button
+
+To filter a literal ``text`` *attribute* (rather than the text content), pass it through ``attrs={"text": ...}``, since
+the ``text`` keyword is the text predicate.
