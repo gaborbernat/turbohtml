@@ -84,6 +84,8 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
       - :meth:`~turbohtml.Node.find_all`, :meth:`~turbohtml.Node.xpath`
     - - ``etree.XPath("//a[@href=$u]")(el, u=v)``
       - :class:`~turbohtml.XPath` (``XPath("//a[@href=$u]")(el, u=v)``)
+    - - ``el.xpath("//svg:rect", namespaces={"svg": SVG})``
+      - :meth:`~turbohtml.Node.xpath` with the same ``namespaces={"svg": SVG}`` (the prefix binds at evaluation time)
     - - ``el.cssselect("div a")``
       - :meth:`~turbohtml.Node.select`
     - - ``etree.FunctionNamespace(None)["f"] = fn``; ``el.xpath("f(//a)")``
@@ -176,6 +178,35 @@ wpt page with ``tox -e bench xpath``:
       - 1.1 µs
       - 3.2 µs
       - 2.9x
+
+A namespace-prefixed name test ports unchanged: pass the same ``namespaces=`` mapping to :meth:`~turbohtml.Node.xpath`
+that you give lxml. turbohtml binds the prefix at evaluation time against the per-tree cached program and resolves the
+suffix to an interned atom, while lxml re-reads the namespace map on every call, so ``//svg:rect`` with
+``namespaces={"svg": "http://www.w3.org/2000/svg"}`` runs several times faster across page sizes (``tox -e bench
+xpath``, over a page carrying an SVG block):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - ``//svg:rect`` (namespaces=)
+      - turbohtml
+      - lxml
+      - speed-up
+    - - wpt page (4 kB)
+      - 0.8 µs
+      - 3.9 µs
+      - 4.8x
+    - - wpt page (9.6 kB)
+      - 0.9 µs
+      - 3.7 µs
+      - 3.9x
+    - - wpt page (92 kB)
+      - 15.5 µs
+      - 22.5 µs
+      - 1.5x
+
+The :doc:`/development/performance` page benchmarks the rest of the XPath surface against lxml.
 
 **********
  Pitfalls

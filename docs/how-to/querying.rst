@@ -348,6 +348,21 @@ Two functions read the HTML document the way HTML means it, where ``lxml``'s leg
 real SVG and MathML namespace for foreign content (``lxml`` leaves it empty). HTML elements report no namespace in both,
 so an unprefixed name test keeps matching them.
 
+To select foreign content by namespace, bind each prefix to a URI through ``namespaces`` (the same argument ``lxml``
+takes). A prefixed name test then matches an element whose namespace equals the bound URI and whose local name equals
+the suffix, so ``//svg:rect`` finds the SVG rectangle while the unprefixed ``//rect`` keeps matching by name alone:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<svg><rect/><circle/></svg>")
+    rects = doc.xpath("//svg:rect", namespaces={"svg": "http://www.w3.org/2000/svg"})
+    print(len(rects))
+
+.. testoutput::
+
+    1
+
 Pass ``$name`` variables as keyword arguments instead of formatting values into the expression string, so a value with
 quotes or special characters cannot break the query:
 

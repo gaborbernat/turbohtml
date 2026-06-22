@@ -92,6 +92,7 @@ class Node:
         expression: str,
         /,
         *,
+        namespaces: dict[str, str] | None = ...,
         smart_strings: bool = ...,
         extensions: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]]
         | None = ...,
@@ -102,6 +103,7 @@ class Node:
         expression: str,
         /,
         *,
+        namespaces: dict[str, str] | None = ...,
         smart_strings: bool = ...,
         extensions: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]]
         | None = ...,
@@ -112,6 +114,7 @@ class Node:
         expression: str,
         /,
         *,
+        namespaces: dict[str, str] | None = ...,
         smart_strings: bool = ...,
         extensions: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]]
         | None = ...,

@@ -1699,8 +1699,8 @@ static PyObject *xpath_result_to_py(module_state *state, PyObject *handle, th_tr
     return out;
 }
 
-static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars, int smart_strings,
-                                   PyObject *extensions) {
+static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindings *vars,
+                                   const xp_namespaces *namespaces, int smart_strings, PyObject *extensions) {
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "xpath expression must be a str");
         return NULL;
@@ -1720,7 +1720,7 @@ static PyObject *xpath_eval_object(PyObject *self, PyObject *arg, const xp_bindi
     if (prog != NULL) {
         compiled = 1;
         xp_result result;
-        status = xp_eval(prog, tree, origin, vars, extensions != NULL ? xpath_call_extension : NULL,
+        status = xp_eval(prog, tree, origin, vars, namespaces, extensions != NULL ? xpath_call_extension : NULL,
                          extensions != NULL ? &ext_ctx : NULL, &result, &feature);
         if (status == 0) {
             out = xpath_result_to_py(state, handle, tree, smart_strings, &result);
@@ -1750,7 +1750,7 @@ static PyObject *xpath_run_program(module_state *state, PyObject *handle, th_nod
     th_tree *tree = handle_obj->tree;
     xpath_ext_ctx ext_ctx = {extensions, handle, state, tree};
     xp_result result;
-    status = xp_eval(prog, tree, origin, vars, extensions != NULL ? xpath_call_extension : NULL,
+    status = xp_eval(prog, tree, origin, vars, NULL, extensions != NULL ? xpath_call_extension : NULL,
                      extensions != NULL ? &ext_ctx : NULL, &result, &feature);
     if (status == 0) {
         out = xpath_result_to_py(state, handle, tree, smart_strings, &result);
@@ -1806,6 +1806,67 @@ static void free_xpath_vars(xp_binding *items, Py_ssize_t len) {
     PyMem_Free(items);
 }
 
+static void free_xpath_namespaces(xp_namespace *items, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        PyMem_Free((void *)items[index].prefix);
+        PyMem_Free((void *)items[index].uri);
+    }
+    PyMem_Free(items);
+}
+
+/* Build the prefix-to-URI bindings from the `namespaces` keyword: a dict mapping str
+   prefixes to str URIs. On error an exception is set and any partial bindings are freed. */
+static int build_xpath_namespaces(PyObject *mapping, xp_namespace **out_items, Py_ssize_t *out_len) {
+    *out_items = NULL;
+    *out_len = 0;
+    if (mapping == NULL || mapping == Py_None) {
+        return 0;
+    }
+    if (!PyDict_Check(mapping)) {
+        PyErr_SetString(PyExc_TypeError, "xpath namespaces must be a dict of prefix -> URI");
+        return -1;
+    }
+    Py_ssize_t total = PyDict_GET_SIZE(mapping);
+    if (total == 0) {
+        return 0;
+    }
+    xp_namespace *items = PyMem_Calloc((size_t)total, sizeof(xp_namespace));
+    if (items == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t count = 0;
+    Py_ssize_t pos = 0;
+    PyObject *key;
+    PyObject *value;
+    while (PyDict_Next(mapping, &pos, &key, &value)) {
+        if (!PyUnicode_Check(key) || !PyUnicode_Check(value)) {
+            free_xpath_namespaces(items, count);
+            PyErr_SetString(PyExc_TypeError, "xpath namespaces must map str prefixes to str URIs");
+            return -1;
+        }
+        Py_UCS4 *prefix = PyUnicode_AsUCS4Copy(key);
+        if (prefix == NULL) {                    /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            free_xpath_namespaces(items, count); /* GCOVR_EXCL_LINE */
+            return -1;                           /* GCOVR_EXCL_LINE */
+        }
+        Py_UCS4 *uri = PyUnicode_AsUCS4Copy(value);
+        if (uri == NULL) {                       /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            PyMem_Free(prefix);                  /* GCOVR_EXCL_LINE */
+            free_xpath_namespaces(items, count); /* GCOVR_EXCL_LINE */
+            return -1;                           /* GCOVR_EXCL_LINE */
+        }
+        items[count].prefix = prefix;
+        items[count].prefix_len = PyUnicode_GET_LENGTH(key);
+        items[count].uri = uri;
+        items[count].uri_len = PyUnicode_GET_LENGTH(value);
+        count++;
+    }
+    *out_items = items;
+    *out_len = count;
+    return 0;
+}
+
 /* Build the $name bindings from the call's keyword arguments (kwargs keys are
    always str). With reserve_options set, the smart_strings and extensions keys are
    skipped because Node.xpath reads them as options off the same kwargs; the
@@ -1834,6 +1895,9 @@ static int build_xpath_vars(PyObject *kwds, int reserve_options, xp_binding **ou
                 continue; /* a reserved option the caller reads, not a $variable */
             }
             if (PyUnicode_CompareWithASCIIString(key, "extensions") == 0) {
+                continue;
+            }
+            if (PyUnicode_CompareWithASCIIString(key, "namespaces") == 0) {
                 continue;
             }
         }
@@ -1884,14 +1948,24 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
             extensions = PyDict_GET_SIZE(ext) > 0 ? ext : NULL;
         }
     }
+    xp_namespace *ns_items;
+    Py_ssize_t ns_len;
+    PyObject *ns_arg = kwds == NULL ? NULL : PyDict_GetItemString(kwds, "namespaces"); /* borrowed */
+    if (build_xpath_namespaces(ns_arg, &ns_items, &ns_len) < 0) {
+        return NULL;
+    }
     xp_binding *items;
     Py_ssize_t len;
     if (build_xpath_vars(kwds, 1, &items, &len) < 0) {
+        free_xpath_namespaces(ns_items, ns_len);
         return NULL;
     }
     xp_bindings vars = {items, len};
-    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars, smart_strings, extensions);
+    xp_namespaces namespaces = {ns_items, ns_len};
+    PyObject *result = xpath_eval_object(self, expr_obj, len == 0 ? NULL : &vars, ns_len == 0 ? NULL : &namespaces,
+                                         smart_strings, extensions);
     free_xpath_vars(items, len);
+    free_xpath_namespaces(ns_items, ns_len);
     return result;
 }
 

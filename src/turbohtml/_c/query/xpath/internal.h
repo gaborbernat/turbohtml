@@ -76,6 +76,7 @@ typedef struct {
     double num;       /* XN_NUM */
     Py_UCS4 *str;     /* owned name/literal; NULL when none */
     Py_ssize_t str_len;
+    Py_ssize_t prefix_len; /* NT_NAME: length of the "prefix" before the ':' in str, else 0 */
 } xn;
 
 struct xp_program {
@@ -167,6 +168,7 @@ typedef struct {
     Py_ssize_t size;
     const char **feature;
     const xp_bindings *vars;
+    const xp_namespaces *namespaces;
     xp_extension_fn extension;
     void *extension_ctx;
 } xp_ctx;

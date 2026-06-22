@@ -64,21 +64,51 @@ static uint32_t resolve_attr_atom(struct th_tree *tree, const Py_UCS4 *name, Py_
     return th_attr_lookup(tree, buf, len);
 }
 
-static int element_name_matches(struct th_node *node, const xn *step, uint16_t atom) {
-    if (atom != TH_TAG_UNKNOWN) {
-        return node->atom == atom;
-    }
-    if (node->atom != TH_TAG_UNKNOWN || node->text_len != step->str_len) {
+/* A step's name test resolved once before the axis walk: the local part (the suffix
+   after any "prefix:"), its interned atoms, and the namespace constraint a bound prefix
+   adds. With no prefix the test matches by local name in any namespace, as before. */
+typedef struct {
+    uint16_t atom;      /* tag atom of the local name (element axes), else 0 */
+    uint32_t attr_atom; /* attr atom of the local name (attribute axis), else UINT32_MAX */
+    const Py_UCS4 *local;
+    Py_ssize_t local_len;
+    int has_ns;         /* the test carried a namespace prefix */
+    int ns_unmatchable; /* the bound URI names no namespace an HTML tree's elements carry */
+    uint8_t want_ns;    /* enum th_ns an element must carry when has_ns and not unmatchable */
+} step_match;
+
+static int ucs4_eq_ascii(const Py_UCS4 *text, Py_ssize_t text_len, const char *ascii, Py_ssize_t ascii_len) {
+    if (text_len != ascii_len) {
         return 0;
     }
-    return memcmp(node->text, step->str, (size_t)step->str_len * sizeof(Py_UCS4)) == 0;
+    for (Py_ssize_t index = 0; index < text_len; index++) {
+        if (text[index] != (Py_UCS4)(unsigned char)ascii[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int element_name_matches(struct th_node *node, const step_match *match) {
+    if (match->atom != TH_TAG_UNKNOWN) {
+        if (node->atom != match->atom) {
+            return 0;
+        }
+    } else if (node->atom != TH_TAG_UNKNOWN || node->text_len != match->local_len ||
+               memcmp(node->text, match->local, (size_t)match->local_len * sizeof(Py_UCS4)) != 0) {
+        return 0;
+    }
+    if (!match->has_ns) {
+        return 1;
+    }
+    return !match->ns_unmatchable && node->ns == match->want_ns;
 }
 
 /* Whether a node satisfies a step's node test on an element-principal axis. */
-static int node_test_matches(struct th_node *node, const xn *step, uint16_t atom) {
+static int node_test_matches(struct th_node *node, const xn *step, const step_match *match) {
     switch (step->test) {
     case NT_NAME:
-        return node->type == TH_NODE_ELEMENT && element_name_matches(node, step, atom);
+        return node->type == TH_NODE_ELEMENT && element_name_matches(node, match);
     case NT_STAR:
         return node->type == TH_NODE_ELEMENT;
     case NT_TEXT:
@@ -137,65 +167,66 @@ static void reverse_items(xp_nodeset *out, Py_ssize_t from) {
 
 /* Push node when it passes the step's node test. Returns 0, or -1 on allocation
    failure (which cannot be forced from a test). */
-static int emit_if_match(xp_nodeset *out, struct th_node *node, const xn *step, uint16_t atom) {
-    if (!node_test_matches(node, step, atom)) {
+static int emit_if_match(xp_nodeset *out, struct th_node *node, const xn *step, const step_match *match) {
+    if (!node_test_matches(node, step, match)) {
         return 0;
     }
     return ns_push(out, node, -1);
 }
 
-static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint16_t atom, uint32_t attr_atom) {
+static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, const step_match *match) {
     switch (step->axis) {
     case AX_ATTRIBUTE:
-        /* node() and * both match every attribute; a name test matches by atom;
+        /* node() and * both match every attribute; a name test matches by atom; a
+           prefixed name test matches none (HTML attributes carry no namespace);
            text()/comment()/processing-instruction() match no attribute. */
         for (Py_ssize_t index = 0; index < ctx->attr_count; index++) {
             int hit = step->test == NT_STAR || step->test == NT_NODE ||
-                      (step->test == NT_NAME && ctx->attrs[index].name_atom == attr_atom);
+                      (step->test == NT_NAME && !match->has_ns && ctx->attrs[index].name_atom == match->attr_atom);
             if (hit && ns_push(out, ctx, index) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
                 return -1;                             /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_SELF:
-        return emit_if_match(out, ctx, step, atom);
+        return emit_if_match(out, ctx, step, match);
     case AX_CHILD:
         for (struct th_node *child = ctx->first_child; child != NULL; child = child->next_sibling) {
-            if (emit_if_match(out, child, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                   /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, child, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                    /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_DESCENDANT_OR_SELF:
-        if (emit_if_match(out, ctx, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                 /* GCOVR_EXCL_LINE */
+        if (emit_if_match(out, ctx, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                  /* GCOVR_EXCL_LINE */
         }
         /* FALLTHROUGH: descendant-or-self is self plus the descendant walk */
     case AX_DESCENDANT:
         for (struct th_node *node = ctx->first_child; node != NULL; node = descendant_next(node, ctx)) {
-            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                  /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, node, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_PARENT:
-        return ctx->parent != NULL ? emit_if_match(out, ctx->parent, step, atom) : 0;
+        return ctx->parent != NULL ? emit_if_match(out, ctx->parent, step, match) : 0;
     case AX_ANCESTOR_OR_SELF:
-        if (emit_if_match(out, ctx, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                 /* GCOVR_EXCL_LINE */
+        if (emit_if_match(out, ctx, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                  /* GCOVR_EXCL_LINE */
         }
         /* FALLTHROUGH: ancestor-or-self is self plus the ancestor walk */
     case AX_ANCESTOR:
         for (struct th_node *node = ctx->parent; node != NULL; node = node->parent) {
-            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                  /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, node, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     case AX_FOLLOWING_SIBLING:
         for (struct th_node *node = ctx->next_sibling; node != NULL; node = node->next_sibling) {
-            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                  /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, node, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
@@ -206,8 +237,8 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint
             start = up->next_sibling;
         }
         for (struct th_node *node = start; node != NULL; node = document_next(node)) {
-            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                  /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, node, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
@@ -224,8 +255,8 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint
             if (is_ancestor_of(node, ctx)) {
                 continue;
             }
-            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                  /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, node, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         reverse_items(out, from);
@@ -245,8 +276,8 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, uint
     }
     default: /* AX_PRECEDING_SIBLING */
         for (struct th_node *node = ctx->prev_sibling; node != NULL; node = node->prev_sibling) {
-            if (emit_if_match(out, node, step, atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                  /* GCOVR_EXCL_LINE */
+            if (emit_if_match(out, node, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
@@ -537,8 +568,8 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
         Py_ssize_t size = set->len;
         Py_ssize_t write_pos = 0;
         for (Py_ssize_t index = 0; index < set->len; index++) {
-            xp_ctx pctx = {ctx->tree, set->items[index].node, index + 1,         size, ctx->feature,
-                           ctx->vars, ctx->extension,         ctx->extension_ctx};
+            xp_ctx pctx = {ctx->tree,       set->items[index].node, index + 1,         size, ctx->feature, ctx->vars,
+                           ctx->namespaces, ctx->extension,         ctx->extension_ctx};
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
             if (rc < 0) {
@@ -551,6 +582,74 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
             }
         }
         set->len = write_pos;
+    }
+    return 0;
+}
+
+/* Resolve a name-test prefix to the element namespace it constrains. On success fills
+   match->want_ns (the enum th_ns an element must carry) and match->ns_unmatchable (set
+   when the bound URI names no namespace an HTML tree's elements live in, e.g. a custom
+   or the XML URI). Returns 0, or -1 when the prefix has no binding. The XML prefix is
+   implicitly bound even without a mapping, matching lxml. */
+static int resolve_step_ns(xp_ctx *ctx, const Py_UCS4 *prefix, Py_ssize_t prefix_len, step_match *match) {
+    const Py_UCS4 *uri = NULL;
+    Py_ssize_t uri_len = 0;
+    int found = 0;
+    if (ctx->namespaces != NULL) {
+        for (Py_ssize_t index = 0; index < ctx->namespaces->len; index++) {
+            const xp_namespace *binding = &ctx->namespaces->items[index];
+            if (binding->prefix_len == prefix_len &&
+                memcmp(binding->prefix, prefix, (size_t)prefix_len * sizeof(Py_UCS4)) == 0) {
+                uri = binding->uri;
+                uri_len = binding->uri_len;
+                found = 1;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        if (ucs4_eq_ascii(prefix, prefix_len, XP_XML_NS_PREFIX, sizeof(XP_XML_NS_PREFIX) - 1)) {
+            match->ns_unmatchable = 1; /* no element in an HTML tree is in the xml namespace */
+            return 0;
+        }
+        return -1;
+    }
+    if (ucs4_eq_ascii(uri, uri_len, XP_SVG_NS_URI, sizeof(XP_SVG_NS_URI) - 1)) {
+        match->want_ns = TH_NS_SVG;
+    } else if (ucs4_eq_ascii(uri, uri_len, XP_MATHML_NS_URI, sizeof(XP_MATHML_NS_URI) - 1)) {
+        match->want_ns = TH_NS_MATHML;
+    } else if (uri_len == 0) {
+        match->want_ns = TH_NS_HTML;
+    } else {
+        match->ns_unmatchable = 1;
+    }
+    return 0;
+}
+
+/* Resolve a step's name test once: the local part after any prefix, its interned atoms,
+   and the namespace the prefix binds. Returns 0, or -3 (with *feature set) for an
+   unbound prefix. */
+static int build_step_match(xp_ctx *ctx, const xn *step, step_match *match) {
+    memset(match, 0, sizeof(*match));
+    match->attr_atom = UINT32_MAX;
+    match->local = step->str;
+    match->local_len = step->str_len;
+    if (step->test != NT_NAME) {
+        return 0;
+    }
+    if (step->prefix_len > 0) {
+        match->has_ns = 1;
+        match->local = step->str + step->prefix_len + 1;
+        match->local_len = step->str_len - step->prefix_len - 1;
+        if (resolve_step_ns(ctx, step->str, step->prefix_len, match) < 0) {
+            *ctx->feature = "undefined namespace prefix";
+            return -3;
+        }
+    }
+    if (step->axis == AX_ATTRIBUTE) {
+        match->attr_atom = resolve_attr_atom(ctx->tree, match->local, match->local_len);
+    } else {
+        match->atom = resolve_tag_atom(match->local, match->local_len);
     }
     return 0;
 }
@@ -580,21 +679,23 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
     xp_nodeset next = {0};
     for (int32_t si = root->first; si >= 0; si = prog->nodes[si].next) {
         const xn *step = &prog->nodes[si];
-        int name_test = step->test == NT_NAME;
-        uint16_t atom = name_test && step->axis != AX_ATTRIBUTE ? resolve_tag_atom(step->str, step->str_len) : 0;
-        uint32_t attr_atom = name_test && step->axis == AX_ATTRIBUTE
-                                 ? resolve_attr_atom(ctx->tree, step->str, step->str_len)
-                                 : UINT32_MAX;
+        step_match match;
+        int resolved = build_step_match(ctx, step, &match);
+        if (resolved < 0) {
+            xp_nodeset_free(&cur);
+            xp_nodeset_free(&next);
+            return resolved;
+        }
         next.len = 0;
         for (Py_ssize_t index = 0; index < cur.len; index++) {
             if (cur.items[index].attr != -1) {
                 continue; /* an attribute or namespace node has no axes of its own */
             }
             Py_ssize_t before = next.len;
-            if (apply_step(&next, cur.items[index].node, step, atom, attr_atom) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                xp_nodeset_free(&cur);                                                 /* GCOVR_EXCL_LINE */
-                xp_nodeset_free(&next);                                                /* GCOVR_EXCL_LINE */
-                return -1;                                                             /* GCOVR_EXCL_LINE */
+            if (apply_step(&next, cur.items[index].node, step, &match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                xp_nodeset_free(&cur);                                        /* GCOVR_EXCL_LINE */
+                xp_nodeset_free(&next);                                       /* GCOVR_EXCL_LINE */
+                return -1;                                                    /* GCOVR_EXCL_LINE */
             }
             if (step->first >= 0) {
                 /* filter this context node's candidates in proximity order */
@@ -895,7 +996,8 @@ int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) 
 }
 
 int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
-            xp_extension_fn extension, void *extension_ctx, xp_result *out, const char **feature) {
-    xp_ctx ctx = {tree, context, 1, 1, feature, vars, extension, extension_ctx};
+            const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx, xp_result *out,
+            const char **feature) {
+    xp_ctx ctx = {tree, context, 1, 1, feature, vars, namespaces, extension, extension_ctx};
     return eval_expr(prog, prog->root, &ctx, out);
 }
