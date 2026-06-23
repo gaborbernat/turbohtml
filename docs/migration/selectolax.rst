@@ -76,6 +76,28 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
 
     ['a', 'b']
 
+*************
+ Performance
+*************
+
+Dropping a set of tags together with their subtrees: selectolax's ``strip_tags`` against turbohtml's
+:meth:`~turbohtml.Node.remove`, over a 92 kB page holding 839 ``<code>``/``<a>``/``<q>`` elements. Both rewrites are
+destructive, so the timed call parses the page, drops every match, and serializes the result -- the string-to-result
+pass these helpers exist for. turbohtml's lighter native tree runs the whole pass three times faster:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 46 18 18 18
+
+    - - drop tags with content (92 kB)
+      - turbohtml
+      - selectolax
+      - speed-up
+    - - ``remove`` vs ``strip_tags``
+      - 554 µs
+      - 1.73 ms
+      - 3.1x
+
 **********
  Pitfalls
 **********

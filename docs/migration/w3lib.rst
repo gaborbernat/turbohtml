@@ -110,6 +110,28 @@ The two helpers that read a document's own URL hints map to the :meth:`~turbohtm
     http://site.com/sub/
     (5.0, 'http://site.com/next.html')
 
+*************
+ Performance
+*************
+
+Stripping a set of tags while keeping their text: w3lib's regex ``remove_tags`` against turbohtml's
+:meth:`~turbohtml.Node.strip_tags`, over a 92 kB page holding 839 ``<code>``/``<a>``/``<q>`` elements. w3lib runs a
+regular-expression substitution over the string; turbohtml builds the WHATWG tree, unwraps each match in place, and
+serializes. turbohtml does the structure-aware pass a regex misreads on nested markup, and still runs it faster:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 46 18 18 18
+
+    - - strip tags, keep text (92 kB)
+      - turbohtml
+      - w3lib
+      - speed-up
+    - - ``strip_tags`` vs ``remove_tags``
+      - 607 µs
+      - 1.11 ms
+      - 1.8x
+
 **********
  Pitfalls
 **********

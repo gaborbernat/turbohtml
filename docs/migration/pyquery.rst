@@ -148,6 +148,28 @@ kB ``wpt`` page in the ``edit`` suite (``tox -e bench edit``):
       - 0.13 µs
       - 4.6 µs
 
+Bulk tag editing over a 92 kB page holding 839 ``<code>``/``<a>``/``<q>`` elements: dropping the matches with their
+subtrees (jQuery's ``.remove()`` against :meth:`~turbohtml.Node.remove`) and unwrapping them to keep their content
+(jQuery's ``.unwrap()`` against :meth:`~turbohtml.Node.strip_tags`). pyquery drives lxml under its wrapper, where
+turbohtml edits its native tree in C, so the same pass runs three to four times faster:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 46 18 18 18
+
+    - - bulk edit (92 kB)
+      - turbohtml
+      - pyquery
+      - speed-up
+    - - drop subtree (``remove`` / ``.remove()``)
+      - 554 µs
+      - 2.06 ms
+      - 3.7x
+    - - keep content (``strip_tags`` / ``.unwrap()``)
+      - 607 µs
+      - 2.35 ms
+      - 3.9x
+
 **********
  Pitfalls
 **********
