@@ -1,15 +1,16 @@
-###############
- From dominate
-###############
+#############
+ From yattag
+#############
 
-.. image:: https://static.pepy.tech/badge/dominate/month
-    :alt: dominate monthly downloads
-    :target: https://pepy.tech/project/dominate
+.. image:: https://static.pepy.tech/badge/yattag/month
+    :alt: yattag monthly downloads
+    :target: https://pepy.tech/project/yattag
 
-`dominate <https://github.com/Knio/dominate>`_ assembles HTML in Python from the other direction than a parser: you open
-a tag as a ``with`` block and nest children inside it (or pass them as arguments), then render the tree to a string. It
-is one of several terse builders turbohtml replaces with :data:`turbohtml.build.E`; the others are :doc:`yattag`,
-:doc:`htpy`, :doc:`airium`, and lxml's ``E`` (see :doc:`lxml`).
+`yattag <https://www.yattag.org>`_ assembles HTML in Python from the other direction than a parser: you unpack ``doc,
+tag, text = Doc().tagtext()`` and open each element as a ``with tag(...)`` block, calling ``text(...)`` for content,
+then read the string back with ``doc.getvalue()``. It is one of several terse builders turbohtml replaces with
+:data:`turbohtml.build.E`; the others are :doc:`dominate`, :doc:`htpy`, :doc:`airium`, and lxml's ``E`` (see
+:doc:`lxml`).
 
 ***************
  Why turbohtml
@@ -32,7 +33,7 @@ parse it back:
 
     <div class="card"><h1>Title</h1><p>body</p></div>
 
-``E`` assembles the fragment in turbohtml's arena and serializes it in C; dominate stays in Python. The same ``<ul>`` of
+``E`` assembles the fragment in turbohtml's arena and serializes it in C; yattag stays in Python. The same ``<ul>`` of
 rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways, from ``tox -e bench build`` on the
 reference machine in :doc:`/development/performance`:
 
@@ -42,15 +43,15 @@ reference machine in :doc:`/development/performance`:
 
     - - build a list
       - :data:`E <turbohtml.build.E>`
-      - dominate
+      - yattag
     - - 100 rows
       - 139 µs
-      - 466 µs (3.3x)
+      - 145 µs (1.0x)
     - - 1000 rows
       - 1.41 ms
-      - 4.59 ms (3.3x)
+      - 1.50 ms (1.1x)
 
-``E`` is about three times faster than dominate, and the decisive difference is the result type: ``E`` hands back a real
+``E`` runs on par with yattag, and the decisive difference is the result type: ``E`` hands back a real
 :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query, edit,
 and re-:meth:`~turbohtml.Node.serialize`.
 
@@ -58,18 +59,18 @@ and re-:meth:`~turbohtml.Node.serialize`.
  The mapping
 *************
 
-dominate spells nesting with ``with`` blocks or positional children; the translation is mechanical:
+yattag opens a tag scope with a context manager; turbohtml builds children inline:
 
 .. list-table::
     :header-rows: 1
     :widths: 50 50
 
-    - - dominate
+    - - yattag
       - turbohtml
-    - - ``div(p("x"), cls="card")`` / ``with`` blocks
-      - ``E.div({"class": "card"}, E.p("x"))``; nest by passing children, not a context manager
-    - - ``tag(...)`` for a non-identifier tag name
-      - ``E("tag", ...)``, the call form
+    - - ``doc, tag, text`` with ``with tag("div"):`` and ``text("x")``
+      - ``E.div("x")`` returns the element; build children inline instead of opening a tag scope
+    - - ``with tag("div", ("class", "card")):``
+      - ``E.div({"class": "card"}, ...)``; attributes are a leading mapping
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:

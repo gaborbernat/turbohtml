@@ -43,6 +43,7 @@ import bleach
 import html2text
 import html5lib
 import html_sanitizer
+import htpy
 import inscriptis
 import lxml_html_clean
 import markdownify
@@ -51,10 +52,13 @@ import minify_html
 import nh3
 import pyperf
 import w3lib.html
+from airium import Airium
 from bs4 import BeautifulSoup
 from inscriptis.model.config import ParserConfig
 from linkify_it import LinkifyIt
 from lxml import html as lxml_html
+from lxml.builder import E as LXML_E
+from metadata_parser import MetadataParser
 from parsel import Selector
 from pyquery import PyQuery
 from resiliparse.extract.html2text import (  # ty: ignore[unresolved-import]  # Cython extension, ships no type stubs
@@ -87,6 +91,7 @@ try:
     from yattag import Doc as YattagDoc  # context-manager builder, no type stubs
 except ImportError:
     YattagDoc = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
 # Article extractors raced in the article suite. trafilatura and readability-lxml install cleanly on current Python;
 # newspaper3k pins long-unmaintained dependencies and rarely resolves, so each import is optional and the suite races
 # whatever is present.
@@ -632,9 +637,34 @@ def yattag_build(count: int) -> None:
     _ = doc.getvalue()
 
 
+def lxml_builder_build(count: int) -> None:
+    """Build the same list with lxml.builder's nested ``E`` calls and serialize the tree."""
+    rows = (LXML_E.li({"class": "item", "data-i": str(index)}, f"item {index}") for index in range(count))
+    _ = lxml_html.tostring(LXML_E.ul(*rows))
+
+
+def htpy_build(count: int) -> None:
+    """Build the same list with htpy's subscript-children syntax and stringify it."""
+    rows = [htpy.li(class_="item", data_i=str(index))[f"item {index}"] for index in range(count)]
+    _ = str(htpy.ul[rows])
+
+
+def airium_build(count: int) -> None:
+    """Build the same list with airium's context-manager tags and stringify it."""
+    air = Airium()
+    with air.ul():
+        for index in range(count):
+            with air.li(klass="item", **{"data-i": str(index)}):
+                air(f"item {index}")
+    _ = str(air)
+
+
 # Terse builders, fastest-first; dominate and yattag are optional and drop out when absent.
 BUILDER_LIBS: tuple[tuple[str, Callable[[int], None]], ...] = (
     ("turbohtml", turbo_e_build),
+    ("lxml.builder", lxml_builder_build),
+    ("htpy", htpy_build),
+    ("airium", airium_build),
     *((("dominate", dominate_build),) if dominate_tags is not None else ()),
     *((("yattag", yattag_build),) if YattagDoc is not None else ()),
 )
@@ -1999,6 +2029,67 @@ def print_structured_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- social-card suite: OpenGraph/Twitter meta tags only -------------------- #
+# turbohtml.Document.opengraph() against metadata_parser, the narrower social-card
+# reader. Both start from the raw HTML string: turbohtml parses to the WHATWG tree
+# and gathers the og:/twitter: meta tags in one C walk, where metadata_parser builds
+# its own tree and maps the meta block in Python.
+
+
+def turbo_opengraph(text: str) -> None:
+    """Read the OpenGraph/Twitter card tags with turbohtml (parse plus one C walk)."""
+    turbohtml.parse(text).opengraph()
+
+
+def metadata_parser_socialcard(text: str) -> None:
+    """Read the same social-card tags with metadata_parser, which parses then maps the meta block."""
+    MetadataParser(html=text)
+
+
+SOCIALCARD_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml", turbo_opengraph),
+    ("metadata_parser", metadata_parser_socialcard),
+)
+
+# A head full of social-card meta tags, then a body of filler the reader must walk past. The larger case tiles the
+# filler so the page has the depth a real article carries around its metadata.
+_SOCIALCARD_HEAD = (
+    '<head><meta property="og:title" content="Widget"><meta property="og:type" content="product">'
+    '<meta property="og:image" content="https://x/i.png"><meta property="og:description" content="A small widget">'
+    '<meta name="twitter:card" content="summary"><meta name="twitter:site" content="@x"></head>'
+)
+
+SOCIALCARD_CASES: tuple[tuple[str, str], ...] = (
+    ("card", f"{_SOCIALCARD_HEAD}<body><p>intro</p></body>"),
+    ("article 8 KiB", f"{_SOCIALCARD_HEAD}<body>{'<p>filler text</p>' * 400}</body>"),
+)
+
+
+def run_socialcard_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark social-card extraction against metadata_parser; return the case names."""
+    for name, text in SOCIALCARD_CASES:
+        for label, run in SOCIALCARD_LIBS:
+            bench(f"socialcard {name} [{label}]", run, text)
+    return [name for name, _ in SOCIALCARD_CASES]
+
+
+def print_socialcard_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's opengraph() beside metadata_parser and the speedup factor."""
+    if not cases:
+        return
+    others = [label for label, _ in SOCIALCARD_LIBS if label != "turbohtml"]
+    print()
+    header = f"{'socialcard benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"socialcard {name} [turbohtml]"]
+        row = f"{'socialcard ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"socialcard {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 # --- article suite: main content + metadata extraction ---------------------- #
 # turbohtml.Node.article against trafilatura, readability-lxml, and newspaper3k,
 # the article extractors it succeeds. Each takes an HTML string, scores the
@@ -2844,6 +2935,7 @@ SIMPLE_SUITES: tuple[tuple[str, Callable[..., list[str]], Callable[[dict[str, fl
     ("minify", run_minify_suite, print_minify_table),
     ("tables", run_tables_suite, print_tables_table),
     ("article", run_article_suite, print_article_table),
+    ("socialcard", run_socialcard_suite, print_socialcard_table),
 )
 
 # Suites whose runner has no return value the orchestration reuses; each prints from its own module
@@ -2891,6 +2983,7 @@ def main() -> None:
             "sanitize",
             "structured",
             "article",
+            "socialcard",
             [],
         ],
         help="suites to run (default: all)",

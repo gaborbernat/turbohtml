@@ -1,15 +1,16 @@
-###############
- From dominate
-###############
+###########
+ From htpy
+###########
 
-.. image:: https://static.pepy.tech/badge/dominate/month
-    :alt: dominate monthly downloads
-    :target: https://pepy.tech/project/dominate
+.. image:: https://static.pepy.tech/badge/htpy/month
+    :alt: htpy monthly downloads
+    :target: https://pepy.tech/project/htpy
 
-`dominate <https://github.com/Knio/dominate>`_ assembles HTML in Python from the other direction than a parser: you open
-a tag as a ``with`` block and nest children inside it (or pass them as arguments), then render the tree to a string. It
-is one of several terse builders turbohtml replaces with :data:`turbohtml.build.E`; the others are :doc:`yattag`,
-:doc:`htpy`, :doc:`airium`, and lxml's ``E`` (see :doc:`lxml`).
+`htpy <https://htpy.dev>`_ assembles HTML in Python from the other direction than a parser: each element is an object
+whose attributes come from a call (``li(class_="item")``) and whose children sit in a ``[...]`` subscript (``ul[li("a"),
+li("b")]``), and stringifying the root renders the tree. It is one of several terse builders turbohtml replaces with
+:data:`turbohtml.build.E`; the others are :doc:`dominate`, :doc:`yattag`, :doc:`airium`, and lxml's ``E`` (see
+:doc:`lxml`).
 
 ***************
  Why turbohtml
@@ -32,7 +33,7 @@ parse it back:
 
     <div class="card"><h1>Title</h1><p>body</p></div>
 
-``E`` assembles the fragment in turbohtml's arena and serializes it in C; dominate stays in Python. The same ``<ul>`` of
+``E`` assembles the fragment in turbohtml's arena and serializes it in C; htpy stays in Python. The same ``<ul>`` of
 rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways, from ``tox -e bench build`` on the
 reference machine in :doc:`/development/performance`:
 
@@ -42,34 +43,34 @@ reference machine in :doc:`/development/performance`:
 
     - - build a list
       - :data:`E <turbohtml.build.E>`
-      - dominate
+      - htpy
     - - 100 rows
       - 139 µs
-      - 466 µs (3.3x)
+      - 361 µs (2.6x)
     - - 1000 rows
       - 1.41 ms
-      - 4.59 ms (3.3x)
+      - 3.73 ms (2.6x)
 
-``E`` is about three times faster than dominate, and the decisive difference is the result type: ``E`` hands back a real
-:class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query, edit,
-and re-:meth:`~turbohtml.Node.serialize`.
+``E`` is about two and a half times faster than htpy, and the decisive difference is the result type: ``E`` hands back a
+real :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query,
+edit, and re-:meth:`~turbohtml.Node.serialize`.
 
 *************
  The mapping
 *************
 
-dominate spells nesting with ``with`` blocks or positional children; the translation is mechanical:
+htpy carries attributes in the call and children in a subscript; turbohtml passes both to one call:
 
 .. list-table::
     :header-rows: 1
     :widths: 50 50
 
-    - - dominate
+    - - htpy
       - turbohtml
-    - - ``div(p("x"), cls="card")`` / ``with`` blocks
-      - ``E.div({"class": "card"}, E.p("x"))``; nest by passing children, not a context manager
-    - - ``tag(...)`` for a non-identifier tag name
-      - ``E("tag", ...)``, the call form
+    - - ``div(".card")[h1("Title")]``
+      - ``E.div({"class": "card"}, E.h1("Title"))``; attributes are a mapping, children are arguments
+    - - ``li(class_="item", data_i="1")["text"]``
+      - ``E.li({"class": "item", "data-i": "1"}, "text")``
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:
@@ -90,7 +91,7 @@ attribute joins on a space so a class list reads naturally:
 
 - ``E`` builds a fragment, not a document: there is no implicit ``<html>``/``<head>``/``<body>`` wrapper and no doctype.
   Serialize the element you built, or append it under a parsed document when you need the full page shell.
-- A leading mapping is always read as attributes; to start an element with literal text, pass the string first
-  (``E.p("text", E.b("bold"))``).
+- htpy spells attributes with keyword arguments (``class_``, ``data_i``); ``E`` takes a plain mapping, so a hyphenated
+  name like ``data-i`` is written as the dict key directly rather than an underscore the builder rewrites.
 - The result is an ordinary :class:`~turbohtml.Element`, so the whole edit and query surface (``append``, ``find``,
   ``select``, ``serialize``, ``to_markdown``) is available -- the builder only saves the construction boilerplate.

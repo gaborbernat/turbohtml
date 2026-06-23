@@ -1,14 +1,14 @@
-#####################
- From w3lib (Scrapy)
-#####################
+############
+ From w3lib
+############
 
 .. image:: https://static.pepy.tech/badge/w3lib/month
     :alt: w3lib monthly downloads
     :target: https://pepy.tech/project/w3lib
 
-`w3lib <https://w3lib.readthedocs.io>`_ collects the web utilities `Scrapy <https://scrapy.org>`_ reuses: entity
-resolution, tag/comment stripping, URL canonicalization, and response-encoding helpers. Only its ``w3lib.html``
-text/entity subset overlaps with turbohtml; the ``w3lib.url`` and HTTP helpers stay outside turbohtml's scope.
+`w3lib <https://w3lib.readthedocs.io>`_ collects low-level web utilities: entity resolution, tag/comment stripping, URL
+canonicalization, and response-encoding helpers. Only its ``w3lib.html`` text/entity subset overlaps with turbohtml; the
+``w3lib.url`` and HTTP helpers stay outside turbohtml's scope.
 
 ***************
  Why turbohtml
