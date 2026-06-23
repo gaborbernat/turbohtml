@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import functools
 import html
+import io
 import os
 import random
 import re
@@ -83,6 +84,12 @@ try:
     from yattag import Doc as YattagDoc  # context-manager builder, no type stubs
 except ImportError:
     YattagDoc = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
+# pandas.read_html is the one helper the tables suite races; optional so the suite still runs without it.
+try:
+    import pandas as pd  # read_html parses every <table> on a page into DataFrames, over lxml/bs4/html5lib
+except ImportError:
+    pd = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when pandas is unavailable
 
 import turbohtml
 from turbohtml import sanitizer as turbo_sanitizer
@@ -1171,6 +1178,84 @@ def print_minify_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- tables suite: extract <table> grids against pandas.read_html ----------- #
+# turbohtml.parse(html).tables() and find("table").records() against pandas.read_html,
+# the one-call table reader scrapers reach for. pandas pulls in NumPy and returns
+# DataFrames; turbohtml resolves rowspan/colspan in C and hands back plain lists and
+# dicts. All three race the full string-to-structure path: each timed call parses the
+# HTML and extracts every table. pandas is optional, guarded like html5-parser above.
+
+
+def build_table_html(data_rows: int) -> str:
+    """Build a header plus ``data_rows`` body rows, four columns, with a colspan to exercise span resolution."""
+    header = "<tr><th>Region</th><th>Quarter</th><th>Revenue</th><th>Units</th></tr>"
+    body = "".join(
+        f"<tr><td>R{index}</td><td>Q{index % 4 + 1}</td><td colspan=2>{index * 10}</td></tr>"
+        for index in range(data_rows)
+    )
+    return f"<table>{header}{body}</table>"
+
+
+def turbo_table_rows(text: str) -> None:
+    """Parse and read every table into list[list[str]] with turbohtml's C grid walk."""
+    turbohtml.parse(text).tables()
+
+
+def turbo_table_records(text: str) -> None:
+    """Parse and key the first table's rows by its header with turbohtml's records()."""
+    table = turbohtml.parse(text).find("table")
+    assert table is not None  # the generated document always holds one <table>  # noqa: S101
+    table.records()
+
+
+def pandas_table_rows(text: str) -> None:
+    """Parse and read every table into plain rows with pandas.read_html, then materialize the values."""
+    for frame in pd.read_html(io.StringIO(text)):
+        frame.to_numpy().tolist()
+
+
+def pandas_table_records(text: str) -> None:
+    """Parse and key the first table's rows by its header with pandas.read_html, then to_dict('records')."""
+    pd.read_html(io.StringIO(text), header=0)[0].to_dict("records")
+
+
+# Each op paired with its turbohtml and pandas driver; pandas is the only read_html-style competitor.
+TABLE_OPS: tuple[tuple[str, Callable[[str], None], Callable[[str], None]], ...] = (
+    ("rows", turbo_table_rows, pandas_table_rows),
+    ("records", turbo_table_records, pandas_table_records),
+)
+
+TABLE_CASES: tuple[tuple[str, int], ...] = (("10 rows", 10), ("100 rows", 100), ("1000 rows", 1000))
+
+
+def run_tables_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark table extraction against pandas.read_html across each size; return the case labels."""
+    names: list[str] = []
+    for size_name, data_rows in TABLE_CASES:
+        text = build_table_html(data_rows)
+        for op_name, turbo_run, pandas_run in TABLE_OPS:
+            bench(f"tables {op_name} {size_name} [turbohtml]", turbo_run, text)
+            if pd is not None:
+                bench(f"tables {op_name} {size_name} [pandas]", pandas_run, text)
+            names.append(f"{op_name} {size_name}")
+    return names
+
+
+def print_tables_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's table extraction beside pandas.read_html and its slowdown factor."""
+    if not cases:
+        return
+    print()
+    header = f"{'tables benchmark':28} {'turbohtml':>11}{'pandas':>18}"
+    print(header)
+    for name in cases:
+        turbo = means[f"tables {name} [turbohtml]"]
+        other = means.get(f"tables {name} [pandas]")
+        row = f"{'tables ' + name:28} {turbo * 1e6:8.1f} us"
+        row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 # --- linkify suite: auto-link URLs/emails in HTML against bleach and linkify-it #
 # turbohtml.linkify against bleach.linkify, the HTML-aware linkifier it succeeds,
 # and linkify-it-py, the pure-Python scanner markdown-it-py pulls in. bleach and
@@ -1909,6 +1994,7 @@ SIMPLE_SUITES: tuple[tuple[str, Callable[..., list[str]], Callable[[dict[str, fl
     ("stream", run_stream_suite, print_stream_table),
     ("markup", run_markup_suite, print_markup_table),
     ("minify", run_minify_suite, print_minify_table),
+    ("tables", run_tables_suite, print_tables_table),
 )
 
 
@@ -1934,6 +2020,7 @@ def main() -> None:
             "stream",
             "markup",
             "minify",
+            "tables",
             "linkify",
             "markdown",
             "sanitize",
@@ -1951,7 +2038,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,linkify,markdown,sanitize,structured",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,tables,linkify,markdown,sanitize,structured",
         ).split(",")
     )
     means: dict[str, float] = {}

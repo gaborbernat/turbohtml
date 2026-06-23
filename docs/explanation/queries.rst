@@ -78,3 +78,25 @@ only the source string is produced in C, under the same per-tree critical sectio
 a concurrent mutation cannot rewire the subtree mid-read. Unlike ``parsel``, these run on one node rather than a whole
 ``SelectorList``, so a comprehension over :meth:`~turbohtml.Node.select` covers a page: the explicit loop the rest of
 the query API also asks for, rather than a hidden fan-out.
+
+*****************
+ Reading a table
+*****************
+
+A ``<table>`` is the one structure where a node tree is the *wrong* shape for the caller. A scraper wants a grid of
+strings, and HTML's ``rowspan`` / ``colspan`` mean the cell at visual position ``(row, col)`` is not the *n*-th ``<td>``
+of the *n*-th ``<tr>`` -- a cell can cover several columns, and a row above can reach down into the row below.
+``pandas.read_html`` is the tool everyone reaches for, and it pulls in NumPy and pandas to return a ``DataFrame``.
+turbohtml resolves the spans itself, in C, and hands back plain lists and dicts, so the dependency is gone but the
+``DataFrame`` is one call away: ``pandas.DataFrame(table.records())``.
+
+:meth:`~turbohtml.Element.rows` builds a dense grid. It walks the ``<tr>`` elements that belong to the table -- skipping
+any nested table's subtree, whose rows belong to *that* table -- and places each ``<td>``/``<th>`` at the next free
+column, filling every slot a ``rowspan`` or ``colspan`` covers with a copy of the cell's text. Rows are padded to a
+rectangle, so a ragged table reads back uniform and an empty cell is ``""``. The whole grid is snapshotted into C memory
+under the per-tree critical section *before* any Python object is built, the same free-threading discipline the link and
+text walks follow: the read never dereferences a live ``first_child``/``next_sibling`` pointer across an allocation that
+could let another thread rewire the subtree. :meth:`~turbohtml.Element.records` keys the first row (the header, normally
+the ``thead`` row, which the parser emits first) over each later row; a duplicated header keeps the rightmost column's
+value, the way a ``dict`` does. :meth:`~turbohtml.Node.tables` runs the same grid build for every table in a subtree,
+nested tables included as their own entries.

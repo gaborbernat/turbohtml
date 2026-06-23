@@ -49,6 +49,7 @@ py.extension_module(
         'src/turbohtml/_c/features/links.c',
         'src/turbohtml/_c/features/annotation.c',
         'src/turbohtml/_c/features/structured_data.c',
+        'src/turbohtml/_c/features/tables.c',
     ],
     include_directories: include_directories('src/turbohtml/_c'),
     install: true,

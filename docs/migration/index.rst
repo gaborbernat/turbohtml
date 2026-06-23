@@ -30,4 +30,5 @@ treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
     resiliparse
     html-sanitizer
     html5-parser
+    pandas
     stdlib
