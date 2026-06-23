@@ -596,7 +596,9 @@ predicate that references ``position()`` (``[1]`` or ``position() <= 3``): it pi
 disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap. The last four rows are
 the lxml/parsel options the parity work added: a ``$variable`` binding, an EXSLT ``re:test`` predicate (turbohtml's
 Python :mod:`re` against lxml's C libexslt), a ``smart_strings`` attribute read, and a custom ``extensions=`` function.
-turbohtml still leads, since lxml resolves the namespace map and option set on every call.
+turbohtml still leads, since lxml resolves the namespace map and option set on every call. The last row precompiles the
+expression once with :class:`~turbohtml.XPath` and re-evaluates it, lxml's ``etree.XPath`` doing the same: both skip the
+per-call parse :meth:`~turbohtml.Node.xpath` pays, and turbohtml's compiled program stays ahead per evaluation.
 
 .. list-table::
     :header-rows: 1
@@ -650,6 +652,9 @@ turbohtml still leads, since lxml resolves the namespace map and option set on e
     - - ``ext(//a)`` (extensions)
       - 1.0 µs
       - 3.0 µs
+    - - ``//a[@href]`` (precompiled, reused)
+      - 0.5 µs
+      - 2.8 µs
 
 *************
  Serializing

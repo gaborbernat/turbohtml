@@ -82,6 +82,8 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
       - :attr:`~turbohtml.Node.children`, :attr:`~turbohtml.Node.descendants`, :attr:`~turbohtml.Node.ancestors`
     - - ``el.findall(".//a")``, ``el.xpath("//a[@href]")``
       - :meth:`~turbohtml.Node.find_all`, :meth:`~turbohtml.Node.xpath`
+    - - ``etree.XPath("//a[@href=$u]")(el, u=v)``
+      - :class:`~turbohtml.XPath` (``XPath("//a[@href=$u]")(el, u=v)``)
     - - ``el.cssselect("div a")``
       - :meth:`~turbohtml.Node.select`
     - - ``lxml.html.Element("div")``, ``etree.SubElement(p, "div")``
@@ -107,6 +109,46 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
 
     [Element('a')]
     /x
+
+*************
+ Performance
+*************
+
+When one expression runs against many nodes, precompile it once with :class:`~turbohtml.XPath` instead of calling
+:meth:`~turbohtml.Node.xpath`, which reparses the expression on every call. This is the same move as reaching for
+``lxml.etree.XPath`` over a bare ``el.xpath``: the parse happens at construction, and the call site only supplies the
+context node and any ``$name`` variables. turbohtml's compiled program is tree-independent, so a single object evaluates
+against many documents, and it stays ahead of lxml per evaluation. The numbers below are for ``//a[@href]`` over the 9.6
+kB wpt page from the :doc:`/development/performance` benchmark (``tox -e bench xpath``):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - ``//a[@href]``
+      - turbohtml
+      - lxml
+      - speed-up
+    - - per call (reparsed each time)
+      - 0.6 µs
+      - 4.1 µs
+      - 6.8x
+    - - precompiled, reused
+      - 0.5 µs
+      - 2.8 µs
+      - 5.6x
+
+.. testcode::
+
+    from turbohtml import XPath
+
+    links = XPath("//a[@href=$u]")
+    doc = parse('<div><a href="/x">go</a><a href="/y">stay</a></div>')
+    print([link.attrs["href"] for link in links(doc, u="/x")])
+
+.. testoutput::
+
+    ['/x']
 
 **********
  Pitfalls

@@ -374,6 +374,25 @@ namespace; the ``re:`` prefix dispatches to Python's :mod:`re`:
 
     ['/p/12']
 
+When one expression runs over many nodes or documents -- a scraper looping rows, or one query across a corpus -- compile
+it once with :class:`turbohtml.XPath` instead of re-parsing it on every :meth:`~turbohtml.Node.xpath` call. Bind
+``smart_strings`` and ``extensions`` at construction, then call the object with a context node and any ``$name``
+variables; it returns exactly what the matching :meth:`~turbohtml.Node.xpath` call would. The compiled object is
+immutable and re-entrant, so one instance can be shared across threads.
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<table><tr><td class='num'>1</td><td>x</td></tr><tr><td class='num'>2</td></tr></table>")
+    cells = turbohtml.XPath(".//td[@class=$cls]")
+    for row in doc.xpath("//tr"):
+        print([td.text for td in cells(row, cls="num")])
+
+.. testoutput::
+
+    ['1']
+    ['2']
+
 ********************************
  Filter by attribute or pattern
 ********************************

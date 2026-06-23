@@ -7,7 +7,8 @@
 Search a tree with the methods on :class:`Node`: :meth:`~Node.find` and :meth:`~Node.find_all` walk an :class:`Axis`
 with attribute filters, :meth:`~Node.select` and :meth:`~Node.select_one` take CSS selectors, and :meth:`~Node.xpath`,
 :meth:`~Node.xpath_iter`, and :meth:`~Node.xpath_one` evaluate XPath. With ``smart_strings=True`` an XPath string result
-comes back as an :class:`XPathString` that remembers the element it was selected from.
+comes back as an :class:`XPathString` that remembers the element it was selected from. :class:`XPath` compiles an
+expression once and evaluates it against many context nodes or documents, skipping the per-call parse.
 
 .. autoclass:: Axis
     :members:
@@ -15,6 +16,10 @@ comes back as an :class:`XPathString` that remembers the element it was selected
 
 .. autoclass:: XPathString
     :members:
+
+.. autoclass:: XPath
+    :members:
+    :special-members: __call__
 
 *****************
  turbohtml.query
