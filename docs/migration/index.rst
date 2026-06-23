@@ -2,15 +2,13 @@
  Migrating to turbohtml
 ########################
 
-turbohtml replaces the HTML libraries it benchmarks against. None is API-compatible, so
-porting is a translation: turbohtml uses one name per concept and a typed shape where
-those libraries spread the work across aliases, methods, and treebuilder choices. This
-page maps each library to turbohtml; `BeautifulSoup
-<https://www.crummy.com/software/BeautifulSoup/>`_ gets the deepest treatment because it
-shares the most surface.
+turbohtml replaces the HTML libraries it benchmarks against. None is API-compatible, so porting is a translation:
+turbohtml uses one name per concept and a typed shape where those libraries spread the work across aliases, methods, and
+treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
+<https://www.crummy.com/software/BeautifulSoup/>`_ gets the deepest treatment because it shares the most surface.
 
-The guides are ordered by adoption, most to least monthly PyPI downloads, so the
-libraries you are most likely to port from come first.
+The guides are ordered by adoption, most to least monthly PyPI downloads, so the libraries you are most likely to port
+from come first.
 
 .. list-table::
     :header-rows: 1
