@@ -14,7 +14,7 @@ block layout from the tags. It builds an lxml tree and walks it in Python.
 ***************
 
 :meth:`~turbohtml.Node.to_text` is the same call in one fully type annotated C walk: ``extract_text`` maps to
-``to_text``, and the raw word stream html-text returns with layout guessing off maps to the
+:meth:`~turbohtml.Node.to_text`, and the raw word stream html-text returns with layout guessing off maps to the
 :attr:`~turbohtml.Node.strings` / :attr:`~turbohtml.Node.stripped_strings` iterators (or the
 :attr:`~turbohtml.Node.text` concatenation).
 
@@ -63,6 +63,34 @@ block layout from the tags. It builds an lxml tree and walks it in Python.
 
     Hello bold world
     ['Hello', 'bold', 'world']
+
+*************
+ Performance
+*************
+
+The same text benchmark that backs the :doc:`inscriptis <inscriptis>` comparison also runs html-text's ``extract_text``:
+:meth:`~turbohtml.Node.to_text` walks the tree once in C, where html-text builds an lxml tree and collects its text in
+Python.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - to text
+      - turbohtml
+      - html-text
+      - speed-up
+    - - article (2 KiB)
+      - 7 µs
+      - 102 µs
+      - 14.5x
+    - - table (4 KiB)
+      - 28 µs
+      - 258 µs
+      - 9.2x
+
+html-text skips the column-aligned table layout :meth:`~turbohtml.Node.to_text` renders, so its margin behind turbohtml
+narrows on table-heavy input while staying near an order of magnitude.
 
 **********
  Pitfalls

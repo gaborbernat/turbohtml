@@ -91,6 +91,12 @@ try:
 except ImportError:
     pd = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when pandas is unavailable
 
+# html-text (Zyte) pulls visible text off an lxml tree in Python; optional so the suite still runs without it.
+try:
+    import html_text  # lxml-based visible-text extractor, no type stubs
+except ImportError:
+    html_text = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
 import turbohtml
 from turbohtml import sanitizer as turbo_sanitizer
 from turbohtml.build import E as TURBO_E
@@ -1442,9 +1448,15 @@ def inscriptis_text(text: str) -> None:
     inscriptis.get_text(text)
 
 
+def html_text_text(text: str) -> None:
+    """Extract visible text with html-text, walking an lxml tree in Python."""
+    html_text.extract_text(text)
+
+
 TEXT_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
     ("turbohtml", turbo_text),
     ("inscriptis", inscriptis_text),
+    *((("html-text", html_text_text),) if html_text is not None else ()),
 )
 
 TEXT_CASES: tuple[tuple[str, str], ...] = (
@@ -1493,17 +1505,19 @@ def run_markdown_suite(bench: Callable[[str, object, object], None]) -> None:
 
 
 def print_text_table(means: dict[str, float], cases: list[str]) -> None:
-    """Render turbohtml's to_text beside inscriptis and its slowdown factor."""
+    """Render turbohtml's to_text beside inscriptis and html-text and their slowdown factors."""
     if not cases:
         return
+    others = [label for label, _ in TEXT_LIBS if label != "turbohtml"]
     print()
-    header = f"{'text benchmark':28} {'turbohtml':>11}{'inscriptis':>18}"
+    header = f"{'text benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
     print(header)
     for name in cases:
         turbo = means[f"text {name} [turbohtml]"]
-        other = means.get(f"text {name} [inscriptis]")
         row = f"{'text ' + name:28} {turbo * 1e6:8.1f} us"
-        row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        for label in others:
+            other = means.get(f"text {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
         print(row)
 
 
