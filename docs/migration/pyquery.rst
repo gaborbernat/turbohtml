@@ -2,8 +2,8 @@
  From pyquery
 ##############
 
-.. image:: https://static.pepy.tech/badge/pyquery
-    :alt: pyquery downloads
+.. image:: https://static.pepy.tech/badge/pyquery/month
+    :alt: pyquery monthly downloads
     :target: https://pepy.tech/project/pyquery
 
 `pyquery <https://github.com/gawel/pyquery>`_ puts a jQuery-style fluent, chainable wrapper over `lxml

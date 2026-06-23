@@ -2,8 +2,8 @@
  From html5lib
 ###############
 
-.. image:: https://static.pepy.tech/badge/html5lib
-    :alt: html5lib downloads
+.. image:: https://static.pepy.tech/badge/html5lib/month
+    :alt: html5lib monthly downloads
     :target: https://pepy.tech/project/html5lib
 
 `html5lib <https://html5lib.readthedocs.io>`_ is the reference pure-Python implementation of the WHATWG parsing

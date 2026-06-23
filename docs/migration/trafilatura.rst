@@ -2,8 +2,8 @@
  From trafilatura
 ##################
 
-.. image:: https://static.pepy.tech/badge/trafilatura
-    :alt: trafilatura downloads
+.. image:: https://static.pepy.tech/badge/trafilatura/month
+    :alt: trafilatura monthly downloads
     :target: https://pepy.tech/project/trafilatura
 
 `trafilatura <https://trafilatura.readthedocs.io>`_ extracts the main text and metadata from a web page: it downloads

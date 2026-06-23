@@ -2,8 +2,8 @@
  From selectolax
 #################
 
-.. image:: https://static.pepy.tech/badge/selectolax
-    :alt: selectolax downloads
+.. image:: https://static.pepy.tech/badge/selectolax/month
+    :alt: selectolax monthly downloads
     :target: https://pepy.tech/project/selectolax
 
 `selectolax <https://github.com/rushter/selectolax>`_ is a fast CSS-only HTML parser that wraps the `lexbor

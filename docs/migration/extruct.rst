@@ -2,8 +2,8 @@
  From extruct / metadata_parser
 ################################
 
-.. image:: https://static.pepy.tech/badge/extruct
-    :alt: extruct downloads
+.. image:: https://static.pepy.tech/badge/extruct/month
+    :alt: extruct monthly downloads
     :target: https://pepy.tech/project/extruct
 
 `extruct <https://github.com/scrapinghub/extruct>`_ and `metadata_parser <https://github.com/jvanasco/metadata_parser>`_

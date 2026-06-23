@@ -2,8 +2,8 @@
  From BeautifulSoup
 ####################
 
-.. image:: https://static.pepy.tech/badge/beautifulsoup4
-    :alt: beautifulsoup4 downloads
+.. image:: https://static.pepy.tech/badge/beautifulsoup4/month
+    :alt: beautifulsoup4 monthly downloads
     :target: https://pepy.tech/project/beautifulsoup4
 
 `BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ is the long-standing convenience layer over a

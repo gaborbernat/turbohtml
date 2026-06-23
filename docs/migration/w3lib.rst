@@ -2,8 +2,8 @@
  From w3lib (Scrapy)
 #####################
 
-.. image:: https://static.pepy.tech/badge/w3lib
-    :alt: w3lib downloads
+.. image:: https://static.pepy.tech/badge/w3lib/month
+    :alt: w3lib monthly downloads
     :target: https://pepy.tech/project/w3lib
 
 `w3lib <https://w3lib.readthedocs.io>`_ collects the web utilities `Scrapy <https://scrapy.org>`_ reuses: entity

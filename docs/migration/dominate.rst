@@ -2,8 +2,8 @@
  From the HTML builders
 ########################
 
-.. image:: https://static.pepy.tech/badge/dominate
-    :alt: dominate downloads
+.. image:: https://static.pepy.tech/badge/dominate/month
+    :alt: dominate monthly downloads
     :target: https://pepy.tech/project/dominate
 
 The HTML *generators* -- `dominate <https://github.com/Knio/dominate>`_, `yattag <https://www.yattag.org>`_, `htpy

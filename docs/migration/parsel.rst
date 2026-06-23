@@ -2,8 +2,8 @@
  From parsel
 #############
 
-.. image:: https://static.pepy.tech/badge/parsel
-    :alt: parsel downloads
+.. image:: https://static.pepy.tech/badge/parsel/month
+    :alt: parsel monthly downloads
     :target: https://pepy.tech/project/parsel
 
 `parsel <https://parsel.readthedocs.io>`_ is `Scrapy <https://scrapy.org>`_'s extraction-oriented selector library: a

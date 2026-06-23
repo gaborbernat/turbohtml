@@ -2,8 +2,8 @@
  From html-text
 ################
 
-.. image:: https://static.pepy.tech/badge/html-text
-    :alt: html-text downloads
+.. image:: https://static.pepy.tech/badge/html-text/month
+    :alt: html-text monthly downloads
     :target: https://pepy.tech/project/html-text
 
 `html-text <https://github.com/zytedata/html-text>`_ (Zyte) pulls the visible text out of a page, optionally guessing

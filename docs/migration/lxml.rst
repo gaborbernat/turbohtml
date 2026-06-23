@@ -4,8 +4,8 @@
  From lxml
 ###########
 
-.. image:: https://static.pepy.tech/badge/lxml
-    :alt: lxml downloads
+.. image:: https://static.pepy.tech/badge/lxml/month
+    :alt: lxml monthly downloads
     :target: https://pepy.tech/project/lxml
 
 `lxml <https://lxml.de>`_ is the libxml2/libxslt binding that most Python HTML and XML processing has been built on:

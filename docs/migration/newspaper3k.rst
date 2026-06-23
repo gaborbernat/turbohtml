@@ -2,8 +2,8 @@
  From newspaper3k
 ##################
 
-.. image:: https://static.pepy.tech/badge/newspaper3k
-    :alt: newspaper3k downloads
+.. image:: https://static.pepy.tech/badge/newspaper3k/month
+    :alt: newspaper3k monthly downloads
     :target: https://pepy.tech/project/newspaper3k
 
 `newspaper3k <https://newspaper.readthedocs.io>`_ is a news-article scraper: an ``Article`` downloads a URL, then

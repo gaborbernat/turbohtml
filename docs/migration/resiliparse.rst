@@ -2,8 +2,8 @@
  From resiliparse
 ##################
 
-.. image:: https://static.pepy.tech/badge/resiliparse
-    :alt: resiliparse downloads
+.. image:: https://static.pepy.tech/badge/resiliparse/month
+    :alt: resiliparse monthly downloads
     :target: https://pepy.tech/project/resiliparse
 
 `resiliparse <https://github.com/chatnoir-eu/chatnoir-resiliparse>`_ is the web-crawl processing toolkit from ChatNoir.

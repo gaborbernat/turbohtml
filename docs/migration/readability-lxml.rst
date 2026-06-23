@@ -2,8 +2,8 @@
  From readability-lxml
 #######################
 
-.. image:: https://static.pepy.tech/badge/readability-lxml
-    :alt: readability-lxml downloads
+.. image:: https://static.pepy.tech/badge/readability-lxml/month
+    :alt: readability-lxml monthly downloads
     :target: https://pepy.tech/project/readability-lxml
 
 `readability-lxml <https://github.com/buriy/python-readability>`_ is a Python port of Arc90's Readability: a

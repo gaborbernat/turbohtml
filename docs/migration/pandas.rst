@@ -2,8 +2,8 @@
  From pandas
 #############
 
-.. image:: https://static.pepy.tech/badge/pandas
-    :alt: pandas downloads
+.. image:: https://static.pepy.tech/badge/pandas/month
+    :alt: pandas monthly downloads
     :target: https://pepy.tech/project/pandas
 
 `pandas <https://pandas.pydata.org>`_ is how scrapers turn ``<table>`` markup into rows: ``pandas.read_html`` parses
