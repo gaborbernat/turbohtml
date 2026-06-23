@@ -84,6 +84,23 @@ try:
     from yattag import Doc as YattagDoc  # context-manager builder, no type stubs
 except ImportError:
     YattagDoc = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+# Article extractors raced in the article suite. trafilatura and readability-lxml install cleanly on current Python;
+# newspaper3k pins long-unmaintained dependencies and rarely resolves, so each import is optional and the suite races
+# whatever is present.
+try:
+    import trafilatura  # lxml-backed main-text and metadata extractor
+except ImportError:
+    trafilatura = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
+try:
+    from readability import Document as ReadabilityDocument  # readability-lxml, the Arc90 Readability port
+except ImportError:
+    ReadabilityDocument = None  # ty: ignore[invalid-assignment]  # optional: re-bind when readability-lxml is absent
+
+try:
+    from newspaper import Article as NewspaperArticle  # newspaper3k news scraper, no type stubs
+except ImportError:
+    NewspaperArticle = None  # ty: ignore[invalid-assignment]  # optional: re-bind when newspaper3k is absent
 
 # pandas.read_html is the one helper the tables suite races; optional so the suite still runs without it.
 try:
@@ -1677,6 +1694,97 @@ def print_structured_table(means: dict[str, float], cases: list[str]) -> None:
         print(row)
 
 
+# --- article suite: main content + metadata extraction ---------------------- #
+# turbohtml.Node.article against trafilatura, readability-lxml, and newspaper3k,
+# the article extractors it succeeds. Each takes an HTML string, scores the
+# content body, and (trafilatura and newspaper3k) harvests the page metadata
+# beside it; turbohtml parses to the WHATWG tree and does both in one C pass. The
+# inputs are full pages -- navigation, a scored article, and a footer -- so the
+# boilerplate the heuristic must discount is measured, not just the body.
+
+
+def turbo_article(text: str) -> None:
+    """Extract the content body and metadata with turbohtml in one C pass."""
+    turbohtml.parse(text).article()
+
+
+def trafilatura_article(text: str) -> None:
+    """Extract content and metadata with trafilatura, on an lxml tree."""
+    trafilatura.bare_extraction(text, with_metadata=True)
+
+
+def readability_article(text: str) -> None:
+    """Extract the content body and title with readability-lxml."""
+    document = ReadabilityDocument(text)
+    document.summary()
+    document.short_title()
+
+
+def newspaper_article(text: str) -> None:
+    """Extract content and metadata with newspaper3k, from pre-set HTML."""
+    article = NewspaperArticle(url="")
+    article.set_html(text)
+    article.parse()
+
+
+ARTICLE_LIBS: tuple[tuple[str, Callable[[str], None] | None], ...] = (
+    ("turbohtml", turbo_article),
+    ("trafilatura", trafilatura_article if trafilatura is not None else None),
+    ("readability-lxml", readability_article if ReadabilityDocument is not None else None),
+    ("newspaper3k", newspaper_article if NewspaperArticle is not None else None),
+)
+
+_ARTICLE_HEAD = (
+    "<html lang=en><head><title>Comets: A Field Guide</title>"
+    "<meta name=author content='Ada Lovelace'>"
+    "<meta property=article:published_time content='2024-05-06'>"
+    "<meta name=description content='A short guide to comets and the tails they trail past the Sun.'></head>"
+)
+_ARTICLE_NAV = "<body><nav><a href='/'>Home</a> <a href='/science'>Science</a> <a href='/space'>Space</a></nav>"
+_ARTICLE_PARA = (
+    "<p>A comet is an icy small body that, when it passes close to the Sun, warms up, begins to release gases, "
+    "and forms a glowing coma, a thin atmosphere, around it.</p>"
+)
+_ARTICLE_FOOTER = "<footer><p>Copyright notice, all rights reserved here.</p></footer></body></html>"
+
+
+def _article_page(paragraphs: int) -> str:
+    body = f"<article class=post><h1>Comets</h1>{_ARTICLE_PARA * paragraphs}</article>"
+    return f"{_ARTICLE_HEAD}{_ARTICLE_NAV}{body}{_ARTICLE_FOOTER}"
+
+
+ARTICLE_CASES: tuple[tuple[str, str], ...] = (
+    ("post 4 KiB", _article_page(16)),
+    ("longform 16 KiB", _article_page(72)),
+)
+
+
+def run_article_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark article extraction against trafilatura, readability-lxml, and newspaper3k; return the case names."""
+    for name, text in ARTICLE_CASES:
+        for label, run in ARTICLE_LIBS:
+            if run is not None:
+                bench(f"article {name} [{label}]", run, text)
+    return [name for name, _ in ARTICLE_CASES]
+
+
+def print_article_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's article beside each extractor present and its speedup factor."""
+    if not cases:
+        return
+    others = [label for label, run in ARTICLE_LIBS if label != "turbohtml" and run is not None]
+    print()
+    header = f"{'article benchmark':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in others)
+    print(header)
+    for name in cases:
+        turbo = means[f"article {name} [turbohtml]"]
+        row = f"{'article ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in others:
+            other = means.get(f"article {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+
+
 def run_readpath_suite(bench: Callable[[str, object, object], None], op_index: int, op: str) -> list[str]:
     """Benchmark one read-path operation (find/select/serialize) across every library."""
     names: list[str] = []
@@ -2057,6 +2165,7 @@ SIMPLE_SUITES: tuple[tuple[str, Callable[..., list[str]], Callable[[dict[str, fl
     ("markup", run_markup_suite, print_markup_table),
     ("minify", run_minify_suite, print_minify_table),
     ("tables", run_tables_suite, print_tables_table),
+    ("article", run_article_suite, print_article_table),
 )
 
 
@@ -2087,6 +2196,7 @@ def main() -> None:
             "markdown",
             "sanitize",
             "structured",
+            "article",
             [],
         ],
         help="suites to run (default: all)",
@@ -2100,7 +2210,7 @@ def main() -> None:
     suites = set(
         os.environ.get(
             "TURBOHTML_BENCH_SUITES",
-            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,tables,linkify,markdown,sanitize,structured",
+            "escape,unescape,tokenize,corpus,parse,query,xpath,serialize,build,edit,chain,htmlparser,stream,markup,minify,tables,linkify,markdown,sanitize,structured,article",
         ).split(",")
     )
     means: dict[str, float] = {}
