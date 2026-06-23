@@ -717,6 +717,29 @@ objects. selectolax is parse-only, so it has no entry.
       - 13.5 ms
       - 79.0 ms
 
+The terse :data:`turbohtml.build.E` builder spells the same ``<ul>`` declaratively, raced against the dedicated HTML
+generators `dominate <https://github.com/Knio/dominate>`_ and `yattag <https://www.yattag.org>`_. ``E`` is roughly three
+times faster than dominate and on par with yattag, and unlike either it returns a real, queryable turbohtml tree rather
+than a string. That tree costs about three-quarters again the raw :class:`~turbohtml.Element` constructor above -- the
+price of the leading-mapping and per-child dispatch the sugar runs in Python.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 24 24 24
+
+    - - build with ``E``
+      - turbohtml
+      - dominate
+      - yattag
+    - - 100 rows
+      - 104 µs
+      - 320 µs
+      - 94 µs
+    - - 1000 rows
+      - 1.08 ms
+      - 3.34 ms
+      - 1.06 ms
+
 *********
  Editing
 *********

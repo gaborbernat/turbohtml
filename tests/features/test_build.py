@@ -1,92 +1,122 @@
-"""The turbohtml.build.E builder: construction sugar over Element() plus serialize()."""
+"""The turbohtml.build.E builder: construction sugar over Element() plus serialize(), and the factory mechanics."""
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
 import pytest
 
 from turbohtml import Comment, Element, Text, parse_fragment
-from turbohtml.build import E
+from turbohtml.build import E, ElementMaker
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-
-def test_empty_element_serializes_with_end_tag() -> None:
-    assert E.div().serialize() == "<div></div>"
+    from turbohtml import Node
 
 
-def test_void_element_has_no_end_tag() -> None:
-    assert E.br().serialize() == "<br>"
-
-
-def test_text_child_becomes_a_text_node() -> None:
-    paragraph = E.p("body")
-    (child,) = paragraph.children
-    assert isinstance(child, Text)
-    assert child.data == "body"
-
-
-def test_text_child_serializes() -> None:
-    assert E.p("body").serialize() == "<p>body</p>"
-
-
-def test_leading_mapping_is_attributes() -> None:
-    assert E.div({"class": "card"}).serialize() == '<div class="card"></div>'
-
-
-def test_list_valued_attribute_joins_on_space() -> None:
-    assert E.div({"class": ["a", "b"]}).serialize() == '<div class="a b"></div>'
-
-
-def test_none_attribute_is_valueless() -> None:
-    assert E.input({"disabled": None}).serialize() == '<input disabled="">'
-
-
-def test_nesting_builds_real_child_elements() -> None:
-    card = E.div({"class": "card"}, E.h1("Title"), E.p("body"))
-    assert card.serialize() == '<div class="card"><h1>Title</h1><p>body</p></div>'
-
-
-def test_children_keep_their_order() -> None:
-    assert E.p("a", E.b("b"), "c").serialize() == "<p>a<b>b</b>c</p>"
-
-
-def test_prebuilt_text_node_child_is_appended_not_rewrapped() -> None:
-    paragraph = E.p(Text("body"))
-    (child,) = paragraph.children
-    assert isinstance(child, Text)
-    assert child.data == "body"
-
-
-def test_non_string_node_child_passes_through_append() -> None:
-    assert E.div(Comment("note")).serialize() == "<div><!--note--></div>"
-
-
-def test_returns_a_real_element() -> None:
-    assert isinstance(E.div(), Element)
-
-
-def test_mixed_text_and_element_children() -> None:
-    assert E.div("before", E.span("mid"), "after").serialize() == "<div>before<span>mid</span>after</div>"
+@pytest.fixture
+def maker() -> ElementMaker:
+    """A private builder, independent of the shared ``E`` singleton."""
+    return ElementMaker()
 
 
 @pytest.mark.parametrize(
-    ("markup_builder", "expected"),
+    ("build", "expected"),
+    [
+        pytest.param(E.div, "<div></div>", id="empty-element-keeps-end-tag"),
+        pytest.param(E.br, "<br>", id="void-element-has-no-end-tag"),
+        pytest.param(lambda: E.p("body"), "<p>body</p>", id="text-child"),
+        pytest.param(lambda: E.div({"class": "card"}), '<div class="card"></div>', id="leading-mapping-is-attributes"),
+        pytest.param(lambda: E.div({"class": ["a", "b"]}), '<div class="a b"></div>', id="list-attribute-joins"),
+        pytest.param(lambda: E.input({"disabled": None}), '<input disabled="">', id="none-attribute-is-valueless"),
+        pytest.param(
+            lambda: E.div({"class": "card"}, E.h1("Title"), E.p("body")),
+            '<div class="card"><h1>Title</h1><p>body</p></div>',
+            id="nesting-builds-real-children",
+        ),
+        pytest.param(lambda: E.p("a", E.b("b"), "c"), "<p>a<b>b</b>c</p>", id="children-keep-order"),
+        pytest.param(lambda: E.div(Comment("note")), "<div><!--note--></div>", id="non-string-node-passes-through"),
+        pytest.param(
+            lambda: E.div("before", E.span("mid"), "after"),
+            "<div>before<span>mid</span>after</div>",
+            id="mixed-text-and-element-children",
+        ),
+        pytest.param(lambda: E("div", "body"), "<div>body</div>", id="call-form-names-the-tag"),
+        pytest.param(lambda: E("a", {"href": "/x"}, "link"), '<a href="/x">link</a>', id="call-form-leading-mapping"),
+        pytest.param(lambda: E("my-widget"), "<my-widget></my-widget>", id="call-form-non-identifier-tag"),
+    ],
+)
+def test_serialize(build: Callable[[], Element], expected: str) -> None:
+    assert build().serialize() == expected
+
+
+@pytest.mark.parametrize(
+    ("build", "expected"),
     [
         pytest.param(
             lambda: E.section(E.h2("Heading"), E.p("text")),
             "<section><h2>Heading</h2><p>text</p></section>",
             id="section",
         ),
-        pytest.param(
-            lambda: E.ul(E.li("one"), E.li("two")),
-            "<ul><li>one</li><li>two</li></ul>",
-            id="list",
-        ),
+        pytest.param(lambda: E.ul(E.li("one"), E.li("two")), "<ul><li>one</li><li>two</li></ul>", id="list"),
     ],
 )
-def test_round_trip_through_parse(markup_builder: Callable[[], Element], expected: str) -> None:
-    assert markup_builder().serialize() == expected
+def test_round_trips_through_parse(build: Callable[[], Element], expected: str) -> None:
+    assert build().serialize() == expected
     assert parse_fragment(expected).inner_html == expected
+
+
+@pytest.mark.parametrize(
+    "child",
+    [
+        pytest.param("body", id="string-becomes-text-node"),
+        pytest.param(Text("body"), id="prebuilt-text-node-is-not-rewrapped"),
+    ],
+)
+def test_text_child_is_a_text_node(child: str | Text) -> None:
+    (built,) = E.p(child).children
+    assert isinstance(built, Text)
+    assert built.data == "body"
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(E.div, id="attribute-access"),
+        pytest.param(lambda: E("p"), id="call-form"),
+    ],
+)
+def test_builds_a_real_element(build: Callable[[], Node]) -> None:
+    assert isinstance(build(), Element)
+
+
+def test_attribute_access_returns_a_fresh_callable() -> None:
+    assert E.div is not E.div  # each access builds its own factory; no shared mutable state
+
+
+def test_a_separate_maker_builds_the_same_way(maker: ElementMaker) -> None:
+    assert maker.span("x").serialize() == "<span>x</span>"
+
+
+def test_non_leading_mapping_is_rejected() -> None:
+    with pytest.raises(TypeError, match="must come first"):
+        E.div("text", {"id": "b"})
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("__deepcopy__", id="deepcopy"),
+        pytest.param("__setstate__", id="setstate"),
+        pytest.param("__wrapped__", id="wrapped"),
+    ],
+)
+def test_dunder_lookup_falls_through(maker: ElementMaker, name: str) -> None:
+    with pytest.raises(AttributeError):
+        getattr(maker, name)
+
+
+def test_deepcopy_is_not_hijacked_by_getattr(maker: ElementMaker) -> None:
+    assert isinstance(copy.deepcopy(maker), ElementMaker)

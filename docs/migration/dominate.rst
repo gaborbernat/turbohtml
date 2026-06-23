@@ -18,7 +18,8 @@ to htpy's ``[...]`` subscripts to ``lxml.builder``'s nested calls.
 
 turbohtml builds HTML with :class:`~turbohtml.Element` plus :meth:`~turbohtml.Node.serialize`, and
 :data:`turbohtml.build.E` is a terse front end for it that reads like ``lxml.builder``: ``E.<tag>(attrs, *children)``,
-where a leading mapping is the attributes and each child is a node or a string that becomes text. The result is a real
+where a leading mapping is the attributes and each child is a node or a string that becomes text. ``E`` is the shared
+:class:`~turbohtml.build.ElementMaker`; instantiate your own when you want an isolated factory. The result is a real
 turbohtml tree, so the whole edit, query, and serialize surface stays available and the markup you generate serializes
 by exactly the rules that parse it back:
 
@@ -68,6 +69,35 @@ attribute joins on a space so a class list reads naturally:
 .. testoutput::
 
     <my-card class="card lg">hi</my-card>
+
+*************
+ Performance
+*************
+
+``E`` assembles the fragment in turbohtml's arena and serializes it in C; dominate and yattag stay in Python. The same
+``<ul>`` of rows -- a class, a ``data`` attribute, and a text child apiece -- built three ways, from ``tox -e bench
+build`` on the reference machine in :doc:`/development/performance`:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 24 24 24
+
+    - - build a list
+      - :data:`E <turbohtml.build.E>`
+      - dominate
+      - yattag
+    - - 100 rows
+      - 104 µs
+      - 320 µs
+      - 94 µs
+    - - 1000 rows
+      - 1.08 ms
+      - 3.34 ms
+      - 1.06 ms
+
+``E`` is about three times faster than dominate and on par with yattag, and the decisive difference is the result type:
+``E`` hands back a real :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree
+you can query, edit, and re-:meth:`~turbohtml.Node.serialize`.
 
 **********
  Pitfalls

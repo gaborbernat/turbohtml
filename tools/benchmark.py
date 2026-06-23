@@ -73,8 +73,20 @@ try:
 except ImportError:
     extruct = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
 
+# Terse HTML builders raced against turbohtml.build.E in the build suite; optional so the suite still runs without them.
+try:
+    import dominate.tags as dominate_tags  # declarative builder, no type stubs
+except ImportError:
+    dominate_tags = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
+try:
+    from yattag import Doc as YattagDoc  # context-manager builder, no type stubs
+except ImportError:
+    YattagDoc = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
 import turbohtml
 from turbohtml import sanitizer as turbo_sanitizer
+from turbohtml.build import E as TURBO_E
 from turbohtml.linkify import linkify as turbo_linkify_html
 from turbohtml.migration.markupsafe import escape as turbo_markup_escape
 from turbohtml.migration.stdlib import HTMLParser as TurboHTMLParser
@@ -531,11 +543,53 @@ BUILD_LIBS: tuple[tuple[str, Callable[[int], None]], ...] = (
 BUILD_CASES: tuple[tuple[str, int], ...] = (("100 rows", 100), ("1k rows", 1_000), ("10k rows", 10_000))
 
 
+# --- terse-builder sub-suite: the same fragment through declarative builder DSLs --- #
+# turbohtml.build.E against the dedicated HTML generators (dominate, yattag), each
+# spelling the same <ul> of count <li> rows in its own nesting syntax.
+
+
+def turbo_e_build(count: int) -> None:
+    """Build the row list with turbohtml's terse E builder: a leading mapping is attributes, strings become text."""
+    rows = [TURBO_E.li({"class": "item", "data-i": str(index)}, f"item {index}") for index in range(count)]
+    _ = TURBO_E.ul(*rows).serialize()
+
+
+def dominate_build(count: int) -> None:
+    """Build the same list with dominate's tag objects and ``add``."""
+    ul = dominate_tags.ul()
+    for index in range(count):
+        ul.add(dominate_tags.li(f"item {index}", **{"class": "item", "data-i": str(index)}))
+    _ = ul.render(pretty=False)
+
+
+def yattag_build(count: int) -> None:
+    """Build the same list with yattag's ``tag``/``text`` context managers."""
+    doc, tag, text = YattagDoc().tagtext()
+    with tag("ul"):
+        for index in range(count):
+            with tag("li", ("class", "item"), ("data-i", str(index))):
+                text(f"item {index}")
+    _ = doc.getvalue()
+
+
+# Terse builders, fastest-first; dominate and yattag are optional and drop out when absent.
+BUILDER_LIBS: tuple[tuple[str, Callable[[int], None]], ...] = (
+    ("turbohtml", turbo_e_build),
+    *((("dominate", dominate_build),) if dominate_tags is not None else ()),
+    *((("yattag", yattag_build),) if YattagDoc is not None else ()),
+)
+
+BUILDER_CASES: tuple[tuple[str, int], ...] = (("100 rows", 100), ("1k rows", 1_000))
+
+
 def run_build_suite(bench: Callable[[str, object, object], None]) -> list[str]:
     """Benchmark programmatic tree construction across every library; return the case names."""
     for name, count in BUILD_CASES:
         for label, build in BUILD_LIBS:
             bench(f"build {name} [{label}]", build, count)
+    for name, count in BUILDER_CASES:
+        for label, build in BUILDER_LIBS:
+            bench(f"build via E {name} [{label}]", build, count)
     return [name for name, _ in BUILD_CASES]
 
 
@@ -552,6 +606,18 @@ def print_build_table(means: dict[str, float], cases: list[str]) -> None:
         row = f"{'build ' + name:28} {turbo * 1e6:8.1f} us"
         for label in others:
             other = means.get(f"build {name} [{label}]")
+            row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
+        print(row)
+    builders = [label for label, _ in BUILDER_LIBS if label != "turbohtml"]
+    print()
+    builder_header = f"{'terse builder (E)':28} {'turbohtml':>11}" + "".join(f"{label:>18}" for label in builders)
+    print(builder_header)
+    for name, _count in BUILDER_CASES:
+        if (turbo := means.get(f"build via E {name} [turbohtml]")) is None:
+            continue
+        row = f"{'E ' + name:28} {turbo * 1e6:8.1f} us"
+        for label in builders:
+            other = means.get(f"build via E {name} [{label}]")
             row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
         print(row)
 
