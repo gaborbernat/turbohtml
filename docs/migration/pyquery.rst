@@ -102,6 +102,48 @@ node, or to the last sibling), so ``query("p").wrap_all("<div/>")`` over a run o
     - - ``pq(run).wrap_all("<div/>")`` over a contiguous run
       - :meth:`first.wrap_siblings(Element("div"), until=last) <turbohtml.Node.wrap_siblings>`
 
+pyquery's content setters -- ``.html(markup)`` reparses a matched element's children and ``.text(s)`` replaces them with
+one verbatim text node -- map onto three element methods. :meth:`~turbohtml.Element.set_inner_html` parses the markup as
+a fragment in the element's context and replaces its children; :meth:`~turbohtml.Element.set_text` replaces them with
+one verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` splices a parsed fragment at a DOM position
+(the ``.append(markup)`` / ``insertAdjacentHTML`` shape):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 50 50
+
+    - - pyquery
+      - turbohtml
+    - - ``pq(el).html(markup)``
+      - :meth:`el.set_inner_html(markup) <turbohtml.Element.set_inner_html>`
+    - - ``pq(el).text(s)``
+      - :meth:`el.set_text(s) <turbohtml.Element.set_text>`
+    - - ``pq(el).append(markup)``
+      - :meth:`el.insert_adjacent_html("beforeend", markup) <turbohtml.Element.insert_adjacent_html>`
+
+*************
+ Performance
+*************
+
+The content setters carry the same C advantage as the rest of the wrapper. Both libraries parse the page once outside
+the timed call, then replace a ``<body>``'s content on every run: turbohtml reparses the fragment and splices it in one
+C call, where pyquery's ``.html()`` routes through lxml's ``fromstring`` and reassembly. The numbers come from the 9.6
+kB ``wpt`` page in the ``edit`` suite (``tox -e bench edit``):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 30 30
+
+    - - content setter (9.6 kB page)
+      - turbohtml
+      - pyquery
+    - - :meth:`~turbohtml.Element.set_inner_html` vs ``.html()``
+      - 1.3 µs
+      - 7.7 µs
+    - - :meth:`~turbohtml.Element.set_text` vs ``.text()``
+      - 0.13 µs
+      - 4.6 µs
+
 **********
  Pitfalls
 **********

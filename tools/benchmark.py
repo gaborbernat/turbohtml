@@ -596,6 +596,49 @@ def lxml_edit(tree: HtmlElement) -> None:
         anchor.set("rel", "nofollow")
 
 
+# A content-setter pass: replace the <body>'s children by reparsing a fixed fragment in
+# context, the work pyquery's .html(markup) does. Reparsing the same fragment each call
+# keeps pyperf's repeated runs equal, and the body always exists after a document parse.
+SET_HTML_FRAGMENT = "<p>Updated <a href='/x'>link</a> and <b>bold</b>.</p><ul><li>one</li><li>two</li></ul>"
+SET_TEXT_VALUE = "Replacement text, escaped & verbatim."
+
+
+def turbo_set_html(doc: Document) -> None:
+    """Reparse a fragment in the body's context and replace its children."""
+    doc.find_all("body")[0].set_inner_html(SET_HTML_FRAGMENT)
+
+
+def lxml_set_html(tree: HtmlElement) -> None:
+    """Clear the body and append a reparsed fragment, lxml's nearest inner-HTML shape."""
+    body = tree.findall(".//body")[0]
+    body.clear()
+    for fragment in lxml_html.fragments_fromstring(SET_HTML_FRAGMENT):
+        body.append(fragment)
+
+
+def bs4_set_html(soup: BeautifulSoup) -> None:
+    """Clear the body and append a reparsed fragment, BeautifulSoup's inner-HTML shape."""
+    body = soup.find_all("body")[0]
+    body.clear()
+    for node in list(BeautifulSoup(SET_HTML_FRAGMENT, "html.parser").children):
+        body.append(node)
+
+
+def pyquery_set_html(page: PyQuery) -> None:
+    """Replace the body's children with pyquery's .html(markup)."""
+    page("body").html(SET_HTML_FRAGMENT)
+
+
+def turbo_set_text(doc: Document) -> None:
+    """Replace the body's children with one verbatim text node."""
+    doc.find_all("body")[0].set_text(SET_TEXT_VALUE)
+
+
+def pyquery_set_text(page: PyQuery) -> None:
+    """Replace the body's children with pyquery's .text(value)."""
+    page("body").text(SET_TEXT_VALUE)
+
+
 # Write-on-parsed-tree competitors; selectolax mutation is limited, so it is absent.
 EDIT_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
     ("turbohtml", turbo_tree, turbo_edit),
@@ -643,6 +686,18 @@ def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
     for label, build, edit in CLASS_EDIT_LIBS:
         bench(f"edit {CLASS_EDIT_CASE} [{label}]", edit, build(text))
     names.append(CLASS_EDIT_CASE)
+    # Content setters on one representative page: set_inner_html across the editing-table
+    # libraries, plus pyquery's .html()/.text() for the migration guide's comparison.
+    set_label, set_path, set_enc = READPATH_CASES[1]
+    set_name = f"set inner html {set_label}"
+    text = corpus_text(set_path, set_enc)
+    bench(f"edit {set_name} [turbohtml]", turbo_set_html, turbo_tree(text))
+    bench(f"edit {set_name} [lxml]", lxml_set_html, lxml_tree(text))
+    bench(f"edit {set_name} [BeautifulSoup]", bs4_set_html, bs4_tree(text))
+    bench(f"edit {set_name} [pyquery]", pyquery_set_html, pyquery_tree(text))
+    bench(f"edit set text {set_label} [turbohtml]", turbo_set_text, turbo_tree(text))
+    bench(f"edit set text {set_label} [pyquery]", pyquery_set_text, pyquery_tree(text))
+    names.append(set_name)
     return names
 
 

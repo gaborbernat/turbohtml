@@ -2016,6 +2016,12 @@ static PyObject *element_normalize(PyObject *self, PyObject *ignored);
 
 static PyObject *element_wrap_children(PyObject *self, PyObject *wrapper_obj);
 
+static PyObject *element_set_inner_html(PyObject *self, PyObject *html);
+
+static PyObject *element_set_text_method(PyObject *self, PyObject *value);
+
+static PyObject *element_insert_adjacent_html(PyObject *self, PyObject *args);
+
 PyDoc_STRVAR(append_doc, "append(child, /)\n--\n\n"
                          "Add child as the last child of this element. A node already in a tree is\n"
                          "moved; a node from another tree is adopted by copy.\n\n"
@@ -2224,6 +2230,25 @@ static PyObject *element_toggle_class(PyObject *self, PyObject *arg) {
     return class_mutate(self, arg, CLASS_TOGGLE);
 }
 
+PyDoc_STRVAR(set_inner_html_doc, "set_inner_html(html, /)\n--\n\n"
+                                 "Replace this element's children with the nodes parsed from html, a fragment\n"
+                                 "parsed in this element's own context (the DOM innerHTML= setter). The\n"
+                                 "string is run through the same HTML parser as parse(), so malformed markup\n"
+                                 "is repaired the same way.");
+
+PyDoc_STRVAR(set_text_doc, "set_text(text, /)\n--\n\n"
+                           "Replace this element's children with a single Text node holding text\n"
+                           "verbatim (the DOM textContent= setter). text is never parsed, so any markup\n"
+                           "in it is escaped on serialization. The Element.text= setter is equivalent.");
+
+PyDoc_STRVAR(insert_adjacent_html_doc, "insert_adjacent_html(position, html, /)\n--\n\n"
+                                       "Parse html as a fragment and insert it relative to this element at position,\n"
+                                       "one of 'beforebegin', 'afterbegin', 'beforeend', or 'afterend' (the DOM\n"
+                                       "insertAdjacentHTML, matched case-insensitively). 'beforebegin' and 'afterend'\n"
+                                       "place the nodes among this element's siblings, so they require an element\n"
+                                       "parent; 'afterbegin' and 'beforeend' add them as the first or last children.\n"
+                                       "The fragment parses in the context of the element that will hold it.");
+
 static PyMethodDef element_methods[] = {
     {"append", element_append, METH_O, append_doc},
     {"extend", element_extend, METH_O, extend_doc},
@@ -2231,6 +2256,9 @@ static PyMethodDef element_methods[] = {
     {"clear", element_clear, METH_NOARGS, clear_doc},
     {"normalize", element_normalize, METH_NOARGS, normalize_doc},
     {"wrap_children", element_wrap_children, METH_O, wrap_children_doc},
+    {"set_inner_html", element_set_inner_html, METH_O, set_inner_html_doc},
+    {"set_text", element_set_text_method, METH_O, set_text_doc},
+    {"insert_adjacent_html", element_insert_adjacent_html, METH_VARARGS, insert_adjacent_html_doc},
     {"form_data", element_form_data, METH_NOARGS, form_data_doc},
     {"attr", (PyCFunction)(void (*)(void))element_attr, METH_VARARGS | METH_KEYWORDS, attr_doc},
     {"has_class", element_has_class, METH_O, has_class_doc},
@@ -2926,4 +2954,182 @@ static int element_set_text(PyObject *self, PyObject *value, void *Py_UNUSED(clo
     Py_END_CRITICAL_SECTION();
     PyMem_Free(points);
     return error ? -1 : 0; /* GCOVR_EXCL_BR_LINE: error is set only on the excluded allocation failure */
+}
+
+static PyObject *element_set_text_method(PyObject *self, PyObject *value) {
+    if (element_set_text(self, value, NULL) < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+/* The four DOM insertAdjacentHTML positions, also the splice mode for set_inner_html
+   (which clears the element first, then inserts as for "beforeend"). */
+enum th_adjacency { TH_ADJ_BEFOREBEGIN, TH_ADJ_AFTERBEGIN, TH_ADJ_BEFOREEND, TH_ADJ_AFTEREND };
+
+/* Map a position string to its enum case-insensitively (the DOM keywords are ASCII
+   case-insensitive), or -1 with a ValueError naming the offending value. */
+static int resolve_adjacency(PyObject *position, enum th_adjacency *out) {
+    Py_ssize_t len = PyUnicode_GET_LENGTH(position);
+    Py_UCS4 *points = PyUnicode_AsUCS4Copy(position);
+    if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int rc = 0;
+    if (ucs4_iequals_ascii(points, len, "beforebegin")) {
+        *out = TH_ADJ_BEFOREBEGIN;
+    } else if (ucs4_iequals_ascii(points, len, "afterbegin")) {
+        *out = TH_ADJ_AFTERBEGIN;
+    } else if (ucs4_iequals_ascii(points, len, "beforeend")) {
+        *out = TH_ADJ_BEFOREEND;
+    } else if (ucs4_iequals_ascii(points, len, "afterend")) {
+        *out = TH_ADJ_AFTEREND;
+    } else {
+        PyErr_Format(PyExc_ValueError,
+                     "position must be 'beforebegin', 'afterbegin', 'beforeend', or 'afterend', not %R", position);
+        rc = -1;
+    }
+    PyMem_Free(points);
+    return rc;
+}
+
+/* Parse html as a fragment in the context element's own context, so its content
+   model and namespace drive the parse exactly as the DOM innerHTML setter requires
+   (the context name is the tag, prefixed "svg "/"math " for a foreign element). The
+   parse only borrows html and never touches the live tree, so it runs before the
+   per-tree lock is taken and never holds a structural pointer across it. The caller
+   owns the returned tree (free it with th_tree_free). NULL with an exception set on a
+   non-encodable (lone-surrogate) tag name or an allocation failure. */
+static th_tree *parse_fragment_in_context(th_node *context, PyObject *html) {
+    PyObject *tag = ucs4_to_str(context->text, context->text_len);
+    if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t tag_len;
+    const char *tag_utf8 = PyUnicode_AsUTF8AndSize(tag, &tag_len);
+    if (tag_utf8 == NULL) { /* a lone-surrogate tag name has no UTF-8 form */
+        Py_DECREF(tag);
+        return NULL;
+    }
+    const char *prefix = context->ns == TH_NS_SVG ? "svg " : context->ns == TH_NS_MATHML ? "math " : "";
+    Py_ssize_t prefix_len = (Py_ssize_t)strlen(prefix);
+    Py_ssize_t name_len = prefix_len + tag_len;
+    char *name = PyMem_Malloc((size_t)name_len + 1);
+    if (name == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(tag);   /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(name, prefix, (size_t)prefix_len);
+    memcpy(name + prefix_len, tag_utf8, (size_t)tag_len);
+    name[name_len] = '\0';
+    Py_DECREF(tag);
+    th_tree *fragment = th_tree_parse_fragment(PyUnicode_KIND(html), PyUnicode_DATA(html), PyUnicode_GET_LENGTH(html),
+                                               name, name_len, 0);
+    PyMem_Free(name);
+    if (fragment == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return fragment;
+}
+
+/* Copy each top-level node of a parsed fragment into dest in document order and link
+   it relative to target per position; parent is target's parent (read by the caller
+   before the lock, used only by the sibling positions). The caller holds the per-tree
+   lock and fragment is a private detached tree no other thread can see, so iterating
+   its child pointers and copying are a pure-C pass that no concurrent mutation can
+   tear. Returns 0, or -1 on a copy allocation failure (no exception set). */
+static int splice_fragment(th_tree *dest, th_tree *fragment, th_node *parent, th_node *target,
+                           enum th_adjacency position) {
+    th_node *first_ref = position == TH_ADJ_AFTERBEGIN ? target->first_child : NULL;
+    th_node *cursor = target;
+    for (th_node *child = th_tree_document(fragment)->first_child; child != NULL;) {
+        th_node *next = child->next_sibling;
+        th_node *copy = th_tree_copy_node(dest, fragment, child);
+        if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        switch (position) { /* GCOVR_EXCL_BR_LINE: the enum is exhaustive; the implicit default is unreachable */
+        case TH_ADJ_BEFOREBEGIN:
+            th_node_insert_before(parent, copy, target);
+            break;
+        case TH_ADJ_AFTERBEGIN:
+            th_node_insert_before(target, copy, first_ref);
+            break;
+        case TH_ADJ_BEFOREEND:
+            th_node_append_child(target, copy);
+            break;
+        case TH_ADJ_AFTEREND:
+            th_node_insert_before(parent, copy, cursor->next_sibling);
+            cursor = copy;
+            break;
+        }
+        child = next;
+    }
+    return 0;
+}
+
+static PyObject *element_set_inner_html(PyObject *self, PyObject *html) {
+    if (!PyUnicode_Check(html)) {
+        PyErr_SetString(PyExc_TypeError, "html must be a str");
+        return NULL;
+    }
+    th_node *node = ((NodeObject *)self)->node;
+    th_tree *fragment = parse_fragment_in_context(node, html);
+    if (fragment == NULL) {
+        return NULL;
+    }
+    th_tree *dest = tree_of(self);
+    int error;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    handle_drop_index(((NodeObject *)self)->handle);
+    while (node->first_child != NULL) {
+        th_node_remove(node->first_child);
+    }
+    error = splice_fragment(dest, fragment, NULL, node, TH_ADJ_BEFOREEND);
+    Py_END_CRITICAL_SECTION();
+    th_tree_free(fragment);
+    if (error) {                 /* GCOVR_EXCL_BR_LINE: splice only fails on a copy allocation failure */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *element_insert_adjacent_html(PyObject *self, PyObject *args) {
+    PyObject *position;
+    PyObject *html;
+    if (!PyArg_ParseTuple(args, "UU:insert_adjacent_html", &position, &html)) {
+        return NULL;
+    }
+    enum th_adjacency position_kind;
+    if (resolve_adjacency(position, &position_kind) < 0) {
+        return NULL;
+    }
+    th_node *node = ((NodeObject *)self)->node;
+    th_node *parent = NULL;
+    th_node *context = node;
+    if (position_kind == TH_ADJ_BEFOREBEGIN || position_kind == TH_ADJ_AFTEREND) {
+        parent = node->parent;
+        if (parent == NULL || parent->type == TH_NODE_DOCUMENT) {
+            PyErr_SetString(PyExc_ValueError, "'beforebegin' and 'afterend' need an element parent to insert beside");
+            return NULL;
+        }
+        context = parent;
+    }
+    th_tree *fragment = parse_fragment_in_context(context, html);
+    if (fragment == NULL) {
+        return NULL;
+    }
+    th_tree *dest = tree_of(self);
+    int error;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    handle_drop_index(((NodeObject *)self)->handle);
+    error = splice_fragment(dest, fragment, parent, node, position_kind);
+    Py_END_CRITICAL_SECTION();
+    th_tree_free(fragment);
+    if (error) {                 /* GCOVR_EXCL_BR_LINE: splice only fails on a copy allocation failure */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_RETURN_NONE;
 }
