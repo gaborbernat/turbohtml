@@ -898,6 +898,38 @@ static PyObject *element_form_data(PyObject *self, PyObject *Py_UNUSED(ignored))
     return pairs;
 }
 
+PyDoc_STRVAR(rows_doc, "rows()\n--\n\n"
+                       "Return the table's cells as a list of rows, each a list[str], with rowspan and\n"
+                       "colspan resolved by filling every spanned slot with a copy of the cell text.\n"
+                       "Rows are padded to a rectangular width; a nested table's rows belong to that\n"
+                       "table, not this one. Cell text is the cell's text content with surrounding\n"
+                       "whitespace stripped. Raises TypeError on a non-table element.");
+
+static PyObject *element_rows(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((NodeObject *)self)->node;
+    if (node->atom != TH_TAG_TABLE) {
+        PyErr_SetString(PyExc_TypeError, "rows can only be called on a table element");
+        return NULL;
+    }
+    return turbohtml_element_table_rows(self, tree_of(self), node);
+}
+
+PyDoc_STRVAR(records_doc, "records()\n--\n\n"
+                          "Return the table's data rows as a list of dicts, keyed by the first row (the\n"
+                          "header, typically the thead row) over each later row, with rowspan and colspan\n"
+                          "resolved as in rows(). A table with no rows or only a header yields an empty\n"
+                          "list; a duplicated header keeps the rightmost column's value. Pass the result\n"
+                          "to pandas.DataFrame for a frame. Raises TypeError on a non-table element.");
+
+static PyObject *element_records(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((NodeObject *)self)->node;
+    if (node->atom != TH_TAG_TABLE) {
+        PyErr_SetString(PyExc_TypeError, "records can only be called on a table element");
+        return NULL;
+    }
+    return turbohtml_element_table_records(self, tree_of(self), node);
+}
+
 PyDoc_STRVAR(attr_doc, "attr(name, /, default=None)\n--\n\n"
                        "Read one attribute as a single str. The raw value is returned, so a token-list\n"
                        "attribute like class reads back as \"a b c\" rather than a list, and a valueless\n"
@@ -2558,6 +2590,8 @@ static PyMethodDef element_methods[] = {
     {"set_text", element_set_text_method, METH_O, set_text_doc},
     {"insert_adjacent_html", element_insert_adjacent_html, METH_VARARGS, insert_adjacent_html_doc},
     {"form_data", element_form_data, METH_NOARGS, form_data_doc},
+    {"rows", element_rows, METH_NOARGS, rows_doc},
+    {"records", element_records, METH_NOARGS, records_doc},
     {"attr", (PyCFunction)(void (*)(void))element_attr, METH_VARARGS | METH_KEYWORDS, attr_doc},
     {"has_class", element_has_class, METH_O, has_class_doc},
     {"add_class", element_add_class, METH_O, add_class_doc},

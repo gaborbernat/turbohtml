@@ -9,8 +9,8 @@ source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript spec
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
 suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``,
-``edit``, ``chain``, ``htmlparser``, ``markup``, ``linkify``, ``markdown``, ``sanitize``, or ``structured``. Numbers
-vary with input and hardware.
+``edit``, ``chain``, ``htmlparser``, ``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``, ``sanitize``, or
+``structured``. Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -252,6 +252,45 @@ where turbohtml parses to the WHATWG tree and gathers every format in one C walk
     - - catalog (8 KiB)
       - 54.5 µs
       - 494.9 µs
+
+********
+ Tables
+********
+
+:meth:`turbohtml.Node.tables` and :meth:`turbohtml.Element.records` against `pandas <https://pandas.pydata.org>`_'s
+``read_html``, the one-call table reader scrapers reach for. Both parse the HTML and extract every ``<table>``,
+resolving ``rowspan`` and ``colspan`` into a rectangular grid; ``read_html`` returns a ``DataFrame`` per table and pulls
+in NumPy, where turbohtml runs the cell-grid walk in C and hands back plain ``list`` and ``dict`` objects with no added
+dependency. The ``rows`` row times :meth:`~turbohtml.Node.tables` (every table as ``list[list[str]]``) and the
+``records`` row times :meth:`~turbohtml.Element.records` (the first table keyed by its header), each over a four-column
+table of the given height. The single C pass leads from roughly twelve times on the largest table to nearly ninety on
+the smallest, where pandas pays its fixed per-frame construction cost.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 22 22
+
+    - - input
+      - turbohtml
+      - pandas
+    - - rows (10 rows)
+      - 10.8 µs
+      - 943 µs
+    - - records (10 rows)
+      - 15.8 µs
+      - 970 µs
+    - - rows (100 rows)
+      - 99.7 µs
+      - 2178 µs
+    - - records (100 rows)
+      - 98.5 µs
+      - 2165 µs
+    - - rows (1000 rows)
+      - 853 µs
+      - 10.6 ms
+    - - records (1000 rows)
+      - 893 µs
+      - 13.0 ms
 
 ************
  Unescaping

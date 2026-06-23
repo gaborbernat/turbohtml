@@ -374,3 +374,32 @@ def test_concurrent_structured_data_and_extract_is_memory_safe() -> None:
     _run(reader, extractor)
     # the tree is still walkable after the concurrent churn
     assert isinstance(doc.structured_data(), turbohtml.StructuredData)
+
+
+def test_concurrent_table_reads_and_mutation_are_memory_safe() -> None:
+    rows = "".join(
+        f"<tr><td rowspan=2>r{index}</td><td>{index}</td></tr><tr><td>{index}b</td></tr>" for index in range(150)
+    )
+    doc = turbohtml.parse(f"<html><body><table>{rows}</table></body></html>")
+    table = doc.find("table")
+    assert table is not None
+    cells = list(table.children)
+    start = threading.Barrier(3)
+
+    def rows_reader() -> None:
+        start.wait()
+        for _ in range(200):
+            table.rows()  # builds the spanned grid while the mutator rewires the rows
+
+    def tables_reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.tables()  # locates and snapshots every table under the per-tree lock
+
+    def mutator() -> None:
+        start.wait()
+        for cell in cells:
+            cell.extract()  # detaches each row group from the live table
+
+    _run(rows_reader, tables_reader, mutator)
+    assert isinstance(table.rows(), list)  # the tree is still walkable after the concurrent churn

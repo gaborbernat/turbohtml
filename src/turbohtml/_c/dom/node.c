@@ -857,6 +857,16 @@ static PyObject *node_resolve_links(PyObject *self, PyObject *base_url) {
     return turbohtml_node_resolve_links(self, tree_of(self), ((NodeObject *)self)->node, base_url);
 }
 
+PyDoc_STRVAR(tables_doc, "tables()\n--\n\n"
+                         "Return every table in this node and its subtree, in document order, each as the\n"
+                         "list of rows that Element.rows() produces. A nested table appears as its own\n"
+                         "entry. The result is a list[list[list[str]]] of plain strings, with no pandas\n"
+                         "dependency; pass one table to pandas.DataFrame for a frame.");
+
+static PyObject *node_tables(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return turbohtml_node_tables(self, tree_of(self), ((NodeObject *)self)->node);
+}
+
 PyDoc_STRVAR(main_content_doc, "main_content()\n--\n\n"
                                "Find the dominant content element under this node, the article body with\n"
                                "navigation, sidebars, ads, comments and other boilerplate scored out. Scores\n"
@@ -1232,6 +1242,7 @@ static PyMethodDef node_methods[] = {
     {"links", node_links, METH_NOARGS, links_doc},
     {"rewrite_links", node_rewrite_links, METH_O, rewrite_links_doc},
     {"resolve_links", node_resolve_links, METH_O, resolve_links_doc},
+    {"tables", node_tables, METH_NOARGS, tables_doc},
     {"main_content", node_main_content, METH_NOARGS, main_content_doc},
     {"main_text", node_main_text, METH_NOARGS, main_text_doc},
     {"insert_before", node_insert_before, METH_VARARGS, insert_before_doc},

@@ -78,6 +78,15 @@ PyObject *turbohtml_document_opengraph(PyObject *self, PyObject *unused);
 PyObject *turbohtml_document_microdata(PyObject *self, PyObject *unused);
 PyObject *turbohtml_register_structured_data(PyObject *module, PyObject *args);
 
+/* Implemented in tables.c, the engine behind Element.rows()/records() and Node.tables(). Each takes the wrapping node
+   (owner, for the per-tree handle) and the already-derived tree+node the thin C methods in dom/element.c and dom/node.c
+   hand over: turbohtml_element_table_rows reads one table as list[list[str]] with rowspan/colspan expanded,
+   turbohtml_element_table_records keys the first row over the rest as list[dict], and turbohtml_node_tables returns
+   rows() for every table in the subtree. */
+PyObject *turbohtml_element_table_rows(PyObject *owner, struct th_tree *tree, struct th_node *table);
+PyObject *turbohtml_element_table_records(PyObject *owner, struct th_tree *tree, struct th_node *table);
+PyObject *turbohtml_node_tables(PyObject *owner, struct th_tree *tree, struct th_node *root);
+
 /* Implemented in tokenizer/tokenizer.c. tokenize() matches METH_VARARGS | METH_KEYWORDS;
    the internal conformance hook _tokenize_states matches METH_VARARGS. */
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *args, PyObject *kwargs);
