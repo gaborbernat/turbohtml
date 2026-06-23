@@ -206,28 +206,33 @@ markdownify has no equivalent.
 *************
 
 :meth:`turbohtml.Node.to_text` against `inscriptis <https://github.com/weblyzard/inscriptis>`_, the layout-aware
-HTML-to-text renderer it succeeds. Both keep the visual structure and lay tables out as aligned columns; inscriptis
-builds an lxml tree and a CSS model in Python, where turbohtml does the whole layout in one C walk.
+HTML-to-text renderer it succeeds, and `html-text <https://github.com/zytedata/html-text>`_, Zyte's plainer visible-text
+extractor. inscriptis and html-text both build an lxml tree in Python; inscriptis additionally lays tables out as
+aligned columns, where turbohtml does the whole layout in one C walk and html-text skips column alignment entirely.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40 28 28
+    :widths: 34 22 22 22
 
     - - input
       - turbohtml
       - inscriptis
+      - html-text
     - - article (2 KiB)
       - 7 µs
       - 163 µs
+      - 102 µs
     - - table (4 KiB)
       - 28 µs
       - 839 µs
+      - 258 µs
     - - annotated (4 KiB)
       - 10 µs
       - 202 µs
+      - --
 
 The ``annotated`` row labels matching elements with spans through :meth:`~turbohtml.Node.to_annotated_text` against
-inscriptis's ``get_annotated_text``.
+inscriptis's ``get_annotated_text``; html-text has no annotation surface, so it sits out that row.
 
 *****************
  Structured data

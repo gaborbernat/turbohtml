@@ -12,6 +12,7 @@ treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
 
     markupsafe
     beautifulsoup
+    mechanicalsoup
     lxml
     dominate
     linkify-it-py
@@ -27,6 +28,7 @@ treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
     extruct
     pyquery
     inscriptis
+    html-text
     resiliparse
     html-sanitizer
     html5-parser
