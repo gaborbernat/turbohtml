@@ -1,4 +1,13 @@
 # Aggregate stub for the compiled turbohtml._html extension; re-exports the _stubs subsystem packages.
+from ._structured_data import (
+    JSONValue as JSONValue,
+)
+from ._structured_data import (
+    MicrodataItem as MicrodataItem,
+)
+from ._structured_data import (
+    StructuredData as StructuredData,
+)
 from ._stubs.dom import (
     Axis as Axis,
 )
@@ -70,6 +79,9 @@ from ._stubs.features import (
 )
 from ._stubs.features import (
     _register_markup as _register_markup,
+)
+from ._stubs.features import (
+    _register_structured_data as _register_structured_data,
 )
 from ._stubs.features import (
     _sanitize as _sanitize,

@@ -40,6 +40,7 @@ It is the wrong tool in a few honest cases:
     parsing
     tree-model
     queries
+    structured-data
     serialization
     main-content
     mutation

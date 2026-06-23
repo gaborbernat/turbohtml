@@ -246,3 +246,30 @@ def test_concurrent_link_enumeration_and_resolve_is_memory_safe() -> None:
 
     _run(reader, resolver, extractor)
     assert isinstance(doc.links(), list)  # the tree is still walkable after the concurrent churn
+
+
+def test_concurrent_structured_data_and_extract_is_memory_safe() -> None:
+    items = "".join(
+        f'<div itemscope itemtype="https://schema.org/Thing"><meta itemprop="name" content="n{index}">'
+        f'<script type="application/ld+json">{{"@type": "Thing", "id": {index}}}</script></div>'
+        for index in range(300)
+    )
+    doc = turbohtml.parse(f"<html><head></head><body>{items}</body></html>")
+    body = doc.find("body")
+    assert body is not None
+    children = list(body.children)
+    start = threading.Barrier(2)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.structured_data()  # gathers json-ld/microdata/opengraph while the tree is rewired
+
+    def extractor() -> None:
+        start.wait()
+        for child in children:
+            child.extract()
+
+    _run(reader, extractor)
+    # the tree is still walkable after the concurrent churn
+    assert isinstance(doc.structured_data(), turbohtml.StructuredData)

@@ -294,10 +294,36 @@ static PyObject *document_meta_refresh(PyObject *self, PyObject *args, PyObject 
     return result;
 }
 
+PyDoc_STRVAR(structured_data_doc, "structured_data()\n--\n\n"
+                                  "Extract every supported structured-data format from the document, a successor to\n"
+                                  "extruct. Returns a StructuredData record with .json_ld (list of parsed JSON-LD\n"
+                                  "values), .microdata (list of MicrodataItem), .opengraph (dict of og:/twitter: keys\n"
+                                  "to their content), and .microformats/.rdfa (empty lists, a later phase).");
+
+PyDoc_STRVAR(json_ld_doc, "json_ld()\n--\n\n"
+                          "Parse every <script type=\"application/ld+json\"> block in the document with the\n"
+                          "standard library json module, returning the list of decoded values in document order.\n"
+                          "A block that is not valid JSON is skipped.");
+
+PyDoc_STRVAR(opengraph_doc, "opengraph()\n--\n\n"
+                            "Return a dict mapping each <meta property=\"og:...\"> or <meta name=\"twitter:...\">\n"
+                            "key to its content value. When a key repeats, the last occurrence wins.");
+
+PyDoc_STRVAR(microdata_doc,
+             "microdata()\n--\n\n"
+             "Extract HTML Microdata as a list of MicrodataItem, one per top-level itemscope. Each item\n"
+             "has .properties (a dict mapping each itemprop name to its list of values), plus .type and\n"
+             ".id carrying the itemtype/itemid attribute or None. A property value is a nested\n"
+             "MicrodataItem for an itemscope, otherwise the element's microdata value.");
+
 static PyMethodDef document_methods[] = {
     {"base_url", (PyCFunction)(void (*)(void))document_base_url, METH_VARARGS | METH_KEYWORDS, base_url_doc},
     {"meta_refresh", (PyCFunction)(void (*)(void))document_meta_refresh, METH_VARARGS | METH_KEYWORDS,
      meta_refresh_doc},
+    {"structured_data", turbohtml_document_structured_data, METH_NOARGS, structured_data_doc},
+    {"json_ld", turbohtml_document_json_ld, METH_NOARGS, json_ld_doc},
+    {"opengraph", turbohtml_document_opengraph, METH_NOARGS, opengraph_doc},
+    {"microdata", turbohtml_document_microdata, METH_NOARGS, microdata_doc},
     {NULL, NULL, 0, NULL},
 };
 

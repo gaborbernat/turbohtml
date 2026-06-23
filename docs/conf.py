@@ -56,8 +56,15 @@ always_document_param_types = True
 # Python domain can resolve their cross-references; display them under their short names to match the rest of the docs.
 python_use_unqualified_type_names = True
 # _Filter is the private recursive alias for find()/find_all() filters; the stub-sourced signatures render it by name,
-# and it is intentionally not a documented target.
-nitpick_ignore = [("py:type", "_Filter"), ("py:class", "_Filter")]
+# and it is intentionally not a documented target. JSONValue is a recursive type alias, so its expansion references
+# itself and cannot resolve to a single doc target; StructuredData and MicrodataItem are real autodoc'd classes now, so
+# their cross-references resolve and need no ignore.
+nitpick_ignore = [
+    ("py:type", "_Filter"),
+    ("py:class", "_Filter"),
+    ("py:type", "JSONValue"),
+    ("py:class", "JSONValue"),
+]
 
 issues_github_path = "tox-dev/turbohtml"
 towncrier_draft_autoversion_mode = "draft"
