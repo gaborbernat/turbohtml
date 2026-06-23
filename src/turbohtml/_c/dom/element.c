@@ -1484,7 +1484,7 @@ static PyObject *xpath_scalar_to_py(const xp_result *result) {
 /* Evaluate an expression and marshal it to a Python object: a node-set becomes a
    list (elements as Element, attribute/text values as str); a scalar becomes the
    matching float / str / bool. */
-static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out, const char *what);
+static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out);
 
 /* The state an extension callback needs, threaded through xp_eval as a void *. */
 typedef struct {
@@ -1535,7 +1535,7 @@ static int xpath_append_result_node(xpath_ext_ctx *ec, PyObject *obj, xp_nodeset
    a node-set (issue #265). */
 static int xpath_extension_result(xpath_ext_ctx *ec, PyObject *obj, xp_result *out) {
     if (PyBool_Check(obj) || PyLong_Check(obj) || PyFloat_Check(obj) || PyUnicode_Check(obj)) {
-        return xpath_pyobject_to_scalar(obj, out, "an extension result");
+        return xpath_pyobject_to_scalar(obj, out);
     }
     memset(out, 0, sizeof(*out));
     out->kind = XP_NODESET;
@@ -1762,10 +1762,10 @@ static PyObject *xpath_run_program(module_state *state, PyObject *handle, th_nod
     return out;
 }
 
-/* Convert one keyword-argument value into an XPath variable binding value. */
-/* Convert a Python scalar (bool/int/float/str) to an xp_result; `what` names the
-   source for the type error a node-set or any other object triggers. */
-static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out, const char *what) {
+/* Convert a Python scalar to an xp_result. Both callers (variable and extension-result
+   marshaling) check the type is bool/int/float/str before calling, so the final branch
+   is str rather than a guarded case with an unreachable type error. */
+static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out) {
     memset(out, 0, sizeof(*out));
     if (PyBool_Check(obj)) {
         out->kind = XP_BOOLEAN;
@@ -1777,7 +1777,7 @@ static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out, const char *w
         }
         out->kind = XP_NUMBER;
         out->number = value;
-    } else if (PyUnicode_Check(obj)) {
+    } else {
         Py_ssize_t length = PyUnicode_GET_LENGTH(obj);
         Py_UCS4 *buf = PyUnicode_AsUCS4Copy(obj);
         if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
@@ -1786,16 +1786,68 @@ static int xpath_pyobject_to_scalar(PyObject *obj, xp_result *out, const char *w
         out->kind = XP_STRING;
         out->string = buf;
         out->string_len = length;
-    } else {
-        PyErr_Format(PyExc_TypeError, "xpath %s must be str, int, float, or bool, not %.80s", what,
-                     Py_TYPE(obj)->tp_name);
-        return -1;
     }
     return 0;
 }
 
-static int xpath_var_value(PyObject *obj, xp_result *out) {
-    return xpath_pyobject_to_scalar(obj, out, "variable");
+/* Append one Element's node to a node-set variable value. Its node pointer is only
+   valid inside the tree being queried, so a node wrapped against a different handle
+   (another document) is rejected rather than dereferenced into a foreign arena. */
+static int xpath_push_element(PyObject *obj, module_state *state, PyObject *reference_handle, xp_nodeset *ns) {
+    if (!is_node(obj, state)) {
+        PyErr_Format(PyExc_TypeError,
+                     "xpath variable must be str, int, float, bool, an element, or an iterable of elements, not %.80s",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    NodeObject *element = (NodeObject *)obj;
+    if (element->handle != reference_handle) {
+        PyErr_SetString(PyExc_ValueError, "xpath variable refers to a node from a different tree");
+        return -1;
+    }
+    if (ns_push(ns, element->node, -1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        PyErr_NoMemory();                     /* GCOVR_EXCL_LINE */
+        return -1;                            /* GCOVR_EXCL_LINE */
+    }
+    return 0;
+}
+
+/* Convert one keyword-argument value into a variable binding. A scalar maps to its
+   XPath type; an Element or an iterable of Elements maps to a node-set the engine
+   then orders and de-duplicates on reference. */
+static int xpath_var_value(PyObject *obj, xp_result *out, module_state *state, PyObject *reference_handle) {
+    if (PyBool_Check(obj) || PyLong_Check(obj) || PyFloat_Check(obj) || PyUnicode_Check(obj)) {
+        return xpath_pyobject_to_scalar(obj, out);
+    }
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    if (is_node(obj, state)) {
+        return xpath_push_element(obj, state, reference_handle, &out->nodes);
+    }
+    PyObject *iterator = PyObject_GetIter(obj);
+    if (iterator == NULL) {
+        PyErr_Clear();
+        PyErr_Format(PyExc_TypeError,
+                     "xpath variable must be str, int, float, bool, an element, or an iterable of elements, not %.80s",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    PyObject *item;
+    while ((item = PyIter_Next(iterator)) != NULL) {
+        int rc = xpath_push_element(item, state, reference_handle, &out->nodes);
+        Py_DECREF(item);
+        if (rc < 0) {
+            Py_DECREF(iterator);
+            xp_nodeset_free(&out->nodes);
+            return -1;
+        }
+    }
+    Py_DECREF(iterator);
+    if (PyErr_Occurred()) { /* the iterable raised partway through */
+        xp_nodeset_free(&out->nodes);
+        return -1;
+    }
+    return 0;
 }
 
 static void free_xpath_vars(xp_binding *items, Py_ssize_t len) {
@@ -1871,10 +1923,15 @@ static int build_xpath_namespaces(PyObject *mapping, xp_namespace **out_items, P
    always str). With reserve_options set, the smart_strings and extensions keys are
    skipped because Node.xpath reads them as options off the same kwargs; the
    precompiled XPath object binds them at construction and clears the flag, so every
-   keyword is a $variable. On error an exception is set and partial bindings freed. */
-static int build_xpath_vars(PyObject *kwds, int reserve_options, xp_binding **out_items, Py_ssize_t *out_len) {
+   keyword is a $variable. self is the context Node: it supplies the module state and
+   the reference handle a bound Element is validated against. On error an exception is
+   set and partial bindings freed. */
+static int build_xpath_vars(PyObject *self, PyObject *kwds, int reserve_options, xp_binding **out_items,
+                            Py_ssize_t *out_len) {
     *out_items = NULL;
     *out_len = 0;
+    module_state *state = state_of(self);
+    PyObject *reference_handle = ((NodeObject *)self)->handle;
     Py_ssize_t total = kwds == NULL ? 0 : PyDict_Size(kwds);
     if (total == 0) {
         return 0;
@@ -1906,7 +1963,7 @@ static int build_xpath_vars(PyObject *kwds, int reserve_options, xp_binding **ou
             free_xpath_vars(items, count); /* GCOVR_EXCL_LINE */
             return -1;                     /* GCOVR_EXCL_LINE */
         }
-        if (xpath_var_value(value, &items[count].value) < 0) {
+        if (xpath_var_value(value, &items[count].value, state, reference_handle) < 0) {
             PyMem_Free(name);
             free_xpath_vars(items, count);
             return -1;
@@ -1956,7 +2013,7 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
     }
     xp_binding *items;
     Py_ssize_t len;
-    if (build_xpath_vars(kwds, 1, &items, &len) < 0) {
+    if (build_xpath_vars(self, kwds, 1, &items, &len) < 0) {
         free_xpath_namespaces(ns_items, ns_len);
         return NULL;
     }
@@ -2094,7 +2151,7 @@ static PyObject *xpath_compiled_call(PyObject *self, PyObject *args, PyObject *k
     }
     xp_binding *items;
     Py_ssize_t len;
-    if (build_xpath_vars(kwds, 0, &items, &len) < 0) {
+    if (build_xpath_vars(node_obj, kwds, 0, &items, &len) < 0) {
         return NULL;
     }
     xp_bindings vars = {items, len};

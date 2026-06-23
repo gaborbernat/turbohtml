@@ -376,6 +376,23 @@ quotes or special characters cannot break the query:
 
     ['out']
 
+A variable can also hold a node-set: bind an :class:`~turbohtml.Element` or any iterable of elements (a prior
+:meth:`~turbohtml.Node.xpath` result) and feed it back into a later expression instead of re-walking the tree. The
+node-set joins path steps, ``count()``, unions, and predicates like any other node-set:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>")
+    rows = doc.xpath("//tr")
+    print([td.text for td in doc.xpath("$rows/td", rows=rows)])
+    print(doc.xpath("count($rows)", rows=rows))
+
+.. testoutput::
+
+    ['a', 'b', 'c']
+    2.0
+
 The EXSLT ``re:test`` and ``re:replace`` functions ``parsel`` and ``scrapy`` rely on work without registering a
 namespace; the ``re:`` prefix dispatches to Python's :mod:`re`:
 

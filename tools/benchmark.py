@@ -1990,6 +1990,16 @@ def lxml_namespaced(tree: HtmlElement) -> None:
     tree.xpath("//svg:rect", namespaces=_SVG_NS)
 
 
+def turbo_node_set(doc: Document, rows: Iterable[Element]) -> None:
+    """Reuse a prior result by binding it as a node-set ``$variable``, turbohtml."""
+    doc.xpath("$rows/div", rows=rows)
+
+
+def lxml_node_set(tree: HtmlElement, rows: object) -> None:
+    """Reuse a prior result by binding it as a node-set ``$variable``, lxml."""
+    tree.xpath("$rows/div", rows=rows)
+
+
 # Each parity feature paired with its turbohtml and lxml driver.
 XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[HtmlElement], None]], ...] = (
     ("$variable binding", turbo_variable, lxml_variable),
@@ -2039,7 +2049,24 @@ def run_xpath_feature_suite(bench: Callable[[str, object, object], None]) -> lis
             lxml_reuse,
             (lxml_html.etree.XPath(REUSE_EXPR), lxml_tree(text)),
         )
-    return [label for label, _, _ in XPATH_FEATURE_CASES] + ["precompiled reuse"]
+    # The node-set case binds a prior result, so the rows are queried once outside the
+    # timed region and reused on every call -- both engines accept a node-set variable.
+    for size_name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        turbo_doc, lxml_doc = turbo_tree(text), lxml_tree(text)
+        turbo_rows = [node for node in turbo_doc.xpath("//div") if isinstance(node, turbohtml.Element)]
+        lxml_rows = lxml_doc.xpath("//div")
+        bench(
+            f"feature node-set variable | {size_name} [turbohtml]",
+            functools.partial(turbo_node_set, rows=turbo_rows),
+            turbo_doc,
+        )
+        bench(
+            f"feature node-set variable | {size_name} [lxml]",
+            functools.partial(lxml_node_set, rows=lxml_rows),
+            lxml_doc,
+        )
+    return [label for label, _, _ in XPATH_FEATURE_CASES] + ["precompiled reuse", "node-set variable"]
 
 
 def print_xpath_feature_table(means: dict[str, float], labels: list[str]) -> None:

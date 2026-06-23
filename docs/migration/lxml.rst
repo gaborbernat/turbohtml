@@ -84,6 +84,10 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
       - :meth:`~turbohtml.Node.find_all`, :meth:`~turbohtml.Node.xpath`
     - - ``etree.XPath("//a[@href=$u]")(el, u=v)``
       - :class:`~turbohtml.XPath` (``XPath("//a[@href=$u]")(el, u=v)``)
+    - - ``el.xpath("$rows/td", rows=el.xpath("//tr"))``
+      - :meth:`el.xpath("$rows/td", rows=el.xpath("//tr")) <turbohtml.Node.xpath>` (a ``$name`` variable binds a scalar,
+        an :class:`~turbohtml.Element`, or an iterable of elements; :meth:`~turbohtml.Node.xpath_one` and
+        :meth:`~turbohtml.Node.xpath_iter` take the same bindings)
     - - ``el.xpath("//svg:rect", namespaces={"svg": SVG})``
       - :meth:`~turbohtml.Node.xpath` with the same ``namespaces={"svg": SVG}`` (the prefix binds at evaluation time)
     - - ``el.cssselect("div a")``
@@ -178,6 +182,30 @@ wpt page with ``tox -e bench xpath``:
       - 1.1 µs
       - 3.2 µs
       - 2.9x
+
+Both engines accept a node-set ``$variable``, so a prior result feeds a later expression without re-querying:
+:meth:`el.xpath("$rows/td", rows=el.xpath("//tr")) <turbohtml.Node.xpath>` binds the node-set lxml's
+``tree.xpath("$rows/td", rows=tree.xpath("//tr"))`` would. turbohtml normalizes the bound node-set into the compiled
+program once and walks the following step over interned atoms, so binding a prior result and reusing it stays ahead of
+lxml across page sizes (``$rows/div`` reusing a prior ``//div`` result; see :doc:`/development/performance` for the full
+sweep):
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - node-set variable reuse
+      - turbohtml
+      - lxml
+      - speed-up
+    - - wpt page (4 kB)
+      - 4.3 µs
+      - 6.3 µs
+      - 1.5x
+    - - wpt page (9.6 kB)
+      - 3.9 µs
+      - 6.1 µs
+      - 1.5x
 
 A namespace-prefixed name test ports unchanged: pass the same ``namespaces=`` mapping to :meth:`~turbohtml.Node.xpath`
 that you give lxml. turbohtml binds the prefix at evaluation time against the per-tree cached program and resolves the

@@ -826,8 +826,10 @@ static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
     return 0;
 }
 
-/* Deep-copy a bound variable's value so the reference owns its result. The C API
-   only ever binds the scalar kinds, so there is no node-set arm. */
+/* Deep-copy a bound variable's value so the reference owns its result. A node-set
+   binding (an Element or an iterable of Elements from the caller) is copied and
+   normalized to document order without duplicates, the canonical node-set form the
+   rest of the evaluator assumes. */
 static int copy_result(const xp_result *src, xp_result *dst) {
     memset(dst, 0, sizeof(*dst));
     dst->kind = src->kind;
@@ -839,6 +841,17 @@ static int copy_result(const xp_result *src, xp_result *dst) {
         dst->string_len = src->string_len;
     } else if (src->kind == XP_NUMBER) {
         dst->number = src->number;
+    } else if (src->kind == XP_NODESET) {
+        if (src->nodes.len > 0) {
+            dst->nodes.items = PyMem_Malloc((size_t)src->nodes.len * sizeof(xp_item));
+            if (dst->nodes.items == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                  /* GCOVR_EXCL_LINE */
+            }
+            memcpy(dst->nodes.items, src->nodes.items, (size_t)src->nodes.len * sizeof(xp_item));
+            dst->nodes.len = src->nodes.len;
+            dst->nodes.cap = src->nodes.len;
+            sort_unique(&dst->nodes);
+        }
     } else {
         dst->boolean = src->boolean;
     }

@@ -97,7 +97,7 @@ class Node:
         smart_strings: bool = ...,
         extensions: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]]
         | None = ...,
-        **variables: str | float | bool,
+        **variables: str | float | bool | Element | Iterable[Element],
     ) -> list[Element | str]: ...
     def xpath_iter(
         self,
@@ -108,7 +108,7 @@ class Node:
         smart_strings: bool = ...,
         extensions: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]]
         | None = ...,
-        **variables: str | float | bool,
+        **variables: str | float | bool | Element | Iterable[Element],
     ) -> Iterator[Element | str]: ...
     def xpath_one(
         self,
@@ -119,7 +119,7 @@ class Node:
         smart_strings: bool = ...,
         extensions: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]]
         | None = ...,
-        **variables: str | float | bool,
+        **variables: str | float | bool | Element | Iterable[Element],
     ) -> Element | str | None: ...
     def matches(self, selector: str, /) -> bool: ...
     def closest(self, selector: str, /) -> Element | None: ...

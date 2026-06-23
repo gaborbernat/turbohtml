@@ -1133,7 +1133,9 @@ PyDoc_STRVAR(xpath_doc, "xpath(expression, /, *, smart_strings=False, extensions
                         ":param extensions: maps an (namespace, name) pair to a callable, registering a\n"
                         "    custom XPath function; the callable may return a scalar, an Element, or an\n"
                         "    iterable of Elements (a node-set that feeds later steps).\n"
-                        ":param variables: values bound to the $name variables used in the expression.\n"
+                        ":param variables: values bound to the $name variables used in the expression; a\n"
+                        "    str, int, float, or bool binds a scalar, and an Element or an iterable of\n"
+                        "    Elements binds a node-set. A node from a different document raises ValueError.\n"
                         ":returns: the result list, of Elements and str values in document order.");
 
 PyDoc_STRVAR(xpath_iter_doc, "xpath_iter(expression, /, *, smart_strings=False, extensions=None, **variables)\n--\n\n"
