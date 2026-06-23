@@ -417,3 +417,34 @@ def test_compiled_falsy_extensions_bind_nothing(
     extensions: dict[tuple[str | None, str], Callable[..., str | float | bool]] | None,
 ) -> None:
     assert XPath("//a/@href", extensions=extensions)(links_doc) == ["/x", "/y"]
+
+
+# A union of two predicated paths, parsed across an arena growth, must keep both
+# predicates. The parser stored a step's predicate list with
+# ``nodes[step].first = parse_predicates(ps)``; ``parse_predicates`` calls ``xn_new``,
+# which can reallocate the arena, so the left-hand address taken from the pre-call
+# ``nodes`` pointer could dangle and the store be lost -- silently dropping the
+# predicate of a path parsed across the growth. Whether the growth landed on a given
+# predicate depended on the surrounding node count, so wrapping a union in a function
+# call (``count(//a[@x] | //b[@y])``) could drop the second path's predicate.
+@pytest.fixture
+def union_doc() -> turbohtml.Node:
+    return turbohtml.parse("<r><a x='1'>A</a><b y='2'>B</b><b>B2</b></r>")
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("count(//a[@x='1'] | //b[@y='2'])", 2.0, id="union-in-count"),
+        pytest.param("count(//b[@y='2'] | //a[@x='1'])", 2.0, id="union-in-count-swapped"),
+        pytest.param("//a[@x='1'] | //b[@y='2']", None, id="union-root"),
+    ],
+)
+def test_predicate_survives_in_compound_expression(
+    union_doc: turbohtml.Node, expr: str, expected: float | None
+) -> None:
+    result = union_doc.xpath(expr)
+    if expected is None:
+        assert len(result) == 2
+    else:
+        assert result == pytest.approx(expected)

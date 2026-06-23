@@ -445,6 +445,486 @@ static int exslt_re_replace(struct th_tree *tree, xp_result *args, xp_result *ou
     return 0;
 }
 
+/* --- EXSLT set functions (set:) ------------------------------------------- */
+/* The node-set arguments arrive in document order and duplicate-free (every
+   node-set the engine builds is sorted_unique), so the results below preserve that
+   order by copying in place and never need a re-sort. */
+
+/* Whether the same node-set member -- the identical node pointer and attribute
+   index -- appears anywhere in `other`. */
+static int item_in_nodeset(const xp_nodeset *other, xp_item probe) {
+    for (Py_ssize_t index = 0; index < other->len; index++) {
+        if (other->items[index].node == probe.node && other->items[index].attr == probe.attr) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* set:difference / set:intersection: members of the first node-set kept when their
+   presence in the second equals `want_present` (0 for difference, 1 for
+   intersection). */
+static int set_filter(const xp_result *args, int want_present, xp_result *out) {
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    const xp_nodeset *first = &args[0].nodes;
+    const xp_nodeset *second = &args[1].nodes;
+    int rc = 0;
+    for (Py_ssize_t index = 0; index < first->len; index++) {
+        xp_item member = first->items[index];
+        if (item_in_nodeset(second, member) == want_present) {
+            if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                rc = -1;                                              /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        }
+    }
+    if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return rc;
+}
+
+/* set:has-same-node: true when any member of the first node-set is also a member of
+   the second. */
+static void set_has_same_node(const xp_result *args, xp_result *out) {
+    const xp_nodeset *first = &args[0].nodes;
+    const xp_nodeset *second = &args[1].nodes;
+    for (Py_ssize_t index = 0; index < first->len; index++) {
+        if (item_in_nodeset(second, first->items[index])) {
+            result_bool(out, 1);
+            return;
+        }
+    }
+    result_bool(out, 0);
+}
+
+/* set:distinct: the first member, in document order, of every distinct string-value. */
+static int set_distinct(struct th_tree *tree, const xp_result *arg, xp_result *out) {
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    const xp_nodeset *nodes = &arg->nodes;
+    int rc = 0;
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        Py_ssize_t candidate_len;
+        Py_UCS4 *candidate = item_string(tree, nodes->items[index], &candidate_len);
+        if (candidate == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            rc = -1;             /* GCOVR_EXCL_LINE */
+            break;               /* GCOVR_EXCL_LINE */
+        }
+        int duplicate = 0;
+        for (Py_ssize_t earlier = 0; earlier < index; earlier++) {
+            Py_ssize_t earlier_len;
+            Py_UCS4 *earlier_text = item_string(tree, nodes->items[earlier], &earlier_len);
+            if (earlier_text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+                rc = -1;                /* GCOVR_EXCL_LINE */
+                break;                  /* GCOVR_EXCL_LINE */
+            }
+            if (earlier_len == candidate_len &&
+                memcmp(earlier_text, candidate, (size_t)candidate_len * sizeof(Py_UCS4)) == 0) {
+                duplicate = 1;
+            }
+            PyMem_Free(earlier_text);
+            if (duplicate) {
+                break;
+            }
+        }
+        PyMem_Free(candidate);
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            break;    /* GCOVR_EXCL_LINE */
+        }
+        if (!duplicate) {
+            xp_item member = nodes->items[index];
+            if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                rc = -1;                                              /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        }
+    }
+    if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return rc;
+}
+
+/* set:leading / set:trailing: the members of the first node-set that fall before
+   (`want_before`) or after the first node of the second in document order. An empty
+   second node-set yields the first unchanged; a pivot absent from the first yields
+   nothing -- both per the EXSLT contract. */
+static int set_split(const xp_result *args, int want_before, xp_result *out) {
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    const xp_nodeset *first = &args[0].nodes;
+    const xp_nodeset *second = &args[1].nodes;
+    Py_ssize_t lo = 0;
+    Py_ssize_t hi = 0;
+    if (second->len == 0) {
+        lo = 0;
+        hi = first->len; /* the whole first node-set */
+    } else {
+        Py_ssize_t pivot = -1;
+        for (Py_ssize_t index = 0; index < first->len; index++) {
+            if (first->items[index].node == second->items[0].node &&
+                first->items[index].attr == second->items[0].attr) {
+                pivot = index;
+                break;
+            }
+        }
+        if (pivot < 0) {
+            return 0; /* the pivot is not in the first node-set */
+        }
+        lo = want_before ? 0 : pivot + 1;
+        hi = want_before ? pivot : first->len;
+    }
+    int rc = 0;
+    for (Py_ssize_t index = lo; index < hi; index++) {
+        xp_item member = first->items[index];
+        if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            rc = -1;                                              /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    }
+    if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return rc;
+}
+
+/* --- EXSLT string functions (str:) ---------------------------------------- */
+
+/* str:concat(node-set): the string-values of every member joined in document order. */
+static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out) {
+    const xp_nodeset *nodes = &arg->nodes;
+    Py_UCS4 *buf = NULL;
+    Py_ssize_t total = 0;
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        Py_ssize_t part_len;
+        Py_UCS4 *part = item_string(tree, nodes->items[index], &part_len);
+        if (part == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(buf); /* GCOVR_EXCL_LINE */
+            return -1;       /* GCOVR_EXCL_LINE */
+        }
+        Py_UCS4 *grown = PyMem_Realloc(buf, (size_t)(total + part_len) * sizeof(Py_UCS4));
+        if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(part); /* GCOVR_EXCL_LINE */
+            PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
+            return -1;        /* GCOVR_EXCL_LINE */
+        }
+        buf = grown;
+        memcpy(buf + total, part, (size_t)part_len * sizeof(Py_UCS4));
+        total += part_len;
+        PyMem_Free(part);
+    }
+    if (buf == NULL) { /* an empty node-set, or only empty string-values */
+        buf = ucs4_dup(NULL, 0);
+        if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;     /* GCOVR_EXCL_LINE */
+        }
+    }
+    result_string(out, buf, total);
+    return 0;
+}
+
+/* str:replace(string, search, replace): every non-overlapping literal occurrence of
+   `search` in `string` swapped for `replace`. An empty `search` leaves the input
+   untouched (no zero-width match loop). */
+static int str_replace(struct th_tree *tree, const xp_result *args, xp_result *out) {
+    Py_ssize_t src_len;
+    Py_ssize_t search_len;
+    Py_ssize_t repl_len;
+    Py_UCS4 *src = to_string(tree, &args[0], &src_len);
+    Py_UCS4 *search = to_string(tree, &args[1], &search_len);
+    Py_UCS4 *repl = to_string(tree, &args[2], &repl_len);
+    if (src == NULL || search == NULL || repl == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(src);                                 /* GCOVR_EXCL_LINE */
+        PyMem_Free(search);                              /* GCOVR_EXCL_LINE */
+        PyMem_Free(repl);                                /* GCOVR_EXCL_LINE */
+        return -1;                                       /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t count = 0;
+    Py_ssize_t scan = 0;
+    while (search_len > 0 && scan + search_len <= src_len) {
+        if (memcmp(src + scan, search, (size_t)search_len * sizeof(Py_UCS4)) == 0) {
+            count++;
+            scan += search_len;
+        } else {
+            scan++;
+        }
+    }
+    Py_ssize_t out_len = src_len + count * (repl_len - search_len);
+    Py_UCS4 *buf = PyMem_Malloc((size_t)out_len * sizeof(Py_UCS4));
+    if (buf == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(src);    /* GCOVR_EXCL_LINE */
+        PyMem_Free(search); /* GCOVR_EXCL_LINE */
+        PyMem_Free(repl);   /* GCOVR_EXCL_LINE */
+        return -1;          /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t read = 0;
+    Py_ssize_t write = 0;
+    while (read < src_len) {
+        if (search_len > 0 && read + search_len <= src_len &&
+            memcmp(src + read, search, (size_t)search_len * sizeof(Py_UCS4)) == 0) {
+            memcpy(buf + write, repl, (size_t)repl_len * sizeof(Py_UCS4));
+            write += repl_len;
+            read += search_len;
+        } else {
+            buf[write++] = src[read++];
+        }
+    }
+    PyMem_Free(src);
+    PyMem_Free(search);
+    PyMem_Free(repl);
+    result_string(out, buf, write);
+    return 0;
+}
+
+/* str:padding(length, pattern?): a string of `length` characters built by cycling
+   `pattern` (a single space by default). An empty pattern pads with spaces. */
+static int str_padding(struct th_tree *tree, const xp_result *args, int argc, xp_result *out) {
+    double requested = round(to_number(tree, &args[0]));
+    Py_ssize_t target = requested >= 1 ? (Py_ssize_t)requested : 0;
+    const Py_UCS4 space = ' ';
+    const Py_UCS4 *pattern = &space;
+    Py_ssize_t pattern_len = 1;
+    Py_UCS4 *pattern_buf = NULL;
+    if (argc >= 2) {
+        pattern_buf = to_string(tree, &args[1], &pattern_len);
+        if (pattern_buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;             /* GCOVR_EXCL_LINE */
+        }
+        pattern = pattern_buf;
+    }
+    Py_UCS4 *buf = PyMem_Malloc((size_t)target * sizeof(Py_UCS4));
+    if (buf == NULL) {           /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(pattern_buf); /* GCOVR_EXCL_LINE */
+        return -1;               /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < target; index++) {
+        buf[index] = pattern_len > 0 ? pattern[index % pattern_len] : space;
+    }
+    PyMem_Free(pattern_buf);
+    result_string(out, buf, target);
+    return 0;
+}
+
+/* Whether a UCS-4 run equals an ASCII keyword. */
+static int ucs4_eq_ascii(const Py_UCS4 *text, Py_ssize_t len, const char *kw) {
+    Py_ssize_t index = 0;
+    for (; kw[index] != '\0'; index++) {
+        if (index >= len || text[index] != (Py_UCS4)(unsigned char)kw[index]) {
+            return 0;
+        }
+    }
+    return index == len;
+}
+
+/* str:align(string, width, alignment?): `string` placed within a field as wide as
+   the `width` string and filled from it, aligned left (the default), right, or
+   center. A string longer than the field is truncated to it. */
+static int str_align(struct th_tree *tree, const xp_result *args, int argc, xp_result *out) {
+    Py_ssize_t str_len;
+    Py_ssize_t pad_len;
+    Py_UCS4 *str_text = to_string(tree, &args[0], &str_len);
+    Py_UCS4 *pad_text = to_string(tree, &args[1], &pad_len);
+    Py_UCS4 *align_text = NULL;
+    Py_ssize_t align_len = 0;
+    if (argc >= 3) {
+        align_text = to_string(tree, &args[2], &align_len);
+    }
+    if (str_text == NULL || pad_text == NULL || (argc >= 3 && align_text == NULL)) { /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(str_text);                                                        /* GCOVR_EXCL_LINE */
+        PyMem_Free(pad_text);                                                        /* GCOVR_EXCL_LINE */
+        PyMem_Free(align_text);                                                      /* GCOVR_EXCL_LINE */
+        return -1;                                                                   /* GCOVR_EXCL_LINE */
+    }
+    int alignment = 0; /* 0 = left, 1 = right, 2 = center */
+    if (ucs4_eq_ascii(align_text, align_len, "right")) {
+        alignment = 1;
+    } else if (ucs4_eq_ascii(align_text, align_len, "center")) {
+        alignment = 2;
+    }
+    Py_UCS4 *buf = PyMem_Malloc((size_t)pad_len * sizeof(Py_UCS4));
+    if (buf == NULL) {          /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(str_text);   /* GCOVR_EXCL_LINE */
+        PyMem_Free(pad_text);   /* GCOVR_EXCL_LINE */
+        PyMem_Free(align_text); /* GCOVR_EXCL_LINE */
+        return -1;              /* GCOVR_EXCL_LINE */
+    }
+    if (str_len >= pad_len) {
+        const Py_UCS4 *source = alignment == 1 ? str_text + (str_len - pad_len) : str_text;
+        memcpy(buf, source, (size_t)pad_len * sizeof(Py_UCS4));
+    } else {
+        memcpy(buf, pad_text, (size_t)pad_len * sizeof(Py_UCS4));
+        Py_ssize_t gap = pad_len - str_len;
+        Py_ssize_t offset = alignment == 1 ? gap : alignment == 2 ? gap / 2 : 0;
+        memcpy(buf + offset, str_text, (size_t)str_len * sizeof(Py_UCS4));
+    }
+    PyMem_Free(str_text);
+    PyMem_Free(pad_text);
+    PyMem_Free(align_text);
+    result_string(out, buf, pad_len);
+    return 0;
+}
+
+/* --- EXSLT math functions (math:) ----------------------------------------- */
+
+/* math:min / math:max over a node-set's numeric string-values. An empty node-set or
+   any non-numeric member yields NaN, matching EXSLT. */
+static int math_extreme(struct th_tree *tree, const xp_result *arg, int want_max, xp_result *out) {
+    const xp_nodeset *nodes = &arg->nodes;
+    if (nodes->len == 0) {
+        result_number(out, (double)NAN);
+        return 0;
+    }
+    double extreme = want_max ? -INFINITY : INFINITY;
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        Py_ssize_t length;
+        Py_UCS4 *text = item_string(tree, nodes->items[index], &length);
+        if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;      /* GCOVR_EXCL_LINE */
+        }
+        double value = parse_number(text, length);
+        PyMem_Free(text);
+        if (isnan(value)) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
+            extreme = (double)NAN;
+            break;
+        }
+        if (want_max ? value > extreme : value < extreme) {
+            extreme = value;
+        }
+    }
+    result_number(out, extreme);
+    return 0;
+}
+
+/* math:highest / math:lowest: the members whose numeric value is the maximum
+   (`want_max`) or minimum. Any non-numeric member, or an empty node-set, yields an
+   empty node-set. */
+static int math_select(struct th_tree *tree, const xp_result *arg, int want_max, xp_result *out) {
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    const xp_nodeset *nodes = &arg->nodes;
+    if (nodes->len == 0) {
+        return 0;
+    }
+    double *values = PyMem_Malloc((size_t)nodes->len * sizeof(double));
+    if (values == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    double extreme = want_max ? -INFINITY : INFINITY;
+    int numeric = 1;
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        Py_ssize_t length;
+        Py_UCS4 *text = item_string(tree, nodes->items[index], &length);
+        if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(values); /* GCOVR_EXCL_LINE */
+            return -1;          /* GCOVR_EXCL_LINE */
+        }
+        values[index] = parse_number(text, length);
+        PyMem_Free(text);
+        if (isnan(values[index])) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
+            numeric = 0;
+        } else if (want_max ? values[index] > extreme : values[index] < extreme) {
+            extreme = values[index];
+        }
+    }
+    int rc = 0;
+    if (numeric) {
+        for (Py_ssize_t index = 0; index < nodes->len; index++) {
+            xp_item member = nodes->items[index];
+            if (values[index] == extreme) {
+                if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    rc = -1;                                              /* GCOVR_EXCL_LINE */
+                } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+            }
+        }
+    }
+    PyMem_Free(values);
+    if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return rc;
+}
+
+/* --- EXSLT date functions (date:) ----------------------------------------- */
+
+/* Parse `count` ASCII digits into *value; 0 on a non-digit. */
+static int ucs4_digits(const Py_UCS4 *text, Py_ssize_t count, int *value) {
+    int accumulator = 0;
+    for (Py_ssize_t index = 0; index < count; index++) {
+        if (text[index] < '0' || text[index] > '9') {
+            return 0;
+        }
+        accumulator = accumulator * 10 + (int)(text[index] - '0');
+    }
+    *value = accumulator;
+    return 1;
+}
+
+/* Parse an ISO 8601 "YYYY-MM-DD" calendar date, ignoring any trailing time. 0 when
+   the text does not begin with a well-formed, in-range date. */
+static int parse_iso_date(const Py_UCS4 *text, Py_ssize_t len, int *year, int *month, int *day) {
+    if (len < 10 || text[4] != '-' || text[7] != '-') {
+        return 0;
+    }
+    if (!ucs4_digits(text, 4, year) || !ucs4_digits(text + 5, 2, month) || !ucs4_digits(text + 8, 2, day)) {
+        return 0;
+    }
+    if (*month < 1 || *month > 12 || *day < 1 || *day > 31) {
+        return 0;
+    }
+    return len == 10 || text[10] == 'T' || text[10] == ' ';
+}
+
+/* The day of the week for a Gregorian date, 0 = Sunday (Sakamoto's algorithm). */
+static int day_of_week(int year, int month, int day) {
+    static const int month_offsets[12] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    int adjusted_year = month < 3 ? year - 1 : year;
+    return (adjusted_year + adjusted_year / 4 - adjusted_year / 100 + adjusted_year / 400 + month_offsets[month - 1] +
+            day) %
+           7;
+}
+
+/* date:year / date:month-in-year / date:day-in-month / date:day-in-week, selected by
+   `field`. A string that is not a valid date yields NaN. */
+static int date_number(struct th_tree *tree, const xp_result *arg, int field, xp_result *out) {
+    Py_ssize_t len;
+    Py_UCS4 *text = to_string(tree, arg, &len);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    int year;
+    int month;
+    int day;
+    int valid = parse_iso_date(text, len, &year, &month, &day);
+    PyMem_Free(text);
+    if (!valid) {
+        result_number(out, (double)NAN);
+        return 0;
+    }
+    double value = field == 0   ? year
+                   : field == 1 ? month
+                   : field == 2 ? day
+                                : day_of_week(year, month, day) + 1; /* EXSLT counts Sunday as 1 */
+    result_number(out, value);
+    return 0;
+}
+
+/* date:leap-year: true when the date's year is a Gregorian leap year, false for a
+   non-leap year or an unparsable date. */
+static int date_leap_year(struct th_tree *tree, const xp_result *arg, xp_result *out) {
+    Py_ssize_t len;
+    Py_UCS4 *text = to_string(tree, arg, &len);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    int year;
+    int month;
+    int day;
+    int valid = parse_iso_date(text, len, &year, &month, &day);
+    PyMem_Free(text);
+    int leap = valid && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0);
+    result_bool(out, leap);
+    return 0;
+}
+
 int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) {
     const xn *fn = &prog->nodes[idx];
     xp_result args[8];
@@ -555,6 +1035,64 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
         rc = exslt_re_test(ctx->tree, args, argc, out);
     } else if (func_is(fn, "re:replace")) {
         rc = exslt_re_replace(ctx->tree, args, out);
+    } else if (func_is(fn, "set:difference") || func_is(fn, "set:intersection") || func_is(fn, "set:has-same-node") ||
+               func_is(fn, "set:leading") || func_is(fn, "set:trailing")) {
+        if (args[0].kind != XP_NODESET || args[1].kind != XP_NODESET) {
+            *ctx->feature = "a set: function on a non-node-set";
+            rc = -2;
+        } else if (func_is(fn, "set:difference")) {
+            rc = set_filter(args, 0, out);
+        } else if (func_is(fn, "set:intersection")) {
+            rc = set_filter(args, 1, out);
+        } else if (func_is(fn, "set:has-same-node")) {
+            set_has_same_node(args, out);
+        } else {
+            rc = set_split(args, func_is(fn, "set:leading"), out);
+        }
+    } else if (func_is(fn, "set:distinct")) {
+        if (args[0].kind != XP_NODESET) {
+            *ctx->feature = "set:distinct on a non-node-set";
+            rc = -2;
+        } else {
+            rc = set_distinct(ctx->tree, &args[0], out);
+        }
+    } else if (func_is(fn, "str:concat")) {
+        if (args[0].kind != XP_NODESET) {
+            *ctx->feature = "str:concat on a non-node-set";
+            rc = -2;
+        } else {
+            rc = str_concat(ctx->tree, &args[0], out);
+        }
+    } else if (func_is(fn, "str:replace")) {
+        rc = str_replace(ctx->tree, args, out);
+    } else if (func_is(fn, "str:padding")) {
+        rc = str_padding(ctx->tree, args, argc, out);
+    } else if (func_is(fn, "str:align")) {
+        rc = str_align(ctx->tree, args, argc, out);
+    } else if (func_is(fn, "math:min") || func_is(fn, "math:max") || func_is(fn, "math:highest") ||
+               func_is(fn, "math:lowest")) {
+        if (args[0].kind != XP_NODESET) {
+            *ctx->feature = "a math: function on a non-node-set";
+            rc = -2;
+        } else if (func_is(fn, "math:min") || func_is(fn, "math:max")) {
+            rc = math_extreme(ctx->tree, &args[0], func_is(fn, "math:max"), out);
+        } else {
+            rc = math_select(ctx->tree, &args[0], func_is(fn, "math:highest"), out);
+        }
+    } else if (func_is(fn, "math:abs")) {
+        result_number(out, fabs(to_number(ctx->tree, &args[0])));
+    } else if (func_is(fn, "math:power")) {
+        result_number(out, pow(to_number(ctx->tree, &args[0]), to_number(ctx->tree, &args[1])));
+    } else if (func_is(fn, "date:year")) {
+        rc = date_number(ctx->tree, &args[0], 0, out);
+    } else if (func_is(fn, "date:month-in-year")) {
+        rc = date_number(ctx->tree, &args[0], 1, out);
+    } else if (func_is(fn, "date:day-in-month")) {
+        rc = date_number(ctx->tree, &args[0], 2, out);
+    } else if (func_is(fn, "date:day-in-week")) {
+        rc = date_number(ctx->tree, &args[0], 3, out);
+    } else if (func_is(fn, "date:leap-year")) {
+        rc = date_leap_year(ctx->tree, &args[0], out);
     } else if (func_is(fn, "concat")) {
         Py_ssize_t total = 0;
         Py_UCS4 *parts[8];

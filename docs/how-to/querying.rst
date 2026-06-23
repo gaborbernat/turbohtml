@@ -419,6 +419,34 @@ immutable and re-entrant, so one instance can be shared across threads.
     ['1']
     ['2']
 
+The same built-in dispatch covers the EXSLT ``set:``, ``str:``, ``math:``, and ``date:`` namespaces, so the node-set,
+string, numeric, and date helpers ``lxml`` gets from ``libexslt`` work without registering anything. ``set:`` operates
+on node-sets (``difference``, ``intersection``, ``distinct``, ``has-same-node``, ``leading``, ``trailing``), ``str:``
+builds strings (``replace`` literal-not-regex, ``concat``, ``padding``, ``align``), ``math:`` reduces node-sets and
+numbers (``min``, ``max``, ``highest``, ``lowest``, ``abs``, ``power``), and ``date:`` reads fields out of an ISO
+``YYYY-MM-DD`` string (``year``, ``month-in-year``, ``day-in-month``, ``day-in-week``, ``leap-year``):
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<ul><li>3</li><li>1</li><li>1</li></ul>")
+    print([li.text for li in doc.xpath("set:distinct(//li)")])
+    print(doc.xpath("math:max(//li)"))
+    print(doc.xpath("str:padding(3, '-')"))
+    print(doc.xpath("date:year('2024-06-22')"))
+
+.. testoutput::
+
+    ['3', '1']
+    3.0
+    ---
+    2024.0
+
+``str:tokenize`` and ``str:split`` are not built in: they would have to synthesize token nodes, and the engine's
+node-sets only reference nodes that already exist in the tree. Likewise ``date:`` reads an explicit date string rather
+than the implicit current date-time, so a query stays deterministic. Register either through ``extensions=`` if you need
+it.
+
 ********************************
  Filter by attribute or pattern
 ********************************

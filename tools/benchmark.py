@@ -1780,11 +1780,13 @@ def print_xpath_table(means: dict[str, float], suite: tuple[list[str], list[str]
 
 # --- xpath parity-feature suite: the lxml/parsel call options against lxml -- #
 # Each case exercises one option the parity work added: a $variable binding, an
-# EXSLT regex, a smart string, a custom extension. These reach past the all-C
-# fast path the structural queries use -- re: dispatches to Python's re where
-# lxml uses C libexslt, an extension runs a Python callable per match -- so the
-# table is honest about the cost of the Python-backed surface.
-_EXSLT_NS = {"re": "http://exslt.org/regular-expressions"}
+# EXSLT regex, an EXSLT node-set reduction, a smart string, a custom extension.
+# These reach past the all-C fast path the structural queries use -- re:
+# dispatches to Python's re where lxml uses C libexslt, an extension runs a
+# Python callable per match -- so the table is honest about the cost of the
+# Python-backed surface. set:distinct stays in C on both sides (turbohtml's
+# built-in dispatch, lxml's registered libexslt), so it races C against C.
+_EXSLT_NS = {"re": "http://exslt.org/regular-expressions", "set": "http://exslt.org/sets"}
 
 
 def _bench_count_ext(_context: object, nodes: list[object]) -> float:
@@ -1815,6 +1817,16 @@ def turbo_retest(doc: Document) -> None:
 def lxml_retest(tree: HtmlElement) -> None:
     """Run an EXSLT re:test predicate, lxml (C libexslt)."""
     tree.xpath("//a[re:test(@href, '[0-9]')]", namespaces=_EXSLT_NS)
+
+
+def turbo_setdistinct(doc: Document) -> None:
+    """Run an EXSLT set:distinct node-set reduction, turbohtml (built-in dispatch)."""
+    doc.xpath("set:distinct(//a)")
+
+
+def lxml_setdistinct(tree: HtmlElement) -> None:
+    """Run an EXSLT set:distinct node-set reduction, lxml (C libexslt, namespace registered)."""
+    tree.xpath("set:distinct(//a)", namespaces=_EXSLT_NS)
 
 
 def turbo_smart(doc: Document) -> None:
@@ -1861,6 +1873,7 @@ def lxml_nodeset_extension(tree: HtmlElement) -> None:
 XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[HtmlElement], None]], ...] = (
     ("$variable binding", turbo_variable, lxml_variable),
     ("EXSLT re:test", turbo_retest, lxml_retest),
+    ("EXSLT set:distinct", turbo_setdistinct, lxml_setdistinct),
     ("smart_strings", turbo_smart, lxml_smart),
     ("extension function", turbo_extension, lxml_extension),
     ("extension node-set", turbo_nodeset_extension, lxml_nodeset_extension),

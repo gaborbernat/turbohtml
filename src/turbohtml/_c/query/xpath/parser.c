@@ -200,7 +200,11 @@ static int32_t parse_step(parser *ps) {
     }
     ps->prog->nodes[step].axis = (uint8_t)axis;
     parse_node_test(ps, step);
-    ps->prog->nodes[step].first = parse_predicates(ps);
+    /* Resolve the predicate list before the store: parse_predicates calls xn_new,
+       which may reallocate the arena, so computing &nodes[step].first up front would
+       leave the assignment writing through a freed pointer. */
+    int32_t predicates = parse_predicates(ps);
+    ps->prog->nodes[step].first = predicates;
     return step;
 }
 
