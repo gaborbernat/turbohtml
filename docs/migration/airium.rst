@@ -8,9 +8,7 @@
 
 `airium <https://gitlab.com/kamichal/airium>`_ assembles HTML in Python from the other direction than a parser: you open
 each element as a ``with a.tag(...)`` block on an ``Airium`` instance, call the instance for text, and let it track
-indentation as you nest, then stringify it. It is one of several terse builders turbohtml replaces with
-:data:`turbohtml.build.E`; the others are :doc:`dominate`, :doc:`yattag`, :doc:`htpy`, and lxml's ``E`` (see
-:doc:`lxml`).
+indentation as you nest, then stringify it. turbohtml replaces it with the terse :data:`turbohtml.build.E` builder.
 
 ***************
  Why turbohtml
@@ -68,9 +66,9 @@ airium tracks structure by call depth inside ``with`` blocks; turbohtml tracks i
     - - airium
       - turbohtml
     - - ``with a.div(klass="card"):`` then ``a("text")``
-      - ``E.div({"class": "card"}, "text")``; nest by passing children, not by call depth
+      - :data:`E.div({"class": "card"}, "text") <turbohtml.build.E>`; nest by passing children, not by call depth
     - - ``a.li(klass="item", **{"data-i": "1"})``
-      - ``E.li({"class": "item", "data-i": "1"})``
+      - :data:`E.li({"class": "item", "data-i": "1"}) <turbohtml.build.E>`
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:

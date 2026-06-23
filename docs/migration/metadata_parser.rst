@@ -9,8 +9,7 @@
 `metadata_parser <https://github.com/jvanasco/metadata_parser>`_ reads the social-card metadata a page advertises: the
 OpenGraph (``og:``) and Twitter (``twitter:``) ``<meta>`` tags, plus the Dublin Core and plain ``name``/``content``
 pairs. It builds a ``MetadataParser`` over the HTML and groups the tags into per-namespace dicts on
-``parsed_result.metadata`` (``["og"]``, ``["twitter"]``, ``["dc"]``, ``["meta"]``) that you read by key. For the wider
-JSON-LD, Microdata, RDFa, and microformat syntaxes, see :doc:`extruct`.
+``parsed_result.metadata`` (``["og"]``, ``["twitter"]``, ``["dc"]``, ``["meta"]``) that you read by key.
 
 ***************
  Why turbohtml

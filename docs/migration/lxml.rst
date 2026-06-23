@@ -393,5 +393,3 @@ bench build`` on the reference machine in :doc:`/development/performance`:
     - - 1000 rows
       - 1.41 ms
       - 2.13 ms (1.5x)
-
-The other terse builders port the same way: see :doc:`dominate`, :doc:`yattag`, :doc:`htpy`, and :doc:`airium`.

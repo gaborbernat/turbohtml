@@ -8,9 +8,8 @@
 
 `htpy <https://htpy.dev>`_ assembles HTML in Python from the other direction than a parser: each element is an object
 whose attributes come from a call (``li(class_="item")``) and whose children sit in a ``[...]`` subscript (``ul[li("a"),
-li("b")]``), and stringifying the root renders the tree. It is one of several terse builders turbohtml replaces with
-:data:`turbohtml.build.E`; the others are :doc:`dominate`, :doc:`yattag`, :doc:`airium`, and lxml's ``E`` (see
-:doc:`lxml`).
+li("b")]``), and stringifying the root renders the tree. turbohtml replaces it with the terse :data:`turbohtml.build.E`
+builder.
 
 ***************
  Why turbohtml
@@ -68,9 +67,10 @@ htpy carries attributes in the call and children in a subscript; turbohtml passe
     - - htpy
       - turbohtml
     - - ``div(".card")[h1("Title")]``
-      - ``E.div({"class": "card"}, E.h1("Title"))``; attributes are a mapping, children are arguments
+      - :data:`E.div({"class": "card"}, E.h1("Title")) <turbohtml.build.E>`; attributes are a mapping, children are
+        arguments
     - - ``li(class_="item", data_i="1")["text"]``
-      - ``E.li({"class": "item", "data-i": "1"}, "text")``
+      - :data:`E.li({"class": "item", "data-i": "1"}, "text") <turbohtml.build.E>`
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:

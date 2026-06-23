@@ -7,9 +7,8 @@
     :target: https://pepy.tech/project/dominate
 
 `dominate <https://github.com/Knio/dominate>`_ assembles HTML in Python from the other direction than a parser: you open
-a tag as a ``with`` block and nest children inside it (or pass them as arguments), then render the tree to a string. It
-is one of several terse builders turbohtml replaces with :data:`turbohtml.build.E`; the others are :doc:`yattag`,
-:doc:`htpy`, :doc:`airium`, and lxml's ``E`` (see :doc:`lxml`).
+a tag as a ``with`` block and nest children inside it (or pass them as arguments), then render the tree to a string.
+turbohtml replaces it with the terse :data:`turbohtml.build.E` builder.
 
 ***************
  Why turbohtml
@@ -67,9 +66,9 @@ dominate spells nesting with ``with`` blocks or positional children; the transla
     - - dominate
       - turbohtml
     - - ``div(p("x"), cls="card")`` / ``with`` blocks
-      - ``E.div({"class": "card"}, E.p("x"))``; nest by passing children, not a context manager
+      - :data:`E.div({"class": "card"}, E.p("x")) <turbohtml.build.E>`; nest by passing children, not a context manager
     - - ``tag(...)`` for a non-identifier tag name
-      - ``E("tag", ...)``, the call form
+      - :data:`E("tag", ...) <turbohtml.build.E>`, the call form
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:

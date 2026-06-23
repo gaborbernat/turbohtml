@@ -8,7 +8,7 @@
 
 `extruct <https://github.com/scrapinghub/extruct>`_ pulls the machine-readable metadata a page embeds: JSON-LD,
 Microdata, RDFa, microformats, and the OpenGraph/Twitter card tags. It builds an lxml tree and runs a separate extractor
-per syntax you list. For the narrower social-card slice, see :doc:`metadata_parser`.
+per syntax you list.
 
 ***************
  Why turbohtml

@@ -8,9 +8,8 @@
 
 `yattag <https://www.yattag.org>`_ assembles HTML in Python from the other direction than a parser: you unpack ``doc,
 tag, text = Doc().tagtext()`` and open each element as a ``with tag(...)`` block, calling ``text(...)`` for content,
-then read the string back with ``doc.getvalue()``. It is one of several terse builders turbohtml replaces with
-:data:`turbohtml.build.E`; the others are :doc:`dominate`, :doc:`htpy`, :doc:`airium`, and lxml's ``E`` (see
-:doc:`lxml`).
+then read the string back with ``doc.getvalue()``. turbohtml replaces it with the terse :data:`turbohtml.build.E`
+builder.
 
 ***************
  Why turbohtml
@@ -68,9 +67,9 @@ yattag opens a tag scope with a context manager; turbohtml builds children inlin
     - - yattag
       - turbohtml
     - - ``doc, tag, text`` with ``with tag("div"):`` and ``text("x")``
-      - ``E.div("x")`` returns the element; build children inline instead of opening a tag scope
+      - :data:`E.div("x") <turbohtml.build.E>` returns the element; build children inline instead of opening a tag scope
     - - ``with tag("div", ("class", "card")):``
-      - ``E.div({"class": "card"}, ...)``; attributes are a leading mapping
+      - :data:`E.div({"class": "card"}, ...) <turbohtml.build.E>`; attributes are a leading mapping
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:

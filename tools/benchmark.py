@@ -58,7 +58,6 @@ from inscriptis.model.config import ParserConfig
 from linkify_it import LinkifyIt
 from lxml import html as lxml_html
 from lxml.builder import E as LXML_E
-from metadata_parser import MetadataParser
 from parsel import Selector
 from pyquery import PyQuery
 from resiliparse.extract.html2text import (  # ty: ignore[unresolved-import]  # Cython extension, ships no type stubs
@@ -80,6 +79,13 @@ try:
     import extruct  # structured-data extractor over lxml, no type stubs
 except ImportError:
     extruct = None  # ty: ignore[invalid-assignment]  # optional: re-bind the name when the import is unavailable
+
+# metadata_parser is the social-card reader turbohtml.opengraph() succeeds; it pins an older beautifulsoup4 than the
+# rest of the suite, so it is left undeclared and optional, raced only when separately installed into a compatible env.
+try:
+    from metadata_parser import MetadataParser  # ty: ignore[unresolved-import]  # undeclared, social-card extractor
+except ImportError:
+    MetadataParser = None
 
 # Terse HTML builders raced against turbohtml.build.E in the build suite; optional so the suite still runs without them.
 try:
@@ -2043,12 +2049,12 @@ def turbo_opengraph(text: str) -> None:
 
 def metadata_parser_socialcard(text: str) -> None:
     """Read the same social-card tags with metadata_parser, which parses then maps the meta block."""
-    MetadataParser(html=text)
+    MetadataParser(html=text)  # ty: ignore[call-non-callable]  # gated behind the optional import above
 
 
 SOCIALCARD_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
     ("turbohtml", turbo_opengraph),
-    ("metadata_parser", metadata_parser_socialcard),
+    *((("metadata_parser", metadata_parser_socialcard),) if MetadataParser is not None else ()),
 )
 
 # A head full of social-card meta tags, then a body of filler the reader must walk past. The larger case tiles the
