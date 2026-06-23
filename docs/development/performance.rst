@@ -593,12 +593,13 @@ a reverse axis, a union, and a computed name test) runs over the 9.6 kB wpt page
 the sweep across every page size. turbohtml compiles each expression against the tree once, resolves name tests to
 interned atoms, and folds ``//`` to a single ``descendant`` walk, so it leads across the surface. The exception is a
 predicate that references ``position()`` (``[1]`` or ``position() <= 3``): it pins the result to proximity order and
-disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap. The last four rows are
+disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap. The last six rows are
 the lxml/parsel options the parity work added: a ``$variable`` binding, an EXSLT ``re:test`` predicate (turbohtml's
-Python :mod:`re` against lxml's C libexslt), a ``smart_strings`` attribute read, and a custom ``extensions=`` function.
-turbohtml still leads, since lxml resolves the namespace map and option set on every call. The last row precompiles the
-expression once with :class:`~turbohtml.XPath` and re-evaluates it, lxml's ``etree.XPath`` doing the same: both skip the
-per-call parse :meth:`~turbohtml.Node.xpath` pays, and turbohtml's compiled program stays ahead per evaluation.
+Python :mod:`re` against lxml's C libexslt), a ``smart_strings`` attribute read, a custom ``extensions=`` function, and
+an ``extensions=`` function whose return becomes a node-set feeding a later ``/@href`` step. turbohtml still leads,
+since lxml resolves the namespace map and option set on every call. The last row precompiles the expression once with
+:class:`~turbohtml.XPath` and re-evaluates it, lxml's ``etree.XPath`` doing the same: both skip the per-call parse
+:meth:`~turbohtml.Node.xpath` pays, and turbohtml's compiled program stays ahead per evaluation.
 
 .. list-table::
     :header-rows: 1
@@ -652,6 +653,9 @@ per-call parse :meth:`~turbohtml.Node.xpath` pays, and turbohtml's compiled prog
     - - ``ext(//a)`` (extensions)
       - 1.0 µs
       - 3.0 µs
+    - - ``ext(//a)/@href`` (node-set extension)
+      - 1.1 µs
+      - 3.2 µs
     - - ``//a[@href]`` (precompiled, reused)
       - 0.5 µs
       - 2.8 µs

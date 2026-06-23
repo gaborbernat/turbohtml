@@ -4,12 +4,14 @@ A custom function is registered under a ``(namespace, name)`` key and called as
 ``name(...)`` (the un-namespaced ``(None, name)`` form, which needs no namespace
 mapping). It receives a context whose ``context_node`` is the current element,
 then the evaluated arguments: a node-set arrives as a list, a string/number/bool
-as the matching Python scalar. The return must be a str, number, or bool.
+as the matching Python scalar. The return may be a str, number, or bool, or (issue
+#265) an element or an iterable of elements that becomes a node-set feeding later
+path steps and predicates.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -17,7 +19,7 @@ import turbohtml
 from turbohtml import Element
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Iterator
     from types import SimpleNamespace
 
 HTML = "<html><body><a href='/x'>one</a><a href='/y'>two</a></body></html>"
@@ -39,7 +41,7 @@ def context_tag(context: SimpleNamespace) -> str:
     return context.context_node.tag
 
 
-EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {
+EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]] = {
     (None, "count_nodes"): count_nodes,
     (None, "shout"): shout,
     (None, "echo"): echo,
@@ -126,3 +128,119 @@ def test_extension_receiving_an_element_from_a_nodeset(doc: turbohtml.Node) -> N
         return nodes[0].text
 
     assert doc.xpath("first_text(//a)", extensions={(None, "first_text"): first_text}) == "one"
+
+
+def first_node(_context: SimpleNamespace, nodes: list[Element]) -> Element:
+    return nodes[0]
+
+
+def first_two(_context: SimpleNamespace, nodes: list[Element]) -> list[Element]:
+    return nodes[:2]
+
+
+def each(_context: SimpleNamespace, nodes: list[Element]) -> Iterator[Element]:
+    yield from nodes
+
+
+def all_nodes(_context: SimpleNamespace, nodes: list[Element]) -> list[Element]:
+    return nodes
+
+
+def empty(_context: SimpleNamespace, _nodes: list[Element]) -> list[Element]:
+    return []
+
+
+NODESET_EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]] = {
+    (None, "first_node"): first_node,
+    (None, "first_two"): first_two,
+    (None, "each"): each,
+    (None, "all_nodes"): all_nodes,
+    (None, "empty"): empty,
+}
+
+
+@pytest.fixture
+def big_doc() -> turbohtml.Node:
+    return turbohtml.parse("<ul>" + "".join(f"<li>{index}</li>" for index in range(12)) + "</ul>")
+
+
+def _texts(result: object) -> list[str]:
+    assert isinstance(result, list)
+    return [node.text if isinstance(node, Element) else str(node) for node in result]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expression", "expected"),
+    [
+        pytest.param("doc", "first_node(//a)", ["one"], id="single-element-is-a-node-set"),
+        pytest.param("doc", "first_two(//a)", ["one", "two"], id="list-of-elements-is-a-node-set"),
+        pytest.param("doc", "each(//a)", ["one", "two"], id="generator-of-elements-is-a-node-set"),
+        pytest.param("doc", "empty(//a)", [], id="empty-iterable-is-an-empty-node-set"),
+        pytest.param("doc", "first_node(//a)/text()", ["one"], id="node-set-feeds-a-later-path-step"),
+        pytest.param("doc", "first_two(//a)[2]", ["two"], id="node-set-feeds-a-predicate"),
+        pytest.param(
+            "big_doc", "all_nodes(//li)", [str(index) for index in range(12)], id="many-elements-grow-the-node-set"
+        ),
+    ],
+)
+def test_extension_result_becomes_a_node_set(
+    request: pytest.FixtureRequest, *, fixture: str, expression: str, expected: list[str]
+) -> None:
+    page = cast("turbohtml.Node", request.getfixturevalue(fixture))
+    assert _texts(page.xpath(expression, extensions=NODESET_EXTENSIONS)) == expected
+
+
+def test_extension_returning_an_integer_stays_a_number(doc: turbohtml.Node) -> None:
+    assert doc.xpath("five()", extensions={(None, "five"): lambda _context: 5}) == pytest.approx(5.0)
+
+
+def return_none(_context: SimpleNamespace) -> Element:
+    return cast("Element", None)
+
+
+def mixed(_context: SimpleNamespace, nodes: list[Element]) -> list[Element]:
+    return [nodes[0], cast("Element", 123)]
+
+
+def raise_partway(_context: SimpleNamespace, nodes: list[Element]) -> Iterator[Element]:
+    yield nodes[0]
+    msg = "boom"
+    raise RuntimeError(msg)
+
+
+_OTHER_DOCUMENT = turbohtml.parse("<p>elsewhere</p>")
+_STRANGER = next(node for node in _OTHER_DOCUMENT.xpath("//p") if isinstance(node, Element))
+
+
+def steal(_context: SimpleNamespace) -> Element:
+    return _STRANGER
+
+
+@pytest.mark.parametrize(
+    ("function", "expression", "exception", "match"),
+    [
+        pytest.param(
+            return_none, "return_none()", TypeError, "extension result must be", id="none-result-is-a-type-error"
+        ),
+        pytest.param(
+            mixed, "mixed(//a)", TypeError, "extension result must be", id="non-element-in-iterable-is-a-type-error"
+        ),
+        pytest.param(
+            steal, "steal()", ValueError, "different document", id="foreign-document-element-is-a-value-error"
+        ),
+        pytest.param(
+            raise_partway, "raise_partway(//a)", RuntimeError, "boom", id="iterable-that-raises-partway-propagates"
+        ),
+    ],
+)
+def test_extension_result_marshaling_is_rejected(
+    doc: turbohtml.Node,
+    *,
+    function: Callable[..., str | float | bool | Element | Iterable[Element]],
+    expression: str,
+    exception: type[Exception],
+    match: str,
+) -> None:
+    name = expression[: expression.index("(")]
+    with pytest.raises(exception, match=match):
+        doc.xpath(expression, extensions={(None, name): function})

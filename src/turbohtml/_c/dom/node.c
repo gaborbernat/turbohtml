@@ -1057,7 +1057,8 @@ PyDoc_STRVAR(xpath_doc, "xpath(expression, /, *, smart_strings=False, extensions
                         ":param smart_strings: return each string result as a value that remembers the\n"
                         "    Element it came from.\n"
                         ":param extensions: maps an (namespace, name) pair to a callable, registering a\n"
-                        "    custom XPath function.\n"
+                        "    custom XPath function; the callable may return a scalar, an Element, or an\n"
+                        "    iterable of Elements (a node-set that feeds later steps).\n"
                         ":param variables: values bound to the $name variables used in the expression.\n"
                         ":returns: the result list, of Elements and str values in document order.");
 

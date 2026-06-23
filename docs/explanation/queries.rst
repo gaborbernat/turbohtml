@@ -55,7 +55,11 @@ object evaluates against many context nodes, the same design lxml's ``etree.XPat
 one-name-per-concept and returns plain lists, so the jQuery-style chaining pyquery users expect lives in an optional
 Python-side wrapper, :class:`turbohtml.query.Query`, whose traversal and mutation methods each return a wrapper. Output
 runs back through :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.serialize`, and :meth:`~turbohtml.Node.encode`,
-WHATWG-conformant by default with the escaping selectable through :class:`~turbohtml.Formatter`.
+WHATWG-conformant by default with the escaping selectable through :class:`~turbohtml.Formatter`. A registered
+``extensions=`` function crosses the same value boundary in both directions: the four XPath value types marshal to and
+from Python, so a node-set argument arrives as a list of elements and a returned element or iterable of elements becomes
+a node-set the engine can feed into later steps. The extension only ever sees live wrappers bound to the queried tree,
+never the C node model, so a returned element from another document is rejected rather than silently mixing arenas.
 
 *****************************
  Extracting strings (parsel)
