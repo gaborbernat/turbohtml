@@ -8,9 +8,9 @@ documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/
 source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
-suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``,
-``edit``, ``chain``, ``htmlparser``, ``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``, ``sanitize``,
-``structured``, or ``article``. Numbers vary with input and hardware.
+suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``path``, ``serialize``,
+``build``, ``edit``, ``chain``, ``htmlparser``, ``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``,
+``sanitize``, ``structured``, or ``article``. Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -747,6 +747,38 @@ ahead per evaluation.
     - - ``//a[@href]`` (precompiled, reused)
       - 0.5 µs
       - 2.8 µs
+
+************
+ Node paths
+************
+
+:meth:`turbohtml.Element.css_path` and :meth:`~turbohtml.Element.xpath_path` return the unique locator that re-finds an
+element from the document root -- a CSS selector and a positional XPath -- against lxml's ``getroottree().getpath()``,
+the libxml2 path builder devtools' "copy selector" mirrors. lxml emits only the positional XPath, so ``getpath`` pairs
+with both turbohtml methods. Each timed call walks every element in a pre-parsed page and serializes its path, where
+turbohtml's ancestor-chain walk under the per-tree lock leads ``getpath`` by roughly three to five times across page
+sizes.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 22 22 22
+
+    - - input
+      - turbohtml css_path
+      - turbohtml xpath_path
+      - lxml getpath
+    - - wpt page (4 kB)
+      - 9.0 µs
+      - 7.9 µs
+      - 40.3 µs
+    - - wpt page (9.6 kB)
+      - 15.6 µs
+      - 14.3 µs
+      - 55.2 µs
+    - - wpt page (92 kB)
+      - 701.3 µs
+      - 526.4 µs
+      - 2539.8 µs
 
 *************
  Serializing

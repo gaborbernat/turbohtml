@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import turbohtml
-from turbohtml import Element, XPath, XPathString
+from turbohtml import Document, Element, XPath, XPathString
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -575,3 +575,78 @@ def test_same_expression_rebinds_per_call(ns_doc: turbohtml.Node) -> None:
     # The compiled program is cached by string; the prefix resolves per call.
     assert tags(ns_doc.xpath("//p:circle", namespaces={"p": SVG})) == ["circle"]
     assert ns_doc.xpath("//p:circle", namespaces={"p": MATHML}) == []
+
+
+# Element.xpath_path(): the positional XPath locating a node from the root. Unlike
+# css_path() it never anchors on an id, indexing only among same-name siblings.
+def _xpath_path(html: str, selector: str) -> str:
+    element = turbohtml.parse(html).select_one(selector)
+    assert isinstance(element, Element)
+    return element.xpath_path()
+
+
+@pytest.mark.parametrize(
+    ("html", "selector", "expected"),
+    [
+        pytest.param("<html><body><p>x</p></body></html>", "html", "/html", id="root-element"),
+        pytest.param("<html><body><p>x</p></body></html>", "p", "/html/body/p", id="descends-from-root"),
+        pytest.param(
+            "<body><div>a</div><div>b</div><div>c</div></body>",
+            "div:nth-of-type(2)",
+            "/html/body/div[2]",
+            id="index-among-same-name-siblings",
+        ),
+        pytest.param("<body><h1>t</h1><p>x</p></body>", "p", "/html/body/p", id="no-index-for-distinct-names"),
+        pytest.param('<body><div id="main"><p>x</p></div></body>', "#main", "/html/body/div", id="ids-do-not-anchor"),
+        pytest.param(
+            "<body><div><p>a</p></div><div><p>b</p><p>c</p></div></body>",
+            "div:nth-of-type(2) p:nth-of-type(2)",
+            "/html/body/div[2]/p[2]",
+            id="mixed-indices",
+        ),
+        pytest.param(
+            "<ul>" + "".join(f"<li>{number}</li>" for number in range(15)) + "</ul>",
+            "li:nth-of-type(15)",
+            "/html/body/ul/li[15]",
+            id="multi-digit-index",
+        ),
+        pytest.param(
+            "<body><my-widget>a</my-widget><my-widget>b</my-widget></body>",
+            "my-widget:nth-of-type(2)",
+            "/html/body/my-widget[2]",
+            id="unknown-tag-uses-its-name",
+        ),
+    ],
+)
+def test_xpath_path(html: str, selector: str, expected: str) -> None:
+    assert _xpath_path(html, selector) == expected
+
+
+def test_xpath_path_of_detached_element() -> None:
+    assert Element("section").xpath_path() == "/section"
+
+
+# xpath_path() round-trips: re-evaluating the path returns exactly the node it came from.
+_PATH_DOC = (
+    "<!doctype html><html><head><title>t</title></head><body>"
+    "<header><h1>Title</h1></header>"
+    '<main id="content">'
+    "<article><p>one</p><p>two</p><p>three</p></article>"
+    '<article class="aside"><p>alpha</p><ul><li>a</li><li>b</li><li>c</li></ul></article>'
+    "</main>"
+    '<footer><a href="/x">x</a><a href="/y">y</a></footer>'
+    "</body></html>"
+)
+
+_PATH_DOCUMENT = turbohtml.parse(_PATH_DOC)
+
+
+def _every_element(document: Document) -> list[Element]:
+    root = document.root
+    assert root is not None
+    return [root, *(node for node in root.descendants if isinstance(node, Element))]
+
+
+@pytest.mark.parametrize("element", _every_element(_PATH_DOCUMENT), ids=lambda element: element.xpath_path())
+def test_xpath_path_reselects_only_this_element(element: Element) -> None:
+    assert _PATH_DOCUMENT.xpath(element.xpath_path()) == [element]

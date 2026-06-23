@@ -479,6 +479,47 @@ node-sets only reference nodes that already exist in the tree. Likewise ``date:`
 than the implicit current date-time, so a query stays deterministic. Register either through ``extensions=`` if you need
 it.
 
+************************
+ Get the path to a node
+************************
+
+Once you have an element, ask it for a locator back to the document root, the way browser devtools "copy selector" and
+lxml's ``getpath`` do. :meth:`~turbohtml.Element.css_path` returns a CSS selector and
+:meth:`~turbohtml.Element.xpath_path` returns a positional XPath; both round-trip, so feeding the result to
+:meth:`~turbohtml.Node.select` or :meth:`~turbohtml.Node.xpath` on the document returns exactly that element. Use them
+to log a match, store a stable reference, or debug a scrape:
+
+.. testcode::
+
+    import turbohtml
+    doc = turbohtml.parse("<body><div><p>one</p><p>two</p></div></body>")
+    second = doc.select("p")[1]
+    print(second.css_path())
+    print(second.xpath_path())
+    print(doc.select(second.css_path()) == [second])
+
+.. testoutput::
+
+    html > body > div > p:nth-of-type(2)
+    /html/body/div/p[2]
+    True
+
+The CSS path anchors at the nearest ancestor (or the element itself) carrying a document-unique ``id``, which keeps it
+short and stable against reordering; otherwise it descends from the root with ``:nth-of-type()`` steps. The XPath form
+is always positional, like ``getpath``:
+
+.. testcode::
+
+    doc = turbohtml.parse('<body><main id="content"><ul><li>a</li><li>b</li></ul></main></body>')
+    item = doc.select("li")[1]
+    print(item.css_path())
+    print(item.xpath_path())
+
+.. testoutput::
+
+    #content > ul > li:nth-of-type(2)
+    /html/body/main/ul/li[2]
+
 ********************************
  Filter by attribute or pattern
 ********************************

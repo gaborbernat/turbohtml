@@ -1816,6 +1816,67 @@ def print_readpath_table(means: dict[str, float], op: str, cases: list[str]) -> 
         print(row)
 
 
+# --- path suite: generate a unique node locator vs lxml's getpath ----------- #
+# css_path()/xpath_path() walk an element's ancestor chain to build the selector
+# that re-finds it from the root; lxml's getroottree().getpath() is the libxml2
+# equivalent. Each timed call addresses every element in a pre-parsed tree, the
+# work of serializing a whole document's worth of node paths.
+
+
+def turbo_css_path(doc: Document) -> None:
+    """Generate the unique CSS selector for every element with turbohtml's css_path."""
+    for node in doc.descendants:
+        if isinstance(node, turbohtml.Element):
+            node.css_path()
+
+
+def turbo_xpath_path(doc: Document) -> None:
+    """Generate the positional XPath for every element with turbohtml's xpath_path."""
+    for node in doc.descendants:
+        if isinstance(node, turbohtml.Element):
+            node.xpath_path()
+
+
+def lxml_getpath(tree: HtmlElement) -> None:
+    """Generate the positional XPath for every element with lxml's getpath."""
+    root = tree.getroottree()
+    for element in tree.iter():
+        if isinstance(element.tag, str):  # skip the comment/PI proxies iter() also yields
+            root.getpath(element)
+
+
+# Path-generation competitors; only turbohtml and lxml address a node from the root.
+PATH_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]], ...] = (
+    ("turbohtml css_path", turbo_tree, turbo_css_path),
+    ("turbohtml xpath_path", turbo_tree, turbo_xpath_path),
+    ("lxml getpath", lxml_tree, lxml_getpath),
+)
+
+
+def run_path_suite(bench: Callable[[str, object, object], None]) -> list[str]:
+    """Benchmark generating every node's path across each page size; return the case names."""
+    for size_name, path, enc in READPATH_CASES:
+        text = corpus_text(path, enc)
+        for label, build, generate in PATH_LIBS:
+            bench(f"path {size_name} [{label}]", generate, build(text))
+    return [name for name, _, _ in READPATH_CASES]
+
+
+def print_path_table(means: dict[str, float], cases: list[str]) -> None:
+    """Render turbohtml's css_path and xpath_path beside lxml's getpath per page size."""
+    if not cases:
+        return
+    labels = [label for label, _, _ in PATH_LIBS]
+    print()
+    print(f"{'path benchmark':24}" + "".join(f"{label:>24}" for label in labels))
+    for name in cases:
+        row = f"{'path ' + name:24}"
+        for label in labels:
+            value = means.get(f"path {name} [{label}]")
+            row += f"{value * 1e6:20.1f} us" if value is not None else f"{'-':>24}"
+        print(row)
+
+
 # --- xpath suite: evaluate the XPath feature surface over a pre-parsed tree - #
 # turbohtml.xpath against lxml's libxml2 XPath engine, the de-facto XPath in
 # Python that parsel, pyquery, and html5-parser all delegate to. selectolax and
@@ -2252,6 +2313,7 @@ def main() -> None:
     select_cases = run_readpath_suite(bench, 1, "select") if "query" in suites else []
     has_select_cases = run_readpath_suite(bench, 3, "select :has") if "query" in suites else []
     find_text_cases = run_readpath_suite(bench, 4, "find-text") if "query" in suites else []
+    path_cases = run_path_suite(bench) if "query" in suites else []
     xpath_cases = run_xpath_suite(bench) if "xpath" in suites else ([], [])
     xpath_feature_cases = run_xpath_feature_suite(bench) if "xpath" in suites else []
     serialize_cases = run_readpath_suite(bench, 2, "serialize") if "serialize" in suites else []
@@ -2272,6 +2334,7 @@ def main() -> None:
     print_readpath_table(means, "select", select_cases)
     print_readpath_table(means, "select :has", has_select_cases)
     print_readpath_table(means, "find-text", find_text_cases)
+    print_path_table(means, path_cases)
     print_xpath_table(means, xpath_cases)
     print_xpath_feature_table(means, xpath_feature_cases)
     print_readpath_table(means, "serialize", serialize_cases)
