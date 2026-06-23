@@ -8,9 +8,10 @@ documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/
 source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
-suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``path``, ``serialize``,
-``build``, ``edit``, ``chain``, ``htmlparser``, ``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``,
-``sanitize``, ``structured``, or ``article``. Numbers vary with input and hardware.
+suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``fragment``, ``query``, ``text``, ``xpath``,
+``path``, ``serialize``, ``build``, ``edit``, ``navigate``, ``links``, ``extract``, ``chain``, ``htmlparser``,
+``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``, ``sanitize``, ``structured``, or ``article``. Numbers
+vary with input and hardware.
 
 **********
  Escaping
@@ -90,6 +91,30 @@ Python ``escape`` frame and ``Markup`` construction per call, so it runs roughly
       - 141 ns
       - 338 ns
 
+The other ``Markup`` operations race markupsafe's own ``Markup`` of the same method. ``striptags`` and ``unescape`` run
+on turbohtml's tokenizer and HTML5 reference resolution where markupsafe scans with a regex, and ``format`` and ``join``
+escape each untrusted operand through the same C ``escape``.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20
+
+    - - operation
+      - turbohtml
+      - markupsafe
+    - - ``striptags``
+      - 1368 ns
+      - 2483 ns
+    - - ``unescape``
+      - 273 ns
+      - 1114 ns
+    - - ``format`` (escapes operands)
+      - 1662 ns
+      - 1973 ns
+    - - ``join`` (escapes operands)
+      - 609 ns
+      - 1217 ns
+
 *********
  Linkify
 *********
@@ -120,6 +145,31 @@ turbohtml's own tree carry it past bleach's html5lib pass by five to twenty time
       - 127 µs
       - 1562 µs
       - 708 µs
+
+The detection primitive on its own, :meth:`turbohtml.linkify.Detector.find` against ``LinkifyIt().match`` and
+:meth:`~turbohtml.linkify.Detector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the
+spans or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. The
+``has_link`` prose row is close because ``test`` short-circuits on the first link near the start.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20
+
+    - - detect
+      - turbohtml
+      - linkify-it-py
+    - - ``find`` comment (1 link, 1 email)
+      - 0.6 µs
+      - 29.2 µs
+    - - ``find`` prose (1 KiB)
+      - 8.8 µs
+      - 309.9 µs
+    - - ``has_link`` comment
+      - 0.3 µs
+      - 21.5 µs
+    - - ``has_link`` prose (1 KiB)
+      - 2.7 µs
+      - 4.9 µs
 
 **********
  Sanitize
@@ -200,39 +250,6 @@ reference links, padded tables, full escaping), and turbohtml stays ahead by the
 
 The ``google_doc`` row reads the inline-CSS styling a Google Docs export carries (html2text's google_doc mode);
 markdownify has no equivalent.
-
-*************
- Layout text
-*************
-
-:meth:`turbohtml.Node.to_text` against `inscriptis <https://github.com/weblyzard/inscriptis>`_, the layout-aware
-HTML-to-text renderer it succeeds, and `html-text <https://github.com/zytedata/html-text>`_, Zyte's plainer visible-text
-extractor. inscriptis and html-text both build an lxml tree in Python; inscriptis additionally lays tables out as
-aligned columns, where turbohtml does the whole layout in one C walk and html-text skips column alignment entirely.
-
-.. list-table::
-    :header-rows: 1
-    :widths: 34 22 22 22
-
-    - - input
-      - turbohtml
-      - inscriptis
-      - html-text
-    - - article (2 KiB)
-      - 7 µs
-      - 163 µs
-      - 102 µs
-    - - table (4 KiB)
-      - 28 µs
-      - 839 µs
-      - 258 µs
-    - - annotated (4 KiB)
-      - 10 µs
-      - 202 µs
-      - --
-
-The ``annotated`` row labels matching elements with spans through :meth:`~turbohtml.Node.to_annotated_text` against
-inscriptis's ``get_annotated_text``; html-text has no annotation surface, so it sits out that row.
 
 *****************
  Structured data
@@ -531,6 +548,29 @@ longer builds on a current toolchain. turbohtml is the maintained, mutable, type
       - 1.62 s
       - 1.53 s
 
+******************
+ Fragment parsing
+******************
+
+:func:`turbohtml.parse_fragment` parses an ``innerHTML``-style snippet in a container's context rather than a whole
+document, against lxml's ``lxml.html.fromstring`` and html5lib's ``parseFragment``. The input is a table-row fragment
+parsed in its ``<tbody>`` context, where the WHATWG algorithm's table rules apply. turbohtml runs the same C engine it
+uses for whole documents, so it parses the fragment three times faster than lxml and roughly seventy times faster than
+the pure-Python html5lib.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 22 22 22
+
+    - - input
+      - turbohtml
+      - lxml
+      - html5lib
+    - - table-row fragment (2 kB)
+      - 12.6 µs
+      - 39.6 µs
+      - 867 µs
+
 **********
  Querying
 **********
@@ -780,6 +820,124 @@ sizes.
       - 526.4 µs
       - 2539.8 µs
 
+**************
+ Text content
+**************
+
+The ``text`` suite collects the visible text two ways. First, the raw text join off a pre-parsed tree, the ``get_text``
+pass: turbohtml's :attr:`~turbohtml.Node.text` property concatenates every descendant text run, against lxml's
+``text_content()``, selectolax's ``text()``, and BeautifulSoup's ``get_text()``. turbohtml gathers the runs in one C
+walk into a buffer reserved up front, so it leads lxml by a small margin and selectolax and BeautifulSoup by roughly an
+order of magnitude. parsel exposes no node-level text collector, so it sits out.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 18 18 18 18
+
+    - - text content
+      - turbohtml
+      - lxml
+      - selectolax
+      - BeautifulSoup
+    - - wpt page (4 kB)
+      - 0.8 µs
+      - 1.2 µs
+      - 5.2 µs
+      - 6.8 µs
+    - - wpt page (9.6 kB)
+      - 1.1 µs
+      - 1.6 µs
+      - 12.1 µs
+      - 13.3 µs
+    - - wpt page (92 kB)
+      - 36.9 µs
+      - 47.2 µs
+      - 488 µs
+      - 368 µs
+
+Second, the layout-aware string-to-text extraction: :meth:`turbohtml.Node.to_text` against `inscriptis
+<https://github.com/weblyzard/inscriptis>`_, the layout-aware HTML-to-text renderer it succeeds, `html-text
+<https://github.com/zytedata/html-text>`_, Zyte's plainer visible-text extractor, and `resiliparse
+<https://github.com/chatnoir-eu/chatnoir-resiliparse>`_'s ``extract_plain_text``. inscriptis and html-text both build an
+lxml tree in Python and resiliparse renders text off the lexbor tree it parses to, where turbohtml does the whole layout
+in one C walk; inscriptis additionally lays tables out as aligned columns, which html-text and resiliparse skip.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 18 18 18 18
+
+    - - input
+      - turbohtml
+      - inscriptis
+      - html-text
+      - resiliparse
+    - - article (2 KiB)
+      - 7 µs
+      - 163 µs
+      - 102 µs
+      - 23 µs
+    - - table (4 KiB)
+      - 28 µs
+      - 839 µs
+      - 258 µs
+      - 52 µs
+    - - collapsed (2 KiB)
+      - 7 µs
+      - --
+      - 101 µs
+      - --
+    - - main (4 KiB)
+      - 7 µs
+      - --
+      - --
+      - 21 µs
+    - - annotated (4 KiB)
+      - 10 µs
+      - 202 µs
+      - --
+      - --
+
+The ``collapsed`` row turns layout guessing off: turbohtml joins the :attr:`~turbohtml.Node.stripped_strings` word
+stream against html-text's ``extract_text(guess_layout=False)``; inscriptis and resiliparse have no comparable collapsed
+mode. The ``main`` row strips page boilerplate first, :meth:`~turbohtml.Node.main_text` against resiliparse's
+``extract_plain_text(main_content=True)``. The ``annotated`` row labels matching elements with spans through
+:meth:`~turbohtml.Node.to_annotated_text` against inscriptis's ``get_annotated_text``; html-text and resiliparse have no
+annotation surface, so they sit out that row.
+
+*****************
+ Tree navigation
+*****************
+
+Walking every descendant of a parsed tree: turbohtml's :attr:`~turbohtml.Node.descendants` iterator against lxml's
+``iterdescendants()`` and BeautifulSoup's ``descendants``. The ``list(el)``, ``iterdescendants()``, and
+``iterancestors()`` family ports to :attr:`~turbohtml.Node.children`, :attr:`~turbohtml.Node.descendants`, and
+:attr:`~turbohtml.Node.ancestors`; the descendant walk is the dominant case. Each timed call consumes the whole
+iterator, where turbohtml yields interned nodes straight from the arena faster than lxml's libxml2 proxy objects and
+BeautifulSoup's Python ``NavigableString`` chain. The descendant walk is one of BeautifulSoup's leaner paths, so the
+margin is narrower here than on the query and serialize suites. selectolax exposes no document-wide descendant iterator,
+so it has no entry.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 24 24 24
+
+    - - descendant walk
+      - turbohtml
+      - lxml
+      - BeautifulSoup
+    - - wpt page (4 kB)
+      - 2.0 µs
+      - 8.3 µs
+      - 2.9 µs
+    - - wpt page (9.6 kB)
+      - 3.6 µs
+      - 12.1 µs
+      - 5.0 µs
+    - - wpt page (92 kB)
+      - 101 µs
+      - 295 µs
+      - 125 µs
+
 *************
  Serializing
 *************
@@ -939,6 +1097,114 @@ page </migration/pyquery>`).
       - 607 µs
       - 1.11 ms
       - 1.8x
+
+*******
+ Links
+*******
+
+The link surface: extract every in-document link, resolve them against a base URL, and rewrite them through a callback.
+turbohtml's :meth:`~turbohtml.Node.links`, :meth:`~turbohtml.Node.resolve_links`, and
+:meth:`~turbohtml.Node.rewrite_links` against lxml.html's ``iterlinks()``, ``make_links_absolute()``, and
+``rewrite_links()`` -- the only other library that walks the link-bearing attributes (``href``, ``src``, ``srcset``,
+...) as a set. Each timed call runs one operation over the 92 kB wpt page; extraction is read-only, while absolutize and
+rewrite are idempotent once applied. turbohtml walks the attribute set in C where lxml re-resolves each URL in Python,
+so it leads by ten to over a hundred times.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 46 16 16 16
+
+    - - links (92 kB page)
+      - turbohtml
+      - lxml
+      - slowdown
+    - - extract (``links`` / ``iterlinks``)
+      - 60.6 µs
+      - 2.28 ms
+      - 37.7x
+    - - absolutize (``resolve_links`` / ``make_links_absolute``)
+      - 251 µs
+      - 2.76 ms
+      - 11.0x
+    - - rewrite (``rewrite_links``)
+      - 22.3 µs
+      - 2.38 ms
+      - 106.7x
+
+************
+ Extraction
+************
+
+Pulling values out of a document, the idioms the parsel, pyquery, and w3lib migrations center on. First, reading every
+matched node's ``@href`` and visible text off a pre-parsed page: parsel's ``::attr``/``::text`` ``getall`` and a pyquery
+``.items()`` read against turbohtml selecting once and reading :meth:`~turbohtml.Element.attr` and
+:attr:`~turbohtml.Node.text` off each node. turbohtml compiles the selector once and reads interned atoms, where parsel
+re-translates the CSS to XPath on libxml2 per call and pyquery boxes every match in a wrapper object, so it leads by
+twenty-five to nearly a hundred times.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 18 18 18
+
+    - - extract ``@href`` (per match)
+      - turbohtml
+      - parsel
+      - pyquery
+    - - wpt page (4 kB)
+      - 0.1 µs
+      - 3.9 µs
+      - 4.4 µs
+    - - wpt page (9.6 kB)
+      - 0.1 µs
+      - 4.3 µs
+      - 4.8 µs
+    - - wpt page (92 kB)
+      - 8.2 µs
+      - 222 µs
+      - 542 µs
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 18 18 18
+
+    - - extract text (per match)
+      - turbohtml
+      - parsel
+      - pyquery
+    - - wpt page (4 kB)
+      - 0.1 µs
+      - 4.0 µs
+      - 4.5 µs
+    - - wpt page (9.6 kB)
+      - 0.1 µs
+      - 4.3 µs
+      - 4.9 µs
+    - - wpt page (92 kB)
+      - 8.0 µs
+      - 214 µs
+      - 297 µs
+
+Second, reading a document's own URL hints: w3lib's ``get_base_url`` and ``get_meta_refresh`` against turbohtml's
+:meth:`~turbohtml.Document.base_url` and :meth:`~turbohtml.Document.meta_refresh`. Both parse the string each call;
+w3lib runs a regular-expression pass while turbohtml runs the WHATWG tree builder and reads the hint off the parsed
+``<head>``, so the tree builder still comes out ahead of the regex on this small document.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - url hint
+      - turbohtml
+      - w3lib
+      - speed-up
+    - - ``base_url`` / ``get_base_url``
+      - 2.9 µs
+      - 7.4 µs
+      - 2.6x
+    - - ``meta_refresh`` / ``get_meta_refresh``
+      - 3.0 µs
+      - 6.5 µs
+      - 2.1x
 
 *****************
  Fluent chaining
