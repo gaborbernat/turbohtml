@@ -127,6 +127,8 @@ with an explicit ``encoding=``).
       - :meth:`~turbohtml.Node.find` with ``axis=Axis.NEXT_SIBLINGS`` / ``Axis.PREVIOUS_SIBLINGS``
     - - ``tag.find_all("a", recursive=False)``
       - :meth:`~turbohtml.Node.find_all` (``axis=Axis.CHILDREN``)
+    - - ``soup.find(string=re.compile(r"\$\d+"))``, ``soup.find_all(string="Add to cart")``
+      - :meth:`~turbohtml.Node.find` / :meth:`~turbohtml.Node.find_all` with ``text=``
     - - ``soup.select(".cls")``, ``soup.select_one(".cls")``
       - :meth:`~turbohtml.Node.select`, :meth:`~turbohtml.Node.select_one`
     - - ``BeautifulSoup(markup, parse_only=SoupStrainer("article"))``
@@ -179,6 +181,52 @@ attribute; ``class_`` and ``attrs`` match the rest; ``axis`` replaces the direct
 
     section
     section
+
+``text`` replaces ``bs4``'s ``find(string=...)`` search. The one shift: ``bs4`` returns the matching
+``NavigableString``, while ``text`` filters *elements* by their collected text (the whole subtree, as
+:attr:`~turbohtml.Node.text` returns), so it composes with the tag and attribute filters and a plain string is the full
+text rather than a substring (use a regex to search within):
+
+.. testcode::
+
+    import re
+    doc = parse('<ul><li>Buy now</li><li>Later</li></ul>')
+    print(doc.find("li", text="Buy now").text)
+    print([li.text for li in doc.find_all("li", text=re.compile("now"))])
+
+.. testoutput::
+
+    Buy now
+    ['Buy now']
+
+*************
+ Performance
+*************
+
+Filtering elements by text through :meth:`~turbohtml.Node.find` / :meth:`~turbohtml.Node.find_all` (``text=``) gathers
+each candidate's subtree text in C and matches once, where ``bs4``'s ``find_all(string=...)`` runs the predicate in
+Python mid-walk. The :doc:`/development/performance` query suite races the two over the wpt pages:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - find ``text=`` regex
+      - turbohtml
+      - BeautifulSoup
+      - speed-up
+    - - wpt page (4 kB)
+      - 9.3 µs
+      - 19.7 µs
+      - 2.1x
+    - - wpt page (9.6 kB)
+      - 13.9 µs
+      - 38.2 µs
+      - 2.7x
+    - - wpt page (92 kB)
+      - 741 µs
+      - 989 µs
+      - 1.3x
 
 *********************
  Attributes and text

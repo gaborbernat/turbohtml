@@ -9,6 +9,7 @@
 typedef struct {
     PyObject *tag;          /* tag filter, or NULL for no tag constraint */
     PyObject *class_filter; /* class_ filter, or NULL */
+    PyObject *text;         /* text predicate over each element's collected text, or NULL */
     enum th_axis axis;
     Py_ssize_t limit; /* -1 for unlimited */
     uint32_t *atoms;  /* resolved name atoms for the attribute filters */
@@ -195,6 +196,25 @@ static int class_matches_plain(th_node *node, const Py_UCS4 *want, Py_ssize_t wa
     return 0;
 }
 
+/* For a plain-string tag filter, whether node's tag name matches: a known name is
+   a pure integer atom compare; an unknown one can only match the rare unknown-atom
+   elements, compared by name. Returns 1/0, or -1 with an exception set. */
+static int tag_plain_matches(const query_t *query, th_node *node) {
+    if (query->tag_atom != TH_TAG_UNKNOWN) {
+        return node->atom == query->tag_atom;
+    }
+    if (node->atom != TH_TAG_UNKNOWN) {
+        return 0;
+    }
+    PyObject *name = ucs4_to_str(node->text, node->text_len);
+    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int equal = PyUnicode_Compare(name, query->tag) == 0;
+    Py_DECREF(name);
+    return equal;
+}
+
 /* Whether an element matches the whole query. Returns 1/0, or -1 with an
    exception set. */
 static int node_matches(module_state *state, th_node *node, const query_t *query) {
@@ -202,25 +222,9 @@ static int node_matches(module_state *state, th_node *node, const query_t *query
         return 0;
     }
     if (query->tag_plain) {
-        /* a known name is a pure integer compare; an unknown one can only match
-           the rare unknown-atom elements, compared by name */
-        if (query->tag_atom != TH_TAG_UNKNOWN) {
-            if (node->atom != query->tag_atom) {
-                return 0;
-            }
-        } else {
-            if (node->atom != TH_TAG_UNKNOWN) {
-                return 0;
-            }
-            PyObject *name = ucs4_to_str(node->text, node->text_len);
-            if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-            }
-            int equal = PyUnicode_Compare(name, query->tag) == 0;
-            Py_DECREF(name);
-            if (!equal) {
-                return 0;
-            }
+        int matched = tag_plain_matches(query, node);
+        if (matched <= 0) {
+            return matched;
         }
     } else if (query->tag != NULL) {
         PyObject *name = ucs4_to_str(node->text, node->text_len);
@@ -324,7 +328,7 @@ static int add_attr_filter(th_tree *tree, query_t *query, PyObject *key, PyObjec
 
 static int is_reserved_key(PyObject *key, int is_find_all) {
     return PyUnicode_CompareWithASCIIString(key, "axis") == 0 || PyUnicode_CompareWithASCIIString(key, "class_") == 0 ||
-           PyUnicode_CompareWithASCIIString(key, "attrs") == 0 ||
+           PyUnicode_CompareWithASCIIString(key, "attrs") == 0 || PyUnicode_CompareWithASCIIString(key, "text") == 0 ||
            (is_find_all && PyUnicode_CompareWithASCIIString(key, "limit") == 0);
 }
 
@@ -335,6 +339,7 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     th_tree *tree = tree_of(self);
     query->tag = NULL;
     query->class_filter = NULL;
+    query->text = NULL;
     query->axis = TH_AXIS_DESCENDANTS;
     query->limit = -1;
     query->atoms = NULL;
@@ -378,6 +383,8 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
             }
         } else if (PyUnicode_CompareWithASCIIString(key, "class_") == 0) {
             query->class_filter = value;
+        } else if (PyUnicode_CompareWithASCIIString(key, "text") == 0) {
+            query->text = value;
         } else if (PyUnicode_CompareWithASCIIString(key, "attrs") == 0) {
             if (!PyDict_Check(value)) {
                 PyErr_SetString(PyExc_TypeError, "attrs must be a dict");
@@ -446,11 +453,158 @@ static int query_is_simple_tag(const query_t *query) {
            query->class_filter == NULL && query->axis == TH_AXIS_DESCENDANTS;
 }
 
+/* The cheap, pure-C structural prefilter for the text-search path: whether node
+   could match before its collected text is tested, deciding which elements get
+   their text gathered in the snapshot pass. Only the allocation-free checks live
+   here (the element type, a known plain tag, a plain class); the remaining filters,
+   including any regex/callable that would need Python, are deferred to node_matches
+   in the post-snapshot pass. */
+static int text_candidate(const query_t *query, th_node *node) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return 0;
+    }
+    if (query->tag_plain && query->tag_atom != TH_TAG_UNKNOWN && node->atom != query->tag_atom) {
+        return 0;
+    }
+    if (query->class_ucs4 != NULL && class_matches_plain(node, query->class_ucs4, query->class_len) == 0) {
+        return 0;
+    }
+    return 1;
+}
+
+/* Snapshot, under the handle's critical section, the elements that satisfy the tag,
+   class, and attribute filters together with their collected text. node_matches runs
+   the structural filters here, the same way the non-text path does inside the lock;
+   only the text predicate is deferred, because it may run arbitrary Python and so
+   suspend the lock. text_candidate counts an upper bound first so the arrays are
+   sized once with no reallocation, and it never invokes a structural callable twice.
+   Writes the matched element pointers to *out_nodes and their text to *out_texts
+   (both PyMem arrays the caller always frees, with *out_count entries to DECREF in
+   out_texts) and the count to *out_count. Returns 0, or -1 with an exception set
+   when a structural filter raised; the partial snapshot is still returned for the
+   caller to release. */
+static int snapshot_text_candidates(PyObject *self, const query_t *query, th_node ***out_nodes, PyObject ***out_texts,
+                                    Py_ssize_t *out_count) {
+    module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    th_node **nodes = NULL;
+    PyObject **texts = NULL;
+    Py_ssize_t filled = 0;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    Py_ssize_t capacity = 0;
+    for (th_node *node = axis_first(origin, query->axis); node != NULL; node = axis_next(node, origin, query->axis)) {
+        if (text_candidate(query, node)) {
+            capacity++;
+        }
+    }
+    if (capacity > 0) {
+        nodes = PyMem_Malloc((size_t)capacity * sizeof(th_node *));
+        texts = PyMem_Malloc((size_t)capacity * sizeof(PyObject *));
+        if (nodes == NULL || texts == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced from a test */
+            error = 1;                        /* GCOVR_EXCL_LINE: allocation-failure path */
+        } else {                              /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+            for (th_node *node = axis_first(origin, query->axis); node != NULL;
+                 node = axis_next(node, origin, query->axis)) {
+                if (!text_candidate(query, node)) {
+                    continue;
+                }
+                int matched = node_matches(state, node, query);
+                if (matched < 0) {
+                    error = 1;
+                    break;
+                }
+                if (matched == 0) {
+                    continue;
+                }
+                PyObject *text = str_from_accessor(th_node_text, tree, node);
+                if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                    error = 1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+                    break;          /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                nodes[filled] = node;
+                texts[filled] = text;
+                filled++;
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    *out_nodes = nodes;
+    *out_texts = texts;
+    *out_count = filled;
+    return error ? -1 : 0;
+}
+
+/* Search along the axis for elements whose collected text satisfies the text
+   predicate, composed with the tag, class, and attribute filters. The predicate
+   (a str, compiled regex, or callable) runs over the snapshot taken under the lock;
+   nodes are arena-allocated and never freed individually, so the snapshot's
+   pointers stay valid across the predicate even if a concurrent mutation rewires
+   the tree. Returns the first match (want_all 0, None when nothing matches) or the
+   list of matches up to the limit (want_all 1). */
+static PyObject *find_with_text(PyObject *self, const query_t *query, int want_all) {
+    module_state *state = state_of(self);
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_node **nodes;
+    PyObject **texts;
+    Py_ssize_t count;
+    int error = snapshot_text_candidates(self, query, &nodes, &texts, &count) < 0;
+    PyObject *result = NULL;
+    if (!error && want_all) {
+        result = PyList_New(0);
+        if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            error = 1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    }
+    th_node *found = NULL;
+    for (Py_ssize_t index = 0; !error && index < count; index++) {
+        if (want_all && query->limit >= 0 && PyList_GET_SIZE(result) >= query->limit) {
+            break;
+        }
+        int matched = filter_matches(state, query->text, texts[index]);
+        if (matched < 0) {
+            error = 1;
+            break;
+        }
+        if (matched == 0) {
+            continue;
+        }
+        if (!want_all) {
+            found = nodes[index];
+            break;
+        }
+        if (append_wrapped(result, state, handle, nodes[index]) < 0) { /* GCOVR_EXCL_BR_LINE: alloc cannot fail */
+            error = 1;                                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;                                                     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    for (Py_ssize_t index = 0; index < count; index++) {
+        Py_DECREF(texts[index]);
+    }
+    PyMem_Free(nodes);
+    PyMem_Free(texts);
+    if (error) {
+        Py_XDECREF(result);
+        return NULL;
+    }
+    if (want_all) {
+        return result;
+    }
+    return node_wrap(state, handle, found);
+}
+
 PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     query_t query;
     if (build_query(self, args, kwargs, 0, &query) < 0) {
         free_query(&query);
         return NULL;
+    }
+    if (query.text != NULL) {
+        PyObject *result = find_with_text(self, &query, 0);
+        free_query(&query);
+        return result;
     }
     module_state *state = state_of(self);
     PyObject *handle = ((NodeObject *)self)->handle;
@@ -499,6 +653,11 @@ PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs) {
     if (build_query(self, args, kwargs, 1, &query) < 0) {
         free_query(&query);
         return NULL;
+    }
+    if (query.text != NULL) {
+        PyObject *result = find_with_text(self, &query, 1);
+        free_query(&query);
+        return result;
     }
     module_state *state = state_of(self);
     PyObject *handle = ((NodeObject *)self)->handle;

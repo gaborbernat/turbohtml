@@ -70,6 +70,7 @@ class Node:
         axis: Axis = ...,
         attrs: Mapping[str, _Filter] | None = ...,
         class_: _Filter | None = ...,
+        text: _Filter | None = ...,
         **filters: _Filter,
     ) -> Element | None: ...
     def find_all(
@@ -80,6 +81,7 @@ class Node:
         axis: Axis = ...,
         attrs: Mapping[str, _Filter] | None = ...,
         class_: _Filter | None = ...,
+        text: _Filter | None = ...,
         limit: int | None = ...,
         **filters: _Filter,
     ) -> list[Element]: ...

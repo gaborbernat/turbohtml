@@ -1127,24 +1127,30 @@ PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG
                          ":param meta_charset: ensure a <meta charset> naming encoding is present.\n"
                          ":returns: the serialized markup encoded as bytes.");
 
-PyDoc_STRVAR(find_doc, "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, **filters)\n--\n\n"
-                       "Find the first Element along axis matching the tag filter and every attribute\n"
-                       "filter. A filter is a str, bool, compiled regex, callable, or a list of those.\n\n"
-                       ":param tag: filter on the tag name.\n"
-                       ":param axis: which nodes to walk relative to this one.\n"
-                       ":param attrs: a mapping of attribute name to filter.\n"
-                       ":param class_: filter on a token of the class attribute.\n"
-                       ":param filters: further attribute filters given as keyword arguments.\n"
-                       ":returns: the first matching Element, or None.");
+PyDoc_STRVAR(find_doc,
+             "find(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, text=None, **filters)\n--\n\n"
+             "Find the first Element along axis matching the tag filter and every attribute\n"
+             "filter. A filter is a str, bool, compiled regex, callable, or a list of those.\n\n"
+             ":param tag: filter on the tag name.\n"
+             ":param axis: which nodes to walk relative to this one.\n"
+             ":param attrs: a mapping of attribute name to filter.\n"
+             ":param class_: filter on a token of the class attribute.\n"
+             ":param text: match the element's collected text (an exact str, a regex search, or a callable\n"
+             "    predicate); filter a literal text attribute through attrs={'text': ...}.\n"
+             ":param filters: further attribute filters given as keyword arguments.\n"
+             ":returns: the first matching Element, or None.");
 
 PyDoc_STRVAR(find_all_doc,
-             "find_all(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, limit=None, **filters)\n--\n\n"
+             "find_all(tag=None, /, *, axis=Axis.DESCENDANTS, attrs=None, class_=None, text=None, limit=None, "
+             "**filters)\n--\n\n"
              "Find every Element along axis matching the tag filter and every attribute\n"
              "filter, with the same filter forms as find().\n\n"
              ":param tag: filter on the tag name.\n"
              ":param axis: which nodes to walk relative to this one.\n"
              ":param attrs: a mapping of attribute name to filter.\n"
              ":param class_: filter on a token of the class attribute.\n"
+             ":param text: match each element's collected text (an exact str, a regex search, or a callable\n"
+             "    predicate).\n"
              ":param limit: stop after this many matches; None collects them all.\n"
              ":param filters: further attribute filters given as keyword arguments.\n"
              ":returns: the matching Elements in document order.");

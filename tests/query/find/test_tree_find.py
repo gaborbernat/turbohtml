@@ -1,4 +1,4 @@
-"""find()/find_all(): the filter grammar (str/regex/bool/callable/list), class_, axes, and limit."""
+"""find()/find_all(): the filter grammar (str/regex/bool/callable/list), class_, text, axes, and limit."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from turbohtml import Axis, Element, parse
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import TypeAlias
+
+    from turbohtml import Document
 
     Filter: TypeAlias = "str | re.Pattern[str] | bool | Callable[[str | None], bool] | list[Filter]"
 
@@ -310,8 +312,176 @@ def test_callable_error_propagates(id_filter: Filter) -> None:
         pytest.param(lambda: parse(_DOC).find("p", attrs={1: "x"}), id="attr-name-not-a-str"),  # ty: ignore[invalid-argument-type]
         # an int is not a valid filter type
         pytest.param(lambda: parse("<p>").find(id=123), id="unknown-filter-type"),  # ty: ignore[invalid-argument-type]
+        # text= takes the same filter grammar; an int is rejected at runtime
+        pytest.param(lambda: parse("<p>go</p>").find_all(text=123), id="bad-text-type"),  # ty: ignore[invalid-argument-type]
     ],
 )
 def test_type_errors(call: Callable[[], object]) -> None:
     with pytest.raises(TypeError):
         call()
+
+
+# --- text predicate: match an element by its collected text -------------------
+# The text= filter runs against the element's collected subtree text (what .text returns):
+# an exact str, a searched regex, or a callable. It composes with the structural filters,
+# and -- because a regex/callable runs Python mid-walk -- the C side snapshots candidates
+# and their text under the per-tree lock before running the predicate.
+
+_TEXT_DOC = (
+    "<section>"
+    '<button class="buy">Add to cart</button>'
+    "<p>Price: $19</p>"
+    '<span data-sku="x">SKU-7788</span>'
+    "<button>Cancel</button>"
+    "</section>"
+)
+
+
+def _starts_with_sku(value: str | None) -> bool:
+    return value is not None and value.startswith("SKU")
+
+
+@pytest.mark.parametrize(
+    ("text_filter", "tags"),
+    [
+        pytest.param("Add to cart", ["button"], id="string-is-exact-collected-text"),
+        pytest.param(re.compile(r"\$\d+"), ["p"], id="regex-searches"),
+        pytest.param(_starts_with_sku, ["span"], id="callable-receives-text"),
+        pytest.param("Cancel", ["button"], id="string-matches-second-button"),
+        pytest.param("nope", [], id="string-no-match"),
+    ],
+)
+def test_text_predicate_kinds(text_filter: Filter, tags: list[str]) -> None:
+    # search the section's descendants so the html/body/section wrappers (whose collected
+    # text concatenates every child) do not also match
+    section = _el(parse(_TEXT_DOC).find("section"))
+    assert _tags(section.find_all(text=text_filter)) == tags
+
+
+@pytest.mark.parametrize(
+    ("html", "text_filter", "tags"),
+    [
+        # a plain str is the whole collected text, not a substring of it
+        pytest.param(
+            "<section><p>Buy now</p><p>Buy</p></section>", "Buy", ["p"], id="string-is-full-text-not-substring"
+        ),
+        pytest.param("<section><p>Buy now</p><p>Buy</p></section>", "Buy now", ["p"], id="string-matches-full-text"),
+        # <p> collects "Buy " + "now"; only the <b> leaf collects exactly "now"
+        pytest.param("<section><p>Buy <b>now</b></p></section>", "Buy now", ["p"], id="collects-nested-descendants"),
+        pytest.param("<section><p>Buy <b>now</b></p></section>", "now", ["b"], id="nested-leaf-only"),
+        # a loose text node is on the walk but never matches the element-only predicate
+        pytest.param("<section>loose<p>go</p></section>", "go", ["p"], id="elements-only-not-text-nodes"),
+    ],
+)
+def test_text_over_a_section(html: str, text_filter: Filter, tags: list[str]) -> None:
+    section = _el(parse(html).find("section"))
+    assert _tags(section.find_all(text=text_filter)) == tags
+
+
+def test_text_matches_an_ancestor_whose_collected_text_equals_the_target() -> None:
+    # collected text is the whole subtree, so a wrapper with one matching child matches too
+    doc = parse("<div><p>solo</p></div>")
+    assert _tags(_el(doc.find("body")).find_all(text="solo")) == ["div", "p"]
+
+
+def test_text_find_returns_first_match() -> None:
+    section = _el(parse(_TEXT_DOC).find("section"))
+    assert _el(section.find(text=re.compile(r"\$"))).tag == "p"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        pytest.param(lambda doc: doc.find(text="missing"), None, id="find-none"),
+        pytest.param(lambda doc: doc.find_all(text="missing"), [], id="find-all-empty"),
+        # a known tag absent from the tree leaves zero candidates before any text is gathered
+        pytest.param(lambda doc: doc.find("table", text="go"), None, id="no-candidate-find"),
+        pytest.param(lambda doc: doc.find_all("table", text="go"), [], id="no-candidate-find-all"),
+    ],
+)
+def test_text_no_match(query: Callable[[Document], object], expected: object) -> None:
+    assert query(parse(_TEXT_DOC)) == expected
+
+
+@pytest.mark.parametrize(
+    ("html", "query", "tags"),
+    [
+        # only the <button> whose text matches, not the <p> that also carries it
+        pytest.param(
+            "<button>Add to cart</button><p>Add to cart</p>",
+            lambda doc: doc.find_all("button", text="Add to cart"),
+            ["button"],
+            id="tag-string",
+        ),
+        pytest.param(
+            "<button>go</button><bdo>go</bdo><div>go</div>",
+            lambda doc: doc.find_all(re.compile(r"^b"), text="go"),
+            ["button", "bdo"],
+            id="tag-regex",
+        ),
+        pytest.param(
+            "<my-widget>go</my-widget><my-widget>stop</my-widget>",
+            lambda doc: doc.find_all("my-widget", text="go"),
+            ["my-widget"],
+            id="custom-element-tag",
+        ),
+        pytest.param(
+            '<button class="buy">go</button><button>go</button>',
+            lambda doc: doc.find_all(class_="buy", text="go"),
+            ["button"],
+            id="class",
+        ),
+        pytest.param(
+            '<span data-sku="x">go</span><span>go</span>',
+            lambda doc: doc.find_all(text="go", attrs={"data-sku": "x"}),
+            ["span"],
+            id="attrs",
+        ),
+    ],
+)
+def test_text_composes_with_structural_filter(
+    html: str, query: Callable[[Document], list[Element]], tags: list[str]
+) -> None:
+    assert _tags(query(parse(html))) == tags
+
+
+def test_text_attribute_is_reserved_for_the_predicate() -> None:
+    # text= is the predicate, so a literal text attribute is matched through attrs= instead
+    doc = parse('<span text="hi">go</span><span>go</span>')
+    assert _tags(doc.find_all(text="go")) == ["span", "span"]  # both spans collect "go"
+    assert _tags(doc.find_all(text="go", attrs={"text": "hi"})) == ["span"]
+
+
+def test_text_on_children_axis() -> None:
+    doc = parse("<section><p>go</p><div><span>x</span></div></section>")
+    section = _el(doc.find("section"))
+    assert _tags(section.find_all(text="go", axis=Axis.CHILDREN)) == ["p"]  # the <div> child collects "x"
+    assert _tags(section.find_all(text="x")) == ["div", "span"]  # <div> and its <span> both collect "x"
+
+
+@pytest.mark.parametrize(
+    ("limit", "count"),
+    [
+        pytest.param(None, 3, id="none-is-unlimited"),
+        pytest.param(0, 0, id="zero-yields-nothing"),
+        pytest.param(2, 2, id="caps-results"),
+    ],
+)
+def test_text_limit(limit: int | None, count: int) -> None:
+    assert len(parse("<p>go</p><p>go</p><p>go</p>").find_all(text="go", limit=limit)) == count
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        # the text predicate raises while it runs over the snapshot
+        pytest.param(lambda doc: doc.find_all(text=_raise), id="text-predicate-find-all"),
+        pytest.param(lambda doc: doc.find(text=_raise), id="text-predicate-find"),
+        # a structural callable raises during the snapshot pass, before the text predicate runs
+        pytest.param(lambda doc: doc.find_all(text="go", id=_raise), id="structural-find-all"),
+        pytest.param(lambda doc: doc.find(text="go", id=_raise), id="structural-find"),
+    ],
+)
+def test_text_callable_error_propagates(query: Callable[[Document], object]) -> None:
+    with pytest.raises(ZeroDivisionError):
+        query(parse(_TEXT_DOC))
