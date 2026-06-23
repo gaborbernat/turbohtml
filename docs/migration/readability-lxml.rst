@@ -61,3 +61,29 @@ when you need a scrubbed body.
   same :class:`~turbohtml.Article` record.
 - A page with no scoring article leaves ``element`` ``None`` and ``text`` empty while still filling the metadata, so
   branch on ``art.element`` rather than assuming a body.
+
+*************
+ Performance
+*************
+
+Scoring the content body of a full page -- navigation, a scored article, and a footer -- measured with ``tox -e bench
+article`` on CPython 3.14 (release build, Apple M4, macOS 26). :meth:`~turbohtml.Node.article` runs the same
+content-density heuristic in C and selects the live element; readability-lxml builds an lxml tree and rewrites it into a
+cleaned summary fragment. Numbers vary with input and hardware.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - input
+      - turbohtml
+      - readability-lxml
+      - speedup
+    - - post (4 KiB)
+      - 23 µs
+      - 1.26 ms
+      - 55x
+    - - longform (16 KiB)
+      - 70 µs
+      - 2.54 ms
+      - 36x

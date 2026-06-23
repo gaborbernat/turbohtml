@@ -68,3 +68,29 @@ bundles has no equivalent and is out of scope.
 - newspaper's keyword extraction, summarization, and other NLP have no turbohtml equivalent and are out of scope.
 - A page with no scoring article leaves ``element`` ``None`` and ``text`` empty while still filling the metadata, so
   branch on ``art.element`` rather than assuming a body.
+
+*************
+ Performance
+*************
+
+Extracting the content body and metadata from a full page -- navigation, a scored article, and a footer -- measured with
+``tox -e bench article`` on CPython 3.14 (release build, Apple M4, macOS 26). :meth:`~turbohtml.Node.article` scores and
+harvests in one C pass over the parsed tree; newspaper3k builds an lxml tree and runs its own regex-driven metadata
+scan. Numbers vary with input and hardware.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - input
+      - turbohtml
+      - newspaper3k
+      - speedup
+    - - post (4 KiB)
+      - 23 µs
+      - 3.52 ms
+      - 152x
+    - - longform (16 KiB)
+      - 70 µs
+      - 8.97 ms
+      - 128x

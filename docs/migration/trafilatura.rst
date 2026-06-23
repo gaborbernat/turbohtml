@@ -68,6 +68,32 @@ returns the first of a ``<time>``, an ``article:published_time`` meta, and a com
 ``datetime.date.fromisoformat`` or ``dateutil`` when you need a real date object, and keep htmldate for pages whose date
 is only inferable.
 
+*************
+ Performance
+*************
+
+Extracting the content body and metadata from a full page -- navigation, a scored article, and a footer -- measured with
+``tox -e bench article`` on CPython 3.14 (release build, Apple M4, macOS 26). :meth:`~turbohtml.Node.article` scores and
+harvests in one C pass over the parsed tree; trafilatura builds an lxml tree in Python first. Numbers vary with input
+and hardware.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - input
+      - turbohtml
+      - trafilatura
+      - speedup
+    - - post (4 KiB)
+      - 23 µs
+      - 1.34 ms
+      - 58x
+    - - longform (16 KiB)
+      - 70 µs
+      - 3.13 ms
+      - 45x
+
 **********
  Pitfalls
 **********

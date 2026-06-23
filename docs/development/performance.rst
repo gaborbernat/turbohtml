@@ -9,8 +9,8 @@ source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript spec
 <https://github.com/tc39/ecma262>`_, and a size-weighted sample of `web-platform-tests
 <https://github.com/web-platform-tests/wpt>`_ pages. Reproduce any section with ``tox -e bench <suite>``, where the
 suite is one of ``escape``, ``unescape``, ``tokenize``, ``parse``, ``query``, ``xpath``, ``serialize``, ``build``,
-``edit``, ``chain``, ``htmlparser``, ``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``, ``sanitize``, or
-``structured``. Numbers vary with input and hardware.
+``edit``, ``chain``, ``htmlparser``, ``markup``, ``minify``, ``tables``, ``linkify``, ``markdown``, ``sanitize``,
+``structured``, or ``article``. Numbers vary with input and hardware.
 
 **********
  Escaping
@@ -296,6 +296,37 @@ the smallest, where pandas pays its fixed per-frame construction cost.
     - - records (1000 rows)
       - 893 µs
       - 13.0 ms
+
+********************
+ Article extraction
+********************
+
+:meth:`turbohtml.Node.article` against `trafilatura <https://trafilatura.readthedocs.io>`_, `readability-lxml
+<https://github.com/buriy/python-readability>`_, and `newspaper3k <https://newspaper.readthedocs.io>`_, the article
+extractors it succeeds. Each scores the dominant content body and (trafilatura and newspaper3k) harvests the page
+metadata beside it; the others build an lxml tree in Python first, where turbohtml does the scoring and the harvest in
+one C pass over the parsed tree. The inputs are full pages -- navigation, a scored article, and a footer -- so the
+boilerplate the heuristic discounts is part of the measured cost.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 16 18 22 18
+
+    - - input
+      - turbohtml
+      - trafilatura
+      - readability-lxml
+      - newspaper3k
+    - - post (4 KiB)
+      - 23 µs
+      - 1.34 ms
+      - 1.26 ms
+      - 3.52 ms
+    - - longform (16 KiB)
+      - 70 µs
+      - 3.13 ms
+      - 2.54 ms
+      - 8.97 ms
 
 ************
  Unescaping
