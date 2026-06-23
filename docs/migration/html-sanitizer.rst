@@ -2,8 +2,8 @@
  From html-sanitizer
 #####################
 
-.. image:: https://static.pepy.tech/badge/html-sanitizer
-    :alt: html-sanitizer downloads
+.. image:: https://static.pepy.tech/badge/html-sanitizer/month
+    :alt: html-sanitizer monthly downloads
     :target: https://pepy.tech/project/html-sanitizer
 
 `html-sanitizer <https://github.com/matthiask/html-sanitizer>`_ is an allowlist sanitizer over lxml, configured with a
