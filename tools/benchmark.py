@@ -104,11 +104,11 @@ _LXML_CLEANER = lxml_html_clean.Cleaner()
 _HTML_SANITIZER = html_sanitizer.Sanitizer()
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from lxml.html import HtmlElement
 
-    from turbohtml import Document
+    from turbohtml import Document, Element
 
 CORPUS_DIR = Path(__file__).parent / "html5lib-python" / "benchmarks" / "data"
 CORPUS_FILES: list[tuple[str, str, str]] = [
@@ -1778,7 +1778,7 @@ def _bench_count_ext(_context: object, nodes: list[object]) -> float:
     return float(len(nodes))
 
 
-_XPATH_EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {
+_XPATH_EXTENSIONS: dict[tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]] = {
     (None, "ext_count"): _bench_count_ext
 }
 
@@ -1823,12 +1823,33 @@ def lxml_extension(tree: HtmlElement) -> None:
     tree.xpath("ext_count(//a)", extensions=_XPATH_EXTENSIONS)
 
 
+def _bench_first_two(_context: object, nodes: list[Element]) -> list[Element]:
+    """Return the first two nodes as a node-set; the cheapest non-trivial node-set return."""
+    return nodes[:2]
+
+
+_XPATH_NODESET_EXTENSIONS: dict[
+    tuple[str | None, str], Callable[..., str | float | bool | Element | Iterable[Element]]
+] = {(None, "ext_first_two"): _bench_first_two}
+
+
+def turbo_nodeset_extension(doc: Document) -> None:
+    """Call an extension that returns a node-set feeding a later path step, turbohtml."""
+    doc.xpath("ext_first_two(//a)/@href", extensions=_XPATH_NODESET_EXTENSIONS)
+
+
+def lxml_nodeset_extension(tree: HtmlElement) -> None:
+    """Call an extension that returns a node-set feeding a later path step, lxml."""
+    tree.xpath("ext_first_two(//a)/@href", extensions=_XPATH_NODESET_EXTENSIONS)
+
+
 # Each parity feature paired with its turbohtml and lxml driver.
 XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[HtmlElement], None]], ...] = (
     ("$variable binding", turbo_variable, lxml_variable),
     ("EXSLT re:test", turbo_retest, lxml_retest),
     ("smart_strings", turbo_smart, lxml_smart),
     ("extension function", turbo_extension, lxml_extension),
+    ("extension node-set", turbo_nodeset_extension, lxml_nodeset_extension),
 )
 
 # The reuse path turbohtml.XPath adds: parse the expression once into an immutable

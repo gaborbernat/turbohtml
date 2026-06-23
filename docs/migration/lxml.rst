@@ -86,6 +86,9 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
       - :class:`~turbohtml.XPath` (``XPath("//a[@href=$u]")(el, u=v)``)
     - - ``el.cssselect("div a")``
       - :meth:`~turbohtml.Node.select`
+    - - ``etree.FunctionNamespace(None)["f"] = fn``; ``el.xpath("f(//a)")``
+      - :meth:`el.xpath("f(//a)", extensions={(None, "f"): fn}) <turbohtml.Node.xpath>` (the function may return a
+        scalar, an :class:`~turbohtml.Element`, or an iterable of elements)
     - - ``lxml.html.Element("div")``, ``etree.SubElement(p, "div")``
       - :class:`~turbohtml.Element`, :meth:`p.append(Element("div")) <turbohtml.Element.append>`
     - - ``el.drop_tag()``, ``el.drop_tree()``
@@ -149,6 +152,30 @@ kB wpt page from the :doc:`/development/performance` benchmark (``tox -e bench x
 .. testoutput::
 
     ['/x']
+
+lxml registers custom XPath callables through ``etree.FunctionNamespace``; turbohtml passes them per call through the
+``extensions=`` mapping of :meth:`~turbohtml.Node.xpath`. Both dispatch a Python callable per match, but lxml
+re-resolves its namespace and function table on every evaluation while turbohtml binds the mapping once against the
+compiled expression, and a callable that returns an :class:`~turbohtml.Element` (or an iterable of them) is marshaled
+straight back into the evaluator's node-set so the next path step stays on the all-C fast path. Measured over the 9.6 kB
+wpt page with ``tox -e bench xpath``:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 46 18 18 18
+
+    - - extension call
+      - turbohtml
+      - lxml
+      - speed-up
+    - - scalar return (``ext_count(//a)``)
+      - 1.1 µs
+      - 4.1 µs
+      - 3.6x
+    - - node-set return (``ext_first_two(//a)/@href``)
+      - 1.1 µs
+      - 3.2 µs
+      - 2.9x
 
 **********
  Pitfalls

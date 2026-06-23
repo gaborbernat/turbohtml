@@ -374,6 +374,32 @@ namespace; the ``re:`` prefix dispatches to Python's :mod:`re`:
 
     ['/p/12']
 
+Register your own functions under ``extensions={(namespace, name): callable}`` (use ``None`` for the namespace to call
+the function unprefixed). The callable receives a context whose ``context_node`` is the current element, then the
+evaluated arguments: a node-set arrives as a ``list`` of :class:`~turbohtml.Element`, and a string, number, or boolean
+as the matching Python scalar. Returning a ``str``, number, or ``bool`` produces a scalar; returning an element or an
+iterable of elements produces a node-set that feeds later path steps and predicates, exactly as in ``lxml``:
+
+.. testcode::
+
+    import turbohtml
+    from types import SimpleNamespace
+    from turbohtml import Element
+
+    def first_two(context: SimpleNamespace, nodes: list[Element]) -> list[Element]:
+        return nodes[:2]
+
+    doc = turbohtml.parse("<ul><li>a</li><li>b</li><li>c</li></ul>")
+    result = doc.xpath("first_two(//li)/text()", extensions={(None, "first_two"): first_two})
+    print(result)
+
+.. testoutput::
+
+    ['a', 'b']
+
+Every element in a returned node-set must belong to the document being queried; returning one from another parse raises
+``ValueError``.
+
 When one expression runs over many nodes or documents -- a scraper looping rows, or one query across a corpus -- compile
 it once with :class:`turbohtml.XPath` instead of re-parsing it on every :meth:`~turbohtml.Node.xpath` call. Bind
 ``smart_strings`` and ``extensions`` at construction, then call the object with a context node and any ``$name``

@@ -1494,6 +1494,80 @@ typedef struct {
     th_tree *tree;
 } xpath_ext_ctx;
 
+/* Grow `set` by one node (attr -1, the node itself), doubling capacity as needed. */
+static int xpath_nodeset_push(xp_nodeset *set, th_node *node) {
+    if (set->len == set->cap) {
+        Py_ssize_t cap = set->cap ? set->cap * 2 : 8;
+        xp_item *grown = PyMem_Realloc(set->items, (size_t)cap * sizeof(xp_item));
+        if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+            return -1;        /* GCOVR_EXCL_LINE */
+        }
+        set->items = grown;
+        set->cap = cap;
+    }
+    set->items[set->len].node = node;
+    set->items[set->len].attr = -1;
+    set->len++;
+    return 0;
+}
+
+/* Append the tree node a returned element wraps to `set`, rejecting an object that
+   is not one of this module's nodes or an element bound to a different document. */
+static int xpath_append_result_node(xpath_ext_ctx *ec, PyObject *obj, xp_nodeset *set) {
+    if (!is_node(obj, ec->state)) {
+        PyErr_Format(PyExc_TypeError,
+                     "xpath extension result must be str, int, float, bool, an element, or an iterable of elements, "
+                     "not %.80s",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    NodeObject *node_obj = (NodeObject *)obj;
+    if (node_obj->handle != ec->handle) {
+        PyErr_SetString(PyExc_ValueError, "xpath extension returned an element from a different document");
+        return -1;
+    }
+    return xpath_nodeset_push(set, node_obj->node);
+}
+
+/* Marshal an extension's return value into an xp_result: a Python scalar keeps the
+   str/int/float/bool conversion; a single element or an iterable of elements becomes
+   a node-set (issue #265). */
+static int xpath_extension_result(xpath_ext_ctx *ec, PyObject *obj, xp_result *out) {
+    if (PyBool_Check(obj) || PyLong_Check(obj) || PyFloat_Check(obj) || PyUnicode_Check(obj)) {
+        return xpath_pyobject_to_scalar(obj, out, "an extension result");
+    }
+    memset(out, 0, sizeof(*out));
+    out->kind = XP_NODESET;
+    if (is_node(obj, ec->state)) {
+        return xpath_append_result_node(ec, obj, &out->nodes);
+    }
+    PyObject *iterator = PyObject_GetIter(obj);
+    if (iterator == NULL) {
+        PyErr_Format(PyExc_TypeError,
+                     "xpath extension result must be str, int, float, bool, an element, or an iterable of elements, "
+                     "not %.80s",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    PyObject *item;
+    while ((item = PyIter_Next(iterator)) != NULL) {
+        int rc = xpath_append_result_node(ec, item, &out->nodes);
+        Py_DECREF(item);
+        if (rc < 0) {
+            Py_DECREF(iterator);
+            xp_result_free(out);
+            return -1;
+        }
+    }
+    Py_DECREF(iterator);
+    if (PyErr_Occurred()) { /* the iterable raised partway through */
+        xp_result_free(out);
+        return -1;
+    }
+    return 0;
+}
+
 /* Marshal one evaluated argument to the Python object an extension receives. */
 static PyObject *xpath_arg_to_py(xpath_ext_ctx *ec, const xp_result *value) {
     if (value->kind == XP_NODESET) {
@@ -1591,7 +1665,7 @@ static int xpath_call_extension(void *vctx, th_node *context_node, const Py_UCS4
     if (result == NULL) {
         return -1; /* the extension raised */
     }
-    int rc = xpath_pyobject_to_scalar(result, out, "an extension result");
+    int rc = xpath_extension_result(ec, result, out);
     Py_DECREF(result);
     return rc;
 }
