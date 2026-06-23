@@ -64,6 +64,8 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
         :attr:`~turbohtml.Node.stripped_strings`
     - - ``node.html``, ``node.decompose()``, ``node.unwrap()``
       - :attr:`~turbohtml.Node.html`, :meth:`~turbohtml.Node.decompose`, :meth:`~turbohtml.Node.unwrap`
+    - - ``parser.strip_tags(["script"])``, ``node.unwrap_tags(["b"])``
+      - :meth:`node.remove("script") <turbohtml.Node.remove>`, :meth:`node.strip_tags("b") <turbohtml.Node.strip_tags>`
 
 .. testcode::
 
@@ -74,6 +76,28 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
 
     ['a', 'b']
 
+*************
+ Performance
+*************
+
+Dropping a set of tags together with their subtrees: selectolax's ``strip_tags`` against turbohtml's
+:meth:`~turbohtml.Node.remove`, over a 92 kB page holding 839 ``<code>``/``<a>``/``<q>`` elements. Both rewrites are
+destructive, so the timed call parses the page, drops every match, and serializes the result -- the string-to-result
+pass these helpers exist for. turbohtml's lighter native tree runs the whole pass three times faster:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 46 18 18 18
+
+    - - drop tags with content (92 kB)
+      - turbohtml
+      - selectolax
+      - speed-up
+    - - ``remove`` vs ``strip_tags``
+      - 554 µs
+      - 1.73 ms
+      - 3.1x
+
 **********
  Pitfalls
 **********
@@ -81,5 +105,8 @@ heavier object layer, turbohtml's lighter native tree parses and serializes fast
 - selectolax queries are CSS-only; turbohtml adds the ``find``/``find_all`` filter grammar with axes and regex or
   callable filters.
 - ``node.text`` is a property; drop the parentheses.
+- the bulk tag strippers are named the other way around: selectolax's ``strip_tags`` drops the tags *with* their content
+  (turbohtml's :meth:`~turbohtml.Node.remove`), while its ``unwrap_tags`` keeps the content (turbohtml's
+  :meth:`~turbohtml.Node.strip_tags`). Both turbohtml methods take a full CSS selector, not just a tag-name list.
 - selectolax's lexbor-specific knobs and its raw C-level node handles are not exposed; turbohtml's public surface is the
   typed Python tree, not the underlying engine's C API.

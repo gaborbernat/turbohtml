@@ -34,6 +34,15 @@ across such a call once an edit could have rewired it, so the matching pass touc
 change and the removal pass calls into no Python. A match keeps its whole subtree and its ancestors keep their place, so
 a large document collapses to just the parts of interest in one locked pass over the arena.
 
+:meth:`~turbohtml.Node.remove` and :meth:`~turbohtml.Node.strip_tags` are the same snapshot-then-edit pass run for the
+opposite effect, the bulk inverses of ``prune``. ``remove`` deletes every match and its subtree -- what ``prune`` keeps
+-- and ``strip_tags`` unwraps every match, splicing its children into its place to keep the content while dropping the
+tag, the bulk form of :meth:`~turbohtml.Node.unwrap`. Both collect the matches in the pure-C matching pass first so the
+edit pass dereferences no link a Python callback could have rewired. The arena's detach-only removal makes the bulk
+edits robust to nesting: a removed node never frees, only unlinks, so a deeper match whose ancestor already left the
+tree drops harmlessly, and an unwrapped node only relinks, so a nested match stays live -- reparented onto the surviving
+ancestor -- until its own turn comes.
+
 Construction reuses the same arena machinery: :class:`~turbohtml.Element`, :class:`~turbohtml.Text`, and the rest build
 a standalone single-node tree that owns its data, ready to adopt into a document, and tag and attribute names are
 ASCII-lowercased so they resolve to the same interned atoms the parser assigns. :attr:`Element.attrs

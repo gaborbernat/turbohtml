@@ -181,6 +181,58 @@ def test_concurrent_prune_and_reads_are_memory_safe() -> None:
     assert len(doc.find_all("p")) == 400
 
 
+def test_concurrent_remove_and_reads_are_memory_safe() -> None:
+    doc = _doc(400)
+    body = doc.find("body")
+    assert body is not None
+    start = threading.Barrier(3)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.find_all("p")  # walks the tree while remove snapshots and detaches subtrees
+            body.serialize()
+
+    def selector() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.select("div span")
+
+    def remover() -> None:
+        start.wait()
+        body.remove("span")  # drops every <span> subtree, keeps the <p> siblings
+
+    _run(reader, selector, remover)
+    assert doc.find_all("span") == []  # remove dropped every <span>
+    assert len(doc.find_all("p")) == 400
+
+
+def test_concurrent_strip_tags_and_reads_are_memory_safe() -> None:
+    doc = _doc(400)
+    body = doc.find("body")
+    assert body is not None
+    start = threading.Barrier(3)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.find_all("p")  # walks the tree while strip_tags snapshots and relinks it
+            body.serialize()
+
+    def selector() -> None:
+        start.wait()
+        for _ in range(200):
+            doc.select("div p")
+
+    def stripper() -> None:
+        start.wait()
+        body.strip_tags("div")  # unwraps every <div>, lifting its <p>/<span> into the body
+
+    _run(reader, selector, stripper)
+    assert doc.find_all("div") == []  # every <div> was unwrapped
+    assert len(doc.find_all("p")) == 400  # its children survived
+
+
 def test_concurrent_main_content_extraction_is_memory_safe() -> None:
     paragraphs = "".join(
         f"<p>Paragraph {index}, a clause, with prose, holds enough words to score as real content here.</p>"

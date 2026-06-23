@@ -1100,6 +1100,18 @@ PyDoc_STRVAR(prune_doc, "prune(selector, /)\n--\n\n"
                         ":param selector: the CSS selector the kept descendants must match.\n"
                         ":returns: this node.");
 
+PyDoc_STRVAR(remove_doc, "remove(selector, /)\n--\n\n"
+                         "Drop every descendant Element matching the CSS selector, each with its\n"
+                         "whole subtree, and return this node. The bulk inverse of prune (which keeps\n"
+                         "the matches): the destructive counterpart of selectolax's strip_tags and\n"
+                         "w3lib's remove_tags_with_content, and of jQuery's .remove().");
+
+PyDoc_STRVAR(strip_tags_doc, "strip_tags(selector, /)\n--\n\n"
+                             "Unwrap every descendant Element matching the CSS selector, replacing each\n"
+                             "match with its children in place while keeping that content, and return\n"
+                             "this node. The bulk form of unwrap, matching selectolax's unwrap_tags,\n"
+                             "w3lib's remove_tags, and jQuery's .unwrap().");
+
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds);
 
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds);
@@ -1207,6 +1219,8 @@ static PyMethodDef node_methods[] = {
     {"matches", node_css_matches, METH_O, matches_doc},
     {"closest", node_css_closest, METH_O, closest_doc},
     {"prune", node_prune, METH_O, prune_doc},
+    {"remove", node_remove, METH_O, remove_doc},
+    {"strip_tags", node_strip_tags, METH_O, strip_tags_doc},
     {"re", (PyCFunction)(void (*)(void))node_re, METH_VARARGS | METH_KEYWORDS, re_doc},
     {"re_first", (PyCFunction)(void (*)(void))node_re_first, METH_VARARGS | METH_KEYWORDS, re_first_doc},
     {"serialize", (PyCFunction)(void (*)(void))node_serialize, METH_VARARGS | METH_KEYWORDS, serialize_doc},

@@ -428,6 +428,8 @@ PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds);
 PyObject *node_css_matches(PyObject *self, PyObject *arg);
 PyObject *node_css_closest(PyObject *self, PyObject *arg);
 PyObject *node_prune(PyObject *self, PyObject *arg);
+PyObject *node_remove(PyObject *self, PyObject *arg);
+PyObject *node_strip_tags(PyObject *self, PyObject *arg);
 PyObject *wrap_fresh_tree_node(module_state *state, th_tree *tree, th_node *node);
 PyObject *data_node_in_fresh_tree(module_state *state, int node_type, PyObject *data);
 PyObject *node_copy(PyObject *self, PyObject *Py_UNUSED(ignored));

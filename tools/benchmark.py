@@ -672,6 +672,67 @@ CLASS_EDIT_LIBS: tuple[tuple[str, Callable[[str], object], Callable[..., None]],
     ("lxml", lxml_tree, lxml_classes_edit),
 )
 
+# A bulk tag edit: drop a set of tags with their subtrees, or unwrap them and keep
+# their content. Both rewrites are destructive, so a pre-parsed tree could not be
+# re-edited each iteration; the timed call parses the page afresh, the string-to-result
+# transform these helpers exist to perform. The same code/a/q set is dropped or unwrapped
+# on the largest read-path page, raced against each library's bulk tag helper: selectolax's
+# strip_tags drops the matches with their content (turbohtml's remove), w3lib's regex
+# remove_tags keeps the content (turbohtml's strip_tags), and pyquery offers both .remove()
+# and an lxml drop_tag unwrap. selectolax/w3lib/pyquery are already hard imports of this module.
+STRIP_CASE = "bulk strip/remove (92 kB)"
+STRIP_SELECTOR = "code, a, q"
+STRIP_TAGS = ("code", "a", "q")
+
+
+def turbo_remove(text: str) -> None:
+    """Parse, then drop every code/a/q subtree with turbohtml's bulk remove and serialize."""
+    _ = turbohtml.parse(text).remove(STRIP_SELECTOR).html
+
+
+def turbo_strip(text: str) -> None:
+    """Parse, then unwrap every code/a/q element with turbohtml's strip_tags and serialize."""
+    _ = turbohtml.parse(text).strip_tags(STRIP_SELECTOR).html
+
+
+def lexbor_strip(text: str) -> None:
+    """Drop the same tags with their content using selectolax's strip_tags, then serialize."""
+    tree = LexborHTMLParser(text)
+    tree.strip_tags(list(STRIP_TAGS))
+    _ = tree.html
+
+
+def w3lib_remove(text: str) -> None:
+    """Strip the same tags but keep their text with w3lib's regex remove_tags."""
+    _ = w3lib.html.remove_tags(text, which_ones=STRIP_TAGS)
+
+
+def pyquery_remove(text: str) -> None:
+    """Drop the same subtrees with pyquery's .remove(), then serialize."""
+    page = PyQuery(text)
+    page(STRIP_SELECTOR).remove()
+    _ = str(page)
+
+
+def pyquery_unwrap(text: str) -> None:
+    """Unwrap the same tags keeping their content with lxml's drop_tag under pyquery, then serialize."""
+    page = PyQuery(text)
+    for element in page(STRIP_SELECTOR):
+        element.drop_tag()
+    _ = str(page)
+
+
+# (label, edit) pairs for the bulk strip/remove race; the label names the library method so
+# the printed table can pair each turbohtml method with the helper of matching semantics.
+STRIP_LIBS: tuple[tuple[str, Callable[[str], None]], ...] = (
+    ("turbohtml remove", turbo_remove),
+    ("turbohtml strip_tags", turbo_strip),
+    ("selectolax strip_tags", lexbor_strip),
+    ("w3lib remove_tags", w3lib_remove),
+    ("pyquery remove", pyquery_remove),
+    ("pyquery unwrap", pyquery_unwrap),
+)
+
 
 def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
     """Benchmark a link-rewriting edit across every library; return the case names."""
@@ -686,6 +747,8 @@ def run_edit_suite(bench: Callable[[str, object, object], None]) -> list[str]:
     for label, build, edit in CLASS_EDIT_LIBS:
         bench(f"edit {CLASS_EDIT_CASE} [{label}]", edit, build(text))
     names.append(CLASS_EDIT_CASE)
+    for strip_label, strip_edit in STRIP_LIBS:
+        bench(f"{STRIP_CASE} [{strip_label}]", strip_edit, text)
     # Content setters on one representative page: set_inner_html across the editing-table
     # libraries, plus pyquery's .html()/.text() for the migration guide's comparison.
     set_label, set_path, set_enc = READPATH_CASES[1]
@@ -716,6 +779,31 @@ def print_edit_table(means: dict[str, float], cases: list[str]) -> None:
             other = means.get(f"edit {name} [{label}]")
             row += f" {other * 1e6:8.1f} us {other / turbo:4.1f}x" if other is not None else f"{'-':>18}"
         print(row)
+    print_strip_table(means)
+
+
+# turbohtml method paired with the library helper of matching semantics: a drop-the-subtree
+# remove and a keep-the-content strip_tags, each beside the competitor that does the same.
+STRIP_PAIRS: tuple[tuple[str, str], ...] = (
+    ("turbohtml remove", "selectolax strip_tags"),
+    ("turbohtml strip_tags", "w3lib remove_tags"),
+    ("turbohtml remove", "pyquery remove"),
+    ("turbohtml strip_tags", "pyquery unwrap"),
+)
+
+
+def print_strip_table(means: dict[str, float]) -> None:
+    """Render the bulk strip/remove race, pairing each turbohtml method with the matching library helper."""
+    if f"{STRIP_CASE} [turbohtml remove]" not in means:
+        return
+    print()
+    print(STRIP_CASE)
+    print(f"{'turbohtml method':22} {'turbohtml':>11} {'library helper':>22} {'library':>11} {'slowdown':>9}")
+    for turbo_label, other_label in STRIP_PAIRS:
+        turbo = means[f"{STRIP_CASE} [{turbo_label}]"]
+        other = means[f"{STRIP_CASE} [{other_label}]"]
+        method = turbo_label.removeprefix("turbohtml ")
+        print(f"{method:22} {turbo * 1e6:8.1f} us {other_label:>22} {other * 1e6:8.1f} us {other / turbo:8.1f}x")
 
 
 # --- chain suite: a pyquery-style fluent chain over a pre-parsed tree ------- #

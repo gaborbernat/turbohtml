@@ -763,6 +763,31 @@ entry.
       - 5.1 µs
       - 60.6 µs
 
+A third pass is a bulk tag edit over the 92 kB page (839 ``<code>``/``<a>``/``<q>`` elements):
+:meth:`~turbohtml.Node.remove` drops each match with its subtree, and :meth:`~turbohtml.Node.strip_tags` unwraps each
+match but keeps its content. Both rewrites are destructive, so the timed call parses the page afresh -- the
+string-to-result transform these helpers perform -- and races each library's own bulk tag helper. selectolax's
+``strip_tags`` drops the matches with their content, so it pairs with ``remove``; w3lib's regex ``remove_tags`` keeps
+the content, so it pairs with ``strip_tags`` (pyquery's ``.remove()``/``.unwrap()`` numbers are in its :doc:`migration
+page </migration/pyquery>`).
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - bulk strip/remove (92 kB)
+      - turbohtml
+      - library
+      - slowdown
+    - - ``remove`` vs selectolax ``strip_tags``
+      - 554 µs
+      - 1.73 ms
+      - 3.1x
+    - - ``strip_tags`` vs w3lib ``remove_tags``
+      - 607 µs
+      - 1.11 ms
+      - 1.8x
+
 *****************
  Fluent chaining
 *****************
