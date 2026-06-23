@@ -914,6 +914,70 @@ static PyObject *node_main_text(PyObject *self, PyObject *Py_UNUSED(ignored)) {
     return result;
 }
 
+/* Store the Article record type the C core constructs for article(); turbohtml._article registers it on import. */
+PyObject *turbohtml_register_article(PyObject *module, PyObject *type) {
+    module_state *state = PyModule_GetState(module);
+    Py_XSETREF(state->article_type, Py_NewRef(type));
+    Py_RETURN_NONE;
+}
+
+/* Materialize one harvested metadata buffer as a str, or None when it is absent. */
+static PyObject *article_field(const Py_UCS4 *data, Py_ssize_t len) {
+    if (data == NULL) {
+        Py_RETURN_NONE;
+    }
+    return ucs4_to_str(data, len);
+}
+
+PyDoc_STRVAR(article_doc, "article()\n--\n\n"
+                          "Return an Article record for the dominant content under this node: the\n"
+                          "scored content body (element), its layout-aware plain text (text, as\n"
+                          "main_text()), and the page metadata harvested from the document -- title,\n"
+                          "byline, date, description and lang. element is None and text is empty when\n"
+                          "nothing reads as content; each metadata field is None when absent. Title\n"
+                          "comes from <h1>, then og:title, then <title>; byline from a rel=author\n"
+                          "link, then a meta author, then article:author; date from <time>, then\n"
+                          "article:published_time, then a common date meta; description from\n"
+                          "og:description, then a meta description; lang from <html lang>. Pure C.");
+
+static PyObject *node_article(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_tree *tree = tree_of(self);
+    text_opts opt = th_text_default_opts();
+    th_node *winner = NULL;
+    Py_UCS4 *text_data = NULL;
+    Py_ssize_t text_len = 0;
+    th_article_meta meta = {0};
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    winner = th_node_main_content(tree, ((NodeObject *)self)->node);
+    if (winner != NULL) {
+        text_data = th_node_layout_text(tree, winner, &opt, &text_len);
+    }
+    th_article_metadata(tree, th_tree_document(tree), &meta);
+    Py_END_CRITICAL_SECTION();
+
+    PyObject *element = winner != NULL ? turbohtml_node_wrap_in(self, winner) : Py_NewRef(Py_None);
+    /* th_node_layout_text leaves text_data NULL with text_len 0 only on an
+       (unforceable) allocation failure, which ucs4_to_str renders as empty text. */
+    PyObject *text = winner != NULL ? ucs4_to_str(text_data, text_len) : ucs4_to_str(NULL, 0);
+    PyMem_Free(text_data);
+    PyObject *title = article_field(meta.title, meta.title_len);
+    PyObject *byline = article_field(meta.byline, meta.byline_len);
+    PyObject *date = article_field(meta.date, meta.date_len);
+    PyObject *description = article_field(meta.description, meta.description_len);
+    PyObject *lang = article_field(meta.lang, meta.lang_len);
+    th_article_meta_clear(&meta);
+
+    /* Py_BuildValue("(N...)") steals each reference and, if any field is NULL from
+       an (unforceable) allocation failure, propagates the error and frees the rest. */
+    PyObject *args = Py_BuildValue("(NNNNNNN)", element, text, title, byline, date, description, lang);
+    if (args == NULL) { /* GCOVR_EXCL_BR_LINE: a field is NULL only on an unforceable allocation failure */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = PyObject_CallObject(state_of(self)->article_type, args);
+    Py_DECREF(args);
+    return result;
+}
+
 static PyGetSetDef node_getset[] = {
     {"parent", node_get_parent, NULL, "the parent Element or Document, or None for the document root", NULL},
     {"children", node_get_children, NULL, "the child nodes as a tuple", NULL},
@@ -1246,6 +1310,7 @@ static PyMethodDef node_methods[] = {
     {"tables", node_tables, METH_NOARGS, tables_doc},
     {"main_content", node_main_content, METH_NOARGS, main_content_doc},
     {"main_text", node_main_text, METH_NOARGS, main_text_doc},
+    {"article", node_article, METH_NOARGS, article_doc},
     {"insert_before", node_insert_before, METH_VARARGS, insert_before_doc},
     {"insert_after", node_insert_after, METH_VARARGS, insert_after_doc},
     {"replace_with", node_replace_with, METH_VARARGS, replace_with_doc},

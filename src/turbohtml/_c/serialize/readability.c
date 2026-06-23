@@ -311,3 +311,262 @@ th_node *th_node_main_content(th_tree *tree, th_node *root) {
     PyMem_Free(scorer.candidates);
     return best;
 }
+
+/* ----------------------------------------------------- article metadata */
+
+static int read_is_ws(Py_UCS4 character) {
+    /* the tokenizer normalizes CR to LF in the input stream, so tree text and
+       attribute values never hold a carriage return (as md_is_ws also assumes) */
+    return character == ' ' || character == '\t' || character == '\n' || character == '\f';
+}
+
+/* Copy [text, text+len) into a fresh PyMem buffer with each run of HTML whitespace
+   folded to a single space and the ends trimmed; *out_len receives the length.
+   Returns NULL (with *out_len 0) when the trimmed value is empty, so a present but
+   blank field reads the same as an absent one. */
+static Py_UCS4 *read_normalize(const Py_UCS4 *text, Py_ssize_t len, Py_ssize_t *out_len) {
+    *out_len = 0;
+    Py_UCS4 *buffer = PyMem_Malloc((size_t)(len > 0 ? len : 1) * sizeof(Py_UCS4));
+    if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t written = 0;
+    int seen = 0;
+    int pending_space = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (read_is_ws(text[index])) {
+            pending_space = seen;
+            continue;
+        }
+        if (pending_space) {
+            buffer[written++] = ' ';
+            pending_space = 0;
+        }
+        buffer[written++] = text[index];
+        seen = 1;
+    }
+    if (written == 0) {
+        PyMem_Free(buffer);
+        return NULL;
+    }
+    *out_len = written;
+    return buffer;
+}
+
+/* The normalized concatenated text of an element's subtree, or NULL when empty. */
+static Py_UCS4 *read_element_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
+    *out_len = 0;
+    Py_ssize_t raw_len = 0;
+    Py_UCS4 *raw = th_node_text(tree, node, &raw_len);
+    if (raw == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_UCS4 *normalized = read_normalize(raw, raw_len, out_len);
+    PyMem_Free(raw);
+    return normalized;
+}
+
+typedef int (*read_match_fn)(th_tree *tree, th_node *node, const void *ctx);
+
+/* The first HTML element under root (document order, depth first) the predicate
+   accepts, or NULL when none matches. */
+static th_node *read_find(th_tree *tree, th_node *root, read_match_fn match, const void *ctx) {
+    for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        if (match(tree, child, ctx)) {
+            return child;
+        }
+        th_node *found = read_find(tree, child, match, ctx);
+        if (found != NULL) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static int read_is_tag(th_tree *Py_UNUSED(tree), th_node *node, const void *ctx) {
+    return node->ns == TH_NS_HTML && node->atom == *(const uint16_t *)ctx;
+}
+
+/* Whether node is a <meta> whose name or property attribute equals the key. */
+static int read_is_meta(th_tree *tree, th_node *node, const void *ctx) {
+    if (node->ns != TH_NS_HTML || node->atom != TH_TAG_META) {
+        return 0;
+    }
+    const char *key = ctx;
+    static const char *const names[] = {"property", "name"};
+    static const Py_ssize_t name_lens[] = {8, 4};
+    for (size_t attr = 0; attr < 2; attr++) {
+        Py_ssize_t found = th_node_attr_find(tree, node, names[attr], name_lens[attr]);
+        if (found >= 0 && node->attrs[found].value != NULL &&
+            ser_value_iequals(node->attrs[found].value, node->attrs[found].value_len, key)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether node is an <a> whose rel attribute carries the "author" token. */
+static int read_is_author_link(th_tree *tree, th_node *node, const void *Py_UNUSED(ctx)) {
+    if (node->ns != TH_NS_HTML || node->atom != TH_TAG_A) {
+        return 0;
+    }
+    Py_ssize_t found = th_node_attr_find(tree, node, "rel", 3);
+    if (found < 0) {
+        return 0;
+    }
+    /* a valueless rel carries value_len 0 (a NULL pointer if hand-built, an empty
+       string if parsed), so the token scan below simply yields no tokens */
+    const Py_UCS4 *value = node->attrs[found].value;
+    Py_ssize_t value_len = node->attrs[found].value_len;
+    Py_ssize_t index = 0;
+    while (index < value_len) {
+        while (index < value_len && read_is_ws(value[index])) {
+            index++;
+        }
+        Py_ssize_t start = index;
+        while (index < value_len && !read_is_ws(value[index])) {
+            index++;
+        }
+        if (index > start && ser_value_iequals(value + start, index - start, "author")) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The normalized content of the first <meta> matching key, or NULL when absent. */
+static Py_UCS4 *read_meta_content(th_tree *tree, th_node *root, const char *key, Py_ssize_t *out_len) {
+    *out_len = 0;
+    th_node *meta = read_find(tree, root, read_is_meta, key);
+    if (meta == NULL) {
+        return NULL;
+    }
+    Py_ssize_t content = th_node_attr_find(tree, meta, "content", 7);
+    if (content < 0) {
+        return NULL;
+    }
+    return read_normalize(meta->attrs[content].value, meta->attrs[content].value_len, out_len);
+}
+
+/* The normalized value of node's named attribute, or NULL when absent or empty. A
+   valueless attribute carries value_len 0 (a NULL pointer for a hand-built one, an
+   empty string when parsed), both of which read_normalize folds to NULL. */
+static Py_UCS4 *read_attr_value(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len,
+                                Py_ssize_t *out_len) {
+    *out_len = 0;
+    Py_ssize_t found = th_node_attr_find(tree, node, name, name_len);
+    if (found < 0) {
+        return NULL;
+    }
+    return read_normalize(node->attrs[found].value, node->attrs[found].value_len, out_len);
+}
+
+/* Title: the first <h1>'s text, else the og:title meta, else the <title>'s text. */
+static Py_UCS4 *read_harvest_title(th_tree *tree, th_node *root, Py_ssize_t *out_len) {
+    uint16_t h1_atom = TH_TAG_H1;
+    th_node *heading = read_find(tree, root, read_is_tag, &h1_atom);
+    if (heading != NULL) {
+        Py_UCS4 *text = read_element_text(tree, heading, out_len);
+        if (text != NULL) {
+            return text;
+        }
+    }
+    Py_UCS4 *og = read_meta_content(tree, root, "og:title", out_len);
+    if (og != NULL) {
+        return og;
+    }
+    uint16_t title_atom = TH_TAG_TITLE;
+    th_node *title = read_find(tree, root, read_is_tag, &title_atom);
+    if (title != NULL) {
+        return read_element_text(tree, title, out_len);
+    }
+    return NULL;
+}
+
+/* Byline: a rel=author link's text, else the author meta, else article:author. */
+static Py_UCS4 *read_harvest_byline(th_tree *tree, th_node *root, Py_ssize_t *out_len) {
+    th_node *author = read_find(tree, root, read_is_author_link, NULL);
+    if (author != NULL) {
+        Py_UCS4 *text = read_element_text(tree, author, out_len);
+        if (text != NULL) {
+            return text;
+        }
+    }
+    Py_UCS4 *meta = read_meta_content(tree, root, "author", out_len);
+    if (meta != NULL) {
+        return meta;
+    }
+    return read_meta_content(tree, root, "article:author", out_len);
+}
+
+/* Date: the first <time>'s datetime (or its text), else article:published_time,
+   else a common date meta. */
+static Py_UCS4 *read_harvest_date(th_tree *tree, th_node *root, Py_ssize_t *out_len) {
+    uint16_t time_atom = TH_TAG_TIME;
+    th_node *time_element = read_find(tree, root, read_is_tag, &time_atom);
+    if (time_element != NULL) {
+        Py_UCS4 *datetime = read_attr_value(tree, time_element, "datetime", 8, out_len);
+        if (datetime != NULL) {
+            return datetime;
+        }
+        Py_UCS4 *text = read_element_text(tree, time_element, out_len);
+        if (text != NULL) {
+            return text;
+        }
+    }
+    Py_UCS4 *published = read_meta_content(tree, root, "article:published_time", out_len);
+    if (published != NULL) {
+        return published;
+    }
+    static const char *const date_keys[] = {"date", "pubdate", "dc.date"};
+    for (size_t index = 0; index < sizeof(date_keys) / sizeof(char *); index++) {
+        Py_UCS4 *meta = read_meta_content(tree, root, date_keys[index], out_len);
+        if (meta != NULL) {
+            return meta;
+        }
+    }
+    return NULL;
+}
+
+/* Description: the og:description meta, else the description meta. */
+static Py_UCS4 *read_harvest_description(th_tree *tree, th_node *root, Py_ssize_t *out_len) {
+    Py_UCS4 *og = read_meta_content(tree, root, "og:description", out_len);
+    if (og != NULL) {
+        return og;
+    }
+    return read_meta_content(tree, root, "description", out_len);
+}
+
+/* Lang: the <html> element's lang attribute. */
+static Py_UCS4 *read_harvest_lang(th_tree *tree, th_node *root, Py_ssize_t *out_len) {
+    uint16_t html_atom = TH_TAG_HTML;
+    th_node *html = read_find(tree, root, read_is_tag, &html_atom);
+    if (html == NULL) {
+        return NULL;
+    }
+    return read_attr_value(tree, html, "lang", 4, out_len);
+}
+
+void th_article_metadata(th_tree *tree, th_node *root, th_article_meta *meta) {
+    if (root == NULL) {
+        /* a node built by hand (Element(...)) owns a tree with no document root, so
+           there is no page to harvest; every field stays absent */
+        return;
+    }
+    meta->title = read_harvest_title(tree, root, &meta->title_len);
+    meta->byline = read_harvest_byline(tree, root, &meta->byline_len);
+    meta->date = read_harvest_date(tree, root, &meta->date_len);
+    meta->description = read_harvest_description(tree, root, &meta->description_len);
+    meta->lang = read_harvest_lang(tree, root, &meta->lang_len);
+}
+
+void th_article_meta_clear(th_article_meta *meta) {
+    PyMem_Free(meta->title);
+    PyMem_Free(meta->byline);
+    PyMem_Free(meta->date);
+    PyMem_Free(meta->description);
+    PyMem_Free(meta->lang);
+}

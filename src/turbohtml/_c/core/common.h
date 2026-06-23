@@ -62,6 +62,10 @@ PyObject *turbohtml_annotation_tags(PyObject *module, PyObject *args);
 PyObject *turbohtml_node_handle(PyObject *obj);
 PyObject *turbohtml_node_wrap_in(PyObject *owner, struct th_node *node);
 PyObject *turbohtml_register_links(PyObject *module, PyObject *type);
+
+/* Implemented in dom/node.c: stores the Article record type Node.article() builds
+   (METH_O); turbohtml._article registers it on import. */
+PyObject *turbohtml_register_article(PyObject *module, PyObject *type);
 PyObject *turbohtml_node_links(PyObject *owner, struct th_tree *tree, struct th_node *root);
 PyObject *turbohtml_node_rewrite_links(PyObject *owner, struct th_tree *tree, struct th_node *root, PyObject *replace);
 PyObject *turbohtml_node_resolve_links(PyObject *owner, struct th_tree *tree, struct th_node *root, PyObject *base_url);

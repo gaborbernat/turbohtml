@@ -9,6 +9,9 @@ from ._structured_data import (
     StructuredData as StructuredData,
 )
 from ._stubs.dom import (
+    Article as Article,
+)
+from ._stubs.dom import (
     Axis as Axis,
 )
 from ._stubs.dom import (
@@ -73,6 +76,9 @@ from ._stubs.features import (
 )
 from ._stubs.features import (
     _linkify_scan as _linkify_scan,
+)
+from ._stubs.features import (
+    _register_article as _register_article,
 )
 from ._stubs.features import (
     _register_links as _register_links,

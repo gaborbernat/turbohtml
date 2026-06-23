@@ -61,6 +61,7 @@ typedef struct {
     PyObject *json_ld_parser;       /* turbohtml._structured_data._parse_json_ld, the JSON-LD text parser */
     PyObject *microdata_item_type;  /* turbohtml._structured_data.MicrodataItem, one Microdata item record */
     PyObject *structured_data_type; /* turbohtml._structured_data.StructuredData, the combined-format record */
+    PyObject *article_type;         /* turbohtml._article.Article, the record Node.article() yields */
 } module_state;
 
 /* Register the types and enum into module/state. Each returns 0 or -1. */
