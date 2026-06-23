@@ -357,3 +357,39 @@ wpt page:
 namespace resolution; ``set:distinct`` stays in C on both sides. The :doc:`/development/performance` page sweeps these
 EXSLT cases — alongside the structural axes, predicates, and the core function library — across every page size, where
 lxml's streaming evaluation narrows the node-set reductions on the multi-megabyte inputs.
+
+****************************
+ The builder (lxml.builder)
+****************************
+
+``lxml.builder``'s ``E`` assembles a tree from nested calls -- ``E.ul(E.li("a"), E.li("b"))`` -- and you serialize it
+with ``lxml.html.tostring``. :data:`turbohtml.build.E` reads the same way, ``E.<tag>(attrs, *children)`` with a leading
+mapping for attributes, and hands back a real :class:`~turbohtml.Element` rather than an lxml node, so the edit, query,
+and serialize surface above stays available on what you build:
+
+.. testcode::
+
+    from turbohtml.build import E
+
+    print(E.ul(E.li({"class": "item"}, "one"), E.li({"class": "item"}, "two")).serialize())
+
+.. testoutput::
+
+    <ul><li class="item">one</li><li class="item">two</li></ul>
+
+The same ``<ul>`` of rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways, from ``tox -e
+bench build`` on the reference machine in :doc:`/development/performance`:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34 33 33
+
+    - - build a list
+      - :data:`E <turbohtml.build.E>`
+      - lxml.builder
+    - - 100 rows
+      - 139 µs
+      - 204 µs (1.5x)
+    - - 1000 rows
+      - 1.41 ms
+      - 2.13 ms (1.5x)

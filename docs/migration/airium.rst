@@ -1,14 +1,14 @@
-###############
- From dominate
-###############
+#############
+ From airium
+#############
 
-.. image:: https://static.pepy.tech/badge/dominate/month
-    :alt: dominate monthly downloads
-    :target: https://pepy.tech/project/dominate
+.. image:: https://static.pepy.tech/badge/airium/month
+    :alt: airium monthly downloads
+    :target: https://pepy.tech/project/airium
 
-`dominate <https://github.com/Knio/dominate>`_ assembles HTML in Python from the other direction than a parser: you open
-a tag as a ``with`` block and nest children inside it (or pass them as arguments), then render the tree to a string.
-turbohtml replaces it with the terse :data:`turbohtml.build.E` builder.
+`airium <https://gitlab.com/kamichal/airium>`_ assembles HTML in Python from the other direction than a parser: you open
+each element as a ``with a.tag(...)`` block on an ``Airium`` instance, call the instance for text, and let it track
+indentation as you nest, then stringify it. turbohtml replaces it with the terse :data:`turbohtml.build.E` builder.
 
 ***************
  Why turbohtml
@@ -31,9 +31,9 @@ parse it back:
 
     <div class="card"><h1>Title</h1><p>body</p></div>
 
-``E`` assembles the fragment in turbohtml's arena and serializes it in C; dominate stays in Python. The same ``<ul>`` of
-rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways, from ``tox -e bench build`` on the
-reference machine in :doc:`/development/performance`:
+``E`` assembles the fragment in turbohtml's arena and serializes it in C; airium stays in Python and pretty-prints with
+indentation as it goes. The same ``<ul>`` of rows -- a class, a ``data`` attribute, and a text child apiece -- built
+both ways, from ``tox -e bench build`` on the reference machine in :doc:`/development/performance`:
 
 .. list-table::
     :header-rows: 1
@@ -41,15 +41,15 @@ reference machine in :doc:`/development/performance`:
 
     - - build a list
       - :data:`E <turbohtml.build.E>`
-      - dominate
+      - airium
     - - 100 rows
       - 139 µs
-      - 466 µs (3.3x)
+      - 772 µs (5.5x)
     - - 1000 rows
       - 1.41 ms
-      - 4.59 ms (3.3x)
+      - 7.75 ms (5.5x)
 
-``E`` is about three times faster than dominate, and the decisive difference is the result type: ``E`` hands back a real
+``E`` is roughly five times faster than airium, and the decisive difference is the result type: ``E`` hands back a real
 :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query, edit,
 and re-:meth:`~turbohtml.Node.serialize`.
 
@@ -57,18 +57,18 @@ and re-:meth:`~turbohtml.Node.serialize`.
  The mapping
 *************
 
-dominate spells nesting with ``with`` blocks or positional children; the translation is mechanical:
+airium tracks structure by call depth inside ``with`` blocks; turbohtml tracks it in the tree:
 
 .. list-table::
     :header-rows: 1
     :widths: 50 50
 
-    - - dominate
+    - - airium
       - turbohtml
-    - - ``div(p("x"), cls="card")`` / ``with`` blocks
-      - :data:`E.div({"class": "card"}, E.p("x")) <turbohtml.build.E>`; nest by passing children, not a context manager
-    - - ``tag(...)`` for a non-identifier tag name
-      - :data:`E("tag", ...) <turbohtml.build.E>`, the call form
+    - - ``with a.div(klass="card"):`` then ``a("text")``
+      - :data:`E.div({"class": "card"}, "text") <turbohtml.build.E>`; nest by passing children, not by call depth
+    - - ``a.li(klass="item", **{"data-i": "1"})``
+      - :data:`E.li({"class": "item", "data-i": "1"}) <turbohtml.build.E>`
 
 ``E("tag", ...)`` is the call form for a tag that is not a Python identifier (a custom element, say), and a list-valued
 attribute joins on a space so a class list reads naturally:
@@ -89,7 +89,7 @@ attribute joins on a space so a class list reads naturally:
 
 - ``E`` builds a fragment, not a document: there is no implicit ``<html>``/``<head>``/``<body>`` wrapper and no doctype.
   Serialize the element you built, or append it under a parsed document when you need the full page shell.
-- A leading mapping is always read as attributes; to start an element with literal text, pass the string first
-  (``E.p("text", E.b("bold"))``).
+- airium pretty-prints with newlines and indentation; ``E`` serializes compact markup. Parse and re-serialize, or use a
+  formatter, when you need indented output.
 - The result is an ordinary :class:`~turbohtml.Element`, so the whole edit and query surface (``append``, ``find``,
   ``select``, ``serialize``, ``to_markdown``) is available -- the builder only saves the construction boilerplate.
