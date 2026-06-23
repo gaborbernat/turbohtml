@@ -117,6 +117,9 @@ parse = _html._xpath_parse
         pytest.param("following::p", "(path rel (step following name 'p'))", id="axis-following"),
         pytest.param("preceding::p", "(path rel (step preceding name 'p'))", id="axis-preceding"),
         pytest.param("namespace::x", "(path rel (step namespace name 'x'))", id="axis-namespace"),
+        # a namespace-prefixed name test keeps the whole QName; the prefix binds at eval time
+        pytest.param("a:b", "(path rel (step child name 'a:b'))", id="prefixed-name"),
+        pytest.param("//svg:circle", "(path abs (step descendant name 'svg:circle'))", id="prefixed-descendant"),
         # node tests
         pytest.param("node()", "(path rel (step child node()))", id="test-node"),
         pytest.param("text()", "(path rel (step child text()))", id="test-text"),
@@ -277,14 +280,12 @@ def test_large_expression_grows_the_arena() -> None:
         pytest.param(".a", "trailing tokens", id="dot-then-name"),
         pytest.param("4a", "trailing tokens", id="digit-then-name"),
         pytest.param("1.5a", "trailing tokens", id="fraction-then-name"),
-        pytest.param("a:b", "namespace-prefixed", id="single-colon-name"),
         pytest.param("a:5", "invalid character", id="colon-then-non-name"),
         pytest.param("div::", "trailing tokens", id="bad-axis"),
         pytest.param("count(", "node test", id="unclosed-call"),
         pytest.param("1 2", "trailing tokens", id="two-numbers"),
         pytest.param("$5", "expected a name", id="dollar-then-number"),
         pytest.param("$", "expected a name", id="dollar-at-end"),
-        pytest.param("//svg:circle", "namespace-prefixed", id="prefixed-name-test"),
     ],
 )
 def test_rejects(expr: str, message: str) -> None:

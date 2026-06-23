@@ -1787,6 +1787,9 @@ def print_xpath_table(means: dict[str, float], suite: tuple[list[str], list[str]
 # Python-backed surface. set:distinct stays in C on both sides (turbohtml's
 # built-in dispatch, lxml's registered libexslt), so it races C against C.
 _EXSLT_NS = {"re": "http://exslt.org/regular-expressions", "set": "http://exslt.org/sets"}
+_SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
+# a small SVG block appended to each feature page so the namespaced name test resolves over foreign content
+_SVG_FRAGMENT = "<svg><rect/><rect/></svg>"
 
 
 def _bench_count_ext(_context: object, nodes: list[object]) -> float:
@@ -1869,6 +1872,16 @@ def lxml_nodeset_extension(tree: HtmlElement) -> None:
     tree.xpath("ext_first_two(//a)/@href", extensions=_XPATH_NODESET_EXTENSIONS)
 
 
+def turbo_namespaced(doc: Document) -> None:
+    """Resolve a namespace-prefixed name test against a ``namespaces=`` mapping, turbohtml."""
+    doc.xpath("//svg:rect", namespaces=_SVG_NS)
+
+
+def lxml_namespaced(tree: HtmlElement) -> None:
+    """Resolve the same namespace-prefixed name test against the same mapping, lxml."""
+    tree.xpath("//svg:rect", namespaces=_SVG_NS)
+
+
 # Each parity feature paired with its turbohtml and lxml driver.
 XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[HtmlElement], None]], ...] = (
     ("$variable binding", turbo_variable, lxml_variable),
@@ -1877,6 +1890,7 @@ XPATH_FEATURE_CASES: tuple[tuple[str, Callable[[Document], None], Callable[[Html
     ("smart_strings", turbo_smart, lxml_smart),
     ("extension function", turbo_extension, lxml_extension),
     ("extension node-set", turbo_nodeset_extension, lxml_nodeset_extension),
+    ("namespaces= name test", turbo_namespaced, lxml_namespaced),
 )
 
 # The reuse path turbohtml.XPath adds: parse the expression once into an immutable
@@ -1902,7 +1916,7 @@ def run_xpath_feature_suite(bench: Callable[[str, object, object], None]) -> lis
     """Benchmark each parity feature across the page sizes; return the case labels."""
     for label, turbo_run, lxml_run in XPATH_FEATURE_CASES:
         for size_name, path, enc in READPATH_CASES:
-            text = corpus_text(path, enc)
+            text = corpus_text(path, enc) + _SVG_FRAGMENT
             bench(f"feature {label} | {size_name} [turbohtml]", turbo_run, turbo_tree(text))
             bench(f"feature {label} | {size_name} [lxml]", lxml_run, lxml_tree(text))
     for size_name, path, enc in READPATH_CASES:

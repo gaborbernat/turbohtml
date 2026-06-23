@@ -90,11 +90,8 @@ static void parse_node_test(parser *ps, int32_t step) {
         expect(ps, TK_RPAREN, "expected ')'");
         return;
     }
-    if (lx->tprefix > 0) {
-        fail(ps, "a namespace-prefixed name test needs a namespaces mapping");
-        return;
-    }
     ps->prog->nodes[step].test = NT_NAME;
+    ps->prog->nodes[step].prefix_len = lx->tprefix;            /* the resolved URI binds at eval time */
     if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
     } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
@@ -669,6 +666,7 @@ static void optimize_descendant_steps(xp_program *prog) {
             PyMem_Free(step->str); /* the node() test owns no name */
             step->str = follow->str;
             step->str_len = follow->str_len;
+            step->prefix_len = follow->prefix_len;
             follow->str = NULL; /* ownership moved to step */
             step->first = follow->first;
             step->next = follow->next;

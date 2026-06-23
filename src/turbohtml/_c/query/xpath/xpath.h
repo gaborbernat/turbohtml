@@ -76,6 +76,20 @@ typedef struct {
     Py_ssize_t len;
 } xp_bindings;
 
+/* A prefix-to-URI binding for a name test. The strings are borrowed for the duration
+   of one eval (the caller owns the code-point buffers and frees them afterwards). */
+typedef struct {
+    const Py_UCS4 *prefix;
+    Py_ssize_t prefix_len;
+    const Py_UCS4 *uri;
+    Py_ssize_t uri_len;
+} xp_namespace;
+
+typedef struct {
+    const xp_namespace *items;
+    Py_ssize_t len;
+} xp_namespaces;
+
 /* A user extension-function call: resolve `name` against the registered
    extensions and run it over `args` with `context_node` as the XPath context.
    Returns 0 with *out filled, -2 when no extension has that name (the engine then
@@ -85,13 +99,16 @@ typedef int (*xp_extension_fn)(void *ctx, struct th_node *context_node, const Py
                                const xp_result *args, int argc, xp_result *out);
 
 /* Evaluate a compiled program against a context node. vars supplies $name bindings
-   (NULL when none); extension/extension_ctx supply user functions (extension NULL
-   when none). Returns 0 with *out filled (the caller frees it with xp_result_free).
-   Returns -2 for a construct not yet implemented, or -3 for an evaluation error (a
-   reference to an unbound variable), with *feature set to a short name for the
-   message. Returns -1 on allocation failure (or a Python error from an extension). */
+   (NULL when none); namespaces supplies prefix-to-URI bindings for prefixed name tests
+   (NULL when none); extension/extension_ctx supply user functions (extension NULL when
+   none). Returns 0 with *out filled (the caller frees it with xp_result_free). Returns
+   -2 for a construct not yet implemented, or -3 for an evaluation error (a reference to
+   an unbound variable, or a name test whose prefix is not bound), with *feature set to a
+   short name for the message. Returns -1 on allocation failure (or a Python error from
+   an extension). */
 struct th_tree;
 int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
-            xp_extension_fn extension, void *extension_ctx, xp_result *out, const char **feature);
+            const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx, xp_result *out,
+            const char **feature);
 
 #endif /* TURBOHTML_XPATH_H */
