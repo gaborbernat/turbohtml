@@ -191,6 +191,36 @@ wpt page with ``tox -e bench xpath``:
   materialize for :func:`turbohtml.parse`.
 - The wider libxml2 toolchain is a deliberate clean-break scope cut: XSLT, DTD/RelaxNG/XML-Schema validation, and C14N
   have no turbohtml equivalent. XPath is at parity, not a gap: both are XPath 1.0, and the EXSLT ``re:``, ``set:``,
-  ``str:``, ``math:``, and ``date:`` namespaces ``libexslt`` adds are built in here (lxml has to register them, and has
-  no XPath 2.0/XQuery either), so an lxml ``xpath()`` call ports directly — only the node-synthesizing
-  ``str:tokenize``/``str:split`` and the implicit current-date ``date:`` forms stay out of scope.
+  ``str:``, ``math:``, and ``date:`` namespaces ``libexslt`` adds are built into :meth:`~turbohtml.Node.xpath`,
+  :meth:`~turbohtml.Node.xpath_one`, and :meth:`~turbohtml.Node.xpath_iter` (lxml has to register them, and has no XPath
+  2.0/XQuery either), so an lxml ``el.xpath(...)`` call ports straight to :meth:`~turbohtml.Node.xpath` — only the
+  node-synthesizing ``str:tokenize``/``str:split`` and the implicit current-date ``date:`` forms stay out of scope.
+
+*************
+ Performance
+*************
+
+turbohtml's EXSLT namespaces dispatch in the same compiled-C XPath engine as the core functions, so an EXSLT predicate
+through :meth:`~turbohtml.Node.xpath` costs no registration: the prefix is built in. lxml resolves the namespace map and
+routes each call through a ``libexslt`` function you register with ``namespaces=``, so the same expression carries a
+per-call setup cost. lxml *can* run the same EXSLT, so this is a direct race, not a no-competitor note. Over the 9.6 kB
+wpt page:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 44 14 14
+
+    - - EXSLT (9.6 kB page)
+      - turbohtml
+      - lxml
+    - - ``//a[re:test(@href, ...)]``
+      - 0.5 µs
+      - 4.6 µs
+    - - ``set:distinct(//a)``
+      - 0.6 µs
+      - 4.0 µs
+
+``re:`` dispatches to Python's :mod:`re` where lxml uses C libexslt, yet still leads because it skips the per-call
+namespace resolution; ``set:distinct`` stays in C on both sides. The :doc:`/development/performance` page sweeps these
+EXSLT cases — alongside the structural axes, predicates, and the core function library — across every page size, where
+lxml's streaming evaluation narrows the node-set reductions on the multi-megabyte inputs.

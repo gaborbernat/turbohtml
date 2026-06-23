@@ -634,9 +634,10 @@ interned atoms, and folds ``//`` to a single ``descendant`` walk, so it leads ac
 predicate that references ``position()`` (``[1]`` or ``position() <= 3``): it pins the result to proximity order and
 disables the ``//`` collapse, so on the largest pages lxml's streaming evaluation closes the gap. The last six rows are
 the lxml/parsel options the parity work added: a ``$variable`` binding, an EXSLT ``re:test`` predicate (turbohtml's
-Python :mod:`re` against lxml's C libexslt), a ``smart_strings`` attribute read, a custom ``extensions=`` function, and
-an ``extensions=`` function whose return becomes a node-set feeding a later ``/@href`` step. turbohtml still leads,
-since lxml resolves the namespace map and option set on every call. The last row precompiles the expression once with
+Python :mod:`re` against lxml's C libexslt), an EXSLT ``set:distinct`` node-set reduction (built-in C dispatch on both
+sides, so it races C against C), a ``smart_strings`` attribute read, a custom ``extensions=`` function, and an
+``extensions=`` function whose return becomes a node-set feeding a later ``/@href`` step. turbohtml still leads, since
+lxml resolves the namespace map and option set on every call. The last row precompiles the expression once with
 :class:`~turbohtml.XPath` and re-evaluates it, lxml's ``etree.XPath`` doing the same: both skip the per-call parse
 :meth:`~turbohtml.Node.xpath` pays, and turbohtml's compiled program stays ahead per evaluation.
 
@@ -686,6 +687,9 @@ since lxml resolves the namespace map and option set on every call. The last row
     - - ``//a[re:test(@href, ...)]`` (EXSLT)
       - 0.5 µs
       - 4.6 µs
+    - - ``set:distinct(//a)`` (EXSLT)
+      - 0.6 µs
+      - 4.0 µs
     - - ``//a/@href`` (smart_strings)
       - 0.6 µs
       - 2.6 µs
