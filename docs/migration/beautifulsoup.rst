@@ -135,6 +135,7 @@ since turbohtml always runs the WHATWG algorithm:
 .. testcode::
 
     from turbohtml import parse
+
     doc = parse("<p id=intro>Hello</p>")
     print(doc.find("p").attrs["id"])
 
@@ -230,6 +231,7 @@ attribute; ``class_`` and ``attrs`` match the rest; ``axis`` replaces the direct
 .. testcode::
 
     from turbohtml import Axis
+
     doc = parse('<ul><li class="x">a</li><li class="y">b</li></ul>')
     print([li.text for li in doc.find_all("li")])
     print(doc.find("li", class_="y").text)
@@ -262,9 +264,10 @@ text rather than a substring (use a regex to search within):
 .. testcode::
 
     import re
-    doc = parse('<ul><li>Buy now</li><li>Later</li></ul>')
+
+    doc = parse("<ul><li>Buy now</li><li>Later</li></ul>")
     print(doc.find("li", text="Buy now").text)
-    print([li.text for li in doc.find_all("li", text=re.compile("now"))])
+    print([li.text for li in doc.find_all("li", text=re.compile(r"now"))])
 
 .. testoutput::
 
@@ -303,6 +306,7 @@ attribute order, and ``<br>`` versus ``<br/>``. Choose ``Formatter.NAMED_ENTITIE
 .. testcode::
 
     from turbohtml import Formatter
+
     node = parse("<p>café &amp; co</p>").find("p")
     print(node.html)
     print(node.serialize(formatter=Formatter.NAMED_ENTITIES))

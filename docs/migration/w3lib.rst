@@ -107,6 +107,7 @@ tree builder and reads the hint off the parsed ``<head>``, and still comes out a
 .. testcode::
 
     from turbohtml import unescape
+
     print(unescape("caf&eacute; &amp; co"))
 
 .. testoutput::
@@ -120,6 +121,7 @@ comments never appear in ``text``:
 .. testcode::
 
     from turbohtml import parse
+
     print(parse("<p>Tom &amp; Jerry <b>says</b> hi</p><!--note-->").text)
 
 .. testoutput::
