@@ -199,6 +199,35 @@ text rather than a substring (use a regex to search within):
     Buy now
     ['Buy now']
 
+*************
+ Performance
+*************
+
+Filtering elements by text through :meth:`~turbohtml.Node.find` / :meth:`~turbohtml.Node.find_all` (``text=``) gathers
+each candidate's subtree text in C and matches once, where ``bs4``'s ``find_all(string=...)`` runs the predicate in
+Python mid-walk. The :doc:`/development/performance` query suite races the two over the wpt pages:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 20 20 20
+
+    - - find ``text=`` regex
+      - turbohtml
+      - BeautifulSoup
+      - speed-up
+    - - wpt page (4 kB)
+      - 9.3 µs
+      - 19.7 µs
+      - 2.1x
+    - - wpt page (9.6 kB)
+      - 13.9 µs
+      - 38.2 µs
+      - 2.7x
+    - - wpt page (92 kB)
+      - 741 µs
+      - 989 µs
+      - 1.3x
+
 *********************
  Attributes and text
 *********************
