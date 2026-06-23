@@ -38,6 +38,7 @@ from ._structured_data import (  # registers the JSON-LD parser and record class
     StructuredData,
 )
 from ._xpath import XPathString  # registers the smart-string type with the C core on import
+from .build import E, ElementMaker
 
 __version__ = version("turbohtml")
 """The installed package version."""
@@ -48,7 +49,9 @@ __all__ = [
     "Comment",
     "Doctype",
     "Document",
+    "E",
     "Element",
+    "ElementMaker",
     "Formatter",
     "HTMLParseError",
     "IncrementalParser",

@@ -62,6 +62,7 @@ py.install_sources(
         'src/turbohtml/_links.py',
         'src/turbohtml/_structured_data.py',
         'src/turbohtml/_xpath.py',
+        'src/turbohtml/build.py',
         'src/turbohtml/linkify.py',
         'src/turbohtml/query.py',
         'src/turbohtml/sanitizer.py',
