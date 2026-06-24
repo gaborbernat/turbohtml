@@ -33,12 +33,11 @@ parse it back:
     <div class="card"><h1>Title</h1><p>body</p></div>
 
 ``E`` assembles the fragment in turbohtml's arena and serializes it in C; htpy stays in Python. The same ``<ul>`` of
-rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways, from ``tox -e bench build-e`` on the
-reference machine in :doc:`/development/performance`:
+rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways:
 
 .. list-table::
     :header-rows: 1
-    :widths: 34 33 33
+    :widths: 40 30 30
 
     - - build a list
       - :data:`E <turbohtml.build.E>`
@@ -55,7 +54,7 @@ real :class:`~turbohtml.Element`, not a string, so the call that builds the mark
 edit, and re-:meth:`~turbohtml.Node.serialize`.
 
 *************
- The mapping
+ The renames
 *************
 
 htpy carries attributes in the call and children in a subscript; turbohtml passes both to one call:
