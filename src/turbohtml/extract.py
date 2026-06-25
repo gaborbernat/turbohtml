@@ -1,4 +1,5 @@
-"""turbohtml.extract: pull content and data out of HTML.
+"""
+turbohtml.extract: pull content and data out of HTML.
 
 Home for the extraction result types and (as the campaign lands) the content/date/url helpers that replace
 ``trafilatura``/``readability-lxml``/``newspaper3k``/``goose3``/``justext``/``htmldate``/``courlan``/``extruct``.

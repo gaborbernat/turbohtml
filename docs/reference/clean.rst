@@ -22,8 +22,9 @@ in ``<a>`` links, HTML-aware so it never links inside an existing ``<a>``, a raw
 .. autoclass:: OnDisallowed
     :members:
 
-Linkifying
-==========
+************
+ Linkifying
+************
 
 A :class:`Linkify` configuration object carries the knobs: a callback receives each generated :class:`Link` and returns
 it to keep the link or ``None`` to leave the text bare, ``process_existing`` runs the callbacks over ``<a>`` tags
@@ -53,9 +54,8 @@ each match and accepts custom ``tlds`` and scheme-less ``schemes``.
 .. autoclass:: LinkSpan
     :members:
 
-****************************
- turbohtml.migration.bleach
-****************************
+turbohtml.migration.bleach
+==========================
 
 .. module:: turbohtml.migration.bleach
 

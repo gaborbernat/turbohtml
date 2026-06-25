@@ -1,4 +1,5 @@
-"""turbohtml.clean: scrub and tidy HTML -- sanitize against an allowlist, auto-link plain URLs, and minify.
+"""
+turbohtml.clean: scrub and tidy HTML -- sanitize against an allowlist, auto-link plain URLs, and minify.
 
 The sanitizer replaces `bleach <https://github.com/mozilla/bleach>`__/``nh3``/``html-sanitizer``, the linkifier
 replaces ``bleach.linkify``/``linkify-it-py``, and (with #318) ``minify`` replaces ``minify-html``/``htmlmin``. Every

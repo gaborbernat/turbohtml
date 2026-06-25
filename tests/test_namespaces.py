@@ -8,7 +8,15 @@ import turbohtml
 from turbohtml import clean, extract
 
 _EXTRACT_RECORDS = ("Article", "Link", "MicrodataItem", "StructuredData")
-_CLEAN_SANITIZE = ("DEFAULT_ATTRIBUTES", "DEFAULT_SCHEMES", "DEFAULT_TAGS", "OnDisallowed", "Policy", "Sanitizer", "sanitize")
+_CLEAN_SANITIZE = (
+    "DEFAULT_ATTRIBUTES",
+    "DEFAULT_SCHEMES",
+    "DEFAULT_TAGS",
+    "OnDisallowed",
+    "Policy",
+    "Sanitizer",
+    "sanitize",
+)
 _CLEAN_LINKIFY = ("Detector", "LinkSpan", "Linker", "Linkify", "linkify", "nofollow", "target_blank")
 
 
