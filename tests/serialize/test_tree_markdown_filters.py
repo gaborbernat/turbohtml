@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import parse
+from turbohtml import Markdown, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     ],
 )
 def test_strip_inline(html: str, strip: list[str], expected: str) -> None:
-    assert parse(html).to_markdown(strip=strip) == expected
+    assert parse(html).to_markdown(Markdown(strip=strip)) == expected
 
 
 @pytest.mark.parametrize(
@@ -57,41 +57,41 @@ def test_strip_inline(html: str, strip: list[str], expected: str) -> None:
     ],
 )
 def test_convert_inline(html: str, convert: list[str], expected: str) -> None:
-    assert parse(html).to_markdown(convert=convert) == expected
+    assert parse(html).to_markdown(Markdown(convert=convert)) == expected
 
 
 def test_convert_empty_drops_all_markup() -> None:
     # an empty allowlist keeps markup for nothing, so only the text survives
-    out = parse('<p><b>x</b> <a href="https://e.test">y</a></p>').to_markdown(convert=[])
+    out = parse('<p><b>x</b> <a href="https://e.test">y</a></p>').to_markdown(Markdown(convert=[]))
     assert out == "x y"
 
 
 def test_strip_block_keeps_children() -> None:
-    out = parse("<blockquote><p>quoted</p></blockquote>").to_markdown(strip=["blockquote"])
+    out = parse("<blockquote><p>quoted</p></blockquote>").to_markdown(Markdown(strip=["blockquote"]))
     assert out == "quoted"
 
 
 def test_strip_heading_unwraps_to_prose() -> None:
-    out = parse("<h2>Heading</h2><p>Body text.</p>").to_markdown(strip=["h2"])
+    out = parse("<h2>Heading</h2><p>Body text.</p>").to_markdown(Markdown(strip=["h2"]))
     assert out == "Heading\n\nBody text."
 
 
 def test_convert_block_drops_outer_block() -> None:
-    out = parse("<blockquote><p>kept</p></blockquote>").to_markdown(convert=["p"])
+    out = parse("<blockquote><p>kept</p></blockquote>").to_markdown(Markdown(convert=["p"]))
     assert out == "kept"
 
 
 def test_strip_leaves_foreign_element_untouched() -> None:
     # an SVG element has no HTML atom, so it is never named by a filter and renders normally
-    out = parse("<p>a <svg><title>chart</title></svg> b</p>").to_markdown(strip=["b"])
+    out = parse("<p>a <svg><title>chart</title></svg> b</p>").to_markdown(Markdown(strip=["b"]))
     assert out == "a chart b"
 
 
 @pytest.mark.parametrize(
     "render",
     [
-        pytest.param(lambda doc: doc.to_markdown(strip=["script"]), id="strip"),
-        pytest.param(lambda doc: doc.to_markdown(convert=["b"]), id="convert"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(strip=["script"])), id="strip"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(convert=["b"])), id="convert"),
     ],
 )
 def test_skipped_tag_inside_kept_inline_vanishes_whole(render: Callable[[Document], str]) -> None:
@@ -102,31 +102,31 @@ def test_skipped_tag_inside_kept_inline_vanishes_whole(render: Callable[[Documen
 
 def test_uppercase_tag_name_is_lowercased() -> None:
     # a tag name is matched case-insensitively, exercising the ASCII lowercasing
-    out = parse("<p><b>x</b></p>").to_markdown(strip=["B"])
+    out = parse("<p><b>x</b></p>").to_markdown(Markdown(strip=["B"]))
     assert out == "x"
 
 
 def test_unknown_tag_name_is_ignored() -> None:
     html = "<p><b>x</b></p>"
-    assert parse(html).to_markdown(strip=["nosuchtag"]) == parse(html).to_markdown()
+    assert parse(html).to_markdown(Markdown(strip=["nosuchtag"])) == parse(html).to_markdown()
 
 
 def test_overlong_tag_name_is_ignored() -> None:
     html = "<p><b>x</b></p>"
-    assert parse(html).to_markdown(strip=["z" * 65]) == parse(html).to_markdown()
+    assert parse(html).to_markdown(Markdown(strip=["z" * 65])) == parse(html).to_markdown()
 
 
 def test_surrogate_tag_name_is_ignored() -> None:
     html = "<p><b>x</b></p>"
-    assert parse(html).to_markdown(strip=["\ud800"]) == parse(html).to_markdown()
+    assert parse(html).to_markdown(Markdown(strip=["\ud800"])) == parse(html).to_markdown()
 
 
 @pytest.mark.parametrize(
     "render",
     [
-        pytest.param(lambda doc: doc.to_markdown(strip=None), id="strip-none"),
-        pytest.param(lambda doc: doc.to_markdown(convert=None), id="convert-none"),
-        pytest.param(lambda doc: doc.to_markdown(strip=[]), id="strip-empty"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(strip=None)), id="strip-none"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(convert=None)), id="convert-none"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(strip=[])), id="strip-empty"),
     ],
 )
 def test_no_op_filters_match_default(render: Callable[[Document], str]) -> None:
@@ -135,20 +135,20 @@ def test_no_op_filters_match_default(render: Callable[[Document], str]) -> None:
 
 
 def test_non_str_iterable_accepted() -> None:
-    out = parse("<p><b>x</b></p>").to_markdown(strip=(tag for tag in ["b"]))
+    out = parse("<p><b>x</b></p>").to_markdown(Markdown(strip=(tag for tag in ["b"])))
     assert out == "x"
 
 
 def test_strip_and_convert_are_mutually_exclusive() -> None:
     with pytest.raises(ValueError, match="strip and convert are mutually exclusive"):
-        parse("<p><b>x</b></p>").to_markdown(strip=["b"], convert=["b"])
+        Markdown(strip=["b"], convert=["b"])
 
 
 @pytest.mark.parametrize(
     "render",
     [
-        pytest.param(lambda doc: doc.to_markdown(strip="b"), id="strip"),
-        pytest.param(lambda doc: doc.to_markdown(convert="a"), id="convert"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(strip="b")), id="strip"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(convert="a")), id="convert"),
     ],
 )
 def test_single_str_rejected(render: Callable[[Document], str]) -> None:
@@ -159,9 +159,8 @@ def test_single_str_rejected(render: Callable[[Document], str]) -> None:
 @pytest.mark.parametrize(
     "render",
     [
-        # a non-iterable on purpose, to exercise the binding's iterator coercion
-        pytest.param(lambda doc: doc.to_markdown(strip=42), id="strip"),
-        pytest.param(lambda doc: doc.to_markdown(convert=42), id="convert"),
+        pytest.param(lambda doc: doc.to_markdown(Markdown(strip=42)), id="strip"),  # ty: ignore[invalid-argument-type]  # pass a non-iterable to test the binding rejects it
+        pytest.param(lambda doc: doc.to_markdown(Markdown(convert=42)), id="convert"),  # ty: ignore[invalid-argument-type]  # pass a non-iterable to test the binding rejects it
     ],
 )
 def test_non_iterable_rejected(render: Callable[[Document], str]) -> None:
@@ -172,7 +171,7 @@ def test_non_iterable_rejected(render: Callable[[Document], str]) -> None:
 def test_non_str_tag_rejected() -> None:
     with pytest.raises(TypeError, match="tags must be str, not int"):
         # a non-str element on purpose, to exercise the per-item type check
-        parse("<p><b>x</b></p>").to_markdown(strip=["b", 5])  # ty: ignore[invalid-argument-type]
+        parse("<p><b>x</b></p>").to_markdown(Markdown(strip=["b", 5]))  # ty: ignore[invalid-argument-type]
 
 
 def test_iterator_error_propagates() -> None:
@@ -182,4 +181,4 @@ def test_iterator_error_propagates() -> None:
         raise RuntimeError(msg)
 
     with pytest.raises(RuntimeError, match="boom"):
-        parse("<p><b>x</b></p>").to_markdown(strip=tags())
+        parse("<p><b>x</b></p>").to_markdown(Markdown(strip=tags()))

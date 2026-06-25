@@ -352,70 +352,13 @@ static PyObject *node_get_inner_html(PyObject *self, void *Py_UNUSED(closure)) {
     return result;
 }
 
-PyDoc_STRVAR(
-    to_markdown_doc,
-    "to_markdown(*, heading_style='atx', bullets='-', strong='**', emphasis='*', strikethrough='keep', "
-    "ignore_emphasis=False, sub_symbol='', sup_symbol='', code_block_style='fenced', code_language='', "
-    "mark_code=False, link_style='inline', autolink=True, link_title=False, ignore_links=False, "
-    "skip_internal_links=False, base_url='', image_mode='markdown', default_image_alt='', table_mode='markdown', "
-    "table_header='first', pad_tables=False, escape_mode='minimal', escape_asterisks=True, escape_underscores=True, "
-    "line_break='spaces', block_spacing='double', wrap_width=0, wrap_list_items=False, wrap_links=True, "
-    "transliterate=False, document_strip='strip', quote_open='\"', quote_close='\"', "
-    "google_doc=False, google_list_indent=36, hide_strikethrough=False, strip=None, convert=None, "
-    "converters=None)\n--\n\n"
-    "Render this node and its subtree as Markdown. The keyword options cover the\n"
-    "markdownify and html2text configuration surface; the defaults emit opinionated\n"
-    "GitHub-Flavored Markdown.\n\n"
-    ":param heading_style: heading form: 'atx' uses # prefixes, 'atx_closed' adds\n"
-    "    trailing #, 'setext' underlines with === and ---.\n"
-    ":param bullets: the characters cycled, one per nesting level, as unordered-list markers.\n"
-    ":param strong: the delimiter wrapped around bold text.\n"
-    ":param emphasis: the delimiter wrapped around italic text.\n"
-    ":param strikethrough: 'keep' renders struck text as ~~text~~, 'hide' drops it.\n"
-    ":param ignore_emphasis: drop bold and italic markup, keeping the text.\n"
-    ":param sub_symbol: the delimiter wrapped around <sub> text; empty drops the markup.\n"
-    ":param sup_symbol: the delimiter wrapped around <sup> text; empty drops the markup.\n"
-    ":param code_block_style: 'fenced' uses triple-backtick fences, 'indented' uses a four-space indent.\n"
-    ":param code_language: the language tag placed on fenced code blocks.\n"
-    ":param mark_code: wrap inline code in [code]...[/code] instead of backticks.\n"
-    ":param link_style: 'inline' writes [text](url), 'reference' collects links at the end.\n"
-    ":param autolink: render a bare URL whose text equals its href as <url>.\n"
-    ":param link_title: include a link's title attribute in the Markdown link.\n"
-    ":param ignore_links: drop link markup, keeping the link text.\n"
-    ":param skip_internal_links: drop links whose target is a same-page #fragment.\n"
-    ":param base_url: the base each relative link and image URL is resolved against.\n"
-    ":param image_mode: 'markdown' writes ![alt](src), 'alt' writes only the alt text,\n"
-    "    'ignore' drops images, 'html' passes the <img> through verbatim.\n"
-    ":param default_image_alt: alt text used for an image that declares none.\n"
-    ":param table_mode: 'markdown' writes a pipe table, 'strip' drops the table,\n"
-    "    'html' passes the <table> through verbatim.\n"
-    ":param table_header: 'first' treats the first row as the header, 'detect' uses\n"
-    "    <th> cells, 'none' emits an empty header row.\n"
-    ":param pad_tables: pad cells with spaces so the column pipes align.\n"
-    ":param escape_mode: 'minimal' escapes only what would change the markup, 'all'\n"
-    "    escapes every Markdown-significant character.\n"
-    ":param escape_asterisks: escape a literal * in prose so it is not read as emphasis.\n"
-    ":param escape_underscores: escape a literal _ in prose so it is not read as emphasis.\n"
-    ":param line_break: render a <br> as 'spaces' (two trailing spaces) or 'backslash'.\n"
-    ":param block_spacing: 'double' separates blocks with a blank line, 'single' does not.\n"
-    ":param wrap_width: word-wrap prose at this column, or 0 to leave it unwrapped.\n"
-    ":param wrap_list_items: extend word-wrapping into list items.\n"
-    ":param wrap_links: allow a [text](url) construct to be split across wrapped lines.\n"
-    ":param transliterate: fold common non-ASCII typography in prose to ASCII.\n"
-    ":param document_strip: trim the whole output: 'strip' both ends, 'lstrip' the\n"
-    "    leading, 'rstrip' the trailing whitespace, 'none' leaves it.\n"
-    ":param quote_open: the character that opens a converted typographic quotation.\n"
-    ":param quote_close: the character that closes a converted typographic quotation.\n"
-    ":param google_doc: read the inline-CSS styling a Google Docs HTML export carries.\n"
-    ":param google_list_indent: the pixel indent a Google Docs export uses per list level.\n"
-    ":param hide_strikethrough: drop text a Google Docs export marks struck through.\n"
-    ":param strip: tag names whose markup is dropped while their text is kept;\n"
-    "    mutually exclusive with convert.\n"
-    ":param convert: the only tag names to keep markup for; mutually exclusive with strip.\n"
-    ":param converters: maps a lowercased tag name to a callable(element, content) -> str\n"
-    "    that replaces how that tag renders, receiving the element and its\n"
-    "    already-converted child Markdown.\n"
-    ":returns: the Markdown rendering of this node's subtree.");
+PyDoc_STRVAR(to_markdown_doc, "to_markdown(options=None)\n--\n\n"
+                              "Render this node and its subtree as Markdown. The defaults emit opinionated\n"
+                              "GitHub-Flavored Markdown.\n\n"
+                              ":param options: a Markdown configuration object, or None for the defaults. Its\n"
+                              "    grouped knobs (headings, links, tables, ...) cover the markdownify and\n"
+                              "    html2text configuration surface.\n"
+                              ":returns: the Markdown rendering of this node's subtree.");
 
 /* Resolve a string option against its allowed values, writing the matched index
    into *out (an enum), or leave *out untouched when the argument was omitted. */
@@ -523,7 +466,49 @@ static int md_build_tag_filter(PyObject *seq, md_opts *opt, int mode) {
     return 0;
 }
 
-static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds) {
+/* Render this node from spec, a borrowed dict of renderer keyword options (a config
+   object's non-default values) or NULL for every default. */
+typedef PyObject *(*node_render_fn)(PyObject *self, PyObject *spec);
+
+/* Unpack a renderer's config object to its keyword dict via _unpack(); a value that is
+   not the expected config type has no _unpack, so the AttributeError is replaced with a
+   clear TypeError naming the type. Returns a new dict reference, or NULL with the error
+   set. */
+static PyObject *config_unpack(PyObject *options, const char *type_name) {
+    PyObject *spec = PyObject_CallMethod(options, "_unpack", NULL);
+    if (spec == NULL) {
+        PyErr_Clear();
+        PyErr_Format(PyExc_TypeError, "options must be a %s, not %.200s", type_name, Py_TYPE(options)->tp_name);
+    }
+    return spec;
+}
+
+/* The shared dispatch for a renderer whose only argument is a config object: parse
+   the single optional `options`, unpack it to the renderer keyword dict (or NULL for
+   the defaults), and render. The unpacked dict owns the borrowed values for the call. */
+static PyObject *node_render_with_options(PyObject *self, PyObject *args, PyObject *kwds, node_render_fn render,
+                                          const char *type_name) {
+    PyObject *options = NULL;
+    static char *kw[] = {"options", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O", kw, &options)) {
+        return NULL;
+    }
+    if (options == NULL || options == Py_None) {
+        return render(self, NULL);
+    }
+    PyObject *spec = config_unpack(options, type_name);
+    if (spec == NULL) {
+        return NULL;
+    }
+    PyObject *result = render(self, spec);
+    Py_DECREF(spec);
+    return result;
+}
+
+/* Render this node as Markdown from spec, a borrowed dict of the renderer keyword
+   options (the Markdown config's non-default values) or NULL for every default.
+   The caller owns spec; the borrowed strings stay valid for this call. */
+static PyObject *node_markdown_render(PyObject *self, PyObject *spec) {
     md_opts opt = th_markdown_default_opts();
     PyObject *heading = NULL, *strike = NULL, *code_style = NULL, *link = NULL, *image = NULL, *table = NULL;
     PyObject *header = NULL, *escape = NULL, *brk = NULL, *spacing = NULL, *docstrip = NULL;
@@ -570,14 +555,20 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
                          "convert",
                          "converters",
                          NULL};
-    if (!PyArg_ParseTupleAndKeywords(
-            args, kwds, "|$OsssOpssOspOppppsOsOOpOppOOipppOsspipOOO", kw, &heading, &opt.bullets, &opt.strong,
-            &opt.emphasis, &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code,
-            &link, &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
-            &opt.default_image_alt, &table, &header, &opt.pad_tables, &escape, &opt.escape_asterisks,
-            &opt.escape_underscores, &brk, &spacing, &opt.wrap_width, &opt.wrap_list_items, &opt.wrap_links,
-            &opt.transliterate, &docstrip, &opt.quote_open, &opt.quote_close, &opt.google_doc, &opt.google_list_indent,
-            &opt.hide_strikethrough, &strip, &convert, &converters)) {
+    PyObject *empty = PyTuple_New(0);
+    if (empty == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int parsed = PyArg_ParseTupleAndKeywords(
+        empty, spec, "|$OsssOpssOspOppppsOsOOpOppOOipppOsspipOOO", kw, &heading, &opt.bullets, &opt.strong,
+        &opt.emphasis, &strike, &ignore_emphasis, &opt.sub, &opt.sup, &code_style, &opt.code_language, &mark_code,
+        &link, &opt.autolink, &opt.link_title, &opt.ignore_links, &opt.skip_internal_links, &opt.base_url, &image,
+        &opt.default_image_alt, &table, &header, &opt.pad_tables, &escape, &opt.escape_asterisks,
+        &opt.escape_underscores, &brk, &spacing, &opt.wrap_width, &opt.wrap_list_items, &opt.wrap_links,
+        &opt.transliterate, &docstrip, &opt.quote_open, &opt.quote_close, &opt.google_doc, &opt.google_list_indent,
+        &opt.hide_strikethrough, &strip, &convert, &converters);
+    Py_DECREF(empty);
+    if (!parsed) {
         return NULL;
     }
     static const char *const headings[] = {"atx", "atx_closed", "setext"};
@@ -624,12 +615,11 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
         opt.code_mark_open = "[code]";
         opt.code_mark_close = "[/code]";
     }
-    int has_strip = strip != NULL && strip != Py_None;
-    int has_convert = convert != NULL && convert != Py_None;
-    if (has_strip && has_convert) {
-        PyErr_SetString(PyExc_ValueError, "strip and convert are mutually exclusive");
-        return NULL;
-    }
+    /* The Markdown config's _unpack omits a None tag filter, so strip/convert/converters
+       arrive here either absent (NULL) or a real object, never Py_None. strip and convert
+       are mutually exclusive; the config rejects the pair on construction. */
+    int has_strip = strip != NULL;
+    int has_convert = convert != NULL;
     if (has_strip && md_build_tag_filter(strip, &opt, TH_MD_FILTER_STRIP) < 0) {
         return NULL;
     }
@@ -638,7 +628,7 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
     }
     PyObject *conv = NULL;
     md_wrap_ctx wrap_ctx;
-    if (converters != NULL && converters != Py_None) {
+    if (converters != NULL) {
         conv = md_converters_dict(converters);
         if (conv == NULL) {
             return NULL;
@@ -670,35 +660,47 @@ static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds
     return result;
 }
 
-PyDoc_STRVAR(to_text_doc, "to_text(*, width=0, links='none', images=False, layout='extended', default_image_alt='', "
-                          "table_cell_separator='  ', bullet='* ')\n--\n\n"
+static PyObject *node_to_markdown(PyObject *self, PyObject *args, PyObject *kwds) {
+    return node_render_with_options(self, args, kwds, node_markdown_render, "Markdown");
+}
+
+PyDoc_STRVAR(to_text_doc, "to_text(options=None)\n--\n\n"
                           "Render this node and its subtree as layout-aware plain text: blocks\n"
                           "separated by blank lines, lists indented under their bullets, and tables\n"
                           "laid out as a column-aligned grid. The inscriptis role, in C.\n\n"
-                          ":param width: wrap column for prose, or 0 to leave lines unwrapped.\n"
-                          ":param links: how to render <a> targets: 'none' drops them, 'inline' shows\n"
-                          "    them after the text, 'footnote' collects them at the end.\n"
-                          ":param images: render image alt text instead of skipping images.\n"
-                          ":param layout: 'extended' adds blank lines and indentation; 'strict' keeps the\n"
-                          "    output compact.\n"
-                          ":param default_image_alt: alt text used for an image that declares none.\n"
-                          ":param table_cell_separator: string placed between table cells on a row.\n"
-                          ":param bullet: marker prefixed to each list item.\n"
+                          ":param options: a PlainText configuration object, or None for the defaults.\n"
                           ":returns: the plain-text rendering of this node's subtree.");
 
-static PyObject *node_to_text(PyObject *self, PyObject *args, PyObject *kwds) {
-    text_opts opt = th_text_default_opts();
+/* Parse the PlainText keyword options out of spec into opt; spec is a borrowed dict
+   of the config's non-default values, or NULL for every default. -1 with an exception
+   set on a bad value, 0 otherwise. */
+static int text_opts_from_spec(text_opts *opt, PyObject *spec) {
     PyObject *links = NULL, *layout = NULL;
     static char *kw[] = {"width",  "links", "images", "layout", "default_image_alt", "table_cell_separator",
                          "bullet", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$iOpOsss", kw, &opt.width, &links, &opt.images, &layout,
-                                     &opt.default_image_alt, &opt.cell_separator, &opt.bullet)) {
-        return NULL;
+    PyObject *empty = PyTuple_New(0);
+    if (empty == NULL) { /* GCOVR_EXCL_START - allocation failure cannot be forced from a test */
+        PyErr_NoMemory();
+        return -1;
+    } /* GCOVR_EXCL_STOP */
+    int parsed = PyArg_ParseTupleAndKeywords(empty, spec, "|$iOpOsss", kw, &opt->width, &links, &opt->images, &layout,
+                                             &opt->default_image_alt, &opt->cell_separator, &opt->bullet);
+    Py_DECREF(empty);
+    if (!parsed) {
+        return -1;
     }
     static const char *const link_modes[] = {"none", "inline", "footnote"};
     static const char *const layouts[] = {"strict", "extended"};
-    if (md_resolve_enum("links", links, link_modes, 3, &opt.links) < 0 ||
-        md_resolve_enum("layout", layout, layouts, 2, &opt.extended) < 0) {
+    if (md_resolve_enum("links", links, link_modes, 3, &opt->links) < 0 ||
+        md_resolve_enum("layout", layout, layouts, 2, &opt->extended) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *node_text_render(PyObject *self, PyObject *spec) {
+    text_opts opt = th_text_default_opts();
+    if (text_opts_from_spec(&opt, spec) < 0) {
         return NULL;
     }
     Py_ssize_t out_len;
@@ -712,6 +714,10 @@ static PyObject *node_to_text(PyObject *self, PyObject *args, PyObject *kwds) {
     PyObject *result = ucs4_to_str(data, out_len);
     PyMem_Free(data);
     return result;
+}
+
+static PyObject *node_to_text(PyObject *self, PyObject *args, PyObject *kwds) {
+    return node_render_with_options(self, args, kwds, node_text_render, "PlainText");
 }
 
 /* Parse one annotation_rules entry ("tag", "tag#attr", "tag#attr=value", or
@@ -771,40 +777,22 @@ static int text_parse_rule(PyObject *key, PyObject *value, text_rule *rule, PyOb
     return 0;
 }
 
-PyDoc_STRVAR(to_annotated_text_doc,
-             "to_annotated_text(annotation_rules, *, width=0, links='none', images=False, layout='extended', "
-             "default_image_alt='', table_cell_separator='  ', bullet='* ')\n--\n\n"
-             "Render layout-aware text and, for every element matching a rule in\n"
-             "annotation_rules, record a labeled span over its text. Spans inside table\n"
-             "cells are not recorded.\n\n"
-             ":param annotation_rules: maps a selector ('tag', 'tag#attr', 'tag#attr=value',\n"
-             "    or '#attr') to the list of labels to attach to each matching element.\n"
-             ":param width: wrap column for prose, or 0 to leave lines unwrapped.\n"
-             ":param links: how to render <a> targets: 'none', 'inline', or 'footnote'.\n"
-             ":param images: render image alt text instead of skipping images.\n"
-             ":param layout: 'extended' adds blank lines and indentation; 'strict' is compact.\n"
-             ":param default_image_alt: alt text used for an image that declares none.\n"
-             ":param table_cell_separator: string placed between table cells on a row.\n"
-             ":param bullet: marker prefixed to each list item.\n"
-             ":returns: a (text, spans) pair, where spans is a list of (start, end, label).");
+PyDoc_STRVAR(to_annotated_text_doc, "to_annotated_text(annotation_rules, options=None)\n--\n\n"
+                                    "Render layout-aware text and, for every element matching a rule in\n"
+                                    "annotation_rules, record a labeled span over its text. Spans inside table\n"
+                                    "cells are not recorded.\n\n"
+                                    ":param annotation_rules: maps a selector ('tag', 'tag#attr', 'tag#attr=value',\n"
+                                    "    or '#attr') to the list of labels to attach to each matching element.\n"
+                                    ":param options: a PlainText configuration object, or None for the defaults.\n"
+                                    ":returns: a (text, spans) pair, where spans is a list of (start, end, label).");
 
-static PyObject *node_to_annotated_text(PyObject *self, PyObject *args, PyObject *kwds) {
-    text_opts opt = th_text_default_opts();
-    PyObject *rules_dict, *links = NULL, *layout = NULL;
-    static char *kw[] = {"annotation_rules",     "width",  "links", "images", "layout", "default_image_alt",
-                         "table_cell_separator", "bullet", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$iOpOsss", kw, &rules_dict, &opt.width, &links, &opt.images,
-                                     &layout, &opt.default_image_alt, &opt.cell_separator, &opt.bullet)) {
-        return NULL;
-    }
+static PyObject *node_annotated_render(PyObject *self, PyObject *rules_dict, PyObject *spec) {
     if (!PyDict_Check(rules_dict)) {
         PyErr_SetString(PyExc_TypeError, "annotation_rules must be a dict");
         return NULL;
     }
-    static const char *const link_modes[] = {"none", "inline", "footnote"};
-    static const char *const layouts[] = {"strict", "extended"};
-    if (md_resolve_enum("links", links, link_modes, 3, &opt.links) < 0 ||
-        md_resolve_enum("layout", layout, layouts, 2, &opt.extended) < 0) {
+    text_opts opt = th_text_default_opts();
+    if (text_opts_from_spec(&opt, spec) < 0) {
         return NULL;
     }
     Py_ssize_t n = PyDict_Size(rules_dict);
@@ -860,6 +848,24 @@ static PyObject *node_to_annotated_text(PyObject *self, PyObject *args, PyObject
     PyMem_Free(rules);
     PyMem_Free(labels);
     PyMem_Free(values);
+    return result;
+}
+
+static PyObject *node_to_annotated_text(PyObject *self, PyObject *args, PyObject *kwds) {
+    PyObject *rules_dict, *options = NULL;
+    static char *kw[] = {"annotation_rules", "options", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kw, &rules_dict, &options)) {
+        return NULL;
+    }
+    if (options == NULL || options == Py_None) {
+        return node_annotated_render(self, rules_dict, NULL);
+    }
+    PyObject *spec = config_unpack(options, "PlainText");
+    if (spec == NULL) {
+        return NULL;
+    }
+    PyObject *result = node_annotated_render(self, rules_dict, spec);
+    Py_DECREF(spec);
     return result;
 }
 
@@ -1227,27 +1233,17 @@ static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds);
 
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds);
 
-PyDoc_STRVAR(serialize_doc,
-             "serialize(*, formatter=Formatter.WHATWG, layout=None, sort_attributes=False, meta_charset=False)\n--\n\n"
-             "Serialize this node and its subtree to a str.\n\n"
-             ":param formatter: the character-escaping policy to apply.\n"
-             ":param layout: the whitespace mode: None gives the compact WHATWG form, an\n"
-             "    Indent pretty-prints (adding whitespace, so it does not preserve meaning),\n"
-             "    and a Minify shrinks the output while reparsing to the same tree.\n"
-             ":param sort_attributes: emit each start tag's attributes in ascending name order.\n"
-             ":param meta_charset: ensure the document <head> declares <meta charset=\"utf-8\">,\n"
-             "    normalizing an existing charset declaration or injecting one.\n"
-             ":returns: the serialized markup.");
+PyDoc_STRVAR(serialize_doc, "serialize(options=None)\n--\n\n"
+                            "Serialize this node and its subtree to a str.\n\n"
+                            ":param options: an Html configuration object (formatter, layout, attribute\n"
+                            "    ordering, and meta-charset handling), or None for the defaults.\n"
+                            ":returns: the serialized markup.");
 
-PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', *, formatter=Formatter.WHATWG, layout=None, sort_attributes=False, "
-                         "meta_charset=False)\n--\n\n"
-                         "Serialize this node and its subtree to bytes, with the same formatter, layout,\n"
-                         "and sort_attributes controls as serialize().\n\n"
+PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', options=None)\n--\n\n"
+                         "Serialize this node and its subtree to bytes, with the same formatting controls\n"
+                         "as serialize().\n\n"
                          ":param encoding: the codec to encode the markup with.\n"
-                         ":param formatter: the character-escaping policy to apply.\n"
-                         ":param layout: the whitespace mode (None, an Indent, or a Minify).\n"
-                         ":param sort_attributes: emit each start tag's attributes in name order.\n"
-                         ":param meta_charset: ensure a <meta charset> naming encoding is present.\n"
+                         ":param options: an Html configuration object, or None for the defaults.\n"
                          ":returns: the serialized markup encoded as bytes.");
 
 PyDoc_STRVAR(find_doc,
@@ -1404,13 +1400,14 @@ enum th_layout_mode {
     TH_LAYOUT_MINIFY,  /* the round-trip-safe minify transforms */
 };
 
-/* Resolve the layout argument: None compacts, an Indent pretty-prints, a Minify
-   minifies. An Indent owns its unit buffer and a Minify its flags, so the resolved
-   values borrow from the object the caller keeps alive for the serialize. Returns
-   0 on success (mode set) or -1 with a TypeError on any other object. */
+/* Resolve the layout argument: an absent layout compacts, an Indent pretty-prints, a
+   Minify minifies. An Indent owns its unit buffer and a Minify its flags, so the resolved
+   values borrow from the object the caller keeps alive for the serialize. The Html config's
+   _unpack omits a None layout, so layout_obj arrives here NULL (absent) or a real object,
+   never Py_None. Returns 0 on success (mode set) or -1 with a TypeError on any other object. */
 static int resolve_layout(module_state *state, PyObject *layout_obj, enum th_layout_mode *mode,
                           const Py_UCS4 **indent_unit, Py_ssize_t *indent_len, th_minify_opts *opts) {
-    if (layout_obj == NULL || layout_obj == Py_None) {
+    if (layout_obj == NULL) {
         *mode = TH_LAYOUT_COMPACT;
         return 0;
     }
@@ -1471,31 +1468,60 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
     return result;
 }
 
-static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds) {
+/* Serialize self to a str under the Html config in spec (a borrowed dict of the
+   config's non-default values, or NULL for the defaults), writing charset as the
+   meta_charset label. */
+static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const char *charset) {
     static char *keywords[] = {"formatter", "layout", "sort_attributes", "meta_charset", NULL};
     PyObject *formatter_obj = NULL;
     PyObject *layout_obj = NULL;
     int sort_attributes = 0;
     int meta_charset = 0;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OOpp", keywords, &formatter_obj, &layout_obj, &sort_attributes,
-                                     &meta_charset)) {
+    PyObject *empty = PyTuple_New(0);
+    if (empty == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int parsed = PyArg_ParseTupleAndKeywords(empty, spec, "|$OOpp", keywords, &formatter_obj, &layout_obj,
+                                             &sort_attributes, &meta_charset);
+    Py_DECREF(empty);
+    if (!parsed) {
         return NULL;
     }
-    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, "utf-8");
+    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, charset);
+}
+
+/* Resolve a serialize/encode call's options object to a str rendering under charset.
+   None renders the defaults; otherwise the config's _unpack() supplies its keywords. */
+static PyObject *node_serialize_options(PyObject *self, PyObject *options, const char *charset) {
+    if (options == NULL || options == Py_None) {
+        return node_serialize_str(self, NULL, NULL, 0, 0, charset);
+    }
+    PyObject *spec = config_unpack(options, "Html");
+    if (spec == NULL) {
+        return NULL;
+    }
+    PyObject *result = node_serialize_from_spec(self, spec, charset);
+    Py_DECREF(spec);
+    return result;
+}
+
+static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {"options", NULL};
+    PyObject *options = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O", keywords, &options)) {
+        return NULL;
+    }
+    return node_serialize_options(self, options, "utf-8");
 }
 
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"encoding", "formatter", "layout", "sort_attributes", "meta_charset", NULL};
+    static char *keywords[] = {"encoding", "options", NULL};
     const char *encoding = "utf-8";
-    PyObject *formatter_obj = NULL;
-    PyObject *layout_obj = NULL;
-    int sort_attributes = 0;
-    int meta_charset = 0;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|s$OOpp", keywords, &encoding, &formatter_obj, &layout_obj,
-                                     &sort_attributes, &meta_charset)) {
+    PyObject *options = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|sO", keywords, &encoding, &options)) {
         return NULL;
     }
-    PyObject *text = node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, encoding);
+    PyObject *text = node_serialize_options(self, options, encoding);
     if (text == NULL) {
         return NULL;
     }

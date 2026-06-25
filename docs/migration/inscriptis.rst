@@ -63,14 +63,15 @@ twenty times faster:
     Region  Total
     North   120
 
-The ``ParserConfig`` options map onto :meth:`~turbohtml.Node.to_text` keywords:
+The ``ParserConfig`` options map onto :class:`~turbohtml.PlainText` config fields passed to
+:meth:`~turbohtml.Node.to_text`:
 
 .. list-table::
     :header-rows: 1
     :widths: 50 50
 
     - - inscriptis
-      - turbohtml :meth:`~turbohtml.Node.to_text`
+      - turbohtml :class:`~turbohtml.PlainText`
     - - ``display_links``
       - ``links`` (``"none"``/``"inline"``/``"footnote"``)
     - - ``display_images``
@@ -161,8 +162,8 @@ as ``<label>...</label>`` markup, innermost span closing first).
  Pitfalls
 **********
 
-- Links are hidden by default (matching inscriptis); pass ``links="inline"`` for ``text (url)`` or ``links="footnote"``
-  for numbered references collected at the end.
+- Links are hidden by default (matching inscriptis); pass ``PlainText(links="inline")`` for ``text (url)`` or
+  ``PlainText(links="footnote")`` for numbered references collected at the end.
 - :meth:`~turbohtml.Node.to_text` renders structure, not styling: there is no bold or color, and headings are plain
   text. For the raw concatenation with no layout at all, read :attr:`~turbohtml.Node.text`.
 - Annotation offsets count code points into the returned string; a table cell is labeled at its position in the laid-out

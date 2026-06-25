@@ -63,8 +63,8 @@ walk over a BeautifulSoup tree, so it converts a page two orders of magnitude fa
 
     Some **bold** text.
 
-The defaults emit opinionated GitHub-Flavored Markdown, and keyword options cover markdownify's surface with one name
-per concept:
+The defaults emit opinionated GitHub-Flavored Markdown, and the grouped :class:`~turbohtml.Markdown` config fields cover
+markdownify's surface with one name per concept:
 
 .. list-table::
     :header-rows: 1
@@ -73,42 +73,42 @@ per concept:
     - - markdownify
       - turbohtml :meth:`~turbohtml.Node.to_markdown`
     - - ``heading_style`` (``atx``/``atx_closed``/``underlined``)
-      - ``heading_style`` (``"atx"``/``"atx_closed"``/``"setext"``)
+      - ``Markdown.Headings(style=...)`` (``"atx"``/``"atx_closed"``/``"setext"``)
     - - ``bullets``
-      - ``bullets``
+      - ``Markdown.Lists(bullets=...)``
     - - ``strong_em_symbol``
-      - ``strong`` and ``emphasis`` (independent, so a superset)
+      - ``Markdown.Inline(strong=..., emphasis=...)`` (independent, so a superset)
     - - ``sub_symbol``, ``sup_symbol``
-      - ``sub_symbol``, ``sup_symbol``
+      - ``Markdown.Inline(sub=..., sup=...)``
     - - ``escape_asterisks``, ``escape_underscores``
-      - ``escape_asterisks``, ``escape_underscores``
+      - ``Markdown.Escaping(asterisks=..., underscores=...)``
     - - ``escape_misc``
-      - ``escape_mode="all"``
+      - ``Markdown.Escaping(mode="all")``
     - - ``autolinks``
-      - ``autolink``
+      - ``Markdown.Links(autolink=...)``
     - - ``default_title``
-      - ``link_title``
+      - ``Markdown.Links(title=...)``
     - - ``table_infer_header``
-      - ``table_header="first"`` (the default) vs ``"none"``
+      - ``Markdown.Tables(header="first")`` (the default) vs ``"none"``
     - - ``newline_style`` (``spaces``/``backslash``)
-      - ``line_break`` (``"spaces"``/``"backslash"``)
+      - ``Markdown.Document(line_break=...)`` (``"spaces"``/``"backslash"``)
     - - ``strip_document``
-      - ``document_strip`` (``"strip"``/``"lstrip"``/``"rstrip"``/``"none"``)
+      - ``Markdown.Document(trim=...)`` (``"strip"``/``"lstrip"``/``"rstrip"``/``"none"``)
     - - ``code_language``
-      - ``code_language``
+      - ``Markdown.Code(language=...)``
     - - ``strip``, ``convert``
-      - ``strip``, ``convert`` (mutually exclusive tag filters)
+      - ``Markdown(strip=...)``, ``Markdown(convert=...)`` (mutually exclusive tag filters)
     - - ``convert_<tag>`` overrides
-      - ``converters`` argument
+      - ``Markdown(converters=...)`` argument
 
 **********
  Pitfalls
 **********
 
-- The bold and italic markers are independent (``strong`` and ``emphasis``), where markdownify derives both from one
-  ``strong_em_symbol``; set both to reproduce its behavior.
+- The bold and italic markers are independent (``Markdown.Inline(strong=...)`` and ``Markdown.Inline(emphasis=...)``),
+  where markdownify derives both from one ``strong_em_symbol``; set both to reproduce its behavior.
 - :meth:`~turbohtml.Node.to_markdown` is a method on any node, so convert a subtree by calling it on the element you
   selected (``doc.find("article").to_markdown()``) instead of slicing the HTML string first.
 - markdownify's parser-selection options (``bs4_options``) are dropped, since turbohtml always runs the WHATWG
   algorithm.
-- ``base_url`` does simple prefixing rather than full RFC-3986 URL resolution.
+- ``Markdown.Links(base_url=...)`` does simple prefixing rather than full RFC-3986 URL resolution.

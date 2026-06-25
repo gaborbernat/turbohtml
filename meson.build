@@ -62,6 +62,7 @@ py.install_sources(
         'src/turbohtml/_article.py',
         'src/turbohtml/_html.pyi',
         'src/turbohtml/_links.py',
+        'src/turbohtml/_render.py',
         'src/turbohtml/_structured_data.py',
         'src/turbohtml/_xpath.py',
         'src/turbohtml/build.py',

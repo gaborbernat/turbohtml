@@ -24,14 +24,18 @@ Parse a document, query it with a CSS selector, and serialize a node back to HTM
 
 ```python
 import turbohtml
-from turbohtml import Formatter
+from turbohtml import Formatter, Html
 
 doc = turbohtml.parse("<article><h1>Tea</h1><p class=note>café &amp; cake</p></article>")
 print([h.text for h in doc.find_all("h1")])  # ['Tea']
 print(doc.select_one("p.note").text)  # café & cake
-print(doc.select_one("p").serialize(formatter=Formatter.NAMED_ENTITIES))
+print(doc.select_one("p").serialize(Html(formatter=Formatter.NAMED_ENTITIES)))
 # <p class="note">caf&eacute; &amp; cake</p>
 ```
+
+Each renderer takes one configuration object — `Html` for `serialize`/`encode`, `Markdown` for `to_markdown`, and
+`PlainText` for `to_text`/`to_annotated_text` — instead of a long keyword list, so options stay grouped and
+discoverable.
 
 turbohtml models text as real child nodes following the WHATWG DOM shape, so `node[i]` indexes children and attributes
 are reached through `node.attrs`.
@@ -44,11 +48,11 @@ are reached through `node.attrs`.
 | Tokenize          | `tokenize`, `Tokenizer` — WHATWG streaming tokenizer with incremental `feed`/`close`                   |
 | Parse             | `parse`, `parse_fragment`, `IncrementalParser` — encoding sniffing and source positions                |
 | Query             | `find`/`find_all`, CSS `select`/`select_one`, XPath `xpath`/`xpath_one`                                |
-| Serialize         | `serialize` with `Formatter` for escaping and `Minify` for whitespace                                  |
+| Serialize         | `serialize`/`encode` with an `Html` config (`Formatter` escaping, `Indent`/`Minify` whitespace)        |
 | Sanitize          | `sanitize` — allowlist scrub of untrusted HTML (the `bleach.clean` successor)                          |
 | Linkify           | `linkify` — auto-link URLs and emails without touching existing links (the `bleach.linkify` successor) |
-| Markdown          | `to_markdown` — GitHub-Flavored Markdown export                                                        |
-| Plain text        | `to_text`, `to_annotated_text` — layout-aware text, optionally with `(start, end, label)` spans        |
+| Markdown          | `to_markdown` with a `Markdown` config — GitHub-Flavored Markdown export                               |
+| Plain text        | `to_text`, `to_annotated_text` with a `PlainText` config — layout-aware text, optional labeled spans   |
 | Extract           | `tables`, `structured_data` (JSON-LD / Microdata / OpenGraph), `article` (main content)                |
 | Build / edit      | `Element`, `E`/`ElementMaker`, `unwrap`/`wrap`/`decompose`/`replace_with` and live `attrs`             |
 | Migration         | `turbohtml.migration.*` — drop-in shims for `markupsafe` and template autoescaping                     |

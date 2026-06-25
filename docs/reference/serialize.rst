@@ -4,15 +4,19 @@
 
 .. currentmodule:: turbohtml
 
-Turn a tree back into markup or text. :meth:`Node.serialize` and :meth:`Node.encode` produce HTML; a :class:`Formatter`
-picks the escape policy and an :class:`Indent` or :class:`Minify` picks the whitespace. :func:`escape` and
-:func:`unescape` are the standalone string helpers. :meth:`Node.to_text`, :meth:`Node.to_markdown`, and
-:meth:`Node.to_annotated_text` render text; :func:`annotation_surface` and :func:`annotation_tags` post-process the
-annotated-text result.
+Turn a tree back into markup or text. Each renderer takes one configuration object: :meth:`Node.serialize` and
+:meth:`Node.encode` produce HTML under an :class:`Html` config (a :class:`Formatter` picks the escape policy and an
+:class:`Indent` or :class:`Minify` picks the whitespace); :meth:`Node.to_markdown` takes a :class:`Markdown` config; and
+:meth:`Node.to_text` and :meth:`Node.to_annotated_text` take a :class:`PlainText` config. :func:`escape` and
+:func:`unescape` are the standalone string helpers; :func:`annotation_surface` and :func:`annotation_tags` post-process
+the annotated-text result.
 
 .. autofunction:: escape
 
 .. autofunction:: unescape
+
+.. autoclass:: Html
+    :members:
 
 .. autoclass:: Formatter
     :members:
@@ -21,6 +25,12 @@ annotated-text result.
     :members:
 
 .. autoclass:: Minify
+    :members:
+
+.. autoclass:: Markdown
+    :members:
+
+.. autoclass:: PlainText
     :members:
 
 .. autofunction:: annotation_surface

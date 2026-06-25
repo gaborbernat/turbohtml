@@ -63,7 +63,7 @@ faster while covering the same options, including the Google Docs mode:
 
     Some **bold** text.
 
-The html2text options map onto :meth:`~turbohtml.Node.to_markdown` keywords with one name per concept:
+The html2text options map onto the grouped :class:`~turbohtml.Markdown` config fields with one name per concept:
 
 .. list-table::
     :header-rows: 1
@@ -72,58 +72,60 @@ The html2text options map onto :meth:`~turbohtml.Node.to_markdown` keywords with
     - - html2text
       - turbohtml :meth:`~turbohtml.Node.to_markdown`
     - - ``ul_item_mark``
-      - ``bullets``
+      - ``Markdown.Lists(bullets=...)``
     - - ``emphasis_mark``, ``strong_mark``
-      - ``emphasis``, ``strong``
+      - ``Markdown.Inline(emphasis=..., strong=...)``
     - - ``ignore_emphasis``
-      - ``ignore_emphasis``
+      - ``Markdown.Inline(ignore_emphasis=...)``
     - - ``ignore_links``
-      - ``ignore_links``
+      - ``Markdown.Links(ignore=...)``
     - - ``skip_internal_links``
-      - ``skip_internal_links``
+      - ``Markdown.Links(skip_internal=...)``
     - - ``inline_links``
-      - ``link_style`` (``"inline"``/``"reference"``)
+      - ``Markdown.Links(style=...)`` (``"inline"``/``"reference"``)
     - - ``ignore_images``, ``images_to_alt``, ``images_as_html``, ``images_with_size``
-      - ``image_mode`` (``"markdown"``/``"alt"``/``"ignore"``/``"html"``)
+      - ``Markdown.Images(mode=...)`` (``"markdown"``/``"alt"``/``"ignore"``/``"html"``)
     - - ``default_image_alt``
-      - ``default_image_alt``
+      - ``Markdown.Images(default_alt=...)``
     - - ``ignore_tables``, ``bypass_tables``
-      - ``table_mode`` (``"markdown"``/``"strip"``/``"html"``)
+      - ``Markdown.Tables(mode=...)`` (``"markdown"``/``"strip"``/``"html"``)
     - - ``pad_tables``
-      - ``pad_tables``
+      - ``Markdown.Tables(pad=...)``
     - - ``body_width``, ``wrap_list_items``, ``wrap_links``
-      - ``wrap_width``, ``wrap_list_items``, ``wrap_links``
+      - ``Markdown.Wrapping(width=..., list_items=..., links=...)``
     - - ``unicode_snob`` (and the ``UNIFIABLE`` table)
-      - ``transliterate``
+      - ``Markdown.Document(transliterate=...)``
     - - ``mark_code``
-      - ``mark_code``
+      - ``Markdown.Code(mark=...)``
     - - ``backquote_code_style``
-      - ``code_block_style`` (``"fenced"``/``"indented"``)
+      - ``Markdown.Code(block_style=...)`` (``"fenced"``/``"indented"``)
     - - ``single_line_break``
-      - ``block_spacing="single"``
+      - ``Markdown.Document(block_spacing="single")``
     - - ``baseurl``
-      - ``base_url``
+      - ``Markdown.Links(base_url=...)``
     - - ``open_quote``, ``close_quote``
-      - ``quote_open``, ``quote_close``
+      - ``Markdown.Inline(quote_open=..., quote_close=...)``
     - - ``escape_snob``
-      - ``escape_mode="all"``
+      - ``Markdown.Escaping(mode="all")``
     - - ``google_doc``
-      - ``google_doc``
+      - ``Markdown.GoogleDoc(enabled=...)`` (or the ``Markdown.google_doc()`` preset)
     - - ``google_list_indent``
-      - ``google_list_indent``
+      - ``Markdown.GoogleDoc(list_indent=...)``
     - - ``hide_strikethrough``
-      - ``hide_strikethrough``
+      - ``Markdown.Inline(hide_strikethrough=...)``
 
-``google_doc=True`` reads the inline-CSS styling a Google Docs HTML export carries: a ``font-weight`` of ``bold`` or
-``700``--``900`` becomes ``strong``, ``font-style:italic`` becomes ``emphasis``, a ``Courier New``/``Consolas``
-``font-family`` becomes an inline code span, ``list-style-type`` picks the list marker, and each ``google_list_indent``
-pixels of ``margin-left`` add one list-nesting level. With ``hide_strikethrough=True`` a
-``text-decoration:line-through`` drops the struck text.
+``Markdown.google_doc()`` reads the inline-CSS styling a Google Docs HTML export carries: a ``font-weight`` of ``bold``
+or ``700``--``900`` becomes ``strong``, ``font-style:italic`` becomes ``emphasis``, a ``Courier New``/``Consolas``
+``font-family`` becomes an inline code span, ``list-style-type`` picks the list marker, and each
+``Markdown.GoogleDoc(list_indent=...)`` pixels of ``margin-left`` add one list-nesting level. With
+``Markdown.Inline(hide_strikethrough=True)`` a ``text-decoration:line-through`` drops the struck text.
 
 .. testcode::
 
+    from turbohtml import Markdown
+
     export = '<p><span style="font-weight:700">Quarterly</span> revenue</p>'
-    print(parse(export).to_markdown(google_doc=True))
+    print(parse(export).to_markdown(Markdown.google_doc()))
 
 .. testoutput::
 

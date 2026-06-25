@@ -167,7 +167,7 @@ with an explicit ``encoding=``).
     - - ``soup.new_tag("div")``, ``soup.new_string("hi")``
       - :class:`~turbohtml.Element`, :class:`~turbohtml.Text`
     - - ``tag.prettify()``
-      - :meth:`~turbohtml.Node.serialize` (``layout=Indent(2)``)
+      - :meth:`~turbohtml.Node.serialize` (``Html(layout=Indent(2))``)
     - - ``tag.smooth()``
       - :meth:`~turbohtml.Element.normalize`
     - - ``tag.sourceline``, ``tag.sourcepos``
@@ -257,11 +257,11 @@ attribute order, and ``<br>`` versus ``<br/>``. Choose ``Formatter.NAMED_ENTITIE
 
 .. testcode::
 
-    from turbohtml import Formatter
+    from turbohtml import Formatter, Html
 
     node = parse("<p>café &amp; co</p>").find("p")
     print(node.html)
-    print(node.serialize(formatter=Formatter.NAMED_ENTITIES))
+    print(node.serialize(Html(formatter=Formatter.NAMED_ENTITIES)))
 
 .. testoutput::
 
