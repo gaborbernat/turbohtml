@@ -8,7 +8,7 @@
 
 `bleach <https://github.com/mozilla/bleach>`_ was the standard HTML allowlist sanitizer and linkifier, built on
 html5lib. It is end of life with no maintained successor, so its two jobs split across turbohtml: ``bleach.clean`` maps
-to ``turbohtml.sanitizer`` and ``bleach.linkify`` maps to ``turbohtml.linkify``.
+to ``turbohtml.clean`` and ``bleach.linkify`` maps to ``turbohtml.clean``.
 
 ***************
  Why turbohtml
@@ -59,18 +59,18 @@ The bleach-compatible shim keeps ``clean``'s signature so the import is the only
     - - bleach
       - turbohtml
     - - ``clean(text, ...)``
-      - :func:`turbohtml.migration.bleach.clean` (shim) or :func:`turbohtml.sanitizer.sanitize` (native)
+      - :func:`turbohtml.migration.bleach.clean` (shim) or :func:`turbohtml.clean.sanitize` (native)
     - - ``tags=``, ``attributes=``, ``protocols=``
-      - ``Policy.tags``, ``Policy.attributes``, ``Policy.url_schemes`` on :class:`~turbohtml.sanitizer.Policy`
+      - ``Policy.tags``, ``Policy.attributes``, ``Policy.url_schemes`` on :class:`~turbohtml.clean.Policy`
     - - ``strip=True`` / ``strip=False``
-      - :class:`~turbohtml.sanitizer.OnDisallowed` (``STRIP`` / ``ESCAPE``)
+      - :class:`~turbohtml.clean.OnDisallowed` (``STRIP`` / ``ESCAPE``)
     - - ``strip_comments=``
       - ``Policy.strip_comments``
     - - ``css_sanitizer=``
       - ``Policy.css_properties``
 
 ``clean(text, tags=..., attributes=..., protocols=..., strip=..., strip_comments=...)`` maps onto a
-:class:`~turbohtml.sanitizer.Policy`. ``attributes`` accepts bleach's list, per-tag dict, or callable forms; ``strip``
+:class:`~turbohtml.clean.Policy`. ``attributes`` accepts bleach's list, per-tag dict, or callable forms; ``strip``
 chooses between dropping a disallowed tag and keeping its children (``True``) and escaping it (``False``, the default):
 
 .. testcode::
@@ -83,9 +83,9 @@ chooses between dropping a disallowed tag and keeping its children (``True``) an
 
     &lt;p&gt;Hi <a href="http://x">link</a>&lt;/p&gt;&lt;script&gt;evil()&lt;/script&gt;
 
-For new code prefer the native :class:`~turbohtml.sanitizer.Policy`/:class:`~turbohtml.sanitizer.Sanitizer` API: a
-frozen, thread-safe policy, an :class:`~turbohtml.sanitizer.OnDisallowed` enum that names escape/strip/remove where
-bleach overloaded two booleans, and an ``attribute_filter`` that rewrites or drops a value where bleach's callable only
+For new code prefer the native :class:`~turbohtml.clean.Policy`/:class:`~turbohtml.clean.Sanitizer` API: a frozen,
+thread-safe policy, an :class:`~turbohtml.clean.OnDisallowed` enum that names escape/strip/remove where bleach
+overloaded two booleans, and an ``attribute_filter`` that rewrites or drops a value where bleach's callable only
 returned a bool.
 
 Pitfalls
@@ -111,7 +111,7 @@ The entry points keep bleach's names, so the import changes and the common case 
     from bleach.callbacks import nofollow, target_blank
 
     # turbohtml
-    from turbohtml.linkify import linkify, Linker, Linkify, DEFAULT_CALLBACKS, nofollow, target_blank
+    from turbohtml.clean import linkify, Linker, Linkify, DEFAULT_CALLBACKS, nofollow, target_blank
 
 .. list-table::
     :header-rows: 1
@@ -120,32 +120,31 @@ The entry points keep bleach's names, so the import changes and the common case 
     - - bleach
       - turbohtml
     - - ``linkify(text, ...)``
-      - :func:`turbohtml.linkify.linkify`
+      - :func:`turbohtml.clean.linkify`
     - - ``Linker(...)``
-      - :class:`turbohtml.linkify.Linker`
+      - :class:`turbohtml.clean.Linker`
     - - ``DEFAULT_CALLBACKS``
       - ``DEFAULT_CALLBACKS``
     - - ``nofollow``, ``target_blank``
-      - :func:`turbohtml.linkify.nofollow`, :func:`turbohtml.linkify.target_blank`
+      - :func:`turbohtml.clean.nofollow`, :func:`turbohtml.clean.target_blank`
     - - callback ``(attrs, new)`` with ``(namespace, name)`` keys
-      - a single :class:`~turbohtml.linkify.Link` (``url``, ``text``, ``attrs``)
+      - a single :class:`~turbohtml.clean.Link` (``url``, ``text``, ``attrs``)
     - - ``new`` flag
       - ``Link.existing`` (inverted)
     - - ``protocols=``
       - ``Linkify.schemes``
 
 ``linkify(text, Linkify(callbacks=..., skip_tags=..., parse_email=...))``, the reusable
-:class:`~turbohtml.linkify.Linker`, and the ``nofollow``/``target_blank`` defaults work as before: the six knobs are now
-fields of a frozen :class:`~turbohtml.linkify.Linkify` config. Only custom callbacks change shape. bleach passed
-``(attrs, new)`` where ``attrs`` was keyed by ``(namespace, name)`` tuples with a ``"_text"`` pseudo-key for the text;
-turbohtml passes a single :class:`~turbohtml.linkify.Link` with plain ``url``, ``text``, and ``attrs`` (a ``dict[str,
-str]``), and a callback returns it to keep the link or ``None`` to leave the text bare. bleach's ``new`` flag becomes
-``Link.existing`` (inverted: ``new=True`` is ``existing=False``). Porting a callback means reading fields instead of
-tuple keys:
+:class:`~turbohtml.clean.Linker`, and the ``nofollow``/``target_blank`` defaults work as before: the six knobs are now
+fields of a frozen :class:`~turbohtml.clean.Linkify` config. Only custom callbacks change shape. bleach passed ``(attrs,
+new)`` where ``attrs`` was keyed by ``(namespace, name)`` tuples with a ``"_text"`` pseudo-key for the text; turbohtml
+passes a single :class:`~turbohtml.clean.Link` with plain ``url``, ``text``, and ``attrs`` (a ``dict[str, str]``), and a
+callback returns it to keep the link or ``None`` to leave the text bare. bleach's ``new`` flag becomes ``Link.existing``
+(inverted: ``new=True`` is ``existing=False``). Porting a callback means reading fields instead of tuple keys:
 
 .. testcode::
 
-    from turbohtml.linkify import Link, Linkify, linkify
+    from turbohtml.clean import Link, Linkify, linkify
 
 
     def shorten(link: Link) -> Link | None:

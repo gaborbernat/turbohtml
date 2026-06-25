@@ -153,7 +153,7 @@ escape each untrusted operand through the same C ``escape``.
  Linkify
 *********
 
-:func:`turbohtml.linkify.linkify` against `bleach <https://bleach.readthedocs.io>`_'s ``linkify``, the HTML-aware
+:func:`turbohtml.clean.linkify` against `bleach <https://bleach.readthedocs.io>`_'s ``linkify``, the HTML-aware
 linkifier it succeeds, and `linkify-it-py <https://github.com/tsutsu3/linkify-it-py>`_, the pure-Python scanner
 markdown-it-py pulls in. bleach and turbohtml both parse the HTML and rewrite it; linkify-it-py only finds the matches
 and does not rewrite, so it does strictly less work, yet turbohtml is faster than both. The C candidate scan and
@@ -180,9 +180,9 @@ turbohtml's own tree carry it past bleach's html5lib pass by five to twenty time
       - 1562 µs (12.3x)
       - 708 µs (5.6x)
 
-The detection primitive on its own, :meth:`turbohtml.linkify.Detector.find` against ``LinkifyIt().match`` and
-:meth:`~turbohtml.linkify.Detector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the
-spans or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. The
+The detection primitive on its own, :meth:`turbohtml.clean.Detector.find` against ``LinkifyIt().match`` and
+:meth:`~turbohtml.clean.Detector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the spans
+or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. The
 ``has_link`` prose row is close because ``test`` short-circuits on the first link near the start.
 
 .. list-table::
@@ -214,9 +214,9 @@ spans or a boolean without rewriting any HTML, so this isolates the C scan from 
  Sanitize
 **********
 
-:func:`turbohtml.sanitizer.sanitize` against four sanitizers. Three share its allowlist model, where only listed tags
-and attributes survive, so a vector nobody anticipated is dropped by default: `nh3 <https://nh3.readthedocs.io>`_ (the
-Rust ammonia binding), `bleach <https://bleach.readthedocs.io>`_ (its end-of-life predecessor, on html5lib), and
+:func:`turbohtml.clean.sanitize` against four sanitizers. Three share its allowlist model, where only listed tags and
+attributes survive, so a vector nobody anticipated is dropped by default: `nh3 <https://nh3.readthedocs.io>`_ (the Rust
+ammonia binding), `bleach <https://bleach.readthedocs.io>`_ (its end-of-life predecessor, on html5lib), and
 `html-sanitizer <https://github.com/matthiask/html-sanitizer>`_ (an allowlist over lxml). The fourth, `lxml-html-clean
 <https://github.com/fedora-python/lxml_html_clean>`_ (the externalized ``lxml.html.clean.Cleaner``), is a blocklist: it
 strips the constructs it knows are dangerous and lets the rest through, a model lxml itself flagged as hard to keep

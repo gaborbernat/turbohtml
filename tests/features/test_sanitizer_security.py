@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from turbohtml import Element, parse_fragment
-from turbohtml.sanitizer import OnDisallowed, Policy, sanitize
+from turbohtml.clean import OnDisallowed, Policy, sanitize
 
 # Elements that execute or load script if they survive in the HTML namespace.
 _DANGER_TAGS = frozenset({"script", "iframe", "object", "embed", "frame", "style", "noscript", "base"})

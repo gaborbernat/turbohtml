@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml.linkify import LinkSpan
+from turbohtml.clean import LinkSpan
 
 
 def test_repr_shows_offsets_and_url() -> None:

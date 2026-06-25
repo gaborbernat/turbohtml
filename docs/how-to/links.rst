@@ -30,14 +30,14 @@ returning ``None`` leaves a link untouched.
 *********************************
 
 To linkify user-entered text the way `bleach.linkify <https://github.com/mozilla/bleach>`_ did, use
-:func:`turbohtml.linkify.linkify`. It parses the HTML, so it links only in text the reader sees, never inside an
-existing ``<a>``, a ``<script>``, or a tag you list in the ``Linkify.skip_tags`` field. Email autolinking is behind the
+:func:`turbohtml.clean.linkify`. It parses the HTML, so it links only in text the reader sees, never inside an existing
+``<a>``, a ``<script>``, or a tag you list in the ``Linkify.skip_tags`` field. Email autolinking is behind the
 ``Linkify.parse_email`` field because not every page wants it. The default ``nofollow`` callback marks web links, and
 leaves a ``mailto:`` link alone:
 
 .. testcode::
 
-    from turbohtml.linkify import Linkify, linkify
+    from turbohtml.clean import Linkify, linkify
 
     print(linkify("email bob@example.com or visit https://example.com", Linkify(parse_email=True)))
 
@@ -53,7 +53,7 @@ allowlist of explicit URL schemes:
 
 .. testcode::
 
-    from turbohtml.linkify import Link, Linkify, linkify
+    from turbohtml.clean import Link, Linkify, linkify
 
 
     def annotate(link: Link) -> Link:
@@ -74,12 +74,12 @@ allowlist of explicit URL schemes:
 **************************
 
 When the text is not HTML and you only need *where* the links are (to highlight them, count them, or build your own
-markup), use :class:`turbohtml.linkify.Detector`. ``find`` returns a :class:`~turbohtml.linkify.LinkSpan` per match,
-with offsets, the matched text, and the normalized ``url``; ``has_link`` answers the yes/no question more cheaply:
+markup), use :class:`turbohtml.clean.Detector`. ``find`` returns a :class:`~turbohtml.clean.LinkSpan` per match, with
+offsets, the matched text, and the normalized ``url``; ``has_link`` answers the yes/no question more cheaply:
 
 .. testcode::
 
-    from turbohtml.linkify import Detector
+    from turbohtml.clean import Detector
 
     detector = Detector()
     for span in detector.find("ping bob@example.com about example.com"):

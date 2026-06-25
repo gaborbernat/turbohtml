@@ -16,7 +16,7 @@ is the content-density heuristic turbohtml's :meth:`~turbohtml.Node.main_content
 
 :meth:`~turbohtml.Node.article` scores the content body the same way and returns it as an :class:`~turbohtml.Article`
 record, adding the byline, date, description and language readability-lxml leaves to you. It selects an existing element
-unchanged rather than rewriting the DOM into a cleaned fragment, so pair it with :class:`~turbohtml.sanitizer.Sanitizer`
+unchanged rather than rewriting the DOM into a cleaned fragment, so pair it with :class:`~turbohtml.clean.Sanitizer`
 when you need a scrubbed body.
 
 Scoring the content body of a full page -- navigation, a scored article, and a footer. :meth:`~turbohtml.Node.article`

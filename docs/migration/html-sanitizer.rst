@@ -14,7 +14,7 @@ scheme check, and whitespace/tag-merging normalization.
  Why turbohtml
 ***************
 
-``turbohtml.sanitizer`` shares the allowlist stance, so the move is a settings-to-:class:`~turbohtml.sanitizer.Policy`
+``turbohtml.clean`` shares the allowlist stance, so the move is a settings-to-:class:`~turbohtml.clean.Policy`
 translation rather than a rethink, but it adds full static typing, a frozen thread-safe policy, and the WHATWG tree
 builder in C instead of an lxml parse, leading html-sanitizer by one to two orders of magnitude:
 
@@ -50,7 +50,7 @@ builder in C instead of an lxml parse, leading html-sanitizer by one to two orde
     - - html-sanitizer
       - turbohtml
     - - ``Sanitizer(settings).sanitize(text)``
-      - :func:`turbohtml.sanitizer.sanitize` with a :class:`~turbohtml.sanitizer.Policy`
+      - :func:`turbohtml.clean.sanitize` with a :class:`~turbohtml.clean.Policy`
     - - ``tags``
       - ``Policy.tags``
     - - ``attributes``
@@ -62,7 +62,7 @@ builder in C instead of an lxml parse, leading html-sanitizer by one to two orde
 
 .. testcode::
 
-    from turbohtml.sanitizer import sanitize, Policy
+    from turbohtml.clean import sanitize, Policy
 
     print(
         sanitize(

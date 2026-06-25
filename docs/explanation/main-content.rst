@@ -28,7 +28,7 @@ When nothing scores positively (a stub page, pure navigation), there is no winne
 The heuristic has limits worth stating. It is tuned for article-shaped pages; a search-results grid, a forum thread, or
 a single-page app rendered entirely from script has no dominant prose container and may return ``None`` or a surprising
 node. It selects an existing element unchanged (it does not clean inline boilerplate *within* the winner the way
-``Readability.js`` rewrites the DOM), so pair it with :class:`~turbohtml.sanitizer.Sanitizer` when you need a scrubbed
+``Readability.js`` rewrites the DOM), so pair it with :class:`~turbohtml.clean.Sanitizer` when you need a scrubbed
 fragment. And it is content extraction only: language detection and WARC/web-archive handling, which ``resiliparse``
 bundles alongside, are out of scope; reach for a dedicated tool there.
 
