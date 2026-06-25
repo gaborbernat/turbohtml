@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import parse
+from turbohtml import PlainText, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -149,7 +149,9 @@ def test_leading_whitespace_shifts_offsets() -> None:
 def test_links_and_options_compose_with_annotations() -> None:
     text, _labels = annotate("<p><a href='http://x'>site</a></p>", {"a": ["link"]})
     assert text == "site"
-    text2, labels2 = parse("<p><a href='http://x'>site</a></p>").to_annotated_text({"a": ["link"]}, links="inline")
+    text2, labels2 = parse("<p><a href='http://x'>site</a></p>").to_annotated_text(
+        {"a": ["link"]}, PlainText(links="inline")
+    )
     assert text2 == "site (http://x)"
     assert [text2[s:e] for s, e, _ in labels2] == ["site (http://x)"]
 
@@ -189,5 +191,21 @@ def test_invalid_rules(rules: object, exc: type[Exception], match: str) -> None:
     ],
 )
 def test_invalid_options(kwargs: Mapping[str, str], exc: type[Exception], match: str) -> None:
+    # a bad value reaches the renderer through PlainText and is rejected there
     with pytest.raises(exc, match=match):
-        call_with(parse("<p>x</p>").to_annotated_text, {}, **kwargs)
+        parse("<p>x</p>").to_annotated_text({"p": ["para"]}, PlainText(**kwargs))  # ty: ignore[invalid-argument-type]  # pass invalid options to test they are rejected
+
+
+def test_explicit_none_is_the_default() -> None:
+    page = parse("<p>a <b>b</b> c</p>")
+    assert page.to_annotated_text({"b": ["x"]}, None) == page.to_annotated_text({"b": ["x"]})
+
+
+def test_options_must_be_a_plain_text() -> None:
+    with pytest.raises(TypeError, match="options must be a PlainText"):
+        parse("<p>x</p>").to_annotated_text({"p": ["para"]}, object())  # ty: ignore[invalid-argument-type]  # pass a non-PlainText to test the type error
+
+
+def test_rules_are_required() -> None:
+    with pytest.raises(TypeError):
+        parse("<p>x</p>").to_annotated_text()  # ty: ignore[missing-argument]  # annotation_rules is required

@@ -73,7 +73,7 @@ collapsed visible text both return without layout.
     - - ``extract_text(html, guess_layout=False)``
       - ``" ".join(parse(html).stripped_strings)``
     - - the ``guess_layout`` toggle
-      - :meth:`~turbohtml.Node.to_text`'s ``layout`` (``"strict"``/``"extended"``)
+      - a :class:`~turbohtml.PlainText` config's ``layout`` (``"strict"``/``"extended"``)
     - - the raw word list
       - :attr:`~turbohtml.Node.strings` / :attr:`~turbohtml.Node.stripped_strings`
     - - the parsel-bound ``cleaned_selector`` / ``selector_to_text``
@@ -94,9 +94,9 @@ collapsed visible text both return without layout.
  Pitfalls
 **********
 
-- ``extract_text``'s ``guess_layout`` toggle corresponds to :meth:`~turbohtml.Node.to_text`'s ``layout``
-  (``"extended"``/``"strict"``) profile; the :doc:`inscriptis <inscriptis>` page covers the full ``to_text`` option
-  surface.
+- ``extract_text``'s ``guess_layout`` toggle corresponds to the ``layout`` (``"extended"``/``"strict"``) profile on a
+  :class:`~turbohtml.PlainText` config passed to :meth:`~turbohtml.Node.to_text`; the :doc:`inscriptis <inscriptis>`
+  page covers the full ``PlainText`` option surface.
 - For the collapsed word stream html-text returns with layout guessing off, join the
   :attr:`~turbohtml.Node.stripped_strings` iterator rather than reaching for ``to_text``.
 - html-text's parsel-bound helpers (``cleaned_selector``, ``selector_to_text``) are out of scope; the :doc:`parsel

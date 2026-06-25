@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import Element, Formatter, Minify, Text, parse, parse_fragment
+from turbohtml import Element, Formatter, Html, Minify, Text, parse, parse_fragment
 
 
 def frag(source: str, **flags: bool) -> str:
@@ -18,7 +18,7 @@ def frag(source: str, **flags: bool) -> str:
     A <div> is never an optional tag and carries no attributes, so it survives every
     transform unchanged and strips cleanly, leaving just the minified content.
     """
-    out = parse_fragment(source, "div").serialize(layout=Minify(**flags))
+    out = parse_fragment(source, "div").serialize(Html(layout=Minify(**flags)))
     assert out.startswith("<div>")
     assert out.endswith("</div>")
     return out[len("<div>") : -len("</div>")]
@@ -91,16 +91,16 @@ def test_serialize_without_minify_is_unchanged() -> None:
 
 
 def test_serialize_layout_none_is_compact() -> None:
-    assert parse("<p>x").serialize(layout=None) == parse("<p>x").serialize()
+    assert parse("<p>x").serialize(Html(layout=None)) == parse("<p>x").serialize()
 
 
 def test_serialize_rejects_non_layout() -> None:
     with pytest.raises(TypeError, match="layout must be an Indent"):
-        parse("<p>x").serialize(layout=True)  # ty: ignore[invalid-argument-type]  # non-layout rejected
+        parse("<p>x").serialize(Html(layout=True))  # ty: ignore[invalid-argument-type]  # non-layout rejected
 
 
 def test_encode_minify() -> None:
-    assert parse("<p>a</p>").encode(layout=Minify()) == b"<p>a"
+    assert parse("<p>a</p>").encode(options=Html(layout=Minify())) == b"<p>a"
 
 
 # ---------------------------------------------------------------- whitespace
@@ -143,14 +143,14 @@ def test_collapse_escapes_nbsp_under_whatwg() -> None:
 def test_collapse_minimal_formatter_keeps_nbsp_literal() -> None:
     # MINIMAL folds ASCII whitespace but leaves the non-break space literal
     out = parse_fragment("a   \u00a0   b", "div").serialize(
-        layout=Minify(omit_optional_tags=False), formatter=Formatter.MINIMAL
+        Html(layout=Minify(omit_optional_tags=False), formatter=Formatter.MINIMAL)
     )
     assert out == "<div>a \u00a0 b</div>"
 
 
 def test_collapse_named_formatter() -> None:
     out = parse_fragment("caf\u00e9   &  th\u00e9", "div").serialize(
-        layout=Minify(omit_optional_tags=False), formatter=Formatter.NAMED_ENTITIES
+        Html(layout=Minify(omit_optional_tags=False), formatter=Formatter.NAMED_ENTITIES)
     )
     assert out == "<div>caf&eacute; &amp; th&eacute;</div>"
 
@@ -299,23 +299,23 @@ def test_omit_li_end_dropped_with_attributed_child() -> None:
 
 
 def test_omit_start_tags_document() -> None:
-    assert parse("<html><head><title>x</title></head><body><p>a</p></body></html>").serialize(layout=Minify()) == (
-        "<title>x</title><p>a"
-    )
+    assert parse("<html><head><title>x</title></head><body><p>a</p></body></html>").serialize(
+        Html(layout=Minify())
+    ) == ("<title>x</title><p>a")
 
 
 def test_omit_html_start_kept_when_first_is_comment() -> None:
-    out = parse("<html><!--c--><title>x</title>").serialize(layout=Minify(strip_comments=False))
+    out = parse("<html><!--c--><title>x</title>").serialize(Html(layout=Minify(strip_comments=False)))
     assert out.startswith("<html><!--c-->")
 
 
 def test_omit_start_kept_with_attributes() -> None:
-    out = parse("<html lang='en'><body>x</body></html>").serialize(layout=Minify())
+    out = parse("<html lang='en'><body>x</body></html>").serialize(Html(layout=Minify()))
     assert out.startswith("<html lang=en>")
 
 
 def test_omit_body_start_kept_before_whitespace() -> None:
-    out = parse("<body> x</body>").serialize(layout=Minify())
+    out = parse("<body> x</body>").serialize(Html(layout=Minify()))
     assert out.startswith("<body> x")
 
 
@@ -343,21 +343,21 @@ def test_unquote_keeps_quotes_on_quote_chars(source: str, expected: str) -> None
 
 def test_html_body_end_kept_before_comment() -> None:
     # the comment after </body> keeps the body end tag; </html> still drops (nothing follows it)
-    out = parse("<html><body>x</body><!--tail--></html>").serialize(layout=Minify(strip_comments=False))
+    out = parse("<html><body>x</body><!--tail--></html>").serialize(Html(layout=Minify(strip_comments=False)))
     assert out.endswith("</body><!--tail-->")
 
 
 def test_head_end_kept_before_whitespace() -> None:
-    out = parse("<html><head><title>t</title></head> <body>x</body></html>").serialize(layout=Minify())
+    out = parse("<html><head><title>t</title></head> <body>x</body></html>").serialize(Html(layout=Minify()))
     assert "</head>" in out
 
 
 def test_head_start_omitted_when_empty() -> None:
-    assert parse("<html><head></head><body>x</body></html>").serialize(layout=Minify()) == "x"
+    assert parse("<html><head></head><body>x</body></html>").serialize(Html(layout=Minify())) == "x"
 
 
 def test_body_start_kept_before_meta() -> None:
-    out = parse("<body><meta charset='utf-8'>x</body>").serialize(layout=Minify())
+    out = parse("<body><meta charset='utf-8'>x</body>").serialize(Html(layout=Minify()))
     assert out.startswith("<body><meta")
 
 
@@ -372,14 +372,14 @@ def test_empty_element_minified() -> None:
 def test_omit_in_template_content() -> None:
     # items hang off the template content node; dropping the trailing end tag still
     # reparses identically, since the template close reconstructs the element
-    out = parse("<template><li>a</li><li>b</li></template>").serialize(layout=Minify())
+    out = parse("<template><li>a</li><li>b</li></template>").serialize(Html(layout=Minify()))
     assert out == "<template><li>a<li>b</template>"
 
 
 def test_collapse_carriage_return_in_constructed_text() -> None:
     # a parsed document never carries a CR (the tokenizer folds it to LF), but a
     # programmatically built text node can, and it folds like any other whitespace
-    assert Text("a\rb\rc").serialize(layout=Minify()) == "a b c"
+    assert Text("a\rb\rc").serialize(Html(layout=Minify())) == "a b c"
 
 
 def test_body_start_omitted_with_empty_first_text() -> None:
@@ -390,7 +390,7 @@ def test_body_start_omitted_with_empty_first_text() -> None:
     body.append(Text(""))
     body.append(Element("p"))
     html.append(body)
-    out = html.serialize(layout=Minify())
+    out = html.serialize(Html(layout=Minify()))
     assert out == "<html><p></html>"
 
 
@@ -399,24 +399,24 @@ def test_omit_dd_end_kept_before_text() -> None:
 
 
 def test_body_start_kept_before_comment() -> None:
-    assert parse("<body><!--c-->x</body>").serialize(layout=Minify(strip_comments=False)) == "<body><!--c-->x"
+    assert parse("<body><!--c-->x</body>").serialize(Html(layout=Minify(strip_comments=False))) == "<body><!--c-->x"
 
 
 @pytest.mark.parametrize("tag", [pytest.param(t, id=t) for t in ("meta", "link", "script", "style", "template")])
 def test_body_start_kept_before_head_element(tag: str) -> None:
-    assert parse(f"<body><{tag}></{tag}>x</body>").serialize(layout=Minify()).startswith(f"<body><{tag}")
+    assert parse(f"<body><{tag}></{tag}>x</body>").serialize(Html(layout=Minify())).startswith(f"<body><{tag}")
 
 
 def test_empty_element_as_root_keeps_end_tag() -> None:
     para = parse_fragment("<p></p>", "div").find("p")
     assert para is not None
-    assert para.serialize(layout=Minify()) == "<p></p>"
+    assert para.serialize(Html(layout=Minify())) == "<p></p>"
 
 
 def test_rawtext_element_as_root() -> None:
     script = parse_fragment("<script>a<b</script>", "div").find("script")
     assert script is not None
-    assert script.serialize(layout=Minify()) == "<script>a<b</script>"
+    assert script.serialize(Html(layout=Minify())) == "<script>a<b</script>"
 
 
 def test_body_end_omitted_before_noncomment_sibling() -> None:
@@ -425,13 +425,13 @@ def test_body_end_omitted_before_noncomment_sibling() -> None:
     body.append(Text("x"))
     html.append(body)
     html.append(Element("div"))
-    assert html.serialize(layout=Minify(strip_comments=False)) == "<html>x<div></div></html>"
+    assert html.serialize(Html(layout=Minify(strip_comments=False))) == "<html>x<div></div></html>"
 
 
 def test_empty_html_start_omitted() -> None:
     wrap = Element("div")
     wrap.append(Element("html"))
-    assert wrap.serialize(layout=Minify()) == "<div></div>"
+    assert wrap.serialize(Html(layout=Minify())) == "<div></div>"
 
 
 def test_head_start_kept_before_nonelement() -> None:
@@ -440,17 +440,17 @@ def test_head_start_kept_before_nonelement() -> None:
     head.append(Text("t"))
     html.append(head)
     html.append(Element("body"))
-    assert html.serialize(layout=Minify()) == "<html><head>t</html>"
+    assert html.serialize(Html(layout=Minify())) == "<html><head>t</html>"
 
 
 def test_head_end_omitted_when_last() -> None:
     html = Element("html")
     html.append(Element("head"))
-    assert html.serialize(layout=Minify()) == "<html></html>"
+    assert html.serialize(Html(layout=Minify())) == "<html></html>"
 
 
 def test_head_end_kept_before_comment() -> None:
-    out = parse("<html><head></head><!--c--><body>x</body></html>").serialize(layout=Minify(strip_comments=False))
+    out = parse("<html><head></head><!--c--><body>x</body></html>").serialize(Html(layout=Minify(strip_comments=False)))
     assert out.startswith("</head><!--c-->")
 
 
@@ -462,7 +462,7 @@ def test_omit_kept_for_p_in_foreign_parent() -> None:
     para = Element("p")
     para.append(Text("x"))
     math.append(para)
-    assert math.serialize(layout=Minify()).endswith("<p>x</p></math>")
+    assert math.serialize(Html(layout=Minify())).endswith("<p>x</p></math>")
 
 
 # -------------------------------------------------------------------- foreign

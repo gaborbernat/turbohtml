@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import turbohtml
 from bench.timing import Mutating
+from turbohtml import Markdown as _Markdown
 from turbohtml import sanitizer as _sanitizer
 from turbohtml.build import E
 from turbohtml.linkify import Detector as _Detector
@@ -258,14 +259,21 @@ def markdown(case: tuple[str, str]) -> None:
     """Convert HTML to Markdown with turbohtml, with the default or the fully-configured option surface."""
     kind, text = case
     if kind == "configured":
-        _parsed(text).to_markdown(strong="__", emphasis="_", link_style="reference", pad_tables=True, escape_mode="all")
+        _parsed(text).to_markdown(
+            _Markdown(
+                inline=_Markdown.Inline(strong="__", emphasis="_"),
+                links=_Markdown.Links(style="reference"),
+                tables=_Markdown.Tables(pad=True),
+                escaping=_Markdown.Escaping(mode="all"),
+            )
+        )
     else:
         _parsed(text).to_markdown()
 
 
 def markdown_google(text: str) -> None:
     """Convert a Google Docs export to Markdown with turbohtml's google_doc mode."""
-    _parsed(text).to_markdown(google_doc=True)
+    _parsed(text).to_markdown(_Markdown.google_doc())
 
 
 def tables(case: tuple[str, str]) -> None:

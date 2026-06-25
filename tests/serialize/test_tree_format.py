@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import Formatter, Indent, Node, parse
+from turbohtml import Formatter, Html, Indent, Node, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -95,7 +95,7 @@ def test_default_formatter_keeps_non_ascii_literal() -> None:
     ],
 )
 def test_formatter_serialize(html: str, selector: str, formatter: Formatter, expected: str) -> None:
-    assert _one(html, selector).serialize(formatter=formatter) == expected
+    assert _one(html, selector).serialize(Html(formatter=formatter)) == expected
 
 
 @pytest.mark.parametrize(
@@ -150,7 +150,7 @@ def test_formatter_serialize(html: str, selector: str, formatter: Formatter, exp
 )
 def test_serialize_indent(html: str, selector: str, indent: int | str | None, expected: str) -> None:
     layout = None if indent is None else Indent(indent)
-    assert _one(html, selector).serialize(layout=layout) == expected
+    assert _one(html, selector).serialize(Html(layout=layout)) == expected
 
 
 # the parser drops one newline after <pre>; serialization restores it so a
@@ -173,7 +173,7 @@ def test_pre_leading_newline_rule(html: str, selector: str, expected: str) -> No
 
 
 def test_pretty_document_includes_doctype_and_comment() -> None:
-    pretty = parse("<!DOCTYPE html><!--c--><title>t").serialize(layout=Indent(2))
+    pretty = parse("<!DOCTYPE html><!--c--><title>t").serialize(Html(layout=Indent(2)))
     assert pretty.startswith("<!DOCTYPE html>\n<!--c-->\n<html>\n  <head>")
 
 
@@ -220,27 +220,27 @@ def test_indent_rejects_extra_positional() -> None:
 
 
 @pytest.mark.parametrize(
-    ("html", "selector", "kwargs", "expected"),
+    ("html", "selector", "call", "expected"),
     [
-        pytest.param("<p>café</p>", "p", {}, "<p>café</p>".encode(), id="defaults-to-utf8"),
+        pytest.param("<p>café</p>", "p", lambda node: node.encode(), "<p>café</p>".encode(), id="defaults-to-utf8"),
         pytest.param(
             "<p>café</p>",
             "p",
-            {"encoding": "ascii", "formatter": Formatter.NAMED_ENTITIES},
+            lambda node: node.encode("ascii", Html(formatter=Formatter.NAMED_ENTITIES)),
             b"<p>caf&eacute;</p>",
             id="ascii-with-named-entities",
         ),
         pytest.param(
             "<div><p>x</p></div>",
             "div",
-            {"layout": Indent(2)},
+            lambda node: node.encode(options=Html(layout=Indent(2))),
             b"<div>\n  <p>\n    x\n  </p>\n</div>",
             id="honours-indent",
         ),
     ],
 )
-def test_encode(html: str, selector: str, kwargs: dict[str, object], expected: bytes) -> None:
-    assert _one(html, selector).encode(**kwargs) == expected  # ty: ignore[invalid-argument-type]  # object-typed kwargs
+def test_encode(html: str, selector: str, call: Callable[[Node], bytes], expected: bytes) -> None:
+    assert call(_one(html, selector)) == expected
 
 
 @pytest.mark.parametrize(
@@ -260,19 +260,32 @@ def test_encode_raises(html: str, kwargs: dict[str, object], exception: type[Exc
     ("call", "exception", "match"),
     [
         pytest.param(
-            lambda node: node.serialize(formatter="whatwg"), TypeError, "Formatter", id="serialize-non-formatter"
+            lambda node: node.serialize(Html(formatter="whatwg")),  # ty: ignore[invalid-argument-type]  # pass a non-Formatter to test serialize rejects it
+            TypeError,
+            "Formatter",
+            id="serialize-non-formatter",
         ),
         pytest.param(
-            lambda node: node.serialize(layout=Indent(1.5)),  # ty: ignore[invalid-argument-type]  # non-int/str on purpose
+            lambda node: node.serialize(Html(layout=Indent(1.5))),  # ty: ignore[invalid-argument-type]  # pass a non-int/str to test Indent rejects it
             TypeError,
             "indent",
             id="indent-bad-type",
         ),
-        pytest.param(lambda node: node.serialize(layout=Indent(-1)), ValueError, "negative", id="indent-negative"),
-        pytest.param(lambda node: node.serialize(layout="whatwg"), TypeError, "layout", id="serialize-bad-layout"),
-        pytest.param(lambda node: node.serialize("whatwg"), TypeError, None, id="serialize-positional"),
-        pytest.param(lambda node: node.encode("utf-8", "extra"), TypeError, None, id="encode-extra-positional"),
-        pytest.param(lambda node: node.encode(formatter="whatwg"), TypeError, "Formatter", id="encode-non-formatter"),
+        pytest.param(
+            lambda node: node.serialize(Html(layout=Indent(-1))), ValueError, "negative", id="indent-negative"
+        ),
+        pytest.param(
+            lambda node: node.serialize(Html(layout="whatwg")),  # ty: ignore[invalid-argument-type]  # pass a non-layout to test serialize rejects it
+            TypeError,
+            "layout",
+            id="serialize-bad-layout",
+        ),
+        pytest.param(
+            lambda node: node.encode(options=Html(formatter="whatwg")),  # ty: ignore[invalid-argument-type]  # pass a non-Formatter to test encode rejects it
+            TypeError,
+            "Formatter",
+            id="encode-non-formatter",
+        ),
     ],
 )
 def test_serialize_encode_argument_validation(
@@ -280,6 +293,44 @@ def test_serialize_encode_argument_validation(
 ) -> None:
     with pytest.raises(exception, match=match):
         call(_one("<p>x</p>", "p"))
+
+
+def test_explicit_none_is_the_default() -> None:
+    node = _one("<div><p>hi</p></div>", "div")
+    assert node.serialize(None) == node.serialize()
+    assert node.encode("utf-8", None) == node.encode()
+
+
+def test_serialize_options_must_be_an_html() -> None:
+    with pytest.raises(TypeError, match="options must be a Html"):
+        _one("<p>x</p>", "p").serialize(object())  # ty: ignore[invalid-argument-type]  # pass a non-Html to test the type error
+
+
+def test_encode_options_must_be_an_html() -> None:
+    with pytest.raises(TypeError, match="options must be a Html"):
+        _one("<p>x</p>", "p").encode("utf-8", object())  # ty: ignore[invalid-argument-type]  # pass a non-Html to test the type error
+
+
+def test_serialize_rejects_extra_positional() -> None:
+    with pytest.raises(TypeError):
+        _one("<p>x</p>", "p").serialize(Html(), Html())  # ty: ignore[too-many-positional-arguments]  # a second arg is rejected
+
+
+def test_encode_rejects_extra_positional() -> None:
+    with pytest.raises(TypeError):
+        _one("<p>x</p>", "p").encode("utf-8", Html(), "extra")  # ty: ignore[too-many-positional-arguments]  # a third arg is rejected
+
+
+def test_serialize_propagates_a_raising_truthiness() -> None:
+    # the Html bool fields are read with PyObject_IsTrue, so a value whose __bool__
+    # raises surfaces the error instead of being silently coerced
+    class _Boom:
+        def __bool__(self) -> bool:
+            msg = "boom"
+            raise RuntimeError(msg)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _one("<p>x</p>", "p").serialize(Html(sort_attributes=_Boom()))  # ty: ignore[invalid-argument-type]  # a raising __bool__ on purpose
 
 
 @pytest.mark.parametrize(

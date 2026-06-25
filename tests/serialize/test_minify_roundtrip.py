@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from turbohtml import Minify, parse
+from turbohtml import Html, Minify, parse
 
 _TREE_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
 _MINIFY = Minify()
@@ -42,8 +42,8 @@ def _plain_roundtrips(source: str) -> bool:
 
 
 def _minify_idempotent(source: str) -> bool:
-    once = parse(source).serialize(layout=_MINIFY)
-    return once == parse(once).serialize(layout=_MINIFY)
+    once = parse(source).serialize(Html(layout=_MINIFY))
+    return once == parse(once).serialize(Html(layout=_MINIFY))
 
 
 @pytest.mark.parametrize("filename", sorted(p.name for p in _TREE_DIR.glob("*.dat")))
@@ -51,8 +51,8 @@ def test_minify_idempotent_over_tree_construction(filename: str) -> None:
     # only the subset the plain serializer round-trips can be asked of the minifier;
     # the rest are inherently non-idempotent adoption-agency reconstructions
     failures = [
-        f"{data!r}\n  once:    {parse(data).serialize(layout=_MINIFY)!r}\n"
-        f"  reparse: {parse(parse(data).serialize(layout=_MINIFY)).serialize(layout=_MINIFY)!r}"
+        f"{data!r}\n  once:    {parse(data).serialize(Html(layout=_MINIFY))!r}\n"
+        f"  reparse: {parse(parse(data).serialize(Html(layout=_MINIFY))).serialize(Html(layout=_MINIFY))!r}"
         for data in _iter_dat(_TREE_DIR / filename)
         if _plain_roundtrips(data) and not _minify_idempotent(data)
     ]
@@ -77,6 +77,6 @@ def test_minify_idempotent_over_large_document() -> None:
         + "".join(section.format(i=index) for index in range(500))
         + "</body></html>"
     )
-    once = parse(big).serialize(layout=_MINIFY)
-    assert once == parse(once).serialize(layout=_MINIFY)
+    once = parse(big).serialize(Html(layout=_MINIFY))
+    assert once == parse(once).serialize(Html(layout=_MINIFY))
     assert len(once) < len(parse(big).serialize())  # minification actually shrinks the document

@@ -2,13 +2,12 @@
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from enum import Enum, IntEnum
 from re import Pattern
-from typing import Literal, TypeAlias, final
+from typing import TypeAlias, final
 
 from turbohtml._article import Article as Article
 from turbohtml._links import Link
+from turbohtml._render import Html, Markdown, PlainText
 from turbohtml._structured_data import JSONValue, MicrodataItem, StructuredData
-
-from .serialize import Formatter, Indent, Minify
 
 _Filter: TypeAlias = str | Pattern[str] | bool | Callable[[str | None], bool] | list[_Filter]
 
@@ -130,90 +129,12 @@ class Node:
     def re_first(
         self, pattern: str | Pattern[str], /, default: str | None = None, *, attr: str | None = None
     ) -> str | None: ...
-    def serialize(
-        self,
-        *,
-        formatter: Formatter = ...,
-        layout: Indent | Minify | None = ...,
-        sort_attributes: bool = ...,
-        meta_charset: bool = ...,
-    ) -> str: ...
-    def encode(
-        self,
-        encoding: str = "utf-8",
-        *,
-        formatter: Formatter = ...,
-        layout: Indent | Minify | None = ...,
-        sort_attributes: bool = ...,
-        meta_charset: bool = ...,
-    ) -> bytes: ...
-    def to_markdown(
-        self,
-        *,
-        heading_style: Literal["atx", "atx_closed", "setext"] = "atx",
-        bullets: str = "-",
-        strong: str = "**",
-        emphasis: str = "*",
-        strikethrough: Literal["keep", "hide"] = "keep",
-        ignore_emphasis: bool = False,
-        sub_symbol: str = "",
-        sup_symbol: str = "",
-        code_block_style: Literal["fenced", "indented"] = "fenced",
-        code_language: str = "",
-        mark_code: bool = False,
-        link_style: Literal["inline", "reference"] = "inline",
-        autolink: bool = True,
-        link_title: bool = False,
-        ignore_links: bool = False,
-        skip_internal_links: bool = False,
-        base_url: str = "",
-        image_mode: Literal["markdown", "alt", "ignore", "html"] = "markdown",
-        default_image_alt: str = "",
-        table_mode: Literal["markdown", "strip", "html"] = "markdown",
-        table_header: Literal["first", "detect", "none"] = "first",
-        pad_tables: bool = False,
-        escape_mode: Literal["minimal", "all"] = "minimal",
-        escape_asterisks: bool = True,
-        escape_underscores: bool = True,
-        line_break: Literal["spaces", "backslash"] = "spaces",
-        block_spacing: Literal["double", "single"] = "double",
-        wrap_width: int = 0,
-        wrap_list_items: bool = False,
-        wrap_links: bool = True,
-        transliterate: bool = False,
-        document_strip: Literal["strip", "lstrip", "rstrip", "none"] = "strip",
-        quote_open: str = '"',
-        quote_close: str = '"',
-        google_doc: bool = False,
-        google_list_indent: int = 36,
-        hide_strikethrough: bool = False,
-        strip: Iterable[str] | None = None,
-        convert: Iterable[str] | None = None,
-        converters: Mapping[str, Callable[[Element, str], str]] | None = None,
-    ) -> str: ...
-    def to_text(
-        self,
-        *,
-        width: int = 0,
-        links: Literal["none", "inline", "footnote"] = "none",
-        images: bool = False,
-        layout: Literal["extended", "strict"] = "extended",
-        default_image_alt: str = "",
-        table_cell_separator: str = "  ",
-        bullet: str = "* ",
-    ) -> str: ...
+    def serialize(self, options: Html | None = None) -> str: ...
+    def encode(self, encoding: str = "utf-8", options: Html | None = None) -> bytes: ...
+    def to_markdown(self, options: Markdown | None = None) -> str: ...
+    def to_text(self, options: PlainText | None = None) -> str: ...
     def to_annotated_text(
-        self,
-        annotation_rules: Mapping[str, Sequence[str]],
-        /,
-        *,
-        width: int = 0,
-        links: Literal["none", "inline", "footnote"] = "none",
-        images: bool = False,
-        layout: Literal["extended", "strict"] = "extended",
-        default_image_alt: str = "",
-        table_cell_separator: str = "  ",
-        bullet: str = "* ",
+        self, annotation_rules: Mapping[str, Sequence[str]], options: PlainText | None = None
     ) -> tuple[str, list[tuple[int, int, str]]]: ...
     def links(self) -> list[Link]: ...
     def rewrite_links(self, replace: Callable[[str], str | None], /) -> None: ...
