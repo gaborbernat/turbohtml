@@ -102,7 +102,7 @@ comments never appear in ``text``:
 ``remove_tags_with_content(html, which_ones=("script",))`` becomes ``parse(html).remove("script")``, editing the tree in
 place rather than returning a string. When the goal is to drop only some tags while keeping the rest of the document as
 HTML (``remove_tags`` with ``which_ones``), unwrap them with :meth:`~turbohtml.Node.strip_tags`, which keeps each
-match's content. Reach for ``turbohtml.sanitizer`` instead when the goal is producing safe HTML rather than reshaping a
+match's content. Reach for ``turbohtml.clean`` instead when the goal is producing safe HTML rather than reshaping a
 tree.
 
 The two helpers that read a document's own URL hints map to the :meth:`~turbohtml.Document.base_url` and

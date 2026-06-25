@@ -48,13 +48,13 @@ Stay with the string helpers below, or continue to :doc:`tokenizing` to break wh
  Linkify plain text
 ********************
 
-One more string-in, string-out helper rounds out the getting-started toolkit: :func:`turbohtml.linkify.linkify` finds
-the URLs in a run of text and wraps each one in an anchor, leaving the surrounding characters untouched. It is the
-quickest way to turn a plain message into clickable HTML:
+One more string-in, string-out helper rounds out the getting-started toolkit: :func:`turbohtml.clean.linkify` finds the
+URLs in a run of text and wraps each one in an anchor, leaving the surrounding characters untouched. It is the quickest
+way to turn a plain message into clickable HTML:
 
 .. testcode::
 
-    from turbohtml.linkify import linkify
+    from turbohtml.clean import linkify
 
     print(linkify("Visit https://example.com today"))
 

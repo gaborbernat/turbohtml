@@ -7,9 +7,9 @@ prose is the C docstrings, so the reference cannot drift from the compiled core.
 
 Start with :doc:`reference/parsing` to turn markup into a tree, :doc:`reference/nodes` for the node model and the
 navigation, query, and mutation methods shared by every node, and :doc:`reference/query`, :doc:`reference/serialize`,
-and :doc:`reference/tokenizer` for the search, output, and low-level token surfaces. :doc:`reference/linkify` and
-:doc:`reference/sanitize` cover the link-rewriting and allowlist features, and :doc:`reference/structured-data` the
-JSON-LD / Microdata / OpenGraph extraction records.
+and :doc:`reference/tokenizer` for the search, output, and low-level token surfaces. :doc:`reference/clean` covers the
+allowlist sanitizing and link-rewriting features, :doc:`reference/extract` the content-extraction namespace, and
+:doc:`reference/structured-data` the JSON-LD / Microdata / OpenGraph extraction records.
 
 .. currentmodule:: turbohtml
 
@@ -23,6 +23,6 @@ JSON-LD / Microdata / OpenGraph extraction records.
     reference/query
     reference/serialize
     reference/tokenizer
-    reference/linkify
-    reference/sanitize
+    reference/clean
+    reference/extract
     reference/structured-data

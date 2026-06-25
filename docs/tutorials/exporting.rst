@@ -48,13 +48,13 @@ selector, :meth:`~turbohtml.Node.main_content` finds the dominant content elemen
  Sanitize a snippet
 ********************
 
-Export runs the other way too: when the HTML comes from someone else, clean it with :func:`turbohtml.sanitizer.sanitize`
+Export runs the other way too: when the HTML comes from someone else, clean it with :func:`turbohtml.clean.sanitize`
 before you embed it. The default policy keeps a safe subset of tags, drops event handlers and dangerous URL schemes, and
 escapes the elements it removes rather than discarding their text:
 
 .. testcode::
 
-    from turbohtml.sanitizer import sanitize
+    from turbohtml.clean import sanitize
 
     print(sanitize('<a href="javascript:alert(1)">x</a> <b onclick="y()">bold</b><script>bad()</script>'))
 

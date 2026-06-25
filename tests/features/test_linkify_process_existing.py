@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from turbohtml.linkify import Link, Linkify, linkify, nofollow, target_blank
+from turbohtml.clean import Link, Linkify, linkify, nofollow, target_blank
 
 if TYPE_CHECKING:
-    from turbohtml.linkify import Callback
+    from turbohtml.clean import Callback
 
 
 def _no_callbacks() -> list[Callback]:

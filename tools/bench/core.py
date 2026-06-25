@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, cast
 import turbohtml
 from bench.timing import Mutating
 from turbohtml import Markdown as _Markdown
-from turbohtml import sanitizer as _sanitizer
+from turbohtml import clean as _clean
 from turbohtml.build import E
-from turbohtml.linkify import Detector as _Detector
-from turbohtml.linkify import linkify as _linkify
+from turbohtml.clean import Detector as _Detector
+from turbohtml.clean import linkify as _linkify
 from turbohtml.migration.markupsafe import Markup as _Markup
 from turbohtml.migration.markupsafe import escape as _markup_escape
 from turbohtml.migration.stdlib import HTMLParser as _TurboHTMLParser
@@ -26,7 +26,7 @@ from turbohtml.query import Query as _Query
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-_SANITIZER = _sanitizer.Sanitizer(_sanitizer.Policy.relaxed())
+_SANITIZER = _clean.Sanitizer(_clean.Policy.relaxed())
 _LINKS_BASE = "https://example.com/base/"
 _URL_HINT_BASE = "http://site.com/"
 _FIND_TEXT_PATTERN = re.compile(r"test")  # ubiquitous in the wpt corpus, so the predicate does real work

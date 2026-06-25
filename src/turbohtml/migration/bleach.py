@@ -1,7 +1,7 @@
 """
 A drop-in for ``bleach.clean`` for projects migrating off bleach.
 
-This is a thin translator over :mod:`turbohtml.sanitizer`, kept apart from the main API so the drop-in surface stays
+This is a thin translator over :mod:`turbohtml.clean`, kept apart from the main API so the drop-in surface stays
 bounded. ``clean(text, tags=..., attributes=..., protocols=..., strip=...)`` keeps bleach's signature, including the
 list, per-tag-dict, and callable forms of ``attributes``, so a bleach call works with only the import changed. The one
 intentional difference is that event-handler attributes and ``javascript:`` URLs are dropped unconditionally here, even
@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from turbohtml.sanitizer import DEFAULT_ATTRIBUTES, DEFAULT_SCHEMES, DEFAULT_TAGS, OnDisallowed, Policy, sanitize
+from turbohtml.clean import DEFAULT_ATTRIBUTES, DEFAULT_SCHEMES, DEFAULT_TAGS, OnDisallowed, Policy, sanitize
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable

@@ -14,11 +14,11 @@ leaving the caller to turn them into ``<a>`` tags and to skip text that is alrea
  Why turbohtml
 ***************
 
-turbohtml does both jobs, fully type annotated: :func:`~turbohtml.linkify.linkify` rewrites HTML (and, being HTML-aware,
-leaves a URL already inside an ``<a>`` or ``<script>`` alone), while :class:`~turbohtml.linkify.Detector` matches spans
+turbohtml does both jobs, fully type annotated: :func:`~turbohtml.clean.linkify` rewrites HTML (and, being HTML-aware,
+leaves a URL already inside an ``<a>`` or ``<script>`` alone), while :class:`~turbohtml.clean.Detector` matches spans
 the way linkify-it-py's ``match`` does. The candidate scan runs in C, so both the full rewrite and the bare detection
-primitives (:meth:`Detector.find <turbohtml.linkify.Detector.find>` against ``LinkifyIt().match``, and
-:meth:`~turbohtml.linkify.Detector.has_link` against ``LinkifyIt().test``) outrun the Python scanner that does strictly
+primitives (:meth:`Detector.find <turbohtml.clean.Detector.find>` against ``LinkifyIt().match``, and
+:meth:`~turbohtml.clean.Detector.has_link` against ``LinkifyIt().test``) outrun the Python scanner that does strictly
 less work. The one close row is ``has_link`` on prose, where ``test`` short-circuits on the first link near the start:
 
 .. list-table::
@@ -69,21 +69,21 @@ less work. The one close row is ``has_link`` on prose, where ``test`` short-circ
     - - linkify-it-py
       - turbohtml
     - - ``LinkifyIt().match(text)``
-      - :meth:`Detector().find(text) <turbohtml.linkify.Detector.find>`
+      - :meth:`Detector().find(text) <turbohtml.clean.Detector.find>`
     - - ``Match`` (``index``/``last_index``/``url``/``schema``)
-      - :class:`~turbohtml.linkify.LinkSpan` (``start``/``end``/``url``/``text``)
+      - :class:`~turbohtml.clean.LinkSpan` (``start``/``end``/``url``/``text``)
     - - ``LinkifyIt().test(text)``
-      - :meth:`~turbohtml.linkify.Detector.has_link`
+      - :meth:`~turbohtml.clean.Detector.has_link`
     - - ``add(schema, rule)`` (scheme-less schemes)
       - the ``schemes`` argument
     - - ``tlds(...)``
       - the ``tlds`` argument
     - - (rewrite HTML yourself)
-      - :func:`~turbohtml.linkify.linkify`
+      - :func:`~turbohtml.clean.linkify`
 
 .. testcode::
 
-    from turbohtml.linkify import Detector
+    from turbohtml.clean import Detector
 
     span = Detector().find("see https://example.com")[0]
     print(span.start, span.end, span.url)

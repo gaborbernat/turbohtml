@@ -15,8 +15,8 @@ library has not heard of passes through.
  Why turbohtml
 ***************
 
-``turbohtml.sanitizer`` takes the opposite, safer stance: it is an **allowlist**, so nothing survives unless a
-:class:`~turbohtml.sanitizer.Policy` names it, which is why the safety baseline holds against markup the author never
+``turbohtml.clean`` takes the opposite, safer stance: it is an **allowlist**, so nothing survives unless a
+:class:`~turbohtml.clean.Policy` names it, which is why the safety baseline holds against markup the author never
 anticipated. It is fully type annotated and runs the filtering walk in C rather than over an lxml tree, leading the
 blocklist cleaner by an order of magnitude:
 
@@ -54,7 +54,7 @@ Porting inverts the model. Instead of switching dangerous things off, declare th
     - - lxml-html-clean
       - turbohtml
     - - ``Cleaner(...).clean_html(text)``
-      - :func:`turbohtml.sanitizer.sanitize` with a :class:`~turbohtml.sanitizer.Policy`
+      - :func:`turbohtml.clean.sanitize` with a :class:`~turbohtml.clean.Policy`
     - - ``host_whitelist=``, ``allow_tags=``
       - ``Policy.tags`` and ``Policy.attribute_filter``
     - - ``kill_tags=`` (drop element with content)
@@ -64,7 +64,7 @@ Porting inverts the model. Instead of switching dangerous things off, declare th
 
 .. testcode::
 
-    from turbohtml.sanitizer import sanitize, Policy
+    from turbohtml.clean import sanitize, Policy
 
     print(
         sanitize(

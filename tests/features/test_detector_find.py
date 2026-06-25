@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml.linkify import Detector, LinkSpan
+from turbohtml.clean import Detector, LinkSpan
 
 
 def _tuples(spans: list[LinkSpan]) -> list[tuple[int, int, str, str, bool]]:

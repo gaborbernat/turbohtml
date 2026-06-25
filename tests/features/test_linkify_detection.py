@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from turbohtml._html import _linkify_scan
-from turbohtml.linkify import Linkify, linkify
+from turbohtml.clean import Linkify, linkify
 
 if TYPE_CHECKING:
-    from turbohtml.linkify import Callback
+    from turbohtml.clean import Callback
 
 
 def _no_callbacks() -> list[Callback]:

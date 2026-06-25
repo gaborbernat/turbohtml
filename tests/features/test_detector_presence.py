@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml.linkify import Detector
+from turbohtml.clean import Detector
 
 
 @pytest.mark.parametrize(

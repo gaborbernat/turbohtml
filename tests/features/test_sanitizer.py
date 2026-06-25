@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml.sanitizer import (
+from turbohtml.clean import (
     DEFAULT_ATTRIBUTES,
     DEFAULT_CSS_PROPERTIES,
     DEFAULT_SCHEMES,

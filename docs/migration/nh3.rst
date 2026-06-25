@@ -15,9 +15,9 @@ no linkifier.
  Why turbohtml
 ***************
 
-``turbohtml.sanitizer`` stays in the same performance tier as the Rust binding while restoring the features nh3 dropped:
-an escape mode, a value-rewriting ``attribute_filter``, and a companion linkifier, all fully type annotated behind a
-frozen :class:`~turbohtml.sanitizer.Policy`. It also leads nh3 on the benchmark:
+``turbohtml.clean`` stays in the same performance tier as the Rust binding while restoring the features nh3 dropped: an
+escape mode, a value-rewriting ``attribute_filter``, and a companion linkifier, all fully type annotated behind a frozen
+:class:`~turbohtml.clean.Policy`. It also leads nh3 on the benchmark:
 
 .. list-table::
     :header-rows: 1
@@ -45,7 +45,7 @@ frozen :class:`~turbohtml.sanitizer.Policy`. It also leads nh3 on the benchmark:
     nh3.clean(text, tags={"a"}, attributes={"a": {"href"}})
 
     # turbohtml
-    from turbohtml.sanitizer import sanitize, Policy
+    from turbohtml.clean import sanitize, Policy
 
     sanitize(text, Policy(tags=frozenset({"a"}), attributes={"a": frozenset({"href"})}))
 
@@ -56,7 +56,7 @@ frozen :class:`~turbohtml.sanitizer.Policy`. It also leads nh3 on the benchmark:
     - - nh3
       - turbohtml
     - - ``nh3.clean(text, ...)``
-      - :func:`turbohtml.sanitizer.sanitize` with a :class:`~turbohtml.sanitizer.Policy`
+      - :func:`turbohtml.clean.sanitize` with a :class:`~turbohtml.clean.Policy`
     - - ``tags=``, ``attributes=``
       - ``Policy.tags``, ``Policy.attributes``
     - - ``link_rel=``
@@ -68,5 +68,4 @@ frozen :class:`~turbohtml.sanitizer.Policy`. It also leads nh3 on the benchmark:
     - - ``set_tag_attribute_values=``
       - ``Policy.set_attributes``
     - - (drops disallowed tags)
-      - :class:`~turbohtml.sanitizer.OnDisallowed` (``ESCAPE`` by default; ``STRIP`` / ``REMOVE`` for nh3-style
-        dropping)
+      - :class:`~turbohtml.clean.OnDisallowed` (``ESCAPE`` by default; ``STRIP`` / ``REMOVE`` for nh3-style dropping)
