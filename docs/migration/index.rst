@@ -175,6 +175,15 @@ all-time totals and each library's documentation sit alongside for context.
             :alt: lxml_html_clean total downloads
             :target: https://pepy.tech/project/lxml_html_clean
     - - 5
+      - :doc:`minify-html <minify-html>`
+      - `docs <https://github.com/wilsonzlin/minify-html>`__
+      - .. image:: https://static.pepy.tech/badge/minify-html/month
+            :alt: minify-html monthly downloads
+            :target: https://pepy.tech/project/minify-html
+      - .. image:: https://static.pepy.tech/badge/minify-html
+            :alt: minify-html total downloads
+            :target: https://pepy.tech/project/minify-html
+    - - 6
       - :doc:`html-sanitizer <html-sanitizer>`
       - `docs <https://github.com/matthiask/html-sanitizer>`__
       - .. image:: https://static.pepy.tech/badge/html-sanitizer/month
@@ -410,6 +419,7 @@ all-time totals and each library's documentation sit alongside for context.
     html-text
     resiliparse
     newspaper3k
+    minify-html
     html-sanitizer
     yattag
     extruct

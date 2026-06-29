@@ -1099,6 +1099,36 @@ fifty to sixty times faster than BeautifulSoup.
       - 738.0 µs (3.1x)
       - 10.98 ms (45.7x)
 
+***********
+ Minifying
+***********
+
+Minifying a document with :func:`turbohtml.clean.minify`: parse, then serialize once with every fold engaged (collapsing
+insignificant whitespace, omitting the WHATWG-optional tags, unquoting attributes, and stripping comments), against
+`minify-html <https://github.com/wilsonzlin/minify-html>`_'s Rust minifier on the same folds, its CSS and JS
+minification left off for a like-for-like comparison. turbohtml parses and emits in C through one preallocated buffer,
+so it runs about twice as fast with the parse included.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 30 30
+
+    - - minify a document
+      - turbohtml
+      - minify-html
+    - - daring fireball (10 kB)
+      - 32.9 µs
+      - 65.8 µs (2.0x)
+    - - ars technica (56 kB)
+      - 153.1 µs
+      - 315.1 µs (2.1x)
+    - - mozilla blog (95 kB)
+      - 320.6 µs
+      - 742.3 µs (2.3x)
+    - - whatwg spec (235 kB)
+      - 1110.3 µs
+      - 1718.6 µs (1.5x)
+
 **********
  Building
 **********
