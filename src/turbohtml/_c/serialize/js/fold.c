@@ -1,0 +1,810 @@
+/* Peephole folding over the arena AST, run before mangling on the full-minify path.
+
+   Each fold rewrites a node in place into an equivalent shorter form as a real AST
+   node, so the printer's precedence logic re-parenthesises it correctly (e.g.
+   `true.x` becomes `(!0).x`, never the wrong `!0.x`). The pass is post-order: children
+   fold first, so a parent sees already-folded constant operands.
+
+   Literal folds (always safe; reserved words are never bindings, and the global
+   `undefined` check is whole-program):
+     true / false -> !0 / !1
+     undefined    -> void 0        (only when nothing shadows undefined)
+
+   Constant-driven dead-code elimination, modeled on esbuild/terser/tdewolff. A
+   transform only drops an operand when it is a *pure* constant (no side effects) or
+   the operand is on the never-taken side of a short circuit; and it only drops a
+   *statement* subtree when that subtree declares no hoisted `var` or function (which
+   would otherwise survive the branch) -- a conservative check that skips the fold
+   rather than risk the classic hoisting miscompile:
+     !<pure const>            -> the boolean
+     <pure const> && b        -> b or the const
+     <pure const> || b        -> the const or b
+     <null|undefined> ?? b    -> b ;  <other pure const> ?? b -> the const
+     <pure const> ? a : b     -> a or b
+     if (<pure const>) a else b   -> the taken branch (if the dropped branch hoists nothing)
+     ...; return x; <dead>        -> drop <dead> (when it hoists nothing)
+
+   Validated by execution differentials under Node. */
+
+#include "serialize/js/internal.h"
+
+typedef struct {
+    jm_program *prog;
+    int fold_undefined; /* `undefined` is not shadowed by any binding -> fold to void 0 */
+} F;
+
+static int ident_is(const jm_node *node, const char *word) {
+    Py_ssize_t len = 0;
+    while (word[len] != '\0') {
+        len++;
+    }
+    if (node->str_len != len) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (node->str[index] != (Py_UCS4)(unsigned char)word[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Overwrite the node at dst with the node at src, keeping dst's sibling link so a
+   replacement inside a statement or argument chain stays connected. */
+static void replace_with(F *folder, int32_t dst, int32_t src) {
+    int32_t next = folder->prog->nodes[dst].next;
+    folder->prog->nodes[dst] = folder->prog->nodes[src];
+    folder->prog->nodes[dst].next = next;
+}
+
+/* ----------------------------------------------------------- constant truthiness */
+
+/* Whether a number lexeme is the value zero: 1 zero, 0 non-zero, -1 unknown (an
+   exponent or BigInt suffix is left to the engine rather than guessed). */
+static int number_is_zero(const jm_node *node) {
+    Py_ssize_t start = 0;
+    if (node->str_len >= 2 && node->str[0] == '0' &&
+        (node->str[1] == 'x' || node->str[1] == 'X' || node->str[1] == 'o' || node->str[1] == 'O' ||
+         node->str[1] == 'b' || node->str[1] == 'B')) {
+        start = 2;
+    }
+    int zero = 1;
+    for (Py_ssize_t index = start; index < node->str_len; index++) {
+        Py_UCS4 ch = node->str[index];
+        if (ch == 'e' || ch == 'E') { /* an exponent: leave the value to the engine */
+            return -1;
+        }
+        if (ch != '0' && ch != '.' && ch != '_') {
+            zero = 0;
+        }
+    }
+    return zero;
+}
+
+/* The truthiness of a *pure* (side-effect-free) constant: 1 truthy, 0 falsy, -1 not a
+   pure constant (so neither its value is known nor may it be dropped). */
+static int pure_truthy(F *folder, int32_t idx) {
+    jm_node *node = &folder->prog->nodes[idx];
+    switch (node->kind) {
+    case JN_NUM: {
+        int zero = number_is_zero(node);
+        return zero < 0 ? -1 : zero ? 0 : 1;
+    }
+    case JN_STRING:
+        return node->str_len > 2 ? 1 : 0; /* "" / '' is two quote characters */
+    case JN_REGEX:
+        return 1;
+    case JN_IDENT:
+        return ident_is(node, "null") ? 0 : -1;
+    case JN_UNARY:
+        if (node->op == JT_NOT) {
+            int inner = pure_truthy(folder, node->a);
+            return inner < 0 ? -1 : !inner;
+        }
+        if (node->op == JT_IDENT && ident_is(node, "void")) {  /* op==JT_IDENT implies str set */
+            return pure_truthy(folder, node->a) >= 0 ? 0 : -1; /* void <pure> is undefined */
+        }
+        return -1;
+    default:
+        return -1;
+    }
+}
+
+static int is_pure_const(F *folder, int32_t idx) {
+    return pure_truthy(folder, idx) >= 0;
+}
+
+/* Whether a pure constant is null or undefined (the operands `??` short-circuits on). */
+static int is_nullish(F *folder, int32_t idx) {
+    jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_IDENT) {
+        return ident_is(node, "null");
+    }
+    if (node->kind == JN_UNARY && node->op == JT_IDENT && ident_is(node, "void")) {
+        return is_pure_const(folder, node->a); /* op==JT_IDENT implies str set */
+    }
+    return 0;
+}
+
+/* ----------------------------------------------------------- hoisting check */
+
+static int chain_hoists(F *folder, int32_t first);
+
+/* Whether the statement subtree at idx declares a `var` or a function that hoists out
+   of a dropped branch. Descends through control flow but never into nested function
+   scopes (their declarations do not hoist here). Over-approximating is safe; this
+   never under-reports, so a dropped branch can never silently lose a hoisted name. */
+static int node_hoists(F *folder, int32_t idx) {
+    if (idx < 0) {
+        return 0;
+    }
+    jm_node *node = &folder->prog->nodes[idx];
+    switch (node->kind) {
+    case JN_VAR:
+        return node->decl == 0; /* var hoists; let / const are block scoped */
+    case JN_FUNC:
+        return !(node->flags & JN_F_EXPR); /* a function declaration hoists */
+    case JN_BLOCK:
+        return chain_hoists(folder, node->a);
+    case JN_IF:
+        return node_hoists(folder, node->b) || node_hoists(folder, node->c);
+    case JN_FOR:
+        return node_hoists(folder, node->a) || node_hoists(folder, node->d);
+    case JN_FORIN:
+    case JN_FOROF:
+        return node_hoists(folder, node->a) || node_hoists(folder, node->c);
+    case JN_WHILE:
+    case JN_WITH:
+        return node_hoists(folder, node->b);
+    case JN_DOWHILE:
+    case JN_LABEL:
+        return node_hoists(folder, node->a);
+    case JN_TRY:
+        return node_hoists(folder, node->a) || node_hoists(folder, node->c) || node_hoists(folder, node->d);
+    case JN_SWITCH:
+        for (int32_t clause = node->b; clause >= 0; clause = folder->prog->nodes[clause].next) {
+            if (chain_hoists(folder, folder->prog->nodes[clause].b)) {
+                return 1;
+            }
+        }
+        return 0;
+    default:
+        return 0; /* expressions and arrows declare nothing that hoists here */
+    }
+}
+
+static int chain_hoists(F *folder, int32_t first) {
+    for (int32_t idx = first; idx >= 0; idx = folder->prog->nodes[idx].next) {
+        if (node_hoists(folder, idx)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* ----------------------------------------------------------- literal folds */
+
+static void fold_boolean(F *folder, int32_t idx, int truth) {
+    static const Py_UCS4 zero = '0';
+    static const Py_UCS4 one = '1';
+    int32_t num = jm_node_new(folder->prog, JN_NUM);
+    if (num < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path leaves the literal as-is */
+        return;    /* GCOVR_EXCL_LINE */
+    }
+    folder->prog->nodes[num].str = truth ? &zero : &one;
+    folder->prog->nodes[num].str_len = 1;
+    jm_node *node = &folder->prog->nodes[idx];
+    node->kind = JN_UNARY;
+    node->op = JT_NOT;
+    node->str = NULL;
+    node->str_len = 0;
+    node->a = num;
+}
+
+static void fold_void(F *folder, int32_t idx) {
+    static const Py_UCS4 zero = '0';
+    static const Py_UCS4 voidkw[] = {'v', 'o', 'i', 'd'};
+    int32_t num = jm_node_new(folder->prog, JN_NUM);
+    if (num < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;    /* GCOVR_EXCL_LINE */
+    }
+    folder->prog->nodes[num].str = &zero;
+    folder->prog->nodes[num].str_len = 1;
+    jm_node *node = &folder->prog->nodes[idx];
+    node->kind = JN_UNARY;
+    node->op = JT_IDENT; /* a word operator: the printer emits node->str then the operand */
+    node->str = voidkw;
+    node->str_len = 4;
+    node->a = num;
+}
+
+/* ----------------------------------------------------------- declaration scan (for undefined) */
+
+static int pattern_binds(F *folder, int32_t idx, const char *name) {
+    if (idx < 0) {
+        return 0;
+    }
+    jm_node *node = &folder->prog->nodes[idx];
+    switch (node->kind) {
+    case JN_IDENT:
+        return ident_is(node, name);
+    case JN_ARRAY:
+        for (int32_t element = node->a; element >= 0; element = folder->prog->nodes[element].next) {
+            if (pattern_binds(folder, element, name)) {
+                return 1;
+            }
+        }
+        return 0;
+    case JN_OBJECT:
+        for (int32_t prop = node->a; prop >= 0; prop = folder->prog->nodes[prop].next) {
+            jm_node *pn = &folder->prog->nodes[prop];
+            int32_t target = pn->kind == JN_SPREAD ? pn->a : pn->b >= 0 ? pn->b : pn->a;
+            if (pattern_binds(folder, target, name)) {
+                return 1;
+            }
+        }
+        return 0;
+    case JN_ASSIGN:
+    case JN_SPREAD:
+        return pattern_binds(folder, node->a, name);
+    default:
+        return 0;
+    }
+}
+
+static int declares(F *folder, int32_t idx, const char *name) {
+    while (idx >= 0) {
+        jm_node *node = &folder->prog->nodes[idx];
+        switch (node->kind) {
+        case JN_VAR:
+            for (int32_t declarator = node->a; declarator >= 0; declarator = folder->prog->nodes[declarator].next) {
+                if (pattern_binds(folder, folder->prog->nodes[declarator].a, name) ||
+                    declares(folder, folder->prog->nodes[declarator].b, name)) {
+                    return 1;
+                }
+            }
+            break;
+        case JN_FUNC:
+        case JN_ARROW:
+            if (node->str != NULL && ident_is(node, name)) {
+                return 1;
+            }
+            for (int32_t param = node->a; param >= 0; param = folder->prog->nodes[param].next) {
+                if (pattern_binds(folder, param, name)) {
+                    return 1;
+                }
+            }
+            if (declares(folder, node->b, name)) {
+                return 1;
+            }
+            break;
+        case JN_CLASS:
+            if ((node->str != NULL && ident_is(node, name)) || declares(folder, node->a, name) ||
+                declares(folder, node->b, name)) {
+                return 1;
+            }
+            break;
+        case JN_TRY:
+            if (pattern_binds(folder, node->b, name) || declares(folder, node->a, name) ||
+                declares(folder, node->c, name) || declares(folder, node->d, name)) {
+                return 1;
+            }
+            break;
+        default:
+            if (declares(folder, node->a, name) || declares(folder, node->b, name) || declares(folder, node->c, name) ||
+                declares(folder, node->d, name)) {
+                return 1;
+            }
+            break;
+        }
+        idx = node->next;
+    }
+    return 0;
+}
+
+/* ----------------------------------------------------------- walk + transforms */
+
+static void walk(F *folder, int32_t idx);
+
+static void walk_chain(F *folder, int32_t first) {
+    for (int32_t idx = first; idx >= 0; idx = folder->prog->nodes[idx].next) {
+        walk(folder, idx);
+    }
+}
+
+/* Drop statements that follow a return / throw / break / continue, as long as none of
+   them declares a hoisted var or function (which would survive the jump). */
+static void drop_unreachable(F *folder, int32_t first) {
+    for (int32_t idx = first; idx >= 0; idx = folder->prog->nodes[idx].next) {
+        jm_node *node = &folder->prog->nodes[idx];
+        if (node->kind != JN_RETURN && node->kind != JN_THROW && node->kind != JN_BREAK && node->kind != JN_CONTINUE) {
+            continue;
+        }
+        if (node->next < 0 || chain_hoists(folder, node->next)) {
+            return; /* nothing after, or the tail hoists names: keep it */
+        }
+        node->next = -1; /* cut the unreachable tail */
+        return;
+    }
+}
+
+/* Merge each run of adjacent same-kind declarations into one: `var a=1;var b=2` becomes
+   `var a=1,b=2`. Only touches a statement list (never a for-header), and only joins lists of
+   the identical declaration kind, so scoping and hoisting are unchanged. No node is allocated,
+   so the cached arena base stays valid. */
+static void merge_declarations(F *folder, int32_t first) {
+    jm_node *nodes = folder->prog->nodes;
+    for (int32_t idx = first; idx >= 0;) {
+        int32_t next = nodes[idx].next;
+        if (next < 0 || nodes[idx].kind != JN_VAR || nodes[next].kind != JN_VAR ||
+            nodes[idx].decl != nodes[next].decl) {
+            idx = next;
+            continue;
+        }
+        int32_t tail = nodes[idx].a;
+        while (nodes[tail].next >= 0) {
+            tail = nodes[tail].next;
+        }
+        nodes[tail].next = nodes[next].a;
+        nodes[idx].next = nodes[next].next;
+    }
+}
+
+/* The single statement of an `if` branch: the statement itself, or the lone statement of a
+   one-statement block (a block with a single non-declaration statement adds no observable scope).
+   -1 if the branch is empty or a multi-statement block. The caller only rewrites when the result
+   is an expression statement or a return, so unwrapping a block whose statement is a declaration
+   is harmless (it is rejected there). */
+static int32_t branch_stmt(F *folder, int32_t idx) {
+    if (folder->prog->nodes[idx].kind == JN_BLOCK) { /* callers pass a real consequent/alternate */
+        int32_t inner = folder->prog->nodes[idx].a;
+        return inner < 0 || folder->prog->nodes[inner].next >= 0 ? -1 : inner;
+    }
+    return idx;
+}
+
+/* Build `test ? then : els`, flipping `!x ? a : b` to `x ? b : a` to drop the negation (13.14);
+   a doubled `!!x` test peels both, since a conditional reads its test as a boolean. */
+static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t els) {
+    while (prog->nodes[test].kind == JN_UNARY && prog->nodes[test].op == JT_NOT) {
+        test = prog->nodes[test].a;
+        int32_t swap = then;
+        then = els;
+        els = swap;
+    }
+    int32_t cond = jm_node_new(prog, JN_COND);
+    if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1;  /* GCOVR_EXCL_LINE */
+    }
+    prog->nodes[cond].a = test;
+    prog->nodes[cond].b = then;
+    prog->nodes[cond].c = els;
+    return cond;
+}
+
+/* Build `test && expr`, turning `!x && expr` into `x || expr` to drop the negation (13.13); each
+   `!` flips the connective, so `!!x && expr` is back to `x && expr`. */
+static int32_t make_logical(jm_program *prog, int32_t test, int32_t expr) {
+    uint16_t op = JT_AND;
+    while (prog->nodes[test].kind == JN_UNARY && prog->nodes[test].op == JT_NOT) {
+        test = prog->nodes[test].a;
+        op = op == JT_AND ? JT_OR : JT_AND;
+    }
+    int32_t logic = jm_node_new(prog, JN_LOGICAL);
+    if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1;   /* GCOVR_EXCL_LINE */
+    }
+    prog->nodes[logic].op = op;
+    prog->nodes[logic].a = test;
+    prog->nodes[logic].b = expr;
+    return logic;
+}
+
+/* Rewrite a runtime `if` into a shorter equivalent (ECMA-262 14.6 selects one branch; the printer
+   re-parenthesises by precedence and re-wraps a statement-leading `{`/`function`):
+     if(c) e;            -> c && e;          (no else, expression-statement consequent)
+     if(c) e1; else e2;  -> c ? e1 : e2;     (both expression statements)
+     if(c) return a; else return b; -> return c ? a : b;   (both returns carry a value)
+   Every new node is created before any node pointer is re-read, and only indices cross the
+   allocating jm_node_new call, so a realloc of the arena cannot dangle. */
+static void convert_if(F *folder, int32_t idx) {
+    jm_program *prog = folder->prog;
+    int32_t then_stmt = branch_stmt(folder, prog->nodes[idx].b);
+    if (then_stmt < 0) {
+        return;
+    }
+    int32_t else_branch = prog->nodes[idx].c;
+    if (else_branch < 0) {
+        if (prog->nodes[then_stmt].kind != JN_EXPR_STMT) {
+            return;
+        }
+        int32_t logic = make_logical(prog, prog->nodes[idx].a, prog->nodes[then_stmt].a);
+        if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path leaves the if as-is */
+            return;      /* GCOVR_EXCL_LINE */
+        }
+        prog->nodes[idx].kind = JN_EXPR_STMT;
+        prog->nodes[idx].a = logic;
+        prog->nodes[idx].b = -1;
+        prog->nodes[idx].c = -1;
+        return;
+    }
+    int32_t else_stmt = branch_stmt(folder, else_branch);
+    if (else_stmt < 0) {
+        return;
+    }
+    int kind = prog->nodes[then_stmt].kind;
+    int both_expr = kind == JN_EXPR_STMT && prog->nodes[else_stmt].kind == JN_EXPR_STMT;
+    int both_return = kind == JN_RETURN && prog->nodes[else_stmt].kind == JN_RETURN && prog->nodes[then_stmt].a >= 0 &&
+                      prog->nodes[else_stmt].a >= 0;
+    if (!both_expr && !both_return) {
+        return;
+    }
+    /* EXPR_STMT and RETURN both carry their payload in .a */
+    int32_t cond = make_cond(prog, prog->nodes[idx].a, prog->nodes[then_stmt].a, prog->nodes[else_stmt].a);
+    if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;     /* GCOVR_EXCL_LINE */
+    }
+    prog->nodes[idx].kind = both_expr ? JN_EXPR_STMT : JN_RETURN;
+    prog->nodes[idx].a = cond;
+    prog->nodes[idx].b = -1;
+    prog->nodes[idx].c = -1;
+}
+
+/* An expression statement that may join a comma sequence. A string-literal expression statement is
+   excluded so a directive prologue (`"use strict"`) is never swept into a sequence and silenced. */
+static int mergeable_expr(jm_program *prog, int32_t idx) {
+    return prog->nodes[idx].kind == JN_EXPR_STMT && prog->nodes[prog->nodes[idx].a].kind != JN_STRING;
+}
+
+/* The expression as a flat JN_SEQ, wrapping a non-sequence in a fresh one. -1 on allocation failure. */
+static int32_t as_sequence(jm_program *prog, int32_t expr) {
+    if (prog->nodes[expr].kind == JN_SEQ) {
+        return expr;
+    }
+    int32_t seq = jm_node_new(prog, JN_SEQ);
+    if (seq < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    prog->nodes[seq].a = expr;
+    return seq;
+}
+
+/* Append expr to seq's child chain, splicing a nested sequence's children so the result stays flat
+   (`(a,b),c` is emitted as `a,b,c`). No allocation, so the arena base is stable. */
+static void seq_append(jm_program *prog, int32_t seq, int32_t expr) {
+    int32_t tail = prog->nodes[seq].a;
+    while (prog->nodes[tail].next >= 0) {
+        tail = prog->nodes[tail].next;
+    }
+    prog->nodes[tail].next = prog->nodes[expr].kind == JN_SEQ ? prog->nodes[expr].a : expr;
+}
+
+/* Comma-merge a statement list (ECMA-262 13.16, sequential evaluation, value is the last operand):
+   consecutive expression statements collapse to one, and a trailing expression statement folds into
+   a following `return`/`throw` argument (`a();b();return c` -> `return a(),b(),c`). Run before
+   drop_unreachable so the code the merged return makes unreachable is then cut. */
+static void merge_sequences(F *folder, int32_t first) {
+    jm_program *prog = folder->prog;
+    for (int32_t idx = first; idx >= 0; idx = prog->nodes[idx].next) {
+        if (!mergeable_expr(prog, idx) || prog->nodes[idx].next < 0) {
+            continue;
+        }
+        int32_t next = prog->nodes[idx].next;
+        if (mergeable_expr(prog, next)) {
+            int32_t seq = as_sequence(prog, prog->nodes[idx].a);
+            if (seq < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                continue;  /* GCOVR_EXCL_LINE */
+            }
+            prog->nodes[idx].a = seq;
+            while ((next = prog->nodes[idx].next) >= 0 && mergeable_expr(prog, next)) {
+                seq_append(prog, seq, prog->nodes[next].a);
+                prog->nodes[idx].next = prog->nodes[next].next;
+            }
+            next = prog->nodes[idx].next;
+        }
+        if (next < 0 || (prog->nodes[next].kind != JN_RETURN && prog->nodes[next].kind != JN_THROW) ||
+            prog->nodes[next].a < 0) {
+            continue;
+        }
+        int32_t seq = as_sequence(prog, prog->nodes[idx].a);
+        if (seq < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            continue;  /* GCOVR_EXCL_LINE */
+        }
+        seq_append(prog, seq, prog->nodes[next].a);
+        prog->nodes[idx].kind = prog->nodes[next].kind;
+        prog->nodes[idx].a = seq;
+        prog->nodes[idx].next = prog->nodes[next].next;
+    }
+}
+
+/* Fold a guard clause and the statement it guards into one conditional return:
+   `if(c) return a; return b;` becomes `return c ? a : b;`. The following statement is the implicit
+   else, and sequence-merging has already collapsed any run before it into that single return. The
+   loop repeats to a fixpoint so a chain `if(a)return x;if(b)return y;return z` cascades into
+   `return a?x:b?y:z`. */
+static void fold_if_return_chain(F *folder, int32_t first) {
+    jm_program *prog = folder->prog;
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int32_t idx = first; idx >= 0; idx = prog->nodes[idx].next) {
+            if (prog->nodes[idx].kind != JN_IF || prog->nodes[idx].c >= 0) {
+                continue;
+            }
+            int32_t then = branch_stmt(folder, prog->nodes[idx].b);
+            int32_t next = prog->nodes[idx].next;
+            if (then < 0 || prog->nodes[then].kind != JN_RETURN || prog->nodes[then].a < 0 || next < 0 ||
+                prog->nodes[next].kind != JN_RETURN || prog->nodes[next].a < 0) {
+                continue;
+            }
+            int32_t cond = make_cond(prog, prog->nodes[idx].a, prog->nodes[then].a, prog->nodes[next].a);
+            if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                return;     /* GCOVR_EXCL_LINE */
+            }
+            prog->nodes[idx].kind = JN_RETURN;
+            prog->nodes[idx].a = cond;
+            prog->nodes[idx].b = -1;
+            prog->nodes[idx].c = -1;
+            prog->nodes[idx].next = prog->nodes[next].next;
+            changed = 1;
+        }
+    }
+}
+
+/* The statement-list rewrites, in dependency order. The two merges sandwich the guard fold because
+   they enable each other: the first merge turns a run before a `return` into one return so a guard
+   can fold against it, the fold turns an `if` into a return, and the second merge then absorbs a
+   statement that sat before that new return. drop_unreachable runs last to cut what a merged return
+   makes dead. The whole sequence reaches a fixpoint, so re-minifying is a no-op. */
+static void optimize_chain(F *folder, int32_t first) {
+    merge_declarations(folder, first);
+    merge_sequences(folder, first);
+    fold_if_return_chain(folder, first);
+    merge_sequences(folder, first);
+    drop_unreachable(folder, first);
+}
+
+/* Parse a plain non-negative decimal integer lexeme (digits only, no dot, exponent, separator or
+   radix prefix) under 10^15 so every sum/product stays an exact IEEE-754 integer. 1 and *out set,
+   or 0. */
+static int int_value(const jm_node *node, uint64_t *out) {
+    if (node->kind != JN_NUM || node->str_len > 15) {
+        return 0;
+    }
+    uint64_t value = 0;
+    for (Py_ssize_t index = 0; index < node->str_len; index++) {
+        if (node->str[index] < '0' || node->str[index] > '9') {
+            return 0;
+        }
+        value = value * 10 + (uint64_t)(node->str[index] - '0');
+    }
+    *out = value;
+    return 1;
+}
+
+/* Replace the node with a decimal integer literal `value` (the printer re-canonicalises it, e.g.
+   `1000` to `1e3`). The synthesized lexeme has no source span, so the program owns it. */
+static void fold_int(F *folder, int32_t idx, uint64_t value) {
+    Py_UCS4 digits[20];
+    Py_ssize_t len = 0;
+    do {
+        digits[len++] = (Py_UCS4)('0' + value % 10);
+        value /= 10;
+    } while (value > 0);
+    Py_UCS4 buf[20];
+    for (Py_ssize_t index = 0; index < len; index++) {
+        buf[index] = digits[len - 1 - index];
+    }
+    const Py_UCS4 *owned = jm_program_own(folder->prog, buf, len);
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path leaves the expression as-is */
+        return;          /* GCOVR_EXCL_LINE */
+    }
+    jm_node *node = &folder->prog->nodes[idx];
+    node->kind = JN_NUM;
+    node->str = owned;
+    node->str_len = len;
+    node->a = -1;
+    node->b = -1;
+}
+
+/* Fold `<int> + <int>`, `<int> - <int>` (non-negative result) and `<int> * <int>` (ECMA-262 13.15);
+   the integers and their result are exact, so no rounding, -0 or NaN can arise. */
+static void fold_arithmetic(F *folder, int32_t idx) {
+    jm_node *node = &folder->prog->nodes[idx];
+    uint64_t left;
+    uint64_t right;
+    if (!int_value(&folder->prog->nodes[node->a], &left) || !int_value(&folder->prog->nodes[node->b], &right)) {
+        return;
+    }
+    static const uint64_t limit = 1ull << 53; /* the largest exactly-representable IEEE-754 integer */
+    if (node->op == JT_PLUS) {
+        fold_int(folder, idx, left + right); /* two <10^15 operands sum to <2^53, always exact */
+    } else if (node->op == JT_MINUS && left >= right) {
+        fold_int(folder, idx, left - right);
+    } else if (node->op == JT_STAR && (left == 0 || right <= limit / left)) {
+        fold_int(folder, idx, left * right);
+    }
+}
+
+/* Fold `"a" + "b"` to `"ab"` (ECMA-262 13.15.3, string concatenation is exact). Restricted to
+   double-quoted operands, whose contents are already valid inside a double-quoted result, so no
+   escape can be lost or a quote left unescaped. */
+static void fold_concat(F *folder, int32_t idx) {
+    jm_node *node = &folder->prog->nodes[idx];
+    const jm_node *left = &folder->prog->nodes[node->a];
+    const jm_node *right = &folder->prog->nodes[node->b];
+    if (left->kind != JN_STRING || right->kind != JN_STRING || left->str[0] != '"' || right->str[0] != '"') {
+        return;
+    }
+    Py_ssize_t len = left->str_len + right->str_len - 2; /* drop one closing and one opening quote */
+    Py_UCS4 *buf = jm_malloc((size_t)len * sizeof(Py_UCS4));
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;        /* GCOVR_EXCL_LINE */
+    }
+    memcpy(buf, left->str, (size_t)(left->str_len - 1) * sizeof(Py_UCS4)); /* "a (no closing quote) */
+    memcpy(buf + left->str_len - 1, right->str + 1, (size_t)(right->str_len - 1) * sizeof(Py_UCS4)); /* b" */
+    const Py_UCS4 *owned = jm_program_own(folder->prog, buf, len);
+    jm_free(buf);
+    if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;          /* GCOVR_EXCL_LINE */
+    }
+    node = &folder->prog->nodes[idx];
+    node->kind = JN_STRING;
+    node->str = owned;
+    node->str_len = len;
+    node->a = -1;
+    node->b = -1;
+}
+
+static void walk(F *folder, int32_t idx) {
+    if (idx < 0) {
+        return;
+    }
+    jm_node *node = &folder->prog->nodes[idx];
+    /* recurse into children first (post-order), skipping property-name positions */
+    switch (node->kind) {
+    case JN_IDENT:
+        if (ident_is(node, "true")) {
+            fold_boolean(folder, idx, 1);
+        } else if (ident_is(node, "false")) {
+            fold_boolean(folder, idx, 0);
+        } else if (folder->fold_undefined && ident_is(node, "undefined")) {
+            fold_void(folder, idx);
+        }
+        return;
+    case JN_MEMBER_EXPR:
+        walk(folder, node->a);
+        if (node->flags & JN_F_COMPUTED) {
+            walk(folder, node->b);
+        }
+        return;
+    case JN_PROP:
+    case JN_MEMBER:
+        if (node->flags & JN_F_COMPUTED) {
+            walk(folder, node->a);
+        }
+        walk(folder, node->b);
+        return;
+    case JN_ARRAY:
+    case JN_OBJECT:
+    case JN_SEQ:
+    case JN_TEMPLATE:
+        walk_chain(folder, node->a);
+        return;
+    case JN_CALL:
+    case JN_NEW:
+    case JN_CLASS:
+        walk(folder, node->a);
+        walk_chain(folder, node->b);
+        return;
+    case JN_SWITCH:
+        walk(folder, node->a);
+        for (int32_t clause = node->b; clause >= 0; clause = folder->prog->nodes[clause].next) {
+            walk(folder, folder->prog->nodes[clause].a);
+            walk_chain(folder, folder->prog->nodes[clause].b);
+            optimize_chain(folder, folder->prog->nodes[clause].b);
+        }
+        return;
+    case JN_VAR:
+        for (int32_t declr = node->a; declr >= 0; declr = folder->prog->nodes[declr].next) {
+            walk(folder, folder->prog->nodes[declr].b);
+        }
+        return;
+    case JN_BLOCK:
+        walk_chain(folder, node->a);
+        optimize_chain(folder, node->a);
+        return;
+    case JN_FUNC:
+    case JN_ARROW:
+        walk_chain(folder, node->a); /* params (default values may fold) */
+        walk(folder, node->b);       /* body */
+        return;
+    default:
+        walk(folder, node->a);
+        walk(folder, node->b);
+        walk(folder, node->c);
+        walk(folder, node->d);
+        break;
+    }
+    /* then transform this node against its now-folded children */
+    node = &folder->prog->nodes[idx];
+    switch (node->kind) {
+    case JN_UNARY:
+        if (node->op == JT_NOT) {
+            int truth = pure_truthy(folder, node->a);
+            if (truth >= 0) {
+                fold_boolean(folder, idx, !truth);
+            }
+        }
+        return;
+    case JN_LOGICAL: {
+        if (node->op == JT_NULLISH) {
+            if (is_nullish(folder, node->a)) {
+                replace_with(folder, idx, node->b);
+            } else if (is_pure_const(folder, node->a)) {
+                replace_with(folder, idx, node->a);
+            }
+            return;
+        }
+        int truth = pure_truthy(folder, node->a);
+        if (truth < 0) {
+            return;
+        }
+        int keep_right = node->op == JT_AND ? truth : !truth;
+        replace_with(folder, idx, keep_right ? node->b : node->a);
+        return;
+    }
+    case JN_COND: {
+        int truth = pure_truthy(folder, node->a);
+        if (truth >= 0) {
+            replace_with(folder, idx, truth ? node->b : node->c);
+            return;
+        }
+        while (folder->prog->nodes[node->a].kind == JN_UNARY && folder->prog->nodes[node->a].op == JT_NOT) {
+            node->a = folder->prog->nodes[node->a].a; /* !x?a:b -> x?b:a; a doubled !! peels fully */
+            int32_t swap = node->b;
+            node->b = node->c;
+            node->c = swap;
+        }
+        return;
+    }
+    case JN_IF: {
+        int truth = pure_truthy(folder, node->a);
+        if (truth < 0) {
+            convert_if(folder, idx);
+            return;
+        }
+        int32_t taken = truth ? node->b : node->c;
+        int32_t dropped = truth ? node->c : node->b;
+        if (node_hoists(folder, dropped)) {
+            return; /* the dropped branch declares a hoisted name: keep the if */
+        }
+        if (taken >= 0 && folder->prog->nodes[taken].kind == JN_FUNC) {
+            return; /* `if(x) function f(){}` is Annex-B legacy; promoting it changes scope */
+        }
+        if (taken >= 0) {
+            replace_with(folder, idx, taken);
+        } else {
+            folder->prog->nodes[idx].kind = JN_EMPTY; /* if(false) with no else */
+        }
+        return;
+    }
+    case JN_BINARY:
+        if (node->op == JT_PLUS) {
+            fold_concat(folder, idx); /* string operands; turns the node into a string literal */
+        }
+        if (folder->prog->nodes[idx].kind == JN_BINARY) {
+            fold_arithmetic(folder, idx); /* integer operands; a folded concat is already done */
+        }
+        return;
+    default:
+        return;
+    }
+}
+
+void jm_fold(jm_program *prog) {
+    F folder = {.prog = prog, .fold_undefined = 0};
+    /* fold `undefined` only when no binding shadows it anywhere in the program */
+    folder.fold_undefined = !declares(&folder, prog->nodes[prog->root].a, "undefined");
+    walk_chain(&folder, prog->nodes[prog->root].a);
+    optimize_chain(&folder, prog->nodes[prog->root].a);
+}
