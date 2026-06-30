@@ -344,7 +344,10 @@ static void hoist_block(M *mangler, int32_t first, int32_t scope) {
         } else if (node->kind == JN_FUNC) { /* in a statement list a function is always a named declaration */
             declare(mangler, scope, node->str, node->str_len, 4);
             node->sym = resolve(mangler, node->str, node->str_len); /* so the name renames with its references */
-        } else if (node->kind == JN_CLASS) {                        /* likewise a class is always a named declaration */
+            if (node->sym >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on an allocation failure */
+                mangler->prog->syms[node->sym].decl_node = idx; /* let drop_unused find an unused function */
+            }
+        } else if (node->kind == JN_CLASS) { /* likewise a class is always a named declaration */
             declare(mangler, scope, node->str, node->str_len, 6);
             node->sym = resolve(mangler, node->str, node->str_len);
         }
@@ -464,6 +467,18 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
             walk(mangler, node->a, inner, 0);
             walk(mangler, node->b, inner, 0);
             walk(mangler, node->c, inner, 0);
+            /* a for-in/for-of loop binding is required syntax (`for( in o)` is invalid), so it is never
+               a drop or inline candidate: forget the single-ident declaration the JN_VAR walk recorded
+               (a destructuring target was never recorded, so it needs no clearing) */
+            if (mangler->prog->nodes[node->a].kind == JN_VAR) {
+                int32_t bound = mangler->prog->nodes[mangler->prog->nodes[node->a].a].a;
+                if (mangler->prog->nodes[bound].kind == JN_IDENT) {
+                    int32_t bsym = mangler->prog->nodes[bound].sym;
+                    if (bsym >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on an allocation failure */
+                        mangler->prog->syms[bsym].decl_node = -1;
+                    }
+                }
+            }
         }
         undo_to(mangler, mark);
         return;
@@ -491,9 +506,10 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
             walk(mangler, mangler->prog->nodes[declarator].a, scope, 1); /* resolve the (declared) target */
             walk(mangler, mangler->prog->nodes[declarator].b, scope, 0); /* the initializer is a reference context */
         }
-        /* a lone `const name = init` is a candidate for single-use inlining: record its statement so
-           the inline pass can find and drop it. node->a is its one declarator, its target an ident. */
-        if (node->decl == 2 && mangler->prog->nodes[node->a].next < 0 &&
+        /* a lone `name = init` declaration (every JN_VAR is var/let/const) is a candidate for single-use
+           inlining and for unused-binding elimination: record its statement so those passes can find and
+           drop it. node->a is its one declarator, its target an ident. */
+        if (mangler->prog->nodes[node->a].next < 0 &&
             mangler->prog->nodes[mangler->prog->nodes[node->a].a].kind == JN_IDENT) {
             int32_t target = mangler->prog->nodes[mangler->prog->nodes[node->a].a].sym;
             if (target >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on a hoist allocation failure */
@@ -779,21 +795,89 @@ static int is_const_literal(jm_program *prog, int32_t idx) {
     }
 }
 
-/* Inline every `const name = <literal>` read exactly once into that one read and drop the
-   declaration. A const cannot be reassigned and a literal has no side effects and a stable value, so
-   moving it to the single read preserves value and order wherever that read sits (a nested closure
-   included). The emptied declaration is dropped by the printer. */
-static void inline_consts(jm_program *prog, int32_t global) {
+/* Whether an unused binding's initializer can be discarded along with it: it has no observable side
+   effect, so dropping `var/let/const name = init` (when name is never read) changes nothing. A literal,
+   a function/arrow expression and a unary over a pure operand (`void 0`, `!0`, `-1`) are pure. A call,
+   member access, `new`, identifier read (a free name may throw ReferenceError) or anything else is
+   conservatively kept -- the binding then stays rather than risk losing a side effect (ECMA-262 13.3,
+   14.3.2 spell out that only the initializer evaluation is observable). */
+static int is_droppable_init(jm_program *prog, int32_t init) {
+    if (init < 0) {
+        return 1; /* a bare `var x;` declares nothing observable */
+    }
+    switch (prog->nodes[init].kind) {
+    case JN_NUM:
+    case JN_STRING:
+    case JN_REGEX:
+    case JN_BIGINT:
+    case JN_FUNC:
+    case JN_ARROW:
+        return 1;
+    case JN_UNARY:
+        return is_droppable_init(prog, prog->nodes[init].a);
+    default:
+        return 0;
+    }
+}
+
+/* Drop a local binding that is never referenced (dead-code elimination, ECMA-262 has no observable
+   effect for an unread binding). A function declaration is dropped whole; a single-declarator
+   var/let/const is dropped when its initializer is side-effect-free. Confined to non-global scopes so a
+   top-level (observable) name is never removed, and the whole pass is skipped under with/eval (the
+   caller guards on poisoned), where a name may resolve dynamically. References are counted across
+   nested scopes by the walk, so a binding captured by a closure has refs > 0 and is kept. */
+static void drop_unused(jm_program *prog, int32_t global) {
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
-        if (prog->syms[sym].decl != 2 || prog->syms[sym].refs != 1 || prog->syms[sym].decl_node < 0 ||
+        if (prog->syms[sym].refs != 0 || prog->syms[sym].decl_node < 0 || prog->syms[sym].scope == global) {
+            continue;
+        }
+        if (prog->syms[sym].decl == 4) { /* an unused function declaration: drop the whole statement */
+            prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
+            prog->syms[sym].decl_node = -2;
+        } else { /* a single-ident var/let/const (the only other kind decl_node is recorded for) */
+            int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
+            if (is_droppable_init(prog, init)) {
+                prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
+                prog->syms[sym].decl_node = -2;
+            }
+        }
+    }
+}
+
+/* Inline a single-declarator binding that is read exactly once into that one read and drop the
+   declaration (ECMA-262 propagates the assigned value; the optimization just removes the name). The
+   conflated `refs == 1` already proves exactly one reference with no other read and -- since any write,
+   update, destructuring or for-target appearance would add another reference -- no write either, so the
+   value the declaration assigns is the value the single read sees. Two cases are sound:
+
+     - a let/const initialized to a literal: the value is constant and the declaration dominates its use
+       (block scope / TDZ), so the read takes that value wherever it sits, a nested closure included;
+
+     - any binding whose declaration is immediately followed by `return x` / `throw x` (x being the one
+       read): nothing executes between the declaration and the read and the read is not inside a
+       closure, so moving the initializer onto the jump preserves both value and evaluation order even
+       when the initializer has side effects. A `var` is inlined only this way, never anywhere-at-once:
+       a `var` declaration may be conditional or captured, so only adjacency proves it dominates.
+
+   The emptied declaration is removed from its statement chain by the next fold pass. */
+static void inline_single_use(jm_program *prog, int32_t global) {
+    for (int32_t sym = 0; sym < prog->sym_count; sym++) {
+        if (prog->syms[sym].decl > 2 || prog->syms[sym].refs != 1 || prog->syms[sym].decl_node < 0 ||
             prog->syms[sym].scope == global) {
             continue;
         }
-        int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b; /* a const always has one */
-        if (!is_const_literal(prog, init)) {
-            continue;
+        int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
+        if (init < 0) {
+            continue; /* a bare `var x;` declares no value to propagate */
         }
         int32_t ref = prog->syms[sym].ref_node;
+        if (!(prog->syms[sym].decl >= 1 && is_const_literal(prog, init))) {
+            int32_t jump = prog->nodes[prog->syms[sym].decl_node].next; /* the statement right after the decl */
+            if (jump < 0 || (prog->nodes[jump].kind != JN_RETURN && prog->nodes[jump].kind != JN_THROW) ||
+                prog->nodes[jump].a != ref) {
+                continue; /* not a literal let/const, and not an adjacent `return x` / `throw x` */
+            }
+        }
         int32_t next = prog->nodes[ref].next;
         prog->nodes[ref] = prog->nodes[init];
         prog->nodes[ref].next = next;
@@ -820,7 +904,8 @@ void jm_mangle(jm_program *prog) {
     if (!mangler.poisoned) {
         /* the three failed flags are only ever set on allocation failure */
         if (!mangler.failed && !mangler.visible.failed && !mangler.frees.failed) { /* GCOVR_EXCL_BR_LINE */
-            inline_consts(prog, global); /* before naming, so an inlined const consumes no short name */
+            drop_unused(prog, global);       /* remove dead bindings before naming spends slots on them */
+            inline_single_use(prog, global); /* before naming, so an inlined binding consumes no short name */
             /* reserve every *kept* function/class declaration name globally so a mangled binding in
                any scope can never be assigned a name that shadows one. A declaration in a non-global
                function scope is renamed, not kept (see assign_slots), so it is not reserved. */

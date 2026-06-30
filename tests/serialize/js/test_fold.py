@@ -14,7 +14,7 @@ import subprocess  # noqa: S404
 
 import pytest
 
-from turbohtml import minify_js
+from turbohtml import JSMinify, minify_js
 
 _NODE = shutil.which("node")
 
@@ -40,26 +40,6 @@ _NODE = shutil.which("node")
         pytest.param("void 0?1:2", "2", id="dce-void-pure-falsy"),
         pytest.param("void x?1:2", "void x?1:2", id="dce-void-impure-kept"),
         pytest.param("if(0){class C{}}b", "b", id="dce-class-no-hoist-dropped"),
-        # unreachable code after a return is dropped only when it hoists nothing; the hoist check
-        # descends every control-flow shape and short-circuits across both branch slots
-        pytest.param("function f(){return;if(a){var x}}", "function f(){return;if(a){var b}}", id="unreach-if-then"),
-        pytest.param(
-            "function f(){return;if(a){}else{var y}}", "function f(){return;if(a){}else{var b}}", id="unreach-if-else"
-        ),
-        pytest.param(
-            "function f(){return;for(var i=0;;){}}", "function f(){return;for(var a=0;;){}}", id="unreach-for-init"
-        ),
-        pytest.param(
-            "function f(){return;for(;;){var x}}", "function f(){return;for(;;){var a}}", id="unreach-for-body"
-        ),
-        pytest.param(
-            "function f(){return;for(var k in o){}}", "function f(){return;for(var a in o){}}", id="unreach-forin-bind"
-        ),
-        pytest.param(
-            "function f(){return;for(k in o){var x}}",
-            "function f(){return;for(k in o){var a}}",
-            id="unreach-forin-body",
-        ),
         # `undefined` folds to `void 0` only when nothing declares the name; a class named
         # `undefined` blocks it, while any other class lets the fold through
         pytest.param("class undefined{}x=undefined", "class undefined{}x=undefined", id="class-shadows-undefined"),
@@ -68,6 +48,24 @@ _NODE = shutil.which("node")
 )
 def test_folds(source: str, expected: str) -> None:
     assert minify_js(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # fold alone (mangle off) keeps unreachable code after a return when it hoists a var: the hoist
+        # check descends every control-flow shape and short-circuits across both branch slots. The full
+        # pipeline goes further and drops the binding (see test_compresses); here fold must not.
+        pytest.param("function f(){return;if(a){var x}}", id="unreach-if-then"),
+        pytest.param("function f(){return;if(a){}else{var y}}", id="unreach-if-else"),
+        pytest.param("function f(){return;for(var i=0;;){}}", id="unreach-for-init"),
+        pytest.param("function f(){return;for(;;){var x}}", id="unreach-for-body"),
+        pytest.param("function f(){return;for(var k in o){}}", id="unreach-forin-bind"),
+        pytest.param("function f(){return;for(k in o){var x}}", id="unreach-forin-body"),
+    ],
+)
+def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
+    assert minify_js(source, JSMinify(mangle=False)) == source
 
 
 @pytest.mark.parametrize(
@@ -149,9 +147,11 @@ def test_folds(source: str, expected: str) -> None:
         pytest.param("function f(){const x=42;return x*2}", "function f(){return 84}", id="const-inline-then-fold"),
         pytest.param("function f(){for(const x=5;c;)h(x)}", "function f(){for(;c;)h(5)}", id="const-inline-for-init"),
         pytest.param("function f(){const x=1;return x+x}", "function f(){const a=1;return a+a}", id="const-twice-kept"),
-        pytest.param(
-            "function f(){const x=g();return x}", "function f(){const a=g();return a}", id="const-nonliteral-kept"
-        ),
+        # a non-literal single use collapses only when its declaration immediately precedes the use as a
+        # whole `return`/`throw` value (nothing runs between, no closure captures it); otherwise it stays
+        pytest.param("function f(){const x=g();return x}", "function f(){return g()}", id="nonliteral-return-collapse"),
+        pytest.param("function f(){var x=a.b;throw x}", "function f(){throw a.b}", id="nonliteral-throw-collapse"),
+        pytest.param("function f(){const x=g();h(x)}", "function f(){const a=g();h(a)}", id="nonliteral-nonjump-kept"),
         pytest.param(
             "function f(){const a=1,b=2;return a+b}",
             "function f(){const b=1,a=2;return b+a}",
@@ -176,6 +176,28 @@ def test_folds(source: str, expected: str) -> None:
         pytest.param("if(0){for(k of o)g()}f()", "f()", id="dead-forof-no-hoist-dropped"),
         # an object/member key with an ASCII code point above `z` is not an identifier, so quotes stay
         pytest.param("x=a['a{b']", "x=a['a{b']", id="member-above-z-kept"),
+        # an unread local binding is dead code: a side-effect-free var/let/const and an unused function
+        # declaration drop (ECMA-262 has no observable effect for an unread binding); a side-effecting
+        # initializer, a used binding, a for-in/of loop binding and a top-level (observable) name stay
+        pytest.param("function f(){var x=1;return 2}", "function f(){return 2}", id="drop-unused-var"),
+        pytest.param("function f(){let x=function(){};return 2}", "function f(){return 2}", id="drop-unused-fn-expr"),
+        pytest.param("function f(){const x=1;g()}", "function f(){g()}", id="drop-unused-const"),
+        pytest.param("function f(){function h(){}return 2}", "function f(){return 2}", id="drop-unused-function"),
+        pytest.param("function f(){var x=g();return 2}", "function f(){var a=g();return 2}", id="keep-sideeffect-init"),
+        # the side-effect-free check accepts every literal kind, a function/arrow and a unary over a pure operand
+        pytest.param("function f(){var x='s';return 1}", "function f(){return 1}", id="drop-unused-string"),
+        pytest.param("function f(){var x=/r/;return 1}", "function f(){return 1}", id="drop-unused-regex"),
+        pytest.param("function f(){var x=1n;return 1}", "function f(){return 1}", id="drop-unused-bigint"),
+        pytest.param("function f(){var x=()=>1;return 2}", "function f(){return 2}", id="drop-unused-arrow"),
+        pytest.param("function f(){var x=!0;return 1}", "function f(){return 1}", id="drop-unused-unary"),
+        pytest.param("function f(){for(var[a]in o)g()}", "function f(){for(var [a] in o)g()}", id="keep-forin-pattern"),
+        pytest.param(
+            "function f(){function h(){}return h()}", "function f(){function a(){}return a()}", id="keep-used-fn"
+        ),
+        pytest.param("function f(){for(var k in o)g(k)}", "function f(){for(var a in o)g(a)}", id="keep-forin-binding"),
+        pytest.param("function f(){return;for(;;){var x}}", "function f(){return}", id="drop-unreachable-hoisted"),
+        pytest.param("var g=1", "var g=1", id="keep-global-var"),
+        pytest.param("with(o){var x=1;f()}", "with(o){var x=1;f()}", id="keep-under-with"),
     ],
 )
 def test_compresses(source: str, expected: str) -> None:

@@ -33,9 +33,9 @@ def test_scripts_untouched_without_minify_js() -> None:
 @pytest.mark.parametrize(
     ("options", "expected"),
     [
-        pytest.param(JSMinify(), "function f(){var a=3;return a}", id="full"),
+        pytest.param(JSMinify(), "function f(){return 3}", id="full"),
         pytest.param(JSMinify(mangle=False), "function f(){var longName=3;return longName}", id="no-mangle"),
-        pytest.param(JSMinify(fold=False), "function f(){var a=1+2;return a}", id="no-fold"),
+        pytest.param(JSMinify(fold=False), "function f(){return 1+2}", id="no-fold"),
         pytest.param(
             JSMinify(mangle=False, fold=False), "function f(){var longName=1+2;return longName}", id="ws-only"
         ),

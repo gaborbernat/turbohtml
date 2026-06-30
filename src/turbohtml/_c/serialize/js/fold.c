@@ -555,12 +555,34 @@ static void fold_if_return_chain(F *folder, int32_t first) {
    can fold against it, the fold turns an `if` into a return, and the second merge then absorbs a
    statement that sat before that new return. drop_unreachable runs last to cut what a merged return
    makes dead. The whole sequence reaches a fixpoint, so re-minifying is a no-op. */
-static void optimize_chain(F *folder, int32_t first) {
+/* Unlink no-op empty statements -- left by a dropped declaration, an `if(false)`, or a bare `;` -- from
+   a statement chain. Removing them lets the merges below see true adjacency (so a binding the mangler
+   drops between two `var`s no longer blocks their merge) and keeps the output stable under
+   re-minification. Returns the new head, the first non-empty statement or -1. */
+static int32_t drop_empties(F *folder, int32_t first) {
+    jm_node *nodes = folder->prog->nodes;
+    while (first >= 0 && nodes[first].kind == JN_EMPTY) {
+        first = nodes[first].next;
+    }
+    for (int32_t idx = first; idx >= 0;) {
+        int32_t next = nodes[idx].next;
+        while (next >= 0 && nodes[next].kind == JN_EMPTY) {
+            next = nodes[next].next;
+        }
+        nodes[idx].next = next;
+        idx = next;
+    }
+    return first;
+}
+
+static int32_t optimize_chain(F *folder, int32_t first) {
+    first = drop_empties(folder, first);
     merge_declarations(folder, first);
     merge_sequences(folder, first);
     fold_if_return_chain(folder, first);
     merge_sequences(folder, first);
     drop_unreachable(folder, first);
+    return first;
 }
 
 /* Parse a plain non-negative decimal integer lexeme (digits only, no dot, exponent, separator or
@@ -701,7 +723,7 @@ static void walk(F *folder, int32_t idx) {
         for (int32_t clause = node->b; clause >= 0; clause = folder->prog->nodes[clause].next) {
             walk(folder, folder->prog->nodes[clause].a);
             walk_chain(folder, folder->prog->nodes[clause].b);
-            optimize_chain(folder, folder->prog->nodes[clause].b);
+            folder->prog->nodes[clause].b = optimize_chain(folder, folder->prog->nodes[clause].b);
         }
         return;
     case JN_VAR:
@@ -711,7 +733,7 @@ static void walk(F *folder, int32_t idx) {
         return;
     case JN_BLOCK:
         walk_chain(folder, node->a);
-        optimize_chain(folder, node->a);
+        folder->prog->nodes[idx].a = optimize_chain(folder, folder->prog->nodes[idx].a);
         return;
     case JN_FUNC:
     case JN_ARROW:
@@ -806,5 +828,5 @@ void jm_fold(jm_program *prog) {
     /* fold `undefined` only when no binding shadows it anywhere in the program */
     folder.fold_undefined = !declares(&folder, prog->nodes[prog->root].a, "undefined");
     walk_chain(&folder, prog->nodes[prog->root].a);
-    optimize_chain(&folder, prog->nodes[prog->root].a);
+    prog->nodes[prog->root].a = optimize_chain(&folder, prog->nodes[prog->root].a);
 }

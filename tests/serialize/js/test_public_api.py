@@ -18,10 +18,10 @@ _SOURCE = "function f(){var longName=true;return longName}"
 @pytest.mark.parametrize(
     ("options", "expected"),
     [
-        pytest.param(None, "function f(){var a=!0;return a}", id="default-is-full"),
-        pytest.param(JSMinify(), "function f(){var a=!0;return a}", id="explicit-full"),
+        pytest.param(None, "function f(){return!0}", id="default-is-full"),
+        pytest.param(JSMinify(), "function f(){return!0}", id="explicit-full"),
         pytest.param(JSMinify(mangle=False), "function f(){var longName=!0;return longName}", id="fold-keep-names"),
-        pytest.param(JSMinify(fold=False), "function f(){var a=true;return a}", id="mangle-no-fold"),
+        pytest.param(JSMinify(fold=False), "function f(){return true}", id="mangle-no-fold"),
         pytest.param(
             JSMinify(mangle=False, fold=False),
             "function f(){var longName=true;return longName}",
