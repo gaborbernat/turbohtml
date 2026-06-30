@@ -246,9 +246,12 @@ typedef struct {
     int32_t slot;     /* rename slot: bindings sharing a slot take the same short name */
     Py_UCS4 *mangled; /* assigned short name (owned), or NULL to keep the original */
     Py_ssize_t mangled_len;
-    /* single-use const inlining: refs counts read references (a const cannot be written), ref_node is
-       the one reference's node when refs == 1, decl_node is its single-declarator `const` statement */
+    /* single-use inlining and dead-binding elimination: refs counts read references and writes counts
+       assignment/update/for-target references (a binding read once and never written has refs == 1,
+       writes == 0); ref_node is the one read's node when refs == 1; decl_node is the single-declarator
+       statement (var/let/const or function) the binding is declared by */
     int32_t refs;
+    int32_t writes;
     int32_t ref_node;
     int32_t decl_node;
 } jm_sym;

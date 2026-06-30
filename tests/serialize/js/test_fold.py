@@ -152,6 +152,27 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("function f(){const x=g();return x}", "function f(){return g()}", id="nonliteral-return-collapse"),
         pytest.param("function f(){var x=a.b;throw x}", "function f(){throw a.b}", id="nonliteral-throw-collapse"),
         pytest.param("function f(){const x=g();h(x)}", "function f(){const a=g();h(a)}", id="nonliteral-nonjump-kept"),
+        # a binding that is written (reassigned, updated, or a destructuring / for-in assignment target) is
+        # never inlined: the read/write split keeps the value off an illegal `[5]=arr` / `for(5 in o)` slot
+        pytest.param(
+            "function f(){let x=5;[x]=arr;return x}",
+            "function f(){let a=5;return[a]=arr,a}",
+            id="no-inline-destructure-write",
+        ),
+        pytest.param(
+            "function f(){let x=5;for(x in o);}", "function f(){let a=5;for(a in o);}", id="no-inline-forin-write"
+        ),
+        pytest.param(
+            "function f(){var x=1;x=2;return x}", "function f(){var a=1;return a=2,a}", id="no-inline-reassigned"
+        ),
+        pytest.param(
+            "function f(){var x=1;x++;return x}", "function f(){var a=1;return a++,a}", id="no-inline-updated"
+        ),
+        pytest.param(
+            "function f(){var x=1;x+=2;return x}", "function f(){var a=1;return a+=2,a}", id="no-inline-compound"
+        ),
+        pytest.param("function f(o){o.x+=1}", "function f(a){a.x+=1}", id="compound-assign-member"),
+        pytest.param("function f(){g+=1}", "function f(){g+=1}", id="compound-assign-free"),
         pytest.param(
             "function f(){const a=1,b=2;return a+b}",
             "function f(){const b=1,a=2;return b+a}",

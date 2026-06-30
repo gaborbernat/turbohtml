@@ -400,8 +400,10 @@ static void walk_function(M *mangler, int32_t idx, int32_t parent) {
     undo_to(mangler, mark);
 }
 
-/* Walk node idx in scope; bind!=0 means idx is a binding target (its identifiers were
-   already declared, so they only need resolving to set their symbol). */
+/* Walk node idx in scope. bind selects how an identifier is counted: 0 a read reference, 1 a
+   declaration target (already declared, only resolved here), 2 an assignment/update/for-in write
+   target. The read/write split lets the inline and dead-binding passes tell a value's reads from its
+   reassignments. */
 static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
     if (idx < 0) {
         return;
@@ -413,10 +415,12 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         node->sym = sym;
         if (sym >= 0) {
             mangler->prog->syms[sym].uses++;
-            if (!bind) { /* a read reference (the declaration target is walked with bind set) */
+            if (bind == 0) { /* a read reference */
                 mangler->prog->syms[sym].refs++;
                 mangler->prog->syms[sym].ref_node = idx;
-            }
+            } else if (bind == 2) { /* an assignment / update / for-in target: a write */
+                mangler->prog->syms[sym].writes++;
+            } /* bind == 1: a declaration target, neither read nor write */
         } else {
             hslot *slot = htab_slot(&mangler->frees, node->str, node->str_len, 1); /* a global / free name */
             if (slot != NULL) { /* GCOVR_EXCL_BR_LINE: the false branch is an allocation failure */
@@ -464,7 +468,8 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
             if (mangler->prog->nodes[node->a].kind == JN_VAR && mangler->prog->nodes[node->a].decl != 0) {
                 hoist_block(mangler, node->a, inner);
             }
-            walk(mangler, node->a, inner, 0);
+            /* `for(var x in o)` declares x; `for(x in o)` assigns it -- a write target */
+            walk(mangler, node->a, inner, mangler->prog->nodes[node->a].kind == JN_VAR ? 0 : 2);
             walk(mangler, node->b, inner, 0);
             walk(mangler, node->c, inner, 0);
             /* a for-in/for-of loop binding is required syntax (`for( in o)` is invalid), so it is never
@@ -641,6 +646,29 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
     case JN_CONTINUE:
         if (node->str != NULL) { /* a labeled jump: point it at the (possibly renamed) label */
             node->sym = htab_get(&mangler->labels, node->str, node->str_len);
+        }
+        return;
+    case JN_ASSIGN: {
+        /* a simple `x = v` writes x; a compound `x op= v` reads x and writes it. A member or
+           destructuring target is walked as an ordinary expression, where its bindings read. */
+        int simple = node->op == JT_ASSIGN;
+        walk(mangler, node->a, scope, simple ? 2 : 0);
+        if (!simple && mangler->prog->nodes[node->a].kind == JN_IDENT) {
+            int32_t target = mangler->prog->nodes[node->a].sym;
+            if (target >= 0) {
+                mangler->prog->syms[target].writes++;
+            }
+        }
+        walk(mangler, node->b, scope, 0);
+        return;
+    }
+    case JN_UPDATE: /* ++x / x-- reads the operand and writes it */
+        walk(mangler, node->a, scope, 0);
+        if (mangler->prog->nodes[node->a].kind == JN_IDENT) {
+            int32_t target = mangler->prog->nodes[node->a].sym;
+            if (target >= 0) {
+                mangler->prog->syms[target].writes++;
+            }
         }
         return;
     default:
@@ -828,8 +856,9 @@ static int is_droppable_init(jm_program *prog, int32_t init) {
    nested scopes by the walk, so a binding captured by a closure has refs > 0 and is kept. */
 static void drop_unused(jm_program *prog, int32_t global) {
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
-        if (prog->syms[sym].refs != 0 || prog->syms[sym].decl_node < 0 || prog->syms[sym].scope == global) {
-            continue;
+        if (prog->syms[sym].refs != 0 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
+            prog->syms[sym].scope == global) {
+            continue; /* a written binding (even if never read) keeps its declaration; see dead stores */
         }
         if (prog->syms[sym].decl == 4) { /* an unused function declaration: drop the whole statement */
             prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
@@ -846,9 +875,9 @@ static void drop_unused(jm_program *prog, int32_t global) {
 
 /* Inline a single-declarator binding that is read exactly once into that one read and drop the
    declaration (ECMA-262 propagates the assigned value; the optimization just removes the name). The
-   conflated `refs == 1` already proves exactly one reference with no other read and -- since any write,
-   update, destructuring or for-target appearance would add another reference -- no write either, so the
-   value the declaration assigns is the value the single read sees. Two cases are sound:
+   walk records exactly one read (`refs == 1`) and no writes (`writes == 0`), so the value the
+   declaration assigns is the value that single read sees, and the read is a genuine read position --
+   never an assignment or for-in target the inlined value would land on illegally. Two cases are sound:
 
      - a let/const initialized to a literal: the value is constant and the declaration dominates its use
        (block scope / TDZ), so the read takes that value wherever it sits, a nested closure included;
@@ -862,9 +891,9 @@ static void drop_unused(jm_program *prog, int32_t global) {
    The emptied declaration is removed from its statement chain by the next fold pass. */
 static void inline_single_use(jm_program *prog, int32_t global) {
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
-        if (prog->syms[sym].decl > 2 || prog->syms[sym].refs != 1 || prog->syms[sym].decl_node < 0 ||
-            prog->syms[sym].scope == global) {
-            continue;
+        if (prog->syms[sym].decl > 2 || prog->syms[sym].refs != 1 || prog->syms[sym].writes != 0 ||
+            prog->syms[sym].decl_node < 0 || prog->syms[sym].scope == global) {
+            continue; /* exactly one read and never written: the read sees the value the declaration sets */
         }
         int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
         if (init < 0) {
