@@ -510,15 +510,13 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         for (int32_t declarator = node->a; declarator >= 0; declarator = mangler->prog->nodes[declarator].next) {
             walk(mangler, mangler->prog->nodes[declarator].a, scope, 1); /* resolve the (declared) target */
             walk(mangler, mangler->prog->nodes[declarator].b, scope, 0); /* the initializer is a reference context */
-        }
-        /* a lone `name = init` declaration (every JN_VAR is var/let/const) is a candidate for single-use
-           inlining and for unused-binding elimination: record its statement so those passes can find and
-           drop it. node->a is its one declarator, its target an ident. */
-        if (mangler->prog->nodes[node->a].next < 0 &&
-            mangler->prog->nodes[mangler->prog->nodes[node->a].a].kind == JN_IDENT) {
-            int32_t target = mangler->prog->nodes[mangler->prog->nodes[node->a].a].sym;
-            if (target >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on a hoist allocation failure */
-                mangler->prog->syms[target].decl_node = idx;
+            /* record the declaring statement on each ident-target binding so the inline and unused passes
+               can find it; drop_unused removes a single dead declarator, inline_single_use needs a lone one */
+            if (mangler->prog->nodes[mangler->prog->nodes[declarator].a].kind == JN_IDENT) {
+                int32_t target = mangler->prog->nodes[mangler->prog->nodes[declarator].a].sym;
+                if (target >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on a hoist allocation failure */
+                    mangler->prog->syms[target].decl_node = idx;
+                }
             }
         }
         return;
@@ -849,26 +847,47 @@ static int is_droppable_init(jm_program *prog, int32_t init) {
 }
 
 /* Drop a local binding that is never referenced (dead-code elimination, ECMA-262 has no observable
-   effect for an unread binding). A function declaration is dropped whole; a single-declarator
-   var/let/const is dropped when its initializer is side-effect-free. Confined to non-global scopes so a
-   top-level (observable) name is never removed, and the whole pass is skipped under with/eval (the
-   caller guards on poisoned), where a name may resolve dynamically. References are counted across
-   nested scopes by the walk, so a binding captured by a closure has refs > 0 and is kept. */
+   effect for an unread binding). A function declaration is dropped whole; a var/let/const declarator is
+   dropped when its initializer is side-effect-free -- one declarator is unlinked from its statement, and
+   the statement is emptied only when its last declarator goes (so `var a=g(),x=1` loses just `x=1`).
+   Confined to non-global scopes so a top-level (observable) name is never removed, and the whole pass is
+   skipped under with/eval (the caller guards on poisoned), where a name may resolve dynamically.
+   References are counted across nested scopes by the walk, so a binding captured by a closure has
+   refs > 0 and is kept. */
 static void drop_unused(jm_program *prog, int32_t global) {
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].refs != 0 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
             prog->syms[sym].scope == global) {
             continue; /* a written binding (even if never read) keeps its declaration; see dead stores */
         }
+        int32_t stmt = prog->syms[sym].decl_node;
         if (prog->syms[sym].decl == 4) { /* an unused function declaration: drop the whole statement */
-            prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
+            prog->nodes[stmt].kind = JN_EMPTY;
             prog->syms[sym].decl_node = -2;
-        } else { /* a single-ident var/let/const (the only other kind decl_node is recorded for) */
-            int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
-            if (is_droppable_init(prog, init)) {
-                prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
-                prog->syms[sym].decl_node = -2;
+            continue;
+        }
+        int32_t prev = -1; /* find this binding's declarator among the statement's declarators */
+        /* GCOVR_EXCL_BR_START: decl_node records the statement holding this binding, so the declarator is
+           always present and the loop always breaks at it -- the declr < 0 exhaustion never runs */
+        for (int32_t declr = prog->nodes[stmt].a; declr >= 0; prev = declr, declr = prog->nodes[declr].next) {
+            /* GCOVR_EXCL_BR_STOP */
+            int32_t target = prog->nodes[declr].a;
+            if (prog->nodes[target].kind != JN_IDENT || prog->nodes[target].sym != sym) {
+                continue;
             }
+            if (!is_droppable_init(prog, prog->nodes[declr].b)) {
+                break; /* a side-effecting initializer keeps the whole declarator */
+            }
+            if (prev < 0) {
+                prog->nodes[stmt].a = prog->nodes[declr].next;
+            } else {
+                prog->nodes[prev].next = prog->nodes[declr].next;
+            }
+            if (prog->nodes[stmt].a < 0) { /* removed the last declarator: the statement is now empty */
+                prog->nodes[stmt].kind = JN_EMPTY;
+            }
+            prog->syms[sym].decl_node = -2;
+            break;
         }
     }
 }
@@ -892,8 +911,9 @@ static void drop_unused(jm_program *prog, int32_t global) {
 static void inline_single_use(jm_program *prog, int32_t global) {
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].decl > 2 || prog->syms[sym].refs != 1 || prog->syms[sym].writes != 0 ||
-            prog->syms[sym].decl_node < 0 || prog->syms[sym].scope == global) {
-            continue; /* exactly one read and never written: the read sees the value the declaration sets */
+            prog->syms[sym].decl_node < 0 || prog->syms[sym].scope == global ||
+            prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].next >= 0) {
+            continue; /* one read, never written, lone declarator: the read sees the value the decl sets */
         }
         int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
         if (init < 0) {

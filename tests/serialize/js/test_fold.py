@@ -204,6 +204,17 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("function f(){let x=function(){};return 2}", "function f(){return 2}", id="drop-unused-fn-expr"),
         pytest.param("function f(){const x=1;g()}", "function f(){g()}", id="drop-unused-const"),
         pytest.param("function f(){function h(){}return 2}", "function f(){return 2}", id="drop-unused-function"),
+        # one dead declarator drops out of a multi-declarator statement; the statement empties only when
+        # its last declarator goes, and a destructuring sibling is skipped over
+        pytest.param(
+            "function f(){var a=g(),x=1,b=2;return a+b}",
+            "function f(){var b=g(),a=2;return b+a}",
+            id="drop-middle-declarator",
+        ),
+        pytest.param("function f(){var x=1,y=g();return y}", "function f(){return g()}", id="drop-first-declarator"),
+        pytest.param(
+            "function f(){var {a}=o,x=1;return a}", "function f(){var {a:a}=o;return a}", id="drop-past-destructure"
+        ),
         pytest.param("function f(){var x=g();return 2}", "function f(){var a=g();return 2}", id="keep-sideeffect-init"),
         # the side-effect-free check accepts every literal kind, a function/arrow and a unary over a pure operand
         pytest.param("function f(){var x='s';return 1}", "function f(){return 1}", id="drop-unused-string"),
