@@ -22,10 +22,13 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import TypeAlias
 
 import pytest
 
 from turbohtml import JSMinify, _html, minify_js
+
+_SExpr: TypeAlias = "list[_SExpr] | str"  # an AST-dump node: a `(head child...)` list, or an atom
 
 
 def nomangle(source: str) -> str:
@@ -71,11 +74,11 @@ def _canon_num(lexeme: str) -> str:
 _SEXPR_TOKEN = re.compile(r"\(|\)|'[^']*'|[^\s()']+")
 
 
-def _parse_sexpr(tokens: list[str], pos: int) -> tuple[list[object] | str, int]:
+def _parse_sexpr(tokens: list[str], pos: int) -> tuple[_SExpr, int]:
     """Parse one node of the AST dump (a `(head child...)` s-expression) into a nested list."""
     if tokens[pos] != "(":
         return tokens[pos], pos + 1
-    node: list[object] = []
+    node: list[_SExpr] = []
     pos += 1
     while tokens[pos] != ")":
         child, pos = _parse_sexpr(tokens, pos)
@@ -83,7 +86,7 @@ def _parse_sexpr(tokens: list[str], pos: int) -> tuple[list[object] | str, int]:
     return node, pos + 1
 
 
-def _unwrap_single_blocks(node: list[object] | str) -> list[object] | str:
+def _unwrap_single_blocks(node: _SExpr) -> _SExpr:
     """Canonicalize a block that holds a single statement to that statement, so the minifier dropping a
     loop body's braces (`for(;;){g()}` -> `for(;;)g()`) does not read as a difference. Applied uniformly
     to both sides of the comparison; the minifier only ever drops braces around a scope-free statement,
@@ -98,7 +101,7 @@ def _unwrap_single_blocks(node: list[object] | str) -> list[object] | str:
     return node
 
 
-def _dump_sexpr(node: list[object] | str) -> str:
+def _dump_sexpr(node: _SExpr) -> str:
     if isinstance(node, list):
         return "(" + " ".join(_dump_sexpr(child) for child in node) + ")"
     return node
