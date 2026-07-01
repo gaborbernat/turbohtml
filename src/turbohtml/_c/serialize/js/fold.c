@@ -114,6 +114,33 @@ static int is_pure_const(F *folder, int32_t idx) {
     return pure_truthy(folder, idx) >= 0;
 }
 
+/* The primitive type an expression is statically certain to evaluate to -- 's'tring, 'n'umber,
+   'b'oolean, 'u'ndefined -- or 0 when unknown. Only shapes whose type the grammar fixes qualify:
+   a literal, `typeof` (always a string, 13.5.3), `!` (always a boolean, 13.5.7), `void` (always
+   undefined, 13.5.2). */
+static char static_type(F *folder, int32_t idx) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    switch (node->kind) {
+    case JN_STRING:
+        return 's';
+    case JN_NUM:
+        return 'n';
+    case JN_UNARY:
+        if (node->op == JT_NOT) {
+            return 'b';
+        }
+        if (node->op == JT_IDENT && ident_is(node, "typeof")) {
+            return 's';
+        }
+        if (node->op == JT_IDENT && ident_is(node, "void")) {
+            return 'u';
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
 /* Whether a pure constant is null or undefined (the operands `??` short-circuits on). */
 static int is_nullish(F *folder, int32_t idx) {
     jm_node *node = &folder->prog->nodes[idx];
@@ -1086,6 +1113,12 @@ static void walk(F *folder, int32_t idx) {
         }
         if (folder->prog->nodes[idx].kind == JN_BINARY) {
             fold_arithmetic(folder, idx); /* integer operands; a folded concat is already done */
+        }
+        if ((node->op == JT_EQ_EQ_EQ || node->op == JT_NE_EQ) && static_type(folder, node->a) != 0 &&
+            static_type(folder, node->a) == static_type(folder, node->b)) {
+            /* same-type operands make loose equality strict (7.2.14 step 1), so === weakens to ==
+               without a behavior change: typeof x==="string" -> typeof x=="string" */
+            node->op = node->op == JT_EQ_EQ_EQ ? JT_EQ_EQ : JT_NE;
         }
         return;
     default:

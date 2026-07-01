@@ -66,6 +66,22 @@ _NODE = shutil.which("node")
         pytest.param("x=a??(b&&c)", "x=a??(b&&c)", id="nullish-and-mix-kept"),
         pytest.param("if(a)b&&c", "a&&b&&c", id="if-chain-rotates"),
         pytest.param("x=a?a:b||c", "x=a||b||c", id="cond-self-or-chain-rotates"),
+        # same-type operands make loose equality strict (7.2.14 step 1), so === weakens to ==; an
+        # operand of unknown static type (a name, member, or literal against a name) keeps ===
+        pytest.param('x=typeof a==="string"', 'x=typeof a=="string"', id="eq-typeof-string-weakens"),
+        pytest.param('x=typeof a!=="undefined"', 'x=typeof a!="undefined"', id="ne-typeof-string-weakens"),
+        pytest.param("x=typeof a===typeof b", "x=typeof a==typeof b", id="eq-typeof-typeof-weakens"),
+        pytest.param("x=!a===!b", "x=!a==!b", id="eq-bang-bang-weakens"),
+        pytest.param("x=void a===void b", "x=void a==void b", id="eq-void-void-weakens"),
+        pytest.param('x=a==="s"', 'x=a==="s"', id="eq-unknown-string-kept"),
+        pytest.param("x=a===1", "x=a===1", id="eq-unknown-number-kept"),
+        pytest.param("x=a===null", "x=a===null", id="eq-null-kept"),
+        pytest.param("x=a===void 0", "x=a===void 0", id="eq-undefined-kept"),
+        pytest.param("x=1===a", "x=1===a", id="eq-number-unknown-kept"),
+        # -a coerces to an unknown numeric-or-bigint and delete yields its own boolean, but neither
+        # is a shape static_type vouches for, so both keep ===
+        pytest.param("x=-a===-b", "x=-a===-b", id="eq-minus-unary-kept"),
+        pytest.param("x=delete a.b===c", "x=delete a.b===c", id="eq-delete-kept"),
         # a tail return of undefined is redundant (10.2.1.4: falling off the end returns undefined);
         # a valued or non-tail return, and `delete` (valued, not void), stay
         pytest.param("function f(){g();return}", "function f(){g()}", id="tail-bare-return-dropped"),
