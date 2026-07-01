@@ -70,9 +70,9 @@ def test_folds(source: str, expected: str) -> None:
         pytest.param("function f(){return;if(a){var x}}", id="unreach-if-then"),
         pytest.param("function f(){return;if(a){}else{var y}}", id="unreach-if-else"),
         pytest.param("function f(){return;for(var i=0;;){}}", id="unreach-for-init"),
-        pytest.param("function f(){return;for(;;){var x}}", id="unreach-for-body"),
+        pytest.param("function f(){return;for(;;)var x}", id="unreach-for-body"),
         pytest.param("function f(){return;for(var k in o){}}", id="unreach-forin-bind"),
-        pytest.param("function f(){return;for(k in o){var x}}", id="unreach-forin-body"),
+        pytest.param("function f(){return;for(k in o)var x}", id="unreach-forin-body"),
     ],
 )
 def test_fold_keeps_unreachable_that_hoists(source: str) -> None:

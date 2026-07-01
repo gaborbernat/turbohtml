@@ -1034,6 +1034,35 @@ static int print_substmt(St *st, int32_t index) {
     return print_stmt(st, index);
 }
 
+/* A block scopes its `let`/`const`/class/function declarations, so those keep their braces; a `var` or
+   an ordinary statement does not, so a single one can shed the braces. */
+static int keeps_block_scope(const jm_program *prog, int32_t stmt) {
+    int kind = prog->nodes[stmt].kind;
+    return kind == JN_CLASS || kind == JN_FUNC || (kind == JN_VAR && prog->nodes[stmt].decl != 0);
+}
+
+/* A loop body -- unlike an if branch, it has no dangling-else hazard -- prints without braces when it is
+   a block holding a single scope-free statement: `for(;;){g()}` -> `for(;;)g()`. */
+static int print_loop_body(St *st, int32_t index) {
+    if (st->prog->nodes[index].kind == JN_BLOCK) {
+        int32_t only = -1;
+        int count = 0;
+        for (int32_t stmt = st->prog->nodes[index].a; stmt >= 0; stmt = st->prog->nodes[stmt].next) {
+            if (st->prog->nodes[stmt].kind == JN_EMPTY) {
+                continue;
+            }
+            only = stmt;
+            if (++count > 1) {
+                break;
+            }
+        }
+        if (count == 1 && !keeps_block_scope(st->prog, only)) {
+            return print_stmt(st, only);
+        }
+    }
+    return print_substmt(st, index);
+}
+
 /* Print a statement; return 1 if a separating `;` is needed before whatever follows. */
 static int print_stmt(St *st, int32_t index) {
     const jm_node *node = &st->prog->nodes[index];
@@ -1087,7 +1116,7 @@ static int print_stmt(St *st, int32_t index) {
             print_expr(st, node->c);
         }
         put_char(st, ')');
-        return print_substmt(st, node->d);
+        return print_loop_body(st, node->d);
     case JN_FORIN:
     case JN_FOROF: {
         put_ascii(st, "for");
@@ -1103,16 +1132,16 @@ static int print_stmt(St *st, int32_t index) {
         put_ascii(st, node->kind == JN_FOROF ? " of " : " in ");
         print_sub(st, node->b, node->kind == JN_FOROF ? 2 : 1);
         put_char(st, ')');
-        return print_substmt(st, node->c);
+        return print_loop_body(st, node->c);
     }
     case JN_WHILE:
         put_ascii(st, "while(");
         print_expr(st, node->a);
         put_char(st, ')');
-        return print_substmt(st, node->b);
+        return print_loop_body(st, node->b);
     case JN_DOWHILE:
         put_ascii(st, "do"); /* the adjacency guard spaces `do` from a word body */
-        if (print_substmt(st, node->a)) {
+        if (print_loop_body(st, node->a)) {
             put_char(st, ';');
         }
         put_ascii(st, "while(");

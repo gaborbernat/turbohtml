@@ -68,6 +68,42 @@ def _canon_num(lexeme: str) -> str:
     return out or "0"
 
 
+_SEXPR_TOKEN = re.compile(r"\(|\)|'[^']*'|[^\s()']+")
+
+
+def _parse_sexpr(tokens: list[str], pos: int) -> tuple[list[object] | str, int]:
+    """Parse one node of the AST dump (a `(head child...)` s-expression) into a nested list."""
+    if tokens[pos] != "(":
+        return tokens[pos], pos + 1
+    node: list[object] = []
+    pos += 1
+    while tokens[pos] != ")":
+        child, pos = _parse_sexpr(tokens, pos)
+        node.append(child)
+    return node, pos + 1
+
+
+def _unwrap_single_blocks(node: list[object] | str) -> list[object] | str:
+    """Canonicalize a block that holds a single statement to that statement, so the minifier dropping a
+    loop body's braces (`for(;;){g()}` -> `for(;;)g()`) does not read as a difference. Applied uniformly
+    to both sides of the comparison; the minifier only ever drops braces around a scope-free statement,
+    and that it keeps a let/const/class/function block is pinned in test_minify."""
+    if not isinstance(node, list):
+        return node
+    node = [_unwrap_single_blocks(child) for child in node]
+    if len(node) == 2 and node[0] == "block" and isinstance(node[1], list) and node[1] and node[1][0] == "body":
+        statements = [child for child in node[1][1:] if isinstance(child, list)]
+        if len(statements) == 1:
+            return statements[0]
+    return node
+
+
+def _dump_sexpr(node: list[object] | str) -> str:
+    if isinstance(node, list):
+        return "(" + " ".join(_dump_sexpr(child) for child in node) + ")"
+    return node
+
+
 def _norm(dump: str) -> str:
     """Normalize an AST dump: drop empty statements (minified out) and canonicalize
     numeric and BigInt literals (value-preserving number minification, BigInt separator
@@ -84,6 +120,8 @@ def _norm(dump: str) -> str:
         lambda mt: mt.group(0) if mt.group(1) == "__proto__" else f"(key (id '{mt.group(1)}'))",
         dump,
     )
+    tree, _ = _parse_sexpr(_SEXPR_TOKEN.findall(dump), 0)
+    dump = _dump_sexpr(_unwrap_single_blocks(tree))
     dump = re.sub(r"\s+", " ", dump)
     return dump.replace("( ", "(").replace(" )", ")").strip()
 

@@ -624,13 +624,14 @@ static void fold_if_return_chain(F *folder, int32_t first) {
     }
 }
 
-/* In a function body, `if(c)return; REST` (a void return with no else) exits when c is truthy and
-   otherwise runs REST through to the function's end -- exactly `c || (REST)`. Rewrite it to
-   `if(!c){REST}` when every following statement is a mergeable expression; a later fold merges that
-   block into one comma sequence and convert_if turns `if(!c){seq}` into `c||seq`. Sound only at a
-   function body's top level, where a return exits the whole function -- in a nested block, code after
-   the block would still run, so this is never applied there. */
-static void fold_guard_return(F *folder, int32_t first) {
+/* A guard clause `if(c)JUMP; REST` at the top of a body whose JUMP skips the rest of that body -- a void
+   `return` at a function body's top level, or a bare `continue` at a loop body's top level -- runs REST
+   exactly when c is falsy, so it is `c || (REST)`. Rewrite it to `if(!c){REST}` when every following
+   statement is a mergeable expression; a later fold merges that block into one comma sequence and
+   convert_if turns `if(!c){seq}` into `c||seq`. Applied only at that top level: in a nested block, code
+   after the block would still run, and a labeled jump could target an outer loop, so neither is folded.
+   jump_kind is JN_RETURN (function body) or JN_CONTINUE (loop body). */
+static void fold_guard_jump(F *folder, int32_t first, int jump_kind) {
     jm_program *prog = folder->prog;
     for (int32_t idx = first; idx >= 0; idx = prog->nodes[idx].next) {
         if (prog->nodes[idx].kind != JN_IF || prog->nodes[idx].c >= 0) {
@@ -638,8 +639,11 @@ static void fold_guard_return(F *folder, int32_t first) {
         }
         int32_t then = branch_stmt(folder, prog->nodes[idx].b);
         int32_t rest = prog->nodes[idx].next;
-        if (then < 0 || prog->nodes[then].kind != JN_RETURN || prog->nodes[then].a >= 0 || rest < 0) {
-            continue; /* not a bare `if(c)return;` with statements after it to guard */
+        if (then < 0 || prog->nodes[then].kind != jump_kind || rest < 0) {
+            continue; /* not a bare guard jump with statements after it */
+        }
+        if (jump_kind == JN_RETURN ? prog->nodes[then].a >= 0 : prog->nodes[then].str != NULL) {
+            continue; /* a valued return or a labeled continue is not a plain skip-the-rest */
         }
         int mergeable = 1;
         for (int32_t stmt = rest; stmt >= 0; stmt = prog->nodes[stmt].next) {
@@ -860,9 +864,32 @@ static void walk(F *folder, int32_t idx) {
         walk(folder, node->b);       /* body */
         if (!(node->kind == JN_ARROW && (node->flags & JN_F_EXPRBODY))) {
             /* a block body: its statements run to the function's end, so a guard-return there folds */
-            fold_guard_return(folder, folder->prog->nodes[folder->prog->nodes[idx].b].a);
+            fold_guard_jump(folder, folder->prog->nodes[folder->prog->nodes[idx].b].a, JN_RETURN);
         }
         return;
+    case JN_FOR:
+    case JN_FORIN:
+    case JN_FOROF:
+    case JN_WHILE:
+    case JN_DOWHILE: {
+        int kind = node->kind;
+        walk(folder, node->a);
+        walk(folder, node->b);
+        walk(folder, node->c);
+        walk(folder, node->d);
+        /* a bare `continue` at a loop body's top level skips the rest of that body, so a guard there
+           folds like a function's guard-return. The body field differs per loop kind (node is re-read
+           because a fold above may have grown the arena). */
+        node = &folder->prog->nodes[idx];
+        int32_t body = kind == JN_DOWHILE ? node->a
+                       : kind == JN_WHILE ? node->b
+                       : kind == JN_FOR   ? node->d
+                                          : node->c;      /* for-in / for-of */
+        if (folder->prog->nodes[body].kind == JN_BLOCK) { /* a loop always has a body statement */
+            fold_guard_jump(folder, folder->prog->nodes[body].a, JN_CONTINUE);
+        }
+        return;
+    }
     default:
         walk(folder, node->a);
         walk(folder, node->b);

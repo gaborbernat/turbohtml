@@ -55,7 +55,7 @@ _NODE = shutil.which("node")
         pytest.param("function decl(){return decl}", "function decl(){return decl}", id="func-decl-name-kept"),
         # labels are their own namespace: the label renames (with its break/continue) while a
         # same-named variable renames independently, and a global variable still stays put
-        pytest.param("outer:for(;;){break outer}", "a:for(;;){break a}", id="label-renamed"),
+        pytest.param("outer:for(;;){break outer}", "a:for(;;)break a", id="label-renamed"),
         pytest.param("x:for(var x=0;x<1;x++)break x", "a:for(var x=0;x<1;x++)break a", id="label-and-var-share-name"),
         # four-character callees that differ from `eval` at each position must not poison
         pytest.param("oval(1)", "oval(1)", id="eval-lookalike-char0"),

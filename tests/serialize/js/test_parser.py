@@ -133,7 +133,7 @@ def test_malformed_raises(source: str) -> None:
         pytest.param("a:while(1)break a", "a:while(1)break a", id="labeled-break"),
         pytest.param("a:while(1)continue a", "a:while(1)continue a", id="labeled-continue"),
         pytest.param("while(1)break", "while(1)break", id="unlabeled-break"),
-        pytest.param("while(1){continue}", "while(1){continue}", id="unlabeled-continue"),
+        pytest.param("while(1){continue}", "while(1)continue", id="unlabeled-continue"),
         # async-function declaration vs the cases that are not one (an arrow, or a newline-broken async)
         pytest.param("async function f(){}", "async function f(){}", id="async-function-decl"),
         pytest.param("async x=>x", "async x=>x", id="async-arrow"),
