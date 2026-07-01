@@ -363,6 +363,14 @@ static int32_t branch_stmt(F *folder, int32_t idx) {
     return idx;
 }
 
+/* Whether a branch is a no-op: a bare `;` or a block that holds no statement. optimize_chain's
+   drop_empties has already stripped stray `;` from every block by the time this runs, so an empty
+   block is exactly one with no children. */
+static int is_empty_branch(F *folder, int32_t idx) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    return node->kind == JN_EMPTY || (node->kind == JN_BLOCK && node->a < 0);
+}
+
 /* Build `test ? then : els`, flipping `!x ? a : b` to `x ? b : a` to drop the negation (13.14);
    a doubled `!!x` test peels both, since a conditional reads its test as a boolean. */
 static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t els) {
@@ -483,11 +491,33 @@ static void fold_conditional(F *folder, int32_t idx) {
    allocating jm_node_new call, so a realloc of the arena cannot dangle. */
 static void convert_if(F *folder, int32_t idx) {
     jm_program *prog = folder->prog;
+    int32_t else_branch = prog->nodes[idx].c;
+    if (else_branch >= 0 && is_empty_branch(folder, prog->nodes[idx].b)) {
+        int32_t else_stmt = branch_stmt(folder, else_branch);
+        if (else_stmt < 0 || prog->nodes[else_stmt].kind != JN_EXPR_STMT) {
+            return;
+        }
+        int32_t neg = jm_node_new(prog, JN_UNARY);
+        if (neg < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;    /* GCOVR_EXCL_LINE */
+        }
+        prog->nodes[neg].op = JT_NOT;
+        prog->nodes[neg].a = prog->nodes[idx].a;
+        /* if(a){}else e -> a||e : make_logical strips the synthetic `!` and flips && to || */
+        int32_t logic = make_logical(prog, neg, prog->nodes[else_stmt].a);
+        if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;      /* GCOVR_EXCL_LINE */
+        }
+        prog->nodes[idx].kind = JN_EXPR_STMT;
+        prog->nodes[idx].a = logic;
+        prog->nodes[idx].b = -1;
+        prog->nodes[idx].c = -1;
+        return;
+    }
     int32_t then_stmt = branch_stmt(folder, prog->nodes[idx].b);
     if (then_stmt < 0) {
         return;
     }
-    int32_t else_branch = prog->nodes[idx].c;
     if (else_branch < 0) {
         if (prog->nodes[then_stmt].kind != JN_EXPR_STMT) {
             return;
@@ -941,6 +971,9 @@ static void walk(F *folder, int32_t idx) {
         return;
     }
     case JN_IF: {
+        if (node->c >= 0 && is_empty_branch(folder, node->c)) {
+            node->c = -1; /* an empty else does nothing: if(a)b();else{} -> if(a)b() -> a&&b() */
+        }
         int truth = pure_truthy(folder, node->a);
         if (truth < 0) {
             convert_if(folder, idx);

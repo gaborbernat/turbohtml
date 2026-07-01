@@ -95,7 +95,15 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("if(a){b()}else{c()}", "a?b():c()", id="if-else-blocks-flatten"),
         pytest.param("if(a){b();c()}", "a&&(b(),c())", id="if-multi-stmt-block-merges"),
         pytest.param("if(a){var b;c()}", "if(a){var b;c()}", id="if-multi-stmt-block-kept"),
-        pytest.param("if(a){}else b()", "if(a){}else b()", id="if-empty-block-kept"),
+        pytest.param("if(a){}else b()", "a||b()", id="if-empty-then-to-or"),
+        pytest.param("if(a);else b()", "a||b()", id="if-empty-stmt-then-to-or"),
+        pytest.param("if(a)b();else{}", "a&&b()", id="if-empty-else-dropped"),
+        pytest.param("if(a)b();else{;}", "a&&b()", id="if-empty-stmt-else-dropped"),
+        pytest.param("if(!a){}else b()", "a&&b()", id="if-empty-then-neg-to-and"),
+        pytest.param("if(a){}else{}", "if(a){}", id="if-both-empty-guard-kept"),
+        # an empty then with a non-expression else is left intact (nothing shorter to fold to)
+        pytest.param("if(a){}else{var x=1}", "if(a){}else{var x=1}", id="if-empty-then-nonexpr-else-kept"),
+        pytest.param("if(a){}else{for(;;);var z}", "if(a){}else{for(;;);var z}", id="if-empty-then-multi-else-kept"),
         pytest.param("function f(){if(a){return 1}return 2}", "function f(){return a?1:2}", id="guard-block-return"),
         # guard clause -> conditional return; cascades right
         pytest.param("function f(){if(a)return 1;return 2}", "function f(){return a?1:2}", id="guard-return"),
