@@ -44,6 +44,17 @@ _NODE = shutil.which("node")
         # `undefined` blocks it, while any other class lets the fold through
         pytest.param("class undefined{}x=undefined", "class undefined{}x=undefined", id="class-shadows-undefined"),
         pytest.param("class C extends D{}x=undefined", "class C extends D{}x=void 0", id="class-not-undefined-folds"),
+        # conditional algebra (13.14): a repeated name test collapses to a logical, identical branches to
+        # the branch, and two same-target assignments merge; an impure test or a non-ident target is kept
+        pytest.param("x=a?a:b", "x=a||b", id="cond-self-or"),
+        pytest.param("x=a?b:a", "x=a&&b", id="cond-self-and"),
+        pytest.param("x=a?b:b", "x=b", id="cond-same-branches"),
+        pytest.param("x=cond?(t=1):(t=2)", "x=t=cond?1:2", id="cond-assign-merge"),
+        pytest.param("x=g()?c:c", "x=g()?c:c", id="cond-impure-test-kept"),
+        pytest.param("x=a?t+=1:t+=2", "x=a?t+=1:t+=2", id="cond-compound-assign-kept"),
+        pytest.param("x=a?t=1:t+=2", "x=a?t=1:t+=2", id="cond-mixed-assign-kept"),
+        pytest.param("x=a?o.p=1:o.p=2", "x=a?o.p=1:o.p=2", id="cond-member-target-kept"),
+        pytest.param("x=a?t=1:u=2", "x=a?t=1:u=2", id="cond-diff-target-kept"),
     ],
 )
 def test_folds(source: str, expected: str) -> None:

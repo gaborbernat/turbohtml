@@ -400,6 +400,80 @@ static int32_t make_logical(jm_program *prog, int32_t test, int32_t expr) {
     return logic;
 }
 
+/* Whether two nodes are the same identifier or literal -- the cases the conditional-algebra rewrites
+   need to spot a repeated test or a shared assignment target. Two references to the same name in one
+   expression denote the same binding (nothing can shadow between them), so a name match is enough;
+   deeper shapes (member access, calls) are conservatively treated as different. */
+static int same_expr(jm_program *prog, int32_t x, int32_t y) {
+    const jm_node *a = &prog->nodes[x]; /* callers pass real subtrees (a conditional's test/branches) */
+    const jm_node *b = &prog->nodes[y];
+    if (a->kind != b->kind || a->str_len != b->str_len) {
+        return 0;
+    }
+    switch (a->kind) {
+    case JN_IDENT:
+    case JN_NUM:
+    case JN_STRING:
+    case JN_REGEX:
+    case JN_BIGINT:
+        for (Py_ssize_t index = 0; index < a->str_len; index++) {
+            if (a->str[index] != b->str[index]) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Overwrite the node at idx with a two-operand logical `left op right`. */
+static void fold_to_logical(F *folder, int32_t idx, uint16_t op, int32_t left, int32_t right) {
+    int32_t logic = jm_node_new(folder->prog, JN_LOGICAL);
+    if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;      /* GCOVR_EXCL_LINE */
+    }
+    folder->prog->nodes[logic].op = op;
+    folder->prog->nodes[logic].a = left;
+    folder->prog->nodes[logic].b = right;
+    replace_with(folder, idx, logic);
+}
+
+/* Conditional algebra (13.14): rewrite a `test ? cons : alt` whose branches share structure into a
+   shorter equivalent. `test` is already known impure (a pure one folds to the taken branch earlier), so
+   only rewrites that keep test's single evaluation and order are applied. */
+static void fold_conditional(F *folder, int32_t idx) {
+    jm_program *prog = folder->prog;
+    int32_t test = prog->nodes[idx].a;
+    int32_t cons = prog->nodes[idx].b;
+    int32_t alt = prog->nodes[idx].c;
+    if (same_expr(prog, cons, alt)) {
+        if (prog->nodes[test].kind == JN_IDENT) {
+            replace_with(folder, idx, cons); /* x?y:y -> y : reading x is pure, so its value can be dropped */
+        } /* an impure test would need a comma to keep its effect; left for a later pass rather than grown */
+        return;
+    }
+    if (prog->nodes[test].kind == JN_IDENT && same_expr(prog, test, cons)) {
+        fold_to_logical(folder, idx, JT_OR, test, alt); /* x?x:y -> x||y (x is a name: reading twice is safe) */
+        return;
+    }
+    if (prog->nodes[test].kind == JN_IDENT && same_expr(prog, test, alt)) {
+        fold_to_logical(folder, idx, JT_AND, test, cons); /* x?y:x -> x&&y */
+        return;
+    }
+    if (prog->nodes[cons].kind == JN_ASSIGN && prog->nodes[alt].kind == JN_ASSIGN &&
+        prog->nodes[cons].op == JT_ASSIGN && prog->nodes[alt].op == JT_ASSIGN &&
+        prog->nodes[prog->nodes[cons].a].kind == JN_IDENT && same_expr(prog, prog->nodes[cons].a, prog->nodes[alt].a)) {
+        /* a?(t=x):(t=y) -> t=a?x:y : the same simple target is assigned either way */
+        int32_t merged = make_cond(prog, test, prog->nodes[cons].b, prog->nodes[alt].b);
+        if (merged < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;       /* GCOVR_EXCL_LINE */
+        }
+        prog->nodes[cons].b = merged;
+        replace_with(folder, idx, cons);
+    }
+}
+
 /* Rewrite a runtime `if` into a shorter equivalent (ECMA-262 14.6 selects one branch; the printer
    re-parenthesizes by precedence and re-wraps a statement-leading `{`/`function`):
      if(c) e;            -> c && e;          (no else, expression-statement consequent)
@@ -787,6 +861,7 @@ static void walk(F *folder, int32_t idx) {
             node->b = node->c;
             node->c = swap;
         }
+        fold_conditional(folder, idx);
         return;
     }
     case JN_IF: {
