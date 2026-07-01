@@ -624,6 +624,51 @@ static void fold_if_return_chain(F *folder, int32_t first) {
     }
 }
 
+/* In a function body, `if(c)return; REST` (a void return with no else) exits when c is truthy and
+   otherwise runs REST through to the function's end -- exactly `c || (REST)`. Rewrite it to
+   `if(!c){REST}` when every following statement is a mergeable expression; a later fold merges that
+   block into one comma sequence and convert_if turns `if(!c){seq}` into `c||seq`. Sound only at a
+   function body's top level, where a return exits the whole function -- in a nested block, code after
+   the block would still run, so this is never applied there. */
+static void fold_guard_return(F *folder, int32_t first) {
+    jm_program *prog = folder->prog;
+    for (int32_t idx = first; idx >= 0; idx = prog->nodes[idx].next) {
+        if (prog->nodes[idx].kind != JN_IF || prog->nodes[idx].c >= 0) {
+            continue;
+        }
+        int32_t then = branch_stmt(folder, prog->nodes[idx].b);
+        int32_t rest = prog->nodes[idx].next;
+        if (then < 0 || prog->nodes[then].kind != JN_RETURN || prog->nodes[then].a >= 0 || rest < 0) {
+            continue; /* not a bare `if(c)return;` with statements after it to guard */
+        }
+        int mergeable = 1;
+        for (int32_t stmt = rest; stmt >= 0; stmt = prog->nodes[stmt].next) {
+            if (!mergeable_expr(prog, stmt)) {
+                mergeable = 0; /* a declaration or control-flow statement cannot move into the block */
+                break;
+            }
+        }
+        if (!mergeable) {
+            continue;
+        }
+        int32_t neg = jm_node_new(prog, JN_UNARY);
+        if (neg < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;    /* GCOVR_EXCL_LINE */
+        }
+        int32_t block = jm_node_new(prog, JN_BLOCK);
+        if (block < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;      /* GCOVR_EXCL_LINE */
+        }
+        prog->nodes[neg].op = JT_NOT;
+        prog->nodes[neg].a = prog->nodes[idx].a;
+        prog->nodes[block].a = rest;
+        prog->nodes[idx].a = neg;
+        prog->nodes[idx].b = block;
+        prog->nodes[idx].next = -1; /* REST now lives in the block; this if ends the chain */
+        return;                     /* one guard per pass; the compress loop re-runs to cascade a chain */
+    }
+}
+
 /* The statement-list rewrites, in dependency order. The two merges sandwich the guard fold because
    they enable each other: the first merge turns a run before a `return` into one return so a guard
    can fold against it, the fold turns an `if` into a return, and the second merge then absorbs a
@@ -813,6 +858,10 @@ static void walk(F *folder, int32_t idx) {
     case JN_ARROW:
         walk_chain(folder, node->a); /* params (default values may fold) */
         walk(folder, node->b);       /* body */
+        if (!(node->kind == JN_ARROW && (node->flags & JN_F_EXPRBODY))) {
+            /* a block body: its statements run to the function's end, so a guard-return there folds */
+            fold_guard_return(folder, folder->prog->nodes[folder->prog->nodes[idx].b].a);
+        }
         return;
     default:
         walk(folder, node->a);

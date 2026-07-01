@@ -276,6 +276,23 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("function f(){return;for(;;){var x}}", "function f(){return}", id="drop-unreachable-hoisted"),
         pytest.param("var g=1", "var g=1", id="keep-global-var"),
         pytest.param("with(o){var x=1;f()}", "with(o){var x=1;f()}", id="keep-under-with"),
+        # a void guard-return at a function body's top level inverts to `cond||(rest)` when the rest is
+        # all expressions; a valued/trailing return, a declaration in the rest, or a nested block is kept
+        pytest.param("function f(a){if(a)return;g();h()}", "function f(a){a||(g(),h())}", id="guard-return-invert"),
+        pytest.param("function f(a){if(a)return;g()}", "function f(a){a||g()}", id="guard-return-single"),
+        pytest.param(
+            "function f(a){g();if(a)return}", "function f(a){g();if(a)return}", id="guard-return-trailing-kept"
+        ),
+        pytest.param(
+            "function f(a){if(a)return;g();var x=h();x()}",
+            "function f(b){if(b)return;g();var a=h();a()}",
+            id="guard-return-decl-kept",
+        ),
+        pytest.param(
+            "function g(a){while(1){if(a)return;h()}}",
+            "function g(a){while(1){if(a)return;h()}}",
+            id="guard-return-in-loop-kept",
+        ),
         # a dead store whose value is impure keeps the value as an expression statement; a pure sequence
         # head is dropped; a twice-used function in a block keeps its name; a multi-declarator single use
         # is not inlined (the whole statement cannot be emptied without losing its siblings)
