@@ -1074,6 +1074,15 @@ static int drop_unused(jm_program *prog, int32_t global) {
     return changed;
 }
 
+/* The last element of a comma sequence -- the operand whose value the sequence yields (13.16). */
+static int32_t seq_value(jm_program *prog, int32_t seq) {
+    int32_t elem = prog->nodes[seq].a;
+    while (prog->nodes[elem].next >= 0) {
+        elem = prog->nodes[elem].next;
+    }
+    return elem;
+}
+
 /* Inline a single-declarator binding that is read exactly once into that one read and drop the
    declaration (ECMA-262 propagates the assigned value; the optimization just removes the name). The
    walk records exactly one read (`refs == 1`) and no writes (`writes == 0`), so the value the
@@ -1088,6 +1097,9 @@ static int drop_unused(jm_program *prog, int32_t global) {
        closure, so moving the initializer onto the jump preserves both value and evaluation order even
        when the initializer has side effects. A `var` is inlined only this way, never anywhere-at-once:
        a `var` declaration may be conditional or captured, so only adjacency proves it dominates.
+       A literal initializer also rides to the tail of the adjacent jump's comma sequence
+       (`var x=1;return g(),x` -> `return g(),1`): the sequence's earlier operands run after the
+       declaration and cannot change a never-written literal (13.16 evaluates left to right).
 
    The emptied declaration is removed from its statement chain by the next fold pass. */
 static int inline_single_use(jm_program *prog, int32_t global) {
@@ -1127,9 +1139,13 @@ static int inline_single_use(jm_program *prog, int32_t global) {
         }
         if (!(prog->syms[sym].decl >= 1 && is_const_literal(prog, init))) {
             int32_t jump = prog->nodes[prog->syms[sym].decl_node].next; /* the statement right after the decl */
-            if (jump < 0 || (prog->nodes[jump].kind != JN_RETURN && prog->nodes[jump].kind != JN_THROW) ||
-                prog->nodes[jump].a != ref) {
-                continue; /* not a literal let/const, and not an adjacent `return x` / `throw x` */
+            if (jump < 0 || (prog->nodes[jump].kind != JN_RETURN && prog->nodes[jump].kind != JN_THROW)) {
+                continue; /* not a literal let/const, and not an adjacent `return` / `throw` */
+            }
+            int32_t target = prog->nodes[jump].a;
+            if (target != ref && !(is_const_literal(prog, init) && target >= 0 && prog->nodes[target].kind == JN_SEQ &&
+                                   seq_value(prog, target) == ref)) {
+                continue; /* the one read is not where the adjacent jump's value comes from */
             }
         }
         int32_t next = prog->nodes[ref].next;

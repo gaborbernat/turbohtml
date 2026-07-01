@@ -355,6 +355,33 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             "function f(){var r;return h(),r=g(),r}", "function f(){return h(),g()}", id="seq-collapse-after-effect"
         ),
         pytest.param("function f(){var r;return r=1,r}", "function f(){return 1}", id="seq-collapse-literal"),
+        # a single-use literal rides to the tail of the adjacent return/throw's comma sequence (the
+        # earlier operands cannot change a never-written literal); an impure initializer would reorder
+        # against them and stays, as does a read that is not the sequence's value
+        pytest.param("function f(){var x=1;g();return x}", "function f(){return g(),1}", id="literal-seq-tail-inline"),
+        pytest.param("function f(){var x=1;g();throw x}", "function f(){throw g(),1}", id="literal-seq-tail-throw"),
+        pytest.param(
+            "function f(){var x=h();g();return x}",
+            "function f(){var a=h();return g(),a}",
+            id="impure-seq-tail-kept",
+        ),
+        pytest.param(
+            "function f(){var x=1;g();return x+1}",
+            "function f(){var a=1;return g(),a+1}",
+            id="literal-non-tail-kept",
+        ),
+        # the adjacent jump carries no value the read could be: a bare return (the closure read
+        # may run before the declaration) and a non-sequence return value both keep the binding
+        pytest.param(
+            "function f(){if(c){q(()=>x);var x=1;return}g()}",
+            "function f(){if(c){q(()=>a);var a=1;return}g()}",
+            id="literal-bare-return-kept",
+        ),
+        pytest.param(
+            "function f(){q(()=>x);var x=1;return 2}",
+            "function f(){q(()=>a);var a=1;return 2}",
+            id="literal-other-return-value-kept",
+        ),
         pytest.param(
             "function f(){var x;x=g(),foo();return x}",
             "function f(){var a;return a=g(),foo(),a}",
