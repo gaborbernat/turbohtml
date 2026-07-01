@@ -187,10 +187,10 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             id="collapse-other-elem-between",
         ),
         pytest.param("function f(){a=1,b=2}", "function f(){a=1,b=2}", id="collapse-free-assign-kept"),
+        pytest.param("function f(){var x;x=1;return x=2,x}", "function f(){return 2}", id="collapse-twice-written"),
+        # `(t=V, t)` where t is read elsewhere drops just the redundant trailing read, keeping the assign
         pytest.param(
-            "function f(){var x;x=1;return x=2,x}",
-            "function f(){var a;return a=1,a=2,a}",
-            id="collapse-twice-written-kept",
+            "function f(a){return a=a||{},a}", "function f(a){return a=a||{}}", id="collapse-assign-value-read"
         ),
         pytest.param(
             "function f(){var x=1;x++;return x}", "function f(){var a=1;return a++,a}", id="no-inline-updated"

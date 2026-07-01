@@ -872,15 +872,21 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
             continue;
         }
         int32_t target = prog->nodes[prog->nodes[elem].a].sym;
-        if (target < 0 || prog->syms[target].refs != 1 || prog->syms[target].writes != 1 ||
-            prog->nodes[use].kind != JN_IDENT || prog->nodes[use].sym != target) {
-            continue; /* not `x=EXPR` followed by x's one and only read (refs == 1 makes this use it) */
+        if (target < 0 || prog->nodes[use].kind != JN_IDENT || prog->nodes[use].sym != target) {
+            continue; /* not `t = EXPR` immediately followed by a read of the same local t */
         }
         int32_t after = prog->nodes[use].next;
-        prog->nodes[elem] = prog->nodes[prog->nodes[elem].b]; /* the element becomes EXPR, dropping the read */
-        prog->nodes[elem].next = after;
-        prog->syms[target].refs = 0;
-        prog->syms[target].writes = 0;
+        if (prog->syms[target].refs == 1 && prog->syms[target].writes == 1) {
+            prog->nodes[elem] = prog->nodes[prog->nodes[elem].b]; /* `(t=EXPR, t)` with t used once -> EXPR */
+            prog->nodes[elem].next = after;
+            prog->syms[target].refs = 0;
+            prog->syms[target].writes = 0;
+        } else {
+            /* `(t=EXPR, t)` with t used elsewhere too -> `t=EXPR`: the assignment already yields t's new
+               value, so the trailing read adds nothing (nothing runs between to change t) */
+            prog->nodes[elem].next = after;
+            prog->syms[target].refs--;
+        }
         *changed = 1;
     }
     int32_t prev = -1;
