@@ -821,6 +821,109 @@ static int is_const_literal(jm_program *prog, int32_t idx) {
     }
 }
 
+/* ----------------------------------------------------------- forward collapse */
+
+static void collapse_walk(jm_program *prog, int32_t idx);
+
+/* Fold `(x = EXPR, x)` -- the shape the fold pass leaves after merging `x=EXPR; return x` into a comma
+   sequence -- down to `EXPR`, when x is a local written once (this assignment) and read once (the
+   trailing element). Both sides run back to back with nothing between and x escapes nowhere, so the
+   sequence's value and side effects are exactly EXPR's; x is then dead and its declaration drops. This
+   is terser/esbuild collapse_vars restricted to the adjacent pair (soundness is by adjacency, not flow
+   analysis), the shape a `var r; ...; r=f(); return r` temporary leaves behind. */
+static void collapse_sequence(jm_program *prog, int32_t seq) {
+    for (int32_t elem = prog->nodes[seq].a; elem >= 0; elem = prog->nodes[elem].next) {
+        int32_t use = prog->nodes[elem].next;
+        if (use < 0 || prog->nodes[elem].kind != JN_ASSIGN || prog->nodes[elem].op != JT_ASSIGN ||
+            prog->nodes[prog->nodes[elem].a].kind != JN_IDENT) {
+            continue;
+        }
+        int32_t target = prog->nodes[prog->nodes[elem].a].sym;
+        if (target < 0 || prog->syms[target].refs != 1 || prog->syms[target].writes != 1 ||
+            prog->nodes[use].kind != JN_IDENT || prog->nodes[use].sym != target) {
+            continue; /* not `x=EXPR` followed by x's one and only read (refs == 1 makes this use it) */
+        }
+        int32_t init = prog->nodes[elem].b;
+        int32_t after = prog->nodes[use].next;
+        prog->nodes[elem] = prog->nodes[init]; /* the assignment element becomes EXPR, dropping the read */
+        prog->nodes[elem].next = after;
+        prog->syms[target].refs = 0;
+        prog->syms[target].writes = 0;
+    }
+}
+
+/* Descend a chain of statements or expressions, collapsing sequences and recursing. */
+static void collapse_chain(jm_program *prog, int32_t first) {
+    for (int32_t node = first; node >= 0; node = prog->nodes[node].next) {
+        collapse_walk(prog, node);
+    }
+}
+
+/* Descend into every nested statement list (block, function/arrow body, switch case) and every
+   expression that may hold one, mirroring the fold pass's traversal. */
+static void collapse_walk(jm_program *prog, int32_t idx) {
+    if (idx < 0) {
+        return;
+    }
+    jm_node *node = &prog->nodes[idx];
+    switch (node->kind) {
+    case JN_BLOCK:
+        collapse_chain(prog, node->a);
+        return;
+    case JN_MEMBER_EXPR:
+        collapse_walk(prog, node->a);
+        if (node->flags & JN_F_COMPUTED) {
+            collapse_walk(prog, node->b);
+        }
+        return;
+    case JN_PROP:
+    case JN_MEMBER:
+        if (node->flags & JN_F_COMPUTED) {
+            collapse_walk(prog, node->a);
+        }
+        collapse_walk(prog, node->b);
+        return;
+    case JN_SEQ:
+        collapse_sequence(prog, idx);
+        collapse_chain(prog, node->a);
+        return;
+    case JN_ARRAY:
+    case JN_OBJECT:
+    case JN_TEMPLATE:
+        collapse_chain(prog, node->a);
+        return;
+    case JN_CALL:
+    case JN_NEW:
+    case JN_CLASS:
+        collapse_walk(prog, node->a);  /* callee / superclass */
+        collapse_chain(prog, node->b); /* arguments / members */
+        return;
+    case JN_FUNC:
+    case JN_ARROW:
+        collapse_chain(prog, node->a); /* params (defaults may hold a function) */
+        collapse_walk(prog, node->b);  /* body: a block, or an arrow expression */
+        return;
+    case JN_VAR:
+        for (int32_t declr = node->a; declr >= 0; declr = prog->nodes[declr].next) {
+            collapse_walk(prog, prog->nodes[declr].b);
+        }
+        return;
+    case JN_SWITCH:
+        collapse_walk(prog, node->a);
+        for (int32_t clause = node->b; clause >= 0; clause = prog->nodes[clause].next) {
+            collapse_walk(prog, prog->nodes[clause].a);
+            collapse_chain(prog, prog->nodes[clause].b);
+        }
+        return;
+    default:
+        collapse_walk(prog, node->a);
+        collapse_walk(prog, node->b);
+        collapse_walk(prog, node->c);
+        collapse_walk(prog, node->d);
+        return;
+    }
+}
+
 /* Whether an unused binding's initializer can be discarded along with it: it has no observable side
    effect, so dropping `var/let/const name = init` (when name is never read) changes nothing. A literal,
    a function/arrow expression and a unary over a pure operand (`void 0`, `!0`, `-1`) are pure. A call,
@@ -953,6 +1056,7 @@ void jm_mangle(jm_program *prog) {
     if (!mangler.poisoned) {
         /* the three failed flags are only ever set on allocation failure */
         if (!mangler.failed && !mangler.visible.failed && !mangler.frees.failed) { /* GCOVR_EXCL_BR_LINE */
+            collapse_chain(prog, stmts);     /* fold `x=EXPR;return x` so the temporary becomes dead */
             drop_unused(prog, global);       /* remove dead bindings before naming spends slots on them */
             inline_single_use(prog, global); /* before naming, so an inlined binding consumes no short name */
             /* reserve every *kept* function/class declaration name globally so a mangled binding in

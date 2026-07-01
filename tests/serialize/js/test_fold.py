@@ -162,8 +162,24 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param(
             "function f(){let x=5;for(x in o);}", "function f(){let a=5;for(a in o);}", id="no-inline-forin-write"
         ),
+        pytest.param("function f(){var x=1;x=2;g(x)}", "function f(){var a=1;a=2,g(a)}", id="no-inline-reassigned"),
+        # `x=EXPR` folded into the very next read of x -- the temporary the fold pass leaves as `(x=EXPR,x)`
+        pytest.param("function f(){var r;r=g();return r}", "function f(){return g()}", id="collapse-assign-return"),
+        pytest.param("function f(){var r=0;r=g();throw r}", "function f(){throw g()}", id="collapse-assign-throw"),
+        pytest.param("function f(){var x=1;x=2;return x}", "function f(){return 2}", id="collapse-reassign-literal"),
         pytest.param(
-            "function f(){var x=1;x=2;return x}", "function f(){var a=1;return a=2,a}", id="no-inline-reassigned"
+            "function f(){var r;r=g();return r+1}", "function f(){var a;return a=g(),a+1}", id="collapse-not-sole-read"
+        ),
+        pytest.param(
+            "function f(){var x;x=g(),y;return x}",
+            "function f(){var a;return a=g(),y,a}",
+            id="collapse-other-elem-between",
+        ),
+        pytest.param("function f(){a=1,b=2}", "function f(){a=1,b=2}", id="collapse-free-assign-kept"),
+        pytest.param(
+            "function f(){var x;x=1;return x=2,x}",
+            "function f(){var a;return a=1,a=2,a}",
+            id="collapse-twice-written-kept",
         ),
         pytest.param(
             "function f(){var x=1;x++;return x}", "function f(){var a=1;return a++,a}", id="no-inline-updated"
