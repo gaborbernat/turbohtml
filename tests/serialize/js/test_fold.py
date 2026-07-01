@@ -55,6 +55,17 @@ _NODE = shutil.which("node")
         pytest.param("x=a?t=1:t+=2", "x=a?t=1:t+=2", id="cond-mixed-assign-kept"),
         pytest.param("x=a?o.p=1:o.p=2", "x=a?o.p=1:o.p=2", id="cond-member-target-kept"),
         pytest.param("x=a?t=1:u=2", "x=a?t=1:u=2", id="cond-diff-target-kept"),
+        # same-op short-circuit chains left-rotate to drop the parens (13.13: same operands, order,
+        # and result either way); a mixed-op pair keeps its grouping
+        pytest.param("x=a&&(b&&c)", "x=a&&b&&c", id="and-chain-rotates"),
+        pytest.param("x=a||(b||c)", "x=a||b||c", id="or-chain-rotates"),
+        pytest.param("x=a??(b??c)", "x=a??b??c", id="nullish-chain-rotates"),
+        pytest.param("x=a&&(b&&(c&&d))", "x=a&&b&&c&&d", id="and-chain-rotates-deep"),
+        pytest.param("x=a&&((b&&c)&&d)", "x=a&&b&&c&&d", id="and-chain-rotates-left-nested"),
+        pytest.param("x=a&&(b||c)", "x=a&&(b||c)", id="mixed-op-kept"),
+        pytest.param("x=a??(b&&c)", "x=a??(b&&c)", id="nullish-and-mix-kept"),
+        pytest.param("if(a)b&&c", "a&&b&&c", id="if-chain-rotates"),
+        pytest.param("x=a?a:b||c", "x=a||b||c", id="cond-self-or-chain-rotates"),
     ],
 )
 def test_folds(source: str, expected: str) -> None:

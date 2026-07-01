@@ -371,6 +371,27 @@ static int is_empty_branch(F *folder, int32_t idx) {
     return node->kind == JN_EMPTY || (node->kind == JN_BLOCK && node->a < 0);
 }
 
+/* Left-rotate a same-operator `&&`/`||`/`??` chain. Short-circuit evaluation makes the operator
+   associative -- `a&&(b&&c)` and `(a&&b)&&c` evaluate a, b, c in the same order with the same
+   result (13.13) -- and the grammar is left-associative, so only the left-leaning shape prints
+   without parentheses (`a&&b&&c`) and re-parses to itself. */
+static void rotate_logical_chain(jm_program *prog, int32_t idx) {
+    for (int32_t cur = idx;;) {
+        uint16_t op = prog->nodes[cur].op;
+        while (prog->nodes[prog->nodes[cur].b].kind == JN_LOGICAL && prog->nodes[prog->nodes[cur].b].op == op) {
+            int32_t right = prog->nodes[cur].b;
+            prog->nodes[cur].b = prog->nodes[right].b;
+            prog->nodes[right].b = prog->nodes[right].a;
+            prog->nodes[right].a = prog->nodes[cur].a;
+            prog->nodes[cur].a = right;
+        }
+        cur = prog->nodes[cur].a; /* a rotation may leave a same-op chain as the new left's right */
+        if (prog->nodes[cur].kind != JN_LOGICAL || prog->nodes[cur].op != op) {
+            return;
+        }
+    }
+}
+
 /* Build `test ? then : els`, flipping `!x ? a : b` to `x ? b : a` to drop the negation (13.14);
    a doubled `!!x` test peels both, since a conditional reads its test as a boolean. */
 static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t els) {
@@ -405,6 +426,7 @@ static int32_t make_logical(jm_program *prog, int32_t test, int32_t expr) {
     prog->nodes[logic].op = op;
     prog->nodes[logic].a = test;
     prog->nodes[logic].b = expr;
+    rotate_logical_chain(prog, logic); /* expr may be a same-op chain: if(a)b&&c -> a&&b&&c */
     return logic;
 }
 
@@ -444,6 +466,7 @@ static void fold_to_logical(F *folder, int32_t idx, uint16_t op, int32_t left, i
     folder->prog->nodes[logic].op = op;
     folder->prog->nodes[logic].a = left;
     folder->prog->nodes[logic].b = right;
+    rotate_logical_chain(folder->prog, logic); /* right may be a same-op chain: x?x:y||z -> x||y||z */
     replace_with(folder, idx, logic);
 }
 
@@ -944,11 +967,14 @@ static void walk(F *folder, int32_t idx) {
                 replace_with(folder, idx, node->b);
             } else if (is_pure_const(folder, node->a)) {
                 replace_with(folder, idx, node->a);
+            } else {
+                rotate_logical_chain(folder->prog, idx);
             }
             return;
         }
         int truth = pure_truthy(folder, node->a);
         if (truth < 0) {
+            rotate_logical_chain(folder->prog, idx);
             return;
         }
         int keep_right = node->op == JT_AND ? truth : !truth;
