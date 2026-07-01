@@ -92,14 +92,14 @@ than passing through silently.
 
     from turbohtml import minify_js, JSMinify
 
-    source = "function f() { var longName = true; return longName; }"
+    source = "function f() { var longName = 2; return longName * longName; }"
     print(minify_js(source))
     print(minify_js(source, JSMinify(mangle=False)))
 
 .. testoutput::
 
-    function f(){var a=!0;return a}
-    function f(){var longName=!0;return longName}
+    function f(){var a=2;return a*a}
+    function f(){var longName=2;return longName*longName}
 
 Inline ``<script>`` minification rides on HTML minification: pass a :class:`~turbohtml.JSMinify` as
 :class:`~turbohtml.Minify`'s ``minify_js`` (the default ``None`` leaves scripts untouched). Only scripts the ``type``
