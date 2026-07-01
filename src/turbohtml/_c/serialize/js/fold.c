@@ -726,6 +726,64 @@ static void fold_guard_jump(F *folder, int32_t first, int jump_kind) {
     }
 }
 
+/* A `return` ending a function body is redundant when it returns undefined: falling off the end
+   already completes with undefined (10.2.1.4). A bare tail `return` is unlinked, and a tail
+   `return void X` -- or `return a,b,void X` after the sequence merge -- keeps only its operands'
+   evaluation, dropping a pure X (the `void 0` an `undefined` folds to) outright. */
+static void fold_tail_return(F *folder, int32_t block) {
+    jm_program *prog = folder->prog;
+    int32_t prev = -1;
+    int32_t last = prog->nodes[block].a;
+    if (last < 0) {
+        return;
+    }
+    while (prog->nodes[last].next >= 0) {
+        prev = last;
+        last = prog->nodes[last].next;
+    }
+    if (prog->nodes[last].kind != JN_RETURN) {
+        return;
+    }
+    int32_t arg = prog->nodes[last].a;
+    if (arg < 0) {
+        if (prev < 0) {
+            prog->nodes[block].a = -1;
+        } else {
+            prog->nodes[prev].next = -1;
+        }
+        return;
+    }
+    int32_t value = arg; /* the returned value: a sequence returns its last element (13.16) */
+    int32_t value_prev = -1;
+    if (prog->nodes[arg].kind == JN_SEQ) {
+        value = prog->nodes[arg].a;
+        while (prog->nodes[value].next >= 0) {
+            value_prev = value;
+            value = prog->nodes[value].next;
+        }
+    }
+    const jm_node *tail = &prog->nodes[value];
+    if (!(tail->kind == JN_UNARY && tail->op == JT_IDENT && ident_is(tail, "void"))) {
+        return;
+    }
+    if (!is_pure_const(folder, prog->nodes[value].a)) {
+        replace_with(folder, value, prog->nodes[value].a); /* keep X's evaluation, lose the void */
+    } else if (value_prev < 0) {
+        if (prev < 0) { /* `return void 0` alone: the whole statement goes */
+            prog->nodes[block].a = -1;
+        } else {
+            prog->nodes[prev].next = -1;
+        }
+        return;
+    } else { /* `return a,b,void 0`: drop the pure tail element, unwrapping a lone survivor */
+        prog->nodes[value_prev].next = -1;
+        if (value_prev == prog->nodes[arg].a) {
+            prog->nodes[last].a = value_prev;
+        }
+    }
+    prog->nodes[last].kind = JN_EXPR_STMT;
+}
+
 /* The statement-list rewrites, in dependency order. The two merges sandwich the guard fold because
    they enable each other: the first merge turns a run before a `return` into one return so a guard
    can fold against it, the fold turns an `if` into a return, and the second merge then absorbs a
@@ -916,7 +974,9 @@ static void walk(F *folder, int32_t idx) {
         walk_chain(folder, node->a); /* params (default values may fold) */
         walk(folder, node->b);       /* body */
         if (!(node->kind == JN_ARROW && (node->flags & JN_F_EXPRBODY))) {
-            /* a block body: its statements run to the function's end, so a guard-return there folds */
+            /* a block body: its statements run to the function's end, so a trailing undefined-valued
+               return is redundant and a guard-return there folds */
+            fold_tail_return(folder, folder->prog->nodes[idx].b);
             fold_guard_jump(folder, folder->prog->nodes[folder->prog->nodes[idx].b].a, JN_RETURN);
         }
         return;

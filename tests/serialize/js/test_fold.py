@@ -66,6 +66,33 @@ _NODE = shutil.which("node")
         pytest.param("x=a??(b&&c)", "x=a??(b&&c)", id="nullish-and-mix-kept"),
         pytest.param("if(a)b&&c", "a&&b&&c", id="if-chain-rotates"),
         pytest.param("x=a?a:b||c", "x=a||b||c", id="cond-self-or-chain-rotates"),
+        # a tail return of undefined is redundant (10.2.1.4: falling off the end returns undefined);
+        # a valued or non-tail return, and `delete` (valued, not void), stay
+        pytest.param("function f(){g();return}", "function f(){g()}", id="tail-bare-return-dropped"),
+        pytest.param("function f(){return}", "function f(){}", id="tail-only-return-dropped"),
+        pytest.param("function f(){return void g()}", "function f(){g()}", id="tail-return-void-unwrapped"),
+        pytest.param("function f(){h();return void g()}", "function f(){h(),g()}", id="tail-return-void-seq"),
+        pytest.param("function f(){return undefined}", "function f(){}", id="tail-return-undefined-dropped"),
+        pytest.param("function f(){h();return void 0}", "function f(){h()}", id="tail-return-pure-seq-unwraps"),
+        pytest.param("function f(){a();b();return void 0}", "function f(){a(),b()}", id="tail-return-pure-seq-keeps"),
+        pytest.param("var f=()=>{return void g()}", "var f=()=>{g()}", id="tail-return-void-arrow"),
+        pytest.param(
+            "function f(){while(a)b();return void 0}",
+            "function f(){while(a)b()}",
+            id="tail-return-pure-after-loop-dropped",
+        ),
+        pytest.param("function f(){return g()}", "function f(){return g()}", id="tail-valued-return-kept"),
+        pytest.param(
+            "function f(){return delete o.p}", "function f(){return delete o.p}", id="tail-return-delete-kept"
+        ),
+        pytest.param(
+            "function f(){return void g(),h()}", "function f(){return void g(),h()}", id="tail-seq-valued-kept"
+        ),
+        pytest.param(
+            "function f(){for(;;){return void g()}}",
+            "function f(){for(;;)return void g()}",
+            id="loop-nested-return-void-kept",
+        ),
     ],
 )
 def test_folds(source: str, expected: str) -> None:
@@ -292,7 +319,7 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             id="keep-fn-used-in-closure",
         ),
         pytest.param("function f(){for(var k in o)g(k)}", "function f(){for(var a in o)g(a)}", id="keep-forin-binding"),
-        pytest.param("function f(){return;for(;;){var x}}", "function f(){return}", id="drop-unreachable-hoisted"),
+        pytest.param("function f(){return;for(;;){var x}}", "function f(){}", id="drop-unreachable-hoisted"),
         pytest.param("var g=1", "var g=1", id="keep-global-var"),
         pytest.param("with(o){var x=1;f()}", "with(o){var x=1;f()}", id="keep-under-with"),
         # a void guard-return at a function body's top level inverts to `cond||(rest)` when the rest is
@@ -301,6 +328,11 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("function f(a){if(a)return;g()}", "function f(a){a||g()}", id="guard-return-single"),
         pytest.param(
             "function f(a){g();if(a)return}", "function f(a){g();if(a)return}", id="guard-return-trailing-kept"
+        ),
+        pytest.param(
+            "function f(a){if(a)return 1;g();h()}",
+            "function f(a){if(a)return 1;g(),h()}",
+            id="guard-return-valued-kept",
         ),
         pytest.param(
             "function f(a){if(a)return;g();var x=h();x()}",
