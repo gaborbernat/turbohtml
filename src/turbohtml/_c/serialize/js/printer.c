@@ -290,20 +290,21 @@ static void print_sub(St *st, int32_t index, int min_prec) {
     }
 }
 
-/* Print a logical/coalesce operand. ECMA-262 §13.13 forbids ?? adjacent to an unparenthesised
+/* Print a logical/coalesce operand. ECMA-262 §13.13 forbids ?? adjacent to an unparenthesized
    || or && (a Syntax early error), so the source parens around `(a||b)??c` or `a??(b&&c)` are
    load-bearing; the parser keeps no parens once the tree is built, so re-add them whenever a
    coalesce meets a logical-and/or. Every other operand follows the precedence rule. */
 static void print_mix_operand(St *st, uint16_t parent_op, int32_t child, int min_prec) {
     const jm_node *node = &st->prog->nodes[child];
-    int parent_coalesce = parent_op == JT_NULLISH;
-    int parent_logic = parent_op == JT_OR || parent_op == JT_AND;
-    if (node->kind == JN_LOGICAL &&
-        ((parent_coalesce && (node->op == JT_OR || node->op == JT_AND)) || (parent_logic && node->op == JT_NULLISH))) {
-        put_char(st, '(');
-        print_expr(st, child);
-        put_char(st, ')');
-        return;
+    if (node->kind == JN_LOGICAL) {
+        int coalesce_over_logic = parent_op == JT_NULLISH && (node->op == JT_OR || node->op == JT_AND);
+        int logic_over_coalesce = (parent_op == JT_OR || parent_op == JT_AND) && node->op == JT_NULLISH;
+        if (coalesce_over_logic || logic_over_coalesce) {
+            put_char(st, '(');
+            print_expr(st, child);
+            put_char(st, ')');
+            return;
+        }
     }
     print_sub(st, child, min_prec);
 }
@@ -788,9 +789,9 @@ static void print_expr(St *st, int32_t index) {
         int prec = op_prec(node->op);
         int pow = node->op == JT_POW;
         /* ** is right-associative, so the same-precedence operand sits on the right (printed at
-           prec, the left at prec+1). The grammar also forbids an unparenthesised UnaryExpression
+           prec, the left at prec+1). The grammar also forbids an unparenthesized UnaryExpression
            on the left of ** -- `-2**2` is a SyntaxError -- so the left prints at UpdateExpression
-           precedence (17) to parenthesise a unary/await/prefix-update left operand. */
+           precedence (17) to parenthesize a unary/await/prefix-update left operand. */
         print_mix_operand(st, node->op, node->a, pow ? 17 : prec);
         if (node->op == JT_IDENT) {
             print_text(st, &st->prog->nodes[node->c]); /* in / instanceof, spaced by the guard */

@@ -418,6 +418,7 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
             if (bind == 0) { /* a read reference */
                 mangler->prog->syms[sym].refs++;
                 mangler->prog->syms[sym].ref_node = idx;
+                mangler->prog->syms[sym].ref_scope = scope;
             } else if (bind == 2) { /* an assignment / update / for-in target: a write */
                 mangler->prog->syms[sym].writes++;
             } /* bind == 1: a declaration target, neither read nor write */
@@ -698,9 +699,6 @@ static int is_forbidden(M *mangler, const Py_UCS4 *name, Py_ssize_t len) {
 static void assign_slots(M *mangler, int32_t scope, int32_t base) {
     int32_t counter = base;
     for (int32_t sym = mangler->prog->scopes[scope].first_sym; sym >= 0; sym = mangler->prog->syms[sym].scope_next) {
-        if (mangler->prog->syms[sym].decl_node == -2) {
-            continue; /* an inlined const has no declaration left to name */
-        }
         if ((mangler->prog->syms[sym].decl == 4 || mangler->prog->syms[sym].decl == 6) &&
             mangler->prog->scopes[scope].kind != 1) {
             continue; /* a function/class declaration in a block keeps its name: renaming it would
@@ -823,16 +821,51 @@ static int is_const_literal(jm_program *prog, int32_t idx) {
 
 /* ----------------------------------------------------------- forward collapse */
 
-static void collapse_walk(jm_program *prog, int32_t idx);
+static void collapse_walk(jm_program *prog, int32_t idx, int *changed);
+static int is_droppable_init(jm_program *prog, int32_t init);
 
-/* Fold `(x = EXPR, x)` -- the shape the fold pass leaves after merging `x=EXPR; return x` into a comma
-   sequence -- down to `EXPR`, when x is a local written once (this assignment) and read once (the
-   trailing element). Both sides run back to back with nothing between and x escapes nowhere, so the
-   sequence's value and side effects are exactly EXPR's; x is then dead and its declaration drops. This
-   is terser/esbuild collapse_vars restricted to the adjacent pair (soundness is by adjacency, not flow
-   analysis), the shape a `var r; ...; r=f(); return r` temporary leaves behind. */
-static void collapse_sequence(jm_program *prog, int32_t seq) {
+/* A value whose evaluation cannot be observed when its result is discarded: a side-effect-free
+   initializer, or a resolved local read (reading a declared binding never throws). A member access,
+   call or free-name read may throw or run a getter, so it is not pure. */
+static int is_pure_value(jm_program *prog, int32_t idx) {
+    if (prog->nodes[idx].kind == JN_IDENT && prog->nodes[idx].sym >= 0) {
+        return 1;
+    }
+    return is_droppable_init(prog, idx);
+}
+
+/* If node assigns `x = EXPR` to a local that is never read, the store is dead -- ECMA-262 makes only
+   EXPR's evaluation observable. Decrement x's write count (a later pass drops the now-unwritten binding)
+   and return EXPR, else -1. */
+static int32_t dead_store_value(jm_program *prog, int32_t node) {
+    if (prog->nodes[node].kind != JN_ASSIGN || prog->nodes[node].op != JT_ASSIGN ||
+        prog->nodes[prog->nodes[node].a].kind != JN_IDENT) {
+        return -1;
+    }
+    int32_t target = prog->nodes[prog->nodes[node].a].sym;
+    if (target < 0 || prog->syms[target].refs != 0) {
+        return -1;
+    }
+    prog->syms[target].writes--;
+    return prog->nodes[node].b;
+}
+
+/* Simplify a comma sequence: replace a dead store `x=EXPR` (x never read) with EXPR, fold `(x=EXPR, x)`
+   -- the shape the fold pass leaves after merging `x=EXPR; return x` -- down to EXPR when x is a local
+   written once (this assignment) and read once (the trailing element), and drop any non-final element
+   whose value is discarded and whose evaluation is pure (13.16 runs each operand for effect; only the
+   last is the sequence value). The (x=EXPR, x) fold is sound by adjacency, not flow analysis -- the
+   shape a `var r; ...; r=f(); return r` temporary leaves behind. */
+static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
     for (int32_t elem = prog->nodes[seq].a; elem >= 0; elem = prog->nodes[elem].next) {
+        int32_t init = dead_store_value(prog, elem);
+        if (init >= 0) { /* `x=EXPR` with x never read is just EXPR (value and effects preserved) */
+            int32_t after = prog->nodes[elem].next;
+            prog->nodes[elem] = prog->nodes[init];
+            prog->nodes[elem].next = after;
+            *changed = 1;
+            continue;
+        }
         int32_t use = prog->nodes[elem].next;
         if (use < 0 || prog->nodes[elem].kind != JN_ASSIGN || prog->nodes[elem].op != JT_ASSIGN ||
             prog->nodes[prog->nodes[elem].a].kind != JN_IDENT) {
@@ -843,83 +876,119 @@ static void collapse_sequence(jm_program *prog, int32_t seq) {
             prog->nodes[use].kind != JN_IDENT || prog->nodes[use].sym != target) {
             continue; /* not `x=EXPR` followed by x's one and only read (refs == 1 makes this use it) */
         }
-        int32_t init = prog->nodes[elem].b;
         int32_t after = prog->nodes[use].next;
-        prog->nodes[elem] = prog->nodes[init]; /* the assignment element becomes EXPR, dropping the read */
+        prog->nodes[elem] = prog->nodes[prog->nodes[elem].b]; /* the element becomes EXPR, dropping the read */
         prog->nodes[elem].next = after;
         prog->syms[target].refs = 0;
         prog->syms[target].writes = 0;
+        *changed = 1;
+    }
+    int32_t prev = -1;
+    for (int32_t elem = prog->nodes[seq].a; elem >= 0;) {
+        int32_t after = prog->nodes[elem].next;
+        if (after >= 0 && is_pure_value(prog, elem)) {
+            if (prev < 0) {
+                prog->nodes[seq].a = after;
+            } else {
+                prog->nodes[prev].next = after;
+            }
+            elem = after;
+            *changed = 1;
+        } else {
+            prev = elem;
+            elem = after;
+        }
+    }
+    int32_t only = prog->nodes[seq].a; /* a sequence always keeps its last element; if that is the only
+                                          one left, the sequence is just that element */
+    if (prog->nodes[only].next < 0) {
+        int32_t seq_next = prog->nodes[seq].next;
+        prog->nodes[seq] = prog->nodes[only];
+        prog->nodes[seq].next = seq_next;
+        *changed = 1;
     }
 }
 
-/* Descend a chain of statements or expressions, collapsing sequences and recursing. */
-static void collapse_chain(jm_program *prog, int32_t first) {
+/* Descend a chain of statements or expressions, dropping a statement-level dead store, collapsing
+   sequences, and recursing. `x=EXPR;` where x is never read keeps only EXPR -- discarded when EXPR is
+   pure, else left as an expression statement for its side effect. */
+static void collapse_chain(jm_program *prog, int32_t first, int *changed) {
     for (int32_t node = first; node >= 0; node = prog->nodes[node].next) {
-        collapse_walk(prog, node);
+        if (prog->nodes[node].kind == JN_EXPR_STMT) {
+            int32_t init = dead_store_value(prog, prog->nodes[node].a);
+            if (init >= 0) {
+                prog->nodes[node].kind = is_pure_value(prog, init) ? JN_EMPTY : prog->nodes[node].kind;
+                if (prog->nodes[node].kind == JN_EXPR_STMT) {
+                    prog->nodes[node].a = init;
+                }
+                *changed = 1;
+            }
+        }
+        collapse_walk(prog, node, changed);
     }
 }
 
 /* Descend into every nested statement list (block, function/arrow body, switch case) and every
    expression that may hold one, mirroring the fold pass's traversal. */
-static void collapse_walk(jm_program *prog, int32_t idx) {
+static void collapse_walk(jm_program *prog, int32_t idx, int *changed) {
     if (idx < 0) {
         return;
     }
     jm_node *node = &prog->nodes[idx];
     switch (node->kind) {
     case JN_BLOCK:
-        collapse_chain(prog, node->a);
+        collapse_chain(prog, node->a, changed);
         return;
     case JN_MEMBER_EXPR:
-        collapse_walk(prog, node->a);
+        collapse_walk(prog, node->a, changed);
         if (node->flags & JN_F_COMPUTED) {
-            collapse_walk(prog, node->b);
+            collapse_walk(prog, node->b, changed);
         }
         return;
     case JN_PROP:
     case JN_MEMBER:
         if (node->flags & JN_F_COMPUTED) {
-            collapse_walk(prog, node->a);
+            collapse_walk(prog, node->a, changed);
         }
-        collapse_walk(prog, node->b);
+        collapse_walk(prog, node->b, changed);
         return;
     case JN_SEQ:
-        collapse_sequence(prog, idx);
-        collapse_chain(prog, node->a);
+        collapse_chain(prog, node->a, changed); /* recurse into elements before simplifying the sequence */
+        collapse_sequence(prog, idx, changed);  /* may unwrap the sequence node itself */
         return;
     case JN_ARRAY:
     case JN_OBJECT:
     case JN_TEMPLATE:
-        collapse_chain(prog, node->a);
+        collapse_chain(prog, node->a, changed);
         return;
     case JN_CALL:
     case JN_NEW:
     case JN_CLASS:
-        collapse_walk(prog, node->a);  /* callee / superclass */
-        collapse_chain(prog, node->b); /* arguments / members */
+        collapse_walk(prog, node->a, changed);  /* callee / superclass */
+        collapse_chain(prog, node->b, changed); /* arguments / members */
         return;
     case JN_FUNC:
     case JN_ARROW:
-        collapse_chain(prog, node->a); /* params (defaults may hold a function) */
-        collapse_walk(prog, node->b);  /* body: a block, or an arrow expression */
+        collapse_chain(prog, node->a, changed); /* params (defaults may hold a function) */
+        collapse_walk(prog, node->b, changed);  /* body: a block, or an arrow expression */
         return;
     case JN_VAR:
         for (int32_t declr = node->a; declr >= 0; declr = prog->nodes[declr].next) {
-            collapse_walk(prog, prog->nodes[declr].b);
+            collapse_walk(prog, prog->nodes[declr].b, changed);
         }
         return;
     case JN_SWITCH:
-        collapse_walk(prog, node->a);
+        collapse_walk(prog, node->a, changed);
         for (int32_t clause = node->b; clause >= 0; clause = prog->nodes[clause].next) {
-            collapse_walk(prog, prog->nodes[clause].a);
-            collapse_chain(prog, prog->nodes[clause].b);
+            collapse_walk(prog, prog->nodes[clause].a, changed);
+            collapse_chain(prog, prog->nodes[clause].b, changed);
         }
         return;
     default:
-        collapse_walk(prog, node->a);
-        collapse_walk(prog, node->b);
-        collapse_walk(prog, node->c);
-        collapse_walk(prog, node->d);
+        collapse_walk(prog, node->a, changed);
+        collapse_walk(prog, node->b, changed);
+        collapse_walk(prog, node->c, changed);
+        collapse_walk(prog, node->d, changed);
         return;
     }
 }
@@ -957,7 +1026,8 @@ static int is_droppable_init(jm_program *prog, int32_t init) {
    skipped under with/eval (the caller guards on poisoned), where a name may resolve dynamically.
    References are counted across nested scopes by the walk, so a binding captured by a closure has
    refs > 0 and is kept. */
-static void drop_unused(jm_program *prog, int32_t global) {
+static int drop_unused(jm_program *prog, int32_t global) {
+    int changed = 0;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].refs != 0 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
             prog->syms[sym].scope == global) {
@@ -967,6 +1037,7 @@ static void drop_unused(jm_program *prog, int32_t global) {
         if (prog->syms[sym].decl == 4) { /* an unused function declaration: drop the whole statement */
             prog->nodes[stmt].kind = JN_EMPTY;
             prog->syms[sym].decl_node = -2;
+            changed = 1;
             continue;
         }
         int32_t prev = -1; /* find this binding's declarator among the statement's declarators */
@@ -990,9 +1061,11 @@ static void drop_unused(jm_program *prog, int32_t global) {
                 prog->nodes[stmt].kind = JN_EMPTY;
             }
             prog->syms[sym].decl_node = -2;
+            changed = 1;
             break;
         }
     }
+    return changed;
 }
 
 /* Inline a single-declarator binding that is read exactly once into that one read and drop the
@@ -1011,18 +1084,41 @@ static void drop_unused(jm_program *prog, int32_t global) {
        a `var` declaration may be conditional or captured, so only adjacency proves it dominates.
 
    The emptied declaration is removed from its statement chain by the next fold pass. */
-static void inline_single_use(jm_program *prog, int32_t global) {
+static int inline_single_use(jm_program *prog, int32_t global) {
+    int changed = 0;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
-        if (prog->syms[sym].decl > 2 || prog->syms[sym].refs != 1 || prog->syms[sym].writes != 0 ||
-            prog->syms[sym].decl_node < 0 || prog->syms[sym].scope == global ||
-            prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].next >= 0) {
-            continue; /* one read, never written, lone declarator: the read sees the value the decl sets */
+        if (prog->syms[sym].refs != 1 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
+            prog->syms[sym].scope == global) {
+            continue; /* one read, never written: the read is where the declaration's value goes */
+        }
+        int32_t ref = prog->syms[sym].ref_node;
+        if (prog->syms[sym].decl == 4) {
+            /* a function used once becomes an expression at that use, dropping the declaration and the
+               name (refs == 1 means no self-reference). Only into its own scope: a use in a loop body or
+               a nested function runs repeatedly and would build a fresh closure each time (13.2.4). */
+            if (prog->syms[sym].ref_scope != prog->syms[sym].scope) {
+                continue;
+            }
+            int32_t next = prog->nodes[ref].next;
+            int32_t decl = prog->syms[sym].decl_node;
+            prog->nodes[ref] = prog->nodes[decl];
+            prog->nodes[ref].flags |= JN_F_EXPR;
+            prog->nodes[ref].str = NULL;
+            prog->nodes[ref].str_len = 0;
+            prog->nodes[ref].next = next;
+            prog->nodes[decl].kind = JN_EMPTY;
+            prog->syms[sym].decl_node = -2;
+            changed = 1;
+            continue;
+        }
+        if (prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].next >= 0) {
+            continue; /* only a lone declarator inlines below (decl_node is recorded only for var/let/const
+                         and functions, and a function is already handled above) */
         }
         int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
         if (init < 0) {
             continue; /* a bare `var x;` declares no value to propagate */
         }
-        int32_t ref = prog->syms[sym].ref_node;
         if (!(prog->syms[sym].decl >= 1 && is_const_literal(prog, init))) {
             int32_t jump = prog->nodes[prog->syms[sym].decl_node].next; /* the statement right after the decl */
             if (jump < 0 || (prog->nodes[jump].kind != JN_RETURN && prog->nodes[jump].kind != JN_THROW) ||
@@ -1035,32 +1131,85 @@ static void inline_single_use(jm_program *prog, int32_t global) {
         prog->nodes[ref].next = next;
         prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
         prog->syms[sym].decl_node = -2; /* mark inlined so assign_slots spends no name on it */
+        changed = 1;
     }
+    return changed;
 }
 
-void jm_mangle(jm_program *prog) {
-    M mangler = {0};
-    mangler.prog = prog;
+/* Clear the resolved-symbol and scope tables so a fresh analysis can run over the (now transformed)
+   tree. Every compress pass re-derives read/write counts from scratch, which is what lets the
+   transforms cascade -- one drop exposing the next -- and keeps the result stable under
+   re-minification. A label name the previous walk assigned is freed here (only the final naming pass's
+   names outlive the analysis). */
+static void reset_analysis(jm_program *prog) {
+    for (int32_t sym = 0; sym < prog->sym_count; sym++) {
+        jm_free(prog->syms[sym].mangled);
+        prog->syms[sym].mangled = NULL;
+    }
+    prog->sym_count = 0;
+    prog->scope_count = 0;
+}
+
+/* Build the scope tree and resolve every reference into a fresh mangler, populating each binding's
+   read/write counts, its one read node, and its declaring statement. Returns the global scope, or -1 on
+   allocation failure. */
+static int32_t analyze(M *mangler, jm_program *prog) {
+    reset_analysis(prog);
+    mangler->prog = prog;
     int32_t global = jm_scope_new(prog, -1, 1);
     if (global < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return;       /* GCOVR_EXCL_LINE */
+        return -1;    /* GCOVR_EXCL_LINE */
     }
-    mangler.global = global;
+    mangler->global = global;
     int32_t stmts = prog->nodes[prog->root].a;
-    hoist_vars(&mangler, stmts, global);
-    hoist_block(&mangler, stmts, global);
-    walk_chain(&mangler, stmts, global, 0);
+    hoist_vars(mangler, stmts, global);
+    hoist_block(mangler, stmts, global);
+    walk_chain(mangler, stmts, global, 0);
+    return global;
+}
 
-    /* top-level (global-scope) bindings are observable; never rename them, and skip the
-       whole pass when a with/eval anywhere makes name resolution unsafe */
+static void mangler_free(M *mangler) {
+    jm_free(mangler->visible.slots);
+    jm_free(mangler->frees.slots);
+    jm_free(mangler->labels.slots);
+    jm_free(mangler->undo);
+}
+
+/* One compression pass over the whole program: resolve afresh, then run the tree-shrinking transforms.
+   Returns 1 when a transform changed the tree (the driver runs another pass), 0 at a fixpoint, and -1
+   when the analysis is unusable -- a with/eval poisoned name resolution, or an allocation failed -- so
+   the driver stops. Names are never assigned here; that is the final jm_mangle pass. */
+int jm_compress(jm_program *prog) {
+    M mangler = {0};
+    int32_t global = analyze(&mangler, prog);
+    int result = -1;
+    /* top-level bindings are observable and never touched; a with/eval poisons the whole program */
     if (!mangler.poisoned) {
-        /* the three failed flags are only ever set on allocation failure */
-        if (!mangler.failed && !mangler.visible.failed && !mangler.frees.failed) { /* GCOVR_EXCL_BR_LINE */
-            collapse_chain(prog, stmts);     /* fold `x=EXPR;return x` so the temporary becomes dead */
-            drop_unused(prog, global);       /* remove dead bindings before naming spends slots on them */
-            inline_single_use(prog, global); /* before naming, so an inlined binding consumes no short name */
-            /* reserve every *kept* function/class declaration name globally so a mangled binding in
-               any scope can never be assigned a name that shadows one. A declaration in a non-global
+        /* GCOVR_EXCL_BR_START: the remaining guards are allocation-failure paths */
+        if (global >= 0 && !mangler.failed && !mangler.visible.failed && !mangler.frees.failed) {
+            /* GCOVR_EXCL_BR_STOP */
+            int changed = 0;
+            collapse_chain(prog, prog->nodes[prog->root].a, &changed);
+            changed |= drop_unused(prog, global);
+            changed |= inline_single_use(prog, global);
+            result = changed;
+        }
+    }
+    mangler_free(&mangler);
+    return result;
+}
+
+/* Assign the shortest legal names to the surviving local bindings. Run once after compression settles;
+   it changes no tree shape, only names. Skipped entirely under with/eval, where resolution is unsafe. */
+void jm_mangle(jm_program *prog) {
+    M mangler = {0};
+    int32_t global = analyze(&mangler, prog);
+    if (!mangler.poisoned) {
+        /* GCOVR_EXCL_BR_START: the remaining guards are allocation-failure paths */
+        if (global >= 0 && !mangler.failed && !mangler.visible.failed && !mangler.frees.failed) {
+            /* GCOVR_EXCL_BR_STOP */
+            /* reserve every *kept* function/class declaration name globally so a mangled binding in any
+               scope can never be assigned a name that shadows one. A declaration in a non-global
                function scope is renamed, not kept (see assign_slots), so it is not reserved. */
             for (int32_t sym = 0; sym < prog->sym_count; sym++) {
                 if ((prog->syms[sym].decl == 4 || prog->syms[sym].decl == 6) &&
@@ -1078,8 +1227,5 @@ void jm_mangle(jm_program *prog) {
             assign_names_by_frequency(&mangler);
         }
     }
-    jm_free(mangler.visible.slots);
-    jm_free(mangler.frees.slots);
-    jm_free(mangler.labels.slots);
-    jm_free(mangler.undo);
+    mangler_free(&mangler);
 }

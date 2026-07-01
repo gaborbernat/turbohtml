@@ -28,7 +28,7 @@ _NODE = shutil.which("node")
         pytest.param("var g=(alpha,beta)=>alpha+beta", "var g=(b,a)=>b+a", id="arrow-params"),
         pytest.param(
             "function outer(x){function inner(y){return x+y}return inner}",
-            "function outer(a){function c(b){return a+b}return c}",
+            "function outer(a){return function(b){return a+b}}",
             id="closure-capture",
         ),
         pytest.param("function f(p,q){return p+p+q}", "function f(a,b){return a+a+b}", id="frequency-shortest-name"),

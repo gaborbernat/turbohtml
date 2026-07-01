@@ -94,6 +94,7 @@ int32_t jm_sym_new(jm_program *prog, const Py_UCS4 *name, Py_ssize_t name_len, i
     sym->refs = 0;
     sym->writes = 0;
     sym->ref_node = -1;
+    sym->ref_scope = -1;
     sym->decl_node = -1;
     return index;
 }

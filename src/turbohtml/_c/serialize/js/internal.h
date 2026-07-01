@@ -213,7 +213,7 @@ enum {
     JN_F_AWAIT = 1 << 11,    /* for-await-of */
     JN_F_EXPRBODY = 1 << 12, /* arrow with an expression body */
     JN_F_DELEGATE = 1 << 13, /* yield* */
-    JN_F_PAREN = 1 << 14,    /* a parenthesised optional chain whose parens are load-bearing:
+    JN_F_PAREN = 1 << 14,    /* a parenthesized optional chain whose parens are load-bearing:
                                 `(a?.b).c` breaks the short-circuit that `a?.b.c` keeps */
 };
 
@@ -253,6 +253,7 @@ typedef struct {
     int32_t refs;
     int32_t writes;
     int32_t ref_node;
+    int32_t ref_scope; /* the scope the one read sits in; a function inlines only into its own scope */
     int32_t decl_node;
 } jm_sym;
 
@@ -315,6 +316,11 @@ void jm_program_free(jm_program *prog);
 /* Peephole-fold the AST into shorter equivalent forms (e.g. true -> !0) in place,
    before mangling. Value-exact; a no-op on allocation failure. */
 void jm_fold(jm_program *prog);
+
+/* Run one compression pass: resolve every binding, then drop dead ones, inline single-use values, and
+   collapse assignment temporaries. Returns 1 if the tree changed (run again), 0 at a fixpoint, -1 when
+   with/eval or an allocation makes it unusable. Interleave with jm_fold until it returns <= 0. */
+int jm_compress(jm_program *prog);
 
 void jm_mangle(jm_program *prog);
 

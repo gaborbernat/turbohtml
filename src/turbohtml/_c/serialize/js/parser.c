@@ -1388,7 +1388,7 @@ static int32_t parse_class(P *parser, int is_expr) {
             set_b(parser, fn, parse_block(parser));
             set_b(parser, member, fn);
         } else {
-            /* a field: optional initialiser, then ASI */
+            /* a field: optional initializer, then ASI */
             parser->prog->nodes[member].decl = 3; /* field */
             if (eat(parser, JT_ASSIGN)) {
                 set_b(parser, member, parse_assign(parser, 0));

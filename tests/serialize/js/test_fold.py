@@ -240,12 +240,62 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("function f(){var x=!0;return 1}", "function f(){return 1}", id="drop-unused-unary"),
         pytest.param("function f(){for(var[a]in o)g()}", "function f(){for(var [a] in o)g()}", id="keep-forin-pattern"),
         pytest.param(
-            "function f(){function h(){}return h()}", "function f(){function a(){}return a()}", id="keep-used-fn"
+            "function f(){function h(){}return h()+h()}",
+            "function f(){function a(){}return a()+a()}",
+            id="keep-twice-used-fn",
+        ),
+        # a function used once becomes an expression at the use; a use in a loop or a nested function
+        # runs repeatedly and would build a fresh closure each time, so it is kept
+        pytest.param(
+            "function f(){function h(){return 1}return h}",
+            "function f(){return function(){return 1}}",
+            id="inline-single-use-fn",
+        ),
+        pytest.param(
+            "function f(){function h(){}for(var i=0;i<3;i++)a.push(h)}",
+            "function f(){function c(){}for(var b=0;b<3;b++)a.push(c)}",
+            id="keep-fn-used-in-loop",
+        ),
+        pytest.param(
+            "function f(){function h(){}g(function(){return h})}",
+            "function f(){function a(){}g(function(){return a})}",
+            id="keep-fn-used-in-closure",
         ),
         pytest.param("function f(){for(var k in o)g(k)}", "function f(){for(var a in o)g(a)}", id="keep-forin-binding"),
         pytest.param("function f(){return;for(;;){var x}}", "function f(){return}", id="drop-unreachable-hoisted"),
         pytest.param("var g=1", "var g=1", id="keep-global-var"),
         pytest.param("with(o){var x=1;f()}", "with(o){var x=1;f()}", id="keep-under-with"),
+        # a dead store whose value is impure keeps the value as an expression statement; a pure sequence
+        # head is dropped; a twice-used function in a block keeps its name; a multi-declarator single use
+        # is not inlined (the whole statement cannot be emptied without losing its siblings)
+        pytest.param("function f(){var x;x=g()}", "function f(){g()}", id="dead-store-impure"),
+        pytest.param("function f(){0,g()}", "function f(){g()}", id="seq-drop-pure-head"),
+        pytest.param("function f(x){return x,g()}", "function f(a){return g()}", id="seq-drop-pure-local-head"),
+        pytest.param("function f(y){return g(),y,h()}", "function f(a){return g(),h()}", id="seq-drop-pure-mid"),
+        pytest.param(
+            "function f(){var r;return h(),r=g(),r}", "function f(){return h(),g()}", id="seq-collapse-after-effect"
+        ),
+        pytest.param("function f(){var r;return r=1,r}", "function f(){return 1}", id="seq-collapse-literal"),
+        pytest.param(
+            "function f(){var x;x=g(),foo();return x}",
+            "function f(){var a;return a=g(),foo(),a}",
+            id="seq-collapse-gap-kept",
+        ),
+        pytest.param(
+            "function f(){var x;return x=g(),x+x}",
+            "function f(){var a;return a=g(),a+a}",
+            id="seq-collapse-twice-read-kept",
+        ),
+        pytest.param(
+            "function f(x){if(x){function h(){}h();h()}}",
+            "function f(a){if(a){function h(){}h(),h()}}",
+            id="block-function-kept",
+        ),
+        pytest.param(
+            "function f(){var a=g(),x=1;return x}",
+            "function f(){var b=g(),a=1;return a}",
+            id="multi-declarator-single-use",
+        ),
     ],
 )
 def test_compresses(source: str, expected: str) -> None:

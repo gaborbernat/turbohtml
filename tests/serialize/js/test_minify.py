@@ -44,9 +44,11 @@ def minify(source: str) -> str:
         pytest.param("x = ( a || b ) ?? c", "x=(a||b)??c", id="nullish-left-or-keeps-parens"),
         pytest.param("x = ( a && b ) ?? c", "x=(a&&b)??c", id="nullish-left-and-keeps-parens"),
         pytest.param("x = a ?? ( b || c )", "x=a??(b||c)", id="nullish-right-or-keeps-parens"),
+        pytest.param("x = a ?? ( b && c )", "x=a??(b&&c)", id="nullish-right-and-keeps-parens"),
         pytest.param("x = ( a ?? b ) || c", "x=(a??b)||c", id="or-left-nullish-keeps-parens"),
         pytest.param("x = ( a ?? b ) && c", "x=(a??b)&&c", id="and-left-nullish-keeps-parens"),
         pytest.param("x = a ?? b ?? c", "x=a??b??c", id="nullish-chain-no-parens"),
+        pytest.param("x = a && b && c", "x=a&&b&&c", id="and-chain-no-parens"),
         pytest.param("x = a && b || c", "x=a&&b||c", id="and-or-no-parens"),
         # a logical operand of an arithmetic operator keeps only the precedence paren (no mix)
         pytest.param("x = ( a || b ) + c", "x=(a||b)+c", id="logical-in-arithmetic"),

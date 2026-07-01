@@ -17,10 +17,25 @@ Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, 
         jm_fold(prog);
     }
     if (mangle) {
-        jm_mangle(prog);
-    }
-    if (fold && mangle) {
-        jm_fold(prog); /* fold a literal the const-inliner just exposed (`const x=42;x*2` -> `42*2`) */
+        /* Compress and fold to a fixpoint: each compress pass re-resolves the tree, so a binding a
+           previous pass exposed as dead or single-use is caught by the next, and the re-fold cleans up
+           the empties and folds any literal an inline just uncovered (`const x=42;x*2` -> `42*2`). The
+           tree only ever shrinks, so this converges; the cap is a backstop against a pathological loop. */
+        /* GCOVR_EXCL_BR_START: the tree only shrinks, so it converges well before the backstop cap */
+        for (int pass = 0; pass < 12; pass++) {
+            /* GCOVR_EXCL_BR_STOP */
+            int changed = jm_compress(prog);
+            if (changed <= 0) {
+                break; /* 0: nothing left to do; -1: poisoned by with/eval or an allocation failed */
+            }
+            if (fold) {
+                jm_fold(prog); /* clean up empties and fold what the compress just exposed */
+            }
+        }
+        jm_mangle(prog); /* assign short names once the shape has settled */
+        if (fold) {
+            jm_fold(prog); /* a last fold over the settled, named tree */
+        }
     }
     Py_UCS4 *out = jm_print(prog, out_len);
     jm_program_free(prog);

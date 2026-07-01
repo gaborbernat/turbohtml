@@ -1,7 +1,7 @@
 /* Peephole folding over the arena AST, run before mangling on the full-minify path.
 
    Each fold rewrites a node in place into an equivalent shorter form as a real AST
-   node, so the printer's precedence logic re-parenthesises it correctly (e.g.
+   node, so the printer's precedence logic re-parenthesizes it correctly (e.g.
    `true.x` becomes `(!0).x`, never the wrong `!0.x`). The pass is post-order: children
    fold first, so a parent sees already-folded constant operands.
 
@@ -401,7 +401,7 @@ static int32_t make_logical(jm_program *prog, int32_t test, int32_t expr) {
 }
 
 /* Rewrite a runtime `if` into a shorter equivalent (ECMA-262 14.6 selects one branch; the printer
-   re-parenthesises by precedence and re-wraps a statement-leading `{`/`function`):
+   re-parenthesizes by precedence and re-wraps a statement-leading `{`/`function`):
      if(c) e;            -> c && e;          (no else, expression-statement consequent)
      if(c) e1; else e2;  -> c ? e1 : e2;     (both expression statements)
      if(c) return a; else return b; -> return c ? a : b;   (both returns carry a value)
