@@ -85,7 +85,7 @@ def test_adjacency_guard(source: str, expected: str) -> None:
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        pytest.param("if ( x ) { a ( ) } else { b ( ) }", "if(x){a()}else{b()}", id="if-else"),
+        pytest.param("if ( x ) { a ( ) } else { b ( ) }", "if(x)a();else b()", id="if-else"),
         pytest.param("for ( let i = 0 ; i < n ; i ++ ) { f ( i ) }", "for(let i=0;i<n;i++)f(i)", id="for"),
         pytest.param("for ( const k in o ) { }", "for(const k in o){}", id="for-in"),
         pytest.param("for ( const v of a ) { }", "for(const v of a){}", id="for-of"),
@@ -108,6 +108,31 @@ def test_adjacency_guard(source: str, expected: str) -> None:
         pytest.param("do a ( ) ; while ( b )", "do a();while(b)", id="do-while-braceless-kept"),
         pytest.param("for ( ; ; ) { ; g ( ) }", "for(;;)g()", id="loop-body-empty-then-stmt"),
         pytest.param("for ( var a = ( b in c ) ; ; ) ;", "for(var a=(b in c);;);", id="for-init-in-parenthesised"),
+        # an if branch, label body or with body flattens like a loop body; a consequent that would
+        # end in an open `if` keeps (or gains) braces so the `else` stays attached to the outer if
+        pytest.param("while ( x ) { if ( a ) { break } }", "while(x)if(a)break", id="if-branch-braces-drop"),
+        pytest.param("l : { g ( ) }", "l:g()", id="label-body-braces-drop"),
+        pytest.param("with ( o ) { g ( ) }", "with(o)g()", id="with-body-braces-drop"),
+        pytest.param(
+            "while ( x ) { if ( a ) { if ( b ) break } else d ( ) }",
+            "while(x)if(a){if(b)break}else d()",
+            id="dangling-else-braces-kept",
+        ),
+        pytest.param(
+            "while ( x ) { if ( a ) { while ( y ) if ( b ) break } else d ( ) }",
+            "while(x)if(a){while(y)if(b)break}else d()",
+            id="dangling-else-loop-chain-kept",
+        ),
+        pytest.param(
+            "while ( x ) { if ( a ) { if ( b ) break ; else e ( ) } else d ( ) }",
+            "while(x)if(a)if(b)break;else e();else d()",
+            id="closed-inner-else-flattens",
+        ),
+        pytest.param(
+            "if ( a ) b : { if ( c ) break b } else d ( )",
+            "if(a){b:if(c)break b}else d()",
+            id="dangling-else-label-braced",
+        ),
     ],
 )
 def test_statements(source: str, expected: str) -> None:

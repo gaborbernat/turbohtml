@@ -1041,22 +1041,82 @@ static int keeps_block_scope(const jm_program *prog, int32_t stmt) {
     return kind == JN_CLASS || kind == JN_FUNC || (kind == JN_VAR && prog->nodes[stmt].decl != 0);
 }
 
-/* A loop body -- unlike an if branch, it has no dangling-else hazard -- prints without braces when it is
-   a block holding a single scope-free statement: `for(;;){g()}` -> `for(;;)g()`. */
-static int print_loop_body(St *st, int32_t index) {
-    if (st->prog->nodes[index].kind == JN_BLOCK) {
-        int32_t only = -1;
-        int count = 0;
-        for (int32_t stmt = st->prog->nodes[index].a; stmt >= 0; stmt = st->prog->nodes[stmt].next) {
-            if (st->prog->nodes[stmt].kind == JN_EMPTY) {
-                continue;
-            }
-            only = stmt;
-            if (++count > 1) {
-                break;
-            }
+/* The statement a block prints braceless -- its single scope-free statement -- or -1 when the
+   braces stay (several statements, or one that needs the block scope). */
+static int32_t block_single_stmt(const St *st, int32_t index) {
+    int32_t only = -1;
+    int count = 0;
+    for (int32_t stmt = st->prog->nodes[index].a; stmt >= 0; stmt = st->prog->nodes[stmt].next) {
+        if (st->prog->nodes[stmt].kind == JN_EMPTY) {
+            continue;
         }
-        if (count == 1 && !keeps_block_scope(st->prog, only)) {
+        only = stmt;
+        if (++count > 1) {
+            break;
+        }
+    }
+    return count == 1 && !keeps_block_scope(st->prog, only) ? only : -1;
+}
+
+/* Whether the statement, printed braceless, ends in an `if` with no `else` -- the shape a following
+   `else` would re-attach to (the grammar binds `else` to the nearest open `if`). The walk descends
+   every trailing substatement position exactly as print_branch flattens it: a block that keeps its
+   braces closes the chain. */
+static int ends_with_open_if(const St *st, int32_t index) {
+    for (;;) {
+        const jm_node *node = &st->prog->nodes[index];
+        switch (node->kind) {
+        case JN_BLOCK:
+            index = block_single_stmt(st, index);
+            if (index < 0) {
+                return 0;
+            }
+            break;
+        case JN_IF:
+            if (node->c < 0) {
+                return 1;
+            }
+            index = node->c;
+            break;
+        case JN_FOR:
+            index = node->d;
+            break;
+        case JN_FORIN:
+        case JN_FOROF:
+            index = node->c;
+            break;
+        case JN_WHILE:
+        case JN_WITH:
+            index = node->b;
+            break;
+        case JN_LABEL:
+            index = node->a;
+            break;
+        default: /* a do-while, switch, try or plain statement ends closed */
+            return 0;
+        }
+    }
+}
+
+/* A substatement -- a loop/label/with body or an if branch -- prints without braces when it is a
+   block holding a single scope-free statement: `for(;;){g()}` -> `for(;;)g()`. An if consequent
+   (has_else set) that would end in an open `if` -- which the following `else` would re-attach to --
+   is braced instead, whether it arrived as a block or as a bare statement whose trailing
+   substatement flattens into that shape (`if(a)b:{if(c)break b}else...`). */
+static int print_branch(St *st, int32_t index, int has_else) {
+    if (has_else && ends_with_open_if(st, index)) {
+        if (st->prog->nodes[index].kind == JN_BLOCK) {
+            print_substmt(st, index);
+        } else {
+            put_char(st, '{');
+            print_stmt(st, index);
+            put_char(st, '}');
+        }
+        return 0;
+    }
+    if (st->prog->nodes[index].kind == JN_BLOCK) {
+        int32_t only = block_single_stmt(st, index);
+        if (only >= 0) {
             return print_stmt(st, only);
         }
     }
@@ -1087,14 +1147,14 @@ static int print_stmt(St *st, int32_t index) {
         print_expr(st, node->a);
         put_char(st, ')');
         if (node->c >= 0) {
-            int then_semi = print_substmt(st, node->b);
+            int then_semi = print_branch(st, node->b, 1);
             if (then_semi) {
                 put_char(st, ';');
             }
             put_ascii(st, "else"); /* the adjacency guard adds a space only before a word */
-            return print_substmt(st, node->c);
+            return print_branch(st, node->c, 0);
         }
-        return print_substmt(st, node->b);
+        return print_branch(st, node->b, 0);
     }
     case JN_FOR:
         put_ascii(st, "for(");
@@ -1116,7 +1176,7 @@ static int print_stmt(St *st, int32_t index) {
             print_expr(st, node->c);
         }
         put_char(st, ')');
-        return print_loop_body(st, node->d);
+        return print_branch(st, node->d, 0);
     case JN_FORIN:
     case JN_FOROF: {
         put_ascii(st, "for");
@@ -1132,16 +1192,16 @@ static int print_stmt(St *st, int32_t index) {
         put_ascii(st, node->kind == JN_FOROF ? " of " : " in ");
         print_sub(st, node->b, node->kind == JN_FOROF ? 2 : 1);
         put_char(st, ')');
-        return print_loop_body(st, node->c);
+        return print_branch(st, node->c, 0);
     }
     case JN_WHILE:
         put_ascii(st, "while(");
         print_expr(st, node->a);
         put_char(st, ')');
-        return print_loop_body(st, node->b);
+        return print_branch(st, node->b, 0);
     case JN_DOWHILE:
         put_ascii(st, "do"); /* the adjacency guard spaces `do` from a word body */
-        if (print_loop_body(st, node->a)) {
+        if (print_branch(st, node->a, 0)) {
             put_char(st, ';');
         }
         put_ascii(st, "while(");
@@ -1224,12 +1284,12 @@ static int print_stmt(St *st, int32_t index) {
     case JN_LABEL:
         print_text(st, node);
         put_char(st, ':');
-        return print_substmt(st, node->a);
+        return print_branch(st, node->a, 0);
     case JN_WITH:
         put_ascii(st, "with(");
         print_expr(st, node->a);
         put_char(st, ')');
-        return print_substmt(st, node->b);
+        return print_branch(st, node->b, 0);
     case JN_DEBUGGER:
         put_ascii(st, "debugger");
         return 1;

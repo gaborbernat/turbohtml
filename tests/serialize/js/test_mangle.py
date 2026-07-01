@@ -41,7 +41,7 @@ _NODE = shutil.which("node")
         ),
         # a global shorthand binding is never renamed, so it stays a shorthand (not expanded)
         pytest.param("let x=1;o={x}", "let x=1;o={x}", id="shorthand-global-kept"),
-        pytest.param("function f(){var x=1;with(o){x}}", "function f(){var x=1;with(o){x}}", id="with-poisons"),
+        pytest.param("function f(){var x=1;with(o){x}}", "function f(){var x=1;with(o)x}", id="with-poisons"),
         pytest.param(
             "function f(){eval('x');var y=1;return y}", "function f(){eval('x');var y=1;return y}", id="eval-poisons"
         ),

@@ -105,8 +105,8 @@ def test_folds(source: str, expected: str) -> None:
         # fold alone (mangle off) keeps unreachable code after a return when it hoists a var: the hoist
         # check descends every control-flow shape and short-circuits across both branch slots. The full
         # pipeline goes further and drops the binding (see test_compresses); here fold must not.
-        pytest.param("function f(){return;if(a){var x}}", id="unreach-if-then"),
-        pytest.param("function f(){return;if(a){}else{var y}}", id="unreach-if-else"),
+        pytest.param("function f(){return;if(a)var x}", id="unreach-if-then"),
+        pytest.param("function f(){return;if(a){}else var y}", id="unreach-if-else"),
         pytest.param("function f(){return;for(var i=0;;){}}", id="unreach-for-init"),
         pytest.param("function f(){return;for(;;)var x}", id="unreach-for-body"),
         pytest.param("function f(){return;for(var k in o){}}", id="unreach-forin-bind"),
@@ -140,7 +140,7 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("if(!a){}else b()", "a&&b()", id="if-empty-then-neg-to-and"),
         pytest.param("if(a){}else{}", "if(a){}", id="if-both-empty-guard-kept"),
         # an empty then with a non-expression else is left intact (nothing shorter to fold to)
-        pytest.param("if(a){}else{var x=1}", "if(a){}else{var x=1}", id="if-empty-then-nonexpr-else-kept"),
+        pytest.param("if(a){}else{var x=1}", "if(a){}else var x=1", id="if-empty-then-nonexpr-else-kept"),
         pytest.param("if(a){}else{for(;;);var z}", "if(a){}else{for(;;);var z}", id="if-empty-then-multi-else-kept"),
         pytest.param("function f(){if(a){return 1}return 2}", "function f(){return a?1:2}", id="guard-block-return"),
         # guard clause -> conditional return; cascades right
@@ -261,9 +261,9 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("if(~a)b();else c()", "~a?b():c()", id="if-cond-unary-non-not"),
         # a dead branch whose alternate or loop body (not just its head) hoists is still kept;
         # one whose nested if / loop hoists nowhere is dropped (the body is scanned either way)
-        pytest.param("if(0){if(q)g();else var v}f()", "if(0){if(q)g();else var v}f()", id="dead-if-alt-hoist-kept"),
-        pytest.param("if(0){for(;c;)var v}f()", "if(0){for(;c;)var v}f()", id="dead-for-body-hoist-kept"),
-        pytest.param("if(0){for(k in o)var v}f()", "if(0){for(k in o)var v}f()", id="dead-forin-body-hoist-kept"),
+        pytest.param("if(0){if(q)g();else var v}f()", "if(0)if(q)g();else var v;f()", id="dead-if-alt-hoist-kept"),
+        pytest.param("if(0){for(;c;)var v}f()", "if(0)for(;c;)var v;f()", id="dead-for-body-hoist-kept"),
+        pytest.param("if(0){for(k in o)var v}f()", "if(0)for(k in o)var v;f()", id="dead-forin-body-hoist-kept"),
         pytest.param("if(0){if(q)while(c)g()}f()", "f()", id="dead-if-no-hoist-dropped"),
         pytest.param("if(0){for(;c;)g()}f()", "f()", id="dead-for-no-hoist-dropped"),
         pytest.param("if(0){for(k in o)g()}f()", "f()", id="dead-forin-no-hoist-dropped"),
