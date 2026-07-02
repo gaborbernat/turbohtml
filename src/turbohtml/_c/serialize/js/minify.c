@@ -24,8 +24,7 @@ Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, 
         /* GCOVR_EXCL_BR_START: the tree only shrinks, so it converges well before the backstop cap */
         for (int pass = 0; pass < 12; pass++) {
             /* GCOVR_EXCL_BR_STOP */
-            int changed = jm_compress(prog);
-            if (changed <= 0) {
+            if (jm_compress(prog) <= 0) {
                 break; /* 0: nothing left to do; -1: poisoned by with/eval or an allocation failed */
             }
             if (fold) {

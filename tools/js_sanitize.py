@@ -18,9 +18,10 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Final
 
-ROOT = Path(__file__).resolve().parent.parent
-ENGINE = [
+_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
+_ENGINE: Final[tuple[str, ...]] = (
     "lexer.c",
     "ast.c",
     "parser.c",
@@ -28,22 +29,21 @@ ENGINE = [
     "fold.c",
     "mangle.c",
     "minify.c",
-]
+)
 
 
 def main() -> int:
-    """Compile the engine standalone and run the sanitizer harness over the corpus."""
-    clang = os.environ.get("CC", "clang")
+    """Return the harness's exit code: 0 for a clean run, the sanitizer's abort code otherwise."""
     corpus_dir = Path(tempfile.mkdtemp(prefix="jsmin-corpus-"))
     count = 0
-    for fixture in sorted((ROOT / "tests" / "serialize" / "js" / "_corpus").glob("*.json")):
+    for fixture in sorted((_ROOT / "tests" / "serialize" / "js" / "_corpus").glob("*.json")):
         for row in json.loads(fixture.read_text(encoding="utf-8")):
             (corpus_dir / f"{count}.js").write_text(row["input"], encoding="utf-8")
             count += 1
 
     binary = corpus_dir / "jsmin_harness"
     cmd = [
-        clang,
+        os.environ.get("CC", "clang"),
         "-DJM_STANDALONE",
         "-fsanitize=address,undefined",
         "-fno-omit-frame-pointer",
@@ -53,9 +53,9 @@ def main() -> int:
         "-Wextra",
         "-Werror",
         "-I",
-        str(ROOT / "src" / "turbohtml" / "_c"),
-        str(ROOT / "tools" / "js_minify_harness.c"),
-        *[str(ROOT / "src" / "turbohtml" / "_c" / "serialize" / "js" / name) for name in ENGINE],
+        str(_ROOT / "src" / "turbohtml" / "_c"),
+        str(_ROOT / "tools" / "js_minify_harness.c"),
+        *[str(_ROOT / "src" / "turbohtml" / "_c" / "serialize" / "js" / name) for name in _ENGINE],
         "-o",
         str(binary),
     ]
@@ -68,8 +68,7 @@ def main() -> int:
     env["UBSAN_OPTIONS"] = "halt_on_error=1:print_stacktrace=1"
     files = sorted(str(path) for path in corpus_dir.glob("*.js"))
     print(f"running harness over {len(files)} corpus inputs (leak detection {'on' if on_linux else 'off (macOS)'})")
-    result = subprocess.run([str(binary), *files], env=env, check=False)
-    if result.returncode != 0:
+    if (result := subprocess.run([str(binary), *files], env=env, check=False)).returncode != 0:
         print(f"SANITIZER ABORT (exit {result.returncode})", file=sys.stderr)
         return result.returncode
     print("sanitizer run clean")

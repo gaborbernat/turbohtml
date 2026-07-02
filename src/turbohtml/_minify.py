@@ -45,5 +45,4 @@ def minify_js(source: str, options: JSMinify | None = None) -> str:
     not handle, so an unminifiable script fails loudly rather than passing through
     unchanged. ``options`` defaults to the full pipeline.
     """
-    config = options or JSMinify()
-    return _minify_js(source, config.fold, config.mangle)
+    return _minify_js(source, (config := options or JSMinify()).fold, config.mangle)

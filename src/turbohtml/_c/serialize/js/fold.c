@@ -521,20 +521,20 @@ static int32_t make_logical(F *folder, int32_t test, int32_t expr) {
    need to spot a repeated test or a shared assignment target. Two references to the same name in one
    expression denote the same binding (nothing can shadow between them), so a name match is enough;
    deeper shapes (member access, calls) are conservatively treated as different. */
-static int same_expr(jm_program *prog, int32_t x, int32_t y) {
-    const jm_node *a = &prog->nodes[x]; /* callers pass real subtrees (a conditional's test/branches) */
-    const jm_node *b = &prog->nodes[y];
-    if (a->kind != b->kind || a->str_len != b->str_len) {
+static int same_expr(jm_program *prog, int32_t left, int32_t right) {
+    const jm_node *first = &prog->nodes[left]; /* callers pass real subtrees (a conditional's test/branches) */
+    const jm_node *second = &prog->nodes[right];
+    if (first->kind != second->kind || first->str_len != second->str_len) {
         return 0;
     }
-    switch (a->kind) {
+    switch (first->kind) {
     case JN_IDENT:
     case JN_NUM:
     case JN_STRING:
     case JN_REGEX:
     case JN_BIGINT:
-        for (Py_ssize_t index = 0; index < a->str_len; index++) {
-            if (a->str[index] != b->str[index]) {
+        for (Py_ssize_t index = 0; index < first->str_len; index++) {
+            if (first->str[index] != second->str[index]) {
                 return 0;
             }
         }

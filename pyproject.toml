@@ -215,7 +215,8 @@ lint.preview = true
 
 [tool.codespell]
 builtin = "clear,usage,en-GB_to_en-US"
-ignore-words-list = "caf,notin,afe,hava,vave,grey,forin"  # café, the &notin; entity, afe (active formatting elements), vave (a CSS-minify test value), grey (a CSS Color 4 named color), forin (JS for-in dump label)
+# café, &notin;, afe (active formatting elements), vave (CSS-minify test value), grey (CSS Color 4), forin (JS dump)
+ignore-words-list = "caf,notin,afe,hava,vave,grey,forin"
 skip = "*/html_entities.h,*/tag_atom.h,*/entity_names.h,*/tld_table.h,*/css_colors.h"  # generated tables of HTML5 / IANA / CSS names
 count = true
 quiet-level = 3

@@ -283,8 +283,12 @@ static void declare_pattern(M *mangler, int32_t idx, int32_t scope, uint8_t decl
         break;
     case JN_OBJECT:
         for (int32_t prop = node->a; prop >= 0; prop = mangler->prog->nodes[prop].next) {
-            jm_node *pn = &mangler->prog->nodes[prop];
-            declare_pattern(mangler, pn->kind == JN_SPREAD ? pn->a : pn->b >= 0 ? pn->b : pn->a, scope, decl);
+            const jm_node *entry = &mangler->prog->nodes[prop];
+            declare_pattern(mangler,
+                            entry->kind == JN_SPREAD ? entry->a
+                            : entry->b >= 0          ? entry->b
+                                                     : entry->a,
+                            scope, decl);
         }
         break;
     case JN_ASSIGN: /* a default `target = init`, or a rest `...target` */
