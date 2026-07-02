@@ -546,6 +546,20 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("while(1)b()", "for(;;)b()", id="truthy-test-drops"),
         pytest.param("do b();while(c)", "do b();while(c)", id="do-while-kept"),
         pytest.param("a();for(var i=0;c;i++)b()", "a();for(var i=0;c;i++)b()", id="var-init-blocks-merge"),
+        # a var statement becomes (or prepends) the for init -- it hoists to the function either
+        # way and its initializers run in the same order right before the first test (14.7.4);
+        # a let/const would be re-scoped into the head and stays put
+        pytest.param("var a=1;for(;c;)b()", "for(var a=1;c;)b()", id="var-merges-into-for-init"),
+        pytest.param("var a=g();for(var i=0;i<n;i++)b()", "for(var a=g(),i=0;i<n;i++)b()", id="var-joins-for-var-init"),
+        pytest.param(
+            "var a=g(),b=h();for(var i=0;i<n;i++)q(a,b)",
+            "for(var a=g(),b=h(),i=0;i<n;i++)q(a,b)",
+            id="multi-var-joins-for-var-init",
+        ),
+        pytest.param("var a=1;while(c)b()", "for(var a=1;c;)b()", id="var-merges-into-converted-while"),
+        pytest.param("let a=1;for(;c;)b()", "let a=1;for(;c;)b()", id="let-stays-before-for"),
+        pytest.param("var a=1;for(i=0;c;)b()", "var a=1;for(i=0;c;)b()", id="var-expr-init-kept"),
+        pytest.param('var c="";for(let i=0;;);', 'for(var c="";;);', id="dropped-let-init-reopens-slot"),
         pytest.param("a();for(k in o)b()", "a();for(k in o)b()", id="forin-blocks-merge"),
         # a bare unlabeled break guarding a for body's top folds into the test (T then !C decide the
         # same exit at the same point; the break skipped the update exactly as a failed test does);

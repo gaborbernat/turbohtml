@@ -396,23 +396,51 @@ static void drop_unreachable(F *folder, int32_t first) {
    `var a=1,b=2`. Only touches a statement list (never a for-header), and only joins lists of
    the identical declaration kind, so scoping and hoisting are unchanged. No node is allocated,
    so the cached arena base stays valid. */
-static void merge_declarations(F *folder, int32_t first) {
+static int32_t merge_declarations(F *folder, int32_t first) {
     jm_node *nodes = folder->prog->nodes;
+    int32_t prev = -1;
     for (int32_t idx = first; idx >= 0;) {
         int32_t next = nodes[idx].next;
-        if (next < 0 || nodes[idx].kind != JN_VAR || nodes[next].kind != JN_VAR ||
-            nodes[idx].decl != nodes[next].decl) {
+        if (next >= 0 && nodes[idx].kind == JN_VAR && nodes[next].kind == JN_VAR &&
+            nodes[idx].decl == nodes[next].decl) {
+            int32_t tail = nodes[idx].a;
+            while (nodes[tail].next >= 0) {
+                tail = nodes[tail].next;
+            }
+            nodes[tail].next = nodes[next].a;
+            nodes[idx].next = nodes[next].next;
+            folder->changed = 1;
+            continue;
+        }
+        if (next >= 0 && nodes[idx].kind == JN_VAR && nodes[idx].decl == 0 && nodes[next].kind == JN_FOR &&
+            (nodes[next].a < 0 || (nodes[nodes[next].a].kind == JN_VAR && nodes[nodes[next].a].decl == 0))) {
+            /* `var A;for(...)` becomes the for's init: a var hoists to the function either way and
+               its initializers run in the same order right before the first test (14.7.4), so an
+               empty init takes the statement and a var init prepends its declarators. A let/const
+               never moves -- the head would re-scope it away from the code after the loop. */
+            int32_t init = nodes[next].a;
+            if (init >= 0) {
+                int32_t tail = nodes[idx].a;
+                while (nodes[tail].next >= 0) {
+                    tail = nodes[tail].next;
+                }
+                nodes[tail].next = nodes[init].a;
+            }
+            nodes[next].a = idx;
+            nodes[idx].next = -1;
+            if (prev < 0) {
+                first = next;
+            } else {
+                nodes[prev].next = next;
+            }
+            folder->changed = 1;
             idx = next;
             continue;
         }
-        int32_t tail = nodes[idx].a;
-        while (nodes[tail].next >= 0) {
-            tail = nodes[tail].next;
-        }
-        nodes[tail].next = nodes[next].a;
-        nodes[idx].next = nodes[next].next;
-        folder->changed = 1;
+        prev = idx;
+        idx = next;
     }
+    return first;
 }
 
 /* The single statement of an `if` branch: the statement itself, or the lone statement of a
@@ -1049,7 +1077,7 @@ static int32_t drop_empties(F *folder, int32_t first) {
 
 static int32_t optimize_chain(F *folder, int32_t first) {
     first = drop_empties(folder, first);
-    merge_declarations(folder, first);
+    first = merge_declarations(folder, first);
     merge_sequences(folder, first);
     fold_if_return_chain(folder, first);
     merge_sequences(folder, first);
@@ -1261,6 +1289,10 @@ static void walk(F *folder, int32_t idx) {
             folder->changed = 1;
         }
         node = &folder->prog->nodes[idx];
+        if (node->kind == JN_FOR && node->a >= 0 && folder->prog->nodes[node->a].kind == JN_EMPTY) {
+            node->a = -1; /* a dropped declaration left an empty init; clear it so a var can merge in */
+            folder->changed = 1;
+        }
         if (node->kind == JN_FOR && node->b >= 0 && pure_truthy(folder, node->b) == 1) {
             node->b = -1; /* an absent test always continues (14.7.4.2), same as a truthy constant */
             folder->changed = 1;
