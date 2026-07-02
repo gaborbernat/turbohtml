@@ -2,9 +2,7 @@
  From trafilatura
 ##################
 
-.. image:: https://static.pepy.tech/badge/trafilatura/month
-    :alt: trafilatura monthly downloads
-    :target: https://pepy.tech/project/trafilatura
+.. package-meta:: trafilatura adbar/trafilatura
 
 `trafilatura <https://trafilatura.readthedocs.io>`_ extracts the main text and metadata from a web page: it downloads
 the URL, scores the content body, and returns the article alongside its title, author, date, and description. It also
@@ -25,19 +23,8 @@ Extracting the content body and metadata from a full page -- navigation, a score
 :meth:`~turbohtml.Node.article` scores and harvests in one C pass over the parsed tree; trafilatura builds an lxml tree
 in Python first. Numbers vary with input and hardware.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - trafilatura
-    - - post (4 KiB)
-      - 23 µs
-      - 1.34 ms (58x)
-    - - longform (16 KiB)
-      - 70 µs
-      - 3.13 ms (45x)
+.. bench-table::
+    :file: bench/trafilatura.json
 
 *************
  The renames
@@ -47,7 +34,7 @@ in Python first. Numbers vary with input and hardware.
     :header-rows: 1
     :widths: 50 50
 
-    - - trafilatura
+    - - `trafilatura <https://trafilatura.readthedocs.io/>`__
       - turbohtml
     - - ``trafilatura.extract(html)``
       - ``doc.article().text`` (or :meth:`~turbohtml.Node.main_text`)

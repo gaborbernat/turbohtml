@@ -1,0 +1,35 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "markupsafe"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "clean (8 B)",
+      6.1e-08,
+      1.85e-07
+    ],
+    [
+      "clean (32 B)",
+      6.7e-08,
+      2.03e-07
+    ],
+    [
+      "clean (256 B)",
+      1.15e-07,
+      4.47e-07
+    ],
+    [
+      "name with ``'`` and ``&``",
+      8.4e-08,
+      2.13e-07
+    ],
+    [
+      "escape-heavy markup",
+      1.41e-07,
+      3.38e-07
+    ]
+  ]
+}

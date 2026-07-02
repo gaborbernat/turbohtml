@@ -2,9 +2,7 @@
  From w3lib
 ############
 
-.. image:: https://static.pepy.tech/badge/w3lib/month
-    :alt: w3lib monthly downloads
-    :target: https://pepy.tech/project/w3lib
+.. package-meta:: w3lib scrapy/w3lib
 
 `w3lib <https://w3lib.readthedocs.io>`_ collects low-level web utilities: entity resolution, tag/comment stripping, URL
 canonicalization, and response-encoding helpers. Only its ``w3lib.html`` text/entity subset overlaps with turbohtml; the
@@ -22,31 +20,8 @@ more ``w3lib.html`` helpers map onto the WHATWG tree: stripping a set of tags wh
 :meth:`~turbohtml.Document.meta_refresh` against ``get_base_url`` and ``get_meta_refresh``), each a structure-aware pass
 that still beats the regex:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - w3lib
-    - - unescape tiny plain (64 B)
-      - 0.02 µs
-      - 0.25 µs (12.4x)
-    - - unescape medium dense refs (4 KiB)
-      - 8.10 µs
-      - 116 µs (14.3x)
-    - - unescape book HTML, real refs (4 MiB)
-      - 2.51 ms
-      - 13.5 ms (5.4x)
-    - - strip tags, keep text (92 kB)
-      - 607 µs
-      - 1.11 ms (1.8x)
-    - - ``base_url`` (vs ``get_base_url``)
-      - 2.9 µs
-      - 7.4 µs (2.6x)
-    - - ``meta_refresh`` (vs ``get_meta_refresh``)
-      - 3.0 µs
-      - 6.5 µs (2.1x)
+.. bench-table::
+    :file: bench/w3lib.json
 
 *************
  The renames
@@ -56,7 +31,7 @@ that still beats the regex:
     :header-rows: 1
     :widths: 50 50
 
-    - - w3lib
+    - - `w3lib <https://w3lib.readthedocs.io/>`__
       - turbohtml
     - - :func:`w3lib.html.replace_entities`
       - :func:`turbohtml.unescape`

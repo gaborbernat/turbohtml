@@ -1,0 +1,40 @@
+{
+  "label": "text content",
+  "parties": [
+    "turbohtml",
+    "lxml",
+    "selectolax",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      2.8e-06,
+      3.4e-06,
+      2.14e-05,
+      1.9e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      1.31e-05,
+      1.54e-05,
+      8.97e-05,
+      7.73e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      2.37e-05,
+      2.58e-05,
+      0.0002023,
+      0.0001657
+    ],
+    [
+      "whatwg spec (235 kB)",
+      7.49e-05,
+      8.96e-05,
+      0.0007536,
+      0.0005798
+    ]
+  ]
+}

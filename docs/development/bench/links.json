@@ -1,0 +1,30 @@
+{
+  "label": "extract (``links`` / ``iterlinks``)",
+  "parties": [
+    "turbohtml",
+    "lxml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      9e-06,
+      0.000144
+    ],
+    [
+      "ars technica (56 kB)",
+      2.83e-05,
+      0.000543
+    ],
+    [
+      "mozilla blog (95 kB)",
+      5.16e-05,
+      0.0012
+    ],
+    [
+      "whatwg spec (235 kB)",
+      8.71e-05,
+      0.0042
+    ]
+  ]
+}

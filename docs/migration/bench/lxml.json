@@ -1,0 +1,95 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "lxml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "parse wpt page (4 kB)",
+      1.14e-05,
+      2.71e-05
+    ],
+    [
+      "parse wpt page (92 kB)",
+      0.000272,
+      0.000631
+    ],
+    [
+      "parse whatwg spec (235 kB)",
+      0.000518,
+      0.00122
+    ],
+    [
+      "parse ecmascript spec (3 MB)",
+      0.00454,
+      0.0174
+    ],
+    [
+      "parse fragment (2 kB)",
+      1.26e-05,
+      3.96e-05
+    ],
+    [
+      "select ``div a[href]`` (Daring Fireball, 10 kB)",
+      7e-07,
+      3.08e-05
+    ],
+    [
+      "select ``div a[href]`` (Ars Technica, 56 kB)",
+      1.6e-06,
+      0.000135
+    ],
+    [
+      "select ``div a[href]`` (Mozilla Blog, 95 kB)",
+      2.4e-06,
+      0.0008653
+    ],
+    [
+      "select ``div a[href]`` (WHATWG spec, 235 kB)",
+      2.1e-06,
+      0.00144
+    ],
+    [
+      "text content (92 kB)",
+      3.69e-05,
+      4.72e-05
+    ],
+    [
+      "descendant walk (92 kB)",
+      6.52e-05,
+      0.000278
+    ],
+    [
+      "extract links (92 kB)",
+      6.06e-05,
+      0.00228
+    ],
+    [
+      "absolutize links (92 kB)",
+      0.000251,
+      0.00276
+    ],
+    [
+      "rewrite links (92 kB)",
+      2.23e-05,
+      0.00238
+    ],
+    [
+      "XPath ``//a[@href]`` precompiled",
+      5e-07,
+      2.8e-06
+    ],
+    [
+      "``css_path`` node locator (ars technica, 56 kB)",
+      9.14e-05,
+      0.0005571
+    ],
+    [
+      "``xpath_path`` node locator (ars technica, 56 kB)",
+      9.88e-05,
+      0.000565
+    ]
+  ]
+}

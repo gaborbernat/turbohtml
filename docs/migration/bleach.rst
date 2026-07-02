@@ -2,9 +2,7 @@
  From bleach
 #############
 
-.. image:: https://static.pepy.tech/badge/bleach/month
-    :alt: bleach monthly downloads
-    :target: https://pepy.tech/project/bleach
+.. package-meta:: bleach mozilla/bleach
 
 `bleach <https://github.com/mozilla/bleach>`_ was the standard HTML allowlist sanitizer and linkifier, built on
 html5lib. It is end of life with no maintained successor, so its two jobs split across turbohtml: ``bleach.clean`` maps
@@ -18,25 +16,8 @@ Both replacements are fully type annotated, run the filtering and link scan in C
 configuration where ``bleach.clean`` had a documented thread-safety footgun. The sanitizer leads bleach by an order of
 magnitude and the linkifier by five to twenty times:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - bleach
-    - - sanitize comment (1 link, 1 script)
-      - 1.5 µs
-      - 78.1 µs (52.6x)
-    - - sanitize post (4 KiB)
-      - 42.1 µs
-      - 1921 µs (45.7x)
-    - - linkify prose (1 KiB)
-      - 51 µs
-      - 272 µs (5.4x)
-    - - linkify markup (4 KiB)
-      - 127 µs
-      - 1562 µs (12.3x)
+.. bench-table::
+    :file: bench/bleach.json
 
 **************
  bleach.clean
@@ -56,7 +37,7 @@ The bleach-compatible shim keeps ``clean``'s signature so the import is the only
     :header-rows: 1
     :widths: 50 50
 
-    - - bleach
+    - - `bleach <https://bleach.readthedocs.io/>`__
       - turbohtml
     - - ``clean(text, ...)``
       - :func:`turbohtml.migration.bleach.clean` (shim) or :func:`turbohtml.clean.sanitize` (native)
@@ -117,7 +98,7 @@ The entry points keep bleach's names, so the import changes and the common case 
     :header-rows: 1
     :widths: 50 50
 
-    - - bleach
+    - - `bleach <https://bleach.readthedocs.io/>`__
       - turbohtml
     - - ``linkify(text, ...)``
       - :func:`turbohtml.clean.linkify`

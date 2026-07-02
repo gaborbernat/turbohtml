@@ -2,9 +2,7 @@
  From pyquery
 ##############
 
-.. image:: https://static.pepy.tech/badge/pyquery/month
-    :alt: pyquery monthly downloads
-    :target: https://pepy.tech/project/pyquery
+.. package-meta:: pyquery gawel/pyquery
 
 `pyquery <https://github.com/gawel/pyquery>`_ puts a jQuery-style fluent, chainable wrapper over `lxml
 <https://lxml.de>`_/`cssselect <https://github.com/scrapy/cssselect>`_, so you select and mutate a document with method
@@ -20,43 +18,8 @@ edits its native tree in C where pyquery drives lxml under its jQuery-style wrap
 select/filter/read, setting content, bulk-editing tags, and reading a value off every match -- runs several to a hundred
 times faster:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - pyquery
-    - - select, filter, read (4 kB)
-      - 0.9 µs
-      - 16.0 µs (17.2x)
-    - - select, filter, read (9.6 kB)
-      - 1.0 µs
-      - 16.5 µs (16.1x)
-    - - select, filter, read (92 kB)
-      - 21.8 µs
-      - 278 µs (12.8x)
-    - - set inner HTML (9.6 kB)
-      - 1.3 µs
-      - 7.7 µs (5.9x)
-    - - set text (9.6 kB)
-      - 0.13 µs
-      - 4.6 µs (35.4x)
-    - - drop subtree (92 kB)
-      - 554 µs
-      - 2.06 ms (3.7x)
-    - - keep content, unwrap (92 kB)
-      - 607 µs
-      - 2.35 ms (3.9x)
-    - - ``@href`` per match (9.6 kB)
-      - 0.1 µs
-      - 4.8 µs (96.6x)
-    - - ``@href`` per match (92 kB)
-      - 8.2 µs
-      - 542 µs (65.8x)
-    - - text per match (92 kB)
-      - 8.0 µs
-      - 297 µs (37.0x)
+.. bench-table::
+    :file: bench/pyquery.json
 
 *************
  The renames
@@ -83,7 +46,7 @@ almost name for name:
     :header-rows: 1
     :widths: 50 50
 
-    - - pyquery
+    - - `pyquery <https://pyquery.readthedocs.io/>`__
       - turbohtml
     - - ``pq = PyQuery(html)``
       - :class:`Query(parse(html)) <turbohtml.query.Query>`
@@ -118,7 +81,7 @@ node, or to the last sibling), so ``query("p").wrap_all("<div/>")`` over a run o
     :header-rows: 1
     :widths: 50 50
 
-    - - pyquery
+    - - `pyquery <https://pyquery.readthedocs.io/>`__
       - turbohtml
     - - ``pq("section").contents().wrap_all("<div/>")``
       - :meth:`section.wrap_children(Element("div")) <turbohtml.Element.wrap_children>`
@@ -135,7 +98,7 @@ one verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` spli
     :header-rows: 1
     :widths: 50 50
 
-    - - pyquery
+    - - `pyquery <https://pyquery.readthedocs.io/>`__
       - turbohtml
     - - ``pq(el).html(markup)``
       - :meth:`el.set_inner_html(markup) <turbohtml.Element.set_inner_html>`

@@ -2,9 +2,7 @@
  From dominate
 ###############
 
-.. image:: https://static.pepy.tech/badge/dominate/month
-    :alt: dominate monthly downloads
-    :target: https://pepy.tech/project/dominate
+.. package-meta:: dominate Knio/dominate
 
 `dominate <https://github.com/Knio/dominate>`_ assembles HTML in Python from the other direction than a parser: you open
 a tag as a ``with`` block and nest children inside it (or pass them as arguments), then render the tree to a string.
@@ -34,19 +32,8 @@ parse it back:
 ``E`` assembles the fragment in turbohtml's arena and serializes it in C; dominate stays in Python. The same ``<ul>`` of
 rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - build a list
-      - :data:`E <turbohtml.build.E>`
-      - dominate
-    - - 100 rows
-      - 139 µs
-      - 466 µs (3.3x)
-    - - 1000 rows
-      - 1.41 ms
-      - 4.59 ms (3.3x)
+.. bench-table::
+    :file: bench/dominate.json
 
 ``E`` is about three times faster than dominate, and the decisive difference is the result type: ``E`` hands back a real
 :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query, edit,
@@ -62,7 +49,7 @@ dominate spells nesting with ``with`` blocks or positional children; the transla
     :header-rows: 1
     :widths: 50 50
 
-    - - dominate
+    - - `dominate <https://github.com/Knio/dominate>`__
       - turbohtml
     - - ``div(p("x"), cls="card")`` / ``with`` blocks
       - :data:`E.div({"class": "card"}, E.p("x")) <turbohtml.build.E>`; nest by passing children, not a context manager

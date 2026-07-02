@@ -1,0 +1,53 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "html.unescape",
+    "w3lib"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "tiny plain (64 B)",
+      2e-08,
+      3e-08,
+      2.5e-07
+    ],
+    [
+      "medium dense refs (4 KiB)",
+      8.1e-06,
+      6.93e-05,
+      0.000116
+    ],
+    [
+      "numeric refs (4 KiB)",
+      5.91e-06,
+      7.89e-05,
+      9.31e-05
+    ],
+    [
+      "book HTML, real refs (4 MiB)",
+      0.00251,
+      0.00805,
+      0.0135
+    ],
+    [
+      "escaped book HTML (5 MiB)",
+      0.00186,
+      0.0199,
+      0.0357
+    ],
+    [
+      "dense refs (4 MiB)",
+      0.00991,
+      0.0738,
+      0.119
+    ],
+    [
+      "UCS-2 refs (4 MiB)",
+      0.00267,
+      0.0184,
+      0.0276
+    ]
+  ]
+}

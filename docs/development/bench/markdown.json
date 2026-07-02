@@ -1,0 +1,41 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "markdownify",
+    "html2text"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "article (2 KiB)",
+      1.3e-05,
+      0.001185,
+      0.000542
+    ],
+    [
+      "list (4 KiB)",
+      2.3e-05,
+      0.002381,
+      0.001143
+    ],
+    [
+      "table (4 KiB)",
+      2.6e-05,
+      0.002825,
+      0.001017
+    ],
+    [
+      "configured (4 KiB)",
+      2.8e-05,
+      0.00256,
+      0.001118
+    ],
+    [
+      "google_doc (4 KiB)",
+      1.8e-05,
+      null,
+      0.00056
+    ]
+  ]
+}

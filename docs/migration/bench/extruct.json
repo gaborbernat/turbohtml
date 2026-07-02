@@ -1,0 +1,20 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "extruct"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "product page",
+      5.6e-06,
+      6.11e-05
+    ],
+    [
+      "catalog (8 KiB)",
+      5.46e-05,
+      0.0005415
+    ]
+  ]
+}

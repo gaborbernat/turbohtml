@@ -2,9 +2,7 @@
  From yattag
 #############
 
-.. image:: https://static.pepy.tech/badge/yattag/month
-    :alt: yattag monthly downloads
-    :target: https://pepy.tech/project/yattag
+.. package-meta:: yattag leforestier/yattag
 
 `yattag <https://www.yattag.org>`_ assembles HTML in Python from the other direction than a parser: you unpack ``doc,
 tag, text = Doc().tagtext()`` and open each element as a ``with tag(...)`` block, calling ``text(...)`` for content,
@@ -35,19 +33,8 @@ parse it back:
 ``E`` assembles the fragment in turbohtml's arena and serializes it in C; yattag stays in Python. The same ``<ul>`` of
 rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - build a list
-      - :data:`E <turbohtml.build.E>`
-      - yattag
-    - - 100 rows
-      - 139 µs
-      - 145 µs (1.0x)
-    - - 1000 rows
-      - 1.41 ms
-      - 1.50 ms (1.1x)
+.. bench-table::
+    :file: bench/yattag.json
 
 ``E`` runs on par with yattag, and the decisive difference is the result type: ``E`` hands back a real
 :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query, edit,
@@ -63,7 +50,7 @@ yattag opens a tag scope with a context manager; turbohtml builds children inlin
     :header-rows: 1
     :widths: 50 50
 
-    - - yattag
+    - - `yattag <https://www.yattag.org/>`__
       - turbohtml
     - - ``doc, tag, text`` with ``with tag("div"):`` and ``text("x")``
       - :data:`E.div("x") <turbohtml.build.E>` returns the element; build children inline instead of opening a tag scope

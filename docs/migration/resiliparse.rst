@@ -2,9 +2,7 @@
  From resiliparse
 ##################
 
-.. image:: https://static.pepy.tech/badge/resiliparse/month
-    :alt: resiliparse monthly downloads
-    :target: https://pepy.tech/project/resiliparse
+.. package-meta:: resiliparse chatnoir-eu/chatnoir-resiliparse
 
 `resiliparse <https://github.com/chatnoir-eu/chatnoir-resiliparse>`_ is the web-crawl processing toolkit from ChatNoir.
 Its ``HTMLTree`` wraps the same `lexbor <https://lexbor.com>`_ engine selectolax does, building a WHATWG tree with real
@@ -21,31 +19,8 @@ Parsing is a dead heat; on text extraction (``extract_plain_text`` against :meth
 ``main_content=True`` mode against :meth:`~turbohtml.Node.main_text`) turbohtml walks the WHATWG tree once in C where
 resiliparse renders off the lexbor tree in a second pass:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - resiliparse
-    - - parse wpt page (4 kB)
-      - 11.4 µs
-      - 12.7 µs (1.1x)
-    - - parse wpt page (92 kB)
-      - 272 µs
-      - 282 µs (1.0x)
-    - - parse ecmascript spec (3 MB)
-      - 4.54 ms
-      - 5.35 ms (1.2x)
-    - - to text, article (2 KiB)
-      - 7 µs
-      - 23 µs (3.1x)
-    - - to text, table (4 KiB)
-      - 28 µs
-      - 52 µs (1.8x)
-    - - main content (4 KiB)
-      - 7 µs
-      - 21 µs (2.9x)
+.. bench-table::
+    :file: bench/resiliparse.json
 
 *************
  The renames
@@ -55,7 +30,7 @@ resiliparse renders off the lexbor tree in a second pass:
     :header-rows: 1
     :widths: 50 50
 
-    - - resiliparse
+    - - `resiliparse <https://resiliparse.chatnoir.eu/>`__
       - turbohtml
     - - ``HTMLTree.parse(html)``
       - :func:`turbohtml.parse`

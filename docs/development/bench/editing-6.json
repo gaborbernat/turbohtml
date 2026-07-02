@@ -1,0 +1,35 @@
+{
+  "label": "``strip_tags`` (unwrap keep content)",
+  "parties": [
+    "turbohtml",
+    "pyquery",
+    "w3lib"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3.1e-05,
+      0.000178,
+      7e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      0.000156,
+      0.000336,
+      0.000336
+    ],
+    [
+      "mozilla blog (95 kB)",
+      0.000341,
+      0.00122,
+      0.000673
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.000844,
+      0.00304,
+      0.00215
+    ]
+  ]
+}

@@ -2,9 +2,7 @@
  From extruct
 ##############
 
-.. image:: https://static.pepy.tech/badge/extruct/month
-    :alt: extruct monthly downloads
-    :target: https://pepy.tech/project/extruct
+.. package-meta:: extruct scrapinghub/extruct
 
 `extruct <https://github.com/scrapinghub/extruct>`_ pulls the machine-readable metadata a page embeds: JSON-LD,
 Microdata, RDFa, microformats, and the OpenGraph/Twitter card tags. It builds an lxml tree and runs a separate extractor
@@ -49,19 +47,8 @@ extractor per syntax, where :meth:`~turbohtml.Document.structured_data` parses t
 format in one C walk. On a product page carrying JSON-LD, Microdata, and OpenGraph at once, the single pass runs roughly
 nine to eleven times faster:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - extruct
-    - - product page
-      - 5.6 µs
-      - 61.1 µs (11.0x)
-    - - catalog (8 KiB)
-      - 54.6 µs
-      - 541.5 µs (9.9x)
+.. bench-table::
+    :file: bench/extruct.json
 
 *************
  The renames
@@ -71,7 +58,7 @@ nine to eleven times faster:
     :header-rows: 1
     :widths: 50 50
 
-    - - extruct
+    - - `extruct <https://github.com/scrapinghub/extruct>`__
       - turbohtml
     - - ``extruct.extract(html)``
       - :meth:`~turbohtml.Document.structured_data`

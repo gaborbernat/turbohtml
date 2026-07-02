@@ -1,0 +1,29 @@
+{
+  "label": "emit a built tree",
+  "parties": [
+    "turbohtml",
+    "lxml",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 rows",
+      5.7e-06,
+      3.34e-05,
+      0.000391
+    ],
+    [
+      "1000 rows",
+      5.8e-05,
+      0.000323,
+      0.00392
+    ],
+    [
+      "10000 rows",
+      0.000563,
+      0.00328,
+      0.0393
+    ]
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "resiliparse"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "parse wpt page (4 kB)",
+      1.14e-05,
+      1.27e-05
+    ],
+    [
+      "parse wpt page (92 kB)",
+      0.000272,
+      0.000282
+    ],
+    [
+      "parse ecmascript spec (3 MB)",
+      0.00454,
+      0.00535
+    ],
+    [
+      "to text, article (2 KiB)",
+      7e-06,
+      2.3e-05
+    ],
+    [
+      "to text, table (4 KiB)",
+      2.8e-05,
+      5.2e-05
+    ],
+    [
+      "main content (4 KiB)",
+      7e-06,
+      2.1e-05
+    ]
+  ]
+}

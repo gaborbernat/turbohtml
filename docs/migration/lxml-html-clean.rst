@@ -2,9 +2,7 @@
  From lxml-html-clean
 ######################
 
-.. image:: https://static.pepy.tech/badge/lxml_html_clean/month
-    :alt: lxml-html-clean monthly downloads
-    :target: https://pepy.tech/project/lxml_html_clean
+.. package-meta:: lxml_html_clean fedora-python/lxml_html_clean
 
 `lxml-html-clean <https://github.com/fedora-python/lxml_html_clean>`_ is the ``Cleaner`` split out of
 ``lxml.html.clean``. It is a **blocklist**: you toggle off categories of dangerous content (``scripts``, ``javascript``,
@@ -20,19 +18,8 @@ library has not heard of passes through.
 anticipated. It is fully type annotated and runs the filtering walk in C rather than over an lxml tree, leading the
 blocklist cleaner by an order of magnitude:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - sanitize
-      - turbohtml
-      - lxml-html-clean
-    - - comment (1 link, 1 script)
-      - 1.5 µs
-      - 19.4 µs (13.0x)
-    - - post (4 KiB)
-      - 42.1 µs
-      - 497 µs (11.8x)
+.. bench-table::
+    :file: bench/lxml-html-clean.json
 
 *************
  The renames
@@ -51,7 +38,7 @@ Porting inverts the model. Instead of switching dangerous things off, declare th
     :header-rows: 1
     :widths: 50 50
 
-    - - lxml-html-clean
+    - - `lxml-html-clean <https://lxml-html-clean.readthedocs.io/>`__
       - turbohtml
     - - ``Cleaner(...).clean_html(text)``
       - :func:`turbohtml.clean.sanitize` with a :class:`~turbohtml.clean.Policy`

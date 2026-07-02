@@ -2,9 +2,7 @@
  From htpy
 ###########
 
-.. image:: https://static.pepy.tech/badge/htpy/month
-    :alt: htpy monthly downloads
-    :target: https://pepy.tech/project/htpy
+.. package-meta:: htpy pelme/htpy
 
 `htpy <https://htpy.dev>`_ assembles HTML in Python from the other direction than a parser: each element is an object
 whose attributes come from a call (``li(class_="item")``) and whose children sit in a ``[...]`` subscript (``ul[li("a"),
@@ -35,19 +33,8 @@ parse it back:
 ``E`` assembles the fragment in turbohtml's arena and serializes it in C; htpy stays in Python. The same ``<ul>`` of
 rows -- a class, a ``data`` attribute, and a text child apiece -- built both ways:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - build a list
-      - :data:`E <turbohtml.build.E>`
-      - htpy
-    - - 100 rows
-      - 139 µs
-      - 361 µs (2.6x)
-    - - 1000 rows
-      - 1.41 ms
-      - 3.73 ms (2.6x)
+.. bench-table::
+    :file: bench/htpy.json
 
 ``E`` is about two and a half times faster than htpy, and the decisive difference is the result type: ``E`` hands back a
 real :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query,
@@ -63,7 +50,7 @@ htpy carries attributes in the call and children in a subscript; turbohtml passe
     :header-rows: 1
     :widths: 50 50
 
-    - - htpy
+    - - `htpy <https://htpy.dev/>`__
       - turbohtml
     - - ``div(".card")[h1("Title")]``
       - :data:`E.div({"class": "card"}, E.h1("Title")) <turbohtml.build.E>`; attributes are a mapping, children are

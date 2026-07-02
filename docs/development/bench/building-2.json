@@ -1,0 +1,29 @@
+{
+  "label": "construct (no serialize)",
+  "parties": [
+    "turbohtml",
+    "lxml",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 rows",
+      4.75e-05,
+      9.4e-05,
+      0.000264
+    ],
+    [
+      "1000 rows",
+      0.000481,
+      0.000953,
+      0.00258
+    ],
+    [
+      "10000 rows",
+      0.00489,
+      0.00953,
+      0.0253
+    ]
+  ]
+}

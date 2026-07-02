@@ -1,0 +1,110 @@
+{
+  "label": "xpath (9.6 kB page)",
+  "parties": [
+    "turbohtml",
+    "lxml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "``//div``",
+      2.5e-06,
+      1.15e-05
+    ],
+    [
+      "``//a[@href]``",
+      6e-07,
+      4.1e-06
+    ],
+    [
+      "``//div//a[@href]``",
+      2.1e-06,
+      1.01e-05
+    ],
+    [
+      "``/html/body/div``",
+      1.1e-06,
+      6.4e-06
+    ],
+    [
+      "``//div//a[1]``",
+      1.11e-05,
+      1.01e-05
+    ],
+    [
+      "``//a[contains(@href, '/')]``",
+      5e-07,
+      4.3e-06
+    ],
+    [
+      "``//div[position() <= 3]``",
+      6.6e-06,
+      1.37e-05
+    ],
+    [
+      "``//a/ancestor::div``",
+      6e-07,
+      2.6e-06
+    ],
+    [
+      "``//a | //span``",
+      1e-06,
+      3.4e-06
+    ],
+    [
+      "``//*[local-name() = 'a']``",
+      5.5e-06,
+      1.43e-05
+    ],
+    [
+      "``count(//a)``",
+      6e-07,
+      2.7e-06
+    ],
+    [
+      "``//a[@href=$x]`` (variable)",
+      6e-07,
+      4.3e-06
+    ],
+    [
+      "``//a[re:test(@href, ...)]`` (EXSLT)",
+      5e-07,
+      4.6e-06
+    ],
+    [
+      "``set:distinct(//a)`` (EXSLT)",
+      6e-07,
+      4e-06
+    ],
+    [
+      "``//a/@href`` (smart_strings)",
+      6e-07,
+      2.6e-06
+    ],
+    [
+      "``ext(//a)`` (extensions)",
+      1e-06,
+      3e-06
+    ],
+    [
+      "``ext(//a)/@href`` (node-set extension)",
+      1.1e-06,
+      3.2e-06
+    ],
+    [
+      "``//svg:rect`` (namespaces=)",
+      9e-07,
+      3.7e-06
+    ],
+    [
+      "``$rows/div`` (node-set variable)",
+      3.9e-06,
+      6.1e-06
+    ],
+    [
+      "``//a[@href]`` (precompiled, reused)",
+      5e-07,
+      2.8e-06
+    ]
+  ]
+}

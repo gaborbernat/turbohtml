@@ -1,0 +1,95 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "parse wpt page (4 kB)",
+      1.14e-05,
+      0.000438
+    ],
+    [
+      "parse wpt page (92 kB)",
+      0.000272,
+      0.0153
+    ],
+    [
+      "select ``div a[href]`` (Daring Fireball, 10 kB)",
+      7e-07,
+      0.0001759
+    ],
+    [
+      "select ``div a[href]`` (Ars Technica, 56 kB)",
+      1.6e-06,
+      0.0006227
+    ],
+    [
+      "select ``div a[href]`` (Mozilla Blog, 95 kB)",
+      2.4e-06,
+      0.0012
+    ],
+    [
+      "select ``div a[href]`` (WHATWG spec, 235 kB)",
+      2.1e-06,
+      0.00329
+    ],
+    [
+      "serialize wpt page (92 kB)",
+      0.000105,
+      0.00595
+    ],
+    [
+      "find ``text=`` regex (daring fireball, 10 kB)",
+      3.6e-05,
+      5.56e-05
+    ],
+    [
+      "find ``text=`` regex (ars technica, 56 kB)",
+      0.000203,
+      0.000219
+    ],
+    [
+      "find ``text=`` regex (mozilla blog, 95 kB)",
+      0.000321,
+      0.000465
+    ],
+    [
+      "find ``text=`` regex (whatwg spec, 235 kB)",
+      0.000731,
+      0.001698
+    ],
+    [
+      "walk descendants (4 kB)",
+      1.3e-06,
+      2.7e-06
+    ],
+    [
+      "walk descendants (9.6 kB)",
+      2.3e-06,
+      4.8e-06
+    ],
+    [
+      "walk descendants (92 kB)",
+      6.52e-05,
+      0.0001233
+    ],
+    [
+      "``get_text`` (4 kB)",
+      8e-07,
+      6.7e-06
+    ],
+    [
+      "``get_text`` (9.6 kB)",
+      1.1e-06,
+      1.37e-05
+    ],
+    [
+      "``get_text`` (92 kB)",
+      3.8e-05,
+      0.0003724
+    ]
+  ]
+}

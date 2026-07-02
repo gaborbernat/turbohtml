@@ -5,12 +5,18 @@ from __future__ import annotations
 import ast
 import copy
 import re
+import sys
 from importlib.metadata import version as _version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from docutils import nodes
+from docutils.parsers.rst import Directive
+
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
+
+sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 
 project = "turbohtml"
 author = "Bernát Gábor"
@@ -31,6 +37,7 @@ extensions = [
     "sphinx_issues",  # the :issue: role used by the changelog
     "sphinxcontrib.mermaid",  # the .. mermaid:: directive used by the explanation diagrams
     "sphinxcontrib.towncrier.ext",  # render unreleased news fragments as a draft section
+    "bench_table",  # the .. bench-table:: directive rendering the benchmark tables from a data feed (docs/_ext)
 ]
 
 html_theme = "furo"
@@ -225,8 +232,52 @@ def _stub_signature_for_alias(  # noqa: PLR0913, PLR0917 -- the signature is fix
     return arguments, return_type or ""
 
 
+class _PackageMeta(Directive):
+    """
+    Render one badge row of package metadata: ``.. package-meta:: <pypi-name> [github-slug]``.
+
+    Every migration guide opens with the same at-a-glance facts about the library it replaces (latest release,
+    supported Pythons, license, downloads, and -- when the project lives on GitHub -- stars and recency), so a single
+    directive keeps the set and its order identical across the guides instead of hand-maintaining badge stacks.
+    """
+
+    required_arguments = 1
+    optional_arguments = 1
+
+    def run(self) -> list[nodes.Node]:
+        pypi = self.arguments[0]
+        badges = [
+            (
+                "latest release",
+                f"https://img.shields.io/pypi/v/{pypi}?label=release",
+                f"https://pypi.org/project/{pypi}/",
+            ),
+            (
+                "supported Pythons",
+                f"https://img.shields.io/pypi/pyversions/{pypi}",
+                f"https://pypi.org/project/{pypi}/",
+            ),
+            ("license", f"https://img.shields.io/pypi/l/{pypi}", f"https://pypi.org/project/{pypi}/"),
+            ("monthly downloads", f"https://static.pepy.tech/badge/{pypi}/month", f"https://pepy.tech/project/{pypi}"),
+            ("total downloads", f"https://static.pepy.tech/badge/{pypi}", f"https://pepy.tech/project/{pypi}"),
+        ]
+        if len(self.arguments) > 1:
+            slug = self.arguments[1]
+            badges += [
+                ("GitHub stars", f"https://img.shields.io/github/stars/{slug}", f"https://github.com/{slug}"),
+                ("last commit", f"https://img.shields.io/github/last-commit/{slug}", f"https://github.com/{slug}"),
+            ]
+        row = nodes.paragraph(classes=["package-meta"])
+        for alt, image, target in badges:
+            link = nodes.reference(refuri=target)
+            link += nodes.image(uri=image, alt=f"{pypi} {alt}")
+            row += link
+        return [row]
+
+
 def setup(app: Sphinx) -> dict[str, Any]:
-    """Wire the stub-sourced type annotations into autodoc."""
+    """Wire the stub-sourced type annotations into autodoc and register the package-meta badge row."""
     _patch_autodoc_engine()
     app.connect("autodoc-process-signature", _stub_signature_for_alias)
+    app.add_directive("package-meta", _PackageMeta)
     return {"parallel_read_safe": True, "parallel_write_safe": True}

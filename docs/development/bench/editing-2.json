@@ -1,0 +1,30 @@
+{
+  "label": "class add/remove on every link",
+  "parties": [
+    "turbohtml",
+    "lxml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      4.6e-06,
+      5.18e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      1.5e-05,
+      0.000139
+    ],
+    [
+      "mozilla blog (95 kB)",
+      1.33e-05,
+      0.000181
+    ],
+    [
+      "whatwg spec (235 kB)",
+      1.34e-05,
+      0.000214
+    ]
+  ]
+}

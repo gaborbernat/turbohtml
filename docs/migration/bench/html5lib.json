@@ -1,0 +1,35 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "html5lib"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "parse wpt page (4 kB)",
+      1.14e-05,
+      0.00062
+    ],
+    [
+      "parse wpt page (92 kB)",
+      0.000272,
+      0.0167
+    ],
+    [
+      "tokenize typical markup",
+      3.49e-05,
+      0.000836
+    ],
+    [
+      "tokenize whatwg spec (235 kB)",
+      0.000708,
+      0.0201
+    ],
+    [
+      "parse fragment, table row (2 kB)",
+      1.26e-05,
+      0.000867
+    ]
+  ]
+}

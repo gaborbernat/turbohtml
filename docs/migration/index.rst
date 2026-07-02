@@ -7,9 +7,9 @@ turbohtml uses one name per concept and a typed shape where those libraries spre
 treebuilder choices. This page maps each library to turbohtml; `BeautifulSoup
 <https://www.crummy.com/software/BeautifulSoup/>`_ gets the deepest treatment because it shares the most surface.
 
-The guides are now grouped by task so you can jump to the job you are porting; within each group they stay ordered by
-adoption, most to least monthly PyPI downloads, so the libraries you are most likely to port from come first. The
-all-time totals and each library's documentation sit alongside for context.
+The guides are grouped by task so you can jump to the job you are porting; within each group, and across the sidebar as
+a whole, they are ordered by adoption, most to least monthly PyPI downloads, so the libraries you are most likely to
+port from come first. The all-time totals and each library's documentation sit alongside for context.
 
 ***************
  Parsing & DOM
@@ -448,9 +448,6 @@ page benchmarks all of them).
     lxml
     linkify-it-py
     bleach
-    rcssmin
-    csscompressor
-    lightningcss
     markdownify
     nh3
     html5lib
@@ -460,14 +457,16 @@ page benchmarks all of them).
     trafilatura
     selectolax
     parsel
-    pyquery
+    rcssmin
     dominate
-    inscriptis
+    pyquery
     readability-lxml
+    inscriptis
+    minify-html
     html-text
     resiliparse
+    csscompressor
     newspaper3k
-    minify-html
     html-sanitizer
     yattag
     extruct
@@ -476,4 +475,5 @@ page benchmarks all of them).
     airium
     html5-parser
     metadata_parser
+    lightningcss
     stdlib

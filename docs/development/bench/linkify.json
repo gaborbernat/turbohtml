@@ -1,0 +1,29 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "bleach",
+    "linkify-it-py"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "comment (1 link, 1 email)",
+      2.9e-06,
+      5.2e-05,
+      2.9e-05
+    ],
+    [
+      "prose (1 KiB)",
+      5.1e-05,
+      0.000272,
+      0.00031
+    ],
+    [
+      "markup (4 KiB)",
+      0.000127,
+      0.001562,
+      0.000708
+    ]
+  ]
+}

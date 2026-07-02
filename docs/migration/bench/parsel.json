@@ -1,0 +1,45 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "parsel"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "select ``div a[href]`` (Daring Fireball, 10 kB)",
+      7e-07,
+      3.4e-05
+    ],
+    [
+      "select ``div a[href]`` (Ars Technica, 56 kB)",
+      1.6e-06,
+      0.0001488
+    ],
+    [
+      "select ``div a[href]`` (Mozilla Blog, 95 kB)",
+      2.4e-06,
+      0.0008978
+    ],
+    [
+      "select ``div a[href]`` (WHATWG spec, 235 kB)",
+      2.1e-06,
+      0.00148
+    ],
+    [
+      "``@href`` per match (9.6 kB)",
+      1e-07,
+      4.3e-06
+    ],
+    [
+      "``@href`` per match (92 kB)",
+      8.2e-06,
+      0.000222
+    ],
+    [
+      "text per match (92 kB)",
+      8e-06,
+      0.000214
+    ]
+  ]
+}

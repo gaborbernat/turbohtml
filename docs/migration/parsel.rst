@@ -2,9 +2,7 @@
  From parsel
 #############
 
-.. image:: https://static.pepy.tech/badge/parsel/month
-    :alt: parsel monthly downloads
-    :target: https://pepy.tech/project/parsel
+.. package-meta:: parsel scrapy/parsel
 
 `parsel <https://parsel.readthedocs.io>`_ is `Scrapy <https://scrapy.org>`_'s extraction-oriented selector library: a
 :class:`~parsel.selector.Selector` query returns a :class:`~parsel.selector.SelectorList` and you pull *strings* out of
@@ -22,34 +20,8 @@ and matches by comparing interned integer atoms, where parsel translates every `
 re-evaluates it on libxml2 per call, so a reused query -- and pulling the values out of every match, parsel's whole
 point -- runs tens to hundreds of times faster:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - parsel
-    - - select ``div a[href]`` (Daring Fireball, 10 kB)
-      - 0.7 µs
-      - 34.0 µs (48.4x)
-    - - select ``div a[href]`` (Ars Technica, 56 kB)
-      - 1.6 µs
-      - 148.8 µs (90.6x)
-    - - select ``div a[href]`` (Mozilla Blog, 95 kB)
-      - 2.4 µs
-      - 897.8 µs (378.2x)
-    - - select ``div a[href]`` (WHATWG spec, 235 kB)
-      - 2.1 µs
-      - 1.48 ms (705.8x)
-    - - ``@href`` per match (9.6 kB)
-      - 0.1 µs
-      - 4.3 µs (86.2x)
-    - - ``@href`` per match (92 kB)
-      - 8.2 µs
-      - 222 µs (27.0x)
-    - - text per match (92 kB)
-      - 8.0 µs
-      - 214 µs (26.6x)
+.. bench-table::
+    :file: bench/parsel.json
 
 *************
  The renames
@@ -62,7 +34,7 @@ including their ``attr`` keyword for running a pattern over an attribute value i
     :header-rows: 1
     :widths: 50 50
 
-    - - parsel
+    - - `parsel <https://parsel.readthedocs.io/>`__
       - turbohtml
     - - :class:`Selector(text=html) <parsel.selector.Selector>`
       - :func:`turbohtml.parse`

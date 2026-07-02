@@ -1,0 +1,20 @@
+{
+  "label": "build a list",
+  "parties": [
+    ":data:`E <turbohtml.build.E>`",
+    "yattag"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 rows",
+      0.000139,
+      0.000145
+    ],
+    [
+      "1000 rows",
+      0.00141,
+      0.0015
+    ]
+  ]
+}

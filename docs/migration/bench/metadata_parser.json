@@ -1,0 +1,20 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "metadata_parser"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "social-card head",
+      2e-06,
+      0.000142
+    ],
+    [
+      "article (8 KiB)",
+      2.79e-05,
+      0.00228
+    ]
+  ]
+}

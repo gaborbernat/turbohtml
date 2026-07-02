@@ -14,25 +14,8 @@ non-WHATWG-conformant tokenizer you subclass with ``handle_*`` callbacks.
 are drop-ins, but scan with SIMD and run several times faster. The tokenizer and :func:`turbohtml.parse` are
 WHATWG-conformant where ``html.parser`` is not, and the whole surface is fully type annotated:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - standard library
-    - - escape medium markup (4 KiB)
-      - 2.27 µs
-      - 7.19 µs (3.2x)
-    - - unescape medium dense refs (4 KiB)
-      - 8.10 µs
-      - 69.3 µs (8.6x)
-    - - tokenize typical markup
-      - 34.9 µs
-      - 435 µs (12.5x)
-    - - feed and dispatch wpt page (9.6 kB)
-      - 82.1 µs
-      - 362 µs (4.4x)
+.. bench-table::
+    :file: bench/stdlib.json
 
 *********************
  Escape and unescape

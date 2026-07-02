@@ -2,9 +2,7 @@
  From selectolax
 #################
 
-.. image:: https://static.pepy.tech/badge/selectolax/month
-    :alt: selectolax monthly downloads
-    :target: https://pepy.tech/project/selectolax
+.. package-meta:: selectolax rushter/selectolax
 
 `selectolax <https://github.com/rushter/selectolax>`_ is a fast CSS-only HTML parser that wraps the `lexbor
 <https://lexbor.com>`_ engine. It searches with CSS selectors and exposes ``text()`` as a method, with limited tree
@@ -22,46 +20,8 @@ their subtrees faster (:meth:`~turbohtml.Node.remove` against ``strip_tags``, ov
 selectolax's ``text()`` method) six to thirteen times faster, concatenating in one C pass where selectolax crosses the
 lexbor boundary per node:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - selectolax
-    - - parse wpt page (4 kB)
-      - 11.4 µs
-      - 42.2 µs (3.7x)
-    - - parse wpt page (92 kB)
-      - 272 µs
-      - 917 µs (3.4x)
-    - - select ``div a[href]`` (Daring Fireball, 10 kB)
-      - 0.7 µs
-      - 7.7 µs (11.0x)
-    - - select ``div a[href]`` (Ars Technica, 56 kB)
-      - 1.6 µs
-      - 20.4 µs (12.4x)
-    - - select ``div a[href]`` (Mozilla Blog, 95 kB)
-      - 2.4 µs
-      - 34.9 µs (14.7x)
-    - - select ``div a[href]`` (WHATWG spec, 235 kB)
-      - 2.1 µs
-      - 81.6 µs (39.1x)
-    - - serialize wpt page (92 kB)
-      - 105 µs
-      - 339 µs (3.2x)
-    - - drop tags with content (92 kB)
-      - 554 µs
-      - 1.73 ms (3.1x)
-    - - text content (4 kB)
-      - 0.8 µs
-      - 5.2 µs (6.4x)
-    - - text content (9.6 kB)
-      - 1.1 µs
-      - 12.1 µs (11.4x)
-    - - text content (92 kB)
-      - 36.9 µs
-      - 488 µs (13.2x)
+.. bench-table::
+    :file: bench/selectolax.json
 
 *************
  The renames
@@ -71,7 +31,7 @@ lexbor boundary per node:
     :header-rows: 1
     :widths: 50 50
 
-    - - selectolax
+    - - `selectolax <https://github.com/rushter/selectolax>`__
       - turbohtml
     - - ``LexborHTMLParser(html)``
       - :func:`turbohtml.parse`

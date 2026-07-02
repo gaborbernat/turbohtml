@@ -10,16 +10,23 @@ target, so this entry point itself needs only uv on PATH -- no turbohtml, no com
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from bench import orchestrator
+from bench import orchestrator, report
 
 
 def main() -> None:
     """Parse the command argument plus any pyperf passthrough options and run the matching report."""
-    if len(sys.argv) < 2:
-        msg = "usage: python -m bench <core|all|operation|package> [pyperf options...]"
+    arguments = sys.argv[1:]
+    if "--table-json" in arguments:
+        # also write each rendered table as the docs' bench-table JSON feed into the named directory
+        position = arguments.index("--table-json")
+        report.TABLE_JSON_DIR = Path(arguments[position + 1])
+        del arguments[position : position + 2]
+    if not arguments:
+        msg = "usage: python -m bench [--table-json DIR] <core|all|operation|package> [pyperf options...]"
         raise SystemExit(msg)
-    orchestrator.run(sys.argv[1], tuple(sys.argv[2:]))
+    orchestrator.run(arguments[0], tuple(arguments[1:]))
 
 
 if __name__ == "__main__":

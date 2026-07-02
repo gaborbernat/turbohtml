@@ -2,9 +2,7 @@
  From BeautifulSoup
 ####################
 
-.. image:: https://static.pepy.tech/badge/beautifulsoup4/month
-    :alt: beautifulsoup4 monthly downloads
-    :target: https://pepy.tech/project/beautifulsoup4
+.. package-meta:: beautifulsoup4
 
 `BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ is the long-standing convenience layer over a
 choice of HTML parsers (``html.parser``, ``lxml``, or ``html5lib``): you pick a backend, then navigate and search the
@@ -21,64 +19,8 @@ to three orders of magnitude faster than BeautifulSoup over ``html.parser`` -- i
 (``find(text=...)`` against ``find_all(string=...)``), walking the tree (:attr:`~turbohtml.Node.descendants` against
 ``soup.descendants``), and reading its text (:attr:`~turbohtml.Node.text` against ``soup.get_text()``):
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - BeautifulSoup
-    - - parse wpt page (4 kB)
-      - 11.4 µs
-      - 438 µs (38.5x)
-    - - parse wpt page (92 kB)
-      - 272 µs
-      - 15.3 ms (56.2x)
-    - - select ``div a[href]`` (Daring Fireball, 10 kB)
-      - 0.7 µs
-      - 175.9 µs (250.6x)
-    - - select ``div a[href]`` (Ars Technica, 56 kB)
-      - 1.6 µs
-      - 622.7 µs (379.2x)
-    - - select ``div a[href]`` (Mozilla Blog, 95 kB)
-      - 2.4 µs
-      - 1.20 ms (505.0x)
-    - - select ``div a[href]`` (WHATWG spec, 235 kB)
-      - 2.1 µs
-      - 3.29 ms (1573.9x)
-    - - serialize wpt page (92 kB)
-      - 105 µs
-      - 5.95 ms (56.8x)
-    - - find ``text=`` regex (daring fireball, 10 kB)
-      - 36.0 µs
-      - 55.6 µs (1.5x)
-    - - find ``text=`` regex (ars technica, 56 kB)
-      - 203 µs
-      - 219.0 µs (1.1x)
-    - - find ``text=`` regex (mozilla blog, 95 kB)
-      - 321 µs
-      - 465.0 µs (1.4x)
-    - - find ``text=`` regex (whatwg spec, 235 kB)
-      - 731 µs
-      - 1698 µs (2.3x)
-    - - walk descendants (4 kB)
-      - 1.3 µs
-      - 2.7 µs (2.1x)
-    - - walk descendants (9.6 kB)
-      - 2.3 µs
-      - 4.8 µs (2.1x)
-    - - walk descendants (92 kB)
-      - 65.2 µs
-      - 123.3 µs (1.9x)
-    - - ``get_text`` (4 kB)
-      - 0.8 µs
-      - 6.7 µs (8.3x)
-    - - ``get_text`` (9.6 kB)
-      - 1.1 µs
-      - 13.7 µs (12.9x)
-    - - ``get_text`` (92 kB)
-      - 38.0 µs
-      - 372.4 µs (9.8x)
+.. bench-table::
+    :file: bench/beautifulsoup.json
 
 The :doc:`/development/performance` page benchmarks the build and edit paths against BeautifulSoup too.
 
@@ -142,7 +84,7 @@ with an explicit ``encoding=``).
     :header-rows: 1
     :widths: 50 50
 
-    - - BeautifulSoup
+    - - `BeautifulSoup <https://www.crummy.com/software/BeautifulSoup/>`__
       - turbohtml
     - - ``tag.name``
       - :attr:`~turbohtml.Element.tag`

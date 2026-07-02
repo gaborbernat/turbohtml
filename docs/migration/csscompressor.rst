@@ -2,9 +2,7 @@
  From csscompressor
 ####################
 
-.. image:: https://static.pepy.tech/badge/csscompressor/month
-    :alt: csscompressor monthly downloads
-    :target: https://pepy.tech/project/csscompressor
+.. package-meta:: csscompressor sprymix/csscompressor
 
 `csscompressor <https://github.com/sprymix/csscompressor>`_ is a pure-Python port of the YUI CSS compressor. Like
 turbohtml it *rewrites* values -- colors to hex, redundant zeros and units dropped -- so it is in the same minifier
@@ -15,51 +13,14 @@ produces a smaller result and runs in C rather than chained regular expressions.
  Why turbohtml
 ***************
 
-turbohtml's output is smaller on every framework except the custom-property-heavy ``bulma.css``, where csscompressor
-edges ahead only by rewriting the custom-property whitespace `CSS Variables 1 §3
-<https://www.w3.org/TR/css-variables-1/#defining-variables>`_ preserves. Its C engine is also 40x to 130x faster --
-csscompressor's regex passes turn quadratic on a large stylesheet, where turbohtml stays linear. Each cell shows the
-figure with its ratio to turbohtml:
+turbohtml's output is smaller on every framework, including the custom-property-heavy ``bulma.css``, and its C engine is
+40x to 155x faster -- csscompressor's regex passes turn quadratic on a large stylesheet, where turbohtml stays linear.
+csscompressor also rewrites whitespace inside custom-property values, which `CSS Variables 1 §2
+<https://www.w3.org/TR/css-variables-1/#defining-variables>`_ keeps as the literal token stream that ``var()`` splices
+verbatim, so its output is not guaranteed to parse to the same cascade. Each ratio is against turbohtml:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 24 19 19 19 19
-
-    - - stylesheet
-      - turbohtml size
-      - csscompressor size
-      - turbohtml time
-      - csscompressor time
-    - - normalize.css (6 kB)
-      - 1.8 kB
-      - 1.8 kB (1.04x)
-      - 15.9 µs
-      - 1.11 ms (70x)
-    - - animate.css (93 kB)
-      - 72.8 kB
-      - 75.7 kB (1.04x)
-      - 605 µs
-      - 24.8 ms (41x)
-    - - pico.css (90 kB)
-      - 81.0 kB
-      - 81.6 kB (1.01x)
-      - 457 µs
-      - 35.1 ms (77x)
-    - - foundation.css (164 kB)
-      - 131.4 kB
-      - 136.4 kB (1.04x)
-      - 1.09 ms
-      - 58.8 ms (54x)
-    - - bootstrap.css (274 kB)
-      - 229.4 kB
-      - 234.2 kB (1.02x)
-      - 1.65 ms
-      - 80.9 ms (49x)
-    - - bulma.css (745 kB)
-      - 682.2 kB
-      - 681.3 kB (0.999x)
-      - 3.46 ms
-      - 538 ms (155x)
+.. bench-table::
+    :file: bench/csscompressor.json
 
 turbohtml also folds constant ``calc()``, merges box longhands into shorthands, and combines adjacent equal-bodied
 rules, none of which csscompressor attempts, so the size gap widens on framework CSS that leans on those forms.

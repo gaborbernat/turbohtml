@@ -1,0 +1,30 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "standard library"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "escape medium markup (4 KiB)",
+      2.27e-06,
+      7.19e-06
+    ],
+    [
+      "unescape medium dense refs (4 KiB)",
+      8.1e-06,
+      6.93e-05
+    ],
+    [
+      "tokenize typical markup",
+      3.49e-05,
+      0.000435
+    ],
+    [
+      "feed and dispatch wpt page (9.6 kB)",
+      8.21e-05,
+      0.000362
+    ]
+  ]
+}

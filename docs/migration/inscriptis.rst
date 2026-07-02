@@ -2,9 +2,7 @@
  From inscriptis
 #################
 
-.. image:: https://static.pepy.tech/badge/inscriptis/month
-    :alt: inscriptis monthly downloads
-    :target: https://pepy.tech/project/inscriptis
+.. package-meta:: inscriptis weblyzard/inscriptis
 
 `inscriptis <https://github.com/weblyzard/inscriptis>`_ renders HTML to *layout-aware* plain text: it keeps the visual
 structure, most visibly by laying tables out as aligned columns, and can tag the output with labeled annotation spans.
@@ -18,22 +16,8 @@ It builds an lxml tree and a CSS model in Python.
 :meth:`~turbohtml.Node.to_annotated_text` ports the annotation surface. Doing the whole layout natively makes it roughly
 twenty times faster:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - to text
-      - turbohtml
-      - inscriptis
-    - - article (2 KiB)
-      - 7 µs
-      - 163 µs (23.5x)
-    - - table (4 KiB)
-      - 28 µs
-      - 839 µs (30.1x)
-    - - annotated (4 KiB)
-      - 10 µs
-      - 202 µs (20.8x)
+.. bench-table::
+    :file: bench/inscriptis.json
 
 *************
  The renames
@@ -70,7 +54,7 @@ The ``ParserConfig`` options map onto :class:`~turbohtml.PlainText` config field
     :header-rows: 1
     :widths: 50 50
 
-    - - inscriptis
+    - - `inscriptis <https://github.com/weblyzard/inscriptis>`__
       - turbohtml :class:`~turbohtml.PlainText`
     - - ``display_links``
       - ``links`` (``"none"``/``"inline"``/``"footnote"``)
@@ -133,7 +117,7 @@ as ``<label>...</label>`` markup, innermost span closing first).
     :header-rows: 1
     :widths: 50 50
 
-    - - inscriptis output processor
+    - - `inscriptis <https://github.com/weblyzard/inscriptis>`__ output processor
       - turbohtml
     - - ``SurfaceExtractor`` (``surface`` annotation processor)
       - :func:`turbohtml.annotation_surface`

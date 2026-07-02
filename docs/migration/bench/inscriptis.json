@@ -1,0 +1,25 @@
+{
+  "label": "to text",
+  "parties": [
+    "turbohtml",
+    "inscriptis"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "article (2 KiB)",
+      7e-06,
+      0.000163
+    ],
+    [
+      "table (4 KiB)",
+      2.8e-05,
+      0.000839
+    ],
+    [
+      "annotated (4 KiB)",
+      1e-05,
+      0.000202
+    ]
+  ]
+}

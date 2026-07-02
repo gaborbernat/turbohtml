@@ -1,0 +1,65 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "selectolax"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "parse wpt page (4 kB)",
+      1.14e-05,
+      4.22e-05
+    ],
+    [
+      "parse wpt page (92 kB)",
+      0.000272,
+      0.000917
+    ],
+    [
+      "select ``div a[href]`` (Daring Fireball, 10 kB)",
+      7e-07,
+      7.7e-06
+    ],
+    [
+      "select ``div a[href]`` (Ars Technica, 56 kB)",
+      1.6e-06,
+      2.04e-05
+    ],
+    [
+      "select ``div a[href]`` (Mozilla Blog, 95 kB)",
+      2.4e-06,
+      3.49e-05
+    ],
+    [
+      "select ``div a[href]`` (WHATWG spec, 235 kB)",
+      2.1e-06,
+      8.16e-05
+    ],
+    [
+      "serialize wpt page (92 kB)",
+      0.000105,
+      0.000339
+    ],
+    [
+      "drop tags with content (92 kB)",
+      0.000554,
+      0.00173
+    ],
+    [
+      "text content (4 kB)",
+      8e-07,
+      5.2e-06
+    ],
+    [
+      "text content (9.6 kB)",
+      1.1e-06,
+      1.21e-05
+    ],
+    [
+      "text content (92 kB)",
+      3.69e-05,
+      0.000488
+    ]
+  ]
+}

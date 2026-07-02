@@ -1,0 +1,60 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "select, filter, read (4 kB)",
+      9e-07,
+      1.6e-05
+    ],
+    [
+      "select, filter, read (9.6 kB)",
+      1e-06,
+      1.65e-05
+    ],
+    [
+      "select, filter, read (92 kB)",
+      2.18e-05,
+      0.000278
+    ],
+    [
+      "set inner HTML (9.6 kB)",
+      1.3e-06,
+      7.7e-06
+    ],
+    [
+      "set text (9.6 kB)",
+      1.3e-07,
+      4.6e-06
+    ],
+    [
+      "drop subtree (92 kB)",
+      0.000554,
+      0.00206
+    ],
+    [
+      "keep content, unwrap (92 kB)",
+      0.000607,
+      0.00235
+    ],
+    [
+      "``@href`` per match (9.6 kB)",
+      1e-07,
+      4.8e-06
+    ],
+    [
+      "``@href`` per match (92 kB)",
+      8.2e-06,
+      0.000542
+    ],
+    [
+      "text per match (92 kB)",
+      8e-06,
+      0.000297
+    ]
+  ]
+}
