@@ -478,6 +478,32 @@ static int ends_abruptly(F *folder, int32_t idx) {
     return node->kind == JN_RETURN || node->kind == JN_THROW || node->kind == JN_BREAK || node->kind == JN_CONTINUE;
 }
 
+/* The boolean negation of an expression, for a test position (ToBoolean consumes the value, so
+   only truthiness must invert): a `!x` peels to x, an (in)equality flips its operator in place
+   (7.2.13/7.2.14: != is the exact complement of ==, !== of ===), and anything else gains a fresh
+   `!`. Returns the negated node, or -1 on allocation failure. */
+static int32_t negate_for_test(F *folder, int32_t idx) {
+    jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_UNARY && node->op == JT_NOT) {
+        return node->a;
+    }
+    if (node->kind == JN_BINARY &&
+        (node->op == JT_EQ_EQ || node->op == JT_NE || node->op == JT_EQ_EQ_EQ || node->op == JT_NE_EQ)) {
+        node->op = node->op == JT_EQ_EQ      ? JT_NE
+                   : node->op == JT_NE       ? JT_EQ_EQ
+                   : node->op == JT_EQ_EQ_EQ ? JT_NE_EQ
+                                             : JT_EQ_EQ_EQ;
+        return idx;
+    }
+    int32_t neg = jm_node_new(folder->prog, JN_UNARY);
+    if (neg < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    folder->prog->nodes[neg].op = JT_NOT;
+    folder->prog->nodes[neg].a = idx;
+    return neg;
+}
+
 /* Build `test ? then : els`, flipping `!x ? a : b` to `x ? b : a` to drop the negation (13.14);
    a doubled `!!x` test peels both, since a conditional reads its test as a boolean. */
 static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t els) {
@@ -716,6 +742,24 @@ static void merge_sequences(F *folder, int32_t first) {
                 folder->changed = 1;
             }
             next = prog->nodes[idx].next;
+        }
+        if (next >= 0 && prog->nodes[next].kind == JN_FOR &&
+            (prog->nodes[next].a < 0 || prog->nodes[prog->nodes[next].a].kind != JN_VAR)) {
+            /* the init clause runs once before the first test (14.7.4.2), exactly when the
+               preceding expression statement ran; a var init has no expression slot to join */
+            if (prog->nodes[next].a < 0) {
+                prog->nodes[next].a = prog->nodes[idx].a;
+            } else {
+                int32_t seq = as_sequence(prog, prog->nodes[idx].a);
+                if (seq < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                    continue;  /* GCOVR_EXCL_LINE */
+                }
+                seq_append(prog, seq, prog->nodes[next].a);
+                prog->nodes[next].a = seq;
+            }
+            prog->nodes[idx].kind = JN_EMPTY; /* the next pass's drop_empties unlinks it */
+            folder->changed = 1;
+            continue;
         }
         if (next < 0 || (prog->nodes[next].kind != JN_RETURN && prog->nodes[next].kind != JN_THROW) ||
             prog->nodes[next].a < 0) {
@@ -1104,6 +1148,61 @@ static void walk(F *folder, int32_t idx) {
                                           : child_c;      /* for-in / for-of */
         if (folder->prog->nodes[body].kind == JN_BLOCK) { /* a loop always has a body statement */
             fold_guard_jump(folder, folder->prog->nodes[body].a, JN_CONTINUE);
+        }
+        if (kind == JN_WHILE) {
+            /* while(c) and for(;c;) run identically (14.7.3 / 14.7.4: test before every iteration,
+               a continue re-tests through the empty update), and only the for form has the init
+               slot a preceding expression statement merges into. Re-read node: the walks and the
+               guard fold above may have grown the arena. */
+            node = &folder->prog->nodes[idx];
+            node->kind = JN_FOR;
+            node->a = -1;
+            node->b = child_a;
+            node->c = -1;
+            node->d = child_b;
+            folder->changed = 1;
+        }
+        node = &folder->prog->nodes[idx];
+        if (node->kind == JN_FOR && node->b >= 0 && pure_truthy(folder, node->b) == 1) {
+            node->b = -1; /* an absent test always continues (14.7.4.2), same as a truthy constant */
+            folder->changed = 1;
+        }
+        if (node->kind == JN_FOR) {
+            /* `for(;T;U){if(C)break;R}` runs R exactly when T then !C hold, and the break skips the
+               update just as a failed test would never reach it, so the guard folds into the test:
+               `for(;T&&!C;U){R}`. Only a bare unlabeled break at the body's top qualifies -- a
+               labeled break may target an outer loop, and a later position runs code before C. */
+            int body_is_block = folder->prog->nodes[body].kind == JN_BLOCK;
+            int32_t guard = body_is_block ? folder->prog->nodes[body].a : body;
+            if (guard >= 0 && folder->prog->nodes[guard].kind == JN_IF && folder->prog->nodes[guard].c < 0) {
+                int32_t then = branch_stmt(folder, folder->prog->nodes[guard].b);
+                if (then >= 0 && folder->prog->nodes[then].kind == JN_BREAK && folder->prog->nodes[then].str == NULL) {
+                    int32_t negated = negate_for_test(folder, folder->prog->nodes[guard].a);
+                    if (negated >= 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the if */
+                        node = &folder->prog->nodes[idx];
+                        if (node->b < 0) {
+                            node->b = negated;
+                        } else {
+                            int32_t logic = jm_node_new(folder->prog, JN_LOGICAL);
+                            if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                                return;      /* GCOVR_EXCL_LINE */
+                            }
+                            node = &folder->prog->nodes[idx];
+                            folder->prog->nodes[logic].op = JT_AND;
+                            folder->prog->nodes[logic].a = node->b;
+                            folder->prog->nodes[logic].b = negated;
+                            node->b = logic;
+                        }
+                        if (body_is_block) {
+                            folder->prog->nodes[body].a = folder->prog->nodes[guard].next;
+                        }
+                        if (!body_is_block || folder->prog->nodes[body].a < 0) {
+                            folder->prog->nodes[body].kind = JN_EMPTY; /* prints as the bare `;` body */
+                        }
+                        folder->changed = 1;
+                    }
+                }
+            }
         }
         return;
     }

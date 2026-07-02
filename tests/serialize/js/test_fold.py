@@ -98,7 +98,7 @@ _NODE = shutil.which("node")
         # runs exactly when the test was falsy either way), so the alternate joins the chain; a
         # falling-through consequent and Annex-B `else function` keep their else
         pytest.param("function f(){if(a)throw e;else g()}", "function f(){if(a)throw e;g()}", id="abrupt-else-spliced"),
-        pytest.param("while(x){if(a)break;else g()}", "while(x){if(a)break;g()}", id="abrupt-break-else-spliced"),
+        pytest.param("while(x){if(a)break;else g()}", "for(;x&&!a;)g()", id="abrupt-break-else-spliced"),
         pytest.param(
             "function f(){if(a)return 1;else if(b)return 2;else g();h()}",
             "function f(){if(a)return 1;if(b)return 2;g(),h()}",
@@ -127,7 +127,7 @@ _NODE = shutil.which("node")
         pytest.param("var f=()=>{return void g()}", "var f=()=>{g()}", id="tail-return-void-arrow"),
         pytest.param(
             "function f(){while(a)b();return void 0}",
-            "function f(){while(a)b()}",
+            "function f(){for(;a;)b()}",
             id="tail-return-pure-after-loop-dropped",
         ),
         pytest.param("function f(){return g()}", "function f(){return g()}", id="tail-valued-return-kept"),
@@ -390,7 +390,7 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         ),
         pytest.param(
             "function g(a){while(1){if(a)return;h()}}",
-            "function g(a){while(1){if(a)return;h()}}",
+            "function g(a){for(;;){if(a)return;h()}}",
             id="guard-return-in-loop-kept",
         ),
         # a dead store whose value is impure keeps the value as an expression statement; a pure sequence
@@ -477,7 +477,7 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         ),
         pytest.param(
             "function f(){while(c){var t=1;g(function(){return t})}}",
-            "function f(){while(c){var a=1;g(function(){return a})}}",
+            "function f(){for(;c;){var a=1;g(function(){return a})}}",
             id="literal-block-nested-var-kept",
         ),
         pytest.param(
@@ -505,6 +505,42 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             "function f(){g();var a=1;return a?u():0,h()}",
             id="literal-seq-non-tail-read-kept",
         ),
+        # while(c) canonicalizes to for(;c;) (14.7.3/14.7.4 run identically) so a preceding
+        # expression statement can merge into the init slot; a truthy-constant test then drops
+        # (an absent test always continues); a var init or a for-in head takes no expression
+        pytest.param("while(c)b()", "for(;c;)b()", id="while-to-for"),
+        pytest.param("a();while(c)b()", "for(a();c;)b()", id="expr-merges-into-for-init"),
+        pytest.param("a();b();while(c)d()", "for(a(),b();c;)d()", id="seq-merges-into-for-init"),
+        pytest.param("a();for(i=0;c;i++)b()", "for(a(),i=0;c;i++)b()", id="expr-joins-existing-init"),
+        pytest.param("while(1)b()", "for(;;)b()", id="truthy-test-drops"),
+        pytest.param("do b();while(c)", "do b();while(c)", id="do-while-kept"),
+        pytest.param("a();for(var i=0;c;i++)b()", "a();for(var i=0;c;i++)b()", id="var-init-blocks-merge"),
+        pytest.param("a();for(k in o)b()", "a();for(k in o)b()", id="forin-blocks-merge"),
+        # a bare unlabeled break guarding a for body's top folds into the test (T then !C decide the
+        # same exit at the same point; the break skipped the update exactly as a failed test does);
+        # a labeled break, a later guard, or a do-while (whose body runs before the first test) stay
+        pytest.param(
+            "for(i=0;i<n;i++){if(f(i)===!1)break;g(i)}",
+            "for(i=0;i<n&&f(i)!==!1;i++)g(i)",
+            id="break-guard-into-test",
+        ),
+        pytest.param("for(i=0;i<n;i++)if(f(i)===!1)break", "for(i=0;i<n&&f(i)!==!1;i++);", id="break-guard-bare-body"),
+        pytest.param("for(;;){if(d)break;g()}", "for(;!d;)g()", id="break-guard-no-test"),
+        pytest.param("while(c){if(!d)break;g()}", "for(;c&&d;)g()", id="break-guard-not-peels"),
+        pytest.param("l:for(;;){if(d)break l;g()}", "a:for(;;){if(d)break a;g()}", id="labeled-break-kept"),
+        pytest.param("for(;c;){g();if(d)break}", "for(;c;){g();if(d)break}", id="late-break-kept"),
+        pytest.param("do{if(d)break;g()}while(c)", "do{if(d)break;g()}while(c)", id="do-while-break-kept"),
+        pytest.param("while(c){if(a==b)break;g()}", "for(;c&&a!=b;)g()", id="break-guard-eq-flips"),
+        pytest.param("while(c){if(a!=b)break;g()}", "for(;c&&a==b;)g()", id="break-guard-ne-flips"),
+        pytest.param("while(c){if(a!==b)break;g()}", "for(;c&&a===b;)g()", id="break-guard-strict-ne-flips"),
+        pytest.param("while(c){if(-d)break;g()}", "for(;c&&!-d;)g()", id="break-guard-other-unary-wraps"),
+        pytest.param("while(c){}", "for(;c;){}", id="while-empty-body"),
+        pytest.param(
+            "for(;c;){if(d){g();break}h()}", "for(;c;){if(d){g();break}h()}", id="break-multi-stmt-guard-kept"
+        ),
+        pytest.param("for(;c;){if(d)break}", "for(;c&&!d;);", id="break-only-body-empties"),
+        pytest.param("while(c){if(a<b)break;g()}", "for(;c&&!(a<b);)g()", id="break-guard-relational-wraps"),
+        pytest.param("for(;c;){if(d){var x}else break}", "for(;c;)if(d)var x;else break", id="break-in-else-kept"),
         pytest.param(
             "function f(){g();var x=1;h();return x}",
             "function f(){return g(),h(),1}",
