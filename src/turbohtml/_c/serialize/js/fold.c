@@ -28,6 +28,8 @@
 
 #include "serialize/js/internal.h"
 
+#include <string.h>
+
 typedef struct {
     jm_program *prog;
     int fold_undefined; /* `undefined` is not shadowed by any binding -> fold to void 0 */
@@ -1012,8 +1014,17 @@ static void walk(F *folder, int32_t idx) {
         return;
     }
     jm_node *node = &folder->prog->nodes[idx];
-    /* recurse into children first (post-order), skipping property-name positions */
-    switch (node->kind) {
+    int kind = node->kind;
+    uint16_t flags = node->flags;
+    int32_t child_a = node->a;
+    int32_t child_b = node->b;
+    int32_t child_c = node->c;
+    int32_t child_d = node->d;
+    /* recurse into children first (post-order), skipping property-name positions. The kind, flags
+       and child indices are captured before any recursion: a fold inside a child allocates nodes,
+       which may grow the arena and move it, so `node` dangles the moment a child walk returns.
+       A child walk rewrites nodes in place and never edits its parent, so the captures stay true. */
+    switch (kind) {
     case JN_IDENT:
         if (ident_is(node, "true")) {
             fold_boolean(folder, idx, 1);
@@ -1024,56 +1035,56 @@ static void walk(F *folder, int32_t idx) {
         }
         return;
     case JN_MEMBER_EXPR:
-        walk(folder, node->a);
-        if (node->flags & JN_F_COMPUTED) {
-            walk(folder, node->b);
+        walk(folder, child_a);
+        if (flags & JN_F_COMPUTED) {
+            walk(folder, child_b);
         }
         return;
     case JN_PROP:
     case JN_MEMBER:
-        if (node->flags & JN_F_COMPUTED) {
-            walk(folder, node->a);
+        if (flags & JN_F_COMPUTED) {
+            walk(folder, child_a);
         }
-        walk(folder, node->b);
+        walk(folder, child_b);
         return;
     case JN_ARRAY:
     case JN_OBJECT:
     case JN_SEQ:
     case JN_TEMPLATE:
-        walk_chain(folder, node->a);
+        walk_chain(folder, child_a);
         return;
     case JN_CALL:
     case JN_NEW:
     case JN_CLASS:
-        walk(folder, node->a);
-        walk_chain(folder, node->b);
+        walk(folder, child_a);
+        walk_chain(folder, child_b);
         return;
     case JN_SWITCH:
-        walk(folder, node->a);
-        for (int32_t clause = node->b; clause >= 0; clause = folder->prog->nodes[clause].next) {
+        walk(folder, child_a);
+        for (int32_t clause = child_b; clause >= 0; clause = folder->prog->nodes[clause].next) {
             walk(folder, folder->prog->nodes[clause].a);
             walk_chain(folder, folder->prog->nodes[clause].b);
             folder->prog->nodes[clause].b = optimize_chain(folder, folder->prog->nodes[clause].b);
         }
         return;
     case JN_VAR:
-        for (int32_t declr = node->a; declr >= 0; declr = folder->prog->nodes[declr].next) {
+        for (int32_t declr = child_a; declr >= 0; declr = folder->prog->nodes[declr].next) {
             walk(folder, folder->prog->nodes[declr].b);
         }
         return;
     case JN_BLOCK:
-        walk_chain(folder, node->a);
+        walk_chain(folder, child_a);
         folder->prog->nodes[idx].a = optimize_chain(folder, folder->prog->nodes[idx].a);
         return;
     case JN_FUNC:
     case JN_ARROW:
-        walk_chain(folder, node->a); /* params (default values may fold) */
-        walk(folder, node->b);       /* body */
-        if (!(node->kind == JN_ARROW && (node->flags & JN_F_EXPRBODY))) {
+        walk_chain(folder, child_a); /* params (default values may fold) */
+        walk(folder, child_b);       /* body */
+        if (!(kind == JN_ARROW && (flags & JN_F_EXPRBODY))) {
             /* a block body: its statements run to the function's end, so a trailing undefined-valued
                return is redundant and a guard-return there folds */
-            fold_tail_return(folder, folder->prog->nodes[idx].b);
-            fold_guard_jump(folder, folder->prog->nodes[folder->prog->nodes[idx].b].a, JN_RETURN);
+            fold_tail_return(folder, child_b);
+            fold_guard_jump(folder, folder->prog->nodes[child_b].a, JN_RETURN);
         }
         return;
     case JN_FOR:
@@ -1081,29 +1092,26 @@ static void walk(F *folder, int32_t idx) {
     case JN_FOROF:
     case JN_WHILE:
     case JN_DOWHILE: {
-        int kind = node->kind;
-        walk(folder, node->a);
-        walk(folder, node->b);
-        walk(folder, node->c);
-        walk(folder, node->d);
+        walk(folder, child_a);
+        walk(folder, child_b);
+        walk(folder, child_c);
+        walk(folder, child_d);
         /* a bare `continue` at a loop body's top level skips the rest of that body, so a guard there
-           folds like a function's guard-return. The body field differs per loop kind (node is re-read
-           because a fold above may have grown the arena). */
-        node = &folder->prog->nodes[idx];
-        int32_t body = kind == JN_DOWHILE ? node->a
-                       : kind == JN_WHILE ? node->b
-                       : kind == JN_FOR   ? node->d
-                                          : node->c;      /* for-in / for-of */
+           folds like a function's guard-return. The body field differs per loop kind. */
+        int32_t body = kind == JN_DOWHILE ? child_a
+                       : kind == JN_WHILE ? child_b
+                       : kind == JN_FOR   ? child_d
+                                          : child_c;      /* for-in / for-of */
         if (folder->prog->nodes[body].kind == JN_BLOCK) { /* a loop always has a body statement */
             fold_guard_jump(folder, folder->prog->nodes[body].a, JN_CONTINUE);
         }
         return;
     }
     default:
-        walk(folder, node->a);
-        walk(folder, node->b);
-        walk(folder, node->c);
-        walk(folder, node->d);
+        walk(folder, child_a);
+        walk(folder, child_b);
+        walk(folder, child_c);
+        walk(folder, child_d);
         break;
     }
     /* then transform this node against its now-folded children */
