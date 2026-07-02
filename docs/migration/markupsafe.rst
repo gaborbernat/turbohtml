@@ -2,9 +2,7 @@
  From markupsafe
 #################
 
-.. image:: https://static.pepy.tech/badge/markupsafe/month
-    :alt: markupsafe monthly downloads
-    :target: https://pepy.tech/project/markupsafe
+.. package-meta:: markupsafe pallets/markupsafe
 
 `markupsafe <https://markupsafe.palletsprojects.com>`_ is the safe-string library behind `Jinja2
 <https://jinja.palletsprojects.com>`_, `WTForms <https://wtforms.readthedocs.io>`_, and `Werkzeug
@@ -23,40 +21,8 @@ other ``Markup`` operations stay ahead too -- ``striptags`` and ``unescape`` run
 reference resolution rather than markupsafe's regex scan, and the composing operations (``format``, ``join``) escape
 each untrusted operand through the same C ``escape``:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - markupsafe
-    - - escape clean (8 B)
-      - 61 ns
-      - 185 ns (3.1x)
-    - - escape clean (32 B)
-      - 67 ns
-      - 203 ns (3.0x)
-    - - escape clean (256 B)
-      - 115 ns
-      - 447 ns (3.9x)
-    - - escape name with ``'`` and ``&``
-      - 84 ns
-      - 213 ns (2.5x)
-    - - escape-heavy markup
-      - 141 ns
-      - 338 ns (2.4x)
-    - - ``striptags``
-      - 1368 ns
-      - 2483 ns (1.8x)
-    - - ``unescape``
-      - 273 ns
-      - 1114 ns (4.1x)
-    - - ``format`` (escapes operands)
-      - 1662 ns
-      - 1973 ns (1.2x)
-    - - ``join`` (escapes operands)
-      - 609 ns
-      - 1217 ns (2.0x)
+.. bench-table::
+    :file: bench/markupsafe.json
 
 *************
  The renames
@@ -82,7 +48,7 @@ A Jinja2, WTForms, or Werkzeug project changes only the import line:
     :header-rows: 1
     :widths: 50 50
 
-    - - markupsafe
+    - - `markupsafe <https://markupsafe.palletsprojects.com/>`__
       - turbohtml
     - - :class:`markupsafe.Markup`
       - :class:`~turbohtml.migration.markupsafe.Markup`

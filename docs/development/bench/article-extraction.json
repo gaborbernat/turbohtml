@@ -1,0 +1,26 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "trafilatura",
+    "readability-lxml",
+    "newspaper3k"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "post (4 KiB)",
+      2.3e-05,
+      0.00134,
+      0.00126,
+      0.00352
+    ],
+    [
+      "longform (16 KiB)",
+      7e-05,
+      0.00313,
+      0.00254,
+      0.00897
+    ]
+  ]
+}

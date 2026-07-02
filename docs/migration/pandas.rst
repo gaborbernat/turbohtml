@@ -2,9 +2,7 @@
  From pandas
 #############
 
-.. image:: https://static.pepy.tech/badge/pandas/month
-    :alt: pandas monthly downloads
-    :target: https://pepy.tech/project/pandas
+.. package-meta:: pandas pandas-dev/pandas
 
 `pandas <https://pandas.pydata.org>`_ is how scrapers turn ``<table>`` markup into rows: ``pandas.read_html`` parses
 every table on a page into a list of ``DataFrame`` objects. Only that one helper overlaps with turbohtml; the rest of
@@ -40,31 +38,8 @@ returns plain lists and dicts where ``read_html`` builds a ``DataFrame`` (import
 ninety times faster: the gap is widest on small tables, where pandas pays a fixed per-frame cost, and narrows as the row
 count grows. See :doc:`/development/performance` for the methodology.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - pandas.read_html
-    - - rows (10 rows)
-      - 10.8 µs
-      - 943 µs (87.3x)
-    - - records (10 rows)
-      - 15.8 µs
-      - 970 µs (61.4x)
-    - - rows (100 rows)
-      - 99.7 µs
-      - 2178 µs (21.8x)
-    - - records (100 rows)
-      - 98.5 µs
-      - 2165 µs (22.0x)
-    - - rows (1000 rows)
-      - 853 µs
-      - 10.6 ms (12.4x)
-    - - records (1000 rows)
-      - 893 µs
-      - 13.0 ms (14.6x)
+.. bench-table::
+    :file: bench/pandas.json
 
 *************
  The renames
@@ -74,7 +49,7 @@ count grows. See :doc:`/development/performance` for the methodology.
     :header-rows: 1
     :widths: 50 50
 
-    - - pandas
+    - - `pandas <https://pandas.pydata.org/>`__
       - turbohtml
     - - ``pandas.read_html(html)`` -> ``list[DataFrame]``
       - :meth:`turbohtml.parse(html).tables() <turbohtml.Node.tables>` -> ``list[list[list[str]]]``

@@ -1,0 +1,35 @@
+{
+  "label": "extract text (per match)",
+  "parties": [
+    "turbohtml",
+    "parsel",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      2.6e-06,
+      6.51e-05,
+      9.12e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      6.2e-06,
+      0.0001296,
+      9.8e-06
+    ],
+    [
+      "mozilla blog (95 kB)",
+      9.5e-06,
+      0.0001895,
+      0.000344
+    ],
+    [
+      "whatwg spec (235 kB)",
+      1.02e-05,
+      0.0002407,
+      0.0003869
+    ]
+  ]
+}

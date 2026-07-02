@@ -161,8 +161,11 @@ Structure and selectors
   four legacy pseudo-elements with one colon (``::before`` → ``:before``), and unquote an attribute value that is a
   valid identifier (`Selectors 4 §5–6 <https://www.w3.org/TR/selectors-4/#attribute-selectors>`__, `Pseudo-Elements 4 §8
   <https://www.w3.org/TR/css-pseudo-4/#css2-compat>`__); a custom-property name keeps its case (`Variables 1 §2
-  <https://www.w3.org/TR/css-variables-1/#defining-variables>`__). ``A{X:1}`` → ``a{x:1}``, ``[a="Foo"]{x:1}`` →
-  ``[a=Foo]{x:1}``.
+  <https://www.w3.org/TR/css-variables-1/#defining-variables>`__).
+- Keep a custom-property value byte-exact past edge trimming: §2 defines the value as the literal token stream,
+  ``var()`` splices it verbatim, and ``getComputedStyle().getPropertyValue()`` reads it back as written, so collapsing
+  its internal whitespace -- which the other PyPI minifiers do for a few hundred bytes on custom-property-heavy CSS --
+  is observable and never applied. ``A{X:1}`` → ``a{x:1}``, ``[a="Foo"]{x:1}`` → ``[a=Foo]{x:1}``.
 - Rewrite a ``@keyframes`` ``from`` selector to ``0%`` (`Animations 1
   <https://www.w3.org/TR/css-animations-1/#keyframes>`__), and drop the space before ``and``/``or`` after a ``)`` in a
   media query (`Media Queries 4 <https://www.w3.org/TR/mediaqueries-4/#mq-syntax>`__). ``@keyframes k{from{opacity:0}}``

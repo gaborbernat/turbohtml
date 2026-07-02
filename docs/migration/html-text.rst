@@ -2,9 +2,7 @@
  From html-text
 ################
 
-.. image:: https://static.pepy.tech/badge/html-text/month
-    :alt: html-text monthly downloads
-    :target: https://pepy.tech/project/html-text
+.. package-meta:: html-text zytedata/html-text
 
 `html-text <https://github.com/zytedata/html-text>`_ (Zyte) pulls the visible text out of a page, optionally guessing
 block layout from the tags. It builds an lxml tree and walks it in Python.
@@ -36,22 +34,8 @@ The same text benchmark that backs the :doc:`inscriptis <inscriptis>` comparison
 :meth:`~turbohtml.Node.to_text` walks the tree once in C, where html-text builds an lxml tree and collects its text in
 Python.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - to text
-      - turbohtml
-      - html-text
-    - - article (2 KiB)
-      - 7 µs
-      - 102 µs (14.5x)
-    - - table (4 KiB)
-      - 28 µs
-      - 258 µs (9.2x)
-    - - word stream (2 KiB)
-      - 7 µs
-      - 101 µs (14.0x)
+.. bench-table::
+    :file: bench/html-text.json
 
 html-text skips the column-aligned table layout :meth:`~turbohtml.Node.to_text` renders, so its margin behind turbohtml
 narrows on table-heavy input while staying near an order of magnitude. The ``word stream`` row turns layout guessing off
@@ -66,7 +50,7 @@ collapsed visible text both return without layout.
     :header-rows: 1
     :widths: 50 50
 
-    - - html-text
+    - - `html-text <https://github.com/zytedata/html-text>`__
       - turbohtml
     - - ``extract_text(html)``
       - ``parse(html).to_text()``

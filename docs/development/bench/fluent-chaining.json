@@ -1,0 +1,30 @@
+{
+  "label": "select, filter, tag, read",
+  "parties": [
+    "turbohtml",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3.7e-06,
+      8.14e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      1.09e-05,
+      2.12e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      1.61e-05,
+      0.0002356
+    ],
+    [
+      "whatwg spec (235 kB)",
+      2.88e-05,
+      0.0002957
+    ]
+  ]
+}

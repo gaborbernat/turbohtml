@@ -1,0 +1,30 @@
+{
+  "label": "rewrite (``rewrite_links``)",
+  "parties": [
+    "turbohtml",
+    "lxml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3.2e-06,
+      0.000155
+    ],
+    [
+      "ars technica (56 kB)",
+      1.95e-05,
+      0.000591
+    ],
+    [
+      "mozilla blog (95 kB)",
+      2.42e-05,
+      0.00267
+    ],
+    [
+      "whatwg spec (235 kB)",
+      4.18e-05,
+      0.0052
+    ]
+  ]
+}

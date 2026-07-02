@@ -1,0 +1,30 @@
+{
+  "label": "to Markdown",
+  "parties": [
+    "turbohtml",
+    "markdownify"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "article (2 KiB)",
+      1.3e-05,
+      0.001185
+    ],
+    [
+      "list (4 KiB)",
+      2.3e-05,
+      0.002381
+    ],
+    [
+      "table (4 KiB)",
+      2.6e-05,
+      0.002825
+    ],
+    [
+      "configured (4 KiB)",
+      2.8e-05,
+      0.00256
+    ]
+  ]
+}

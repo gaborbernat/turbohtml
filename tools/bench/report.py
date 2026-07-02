@@ -5,15 +5,28 @@ Standard library only: the orchestrator imports this to print, so it must not pu
 benchmark name is ``"<operation>|<case>|<label>"`` and a stat is ``{"mean": seconds, "stdev": seconds}``; turbohtml is
 the baseline every competitor column divides into. Each cell shows the mean, the relative standard deviation as ``±N%``
 so a reader can tell a real gap from run-to-run noise, and (for competitors) the slowdown factor against turbohtml.
+
+With ``--table-json DIR`` on the CLI, each rendered operation is also written to ``DIR/<operation>.json`` in the feed
+the docs' ``bench-table`` directive consumes: the label, parties, metrics, and rows of raw mean seconds. The directive
+derives the readable units and the ratios, so refreshing a docs table is copying the emitted feed over the committed
+one.
 """
 
 from __future__ import annotations
 
+import json
+from typing import TYPE_CHECKING
+
 from bench import operations
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SCALE: dict[str, float] = {"ns": 1e9, "us": 1e6, "ms": 1e3}
 _TURBO_COL = 18
 _COMPETITOR_COL = 26
+
+TABLE_JSON_DIR: Path | None = None
 
 
 def _labels(operation: str, stats: dict[str, dict[str, float]]) -> list[str]:
@@ -62,3 +75,24 @@ def render(operation: str, stats: dict[str, dict[str, float]]) -> None:
                 cell = f"{_cell(other, scale, meta.unit)} {other['mean'] / turbo['mean']:5.1f}x"
                 row += f"{cell:>{_COMPETITOR_COL}}"
         print(row)
+    if TABLE_JSON_DIR is not None:
+        _emit_table_json(operation, stats, TABLE_JSON_DIR)
+
+
+def _emit_table_json(operation: str, stats: dict[str, dict[str, float]], directory: Path) -> None:
+    """Write one operation's raw means as the docs' bench-table feed: DIR/<operation>.json."""
+    meta = operations.OPERATIONS[operation]
+    competitors = _labels(operation, stats)[1:]
+    rows: list[list[str | float | None]] = []
+    for case_name in _case_names(operation, stats):
+        if (turbo := stats.get(f"{operation}|{case_name}|turbohtml")) is None:
+            continue
+        row: list[str | float | None] = [case_name, turbo["mean"]]
+        row += [
+            other["mean"] if (other := stats.get(f"{operation}|{case_name}|{label}")) is not None else None
+            for label in competitors
+        ]
+        rows.append(row)
+    feed = {"label": meta.title, "parties": ["turbohtml", *competitors], "metrics": [], "rows": rows}
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{operation}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")

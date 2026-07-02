@@ -1,0 +1,30 @@
+{
+  "label": "minify a document",
+  "parties": [
+    "turbohtml",
+    "minify-html"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3.29e-05,
+      6.58e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      0.0001531,
+      0.0003151
+    ],
+    [
+      "mozilla blog (95 kB)",
+      0.0003206,
+      0.0007423
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.0011103,
+      0.0017186
+    ]
+  ]
+}

@@ -2,9 +2,7 @@
  From html2text
 ################
 
-.. image:: https://static.pepy.tech/badge/html2text/month
-    :alt: html2text monthly downloads
-    :target: https://pepy.tech/project/html2text
+.. package-meta:: html2text Alir3z4/html2text
 
 `html2text <https://github.com/Alir3z4/html2text>`_ converts HTML to Markdown with a streaming ``HTMLParser`` subclass
 and a wide option surface, including a ``google_doc`` mode that reads the inline CSS a Google Docs export carries.
@@ -17,25 +15,8 @@ and a wide option surface, including a ``google_doc`` mode that reads the inline
 tree. It walks the WHATWG tree in C rather than driving a Python ``HTMLParser``, converting a page roughly fifty times
 faster while covering the same options, including the Google Docs mode:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - to Markdown
-      - turbohtml
-      - html2text
-    - - article (2 KiB)
-      - 13 µs
-      - 542 µs (42.2x)
-    - - list (4 KiB)
-      - 23 µs
-      - 1143 µs (49.6x)
-    - - table (4 KiB)
-      - 26 µs
-      - 1017 µs (38.9x)
-    - - google_doc (4 KiB)
-      - 18 µs
-      - 560 µs (31.9x)
+.. bench-table::
+    :file: bench/html2text.json
 
 *************
  The renames
@@ -69,7 +50,7 @@ The html2text options map onto the grouped :class:`~turbohtml.Markdown` config f
     :header-rows: 1
     :widths: 50 50
 
-    - - html2text
+    - - `html2text <https://github.com/Alir3z4/html2text>`__
       - turbohtml :meth:`~turbohtml.Node.to_markdown`
     - - ``ul_item_mark``
       - ``Markdown.Lists(bullets=...)``

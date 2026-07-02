@@ -4,9 +4,7 @@
  From lxml
 ###########
 
-.. image:: https://static.pepy.tech/badge/lxml/month
-    :alt: lxml monthly downloads
-    :target: https://pepy.tech/project/lxml
+.. package-meta:: lxml lxml/lxml
 
 `lxml <https://lxml.de>`_ is the libxml2/libxslt binding that most Python HTML and XML processing has been built on:
 ``lxml.html`` parses documents into ElementTree-style elements with ``.text``/``.tail`` strings, and the wider stack
@@ -22,64 +20,8 @@ instead of separate ``findall``/``xpath``/``cssselect`` entry points. It parses 
 matching a browser on malformed input, and stays ahead across the operational surface -- fragment parsing, CSS
 selection, text and tree walks, the link helpers, XPath, and the node-path generators:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - lxml
-    - - parse wpt page (4 kB)
-      - 11.4 µs
-      - 27.1 µs (2.4x)
-    - - parse wpt page (92 kB)
-      - 272 µs
-      - 631 µs (2.3x)
-    - - parse whatwg spec (235 kB)
-      - 518 µs
-      - 1.22 ms (2.4x)
-    - - parse ecmascript spec (3 MB)
-      - 4.54 ms
-      - 17.4 ms (3.8x)
-    - - parse fragment (2 kB)
-      - 12.6 µs
-      - 39.6 µs (3.2x)
-    - - select ``div a[href]`` (Daring Fireball, 10 kB)
-      - 0.7 µs
-      - 30.8 µs (43.9x)
-    - - select ``div a[href]`` (Ars Technica, 56 kB)
-      - 1.6 µs
-      - 135.0 µs (82.2x)
-    - - select ``div a[href]`` (Mozilla Blog, 95 kB)
-      - 2.4 µs
-      - 865.3 µs (364.5x)
-    - - select ``div a[href]`` (WHATWG spec, 235 kB)
-      - 2.1 µs
-      - 1.44 ms (689.5x)
-    - - text content (92 kB)
-      - 36.9 µs
-      - 47.2 µs (1.3x)
-    - - descendant walk (92 kB)
-      - 65.2 µs
-      - 278 µs (4.3x)
-    - - extract links (92 kB)
-      - 60.6 µs
-      - 2.28 ms (37.7x)
-    - - absolutize links (92 kB)
-      - 251 µs
-      - 2.76 ms (11.0x)
-    - - rewrite links (92 kB)
-      - 22.3 µs
-      - 2.38 ms (106.7x)
-    - - XPath ``//a[@href]`` precompiled
-      - 0.5 µs
-      - 2.8 µs (5.6x)
-    - - ``css_path`` node locator (ars technica, 56 kB)
-      - 91.4 µs
-      - 557.1 µs (6.1x)
-    - - ``xpath_path`` node locator (ars technica, 56 kB)
-      - 98.8 µs
-      - 565.0 µs (5.7x)
+.. bench-table::
+    :file: bench/lxml.json
 
 The :doc:`/development/performance` page benchmarks the full serializer, builder, editor, CSS, XPath 1.0, and EXSLT
 surface against lxml directly.
@@ -97,7 +39,7 @@ lxml stores text as an element's ``.text`` and ``.tail`` strings, while turbohtm
     :header-rows: 1
     :widths: 50 50
 
-    - - lxml
+    - - `lxml <https://lxml.de/>`__
       - turbohtml
     - - ``el.tag``
       - :attr:`~turbohtml.Element.tag` (same)

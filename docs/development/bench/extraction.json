@@ -1,0 +1,35 @@
+{
+  "label": "extract ``@href`` (per match)",
+  "parties": [
+    "turbohtml",
+    "parsel",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      2.7e-06,
+      6.51e-05,
+      0.0001604
+    ],
+    [
+      "ars technica (56 kB)",
+      6.8e-06,
+      0.000144,
+      9.8e-06
+    ],
+    [
+      "mozilla blog (95 kB)",
+      9.2e-06,
+      0.0002087,
+      0.0005215
+    ],
+    [
+      "whatwg spec (235 kB)",
+      9.7e-06,
+      0.0002661,
+      0.0006243
+    ]
+  ]
+}

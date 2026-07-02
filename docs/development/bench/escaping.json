@@ -1,0 +1,60 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "html.escape"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "tiny plain (64 B)",
+      4e-08,
+      1.1e-07
+    ],
+    [
+      "medium markup (4 KiB)",
+      2.27e-06,
+      7.19e-06
+    ],
+    [
+      "no-op prose (4 MiB)",
+      0.00011,
+      0.00253
+    ],
+    [
+      "book text (3 MiB)",
+      0.00066,
+      0.00259
+    ],
+    [
+      "book HTML (4 MiB)",
+      0.00126,
+      0.00458
+    ],
+    [
+      "spec HTML, dense (4 MiB)",
+      0.00498,
+      0.0127
+    ],
+    [
+      "UCS-2 plain (4 MiB)",
+      0.0007,
+      0.00244
+    ],
+    [
+      "UCS-2 markup (4 MiB)",
+      0.00336,
+      0.0111
+    ],
+    [
+      "UCS-4 plain (4 MiB)",
+      0.00092,
+      0.00529
+    ],
+    [
+      "UCS-4 markup (4 MiB)",
+      0.00393,
+      0.0194
+    ]
+  ]
+}

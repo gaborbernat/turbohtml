@@ -2,9 +2,7 @@
  From MechanicalSoup
 #####################
 
-.. image:: https://static.pepy.tech/badge/MechanicalSoup/month
-    :alt: MechanicalSoup monthly downloads
-    :target: https://pepy.tech/project/MechanicalSoup
+.. package-meta:: MechanicalSoup MechanicalSoup/MechanicalSoup
 
 `MechanicalSoup <https://github.com/MechanicalSoup/MechanicalSoup>`_ is a stateful browser: it fetches pages with
 `requests <https://requests.readthedocs.io>`_, parses them with `BeautifulSoup
@@ -30,7 +28,7 @@ parsed form instead of a stateful browser object.
     :header-rows: 1
     :widths: 50 50
 
-    - - MechanicalSoup
+    - - `MechanicalSoup <https://mechanicalsoup.readthedocs.io/>`__
       - turbohtml
     - - ``browser.open(url)``, ``browser.get_current_page()``
       - fetch yourself, then ``turbohtml.parse(response.content)``

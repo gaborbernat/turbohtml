@@ -1,0 +1,25 @@
+{
+  "label": "parse",
+  "parties": [
+    "turbohtml",
+    "html5-parser"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "4 kB document",
+      2.8e-06,
+      6.41e-05
+    ],
+    [
+      "92 kB document",
+      0.00013,
+      0.00184
+    ],
+    [
+      "3 MB document",
+      0.00463,
+      0.0597
+    ]
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "label": "descendant walk",
+  "parties": [
+    "turbohtml",
+    "lxml",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3.4e-06,
+      1.6e-05,
+      6.9e-06
+    ],
+    [
+      "ars technica (56 kB)",
+      1.4e-05,
+      6.37e-05,
+      2.74e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      2.86e-05,
+      0.0001359,
+      5.72e-05
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.0001021,
+      0.0004767,
+      0.0001985
+    ]
+  ]
+}

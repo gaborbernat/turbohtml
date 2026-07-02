@@ -1,0 +1,45 @@
+{
+  "label": "select ``div a[href]``",
+  "parties": [
+    "turbohtml",
+    "lxml",
+    "selectolax",
+    "parsel",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      7e-07,
+      3.08e-05,
+      7.7e-06,
+      3.4e-05,
+      0.0001759
+    ],
+    [
+      "ars technica (56 kB)",
+      1.6e-06,
+      0.000135,
+      2.04e-05,
+      0.0001488,
+      0.0006227
+    ],
+    [
+      "mozilla blog (95 kB)",
+      2.4e-06,
+      0.0008653,
+      3.49e-05,
+      0.0008978,
+      0.0012
+    ],
+    [
+      "whatwg spec (235 kB)",
+      2.1e-06,
+      0.00144,
+      8.16e-05,
+      0.00148,
+      0.00329
+    ]
+  ]
+}

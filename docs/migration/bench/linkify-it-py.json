@@ -1,0 +1,45 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "linkify-it-py"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "linkify comment (1 link, 1 email)",
+      2.9e-06,
+      2.9e-05
+    ],
+    [
+      "linkify prose (1 KiB)",
+      5.1e-05,
+      0.00031
+    ],
+    [
+      "linkify markup (4 KiB)",
+      0.000127,
+      0.000708
+    ],
+    [
+      "``find`` comment (1 link, 1 email)",
+      6e-07,
+      2.92e-05
+    ],
+    [
+      "``find`` prose (1 KiB)",
+      8.8e-06,
+      0.0003099
+    ],
+    [
+      "``has_link`` comment",
+      3e-07,
+      2.15e-05
+    ],
+    [
+      "``has_link`` prose (1 KiB)",
+      2.7e-06,
+      4.9e-06
+    ]
+  ]
+}

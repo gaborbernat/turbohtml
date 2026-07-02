@@ -1,0 +1,40 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "w3lib"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "unescape tiny plain (64 B)",
+      2e-08,
+      2.5e-07
+    ],
+    [
+      "unescape medium dense refs (4 KiB)",
+      8.1e-06,
+      0.000116
+    ],
+    [
+      "unescape book HTML, real refs (4 MiB)",
+      0.00251,
+      0.0135
+    ],
+    [
+      "strip tags, keep text (92 kB)",
+      0.000607,
+      0.00111
+    ],
+    [
+      "``base_url`` (vs ``get_base_url``)",
+      2.9e-06,
+      7.4e-06
+    ],
+    [
+      "``meta_refresh`` (vs ``get_meta_refresh``)",
+      3e-06,
+      6.5e-06
+    ]
+  ]
+}

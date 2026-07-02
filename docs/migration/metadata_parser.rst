@@ -2,9 +2,7 @@
  From metadata_parser
 ######################
 
-.. image:: https://static.pepy.tech/badge/metadata_parser/month
-    :alt: metadata_parser monthly downloads
-    :target: https://pepy.tech/project/metadata_parser
+.. package-meta:: metadata_parser jvanasco/metadata_parser
 
 `metadata_parser <https://github.com/jvanasco/metadata_parser>`_ reads the social-card metadata a page advertises: the
 OpenGraph (``og:``) and Twitter (``twitter:``) ``<meta>`` tags, plus the Dublin Core and plain ``name``/``content``
@@ -36,19 +34,8 @@ own tree and maps the meta block in Python, where :meth:`~turbohtml.Document.ope
 gathers the ``og:``/``twitter:`` tags in one C walk. On a social-card head, and on an 8 KiB article carrying that head,
 the single pass runs dozens of times faster:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - metadata_parser
-    - - social-card head
-      - 2.0 µs
-      - 142 µs (71.6x)
-    - - article (8 KiB)
-      - 27.9 µs
-      - 2.28 ms (81.8x)
+.. bench-table::
+    :file: bench/metadata_parser.json
 
 *************
  The renames
@@ -58,7 +45,7 @@ the single pass runs dozens of times faster:
     :header-rows: 1
     :widths: 50 50
 
-    - - metadata_parser
+    - - `metadata_parser <https://github.com/jvanasco/metadata_parser>`__
       - turbohtml
     - - ``mp = MetadataParser(html=html)``
       - ``doc = parse(html)`` (:func:`turbohtml.parse`)

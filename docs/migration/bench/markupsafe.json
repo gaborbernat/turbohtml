@@ -1,0 +1,55 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "markupsafe"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "escape clean (8 B)",
+      6.1e-08,
+      1.85e-07
+    ],
+    [
+      "escape clean (32 B)",
+      6.7e-08,
+      2.03e-07
+    ],
+    [
+      "escape clean (256 B)",
+      1.15e-07,
+      4.47e-07
+    ],
+    [
+      "escape name with ``'`` and ``&``",
+      8.4e-08,
+      2.13e-07
+    ],
+    [
+      "escape-heavy markup",
+      1.41e-07,
+      3.38e-07
+    ],
+    [
+      "``striptags``",
+      1.368e-06,
+      2.483e-06
+    ],
+    [
+      "``unescape``",
+      2.73e-07,
+      1.114e-06
+    ],
+    [
+      "``format`` (escapes operands)",
+      1.662e-06,
+      1.973e-06
+    ],
+    [
+      "``join`` (escapes operands)",
+      6.09e-07,
+      1.217e-06
+    ]
+  ]
+}

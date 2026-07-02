@@ -1,0 +1,40 @@
+{
+  "label": "select ``div:has(a)``",
+  "parties": [
+    "turbohtml",
+    "lxml",
+    "selectolax",
+    "BeautifulSoup"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3e-07,
+      1.46e-05,
+      4.9e-06,
+      0.0001118
+    ],
+    [
+      "ars technica (56 kB)",
+      1.4e-06,
+      2.77e-05,
+      1.76e-05,
+      0.00049
+    ],
+    [
+      "mozilla blog (95 kB)",
+      9.3e-06,
+      6.05e-05,
+      5.11e-05,
+      0.00218
+    ],
+    [
+      "whatwg spec (235 kB)",
+      6.1e-06,
+      7.15e-05,
+      8.26e-05,
+      0.00315
+    ]
+  ]
+}

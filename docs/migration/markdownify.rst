@@ -2,9 +2,7 @@
  From markdownify
 ##################
 
-.. image:: https://static.pepy.tech/badge/markdownify/month
-    :alt: markdownify monthly downloads
-    :target: https://pepy.tech/project/markdownify
+.. package-meta:: markdownify matthewwithanm/python-markdownify
 
 `markdownify <https://github.com/matthewwithanm/python-markdownify>`_ converts HTML to Markdown by walking a
 BeautifulSoup tree, with a per-tag ``convert_<tag>`` override system for customizing the output.
@@ -17,25 +15,8 @@ BeautifulSoup tree, with a per-tag ``convert_<tag>`` override system for customi
 annotated, exposes one keyword per concept, and runs the conversion in C off the WHATWG tree instead of a second Python
 walk over a BeautifulSoup tree, so it converts a page two orders of magnitude faster:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - to Markdown
-      - turbohtml
-      - markdownify
-    - - article (2 KiB)
-      - 13 µs
-      - 1185 µs (92.4x)
-    - - list (4 KiB)
-      - 23 µs
-      - 2381 µs (103.2x)
-    - - table (4 KiB)
-      - 26 µs
-      - 2825 µs (108.1x)
-    - - configured (4 KiB)
-      - 28 µs
-      - 2560 µs (92.5x)
+.. bench-table::
+    :file: bench/markdownify.json
 
 *************
  The renames
@@ -70,7 +51,7 @@ markdownify's surface with one name per concept:
     :header-rows: 1
     :widths: 50 50
 
-    - - markdownify
+    - - `markdownify <https://github.com/matthewwithanm/python-markdownify>`__
       - turbohtml :meth:`~turbohtml.Node.to_markdown`
     - - ``heading_style`` (``atx``/``atx_closed``/``underlined``)
       - ``Markdown.Headings(style=...)`` (``"atx"``/``"atx_closed"``/``"setext"``)

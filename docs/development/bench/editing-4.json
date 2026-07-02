@@ -1,0 +1,30 @@
+{
+  "label": "replace body text",
+  "parties": [
+    "turbohtml",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      1.4e-06,
+      1.61e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      8.2e-06,
+      1.34e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      1.53e-05,
+      0.000126
+    ],
+    [
+      "whatwg spec (235 kB)",
+      4.31e-05,
+      0.000374
+    ]
+  ]
+}

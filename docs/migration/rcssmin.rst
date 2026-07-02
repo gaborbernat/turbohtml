@@ -2,9 +2,7 @@
  From rcssmin
 ##############
 
-.. image:: https://static.pepy.tech/badge/rcssmin/month
-    :alt: rcssmin monthly downloads
-    :target: https://pepy.tech/project/rcssmin
+.. package-meta:: rcssmin ndparker/rcssmin
 
 `rcssmin <https://github.com/ndparker/rcssmin>`_ is the most-used CSS minifier on PyPI, a fast C extension that is
 deliberately *non-destructive*: it strips comments and collapses whitespace and rewrites nothing else, so ``#ffffff``
@@ -16,47 +14,16 @@ every value-safe rewrite as well -- so the result is smaller while still parsing
 ***************
 
 turbohtml rewrites each value to its shortest equivalent form -- colors to their shortest hex or name, redundant zeros
-and units dropped, constant ``calc()`` folded, longhands merged into shorthands, adjacent equal-bodied rules combined --
-where rcssmin leaves values verbatim. turbohtml's output is smaller on every framework except the custom-property-heavy
-``bulma.css``, where rcssmin edges ahead only by stripping the custom-property whitespace `CSS Variables 1 §3
-<https://www.w3.org/TR/css-variables-1/#defining-variables>`_ preserves; rcssmin's whitespace-only pass is faster
-because it does strictly less work. Each cell shows the figure with its ratio to turbohtml:
+and units dropped, constant ``calc()`` folded, longhands merged into shorthands, equal rules combined -- where rcssmin
+leaves values verbatim. turbohtml's output is smaller on every framework except the custom-property-heavy ``bulma.css``,
+where rcssmin ends 0.1% ahead only by rewriting whitespace inside custom-property values. That rewrite is not
+value-safe: `CSS Variables 1 §2 <https://www.w3.org/TR/css-variables-1/#defining-variables>`_ keeps a custom property's
+value as its literal token stream, ``var()`` splices it verbatim and ``getPropertyValue()`` reads it back byte-exact, so
+a collapsed space is observable wherever the value is substituted or compared. rcssmin's whitespace-only pass is faster
+because it does strictly less work. Each ratio is against turbohtml:
 
-Each row pairs the two outputs and reads the difference in the unit that fits its scale -- size as a percent, since it
-moves a few points, and speed as a factor, since it spans an order of magnitude:
-
-.. list-table::
-    :header-rows: 1
-    :widths: 24 22 22 32
-
-    - - stylesheet
-      - turbohtml
-      - rcssmin
-      - rcssmin vs turbohtml
-    - - normalize.css (6 kB)
-      - 1.8 kB · 15.9 µs
-      - 1.8 kB · 5.12 µs
-      - same size · 3.1× faster
-    - - animate.css (93 kB)
-      - 72.8 kB · 605 µs
-      - 75.7 kB · 165 µs
-      - 4% larger · 3.7× faster
-    - - pico.css (90 kB)
-      - 81.0 kB · 457 µs
-      - 82.1 kB · 194 µs
-      - 1% larger · 2.4× faster
-    - - foundation.css (164 kB)
-      - 131.4 kB · 1.09 ms
-      - 136.7 kB · 382 µs
-      - 4% larger · 2.9× faster
-    - - bootstrap.css (274 kB)
-      - 229.4 kB · 1.65 ms
-      - 233.2 kB · 625 µs
-      - 2% larger · 2.6× faster
-    - - bulma.css (745 kB)
-      - 682.2 kB · 3.46 ms
-      - 680.0 kB · 1.73 ms
-      - 0.3% smaller · 2.0× faster
+.. bench-table::
+    :file: bench/rcssmin.json
 
 Both round-trip safely -- the output parses to the same cascade -- and both are idempotent. turbohtml is still far
 faster than every *other* value-rewriting minifier, which are pure-Python and turn quadratic on a large stylesheet.

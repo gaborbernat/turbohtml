@@ -2,9 +2,7 @@
  From html5lib
 ###############
 
-.. image:: https://static.pepy.tech/badge/html5lib/month
-    :alt: html5lib monthly downloads
-    :target: https://pepy.tech/project/html5lib
+.. package-meta:: html5lib html5lib/html5lib-python
 
 `html5lib <https://html5lib.readthedocs.io>`_ is the reference pure-Python implementation of the WHATWG parsing
 algorithm: it tokenizes and builds a tree that you select through a treebuilder (an :mod:`xml.etree.ElementTree` element
@@ -20,28 +18,8 @@ parsing, tokenizing, and fragment parsing run 25 to 70 times faster than the pur
 (:func:`turbohtml.parse_fragment` parses an ``innerHTML``-style snippet in its container context, the same WHATWG
 fragment algorithm html5lib's :func:`~html5lib.html5parser.parseFragment` runs):
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - html5lib
-    - - parse wpt page (4 kB)
-      - 11.4 µs
-      - 620 µs (54.5x)
-    - - parse wpt page (92 kB)
-      - 272 µs
-      - 16.7 ms (61.6x)
-    - - tokenize typical markup
-      - 34.9 µs
-      - 836 µs (24.0x)
-    - - tokenize whatwg spec (235 kB)
-      - 708 µs
-      - 20.1 ms (28.4x)
-    - - parse fragment, table row (2 kB)
-      - 12.6 µs
-      - 867 µs (69.0x)
+.. bench-table::
+    :file: bench/html5lib.json
 
 *************
  The renames
@@ -51,7 +29,7 @@ fragment algorithm html5lib's :func:`~html5lib.html5parser.parseFragment` runs):
     :header-rows: 1
     :widths: 50 50
 
-    - - html5lib
+    - - `html5lib <https://html5lib.readthedocs.io/>`__
       - turbohtml
     - - :func:`html5lib.parse() <html5lib.html5parser.parse>`
       - :func:`turbohtml.parse`

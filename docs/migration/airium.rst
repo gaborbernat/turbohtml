@@ -2,9 +2,7 @@
  From airium
 #############
 
-.. image:: https://static.pepy.tech/badge/airium/month
-    :alt: airium monthly downloads
-    :target: https://pepy.tech/project/airium
+.. package-meta:: airium
 
 `airium <https://gitlab.com/kamichal/airium>`_ assembles HTML in Python from the other direction than a parser: you open
 each element as a ``with a.tag(...)`` block on an ``Airium`` instance, call the instance for text, and let it track
@@ -35,19 +33,8 @@ parse it back:
 indentation as it goes. The same ``<ul>`` of rows -- a class, a ``data`` attribute, and a text child apiece -- built
 both ways:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - build a list
-      - :data:`E <turbohtml.build.E>`
-      - airium
-    - - 100 rows
-      - 139 µs
-      - 772 µs (5.5x)
-    - - 1000 rows
-      - 1.41 ms
-      - 7.75 ms (5.5x)
+.. bench-table::
+    :file: bench/airium.json
 
 ``E`` is roughly five times faster than airium, and the decisive difference is the result type: ``E`` hands back a real
 :class:`~turbohtml.Element`, not a string, so the call that builds the markup also leaves a tree you can query, edit,
@@ -63,7 +50,7 @@ airium tracks structure by call depth inside ``with`` blocks; turbohtml tracks i
     :header-rows: 1
     :widths: 50 50
 
-    - - airium
+    - - `airium <https://pypi.org/project/airium/>`__
       - turbohtml
     - - ``with a.div(klass="card"):`` then ``a("text")``
       - :data:`E.div({"class": "card"}, "text") <turbohtml.build.E>`; nest by passing children, not by call depth

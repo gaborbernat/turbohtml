@@ -39,3 +39,26 @@
         margin-right: auto;
     }
 }
+
+/* the package-meta badge row: keep the shields on one wrapping line with even spacing */
+.package-meta img {
+    height: 20px;
+    margin: 0 0.35em 0.35em 0;
+    vertical-align: middle;
+}
+
+/* bench-table ratio tints: parity green ramping to worst-case red (the status ladder from the docs palette,
+   validated on both surfaces). Text stays in the theme's ink; the number carries the value, the tint is redundant,
+   and the ramp darkens monotonically so it also reads under red/green color-vision deficiency. */
+.bench-table td.bench-faster { background: rgba(12, 163, 12, 0.28); }
+.bench-table td.bench-par { background: rgba(12, 163, 12, 0.14); }
+.bench-table td.bench-mild { background: rgba(250, 178, 25, 0.16); }
+.bench-table td.bench-slow { background: rgba(236, 131, 90, 0.20); }
+.bench-table td.bench-veryslow { background: rgba(208, 59, 59, 0.22); }
+.bench-table td.bench-worst { background: rgba(208, 59, 59, 0.38); }
+body[data-theme="dark"] .bench-table td.bench-faster { background: rgba(12, 163, 12, 0.34); }
+body[data-theme="dark"] .bench-table td.bench-par { background: rgba(12, 163, 12, 0.18); }
+body[data-theme="dark"] .bench-table td.bench-mild { background: rgba(250, 178, 25, 0.20); }
+body[data-theme="dark"] .bench-table td.bench-slow { background: rgba(236, 131, 90, 0.24); }
+body[data-theme="dark"] .bench-table td.bench-veryslow { background: rgba(208, 59, 59, 0.28); }
+body[data-theme="dark"] .bench-table td.bench-worst { background: rgba(208, 59, 59, 0.44); }

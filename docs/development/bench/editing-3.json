@@ -1,0 +1,40 @@
+{
+  "label": "replace body inner HTML",
+  "parties": [
+    "turbohtml",
+    "BeautifulSoup",
+    "lxml",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      2.6e-06,
+      9.38e-05,
+      1.76e-05,
+      2.08e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      1.02e-05,
+      0.000157,
+      5.32e-05,
+      1.48e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      1.51e-05,
+      0.000228,
+      0.000122,
+      0.000131
+    ],
+    [
+      "whatwg spec (235 kB)",
+      4.32e-05,
+      0.000906,
+      0.00029,
+      0.00038
+    ]
+  ]
+}

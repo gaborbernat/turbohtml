@@ -2,9 +2,7 @@
  From readability-lxml
 #######################
 
-.. image:: https://static.pepy.tech/badge/readability-lxml/month
-    :alt: readability-lxml monthly downloads
-    :target: https://pepy.tech/project/readability-lxml
+.. package-meta:: readability-lxml buriy/python-readability
 
 `readability-lxml <https://github.com/buriy/python-readability>`_ is a Python port of Arc90's Readability: a
 ``Document`` wraps the HTML, ``summary()`` returns the cleaned article markup, and ``short_title()`` the page title. It
@@ -23,19 +21,8 @@ Scoring the content body of a full page -- navigation, a scored article, and a f
 runs the same content-density heuristic in C and selects the live element; readability-lxml builds an lxml tree and
 rewrites it into a cleaned summary fragment. Numbers vary with input and hardware.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - readability-lxml
-    - - post (4 KiB)
-      - 23 µs
-      - 1.26 ms (55x)
-    - - longform (16 KiB)
-      - 70 µs
-      - 2.54 ms (36x)
+.. bench-table::
+    :file: bench/readability-lxml.json
 
 *************
  The renames
@@ -45,7 +32,7 @@ rewrites it into a cleaned summary fragment. Numbers vary with input and hardwar
     :header-rows: 1
     :widths: 50 50
 
-    - - readability-lxml
+    - - `readability-lxml <https://github.com/buriy/python-readability>`__
       - turbohtml
     - - ``Document(html).summary()``
       - ``doc.article().element`` (:attr:`~turbohtml.Node.html` for its markup, or ``None``)

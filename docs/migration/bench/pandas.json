@@ -1,0 +1,40 @@
+{
+  "label": "input",
+  "parties": [
+    "turbohtml",
+    "pandas.read_html"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "rows (10 rows)",
+      1.08e-05,
+      0.000943
+    ],
+    [
+      "records (10 rows)",
+      1.58e-05,
+      0.00097
+    ],
+    [
+      "rows (100 rows)",
+      9.97e-05,
+      0.002178
+    ],
+    [
+      "records (100 rows)",
+      9.85e-05,
+      0.002165
+    ],
+    [
+      "rows (1000 rows)",
+      0.000853,
+      0.0106
+    ],
+    [
+      "records (1000 rows)",
+      0.000893,
+      0.013
+    ]
+  ]
+}

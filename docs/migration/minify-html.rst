@@ -2,9 +2,7 @@
  From minify-html
 ##################
 
-.. image:: https://static.pepy.tech/badge/minify-html/month
-    :alt: minify-html monthly downloads
-    :target: https://pepy.tech/project/minify-html
+.. package-meta:: minify-html wilsonzlin/minify-html
 
 `minify-html <https://github.com/wilsonzlin/minify-html>`_ is a Rust HTML/CSS/JS minifier with a Python binding;
 ``minify_html.minify(html, **flags)`` collapses whitespace, drops optional tags, and unquotes attributes, and can also
@@ -20,25 +18,8 @@ whitespace, omitting the tags the WHATWG rules make optional, dropping redundant
 comments) it runs about twice as fast, parse included. It leaves embedded CSS and JavaScript untouched, which
 minify-html can also shrink.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - minify a document
-      - turbohtml
-      - minify-html
-    - - daring fireball (10 kB)
-      - 32.9 µs
-      - 65.8 µs (2.0x)
-    - - ars technica (56 kB)
-      - 153.1 µs
-      - 315.1 µs (2.1x)
-    - - mozilla blog (95 kB)
-      - 320.6 µs
-      - 742.3 µs (2.3x)
-    - - whatwg spec (235 kB)
-      - 1110.3 µs
-      - 1718.6 µs (1.5x)
+.. bench-table::
+    :file: bench/minify-html.json
 
 *************
  The renames
@@ -72,7 +53,7 @@ Each fold is a field on :class:`~turbohtml.Minify`, so a flag becomes one keywor
     :header-rows: 1
     :widths: 50 50
 
-    - - minify-html
+    - - `minify-html <https://github.com/wilsonzlin/minify-html>`__
       - turbohtml :class:`~turbohtml.Minify`
     - - whitespace collapsing (on by default)
       - ``Minify(collapse_whitespace=...)`` (default ``True``)

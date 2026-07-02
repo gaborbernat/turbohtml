@@ -2,9 +2,7 @@
  From newspaper3k
 ##################
 
-.. image:: https://static.pepy.tech/badge/newspaper3k/month
-    :alt: newspaper3k monthly downloads
-    :target: https://pepy.tech/project/newspaper3k
+.. package-meta:: newspaper3k codelucas/newspaper
 
 `newspaper3k <https://newspaper.readthedocs.io>`_ is a news-article scraper: an ``Article`` downloads a URL, then
 ``parse()`` fills ``article.text``, ``article.title``, ``article.authors``, ``article.publish_date`` and the rest from
@@ -23,19 +21,8 @@ Extracting the content body and metadata from a full page -- navigation, a score
 :meth:`~turbohtml.Node.article` scores and harvests in one C pass over the parsed tree; newspaper3k builds an lxml tree
 and runs its own regex-driven metadata scan. Numbers vary with input and hardware.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - input
-      - turbohtml
-      - newspaper3k
-    - - post (4 KiB)
-      - 23 µs
-      - 3.52 ms (152x)
-    - - longform (16 KiB)
-      - 70 µs
-      - 8.97 ms (128x)
+.. bench-table::
+    :file: bench/newspaper3k.json
 
 *************
  The renames
@@ -45,7 +32,7 @@ and runs its own regex-driven metadata scan. Numbers vary with input and hardwar
     :header-rows: 1
     :widths: 50 50
 
-    - - newspaper3k
+    - - `newspaper3k <https://github.com/codelucas/newspaper>`__
       - turbohtml
     - - ``article.text``
       - ``doc.article().text`` (or :meth:`~turbohtml.Node.main_text`)

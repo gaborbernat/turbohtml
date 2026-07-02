@@ -2,9 +2,7 @@
  From linkify-it-py
 ####################
 
-.. image:: https://static.pepy.tech/badge/linkify-it-py/month
-    :alt: linkify-it-py monthly downloads
-    :target: https://pepy.tech/project/linkify-it-py
+.. package-meta:: linkify-it-py tsutsu3/linkify-it-py
 
 `linkify-it-py <https://github.com/tsutsu3/linkify-it-py>`_ is the pure-Python link scanner `markdown-it-py
 <https://github.com/executablebooks/markdown-it-py>`_ pulls in: it scans plain text and returns the link spans it finds,
@@ -21,34 +19,8 @@ primitives (:meth:`Detector.find <turbohtml.clean.Detector.find>` against ``Link
 :meth:`~turbohtml.clean.Detector.has_link` against ``LinkifyIt().test``) outrun the Python scanner that does strictly
 less work. The one close row is ``has_link`` on prose, where ``test`` short-circuits on the first link near the start:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - operation
-      - turbohtml
-      - linkify-it-py
-    - - linkify comment (1 link, 1 email)
-      - 2.9 µs
-      - 29 µs (10.1x)
-    - - linkify prose (1 KiB)
-      - 51 µs
-      - 310 µs (6.1x)
-    - - linkify markup (4 KiB)
-      - 127 µs
-      - 708 µs (5.6x)
-    - - ``find`` comment (1 link, 1 email)
-      - 0.6 µs
-      - 29.2 µs (46.9x)
-    - - ``find`` prose (1 KiB)
-      - 8.8 µs
-      - 309.9 µs (35.1x)
-    - - ``has_link`` comment
-      - 0.3 µs
-      - 21.5 µs (83.7x)
-    - - ``has_link`` prose (1 KiB)
-      - 2.7 µs
-      - 4.9 µs (1.8x)
+.. bench-table::
+    :file: bench/linkify-it-py.json
 
 *************
  The renames
@@ -66,7 +38,7 @@ less work. The one close row is ``has_link`` on prose, where ``test`` short-circ
     :header-rows: 1
     :widths: 50 50
 
-    - - linkify-it-py
+    - - `linkify-it-py <https://github.com/tsutsu3/linkify-it-py>`__
       - turbohtml
     - - ``LinkifyIt().match(text)``
       - :meth:`Detector().find(text) <turbohtml.clean.Detector.find>`

@@ -2,9 +2,7 @@
  From html-sanitizer
 #####################
 
-.. image:: https://static.pepy.tech/badge/html-sanitizer/month
-    :alt: html-sanitizer monthly downloads
-    :target: https://pepy.tech/project/html-sanitizer
+.. package-meta:: html-sanitizer matthiask/html-sanitizer
 
 `html-sanitizer <https://github.com/matthiask/html-sanitizer>`_ is an allowlist sanitizer over lxml, configured with a
 ``settings`` dict carrying ``tags`` (a set), ``attributes`` (a per-tag dict), ``add_nofollow``, a ``sanitize_href``
@@ -18,19 +16,8 @@ scheme check, and whitespace/tag-merging normalization.
 translation rather than a rethink, but it adds full static typing, a frozen thread-safe policy, and the WHATWG tree
 builder in C instead of an lxml parse, leading html-sanitizer by one to two orders of magnitude:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - sanitize
-      - turbohtml
-      - html-sanitizer
-    - - comment (1 link, 1 script)
-      - 1.5 µs
-      - 45.3 µs (30.5x)
-    - - post (4 KiB)
-      - 42.1 µs
-      - 1504 µs (35.8x)
+.. bench-table::
+    :file: bench/html-sanitizer.json
 
 *************
  The renames
@@ -47,7 +34,7 @@ builder in C instead of an lxml parse, leading html-sanitizer by one to two orde
     :header-rows: 1
     :widths: 50 50
 
-    - - html-sanitizer
+    - - `html-sanitizer <https://github.com/matthiask/html-sanitizer>`__
       - turbohtml
     - - ``Sanitizer(settings).sanitize(text)``
       - :func:`turbohtml.clean.sanitize` with a :class:`~turbohtml.clean.Policy`

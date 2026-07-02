@@ -2,9 +2,7 @@
  From nh3
 ##########
 
-.. image:: https://static.pepy.tech/badge/nh3/month
-    :alt: nh3 monthly downloads
-    :target: https://pepy.tech/project/nh3
+.. package-meta:: nh3 messense/nh3
 
 `nh3 <https://nh3.readthedocs.io>`_ is the Python binding for the Rust `ammonia
 <https://github.com/rust-ammonia/ammonia>`_ HTML sanitizer, a common bleach refugee target. It is an allowlist
@@ -19,19 +17,8 @@ no linkifier.
 escape mode, a value-rewriting ``attribute_filter``, and a companion linkifier, all fully type annotated behind a frozen
 :class:`~turbohtml.clean.Policy`. It also leads nh3 on the benchmark:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 40 30 30
-
-    - - sanitize
-      - turbohtml
-      - nh3
-    - - comment (1 link, 1 script)
-      - 1.5 µs
-      - 5.5 µs (3.7x)
-    - - post (4 KiB)
-      - 42.1 µs
-      - 120.1 µs (2.9x)
+.. bench-table::
+    :file: bench/nh3.json
 
 *************
  The renames
@@ -53,7 +40,7 @@ escape mode, a value-rewriting ``attribute_filter``, and a companion linkifier, 
     :header-rows: 1
     :widths: 50 50
 
-    - - nh3
+    - - `nh3 <https://nh3.readthedocs.io/>`__
       - turbohtml
     - - ``nh3.clean(text, ...)``
       - :func:`turbohtml.clean.sanitize` with a :class:`~turbohtml.clean.Policy`

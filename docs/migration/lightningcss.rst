@@ -2,9 +2,7 @@
  From lightningcss
 ###################
 
-.. image:: https://static.pepy.tech/badge/lightningcss/month
-    :alt: lightningcss monthly downloads
-    :target: https://pepy.tech/project/lightningcss
+.. package-meta:: lightningcss
 
 `lightningcss <https://pypi.org/project/lightningcss/>`_ binds the Rust CSS engine behind Parcel to Python through
 ``process_stylesheet``. It is a cascade-aware optimizer: besides minifying, it drops declarations overridden elsewhere
@@ -17,54 +15,17 @@ input.
  Why turbohtml
 ***************
 
-lightningcss produces the smaller output -- one to five percent under turbohtml on the framework corpus -- because it
+lightningcss produces the smaller output on most of the corpus -- up to five percent under turbohtml -- because it
 optimizes for a browser-target set: it removes declarations overridden across the sheet and emits syntax those targets
 support. turbohtml applies only transforms that hold on any conformant browser, so its default output needs no target
 list and parses to the same cascade everywhere; the :class:`~turbohtml.clean.CSSMinify` ``baseline`` year opts into the
-newer-syntax shorthand merges when you are ready to require them. turbohtml also minifies two to three times faster, and
-it recovers from malformed CSS that lightningcss rejects: ``foundation.css`` raises a parse error on a media query the
-WHATWG rules accept, where turbohtml minifies all six stylesheets. Each cell shows the figure with its ratio to
-turbohtml:
+newer-syntax shorthand merges when you are ready to require them. turbohtml also minifies two to three times faster,
+comes out ahead on ``normalize.css``, and recovers from malformed CSS that lightningcss rejects: ``foundation.css``
+raises a parse error on a media query the WHATWG rules accept, where turbohtml minifies all six stylesheets. Each ratio
+is against turbohtml:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 24 19 19 19 19
-
-    - - stylesheet
-      - turbohtml size
-      - lightningcss size
-      - turbohtml time
-      - lightningcss time
-    - - normalize.css (6 kB)
-      - 1.8 kB
-      - 1.8 kB (0.99x)
-      - 15.9 µs
-      - 48.2 µs (3.0x)
-    - - animate.css (93 kB)
-      - 72.8 kB
-      - 68.8 kB (0.95x)
-      - 605 µs
-      - 1.25 ms (2.1x)
-    - - pico.css (90 kB)
-      - 81.0 kB
-      - 80.0 kB (0.99x)
-      - 457 µs
-      - 1.56 ms (3.4x)
-    - - foundation.css (164 kB)
-      - 131.4 kB
-      - parse error
-      - 1.09 ms
-      - parse error
-    - - bootstrap.css (274 kB)
-      - 229.4 kB
-      - 228.7 kB (1.00x)
-      - 1.65 ms
-      - 4.82 ms (2.9x)
-    - - bulma.css (745 kB)
-      - 682.2 kB
-      - 674.3 kB (0.99x)
-      - 3.46 ms
-      - 11.7 ms (3.4x)
+.. bench-table::
+    :file: bench/lightningcss.json
 
 Reach for lightningcss when you can pin a browser-target set and want the last few percent of size; reach for turbohtml
 when you want value-safe output with no configuration, faster runs, and tolerance of real-world CSS.
