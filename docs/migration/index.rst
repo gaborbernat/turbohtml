@@ -438,6 +438,15 @@ page benchmarks all of them).
             :alt: yattag total downloads
             :target: https://pepy.tech/project/yattag
     - - 3
+      - :doc:`htbuilder <htbuilder>`
+      - `docs <https://github.com/tvst/htbuilder>`__
+      - .. image:: https://static.pepy.tech/badge/htbuilder/month
+            :alt: htbuilder monthly downloads
+            :target: https://pepy.tech/project/htbuilder
+      - .. image:: https://static.pepy.tech/badge/htbuilder
+            :alt: htbuilder total downloads
+            :target: https://pepy.tech/project/htbuilder
+    - - 4
       - :doc:`htpy <htpy>`
       - `docs <https://htpy.dev/>`__
       - .. image:: https://static.pepy.tech/badge/htpy/month
@@ -446,7 +455,7 @@ page benchmarks all of them).
       - .. image:: https://static.pepy.tech/badge/htpy
             :alt: htpy total downloads
             :target: https://pepy.tech/project/htpy
-    - - 4
+    - - 5
       - :doc:`airium <airium>`
       - `docs <https://gitlab.com/kamichal/airium>`__
       - .. image:: https://static.pepy.tech/badge/airium/month
@@ -533,6 +542,7 @@ page benchmarks all of them).
     html-sanitizer
     yattag
     extruct
+    htbuilder
     htpy
     mechanicalsoup
     airium
