@@ -92,6 +92,7 @@ bench = [
   "calmjs-parse>=1.3",
   "chardet>=5.2",
   "charset-normalizer>=3.4",
+  "courlan>=1.4",
   "css-html-js-minify>=2.5",
   "csscompressor>=0.9",
   "cssmin>=0.2",
@@ -225,8 +226,9 @@ lint.preview = true
 
 [tool.codespell]
 builtin = "clear,usage,en-GB_to_en-US"
-# café, &notin;, afe (active formatting elements), vave (CSS-minify test value), grey (CSS Color 4), forin (JS dump)
-ignore-words-list = "caf,notin,afe,hava,vave,grey,forin"
+# café, &notin;, afe (active formatting elements), vave (CSS-minify test value), grey (CSS Color 4), forin (JS dump),
+# fo/nd/te (ISO 639-1 codes in the URL language filter)
+ignore-words-list = "caf,notin,afe,hava,vave,grey,forin,fo,nd,te"
 skip = "*/html_entities.h,*/tag_atom.h,*/entity_names.h,*/tld_table.h,*/css_colors.h"  # generated tables of HTML5 / IANA / CSS names
 count = true
 quiet-level = 3
