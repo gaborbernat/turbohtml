@@ -823,6 +823,24 @@ static void merge_sequences(F *folder, int32_t first) {
             }
             next = prog->nodes[idx].next;
         }
+        int32_t guard_then = next >= 0 && prog->nodes[next].kind == JN_IF && prog->nodes[next].c < 0
+                                 ? branch_stmt(folder, prog->nodes[next].b)
+                                 : -1;
+        if (guard_then >= 0 && prog->nodes[guard_then].kind == JN_BREAK) {
+            /* the test evaluates before anything else in the statement (14.6.2), exactly when the
+               preceding expression statement ran, so it rides along as a comma operand. Only a
+               break guard packs: it folds into the loop test or stays a statement, while any other
+               if re-emerges as an expression whose sequence would cost parentheses. */
+            int32_t seq = as_sequence(prog, prog->nodes[idx].a);
+            if (seq < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                continue;  /* GCOVR_EXCL_LINE */
+            }
+            seq_append(prog, seq, prog->nodes[next].a);
+            prog->nodes[next].a = seq;
+            prog->nodes[idx].kind = JN_EMPTY; /* the next pass's drop_empties unlinks it */
+            folder->changed = 1;
+            continue;
+        }
         if (next >= 0 && prog->nodes[next].kind == JN_FOR &&
             (prog->nodes[next].a < 0 || prog->nodes[prog->nodes[next].a].kind != JN_VAR)) {
             /* the init clause runs once before the first test (14.7.4.2), exactly when the
