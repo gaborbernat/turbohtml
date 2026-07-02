@@ -561,71 +561,10 @@ that stays value-safe at the most compatible baseline and recovers from malforme
 character state machine), and `calmjs.parse <https://github.com/calmjs/calmjs.parse>`_ (a full ES5 parser with an
 obfuscating printer). The inputs are real un-minified libraries, a size ladder every tool parses. turbohtml and
 calmjs.parse both parse and rename, so they shrink the most; rjsmin and jsmin only strip whitespace and comments.
-turbohtml leads the parsers by two orders of magnitude over calmjs.parse and by ten over jsmin, and trails only rjsmin,
-which buys its speed by doing far less and leaving output about a third larger. The parenthesized factor is each tool's
-time relative to turbohtml.
+turbohtml renames every local binding (function and class declarations included) and runs the structural folds, so it
+beats calmjs.parse's heavier global obfuscation on size everywhere while running thirty to fifty times faster; it trails
+only rjsmin on time, which buys its speed by doing far less and leaving output roughly twice the size. Each cell pairs a
+minifier's output size with the time to produce it; both ratios are against turbohtml.
 
-.. list-table::
-    :header-rows: 1
-    :widths: 26 14 20 16 16
-
-    - - input
-      - turbohtml
-      - calmjs.parse
-      - jsmin
-      - rjsmin
-    - - underscore (67 kB)
-      - 0.6 ms
-      - 101.8 ms (179x)
-      - 5.7 ms (9.9x)
-      - 0.1 ms (0.1x)
-    - - backbone (79 kB)
-      - 0.6 ms
-      - 105.4 ms (188x)
-      - 6.1 ms (10.9x)
-      - 0.1 ms (0.2x)
-    - - jquery (279 kB)
-      - 2.7 ms
-      - 464.0 ms (171x)
-      - 23.5 ms (8.7x)
-      - 0.4 ms (0.1x)
-    - - lodash (531 kB)
-      - 2.7 ms
-      - 435.4 ms (161x)
-      - 32.8 ms (12.2x)
-      - 0.6 ms (0.2x)
-
-The same run measured each tool's output size. turbohtml renames every local binding (function and class declarations
-included) and runs the structural folds where rjsmin and jsmin only strip whitespace, so it shrinks every library well
-past them, and it now edges out calmjs.parse's heavier global obfuscation on size while parsing two orders of magnitude
-faster. The parenthesized factor is each tool's minified size relative to turbohtml.
-
-.. list-table::
-    :header-rows: 1
-    :widths: 26 14 20 16 16
-
-    - - input
-      - turbohtml
-      - calmjs.parse
-      - jsmin
-      - rjsmin
-    - - underscore (67 kB)
-      - 19 kB
-      - 20 kB (1.1x)
-      - 33 kB (1.7x)
-      - 33 kB (1.7x)
-    - - backbone (79 kB)
-      - 24 kB
-      - 25 kB (1.0x)
-      - 34 kB (1.4x)
-      - 34 kB (1.4x)
-    - - jquery (279 kB)
-      - 87 kB
-      - 91 kB (1.1x)
-      - 138 kB (1.6x)
-      - 138 kB (1.6x)
-    - - lodash (531 kB)
-      - 72 kB
-      - 75 kB (1.0x)
-      - 145 kB (2.0x)
-      - 145 kB (2.0x)
+.. bench-table::
+    :file: bench/js-minification.json

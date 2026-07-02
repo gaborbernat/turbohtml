@@ -32,35 +32,13 @@ you (it only sees the script string) is built in: pass a :class:`~turbohtml.JSMi
 
     turbohtml.minify_js(source)  # whitespace + rename locals + fold constants
 
-The trade is deliberate: rjsmin's regex is faster than a parse, but it shrinks far less. On the vendored library ladder
-(``python -m bench minify-js``) turbohtml takes single-digit milliseconds where rjsmin takes a fraction of one, and in
-return its output is up to half the size: jQuery 3.7 minifies to 31% of source under turbohtml versus 49% under rjsmin,
-lodash 4.17 to 14% versus 27%, because turbohtml renames and folds rather than only deleting space.
+The trade is deliberate: rjsmin's regex is faster than a parse, but it shrinks far less. On the library ladder (``python
+-m bench minify-js``) turbohtml takes single-digit milliseconds where rjsmin takes a fraction of one, and in return its
+output is up to half the size: jQuery 3.7 minifies to 31% of source under turbohtml versus 51% under rjsmin, lodash 4.17
+to 13% versus 28%, because turbohtml renames and folds rather than only deleting space. Each ratio is against turbohtml:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 24 19 19 19 19
-
-    - - minify
-      - turbohtml time
-      - rjsmin time
-      - turbohtml size
-      - rjsmin size
-    - - underscore (67 kB)
-      - 0.6 ms
-      - 0.1 ms (0.1x)
-      - 19 kB
-      - 33 kB (1.7x)
-    - - jquery (279 kB)
-      - 2.7 ms
-      - 0.4 ms (0.1x)
-      - 87 kB
-      - 138 kB (1.6x)
-    - - lodash (531 kB)
-      - 2.7 ms
-      - 0.6 ms (0.2x)
-      - 72 kB
-      - 145 kB (2.0x)
+.. bench-table::
+    :file: bench/rjsmin.json
 
 When the cost that matters is bytes shipped rather than minify time, turbohtml wins; when you only need whitespace
 stripped as cheaply as possible, rjsmin is still the lighter tool.

@@ -31,34 +31,12 @@ jsmin leaves entirely to you, is a :class:`~turbohtml.JSMinify` on :class:`~turb
 
     turbohtml.minify_js(source)  # smaller output, in C
 
-On the vendored library ladder (``python -m bench minify-js``) turbohtml is roughly ten times faster than jsmin and its
+On the library ladder (``python -m bench minify-js``) turbohtml runs about two to three times faster than jsmin and its
 output is up to half the size, because jsmin only deletes whitespace where turbohtml renames every local binding and
-runs the structural folds.
+runs the structural folds. Each ratio is against turbohtml:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 24 19 19 19 19
-
-    - - minify
-      - turbohtml time
-      - jsmin time
-      - turbohtml size
-      - jsmin size
-    - - underscore (67 kB)
-      - 0.6 ms
-      - 5.7 ms (9.9x)
-      - 19 kB
-      - 33 kB (1.7x)
-    - - jquery (279 kB)
-      - 2.7 ms
-      - 23.5 ms (8.7x)
-      - 87 kB
-      - 138 kB (1.6x)
-    - - lodash (531 kB)
-      - 2.7 ms
-      - 32.8 ms (12.2x)
-      - 72 kB
-      - 145 kB (2.0x)
+.. bench-table::
+    :file: bench/jsmin.json
 
 Unlike the regex-based :doc:`rjsmin <rjsmin>`, jsmin has no speed advantage to trade for its simpler output, so there is
 no case where it beats :func:`~turbohtml.minify_js`.

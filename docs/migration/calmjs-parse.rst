@@ -33,34 +33,13 @@ HTML, a verbatim fallback) rather than a hard parser crash.
 
     turbohtml.minify_js(source)  # in C, modern syntax too
 
-On the vendored ES5 library ladder turbohtml reaches the smaller output, and the speed gap is large: on the same machine
+On the ES5 library ladder turbohtml reaches the smaller output, and the speed gap is large: on the same machine
 (``python -m bench minify-js``) calmjs.parse takes hundreds of milliseconds where turbohtml takes single-digit
-milliseconds.
+milliseconds. Each ratio is against turbohtml:
 
-.. list-table::
-    :header-rows: 1
-    :widths: 24 19 19 19 19
+.. bench-table::
+    :file: bench/calmjs-parse.json
 
-    - - minify
-      - turbohtml time
-      - calmjs.parse time
-      - turbohtml size
-      - calmjs.parse size
-    - - underscore (67 kB)
-      - 0.6 ms
-      - 101.8 ms (179x)
-      - 19 kB
-      - 20 kB (1.1x)
-    - - jquery (279 kB)
-      - 2.7 ms
-      - 464.0 ms (171x)
-      - 87 kB
-      - 91 kB (1.1x)
-    - - lodash (531 kB)
-      - 2.7 ms
-      - 435.4 ms (161x)
-      - 72 kB
-      - 75 kB (1.0x)
-
-turbohtml now matches or beats calmjs.parse on size, at ~170x less time and on modern JavaScript that calmjs.parse
-rejects outright, so for any build where minify time or modern syntax is in the loop turbohtml is the practical choice.
+turbohtml beats calmjs.parse on size everywhere, at thirty to fifty times less time and on modern JavaScript that
+calmjs.parse rejects outright, so for any build where minify time or modern syntax is in the loop turbohtml is the
+practical choice.
