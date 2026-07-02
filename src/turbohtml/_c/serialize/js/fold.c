@@ -478,6 +478,89 @@ static int ends_abruptly(F *folder, int32_t idx) {
     return node->kind == JN_RETURN || node->kind == JN_THROW || node->kind == JN_BREAK || node->kind == JN_CONTINUE;
 }
 
+/* The byte cost of negating an expression in a test position, with *wraps counting the fresh `!`
+   nodes an application would need. Negation pays when the cost is negative: a `!x` sheds its bang
+   (-1), an (in)equality flips its operator for free (7.2.13/7.2.14: != is the exact complement of
+   ==), a short-circuit pair De-Morgans into the sum of its operands (13.13: !(a&&b) selects
+   exactly like !a||!b in a boolean context), and anything else gains a bang (+1 when the operand
+   binds at least as tight as the unary, else +3 for the parentheses). */
+static int negate_cost(F *folder, int32_t idx, int *wraps) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_UNARY && node->op == JT_NOT) {
+        return -1;
+    }
+    if (node->kind == JN_BINARY &&
+        (node->op == JT_EQ_EQ || node->op == JT_NE || node->op == JT_EQ_EQ_EQ || node->op == JT_NE_EQ)) {
+        return 0;
+    }
+    if (node->kind == JN_LOGICAL && (node->op == JT_AND || node->op == JT_OR)) {
+        return negate_cost(folder, node->a, wraps) + negate_cost(folder, node->b, wraps);
+    }
+    *wraps += 1;
+    switch (node->kind) {
+    case JN_IDENT:
+    case JN_NUM:
+    case JN_STRING:
+    case JN_CALL:
+    case JN_MEMBER_EXPR:
+    case JN_UNARY:
+        return 1;
+    default:
+        return 3;
+    }
+}
+
+/* Apply the negation negate_cost priced, consuming the pre-allocated `!` nodes in pool -- no
+   allocation happens here, so a half-applied tree is impossible. Returns the negated root. */
+static int32_t negate_apply(F *folder, int32_t idx, const int32_t *pool, int *pool_next) {
+    jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_UNARY && node->op == JT_NOT) {
+        return node->a;
+    }
+    if (node->kind == JN_BINARY &&
+        (node->op == JT_EQ_EQ || node->op == JT_NE || node->op == JT_EQ_EQ_EQ || node->op == JT_NE_EQ)) {
+        node->op = node->op == JT_EQ_EQ      ? JT_NE
+                   : node->op == JT_NE       ? JT_EQ_EQ
+                   : node->op == JT_EQ_EQ_EQ ? JT_NE_EQ
+                                             : JT_EQ_EQ_EQ;
+        return idx;
+    }
+    if (node->kind == JN_LOGICAL && (node->op == JT_AND || node->op == JT_OR)) {
+        node->op = node->op == JT_AND ? JT_OR : JT_AND;
+        node->a = negate_apply(folder, node->a, pool, pool_next);
+        node->b = negate_apply(folder, node->b, pool, pool_next);
+        return idx;
+    }
+    int32_t wrap = pool[(*pool_next)++];
+    folder->prog->nodes[wrap].op = JT_NOT;
+    folder->prog->nodes[wrap].a = idx;
+    return wrap;
+}
+
+/* Negate `*test` in place while that sheds bytes, returning how many negations applied (the
+   caller flips its operator or swaps its branches once per application). Loops because peeling a
+   doubled bang re-exposes another win. */
+static int negate_test(F *folder, int32_t *test) {
+    int applications = 0;
+    for (;;) {
+        int wraps = 0;
+        if (negate_cost(folder, *test, &wraps) >= 0 || wraps > 16) {
+            return applications;
+        }
+        int32_t pool[16];
+        for (int slot = 0; slot < wraps; slot++) {
+            pool[slot] = jm_node_new(folder->prog, JN_UNARY);
+            if (pool[slot] < 0) {    /* GCOVR_EXCL_BR_LINE: allocation-failure bails before any mutation */
+                return applications; /* GCOVR_EXCL_LINE */
+            }
+        }
+        int consumed = 0;
+        *test = negate_apply(folder, *test, pool, &consumed);
+        applications++;
+        folder->changed = 1;
+    }
+}
+
 /* The boolean negation of an expression, for a test position (ToBoolean consumes the value, so
    only truthiness must invert): a `!x` peels to x, an (in)equality flips its operator in place
    (7.2.13/7.2.14: != is the exact complement of ==, !== of ===), and anything else gains a fresh
@@ -504,11 +587,11 @@ static int32_t negate_for_test(F *folder, int32_t idx) {
     return neg;
 }
 
-/* Build `test ? then : els`, flipping `!x ? a : b` to `x ? b : a` to drop the negation (13.14);
-   a doubled `!!x` test peels both, since a conditional reads its test as a boolean. */
-static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t els) {
-    while (prog->nodes[test].kind == JN_UNARY && prog->nodes[test].op == JT_NOT) {
-        test = prog->nodes[test].a;
+/* Build `test ? then : els`, negating the test and swapping the branches when the negation sheds
+   bytes (13.14: a conditional reads its test as a boolean, so `!x?a:b` selects like `x?b:a`). */
+static int32_t make_cond(F *folder, int32_t test, int32_t then, int32_t els) {
+    jm_program *prog = folder->prog;
+    if (negate_test(folder, &test) % 2) {
         int32_t swap = then;
         then = els;
         els = swap;
@@ -523,15 +606,12 @@ static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t e
     return cond;
 }
 
-/* Build `test && expr`, turning `!x && expr` into `x || expr` to drop the negation (13.13); each
-   `!` flips the connective, so `!!x && expr` is back to `x && expr`. */
+/* Build `test && expr` for a value-discarded position, negating the test and flipping the
+   connective when that sheds bytes (13.13: as a statement, `!x&&e` and `x||e` run e at exactly
+   the same time and their value is thrown away). */
 static int32_t make_logical(F *folder, int32_t test, int32_t expr) {
     jm_program *prog = folder->prog;
-    uint16_t op = JT_AND;
-    while (prog->nodes[test].kind == JN_UNARY && prog->nodes[test].op == JT_NOT) {
-        test = prog->nodes[test].a;
-        op = op == JT_AND ? JT_OR : JT_AND;
-    }
+    uint16_t op = negate_test(folder, &test) % 2 ? JT_OR : JT_AND;
     int32_t logic = jm_node_new(prog, JN_LOGICAL);
     if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         return -1;   /* GCOVR_EXCL_LINE */
@@ -609,7 +689,7 @@ static void fold_conditional(F *folder, int32_t idx) {
         prog->nodes[cons].op == JT_ASSIGN && prog->nodes[alt].op == JT_ASSIGN &&
         prog->nodes[prog->nodes[cons].a].kind == JN_IDENT && same_expr(prog, prog->nodes[cons].a, prog->nodes[alt].a)) {
         /* a?(t=x):(t=y) -> t=a?x:y : the same simple target is assigned either way */
-        int32_t merged = make_cond(prog, test, prog->nodes[cons].b, prog->nodes[alt].b);
+        int32_t merged = make_cond(folder, test, prog->nodes[cons].b, prog->nodes[alt].b);
         if (merged < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             return;       /* GCOVR_EXCL_LINE */
         }
@@ -679,7 +759,7 @@ static void convert_if(F *folder, int32_t idx) {
     if (prog->nodes[then_stmt].kind != JN_EXPR_STMT || prog->nodes[else_stmt].kind != JN_EXPR_STMT) {
         return;
     }
-    int32_t cond = make_cond(prog, prog->nodes[idx].a, prog->nodes[then_stmt].a, prog->nodes[else_stmt].a);
+    int32_t cond = make_cond(folder, prog->nodes[idx].a, prog->nodes[then_stmt].a, prog->nodes[else_stmt].a);
     if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         return;     /* GCOVR_EXCL_LINE */
     }
@@ -796,7 +876,7 @@ static void fold_if_return_chain(F *folder, int32_t first) {
                 prog->nodes[next].kind != JN_RETURN || prog->nodes[next].a < 0) {
                 continue;
             }
-            int32_t cond = make_cond(prog, prog->nodes[idx].a, prog->nodes[then].a, prog->nodes[next].a);
+            int32_t cond = make_cond(folder, prog->nodes[idx].a, prog->nodes[then].a, prog->nodes[next].a);
             if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
                 return;     /* GCOVR_EXCL_LINE */
             }
@@ -1221,6 +1301,18 @@ static void walk(F *folder, int32_t idx) {
             int truth = pure_truthy(folder, node->a);
             if (truth >= 0) {
                 fold_boolean(folder, idx, !truth);
+                return;
+            }
+            const jm_node *operand = &folder->prog->nodes[node->a];
+            if (operand->kind == JN_BINARY && (operand->op == JT_EQ_EQ || operand->op == JT_NE ||
+                                               operand->op == JT_EQ_EQ_EQ || operand->op == JT_NE_EQ)) {
+                /* !(a==b) and a!=b are the same boolean everywhere, not just in a test position
+                   (7.2.13/7.2.14 define one as the other's exact complement, both booleans) */
+                folder->prog->nodes[node->a].op = operand->op == JT_EQ_EQ      ? JT_NE
+                                                  : operand->op == JT_NE       ? JT_EQ_EQ
+                                                  : operand->op == JT_EQ_EQ_EQ ? JT_NE_EQ
+                                                                               : JT_EQ_EQ_EQ;
+                replace_with(folder, idx, node->a);
             }
         }
         return;
@@ -1250,13 +1342,14 @@ static void walk(F *folder, int32_t idx) {
             replace_with(folder, idx, truth ? node->b : node->c);
             return;
         }
-        while (folder->prog->nodes[node->a].kind == JN_UNARY && folder->prog->nodes[node->a].op == JT_NOT) {
-            node->a = folder->prog->nodes[node->a].a; /* !x?a:b -> x?b:a; a doubled !! peels fully */
+        int32_t test = node->a;
+        if (negate_test(folder, &test) % 2) { /* !x?a:b -> x?b:a; a cheaper negation swaps too */
+            node = &folder->prog->nodes[idx]; /* negate_test allocates; re-read */
             int32_t swap = node->b;
             node->b = node->c;
             node->c = swap;
-            folder->changed = 1;
         }
+        folder->prog->nodes[idx].a = test;
         fold_conditional(folder, idx);
         return;
     }

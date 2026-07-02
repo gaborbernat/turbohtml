@@ -82,6 +82,37 @@ _NODE = shutil.which("node")
         # is a shape static_type vouches for, so both keep ===
         pytest.param("x=-a===-b", "x=-a===-b", id="eq-minus-unary-kept"),
         pytest.param("x=delete a.b===c", "x=delete a.b===c", id="eq-delete-kept"),
+        # negation is applied or removed wherever it nets bytes: !(a==b) is exactly a!=b (7.2.13/
+        # 7.2.14, both booleans), a test position absorbs a ! by swapping branches or flipping the
+        # connective, and && / || De-Morgan when both sides negate for free; !(a<b) stays (NaN)
+        pytest.param("x=!(a==b)", "x=a!=b", id="not-eq-flips"),
+        pytest.param("x=!(a!==b)", "x=a===b", id="not-strict-ne-flips"),
+        pytest.param("x=!(a<b)", "x=!(a<b)", id="not-relational-kept"),
+        pytest.param("if(!a&&!b)x()", "a||b||x()", id="demorgan-statement-test"),
+        pytest.param("x=!a&&!b?1:2", "x=a||b?2:1", id="demorgan-cond-swaps"),
+        pytest.param("if(!(a&&b))x()", "a&&b||x()", id="not-over-and-peels"),
+        pytest.param("x=!(a!=b)", "x=a==b", id="not-ne-flips"),
+        pytest.param("x=!(a===b)", "x=a!==b", id="not-strict-eq-flips"),
+        pytest.param("if(!a&&!b&&c)x()", "a||b||!c||x()", id="demorgan-wraps-positive-leaf"),
+        pytest.param("if(!(a??b))x()", "(a??b)||x()", id="not-over-nullish-peels"),
+        pytest.param("if(!a&&b!==c)x()", "a||b===c||x()", id="demorgan-flips-strict-ne"),
+        pytest.param("if(!a&&b===c)x()", "a||b!==c||x()", id="demorgan-flips-strict-eq"),
+        pytest.param("if(!a&&b==c)x()", "a||b!=c||x()", id="demorgan-flips-eq"),
+        pytest.param("if(!a&&b!=c)x()", "a||b==c||x()", id="demorgan-flips-ne"),
+        pytest.param("if(!a&&!b&&void c)x()", "a||b||!void c||x()", id="demorgan-wraps-unary"),
+        pytest.param("if(!a&&!b&&!c&&!d&&(e??f))x()", "a||b||c||d||!(e??f)||x()", id="demorgan-wraps-nullish"),
+        pytest.param("if(!a&&!b&&!c&&!d&&e+f)x()", "a||b||c||d||!(e+f)||x()", id="demorgan-wraps-binary"),
+        # past 16 fresh bangs the negation is skipped rather than half-applied (the wrap pool cap)
+        pytest.param(
+            "if(" + "&&".join(f"!n{i}" for i in range(18)) + "&&" + "&&".join(f"p{i}" for i in range(17)) + ")x()",
+            "&&".join(f"!n{i}" for i in range(18)) + "&&" + "&&".join(f"p{i}" for i in range(17)) + "&&x()",
+            id="demorgan-wrap-cap-skips",
+        ),
+        pytest.param(
+            'function f(){if(typeof a!="object"&&!b(c))return;g();h()}',
+            'function f(){(typeof a=="object"||b(c))&&(g(),h())}',
+            id="guard-negation-distributes",
+        ),
         # typeof X compared with "undefined" collapses to a strict undefined check (13.5.3), unless
         # X is a bare name whose ReferenceError the typeof suppresses
         pytest.param('x=typeof a.b!="undefined"', "x=void 0!==a.b", id="typeof-undefined-ne"),
