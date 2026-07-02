@@ -82,6 +82,27 @@ _NODE = shutil.which("node")
         # is a shape static_type vouches for, so both keep ===
         pytest.param("x=-a===-b", "x=-a===-b", id="eq-minus-unary-kept"),
         pytest.param("x=delete a.b===c", "x=delete a.b===c", id="eq-delete-kept"),
+        # a consequent that always jumps makes the else keyword redundant (14.6.2: the alternate
+        # runs exactly when the test was falsy either way), so the alternate joins the chain; a
+        # falling-through consequent and Annex-B `else function` keep their else
+        pytest.param("function f(){if(a)throw e;else g()}", "function f(){if(a)throw e;g()}", id="abrupt-else-spliced"),
+        pytest.param("while(x){if(a)break;else g()}", "while(x){if(a)break;g()}", id="abrupt-break-else-spliced"),
+        pytest.param(
+            "function f(){if(a)return 1;else if(b)return 2;else g();h()}",
+            "function f(){if(a)return 1;if(b)return 2;g(),h()}",
+            id="abrupt-else-chain-spliced",
+        ),
+        pytest.param(
+            "function f(){if(a){g();return 1}else h()}",
+            "function f(){if(a)return g(),1;h()}",
+            id="abrupt-block-else-spliced",
+        ),
+        pytest.param(
+            "function f(){if(a)return;else function q(){}q()}",
+            "function f(){if(a)return;else function q(){}q()}",
+            id="annex-b-else-function-kept",
+        ),
+        pytest.param("if(a)g();else{var x=1;h(x)}", "if(a)g();else{var x=1;h(x)}", id="multi-stmt-else-block-kept"),
         # a tail return of undefined is redundant (10.2.1.4: falling off the end returns undefined);
         # a valued or non-tail return, and `delete` (valued, not void), stay
         pytest.param("function f(){g();return}", "function f(){g()}", id="tail-bare-return-dropped"),

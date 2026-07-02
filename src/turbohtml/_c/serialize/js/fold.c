@@ -31,6 +31,7 @@
 typedef struct {
     jm_program *prog;
     int fold_undefined; /* `undefined` is not shadowed by any binding -> fold to void 0 */
+    int changed;        /* a transform fired this pass: jm_fold walks again so cascades finish */
 } F;
 
 static int ident_is(const jm_node *node, const char *word) {
@@ -55,6 +56,7 @@ static void replace_with(F *folder, int32_t dst, int32_t src) {
     int32_t next = folder->prog->nodes[dst].next;
     folder->prog->nodes[dst] = folder->prog->nodes[src];
     folder->prog->nodes[dst].next = next;
+    folder->changed = 1;
 }
 
 /* ----------------------------------------------------------- constant truthiness */
@@ -226,6 +228,7 @@ static void fold_boolean(F *folder, int32_t idx, int truth) {
     node->str = NULL;
     node->str_len = 0;
     node->a = num;
+    folder->changed = 1;
 }
 
 static void fold_void(F *folder, int32_t idx) {
@@ -243,6 +246,7 @@ static void fold_void(F *folder, int32_t idx) {
     node->str = voidkw;
     node->str_len = 4;
     node->a = num;
+    folder->changed = 1;
 }
 
 /* ----------------------------------------------------------- declaration scan (for undefined) */
@@ -351,6 +355,7 @@ static void drop_unreachable(F *folder, int32_t first) {
             return; /* nothing after, or the tail hoists names: keep it */
         }
         node->next = -1; /* cut the unreachable tail */
+        folder->changed = 1;
         return;
     }
 }
@@ -374,6 +379,7 @@ static void merge_declarations(F *folder, int32_t first) {
         }
         nodes[tail].next = nodes[next].a;
         nodes[idx].next = nodes[next].next;
+        folder->changed = 1;
     }
 }
 
@@ -402,7 +408,8 @@ static int is_empty_branch(F *folder, int32_t idx) {
    associative -- `a&&(b&&c)` and `(a&&b)&&c` evaluate a, b, c in the same order with the same
    result (13.13) -- and the grammar is left-associative, so only the left-leaning shape prints
    without parentheses (`a&&b&&c`) and re-parses to itself. */
-static void rotate_logical_chain(jm_program *prog, int32_t idx) {
+static void rotate_logical_chain(F *folder, int32_t idx) {
+    jm_program *prog = folder->prog;
     for (int32_t cur = idx;;) {
         uint16_t op = prog->nodes[cur].op;
         while (prog->nodes[prog->nodes[cur].b].kind == JN_LOGICAL && prog->nodes[prog->nodes[cur].b].op == op) {
@@ -411,12 +418,32 @@ static void rotate_logical_chain(jm_program *prog, int32_t idx) {
             prog->nodes[right].b = prog->nodes[right].a;
             prog->nodes[right].a = prog->nodes[cur].a;
             prog->nodes[cur].a = right;
+            folder->changed = 1;
         }
         cur = prog->nodes[cur].a; /* a rotation may leave a same-op chain as the new left's right */
         if (prog->nodes[cur].kind != JN_LOGICAL || prog->nodes[cur].op != op) {
             return;
         }
     }
+}
+
+/* Whether the branch statement always completes abruptly with a jump: it is a return / throw /
+   break / continue, or a block whose last statement is one. Control never falls out of such a
+   consequent, so an `else` after it is redundant (14.6.2: the alternate runs exactly when the
+   test was falsy either way). */
+static int ends_abruptly(F *folder, int32_t idx) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_BLOCK) { /* drop_empties has already stripped stray `;` from the block */
+        int32_t last = node->a;
+        if (last < 0) {
+            return 0;
+        }
+        while (folder->prog->nodes[last].next >= 0) {
+            last = folder->prog->nodes[last].next;
+        }
+        node = &folder->prog->nodes[last];
+    }
+    return node->kind == JN_RETURN || node->kind == JN_THROW || node->kind == JN_BREAK || node->kind == JN_CONTINUE;
 }
 
 /* Build `test ? then : els`, flipping `!x ? a : b` to `x ? b : a` to drop the negation (13.14);
@@ -440,7 +467,8 @@ static int32_t make_cond(jm_program *prog, int32_t test, int32_t then, int32_t e
 
 /* Build `test && expr`, turning `!x && expr` into `x || expr` to drop the negation (13.13); each
    `!` flips the connective, so `!!x && expr` is back to `x && expr`. */
-static int32_t make_logical(jm_program *prog, int32_t test, int32_t expr) {
+static int32_t make_logical(F *folder, int32_t test, int32_t expr) {
+    jm_program *prog = folder->prog;
     uint16_t op = JT_AND;
     while (prog->nodes[test].kind == JN_UNARY && prog->nodes[test].op == JT_NOT) {
         test = prog->nodes[test].a;
@@ -453,7 +481,7 @@ static int32_t make_logical(jm_program *prog, int32_t test, int32_t expr) {
     prog->nodes[logic].op = op;
     prog->nodes[logic].a = test;
     prog->nodes[logic].b = expr;
-    rotate_logical_chain(prog, logic); /* expr may be a same-op chain: if(a)b&&c -> a&&b&&c */
+    rotate_logical_chain(folder, logic); /* expr may be a same-op chain: if(a)b&&c -> a&&b&&c */
     return logic;
 }
 
@@ -493,7 +521,7 @@ static void fold_to_logical(F *folder, int32_t idx, uint16_t op, int32_t left, i
     folder->prog->nodes[logic].op = op;
     folder->prog->nodes[logic].a = left;
     folder->prog->nodes[logic].b = right;
-    rotate_logical_chain(folder->prog, logic); /* right may be a same-op chain: x?x:y||z -> x||y||z */
+    rotate_logical_chain(folder, logic); /* right may be a same-op chain: x?x:y||z -> x||y||z */
     replace_with(folder, idx, logic);
 }
 
@@ -535,8 +563,8 @@ static void fold_conditional(F *folder, int32_t idx) {
 /* Rewrite a runtime `if` into a shorter equivalent (ECMA-262 14.6 selects one branch; the printer
    re-parenthesizes by precedence and re-wraps a statement-leading `{`/`function`):
      if(c) e;            -> c && e;          (no else, expression-statement consequent)
+     if(c); else e;      -> c || e;          (empty consequent, expression-statement alternate)
      if(c) e1; else e2;  -> c ? e1 : e2;     (both expression statements)
-     if(c) return a; else return b; -> return c ? a : b;   (both returns carry a value)
    Every new node is created before any node pointer is re-read, and only indices cross the
    allocating jm_node_new call, so a realloc of the arena cannot dangle. */
 static void convert_if(F *folder, int32_t idx) {
@@ -554,7 +582,7 @@ static void convert_if(F *folder, int32_t idx) {
         prog->nodes[neg].op = JT_NOT;
         prog->nodes[neg].a = prog->nodes[idx].a;
         /* if(a){}else e -> a||e : make_logical strips the synthetic `!` and flips && to || */
-        int32_t logic = make_logical(prog, neg, prog->nodes[else_stmt].a);
+        int32_t logic = make_logical(folder, neg, prog->nodes[else_stmt].a);
         if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             return;      /* GCOVR_EXCL_LINE */
         }
@@ -562,6 +590,7 @@ static void convert_if(F *folder, int32_t idx) {
         prog->nodes[idx].a = logic;
         prog->nodes[idx].b = -1;
         prog->nodes[idx].c = -1;
+        folder->changed = 1;
         return;
     }
     int32_t then_stmt = branch_stmt(folder, prog->nodes[idx].b);
@@ -572,7 +601,7 @@ static void convert_if(F *folder, int32_t idx) {
         if (prog->nodes[then_stmt].kind != JN_EXPR_STMT) {
             return;
         }
-        int32_t logic = make_logical(prog, prog->nodes[idx].a, prog->nodes[then_stmt].a);
+        int32_t logic = make_logical(folder, prog->nodes[idx].a, prog->nodes[then_stmt].a);
         if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path leaves the if as-is */
             return;      /* GCOVR_EXCL_LINE */
         }
@@ -580,28 +609,27 @@ static void convert_if(F *folder, int32_t idx) {
         prog->nodes[idx].a = logic;
         prog->nodes[idx].b = -1;
         prog->nodes[idx].c = -1;
+        folder->changed = 1;
         return;
     }
     int32_t else_stmt = branch_stmt(folder, else_branch);
     if (else_stmt < 0) {
         return;
     }
-    int kind = prog->nodes[then_stmt].kind;
-    int both_expr = kind == JN_EXPR_STMT && prog->nodes[else_stmt].kind == JN_EXPR_STMT;
-    int both_return = kind == JN_RETURN && prog->nodes[else_stmt].kind == JN_RETURN && prog->nodes[then_stmt].a >= 0 &&
-                      prog->nodes[else_stmt].a >= 0;
-    if (!both_expr && !both_return) {
+    /* both returns never reach here: an abrupt consequent had its else spliced away already, and
+       fold_if_return_chain then folds the pair -- so only the two-expression form remains */
+    if (prog->nodes[then_stmt].kind != JN_EXPR_STMT || prog->nodes[else_stmt].kind != JN_EXPR_STMT) {
         return;
     }
-    /* EXPR_STMT and RETURN both carry their payload in .a */
     int32_t cond = make_cond(prog, prog->nodes[idx].a, prog->nodes[then_stmt].a, prog->nodes[else_stmt].a);
     if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         return;     /* GCOVR_EXCL_LINE */
     }
-    prog->nodes[idx].kind = both_expr ? JN_EXPR_STMT : JN_RETURN;
+    prog->nodes[idx].kind = JN_EXPR_STMT;
     prog->nodes[idx].a = cond;
     prog->nodes[idx].b = -1;
     prog->nodes[idx].c = -1;
+    folder->changed = 1;
 }
 
 /* An expression statement that may join a comma sequence. A string-literal expression statement is
@@ -653,6 +681,7 @@ static void merge_sequences(F *folder, int32_t first) {
             while ((next = prog->nodes[idx].next) >= 0 && mergeable_expr(prog, next)) {
                 seq_append(prog, seq, prog->nodes[next].a);
                 prog->nodes[idx].next = prog->nodes[next].next;
+                folder->changed = 1;
             }
             next = prog->nodes[idx].next;
         }
@@ -668,6 +697,7 @@ static void merge_sequences(F *folder, int32_t first) {
         prog->nodes[idx].kind = prog->nodes[next].kind;
         prog->nodes[idx].a = seq;
         prog->nodes[idx].next = prog->nodes[next].next;
+        folder->changed = 1;
     }
 }
 
@@ -700,6 +730,7 @@ static void fold_if_return_chain(F *folder, int32_t first) {
             prog->nodes[idx].c = -1;
             prog->nodes[idx].next = prog->nodes[next].next;
             changed = 1;
+            folder->changed = 1;
         }
     }
 }
@@ -749,7 +780,8 @@ static void fold_guard_jump(F *folder, int32_t first, int jump_kind) {
         prog->nodes[idx].a = neg;
         prog->nodes[idx].b = block;
         prog->nodes[idx].next = -1; /* REST now lives in the block; this if ends the chain */
-        return;                     /* one guard per pass; the compress loop re-runs to cascade a chain */
+        folder->changed = 1;
+        return; /* one guard per pass; the next fold pass cascades a chain */
     }
 }
 
@@ -778,6 +810,7 @@ static void fold_tail_return(F *folder, int32_t block) {
         } else {
             prog->nodes[prev].next = -1;
         }
+        folder->changed = 1;
         return;
     }
     int32_t value = arg; /* the returned value: a sequence returns its last element (13.16) */
@@ -801,12 +834,14 @@ static void fold_tail_return(F *folder, int32_t block) {
         } else {
             prog->nodes[prev].next = -1;
         }
+        folder->changed = 1;
         return;
     } else { /* `return a,b,void 0`: drop the pure tail element, unwrapping a lone survivor */
         prog->nodes[value_prev].next = -1;
         if (value_prev == prog->nodes[arg].a) {
             prog->nodes[last].a = value_prev;
         }
+        folder->changed = 1;
     }
     prog->nodes[last].kind = JN_EXPR_STMT;
 }
@@ -824,11 +859,13 @@ static int32_t drop_empties(F *folder, int32_t first) {
     jm_node *nodes = folder->prog->nodes;
     while (first >= 0 && nodes[first].kind == JN_EMPTY) {
         first = nodes[first].next;
+        folder->changed = 1;
     }
     for (int32_t idx = first; idx >= 0;) {
         int32_t next = nodes[idx].next;
         while (next >= 0 && nodes[next].kind == JN_EMPTY) {
             next = nodes[next].next;
+            folder->changed = 1;
         }
         nodes[idx].next = next;
         idx = next;
@@ -887,6 +924,7 @@ static void fold_int(F *folder, int32_t idx, uint64_t value) {
     node->str_len = len;
     node->a = -1;
     node->b = -1;
+    folder->changed = 1;
 }
 
 /* Fold `<int> + <int>`, `<int> - <int>` (non-negative result) and `<int> * <int>` (ECMA-262 13.15);
@@ -936,6 +974,7 @@ static void fold_concat(F *folder, int32_t idx) {
     node->str_len = len;
     node->a = -1;
     node->b = -1;
+    folder->changed = 1;
 }
 
 static void walk(F *folder, int32_t idx) {
@@ -1055,13 +1094,13 @@ static void walk(F *folder, int32_t idx) {
             } else if (is_pure_const(folder, node->a)) {
                 replace_with(folder, idx, node->a);
             } else {
-                rotate_logical_chain(folder->prog, idx);
+                rotate_logical_chain(folder, idx);
             }
             return;
         }
         int truth = pure_truthy(folder, node->a);
         if (truth < 0) {
-            rotate_logical_chain(folder->prog, idx);
+            rotate_logical_chain(folder, idx);
             return;
         }
         int keep_right = node->op == JT_AND ? truth : !truth;
@@ -1079,6 +1118,7 @@ static void walk(F *folder, int32_t idx) {
             int32_t swap = node->b;
             node->b = node->c;
             node->c = swap;
+            folder->changed = 1;
         }
         fold_conditional(folder, idx);
         return;
@@ -1086,6 +1126,23 @@ static void walk(F *folder, int32_t idx) {
     case JN_IF: {
         if (node->c >= 0 && is_empty_branch(folder, node->c)) {
             node->c = -1; /* an empty else does nothing: if(a)b();else{} -> if(a)b() -> a&&b() */
+            folder->changed = 1;
+        }
+        if (node->c >= 0 && ends_abruptly(folder, node->b) && folder->prog->nodes[node->c].kind != JN_FUNC) {
+            /* the consequent always jumps, so the else keyword is redundant: the alternate splices
+               into the statement chain after the if. Its own splice may already have chained
+               statements onto it, so the outer rest attaches at that chain's tail. A bare
+               `else function f(){}` stays: promoting that Annex-B legacy form to a chain
+               declaration would change its scope. */
+            int32_t alt = node->c;
+            node->c = -1;
+            int32_t alt_tail = alt;
+            while (folder->prog->nodes[alt_tail].next >= 0) {
+                alt_tail = folder->prog->nodes[alt_tail].next;
+            }
+            folder->prog->nodes[alt_tail].next = node->next;
+            node->next = alt;
+            folder->changed = 1;
         }
         int truth = pure_truthy(folder, node->a);
         if (truth < 0) {
@@ -1104,6 +1161,7 @@ static void walk(F *folder, int32_t idx) {
             replace_with(folder, idx, taken);
         } else {
             folder->prog->nodes[idx].kind = JN_EMPTY; /* if(false) with no else */
+            folder->changed = 1;
         }
         return;
     }
@@ -1119,6 +1177,7 @@ static void walk(F *folder, int32_t idx) {
             /* same-type operands make loose equality strict (7.2.14 step 1), so === weakens to ==
                without a behavior change: typeof x==="string" -> typeof x=="string" */
             node->op = node->op == JT_EQ_EQ_EQ ? JT_EQ_EQ : JT_NE;
+            folder->changed = 1;
         }
         return;
     default:
@@ -1127,9 +1186,19 @@ static void walk(F *folder, int32_t idx) {
 }
 
 void jm_fold(jm_program *prog) {
-    F folder = {.prog = prog, .fold_undefined = 0};
+    F folder = {.prog = prog, .fold_undefined = 0, .changed = 0};
     /* fold `undefined` only when no binding shadows it anywhere in the program */
     folder.fold_undefined = !declares(&folder, prog->nodes[prog->root].a, "undefined");
-    walk_chain(&folder, prog->nodes[prog->root].a);
-    prog->nodes[prog->root].a = optimize_chain(&folder, prog->nodes[prog->root].a);
+    /* the transforms cascade -- a spliced else exposes a guard fold, whose block a merge then
+       collapses -- so walk until a full pass changes nothing and the output is a fixpoint */
+    /* GCOVR_EXCL_BR_START: converges well before the backstop cap */
+    for (int pass = 0; pass < 12; pass++) {
+        /* GCOVR_EXCL_BR_STOP */
+        folder.changed = 0;
+        walk_chain(&folder, prog->nodes[prog->root].a);
+        prog->nodes[prog->root].a = optimize_chain(&folder, prog->nodes[prog->root].a);
+        if (!folder.changed) {
+            break;
+        }
+    }
 }
