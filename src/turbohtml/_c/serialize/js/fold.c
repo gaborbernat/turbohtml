@@ -143,6 +143,36 @@ static char static_type(F *folder, int32_t idx) {
     }
 }
 
+/* Whether the string literal spells `word` (the lexeme keeps its quotes; an escape in the
+   lexeme fails the character match, so the decoded value always agrees). */
+static int string_is(const jm_node *node, const char *word) {
+    if (node->kind != JN_STRING) {
+        return 0;
+    }
+    Py_ssize_t len = 0;
+    while (word[len] != '\0') {
+        len++;
+    }
+    if (node->str_len != len + 2) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (node->str[index + 1] != (Py_UCS4)(unsigned char)word[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* A `typeof X` whose X is not a bare name. typeof suppresses the ReferenceError of an
+   unresolvable name (13.5.3 step 2), so only a non-name operand evaluates identically
+   outside the typeof. */
+static int is_typeof_nonref(F *folder, int32_t idx) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    return node->kind == JN_UNARY && node->op == JT_IDENT && ident_is(node, "typeof") &&
+           folder->prog->nodes[node->a].kind != JN_IDENT;
+}
+
 /* Whether a pure constant is null or undefined (the operands `??` short-circuits on). */
 static int is_nullish(F *folder, int32_t idx) {
     jm_node *node = &folder->prog->nodes[idx];
@@ -1171,6 +1201,30 @@ static void walk(F *folder, int32_t idx) {
         }
         if (folder->prog->nodes[idx].kind == JN_BINARY) {
             fold_arithmetic(folder, idx); /* integer operands; a folded concat is already done */
+        }
+        if (node->op == JT_EQ_EQ || node->op == JT_NE || node->op == JT_EQ_EQ_EQ || node->op == JT_NE_EQ) {
+            int32_t typeof_side = is_typeof_nonref(folder, node->a)   ? node->a
+                                  : is_typeof_nonref(folder, node->b) ? node->b
+                                                                      : -1;
+            int32_t other_side = typeof_side == node->a ? node->b : node->a;
+            if (typeof_side >= 0 && string_is(&folder->prog->nodes[other_side], "undefined")) {
+                /* `typeof X op "undefined"` is true exactly when X's value is undefined (13.5.3),
+                   so it shortens to the strict `void 0===X` / `void 0!==X`; X's evaluation (and any
+                   throw from it) is identical on both forms since X is not a bare name. */
+                int32_t undef = jm_node_new(folder->prog, JN_UNARY);
+                if (undef < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the typeof */
+                    return;      /* GCOVR_EXCL_LINE */
+                }
+                fold_void(folder, undef);
+                node = &folder->prog->nodes[idx];             /* the two allocations may have moved the arena */
+                if (folder->prog->nodes[undef].str == NULL) { /* GCOVR_EXCL_BR_LINE: alloc failure */
+                    return;                                   /* GCOVR_EXCL_LINE */
+                }
+                node->op = node->op == JT_EQ_EQ || node->op == JT_EQ_EQ_EQ ? JT_EQ_EQ_EQ : JT_NE_EQ;
+                node->a = undef;
+                node->b = folder->prog->nodes[typeof_side].a;
+                return;
+            }
         }
         if ((node->op == JT_EQ_EQ_EQ || node->op == JT_NE_EQ) && static_type(folder, node->a) != 0 &&
             static_type(folder, node->a) == static_type(folder, node->b)) {

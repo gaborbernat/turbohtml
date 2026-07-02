@@ -82,6 +82,18 @@ _NODE = shutil.which("node")
         # is a shape static_type vouches for, so both keep ===
         pytest.param("x=-a===-b", "x=-a===-b", id="eq-minus-unary-kept"),
         pytest.param("x=delete a.b===c", "x=delete a.b===c", id="eq-delete-kept"),
+        # typeof X compared with "undefined" collapses to a strict undefined check (13.5.3), unless
+        # X is a bare name whose ReferenceError the typeof suppresses
+        pytest.param('x=typeof a.b!="undefined"', "x=void 0!==a.b", id="typeof-undefined-ne"),
+        pytest.param('x=typeof a.b!=="undefined"', "x=void 0!==a.b", id="typeof-undefined-strict-ne"),
+        pytest.param('x=typeof a.b=="undefined"', "x=void 0===a.b", id="typeof-undefined-eq"),
+        pytest.param('x="undefined"===typeof a.b', "x=void 0===a.b", id="typeof-undefined-flipped"),
+        pytest.param('x=typeof a[i]=="undefined"', "x=void 0===a[i]", id="typeof-undefined-index"),
+        pytest.param('x=typeof f()=="undefined"', "x=void 0===f()", id="typeof-undefined-call"),
+        pytest.param('x=typeof a!="undefined"', 'x=typeof a!="undefined"', id="typeof-undefined-bare-name-kept"),
+        pytest.param("x=typeof a.b==c", "x=typeof a.b==c", id="typeof-nonstring-side-kept"),
+        pytest.param('x=typeof a.b=="undef"', 'x=typeof a.b=="undef"', id="typeof-short-string-kept"),
+        pytest.param('x=typeof a.b=="Undefined"', 'x=typeof a.b=="Undefined"', id="typeof-case-mismatch-kept"),
         # a consequent that always jumps makes the else keyword redundant (14.6.2: the alternate
         # runs exactly when the test was falsy either way), so the alternate joins the chain; a
         # falling-through consequent and Annex-B `else function` keep their else
