@@ -225,7 +225,7 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("x=1.5+2", "x=1.5+2", id="float-add-kept"),
         pytest.param("x=1000+0", "x=1e3", id="int-add-then-canon"),
         pytest.param('x="a"+"b"', 'x="ab"', id="string-concat"),
-        pytest.param("x='a'+'b'", "x='a'+'b'", id="string-concat-single-quote-kept"),
+        pytest.param("x='a'+'b'", "x='ab'", id="string-concat-single-quote"),
         pytest.param('x=1+"a"', 'x=1+"a"', id="mixed-add-kept"),
         pytest.param("x=1e3+2", "x=1e3+2", id="exponent-operand-kept"),
         pytest.param("x=9999999999999999+1", "x=9999999999999999+1", id="oversize-int-kept"),
@@ -297,8 +297,8 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         pytest.param("function f(){g+=1}", "function f(){g+=1}", id="compound-assign-free"),
         pytest.param(
             "function f(){const a=1,b=2;return a+b}",
-            "function f(){const b=1,a=2;return b+a}",
-            id="const-multi-declarator-kept",
+            "function f(){return 3}",
+            id="const-multi-declarator-inlines",
         ),
         pytest.param(
             "function f(){const[x]=a;return x}", "function f(){const [b]=a;return b}", id="const-destructuring-kept"
@@ -330,7 +330,7 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         # its last declarator goes, and a destructuring sibling is skipped over
         pytest.param(
             "function f(){var a=g(),x=1,b=2;return a+b}",
-            "function f(){var b=g(),a=2;return b+a}",
+            "function f(){var a=g();return a+2}",
             id="drop-middle-declarator",
         ),
         pytest.param("function f(){var x=1,y=g();return y}", "function f(){return g()}", id="drop-first-declarator"),
@@ -416,8 +416,8 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         ),
         pytest.param(
             "function f(){var x=1;g();return x+1}",
-            "function f(){var a=1;return g(),a+1}",
-            id="literal-non-tail-kept",
+            "function f(){return g(),2}",
+            id="literal-first-statement-inlines",
         ),
         # the adjacent jump carries no value the read could be: a bare return (the closure read
         # may run before the declaration) and a non-sequence return value both keep the binding
@@ -448,8 +448,83 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         ),
         pytest.param(
             "function f(){var a=g(),x=1;return x}",
-            "function f(){var b=g(),a=1;return a}",
+            "function f(){var a=g();return 1}",
             id="multi-declarator-single-use",
+        ),
+        # a single-use literal var in its function body's first statement dominates its one read
+        # (nothing can execute before the statement), so it inlines even into a nested closure;
+        # a later statement, a read in an earlier declarator's initializer, or a block-nested var
+        # cannot prove domination and keep the binding
+        pytest.param(
+            'function f(){var t="[object Foo]";return function(x){return q(x)==t}}',
+            'function f(){return function(a){return q(a)=="[object Foo]"}}',
+            id="literal-first-statement-closure-inlines",
+        ),
+        pytest.param(
+            'function f(){var a="x",b=a+"y";return function(){return b}}',
+            'function f(){return function(){return"xy"}}',
+            id="literal-declarator-chain-cascades",
+        ),
+        pytest.param(
+            "function f(){g();var t=1;return function(){return t}}",
+            "function f(){g();var a=1;return function(){return a}}",
+            id="literal-later-statement-kept",
+        ),
+        pytest.param(
+            "function f(){var a=(function(){return t})(),t=1;return a}",
+            "function f(){var b=function(){return a}(),a=1;return b}",
+            id="literal-earlier-declarator-read-kept",
+        ),
+        pytest.param(
+            "function f(){while(c){var t=1;g(function(){return t})}}",
+            "function f(){while(c){var a=1;g(function(){return a})}}",
+            id="literal-block-nested-var-kept",
+        ),
+        pytest.param(
+            "function f(){var a=t,t=1;return a}",
+            "function f(){var b=a,a=1;return b}",
+            id="literal-earlier-declarator-direct-read-kept",
+        ),
+        pytest.param(
+            "function f(){var a=u?1:t,t=2;return a}",
+            "function f(){var b=u?1:a,a=2;return b}",
+            id="literal-earlier-declarator-cond-read-kept",
+        ),
+        pytest.param(
+            "function f(){var a=function(){for(;;)g(t)},t=1;return a}",
+            "function f(){var b=function(){for(;;)g(a)},a=1;return b}",
+            id="literal-earlier-declarator-loop-read-kept",
+        ),
+        pytest.param(
+            "function f(){var a=g(),b=t,t=2;return b}",
+            "function f(){var c=g(),b=a,a=2;return b}",
+            id="literal-second-earlier-declarator-read-kept",
+        ),
+        pytest.param(
+            "function f(){g();var x=1;return x?u():0,h()}",
+            "function f(){g();var a=1;return a?u():0,h()}",
+            id="literal-seq-non-tail-read-kept",
+        ),
+        pytest.param(
+            "function f(){g();var x=1;h();return x}",
+            "function f(){return g(),h(),1}",
+            id="literal-seq-tail-later-statement",
+        ),
+        pytest.param(
+            "function f(){var {x}=o,y=1;return x+y}",
+            "function f(){var {x:a}=o;return a+1}",
+            id="destructuring-sibling-skipped",
+        ),
+        # an expression's unread self-name drops (13.2.4/15.7.4: it binds only in its own body);
+        # a self-referencing name stays, and a shorthand read gains an explicit key before an
+        # inline lands in its value slot
+        pytest.param("var f=function rec(n){return n*2}", "var f=function(a){return a*2}", id="nfe-unread-name-drops"),
+        pytest.param("var C=class Self{m(){return 1}}", "var C=class{m(){return 1}}", id="class-unread-name-drops"),
+        pytest.param("function f(){var x=1;return{x}}", "function f(){return{x:1}}", id="shorthand-inline-expands-key"),
+        pytest.param(
+            "function q(){function f(){}return{f}}",
+            "function q(){return{f:function(){}}}",
+            id="shorthand-function-inline-expands-key",
         ),
     ],
 )

@@ -979,13 +979,13 @@ static void fold_arithmetic(F *folder, int32_t idx) {
 }
 
 /* Fold `"a" + "b"` to `"ab"` (ECMA-262 13.15.3, string concatenation is exact). Restricted to
-   double-quoted operands, whose contents are already valid inside a double-quoted result, so no
-   escape can be lost or a quote left unescaped. */
+   operands quoted the same way, whose contents are already valid inside a result carrying that
+   quote, so no escape can be lost or a quote left unescaped. */
 static void fold_concat(F *folder, int32_t idx) {
     jm_node *node = &folder->prog->nodes[idx];
     const jm_node *left = &folder->prog->nodes[node->a];
     const jm_node *right = &folder->prog->nodes[node->b];
-    if (left->kind != JN_STRING || right->kind != JN_STRING || left->str[0] != '"' || right->str[0] != '"') {
+    if (left->kind != JN_STRING || right->kind != JN_STRING || left->str[0] != right->str[0]) {
         return;
     }
     Py_ssize_t len = left->str_len + right->str_len - 2; /* drop one closing and one opening quote */

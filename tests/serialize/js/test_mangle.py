@@ -24,7 +24,11 @@ _NODE = shutil.which("node")
     ("source", "expected"),
     [
         pytest.param("function f(longName, other){return longName+other}", "function f(b,a){return b+a}", id="params"),
-        pytest.param("function f(){var localVar=1;return localVar*2}", "function f(){var a=1;return a*2}", id="local"),
+        pytest.param(
+            "function f(){var localVar=g();return localVar*localVar}",
+            "function f(){var a=g();return a*a}",
+            id="local",
+        ),
         pytest.param("var g=(alpha,beta)=>alpha+beta", "var g=(b,a)=>b+a", id="arrow-params"),
         pytest.param(
             "function outer(x){function inner(y){return x+y}return inner}",
@@ -37,7 +41,7 @@ _NODE = shutil.which("node")
         # a renamed shorthand binding must expand to key:value or it reads the wrong property
         pytest.param("function f({x}){return x}", "function f({x:a}){return a}", id="shorthand-pattern-expanded"),
         pytest.param(
-            "function f(){var x=1;return{x}}", "function f(){var a=1;return{x:a}}", id="shorthand-literal-expanded"
+            "function f(){var x=g();return{x}}", "function f(){var a=g();return{x:a}}", id="shorthand-literal-expanded"
         ),
         # a global shorthand binding is never renamed, so it stays a shorthand (not expanded)
         pytest.param("let x=1;o={x}", "let x=1;o={x}", id="shorthand-global-kept"),
@@ -102,7 +106,7 @@ def _run(code: str) -> str:
             "(function(){var "
             + ",".join(f"v{index}={index}" for index in range(340))
             + ";console.log("
-            + "+".join(f"v{index}" for index in range(340))
+            + "+".join(f"v{index}+v{index}" for index in range(340))  # each read twice: single reads would inline
             + ")})()",
             id="many-locals",
         ),

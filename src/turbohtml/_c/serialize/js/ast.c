@@ -61,6 +61,7 @@ int32_t jm_scope_new(jm_program *prog, int32_t parent, uint8_t kind) {
     scope->first_sym = -1;
     scope->first_child = -1;
     scope->next_sibling = -1;
+    scope->first_stmt = -1;
     if (parent >= 0) {
         scope->next_sibling = prog->scopes[parent].first_child;
         prog->scopes[parent].first_child = index;
@@ -95,6 +96,7 @@ int32_t jm_sym_new(jm_program *prog, const Py_UCS4 *name, Py_ssize_t name_len, i
     sym->writes = 0;
     sym->ref_node = -1;
     sym->ref_scope = -1;
+    sym->ref_prop = -1;
     sym->decl_node = -1;
     return index;
 }

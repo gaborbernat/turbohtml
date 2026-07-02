@@ -398,6 +398,7 @@ static void walk_function(M *mangler, int32_t idx, int32_t parent) {
     /* params may carry default-value expressions and patterns */
     walk_chain(mangler, node->a, scope, 1);
     int32_t body_stmts = mangler->prog->nodes[body].a;
+    mangler->prog->scopes[scope].first_stmt = body_stmts;
     hoist_vars(mangler, body_stmts, scope);
     hoist_block(mangler, body_stmts, scope);
     walk_chain(mangler, body_stmts, scope, 0);
@@ -539,6 +540,10 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         walk(mangler, node->b, scope, bind);
         if (node->flags & JN_F_SHORTHAND) {
             walk(mangler, node->a, scope, bind); /* { x } references (or binds) x */
+            int32_t self = mangler->prog->nodes[node->a].sym;
+            if (self >= 0) {
+                mangler->prog->syms[self].ref_prop = idx;
+            }
         }
         return;
     case JN_MEMBER: /* class member: key may be computed; value is a function */
@@ -940,6 +945,18 @@ static void collapse_chain(jm_program *prog, int32_t first, int *changed) {
 
 /* Descend into every nested statement list (block, function/arrow body, switch case) and every
    expression that may hold one, mirroring the fold pass's traversal. */
+/* A function/class expression's self-name binds only inside its own body (13.2.4 / 15.7.4); with
+   zero reads it names nothing, so the expression prints anonymous and the name's slot is freed. */
+static void drop_unread_expr_name(jm_program *prog, jm_node *node, int *changed) {
+    /* a named expression always resolved its self-name, so str != NULL implies a live sym */
+    if ((node->flags & JN_F_EXPR) && node->str != NULL && prog->syms[node->sym].refs == 0) {
+        node->str = NULL;
+        node->str_len = 0;
+        node->sym = -1;
+        *changed = 1;
+    }
+}
+
 static void collapse_walk(jm_program *prog, int32_t idx, int *changed) {
     if (idx < 0) {
         return;
@@ -973,11 +990,19 @@ static void collapse_walk(jm_program *prog, int32_t idx, int *changed) {
         return;
     case JN_CALL:
     case JN_NEW:
+        collapse_walk(prog, node->a, changed);  /* callee */
+        collapse_chain(prog, node->b, changed); /* arguments */
+        return;
     case JN_CLASS:
-        collapse_walk(prog, node->a, changed);  /* callee / superclass */
-        collapse_chain(prog, node->b, changed); /* arguments / members */
+        drop_unread_expr_name(prog, node, changed);
+        collapse_walk(prog, node->a, changed);  /* superclass */
+        collapse_chain(prog, node->b, changed); /* members */
         return;
     case JN_FUNC:
+        drop_unread_expr_name(prog, node, changed);
+        collapse_chain(prog, node->a, changed); /* params (defaults may hold a function) */
+        collapse_walk(prog, node->b, changed);  /* body */
+        return;
     case JN_ARROW:
         collapse_chain(prog, node->a, changed); /* params (defaults may hold a function) */
         collapse_walk(prog, node->b, changed);  /* body: a block, or an arrow expression */
@@ -1078,6 +1103,28 @@ static int drop_unused(jm_program *prog, int32_t global) {
     return changed;
 }
 
+static int chain_contains(jm_program *prog, int32_t first, int32_t target);
+
+/* Whether target sits anywhere inside the subtree rooted at idx (its own siblings excluded);
+   callers pass real nodes, chain_contains skips the absent links. */
+static int subtree_contains(jm_program *prog, int32_t idx, int32_t target) {
+    if (idx == target) {
+        return 1;
+    }
+    const jm_node *node = &prog->nodes[idx];
+    return chain_contains(prog, node->a, target) || chain_contains(prog, node->b, target) ||
+           chain_contains(prog, node->c, target) || chain_contains(prog, node->d, target);
+}
+
+static int chain_contains(jm_program *prog, int32_t first, int32_t target) {
+    for (int32_t idx = first; idx >= 0; idx = prog->nodes[idx].next) {
+        if (subtree_contains(prog, idx, target)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The last element of a comma sequence -- the operand whose value the sequence yields (13.16). */
 static int32_t seq_value(jm_program *prog, int32_t seq) {
     int32_t elem = prog->nodes[seq].a;
@@ -1085,6 +1132,26 @@ static int32_t seq_value(jm_program *prog, int32_t seq) {
         elem = prog->nodes[elem].next;
     }
     return elem;
+}
+
+/* Give a `{ x }` shorthand an explicit key so its value slot can take an inlined expression:
+   the fresh key ident carries the original name and no symbol (a property name, never renamed).
+   1 on success (or nothing to expand), 0 when the key allocation failed. */
+static int expand_shorthand_ref(jm_program *prog, int32_t sym) {
+    int32_t prop = prog->syms[sym].ref_prop;
+    if (prop < 0) {
+        return 1;
+    }
+    int32_t key = jm_node_new(prog, JN_IDENT);
+    if (key < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the shorthand */
+        return 0;  /* GCOVR_EXCL_LINE */
+    }
+    prog->nodes[key].str = prog->syms[sym].name;
+    prog->nodes[key].str_len = prog->syms[sym].name_len;
+    prog->nodes[prop].a = key;
+    prog->nodes[prop].b = prog->syms[sym].ref_node;
+    prog->nodes[prop].flags &= (uint16_t)~JN_F_SHORTHAND;
+    return 1;
 }
 
 /* Inline a single-declarator binding that is read exactly once into that one read and drop the
@@ -1121,6 +1188,9 @@ static int inline_single_use(jm_program *prog, int32_t global) {
             if (prog->syms[sym].ref_scope != prog->syms[sym].scope) {
                 continue;
             }
+            if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                continue;                           /* GCOVR_EXCL_LINE */
+            }
             int32_t next = prog->nodes[ref].next;
             int32_t decl = prog->syms[sym].decl_node;
             prog->nodes[ref] = prog->nodes[decl];
@@ -1133,16 +1203,44 @@ static int inline_single_use(jm_program *prog, int32_t global) {
             changed = 1;
             continue;
         }
-        if (prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].next >= 0) {
-            continue; /* only a lone declarator inlines below (decl_node is recorded only for var/let/const
-                         and functions, and a function is already handled above) */
+        int32_t stmt = prog->syms[sym].decl_node;
+        /* decl_node is recorded only on a var/let/const statement whose ident-target declarator
+           binds this symbol (functions were handled above), so the search always lands; it walks
+           past destructuring siblings, whose bindings never record a decl_node */
+        int32_t declr = prog->nodes[stmt].a;
+        int32_t declr_prev = -1;
+        while (!(prog->nodes[prog->nodes[declr].a].kind == JN_IDENT && prog->nodes[prog->nodes[declr].a].sym == sym)) {
+            declr_prev = declr;
+            declr = prog->nodes[declr].next;
         }
-        int32_t init = prog->nodes[prog->nodes[prog->syms[sym].decl_node].a].b;
+        int32_t init = prog->nodes[declr].b;
         if (init < 0) {
             continue; /* a bare `var x;` declares no value to propagate */
         }
-        if (!(prog->syms[sym].decl >= 1 && is_const_literal(prog, init))) {
-            int32_t jump = prog->nodes[prog->syms[sym].decl_node].next; /* the statement right after the decl */
+        int lone = declr_prev < 0 && prog->nodes[declr].next < 0;
+        if (prog->syms[sym].decl >= 1 && is_const_literal(prog, init)) {
+            /* a literal let/const: the declaration dominates its use (TDZ), so it inlines anywhere */
+        } else if (prog->syms[sym].decl == 0 && is_const_literal(prog, init) &&
+                   stmt == prog->scopes[prog->syms[sym].scope].first_stmt) {
+            /* a literal var in its function body's first statement: no expression can run before the
+               statement (hoisted declarations before it do not execute), so the only read that could
+               still see the pre-initialization undefined sits in the initializer of a declarator left
+               of this one -- that read keeps the binding */
+            int in_earlier = 0;
+            for (int32_t earlier = prog->nodes[stmt].a; earlier != declr; earlier = prog->nodes[earlier].next) {
+                if (subtree_contains(prog, earlier, ref)) {
+                    in_earlier = 1;
+                    break;
+                }
+            }
+            if (in_earlier) {
+                continue;
+            }
+        } else {
+            if (!lone) {
+                continue; /* moving an impure initializer past its sibling declarators would reorder them */
+            }
+            int32_t jump = prog->nodes[stmt].next; /* the statement right after the decl */
             if (jump < 0 || (prog->nodes[jump].kind != JN_RETURN && prog->nodes[jump].kind != JN_THROW)) {
                 continue; /* not a literal let/const, and not an adjacent `return` / `throw` */
             }
@@ -1152,10 +1250,19 @@ static int inline_single_use(jm_program *prog, int32_t global) {
                 continue; /* the one read is not where the adjacent jump's value comes from */
             }
         }
+        if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            continue;                           /* GCOVR_EXCL_LINE */
+        }
         int32_t next = prog->nodes[ref].next;
         prog->nodes[ref] = prog->nodes[init];
         prog->nodes[ref].next = next;
-        prog->nodes[prog->syms[sym].decl_node].kind = JN_EMPTY;
+        if (lone) {
+            prog->nodes[stmt].kind = JN_EMPTY;
+        } else if (declr_prev < 0) { /* unlink just this declarator; its siblings keep the statement */
+            prog->nodes[stmt].a = prog->nodes[declr].next;
+        } else {
+            prog->nodes[declr_prev].next = prog->nodes[declr].next;
+        }
         prog->syms[sym].decl_node = -2; /* mark inlined so assign_slots spends no name on it */
         changed = 1;
     }

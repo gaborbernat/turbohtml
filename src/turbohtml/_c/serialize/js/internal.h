@@ -255,6 +255,8 @@ typedef struct {
     int32_t ref_node;
     int32_t ref_scope; /* the scope the one read sits in; a function inlines only into its own scope */
     int32_t decl_node;
+    int32_t ref_prop; /* the `{ x }` property node when the one read is a shorthand: the read doubles
+                         as the key, so an inline must first give the property an explicit key */
 } jm_sym;
 
 /* A scope node in the lexical scope tree. kind distinguishes a function/block/catch/
@@ -266,6 +268,8 @@ typedef struct {
     int32_t first_sym;    /* head of the chain of symbols declared here (jm_sym.scope == this) */
     int32_t first_child;  /* head of the child-scope list, for an O(scopes) tree walk */
     int32_t next_sibling; /* next scope with the same parent */
+    int32_t first_stmt;   /* a function scope's first body statement: nothing executes before it,
+                             so a var literal declared there dominates every read (-1 elsewhere) */
 } jm_scope;
 
 /* ----------------------------------------------------------------- program */
