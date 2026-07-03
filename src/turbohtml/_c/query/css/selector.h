@@ -52,6 +52,9 @@ enum sel_pseudo {
     PSEUDO_DEFAULT,
     PSEUDO_LANG, /* §11.1, the comma list of ranges is stored as the value slice */
     PSEUDO_DIR,  /* §11.2, the direction (1 ltr, 2 rtl, 0 other) is stored in nth_a */
+    /* :link/:any-link: an unvisited or any hyperlink. A parsed tree has no visit
+       history, so both reduce to :is(a, area)[href] (HTML "the :link/:any-link") */
+    PSEUDO_ANY_LINK,
     /* live UA/interaction or navigation state a static tree cannot express: these
        parse as valid selectors but match nothing (so :is()/:not() still compose) */
     PSEUDO_NEVER,
@@ -121,9 +124,24 @@ static int sel_is_hex(Py_UCS4 ch) {
     return (ch >= '0' && ch <= '9') || ((ch | 32) >= 'a' && (ch | 32) <= 'f');
 }
 
+/* Skip whitespace and CSS comments (CSS Syntax §4.3.2: a comment is valid anywhere
+   whitespace is). An unterminated comment runs to end of input rather than erroring,
+   as the spec's consume-comments step treats a file-ending comment as complete. */
 static void sel_skip_ws(sel_parser *parser) {
-    while (parser->pos < parser->len && is_space(parser->src[parser->pos])) {
-        parser->pos++;
+    while (parser->pos < parser->len) {
+        if (is_space(parser->src[parser->pos])) {
+            parser->pos++;
+        } else if (parser->src[parser->pos] == '/' && parser->pos + 1 < parser->len &&
+                   parser->src[parser->pos + 1] == '*') {
+            parser->pos += 2;
+            while (parser->pos + 1 < parser->len &&
+                   !(parser->src[parser->pos] == '*' && parser->src[parser->pos + 1] == '/')) {
+                parser->pos++;
+            }
+            parser->pos = parser->pos + 1 < parser->len ? parser->pos + 2 : parser->len;
+        } else {
+            break;
+        }
     }
 }
 
@@ -497,8 +515,7 @@ static void sel_free_alts(sel_complex *alts, int count);
    parsed tree cannot express. They parse as valid selectors but match nothing,
    so :is()/:not() compositions stay usable instead of failing to compile. */
 static const char *const SEL_NEVER_PSEUDOS[] = {
-    "hover",  "focus",         "focus-within", "focus-visible", "active",
-    "target", "target-within", "visited",      "link",          "any-link",
+    "hover", "focus", "focus-within", "focus-visible", "active", "target", "target-within", "visited",
 };
 
 /* Parse the :dir() argument (pos just after '('): an identifier, mapped to the
@@ -517,15 +534,20 @@ static void sel_parse_dir(sel_parser *parser, sel_simple *simple) {
 }
 
 /* Parse the :lang() argument (pos just after '('): a non-empty comma-separated
-   list of language ranges, captured verbatim as the value slice and split at
-   match time. */
+   list of language ranges. Escapes are decoded in place (so an escaped wildcard
+   like \2a or \* becomes '*'); the decoded slice is the value, split at match time. */
 static void sel_parse_lang(sel_parser *parser, sel_simple *simple) {
     sel_skip_ws(parser);
     Py_ssize_t start = parser->pos;
+    Py_ssize_t write = parser->pos;
     while (parser->pos < parser->len && parser->src[parser->pos] != ')') {
-        parser->pos++;
+        if (parser->src[parser->pos] == '\\') {
+            parser->src[write++] = sel_consume_escape(parser);
+            continue;
+        }
+        parser->src[write++] = parser->src[parser->pos++];
     }
-    Py_ssize_t end = parser->pos;
+    Py_ssize_t end = write;
     while (end > start && is_space(parser->src[end - 1])) {
         end--;
     }
@@ -603,6 +625,8 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
         langdir = PSEUDO_LANG;
     } else if (sel_kw(name, name_len, "dir")) {
         langdir = PSEUDO_DIR;
+    } else if (sel_kw(name, name_len, "link") || sel_kw(name, name_len, "any-link")) {
+        simple->pseudo = PSEUDO_ANY_LINK;
     } else {
         for (size_t index = 0; index < sizeof(SEL_NEVER_PSEUDOS) / sizeof(SEL_NEVER_PSEUDOS[0]); index++) {
             if (sel_kw(name, name_len, SEL_NEVER_PSEUDOS[index])) {
@@ -1384,16 +1408,54 @@ static int sel_is_default(th_node *node) {
     return 0;
 }
 
-/* Whether a language tag matches a range: equal, or the tag begins with the
-   range followed by '-' (BCP47 basic filtering, ASCII case-insensitive). */
+/* The end (exclusive) of the '-'-delimited subtag of s beginning at start. */
+static Py_ssize_t sel_subtag_end(const Py_UCS4 *s, Py_ssize_t len, Py_ssize_t start) {
+    Py_ssize_t end = start;
+    while (end < len && s[end] != '-') {
+        end++;
+    }
+    return end;
+}
+
+/* Whether a language tag matches a range by RFC 4647 §3.3.2 extended filtering
+   (ASCII case-insensitive): a '*' subtag is a wildcard (a leading '*' matches any
+   primary tag, an interior '*' is skipped), and a non-matching, non-singleton tag
+   subtag is skipped, so a range's subtags need only appear in order. */
 static int sel_lang_range_matches(const Py_UCS4 *tag, Py_ssize_t tag_len, const Py_UCS4 *range, Py_ssize_t range_len) {
-    if (range_len == 0 || range_len > tag_len) {
+    if (range_len == 0) {
         return 0;
     }
-    if (!sel_eq(tag, range_len, range, range_len, 1)) {
-        return 0;
+    Py_ssize_t rend = sel_subtag_end(range, range_len, 0);
+    Py_ssize_t tend = sel_subtag_end(tag, tag_len, 0);
+    if ((rend != 1 || range[0] != '*') && !sel_eq(tag, tend, range, rend, 1)) {
+        return 0; /* the primary subtag must match unless the range's is the wildcard */
     }
-    return tag_len == range_len || tag[range_len] == '-';
+    Py_ssize_t rstart = rend + 1;
+    Py_ssize_t tstart = tend + 1;
+    while (rstart < range_len) {
+        rend = sel_subtag_end(range, range_len, rstart);
+        Py_ssize_t rlen = rend - rstart;
+        if (rlen == 1 && range[rstart] == '*') {
+            rstart = rend + 1;
+            continue;
+        }
+        while (1) {
+            if (tstart >= tag_len) {
+                return 0; /* the range has subtags left but the tag has none */
+            }
+            tend = sel_subtag_end(tag, tag_len, tstart);
+            if (sel_eq(tag + tstart, tend - tstart, range + rstart, rlen, 1)) {
+                tstart = tend + 1;
+                break;
+            }
+            if (tend - tstart == 1) {
+                return 0; /* a singleton tag subtag cannot be skipped by the implicit wildcard */
+            }
+            tstart = tend + 1;
+        }
+        rstart = rend + 1;
+    }
+    return 1;
 }
 
 /* :lang(): the element's language is the nearest lang attribute on it or an
@@ -1534,9 +1596,13 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, const sel_c
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 1));
     case PSEUDO_NTH_LAST_OF_TYPE:
         return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 1));
-    /* §6.6 the scoping root: the element the query was rooted at */
+    /* §6.6 the scoping root: the element the query was rooted at, or, when the root is
+       the document (or a fragment), the document element, as :root resolves to */
     case PSEUDO_SCOPE:
-        return node == ctx->scope;
+        if (ctx->scope->type == TH_NODE_ELEMENT) {
+            return node == ctx->scope;
+        }
+        return node->parent->type != TH_NODE_ELEMENT;
     /* §12 the input pseudo-classes determinable from the static tree */
     case PSEUDO_CHECKED:
         return sel_is_checked(node);
@@ -1558,6 +1624,9 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, const sel_c
         return sel_matches_lang(node, simple);
     case PSEUDO_DIR:
         return sel_direction(ctx->tree, node) == simple->nth_a;
+    /* :link/:any-link: an a or area carrying an href (HTML "the :link/:any-link") */
+    case PSEUDO_ANY_LINK:
+        return (node->atom == TH_TAG_A || node->atom == TH_TAG_AREA) && sel_has_attr(node, TH_ATTR_HREF);
     /* live UA/interaction or navigation state a static tree cannot express */
     case PSEUDO_NEVER:
         return 0;
