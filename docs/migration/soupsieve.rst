@@ -62,8 +62,8 @@ These port 1:1 -- same names, turbohtml nodes in place of bs4 tags:
 - The same six methods on :class:`~turbohtml.match.Matcher`, plus its ``pattern`` / ``namespaces`` / ``flags``
   properties.
 - ``limit=`` on ``select`` / ``iselect`` to cap the number of matches.
-- :func:`turbohtml.match.escape` for building a selector around untrusted class or id text.
-- :class:`turbohtml.match.SelectorSyntaxError` (a :class:`ValueError`) raised on a malformed selector.
+- :func:`turbohtml.match.escape_identifier` for building a selector around untrusted class or id text.
+- :class:`turbohtml.SelectorSyntaxError` (a :class:`ValueError`) raised on a malformed selector.
 
 What turbohtml adds
 ===================
@@ -151,9 +151,9 @@ Only the trees and the keyword bundle differ; every call name stays.
     - - ``SoupSieve.pattern`` / ``.namespaces`` / ``.flags``
       - the same properties on :class:`~turbohtml.match.Matcher`
     - - ``sv.escape(ident)``
-      - :func:`turbohtml.match.escape`
+      - :func:`turbohtml.match.escape_identifier`
     - - ``soupsieve.SelectorSyntaxError``
-      - :class:`turbohtml.match.SelectorSyntaxError` (a :class:`ValueError`, matching the native engine)
+      - :class:`turbohtml.SelectorSyntaxError` (a :class:`ValueError`, matching the native engine)
     - - ``sv.purge()`` (drop the global compile cache)
       - not needed; there is no global cache, a :class:`~turbohtml.match.Matcher` is the reusable artifact
     - - ``custom={":--name": "..."}`` pseudo-class aliases
@@ -181,7 +181,7 @@ A full round-trip, from parse to selection to matching:
 - The nodes are turbohtml's, so parse with :func:`turbohtml.parse` and pass the :class:`~turbohtml.Document` or an
   :class:`~turbohtml.Element` where soupsieve took a bs4 ``Tag``; matches come back as turbohtml elements with
   :meth:`~turbohtml.Element.attr` / :attr:`~turbohtml.Node.text` instead of ``tag["attr"]`` / ``tag.get_text()``.
-- soupsieve's proprietary selectors raise :class:`~turbohtml.match.SelectorSyntaxError`: ``[attr!=value]`` (write
+- soupsieve's proprietary selectors raise :class:`~turbohtml.SelectorSyntaxError`: ``[attr!=value]`` (write
   ``:not([attr=value])``) and ``:-soup-contains()`` / ``:-soup-contains-own()`` (query text through
   :meth:`~turbohtml.Node.find_all` with ``text=`` instead).
 - ``namespaces`` and ``flags`` are carried for parity but never change which elements match: turbohtml selects by local

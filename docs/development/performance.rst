@@ -68,9 +68,9 @@ turbohtml's own tree carry it past bleach's html5lib pass by five to twenty time
 .. bench-table::
     :file: bench/linkify.json
 
-The detection primitive on its own, :meth:`turbohtml.clean.Detector.find` against ``LinkifyIt().match`` and
-:meth:`~turbohtml.clean.Detector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the spans
-or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. The
+The detection primitive on its own, :meth:`turbohtml.clean.LinkDetector.find` against ``LinkifyIt().match`` and
+:meth:`~turbohtml.clean.LinkDetector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the
+spans or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. The
 ``has_link`` prose row is close because ``test`` short-circuits on the first link near the start.
 
 .. bench-table::
@@ -597,7 +597,7 @@ that stays value-safe at the most compatible baseline and recovers from malforme
  JavaScript minification
 *************************
 
-:func:`turbohtml.minify_js` against the PyPI JavaScript minifiers it replaces -- `rjsmin
+:func:`turbohtml.clean.minify_js` against the PyPI JavaScript minifiers it replaces -- `rjsmin
 <https://opensource.perlig.de/rjsmin/>`_ (a regex substitution), `jsmin <https://github.com/tikitu/jsmin>`_ (Crockford's
 character state machine), and `calmjs.parse <https://github.com/calmjs/calmjs.parse>`_ (a full ES5 parser with an
 obfuscating printer) -- plus `terser <https://terser.org/>`_, the JavaScript ecosystem's reference minifier, run

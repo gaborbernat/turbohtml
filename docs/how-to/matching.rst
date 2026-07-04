@@ -65,22 +65,22 @@ for a quick call:
  Building selectors from data
 ******************************
 
-:func:`~turbohtml.match.escape` turns an arbitrary string into a safe CSS identifier, so an id or class read from data
-cannot break out of the selector:
+:func:`~turbohtml.match.escape_identifier` turns an arbitrary string into a safe CSS identifier, so an id or class read
+from data cannot break out of the selector:
 
 .. testcode::
 
     raw_id = "12 col"
-    print(match.escape(raw_id))
+    print(match.escape_identifier(raw_id))
     page = parse('<p id="12 col">found</p>')
-    print(match.select_one(f"#{match.escape(raw_id)}", page).text)
+    print(match.select_one(f"#{match.escape_identifier(raw_id)}", page).text)
 
 .. testoutput::
 
     \31 2\ col
     found
 
-A malformed selector raises :class:`~turbohtml.match.SelectorSyntaxError` (a :class:`ValueError` subclass, so
-soupsieve's exception name and the native engine's ``ValueError`` both catch it). soupsieve's ``namespaces`` and
-``flags`` arguments are carried on a :class:`~turbohtml.match.Matching` config for API parity but do not change which
-elements match -- see :doc:`the reference </reference/match>` for that limitation.
+A malformed selector raises :class:`~turbohtml.SelectorSyntaxError` (a :class:`ValueError` subclass, so soupsieve's
+exception name and the native engine's ``ValueError`` both catch it). soupsieve's ``namespaces`` and ``flags`` arguments
+are carried on a :class:`~turbohtml.match.Matching` config for API parity but do not change which elements match -- see
+:doc:`the reference </reference/match>` for that limitation.
