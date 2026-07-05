@@ -201,6 +201,9 @@ _SCAN_ALL_CASES = [
     pytest.param("Il 4 luglio 2016 qui.", [(2016, 7, 4)], id="italian-day-first"),
     pytest.param("Posted 4th of July 2016.", [(2016, 7, 4)], id="english-ordinal-of"),
     pytest.param("25th December 2020", [(2020, 12, 25)], id="day-first-ordinal"),
+    # The date grammar's inter-token whitespace is the Perl \s the ported regex used, which keeps the
+    # vertical tab (0x0B) that HTML "ASCII whitespace" drops; a VT between tokens still separates them.
+    pytest.param("25th\x0bDecember\x0b2020", [(2020, 12, 25)], id="vertical-tab-separated"),
     pytest.param("July 4th 2016", [(2016, 7, 4)], id="month-first-ordinal"),
     pytest.param("1st January 2000", [(2000, 1, 1)], id="ordinal-st"),
     pytest.param("22nd March 2020", [(2020, 3, 22)], id="ordinal-nd"),
@@ -293,6 +296,33 @@ def test_date_scan_all_reads_every_date(text: str, expected: list[tuple[int, int
 @pytest.mark.parametrize(("url", "expected"), _URL_CASES)
 def test_date_url_reads_the_path_date(url: str, expected: tuple[int, int, int] | None) -> None:
     assert _date_url(url) == expected
+
+
+_WIDE_STORAGE = [
+    pytest.param("★", id="ucs2"),
+    pytest.param("\U0001f600", id="ucs4"),
+]
+"""A BMP star and an astral emoji force the argument to 2- and 4-byte storage; the plain-ASCII
+cases only exercise the 1-byte code-point read. Re-running them at each width pins that a date
+reads the same whatever storage the surrounding text forces."""
+
+
+@pytest.mark.parametrize("wide", _WIDE_STORAGE)
+@pytest.mark.parametrize(("text", "expected"), _SCAN_CASES)
+def test_date_scan_is_storage_width_agnostic(text: str, expected: tuple[int, int, int] | None, wide: str) -> None:
+    assert _date_scan(text + wide, _YEAR) == expected
+
+
+@pytest.mark.parametrize("wide", _WIDE_STORAGE)
+@pytest.mark.parametrize(("text", "expected"), _SCAN_ALL_CASES)
+def test_date_scan_all_is_storage_width_agnostic(text: str, expected: list[tuple[int, int, int]], wide: str) -> None:
+    assert _date_scan_all(text + wide, _YEAR) == expected
+
+
+@pytest.mark.parametrize("wide", _WIDE_STORAGE)
+@pytest.mark.parametrize(("url", "expected"), _URL_CASES)
+def test_date_url_is_storage_width_agnostic(url: str, expected: tuple[int, int, int] | None, wide: str) -> None:
+    assert _date_url(url + wide) == expected
 
 
 def test_date_url_rejects_non_str() -> None:
