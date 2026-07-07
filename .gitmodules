@@ -32,6 +32,10 @@
 	path = tests/conformance/unicodetools
 	url = https://github.com/unicode-org/unicodetools
 	shallow = true
+[submodule "tests/conformance/DOMPurify"]
+	path = tests/conformance/DOMPurify
+	url = https://github.com/cure53/DOMPurify
+	shallow = true
 [submodule "tests/conformance/libxml2"]
 	path = tests/conformance/libxml2
 	url = https://github.com/GNOME/libxml2
