@@ -44,6 +44,7 @@ It is the wrong tool in a few honest cases:
     traversal
     ranges
     queries
+    cssom
     structured-data
     serialization
     main-content

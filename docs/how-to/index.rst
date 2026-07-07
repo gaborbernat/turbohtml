@@ -19,6 +19,7 @@ ending with running the toolkit from a shell.
     ranges
     encoding
     selecting
+    computed-style
     finding
     traversing
     extracting
