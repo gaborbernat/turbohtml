@@ -32,6 +32,10 @@
 	path = tests/conformance/unicodetools
 	url = https://github.com/unicode-org/unicodetools
 	shallow = true
+[submodule "tests/conformance/parse5"]
+	path = tests/conformance/parse5
+	url = https://github.com/inikulin/parse5
+	shallow = true
 [submodule "tests/conformance/DOMPurify"]
 	path = tests/conformance/DOMPurify
 	url = https://github.com/cure53/DOMPurify
