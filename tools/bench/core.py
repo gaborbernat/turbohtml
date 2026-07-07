@@ -133,6 +133,11 @@ def parse(text: str) -> None:
     turbohtml.parse(text)
 
 
+def parse_xml(text: str) -> None:
+    """Parse a whole XML document into a navigable tree through turbohtml.parse_xml()."""
+    turbohtml.parse_xml(text)
+
+
 def parse_scripting(text: str) -> None:
     """Parse with the WHATWG scripting flag on, so <noscript> content tokenizes as raw text."""
     turbohtml.parse(text, scripting=True)
@@ -600,6 +605,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "construct": (construct, "turbohtml"),
     "emit": (emit, "turbohtml"),
     "parse": (parse, "turbohtml"),
+    "parse-xml": (parse_xml, "turbohtml"),
     "parse-scripting": (parse_scripting, "turbohtml"),
     "parse-locations": (parse_locations, "turbohtml"),
     "fragment": (fragment, "turbohtml"),
