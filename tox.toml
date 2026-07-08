@@ -1,4 +1,4 @@
-requires = [ "tox>=4.56", "tox-uv>=1.35.2" ]
+requires = [ "tox>=4.56.3", "tox-uv>=1.35.2" ]
 env_list = [
   "3.15",
   "3.14",
@@ -290,6 +290,24 @@ description = "dev environment with all dependencies at {envdir}"
 package = "editable"
 dependency_groups = [ "dev" ]
 commands = [ [ "uv", "pip", "list", "--format=columns" ], [ "python", "-c", 'print(r"{env_python}")' ] ]
+
+[env.docs-linkcheck]
+description = "check every external link in the documentation resolves (network-bound; run on demand, not a per-PR gate)"
+package = "wheel"
+dependency_groups = [ "docs" ]
+commands_pre = []
+commands = [
+  [
+    "sphinx-build",
+    "-d",
+    "{env_tmp_dir}{/}docs_tree",
+    "docs",
+    "{env_tmp_dir}{/}linkcheck",
+    "--color",
+    "-b",
+    "linkcheck",
+  ],
+]
 
 [env.fuzz]
 description = "coverage-guided/mutation deep fuzz of every harness under ASan/UBSan (scheduled/manual, not a PR gate)"

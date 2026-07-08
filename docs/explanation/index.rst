@@ -33,29 +33,15 @@ It is the wrong tool in a few honest cases:
   turbohtml's advantage is speed and a typed API; if you need neither, switching costs more than it saves.
 
 .. toctree::
-    :maxdepth: 1
+    :maxdepth: 2
 
-    c-core
-    stdlib-parity
-    parsing
-    xml
-    validation
-    conformance
-    sax
-    treebuild
-    streaming
-    source-locations
-    tree-model
-    traversal
-    ranges
-    shadow-dom
-    queries
-    cssom
-    xslt
-    structured-data
-    serialization
-    canonicalization
-    main-content
-    mutation
+    foundations
+    parse-and-dom
+    detect
+    query
     sanitizing
-    free-threading
+    xslt
+    extract
+    build
+    serialize
+    validate
