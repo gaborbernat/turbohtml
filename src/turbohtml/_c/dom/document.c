@@ -530,13 +530,13 @@ static PyType_Slot document_slots[] = {
     {Py_tp_doc, (void *)document_doc},
     {Py_tp_getset, document_getset},
     {Py_tp_methods, document_methods},
-    {0, NULL},
+    TH_SEALED_END,
 };
 
 static PyType_Spec document_spec = {
     .name = "turbohtml._html.Document",
     .basicsize = sizeof(NodeObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT | TH_SEALED,
     .slots = document_slots,
 };
 
@@ -556,13 +556,13 @@ static void handle_dealloc(PyObject *self) {
 
 static PyType_Slot handle_slots[] = {
     {Py_tp_dealloc, handle_dealloc},
-    {0, NULL},
+    TH_SEALED_END,
 };
 
 static PyType_Spec handle_spec = {
     .name = "turbohtml._html._TreeHandle",
     .basicsize = sizeof(HandleObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT | TH_SEALED,
     .slots = handle_slots,
 };
 
@@ -604,8 +604,7 @@ static int strict_raise(module_state *state, th_tree *tree, int strict) {
         return 0;
     }
     PyObject *error = parse_error_new(state, &errors[0]);
-    PyObject *message =
-        PyUnicode_FromFormat("%s at line %zd, column %zd", errors[0].code, errors[0].line, errors[0].col);
+    PyObject *message = th_str_format("%s at line %zd, column %zd", errors[0].code, errors[0].line, errors[0].col);
     /* allocation failure cannot be forced from a test */
     if (error == NULL || message == NULL) { /* GCOVR_EXCL_BR_LINE */
         Py_XDECREF(error);                  /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1314,8 +1313,8 @@ static PyObject *reconstruct_doctype(module_state *state, PyObject *data) {
         if (empty == NULL) { /* GCOVR_EXCL_BR_LINE: the empty string is interned and cannot fail */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        packed = PyUnicode_FromFormat("%U \"%U\" \"%U\"", name, has_public ? public_id : empty,
-                                      has_system ? system_id : empty);
+        packed =
+            th_str_format("%U \"%U\" \"%U\"", name, has_public ? public_id : empty, has_system ? system_id : empty);
         Py_DECREF(empty);
     }
     if (packed == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */

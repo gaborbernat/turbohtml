@@ -42,6 +42,29 @@ jobs:
         env:
           UV_PYTHON_PREFERENCE: only-managed
           COV_GCOV: ${{ matrix.cov }}
+  pypy:
+    # PyPy stands outside the test matrix because it runs no coverage gate: gcovr reaches cpyext only through lxml,
+    # which publishes no PyPy wheels, and a cpyext build has no gcov to feed it. Both gates run on the matrix above.
+    name: 🧪 ${{ matrix.py }} - Linux
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["pypy3.11", "pypy3.10"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          submodules: true # html5lib-tests data for the conformance test
+          persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: false
+      - name: ✅ Run ${{ matrix.py }}
+        run: uvx --with tox-uv tox run --skip-missing-interpreters false -e ${{ matrix.py }}
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
   check:
     name: 🔎 ${{ matrix.tox_env }}
     runs-on: ubuntu-24.04

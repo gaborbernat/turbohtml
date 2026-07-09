@@ -408,12 +408,16 @@ static void html_free(void *module) {
     (void)html_clear((PyObject *)module);
 }
 
+/* Both slots below are CPython concepts: cpyext knows only Py_mod_create and Py_mod_exec, rejects
+   any other slot ID at import, and defines neither macro. PyPy reports PY_VERSION_HEX as 3.11
+   today, so the version guards alone already exclude them -- the PYPY_VERSION test is what keeps a
+   future PyPy that reports 3.12+ compiling. */
 static PyModuleDef_Slot html_slots[] = {
     {Py_mod_exec, html_exec},
-#if PY_VERSION_HEX >= 0x030C0000
+#if PY_VERSION_HEX >= 0x030C0000 && !defined(PYPY_VERSION)
     {Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED},
 #endif
-#if PY_VERSION_HEX >= 0x030D0000
+#if PY_VERSION_HEX >= 0x030D0000 && !defined(PYPY_VERSION)
     {Py_mod_gil, Py_MOD_GIL_NOT_USED},
 #endif
     {0, NULL},

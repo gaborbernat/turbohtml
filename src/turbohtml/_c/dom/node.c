@@ -187,13 +187,13 @@ static PyType_Slot walker_slots[] = {
     {Py_tp_dealloc, walker_dealloc},
     {Py_tp_iter, PyObject_SelfIter},
     {Py_tp_iternext, walker_next},
-    {0, NULL},
+    TH_SEALED_END,
 };
 
 PyType_Spec walker_spec = {
     .name = "turbohtml._html._NodeIterator",
     .basicsize = sizeof(WalkerObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT | TH_SEALED,
     .slots = walker_slots,
 };
 
@@ -256,13 +256,13 @@ static PyType_Slot string_walker_slots[] = {
     {Py_tp_dealloc, string_walker_dealloc},
     {Py_tp_iter, PyObject_SelfIter},
     {Py_tp_iternext, string_walker_next},
-    {0, NULL},
+    TH_SEALED_END,
 };
 
 PyType_Spec string_walker_spec = {
     .name = "turbohtml._html._StringIterator",
     .basicsize = sizeof(StringWalkerObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT | TH_SEALED,
     .slots = string_walker_slots,
 };
 
@@ -330,13 +330,13 @@ static PyType_Slot serialize_iter_slots[] = {
     {Py_tp_dealloc, serialize_iter_dealloc},
     {Py_tp_iter, PyObject_SelfIter},
     {Py_tp_iternext, serialize_iter_next},
-    {0, NULL},
+    TH_SEALED_END,
 };
 
 PyType_Spec serialize_iter_spec = {
     .name = "turbohtml._html._SerializeIterator",
     .basicsize = sizeof(SerializeIterObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT | TH_SEALED,
     .slots = serialize_iter_slots,
 };
 
@@ -1334,6 +1334,21 @@ static Py_ssize_t node_length(PyObject *self) {
 
 static PyObject *node_item(PyObject *self, Py_ssize_t index) {
     NodeObject *node = (NodeObject *)self;
+#ifdef PYPY_VERSION
+    /* CPython's PySequence_GetItem adds sq_length to a negative subscript before dispatching here;
+       cpyext hands sq_item the raw index, so node[-1] would walk zero steps and answer the first
+       child. Do the adjustment cpyext skips: https://github.com/pypy/pypy/issues/5526 */
+    if (index < 0) {
+        index += node_length(self);
+    }
+#endif
+    /* CPython's PySequence_GetItem adds sq_length to a negative subscript but never rechecks it, so
+       node[-len - 1] still arrives negative. Without this it would walk zero steps and answer the
+       first child rather than raise, as list does. */
+    if (index < 0) {
+        PyErr_SetString(PyExc_IndexError, "node child index out of range");
+        return NULL;
+    }
     th_node *child;
     Py_BEGIN_CRITICAL_SECTION(node->handle);
     child = node->node->first_child;
@@ -1370,7 +1385,7 @@ static PyObject *node_repr(PyObject *self) {
         if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *repr = PyUnicode_FromFormat("Element(%R)", tag);
+        PyObject *repr = th_str_format("Element(%R)", tag);
         Py_DECREF(tag);
         return repr;
     }
@@ -1386,7 +1401,7 @@ static PyObject *node_repr(PyObject *self) {
                             : node->type == TH_NODE_COMMENT ? "Comment"
                             : node->type == TH_NODE_CDATA   ? "CData"
                                                             : "Doctype";
-        PyObject *repr = PyUnicode_FromFormat("%s(%R)", label, data);
+        PyObject *repr = th_str_format("%s(%R)", label, data);
         Py_DECREF(data);
         return repr;
     }
@@ -1398,7 +1413,7 @@ static PyObject *node_repr(PyObject *self) {
             Py_XDECREF(data);                 /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;                      /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *repr = PyUnicode_FromFormat("ProcessingInstruction(%R, %R)", target, data);
+        PyObject *repr = th_str_format("ProcessingInstruction(%R, %R)", target, data);
         Py_DECREF(target);
         Py_DECREF(data);
         return repr;
@@ -1754,13 +1769,13 @@ static PyType_Slot node_slots[] = {
     {Py_tp_hash, node_hash},       {Py_tp_getset, node_getset},
     {Py_tp_methods, node_methods}, {Py_tp_iter, node_iter},
     {Py_sq_length, node_length},   {Py_sq_item, node_item},
-    {Py_nb_bool, node_bool},       {0, NULL},
+    {Py_nb_bool, node_bool},       TH_SEALED_END,
 };
 
 PyType_Spec node_spec = {
     .name = "turbohtml._html.Node",
     .basicsize = sizeof(NodeObject),
-    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | TH_SEALED,
     .slots = node_slots,
 };
 

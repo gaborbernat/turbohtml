@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -204,6 +205,12 @@ def test_runtime_signature_skips_a_signature_inspect_cannot_build(mocker: Mocker
     assert _runtime_signature(html.parse) is None
 
 
+@pytest.mark.skipif(
+    sys.implementation.name == "pypy",
+    reason="how much of __text_signature__ cpyext exposes varies by PyPy release: 7.3.23 answers for a heap type's "
+    "methods where 7.3.19 answers only for module functions, so _COMPARABLE holds 120 entries on one and 8 on the "
+    "other. The stub parser this guards is exercised on the CPython matrix",
+)
 def test_the_parity_check_covers_the_public_surface() -> None:
     # a stub-parsing regression that silently dropped entries would drop these simple, every-version signatures too
     assert {"parse", "escape", "Minify", "Document.opengraph"} <= set(_COMPARABLE)
