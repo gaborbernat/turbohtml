@@ -1,1 +1,0 @@
-Resolve local ``file://`` stylesheet URLs for ``xsl:import``; ``Path.as_uri()`` bases now load sibling imports.

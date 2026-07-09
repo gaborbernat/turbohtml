@@ -7,6 +7,38 @@
 .. towncrier release notes start
 
 *********************
+ v1.2.0 (2026-07-09)
+*********************
+
+Backward incompatible changes - 1.2.0
+=====================================
+
+- :func:`turbohtml.detect.detect` reports ``windows-1252``, not ``ascii``, for pure-ASCII input;
+  :class:`~turbohtml.detect.EncodingMatch` gained a trailing ``codec`` field; and :class:`~turbohtml.IncrementalParser`
+  takes WHATWG labels, so ``latin-1`` raises where ``iso-8859-1`` works. (:issue:`622`)
+
+Features - 1.2.0
+================
+
+- Add :attr:`EncodingMatch.codec <turbohtml.detect.EncodingMatch>`; ``data.decode(match.codec)`` reproduces what
+  :func:`turbohtml.parse` saw, where ``match.encoding`` corrupted or raised. (:issue:`622`)
+
+Bug fixes - 1.2.0
+=================
+
+- Lock free-threaded DOM tree reads and attribute views; concurrent mutation no longer crashes those readers.
+  (:issue:`617`)
+- Resolve local ``file://`` stylesheet URLs for ``xsl:import``; ``Path.as_uri()`` bases now load sibling imports.
+  (:issue:`618`)
+- Normalize configured ``Linkify.skip_tags`` names before matching parsed HTML tags; ``CODE`` now skips ``<code>`` text.
+  (:issue:`619`)
+- Keep controls inside the first ``<legend>`` child of a disabled ``<fieldset>`` in ``form_data()`` output.
+  (:issue:`621`)
+- Decode legacy bytes with the WHATWG decoders rather than CPython's same-named codecs, whose tables and error handling
+  both differ: ``koi8-u`` is KOI8-RU, and GBK ``0x80`` is the euro sign. The ``<meta>`` prescan, the content detector,
+  and :class:`~turbohtml.IncrementalParser` now follow the spec too. (:issue:`622`)
+
+*********************
  v1.1.1 (2026-07-08)
 *********************
 

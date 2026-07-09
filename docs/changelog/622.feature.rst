@@ -1,2 +1,0 @@
-Add :attr:`EncodingMatch.codec <turbohtml.detect.EncodingMatch>`; ``data.decode(match.codec)`` reproduces what
-:func:`turbohtml.parse` saw, where ``match.encoding`` corrupted or raised.
