@@ -1,0 +1,3 @@
+Decode legacy bytes with the WHATWG decoders rather than CPython's same-named codecs, whose tables and error handling
+both differ: ``koi8-u`` is KOI8-RU, and GBK ``0x80`` is the euro sign. The ``<meta>`` prescan, the content detector, and
+:class:`~turbohtml.IncrementalParser` now follow the spec too.

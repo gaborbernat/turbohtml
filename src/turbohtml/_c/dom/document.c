@@ -4,6 +4,7 @@
 #include "dom/nodes.h"
 
 #include "encoding/encoding.h"
+#include "encoding/decode.h"
 #include "encoding/detect.h"
 #include "encoding/language.h"
 #include "url/url.h"
@@ -628,54 +629,9 @@ static int strict_raise(module_state *state, th_tree *tree, int strict) {
     return -1;
 }
 
-/* Decode windows-1252 per the WHATWG index. CPython's cp1252 leaves 0x81, 0x8D,
-   0x8F, 0x90, and 0x9D undefined, so "replace" maps them to U+FFFD, but the WHATWG
-   windows-1252 index defines them as the matching C1 controls (codepoint equals the
-   byte). Those five bytes are cp1252's only source of U+FFFD, so every U+FFFD in the
-   decoded string is one of them; a single-byte codec emits one char per byte, so the
-   output index is the byte index. Rebuild only when one is present, since removing
-   the U+FFFD may lower the string's kind. */
-static PyObject *decode_windows_1252(const unsigned char *bytes, Py_ssize_t len) {
-    PyObject *decoded = PyUnicode_Decode((const char *)bytes, len, "cp1252", "replace");
-    if (decoded == NULL) { /* GCOVR_EXCL_BR_LINE: cp1252 with the replace handler never fails */
-        return NULL;       /* GCOVR_EXCL_LINE: decode failure */
-    }
-    Py_ssize_t count = PyUnicode_GET_LENGTH(decoded);
-    int kind = PyUnicode_KIND(decoded);
-    const void *data = PyUnicode_DATA(decoded);
-    Py_UCS4 maxchar = 0;
-    int restored = 0;
-    for (Py_ssize_t index = 0; index < count; index++) {
-        Py_UCS4 ch = PyUnicode_READ(kind, data, index);
-        if (ch == 0xFFFD) {
-            ch = bytes[index];
-            restored = 1;
-        }
-        if (ch > maxchar) {
-            maxchar = ch;
-        }
-    }
-    if (!restored) {
-        return decoded;
-    }
-    PyObject *fixed = PyUnicode_New(count, maxchar);
-    if (fixed == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        Py_DECREF(decoded); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    int out_kind = PyUnicode_KIND(fixed);
-    void *out = PyUnicode_DATA(fixed);
-    for (Py_ssize_t index = 0; index < count; index++) {
-        Py_UCS4 ch = PyUnicode_READ(kind, data, index);
-        PyUnicode_WRITE(out_kind, out, index, ch == 0xFFFD ? (Py_UCS4)bytes[index] : ch);
-    }
-    Py_DECREF(decoded);
-    return fixed;
-}
-
-/* Parse bytes: sniff the encoding (BOM, then the encoding argument, then a <meta>
-   prescan, then windows-1252), decode with that codec replacing malformed bytes,
-   and parse the resulting str. The decoded str is retained as the tree's source. */
+/* Parse bytes: sniff the encoding (BOM, then the encoding argument, then a <meta> prescan, then windows-1252), decode
+   it with the WHATWG decoder in encoding/decode.h, which turns every malformed sequence into U+FFFD, and parse the
+   resulting str. The decoded str is retained as the tree's source. */
 static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *enc_arg, Py_ssize_t enc_len, int strict,
                              int detect, int positions, int locations, int scripting, int declarative) {
     Py_buffer view;
@@ -710,31 +666,9 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
     if (entry == NULL) {
         entry = th_encoding_lookup("windows-1252", 12);
     }
-    PyObject *decoded;
-    if (strcmp(entry->codec, "x-user-defined") == 0) {
-        /* x-user-defined has no CPython codec: ASCII bytes stay, 0x80-0xFF map to the
-           private-use block U+F780-U+F7FF, per the WHATWG Encoding Standard */
-        Py_ssize_t count = len - skip;
-        decoded = PyUnicode_New(count, 0xF7FF);
-        if (decoded != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            void *out = PyUnicode_DATA(decoded);
-            for (Py_ssize_t index = 0; index < count; index++) {
-                unsigned char byte = bytes[skip + index];
-                PyUnicode_WRITE(PyUnicode_2BYTE_KIND, out, index, byte < 0x80 ? byte : (Py_UCS4)(0xF700 + byte));
-            }
-        }
-    } else if (strcmp(entry->codec, "replacement") == 0) {
-        /* the WHATWG replacement encoding refuses the stateful ISO-2022/HZ byte streams,
-           which can smuggle markup past a sanitizer: a non-empty input decodes to a
-           single U+FFFD and an empty input to nothing */
-        decoded = len - skip > 0 ? PyUnicode_FromOrdinal(0xFFFD) : PyUnicode_New(0, 0);
-    } else if (strcmp(entry->codec, "cp1252") == 0) {
-        decoded = decode_windows_1252(bytes + skip, len - skip);
-    } else {
-        decoded = PyUnicode_Decode((const char *)bytes + skip, len - skip, entry->codec, "replace");
-    }
+    PyObject *decoded = th_decode(entry, bytes + skip, len - skip);
     PyBuffer_Release(&view);
-    if (decoded == NULL) { /* GCOVR_EXCL_BR_LINE: the codec is from the table and the replace handler never fails */
+    if (decoded == NULL) { /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
         return NULL;       /* GCOVR_EXCL_LINE: decode failure */
     }
     th_tree *tree = th_tree_parse(PyUnicode_KIND(decoded), PyUnicode_DATA(decoded), PyUnicode_GET_LENGTH(decoded),
@@ -767,6 +701,27 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
    (canonical name, raw score) pairs, and whether a leading byte-order mark decided it.
    The BOM step uses th_detect_bom, which reports UTF-8-SIG and the UTF-32 marks the
    spec-locked parse path does not; the parse path's th_encoding_bom is untouched. */
+/* _decode(data, label) -> str: decode bytes with the WHATWG decoder the label names, the way parse(bytes) would. A
+   byte-order mark is not stripped; the label decides, as the spec's "decode" entry point does. */
+PyObject *turbohtml_decode(PyObject *module, PyObject *args) {
+    (void)module;
+    Py_buffer view;
+    const char *label = NULL;
+    Py_ssize_t label_len = 0;
+    if (!PyArg_ParseTuple(args, "y*s#", &view, &label, &label_len)) {
+        return NULL;
+    }
+    const th_encoding_entry *entry = th_encoding_lookup(label, label_len);
+    if (entry == NULL) {
+        PyBuffer_Release(&view);
+        PyErr_Format(PyExc_LookupError, "unknown encoding: %s", label);
+        return NULL;
+    }
+    PyObject *decoded = th_decode(entry, view.buf, view.len);
+    PyBuffer_Release(&view);
+    return decoded;
+}
+
 PyObject *turbohtml_detect_encoding(PyObject *module, PyObject *arg) {
     (void)module;
     Py_buffer view;
@@ -797,7 +752,7 @@ PyObject *turbohtml_detect_encoding(PyObject *module, PyObject *arg) {
     for (int index = 0; index < scores.count; index++) {
         const char *label = scores.items[index].label;
         const th_encoding_entry *item = th_encoding_lookup(label, (Py_ssize_t)strlen(label));
-        PyObject *pair = Py_BuildValue("(sl)", item->canonical, scores.items[index].score);
+        PyObject *pair = Py_BuildValue("(sL)", item->canonical, (long long)scores.items[index].score);
         if (pair == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             Py_DECREF(ranked); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -952,8 +907,13 @@ PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObje
    marking the parser spent. */
 typedef struct {
     PyObject_HEAD th_stream *stream;
-    PyObject *encoding; /* the encoding str used to decode bytes chunks */
-    PyObject *decoder;  /* the incremental decoder, created on the first bytes feed; else NULL */
+    PyObject *encoding;             /* the encoding label the caller gave, reported back as the tree's encoding */
+    PyObject *unicode_decoder;      /* a CPython incremental decoder for UTF-8 and UTF-16; NULL for the rest */
+    const th_encoding_entry *entry; /* resolved on the first bytes feed; NULL while only str has been fed */
+    th_decoder decoder;             /* carries ISO-2022-JP's mode across a chunk boundary */
+    unsigned char tail[4];          /* the incomplete sequence a chunk ended on; gb18030 needs the most, four bytes */
+    Py_ssize_t tail_len;
+    int replaced; /* the replacement encoding owes the stream exactly one U+FFFD, however many chunks arrive */
 } StreamObject;
 
 static PyObject *stream_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
@@ -969,7 +929,10 @@ static PyObject *stream_new(PyTypeObject *type, PyObject *args, PyObject *kwds) 
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    self->decoder = NULL;
+    self->entry = NULL;
+    self->unicode_decoder = NULL;
+    self->tail_len = 0;
+    self->replaced = 0;
     self->encoding = encoding != NULL ? Py_NewRef(encoding) : PyUnicode_FromString("utf-8");
     if (self->encoding == NULL) { /* GCOVR_EXCL_BR_LINE: the literal "utf-8" always builds */
         Py_DECREF(self);          /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -990,26 +953,96 @@ static void stream_dealloc(PyObject *self) {
         th_stream_free(parser->stream);
     }
     Py_XDECREF(parser->encoding);
-    Py_XDECREF(parser->decoder);
+    Py_XDECREF(parser->unicode_decoder);
     type->tp_free(self);
     Py_DECREF(type);
 }
 
-/* Decode a bytes chunk through the parser's incremental decoder, creating it on
-   first use (an unknown encoding raises LookupError here). final flushes any
-   bytes the decoder held back at a chunk boundary. */
-static PyObject *stream_decode(StreamObject *parser, PyObject *data, int final) {
-    if (parser->decoder == NULL) {
-        const char *name = PyUnicode_AsUTF8(parser->encoding);
-        if (name == NULL) { /* a lone-surrogate encoding name has no UTF-8 form */
-            return NULL;
+/* Decode the held-back tail plus this chunk with the native decoder, stashing whatever it could not finish. */
+static PyObject *stream_decode_legacy(StreamObject *parser, const unsigned char *chunk, Py_ssize_t chunk_len,
+                                      int final) {
+    Py_ssize_t len = parser->tail_len + chunk_len;
+    /* the previous chunk usually ended on a sequence boundary, and then the chunk decodes where it lies */
+    const unsigned char *joined = chunk;
+    unsigned char *spliced = NULL;
+    if (parser->tail_len > 0) {
+        spliced = PyMem_Malloc((size_t)len);
+        if (spliced == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        parser->decoder = PyCodec_IncrementalDecoder(name, "replace");
-        if (parser->decoder == NULL) {
-            return NULL;
+        memcpy(spliced, parser->tail, (size_t)parser->tail_len);
+        memcpy(spliced + parser->tail_len, chunk, (size_t)chunk_len);
+        joined = spliced;
+    }
+    Py_UCS4 *scratch = PyMem_Malloc((size_t)(len > 0 ? len : 1) * sizeof(Py_UCS4));
+    if (scratch == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(spliced);     /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    parser->decoder.buf = joined;
+    parser->decoder.len = len;
+    parser->decoder.pos = 0;
+    Py_ssize_t consumed = 0;
+    Py_UCS4 maxchar = 0;
+    Py_ssize_t count = th_decode_chunk(&parser->decoder, scratch, final, &consumed, &maxchar);
+    parser->tail_len = len - consumed;
+    memcpy(parser->tail, joined + consumed, (size_t)parser->tail_len);
+    PyMem_Free(spliced);
+    PyObject *decoded = th_points_to_str(scratch, count, maxchar);
+    PyMem_Free(scratch);
+    return decoded;
+}
+
+/* Resolve the label on the first bytes feed, so an unsupported one raises LookupError there rather than at close. */
+static int stream_resolve(StreamObject *parser) {
+    Py_ssize_t label_len = 0;
+    const char *label = PyUnicode_AsUTF8AndSize(parser->encoding, &label_len);
+    if (label == NULL) { /* a lone-surrogate encoding name has no UTF-8 form */
+        return -1;
+    }
+    const th_encoding_entry *entry = th_encoding_lookup(label, label_len);
+    if (entry == NULL) {
+        PyErr_Format(PyExc_LookupError, "unknown encoding: %s", label);
+        return -1;
+    }
+    if (entry->kind == TH_DEC_UTF8 || entry->kind == TH_DEC_UTF16LE || entry->kind == TH_DEC_UTF16BE) {
+        /* CPython's UTF-8 and UTF-16 decoders match the spec, and their incremental form already carries a sequence
+           split across chunks, so there is nothing for a native chunk decoder to add */
+        const char *codec = entry->kind == TH_DEC_UTF8      ? "utf-8"
+                            : entry->kind == TH_DEC_UTF16LE ? "utf-16-le"
+                                                            : "utf-16-be";
+        parser->unicode_decoder = PyCodec_IncrementalDecoder(codec, "replace");
+        if (parser->unicode_decoder == NULL) { /* GCOVR_EXCL_BR_LINE: all three are built-in codecs */
+            return -1;                         /* GCOVR_EXCL_LINE: codec-lookup failure */
         }
     }
-    return PyObject_CallMethod(parser->decoder, "decode", "Oi", data, final);
+    th_decode_init(&parser->decoder, entry, NULL, 0);
+    parser->entry = entry;
+    return 0;
+}
+
+/* Decode a bytes chunk with the same WHATWG decoder parse(bytes) uses. final flushes whatever the last chunk boundary
+   held back. */
+static PyObject *stream_decode(StreamObject *parser, const unsigned char *chunk, Py_ssize_t chunk_len, int final) {
+    if (parser->entry == NULL && stream_resolve(parser) < 0) {
+        return NULL;
+    }
+    if (parser->unicode_decoder != NULL) {
+        return PyObject_CallMethod(parser->unicode_decoder, "decode", "y#i", (const char *)chunk, chunk_len, final);
+    }
+    if (parser->entry->kind == TH_DEC_REPLACEMENT) {
+        /* the whole stream decodes to one U+FFFD however it is chunked, so only the first non-empty chunk emits it */
+        if (chunk_len == 0 || parser->replaced) {
+            return PyUnicode_New(0, 0);
+        }
+        parser->replaced = 1;
+        return PyUnicode_FromOrdinal(0xFFFD);
+    }
+    if (parser->entry->kind == TH_DEC_SINGLE_BYTE || parser->entry->kind == TH_DEC_X_USER_DEFINED) {
+        /* one code point per byte and no state, so a chunk decodes on its own with nothing held back */
+        return th_decode(parser->entry, chunk, chunk_len);
+    }
+    return stream_decode_legacy(parser, chunk, chunk_len, final);
 }
 
 /* Feed already-decoded code points to the C stream; -1 with an exception set on
@@ -1038,7 +1071,12 @@ static PyObject *stream_feed_locked(StreamObject *parser, PyObject *data) {
         PyErr_SetString(PyExc_TypeError, "feed() argument must be str or a bytes-like object");
         return NULL;
     }
-    PyObject *decoded = stream_decode(parser, data, 0);
+    Py_buffer view;
+    if (PyObject_GetBuffer(data, &view, PyBUF_SIMPLE) < 0) { /* GCOVR_EXCL_BR_LINE: bytes expose a simple buffer */
+        return NULL;                                         /* GCOVR_EXCL_LINE: buffer-acquisition failure */
+    }
+    PyObject *decoded = stream_decode(parser, view.buf, view.len, 0);
+    PyBuffer_Release(&view);
     if (decoded == NULL) {
         return NULL;
     }
@@ -1074,10 +1112,10 @@ static PyObject *stream_close_locked(StreamObject *parser, module_state *state) 
         PyErr_SetString(PyExc_ValueError, "IncrementalParser is already closed");
         return NULL;
     }
-    if (parser->decoder != NULL) {
+    if (parser->entry != NULL) {
         /* flush any bytes the decoder held back at the last chunk boundary */
-        PyObject *tail = PyObject_CallMethod(parser->decoder, "decode", "yi", "", 1);
-        if (tail == NULL) { /* GCOVR_EXCL_BR_LINE: a final empty decode cannot fail once the codec exists */
+        PyObject *tail = stream_decode(parser, (const unsigned char *)"", 0, 1);
+        if (tail == NULL) { /* GCOVR_EXCL_BR_LINE: a final empty decode cannot fail once the label resolved */
             return NULL;    /* GCOVR_EXCL_LINE: decode-failure path */
         }
         int failed = stream_feed_str(parser, tail);
@@ -1094,7 +1132,18 @@ static PyObject *stream_close_locked(StreamObject *parser, module_state *state) 
     }
     th_stream_free(parser->stream); /* frees the tokenizer; the tree is the caller's now */
     parser->stream = NULL;
-    return tree_to_node(state, tree, Py_None, parser->decoder != NULL ? parser->encoding : Py_None);
+    if (parser->entry == NULL) { /* only str chunks were fed, so the tree has no source encoding */
+        return tree_to_node(state, tree, Py_None, Py_None);
+    }
+    /* report the canonical name, as parse(bytes) does; the label the caller passed may be one of its many aliases */
+    PyObject *canonical = PyUnicode_FromString(parser->entry->canonical);
+    if (canonical == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *node = tree_to_node(state, tree, Py_None, canonical);
+    Py_DECREF(canonical);
+    return node;
 }
 
 PyDoc_STRVAR(stream_close_doc, "close()\n--\n\n"

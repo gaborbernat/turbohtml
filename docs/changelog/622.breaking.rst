@@ -1,0 +1,3 @@
+:func:`turbohtml.detect.detect` reports ``windows-1252``, not ``ascii``, for pure-ASCII input;
+:class:`~turbohtml.detect.EncodingMatch` gained a trailing ``codec`` field; and :class:`~turbohtml.IncrementalParser`
+takes WHATWG labels, so ``latin-1`` raises where ``iso-8859-1`` works.
