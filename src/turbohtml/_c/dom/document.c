@@ -26,6 +26,19 @@ static PyObject *document_get_encoding(PyObject *self, void *Py_UNUSED(closure))
     return Py_NewRef(((HandleObject *)((NodeObject *)self)->handle)->encoding);
 }
 
+/* The WHATWG confidence in Document.encoding. "certain" means the document said so: a
+   byte-order mark, the encoding argument, or a <meta> declaration. "tentative" means the
+   sniff guessed -- a structural UTF-8 read, the opt-in detector, or the windows-1252
+   fallback -- and a scraper may want to second-guess it. None for str input, which was
+   never decoded. */
+static PyObject *document_get_encoding_confidence(PyObject *self, void *Py_UNUSED(closure)) {
+    const HandleObject *handle = (HandleObject *)((NodeObject *)self)->handle;
+    if (handle->encoding == Py_None) {
+        Py_RETURN_NONE;
+    }
+    return PyUnicode_FromString(handle->encoding_certain ? "certain" : "tentative");
+}
+
 /* The scheme scanner's alphabets, complementing the WHATWG component percent-encode sets that now live in url.c: a
    scheme leads with a letter (URL_ALPHABET) and continues over letters, digits, and "+-." (URL_SCHEME_TAIL). */
 static const char URL_ALPHABET[] = TH_URL_ALPHA;
@@ -497,7 +510,17 @@ static PyMethodDef document_methods[] = {
 /* The parse errors are immutable once the parse returns, so this reads them
    lock-free (like the other accessors) and materializes a fresh list each call. */
 static PyObject *document_get_errors(PyObject *self, void *Py_UNUSED(closure)) {
-    th_tree *tree = ((HandleObject *)((NodeObject *)self)->handle)->tree;
+    HandleObject *handle = (HandleObject *)((NodeObject *)self)->handle;
+    th_tree *tree = handle->tree;
+    /* the first read folds the preprocessing errors into the tree, so two threads reading
+       Document.errors at once must not both do it; a streamed or hand-built tree kept no
+       source, and its input raises no error to find */
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    if (PyUnicode_Check(handle->source)) {
+        th_tree_ensure_input_errors(tree, PyUnicode_KIND(handle->source), PyUnicode_DATA(handle->source),
+                                    PyUnicode_GET_LENGTH(handle->source));
+    }
+    Py_END_CRITICAL_SECTION();
     Py_ssize_t count;
     const th_parse_error *errors = th_tree_errors(tree, &count);
     PyObject *list = PyList_New(count);
@@ -519,6 +542,10 @@ static PyObject *document_get_errors(PyObject *self, void *Py_UNUSED(closure)) {
 static PyGetSetDef document_getset[] = {
     {"root", document_get_root, NULL, "the root <html> element, or None", NULL},
     {"encoding", document_get_encoding, NULL, "the resolved encoding name for bytes input, or None for str", NULL},
+    {"encoding_confidence", document_get_encoding_confidence, NULL,
+     "'certain' when a byte-order mark, the encoding argument, or a <meta> named the encoding, 'tentative' when the "
+     "sniff guessed it, or None for str input",
+     NULL},
     {"errors", document_get_errors, NULL, "the WHATWG parse errors detected, as a list of ParseError in document order",
      NULL},
     {NULL, NULL, NULL, NULL, NULL},
@@ -566,7 +593,7 @@ static PyType_Spec handle_spec = {
     .slots = handle_slots,
 };
 
-PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding) {
+PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding, int encoding_certain) {
     PyTypeObject *type = (PyTypeObject *)state->handle_type;
     HandleObject *self = (HandleObject *)type->tp_alloc(type, 0);
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -575,13 +602,15 @@ PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObj
     self->tree = tree;
     self->source = Py_NewRef(source);
     self->encoding = Py_NewRef(encoding);
+    self->encoding_certain = encoding_certain;
     return (PyObject *)self;
 }
 
 /* Wrap a freshly built tree (which borrows source's storage) and return its
    document/context node. Frees the tree on wrapping failure. */
-static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding) {
-    PyObject *handle = handle_new(state, tree, source, encoding);
+static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *source, PyObject *encoding,
+                              int encoding_certain) {
+    PyObject *handle = handle_new(state, tree, source, encoding, encoding_certain);
     if (handle == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -594,9 +623,14 @@ static PyObject *tree_to_node(module_state *state, th_tree *tree, PyObject *sour
 /* In strict mode, raise HTMLParseError carrying the first parse error and free
    the tree, returning -1; otherwise return 0 and leave the tree to be wrapped.
    The exception's str is a readable summary and its .error is the ParseError. */
-static int strict_raise(module_state *state, th_tree *tree, int strict) {
+/* source is the str the tree was parsed from, or NULL for the XML parser, whose
+   well-formedness errors are its own and carry no preprocessing step. */
+static int strict_raise(module_state *state, th_tree *tree, int strict, PyObject *source) {
     if (!strict) {
         return 0;
+    }
+    if (source != NULL) {
+        th_tree_ensure_input_errors(tree, PyUnicode_KIND(source), PyUnicode_DATA(source), PyUnicode_GET_LENGTH(source));
     }
     Py_ssize_t count;
     const th_parse_error *errors = th_tree_errors(tree, &count);
@@ -628,9 +662,35 @@ static int strict_raise(module_state *state, th_tree *tree, int strict) {
     return -1;
 }
 
-/* Parse bytes: sniff the encoding (BOM, then the encoding argument, then a <meta> prescan, then windows-1252), decode
-   it with the WHATWG decoder in encoding/decode.h, which turns every malformed sequence into U+FFFD, and parse the
-   resulting str. The decoded str is retained as the tree's source. */
+/* The encoding the document's <meta> elements declare, or NULL when none of them resolves.
+   The first label naming a supported encoding decides; an unsupported one falls through to
+   the next, the way the prescan's own lookup does. */
+static const th_encoding_entry *meta_declared_encoding(const th_tree *tree) {
+    Py_ssize_t count;
+    const th_meta_label *labels = th_tree_meta_labels(tree, &count);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        char extracted[64]; /* label may point into it, so it outlives the branch below */
+        const char *label = labels[index].text;
+        if (labels[index].from_content) {
+            label = prescan_charset_in_content(label, extracted, sizeof(extracted));
+            if (label == NULL) {
+                continue;
+            }
+        }
+        const th_encoding_entry *entry = th_encoding_lookup(label, (Py_ssize_t)strlen(label));
+        if (entry != NULL) {
+            return th_encoding_declared(entry);
+        }
+    }
+    return NULL;
+}
+
+/* Parse bytes: sniff the encoding (BOM, then the encoding argument, then a <meta> prescan, then a structural UTF-8
+   check, then windows-1252), decode it with the WHATWG decoder in encoding/decode.h, which turns every malformed
+   sequence into U+FFFD, and parse the resulting str. When the sniff was only tentative and the built tree turns out to
+   declare a different encoding in a <meta> the 1024-byte prescan could not reach, the parse is redone once against the
+   declared encoding -- the WHATWG "changing the encoding while parsing" step. The decoded str is retained as the tree's
+   source. */
 static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *enc_arg, Py_ssize_t enc_len, int strict,
                              int detect, int positions, int locations, int scripting, int declarative) {
     Py_buffer view;
@@ -654,29 +714,72 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
             entry = labeled;
         }
     }
+    /* a byte-order mark and the transport-layer argument are the spec's two certain
+       sources; everything below them is tentative, so a <meta> may still overrule it */
+    int certain = entry != NULL;
     if (entry == NULL) {
         entry = th_encoding_prescan(bytes, len);
     }
-    if (entry == NULL && detect) {
-        /* opt-in content-based detection, strictly after the spec sniffing steps */
-        th_detect_scores scores;
-        entry = th_encoding_detect(bytes, len, &scores);
+    if (entry == NULL) {
+        if (detect) {
+            /* opt-in content-based detection, strictly after the spec sniffing steps */
+            th_detect_scores scores;
+            entry = th_encoding_detect(bytes, len, &scores);
+        } else {
+            /* The detector's first step on its own: UTF-8 validity is a structural proof,
+               not a frequency guess, so it costs none of the opt-in model's candidate
+               scoring, and an undeclared UTF-8 document never reaches the windows-1252
+               fallback. Pure ASCII is left to that fallback, which decodes it identically. */
+            int has_non_ascii;
+            if (th_detect_is_utf8(bytes, len, &has_non_ascii) && has_non_ascii) {
+                entry = th_encoding_lookup("utf-8", 5);
+            }
+        }
     }
     if (entry == NULL) {
         entry = th_encoding_lookup("windows-1252", 12);
     }
-    PyObject *decoded = th_decode(entry, bytes + skip, len - skip);
+    /* Decode and parse, then -- while the encoding is still tentative -- let a <meta> the
+       prescan's 1024-byte window could not reach redo the parse against what it declares.
+       Only a real <meta> element counts, so a charset written inside a <script> string
+       cannot fool it the way an unbounded byte scan would. At most one redo: the second
+       pass runs with the declared encoding, which the spec then calls certain. */
+    PyObject *decoded = NULL;
+    th_tree *tree = NULL;
+    for (int redone = 0;; redone = 1) {
+        decoded = th_decode(entry, bytes + skip, len - skip);
+        if (decoded == NULL) {       /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
+            PyBuffer_Release(&view); /* GCOVR_EXCL_LINE: decode failure */
+            return NULL;             /* GCOVR_EXCL_LINE: decode failure */
+        }
+        tree = th_tree_parse(PyUnicode_KIND(decoded), PyUnicode_DATA(decoded), PyUnicode_GET_LENGTH(decoded), positions,
+                             locations, scripting, declarative);
+        if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
+            Py_DECREF(decoded);      /* GCOVR_EXCL_LINE: allocation-failure path */
+            PyBuffer_Release(&view); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (certain) {
+            break;
+        }
+        if (redone) { /* this pass already ran with what the document declares */
+            certain = 1;
+            break;
+        }
+        const th_encoding_entry *declared = meta_declared_encoding(tree);
+        if (declared == NULL) { /* nothing declares an encoding: the sniff stays a guess */
+            break;
+        }
+        if (strcmp(declared->canonical, entry->canonical) == 0) {
+            certain = 1; /* the declaration confirms the sniff, so no redo is needed */
+            break;
+        }
+        entry = declared;
+        th_tree_free(tree); /* the tree spans the decoded str, so it goes first */
+        Py_DECREF(decoded);
+    }
     PyBuffer_Release(&view);
-    if (decoded == NULL) { /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
-        return NULL;       /* GCOVR_EXCL_LINE: decode failure */
-    }
-    th_tree *tree = th_tree_parse(PyUnicode_KIND(decoded), PyUnicode_DATA(decoded), PyUnicode_GET_LENGTH(decoded),
-                                  positions, locations, scripting, declarative);
-    if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
-        Py_DECREF(decoded);      /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    if (strict_raise(state, tree, strict) < 0) {
+    if (strict_raise(state, tree, strict, decoded) < 0) {
         Py_DECREF(decoded);
         return NULL;
     }
@@ -686,7 +789,7 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
         Py_DECREF(decoded);  /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *node = tree_to_node(state, tree, decoded, canonical);
+    PyObject *node = tree_to_node(state, tree, decoded, canonical, certain);
     Py_DECREF(canonical);
     Py_DECREF(decoded);
     return node;
@@ -950,10 +1053,10 @@ PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs) {
         if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
             return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        if (strict_raise(state, tree, strict) < 0) {
+        if (strict_raise(state, tree, strict, markup) < 0) {
             return NULL;
         }
-        return tree_to_node(state, tree, markup, Py_None);
+        return tree_to_node(state, tree, markup, Py_None, 0);
     }
     if (!PyObject_CheckBuffer(markup)) {
         PyErr_SetString(PyExc_TypeError, "parse() argument must be str or a bytes-like object");
@@ -973,10 +1076,10 @@ PyObject *turbohtml_parse_xml(PyObject *module, PyObject *args, PyObject *kwargs
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (strict_raise(state, tree, 1) < 0) { /* XML always raises the first well-formedness error */
+    if (strict_raise(state, tree, 1, NULL) < 0) { /* XML always raises the first well-formedness error */
         return NULL;
     }
-    return tree_to_node(state, tree, markup, Py_None);
+    return tree_to_node(state, tree, markup, Py_None, 0);
 }
 
 PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObject *kwargs) {
@@ -1012,7 +1115,7 @@ PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObje
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return tree_to_node(PyModule_GetState(module), tree, text, Py_None);
+    return tree_to_node(PyModule_GetState(module), tree, text, Py_None, 0);
 }
 
 /* The public IncrementalParser: a push parser that owns a C th_stream plus, once
@@ -1262,7 +1365,7 @@ static PyObject *stream_close_locked(StreamObject *parser, module_state *state) 
     th_stream_free(parser->stream); /* frees the tokenizer; the tree is the caller's now */
     parser->stream = NULL;
     if (parser->entry == NULL) { /* only str chunks were fed, so the tree has no source encoding */
-        return tree_to_node(state, tree, Py_None, Py_None);
+        return tree_to_node(state, tree, Py_None, Py_None, 0);
     }
     /* report the canonical name, as parse(bytes) does; the label the caller passed may be one of its many aliases */
     PyObject *canonical = PyUnicode_FromString(parser->entry->canonical);
@@ -1270,7 +1373,7 @@ static PyObject *stream_close_locked(StreamObject *parser, module_state *state) 
         th_tree_free(tree);  /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *node = tree_to_node(state, tree, Py_None, canonical);
+    PyObject *node = tree_to_node(state, tree, Py_None, canonical, 1);
     Py_DECREF(canonical);
     return node;
 }

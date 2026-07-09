@@ -83,6 +83,12 @@ struct th_tree {
     uint32_t attr_rec_cap;
     uint32_t *attr_slots; /* slot -> record index + 1; 0 marks an empty slot */
     uint32_t attr_slot_mask;
+    /* Encoding declarations from <meta> elements, in document order, so a bytes parse
+       can run the WHATWG "changing the encoding while parsing" step once the tree is
+       built. Grown lazily: a document without a <meta> charset never allocates. */
+    th_meta_label *meta_labels;
+    Py_ssize_t meta_label_count;
+    Py_ssize_t meta_label_cap;
     /* Shadow roots attached through the mutation API, grown lazily by attach_shadow.
        Empty (NULL) for every parsed or shadow-free tree. */
     th_shadow_link *shadows;
@@ -97,8 +103,11 @@ struct th_tree {
     Py_ssize_t observer_cap;
     /* WHATWG parse errors collected during the parse, in document order. The
        tokenizer fills it through this sink while the tree builder adds its own
-       construction errors; read-only once the parse returns. */
+       construction errors. The preprocessing errors, which depend on the input alone,
+       are folded in on the first read rather than at parse time: a document nobody
+       asks for errors from should not pay to find them. */
     th_error_sink errors;
+    int input_errors_merged;
 };
 
 static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {

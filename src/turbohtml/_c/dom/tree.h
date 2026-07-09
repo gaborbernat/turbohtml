@@ -129,6 +129,22 @@ struct th_node {
 
 typedef struct th_tree th_tree;
 
+/* One character-encoding declaration a <meta> element carried, recorded in document
+   order while the tree is built. text is the charset attribute's value, or -- when
+   from_content is set -- the whole http-equiv="content-type" content value, whose
+   charset= token still has to be extracted. Both are the raw declaration: resolving a
+   label to an encoding is dom/document.c's job, because only the first label that
+   resolves decides, exactly as the prescan's fall-through does. */
+typedef struct {
+    const char *text;
+    int from_content;
+} th_meta_label;
+
+/* The <meta> encoding declarations the parse saw, in document order, and how many.
+   NULL with a zero count for a document that declares none. Owned by the tree, so
+   read it before th_tree_free. */
+const th_meta_label *th_tree_meta_labels(const th_tree *tree, Py_ssize_t *count);
+
 /* One source span parse5's sourceCodeLocationInfo reports: 1-based start/end line,
    0-based start/end column, and the code-point start/end offset into the
    newline-normalized source. The half-open [start_offset, end_offset) covers the
@@ -361,6 +377,12 @@ uint32_t th_tree_attr_generation(const th_tree *tree);
 /* The WHATWG parse errors collected during the parse, in document order, and
    their count via *out_count. The array (and its static code strings) lives as
    long as the tree; it is empty for a programmatically built or well-formed tree. */
+/* Fold in the parse errors the input's own code points raise, which th_tree_parse leaves for
+   the first reader. The source is passed in rather than read off the tree: th_tree_parse hands
+   tree->data to the tokenizer's own buffer, which does not outlive the parse. Idempotent; call
+   before th_tree_errors. */
+void th_tree_ensure_input_errors(th_tree *tree, int kind, const void *data, Py_ssize_t length);
+
 const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count);
 
 /* Whether the tree was parsed in quirks mode (no doctype or a quirky one). In
