@@ -7,6 +7,95 @@
 .. towncrier release notes start
 
 *********************
+ v1.3.0 (2026-07-10)
+*********************
+
+Features - 1.3.0
+================
+
+- Run the C core on PyPy 3.10 and 3.11 through ``cpyext``, with the same conformance and byte-identical output as
+  CPython; see :doc:`/explanation/interpreters` for what ``cpyext`` costs and for the three behaviors that do not carry
+  over. (:issue:`623`)
+- Decode the legacy encodings 1.2x to 1.5x faster by inlining each WHATWG decoder into its specialized loop, and stop
+  reallocating :class:`turbohtml.IncrementalParser`'s decode scratch on every :meth:`~turbohtml.IncrementalParser.feed`.
+  (:issue:`624`)
+
+Bug fixes - 1.3.0
+=================
+
+- Raise :exc:`IndexError` for a negative subscript further back than a node's child count; ``node[-len - 1]`` answered
+  the first child, where :class:`list` raises. (:issue:`623`)
+- Resume the ISO-2022-JP escape state across a :class:`turbohtml.IncrementalParser` chunk boundary. A chunk ending on an
+  incomplete escape sequence dropped back to the output state, so the next chunk read the escape's first byte as content
+  and lost one ``U+FFFD``. (:issue:`624`)
+- :func:`turbohtml.parse` no longer mojibakes two common inputs. Bytes that are valid UTF-8 but declare no encoding now
+  decode as UTF-8 rather than reaching the windows-1252 fallback. Validity is a structural proof rather than a frequency
+  guess, so it costs none of the candidate scoring ``detect_encoding=True`` adds, and pure ASCII still resolves to
+  windows-1252, which decodes it to the same text. A ``<meta>`` charset sitting past the prescan's 1024-byte window now
+  redoes the parse against what it declares, following the WHATWG "changing the encoding while parsing" step, so where
+  the declaration sits in the document no longer changes the answer. Only a real ``<meta>`` element counts, so a charset
+  written inside a ``<script>`` string cannot pose as one, and a byte-order mark or the ``encoding`` argument still
+  settles the encoding.
+
+  :attr:`turbohtml.Document.encoding_confidence` reports which step answered: ``"certain"`` when the document named its
+  own encoding through a byte-order mark, the ``encoding`` argument, or a ``<meta>`` charset, ``"tentative"`` when the
+  sniff guessed, and ``None`` for ``str`` input. :func:`turbohtml.detect.detect` reads bytes and has no tree to consult,
+  so on a document whose only ``<meta>`` sits past the prescan window it stops at the prescan and can disagree with
+  :func:`turbohtml.parse`.
+
+  :attr:`turbohtml.Document.errors` reports every parse error the WHATWG tokenizer defines. It carried 8 of the 48 codes
+  the algorithm names, so ``a\x00b`` and a malformed ``<!DOCTYPE>`` both parsed without a word. turbohtml now reports
+  the other 45, along with the preprocessing errors a control, noncharacter, or surrogate code point raises by being in
+  the input at all, interleaved with the tokenizer's in source order. Reading :attr:`~turbohtml.Document.errors` is what
+  finds the preprocessing ones, so a parse that never asks for them does not pay to look. ``strict=True`` therefore
+  raises on documents it used to accept, and :class:`turbohtml.IncrementalParser` keeps no source to walk, so it reports
+  none of them. Nothing gated the ``errors`` arrays the vendored ``html5lib-tests`` tokenizer suite carries; they now
+  gate the codes and their order on all 7032 cases, and the line and column on every BMP-only input. (:issue:`625`)
+
+- The encoding detector ignored the domain the bytes came from. chardetng, which ``_c/encoding/detect.h`` ports, takes
+  the host's rightmost DNS label and reads it three ways: the encoding that label expects gains a point, the encodings
+  native to it keep their score, and the rest pay a penalty. The port dropped all three, so turbohtml scored a Czech
+  page served from a ``.ru`` domain the same as one served from ``.cz``. :class:`turbohtml.detect.Detection` now carries
+  a ``tld`` field that reaches the scoring, and leaving it unset detects as before. A differential test runs both
+  implementations over all 133 labels chardetng's classifier carries.
+
+  :class:`turbohtml.detect.EncodingDetector` no longer buffers the stream. It appended every chunk to a ``bytearray``
+  and detected once over the concatenation at :meth:`~turbohtml.detect.EncodingDetector.close`, so a caller streaming a
+  large file paid its length in memory, in a class documented as mirroring chardet's ``UniversalDetector``. Each
+  candidate now carries its own state between feeds, and the only bytes the detector keeps are the leading 1024 the
+  byte-order-mark check and the ``<meta>`` prescan read, which the spec bounds. Where the chunks fall does not change
+  the answer: the stateful detector is the only implementation, so :func:`turbohtml.detect.detect` drives it with a
+  single feed and the differential test against chardetng covers the scoring both paths share.
+
+  A four-byte gb18030 sequence that resolved to no code point returned an error without naming the byte that caused it,
+  leaving ``error_at`` at whatever the previous error had set. Reading a whole buffer at once never noticed, because the
+  value that means "the input ended mid-sequence" is only ever set at the end. A resumed decoder did notice, and so
+  would :class:`turbohtml.IncrementalParser`, which tells "wait for more input" from "this input is wrong" by that same
+  value. (:issue:`627`)
+
+- Report parse errors from :class:`turbohtml.IncrementalParser`, which collected none: the streaming tokenizer never
+  attached an error sink, and the preprocessing errors were found by a pass over a source no stream keeps. Each chunk is
+  now swept as it arrives. (:issue:`629`)
+- Report a control character that follows a tab, form feed, or NUL inside the same eight bytes of input. The
+  word-at-a-time skip built its mask from a borrow-based test whose bits are not exact per byte, so an ordinary low byte
+  erased its neighbor's error. (:issue:`630`)
+
+Improved documentation - 1.3.0
+==============================
+
+- Explain what running the C core on PyPy costs, in :doc:`/explanation/interpreters`, from a table the benchmark harness
+  generates (``tox -e bench -- interpreters``) rather than from figures typed into prose. How the core adapts to
+  ``cpyext`` moved to :doc:`/development/cpyext`, alongside the invariant that keeps CPython's machine code unchanged.
+  (:issue:`623`)
+
+Packaging updates - 1.3.0
+=========================
+
+- Publish PyPy 3.10 and 3.11 wheels (``pp310``, ``pp311``) for Linux, macOS, and Windows. They carry LTO but skip the
+  profile-guided optimization the CPython Linux wheels use, since a profile trained under PyPy measures ``cpyext``
+  rather than the C hot paths. (:issue:`623`)
+
+*********************
  v1.2.0 (2026-07-09)
 *********************
 
