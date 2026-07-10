@@ -460,3 +460,38 @@ def test_concurrent_table_reads_and_mutation_are_memory_safe() -> None:
 
     _run(rows_reader, tables_reader, mutator)
     assert isinstance(table.rows(), list)  # the tree is still walkable after the concurrent churn
+
+
+def test_concurrent_cross_tree_adoption_copies_one_source_state() -> None:
+    document = turbohtml.parse(f"<section>{'<i></i>' * 50_000}<i id=target data-state=s></i></section>")
+    source = document.find("section")
+    assert source is not None
+    target = document.select_one("#target")
+    assert target is not None
+    destination = turbohtml.Element("main")
+    long_state = "L" * 4_096
+    start = threading.Barrier(2)
+    ready = threading.Event()
+    done = threading.Event()
+
+    def mutator() -> None:
+        start.wait()
+        target.attrs["data-state"] = "s"
+        target.attrs["data-state"] = long_state
+        ready.set()
+        while not done.is_set():
+            target.attrs["data-state"] = "s"
+            target.attrs["data-state"] = long_state
+
+    def adopter() -> None:
+        start.wait()
+        ready.wait()
+        try:
+            destination.append(source)
+        finally:
+            done.set()
+
+    _run(mutator, adopter)
+    adopted = destination.select_one("#target")
+    assert adopted is not None
+    assert adopted.attrs["data-state"] in {"s", long_state}

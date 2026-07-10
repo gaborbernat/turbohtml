@@ -51,17 +51,20 @@ static PyObject *construct_data_node(PyTypeObject *type, int node_type, PyObject
 /* Deep-copy this node and its subtree into a fresh standalone tree, the body of
    __copy__ and __deepcopy__ (an HTML node has no meaningful shallow copy). */
 static PyObject *node_copy_impl(PyObject *self) {
-    module_state *state = state_of(self);
     th_tree *tree = th_tree_new();
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    th_node *copy = th_tree_copy_node(tree, tree_of(self), ((NodeObject *)self)->node);
+    NodeObject *source = (NodeObject *)self;
+    th_node *copy;
+    Py_BEGIN_CRITICAL_SECTION(source->handle);
+    copy = th_tree_copy_node(tree, tree_of(self), source->node);
+    Py_END_CRITICAL_SECTION();
     if (copy == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(tree);      /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return wrap_fresh_tree_node(state, tree, copy);
+    return wrap_fresh_tree_node(state_of(self), tree, copy);
 }
 
 PyObject *node_copy(PyObject *self, PyObject *Py_UNUSED(ignored)) {
