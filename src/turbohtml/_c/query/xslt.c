@@ -4230,8 +4230,8 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
             th_node *import_node;
             int ok = turbohtml_node_borrow(module, item, &import_tree, &import_node) == 0;
             th_node *import_root = ok ? stylesheet_root(import_node) : NULL;
-            Py_XDECREF(item);
             if (import_root == NULL) {
+                Py_DECREF(item);
                 PyMem_Free(imports);
                 engine_clear(&eng);
                 /* A borrow failure already set an exception; an XML-parsed import always has a
@@ -4241,14 +4241,19 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
                     PyErr_SetString(PyExc_ValueError, no_root); /* GCOVR_EXCL_LINE */
                 return NULL;
             }
+            Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(item));
             imports[index] = th_tree_copy_node(eng.merged_tree, import_tree, import_root);
+            Py_END_CRITICAL_SECTION();
+            Py_DECREF(item);
             if (imports[index] == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
                 PyMem_Free(imports);      /* GCOVR_EXCL_LINE */
                 engine_clear(&eng);       /* GCOVR_EXCL_LINE */
                 return PyErr_NoMemory();  /* GCOVR_EXCL_LINE */
             }
         }
+        Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(stylesheet_obj));
         sheet_root = th_tree_copy_node(eng.merged_tree, sheet_tree, sheet_root);
+        Py_END_CRITICAL_SECTION();
         if (sheet_root == NULL) {    /* GCOVR_EXCL_BR_LINE: alloc */
             PyMem_Free(imports);     /* GCOVR_EXCL_LINE */
             engine_clear(&eng);      /* GCOVR_EXCL_LINE */
@@ -4259,11 +4264,10 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
     PyObject *source_handle = turbohtml_node_handle(source_obj);
     (void)source_handle; /* used only by the critical-section macro, a no-op on the GIL build */
     PyObject *result = NULL;
-    /* The source tree drives every query; lock its handle for the free-threaded build.
-       Both trees are read-only through the transform, and the output tree is private. */
-    Py_BEGIN_CRITICAL_SECTION(source_handle);
+    /* The source and stylesheet trees drive the transform; the output tree is private. */
+    Py_BEGIN_CRITICAL_SECTION2(source_handle, turbohtml_node_handle(stylesheet_obj));
     result = run_transform(&eng, sheet_root, params, imports, nimports);
-    Py_END_CRITICAL_SECTION();
+    Py_END_CRITICAL_SECTION2();
     PyMem_Free(imports);
     /* fail() sets eng.error without a Python exception; fail_py() sets the exception and
        leaves eng.error NULL. The two are exclusive, so eng.error != NULL implies no

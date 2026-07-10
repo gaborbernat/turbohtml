@@ -913,17 +913,27 @@ static th_node *adopt(RangeObject *range, PyObject *child_obj) {
         th_node_remove(child->node);
         return child->node;
     }
-    th_node *copy = th_tree_copy_node(dest_tree, child_tree, child->node);
+    PyObject *source_handle = child->handle;
+#ifdef Py_GIL_DISABLED
+    Py_INCREF(source_handle);
+#endif
+    th_node *copy;
+    Py_BEGIN_CRITICAL_SECTION2(range->start_handle, source_handle);
+    copy = th_tree_copy_node(dest_tree, child_tree, child->node);
+    if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        handle_drop_index(source_handle);
+        th_node_remove(child->node);
+        Py_SETREF(child->handle, Py_NewRef(range->start_handle));
+        child->node = copy;
+    }
+    Py_END_CRITICAL_SECTION2();
+#ifdef Py_GIL_DISABLED
+    Py_DECREF(source_handle);
+#endif
     if (copy == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    Py_BEGIN_CRITICAL_SECTION(child->handle);
-    handle_drop_index(child->handle);
-    th_node_remove(child->node);
-    Py_END_CRITICAL_SECTION();
-    Py_SETREF(child->handle, Py_NewRef(range->start_handle));
-    child->node = copy;
     return copy;
 }
 

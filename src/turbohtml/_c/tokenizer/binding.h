@@ -24,6 +24,10 @@
 #define Py_BEGIN_CRITICAL_SECTION(op) {
 #define Py_END_CRITICAL_SECTION() }
 #endif
+#ifndef Py_BEGIN_CRITICAL_SECTION2
+#define Py_BEGIN_CRITICAL_SECTION2(left, right) {
+#define Py_END_CRITICAL_SECTION2() }
+#endif
 
 typedef struct {
     PyObject *token_type;             /* Token */

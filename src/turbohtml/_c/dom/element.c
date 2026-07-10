@@ -1956,19 +1956,27 @@ th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_ob
         th_node_remove_observed(dest_tree, child->node);
         return child->node;
     }
-    th_node *copy = th_tree_copy_node(dest_tree, tree_of(child_obj), child->node);
+    PyObject *source_handle = child->handle;
+#ifdef Py_GIL_DISABLED
+    Py_INCREF(source_handle);
+#endif
+    th_node *copy;
+    Py_BEGIN_CRITICAL_SECTION2(anchor->handle, source_handle);
+    copy = th_tree_copy_node(dest_tree, tree_of(child_obj), child->node);
+    if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        handle_drop_index(source_handle);
+        th_node_remove_observed(tree_of(child_obj), child->node);
+        Py_SETREF(child->handle, Py_NewRef(anchor->handle));
+        child->node = copy;
+    }
+    Py_END_CRITICAL_SECTION2();
+#ifdef Py_GIL_DISABLED
+    Py_DECREF(source_handle);
+#endif
     if (copy == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    /* the caller holds the destination tree's lock; detaching from the source tree (a
-       different tree here) takes the source's lock so it cannot race a source mutation */
-    Py_BEGIN_CRITICAL_SECTION(child->handle);
-    handle_drop_index(child->handle);
-    th_node_remove_observed(tree_of(child_obj), child->node);
-    Py_END_CRITICAL_SECTION();
-    Py_SETREF(child->handle, Py_NewRef(anchor->handle));
-    child->node = copy;
     return copy;
 }
 
