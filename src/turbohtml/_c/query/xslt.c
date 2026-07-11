@@ -17,6 +17,7 @@
 
 #include "core/common.h"
 #include "core/vec.h"
+#include "dom/nodes.h"
 #include "dom/tree.h"
 #include "tokenizer/binding.h"
 #include "query/xpath/internal.h"
@@ -544,6 +545,7 @@ typedef struct engine {
 
     Py_UCS4 *xsl_prefix;
     Py_ssize_t xsl_prefix_len;
+    int xsl_ns_dynamic;
     const Py_UCS4 *exclude_prefixes; /* aliases the stylesheet root's exclude-result-prefixes value */
     Py_ssize_t exclude_prefixes_len;
     const Py_UCS4 *cdata_elements; /* aliases xsl:output cdata-section-elements (space-separated QNames) */
@@ -588,28 +590,81 @@ typedef struct engine {
 
 /* ---- xsl element identification ------------------------------------------- */
 
-/* Whether node is an XSLT-namespace element whose local name is `local`, resolving
-   the prefix bound to the XSLT namespace (usually "xsl") that the stylesheet declared. */
-static int is_xsl(const engine *eng, const th_node *node, const char *local) {
+static const char XSLT_NS[] = "http://www.w3.org/1999/XSL/Transform";
+
+static const Py_UCS4 *qname_local(const th_node *node, Py_ssize_t *local_len, Py_ssize_t *prefix_len) {
+    for (Py_ssize_t index = 0; index < node->text_len; index++) {
+        if (node->text[index] == ':') {
+            *prefix_len = index;
+            *local_len = node->text_len - index - 1;
+            return node->text + index + 1;
+        }
+    }
+    *prefix_len = 0;
+    *local_len = node->text_len;
+    return node->text;
+}
+
+static int node_prefix_is_xsl(th_tree *tree, const th_node *node, Py_ssize_t prefix_len) {
+    for (const th_node *ancestor = node; ancestor != NULL; ancestor = ancestor->parent) {
+        for (Py_ssize_t index = 0; index < ancestor->attr_count; index++) {
+            const th_node_attr *attr = &ancestor->attrs[index];
+            Py_ssize_t name_len = 0;
+            const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+            int matches = prefix_len == 0 ? name_len == 5 && memcmp(name, "xmlns", 5) == 0
+                                          : name_len == prefix_len + 6 && memcmp(name, "xmlns:", 6) == 0;
+            for (Py_ssize_t offset = 0; matches && offset < prefix_len; offset++) {
+                matches = (Py_UCS4)(unsigned char)name[offset + 6] == node->text[offset];
+            }
+            if (matches) {
+                return ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS);
+            }
+        }
+    }
+    return 0;
+}
+
+static int is_xsl_fast(const engine *eng, const th_node *node, const char *local) {
     if (node->type != TH_NODE_ELEMENT) {
         return 0;
     }
-    Py_ssize_t plen = eng->xsl_prefix_len;
-    if (node->text_len < plen + 1 || node->text[plen] != ':') {
+    Py_ssize_t prefix_len = eng->xsl_prefix_len;
+    if (node->text_len < prefix_len + 1 || node->text[prefix_len] != ':') {
         return 0;
     }
-    if (memcmp(node->text, eng->xsl_prefix, (size_t)plen * sizeof(Py_UCS4)) != 0) {
+    if (memcmp(node->text, eng->xsl_prefix, (size_t)prefix_len * sizeof(Py_UCS4)) != 0) {
         return 0;
     }
-    return ucs4_ascii_eq(node->text + plen + 1, node->text_len - plen - 1, local);
+    return ucs4_ascii_eq(node->text + prefix_len + 1, node->text_len - prefix_len - 1, local);
+}
+
+static int is_xsl_dynamic(const engine *eng, const th_node *node, const char *local) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return 0;
+    }
+    Py_ssize_t local_len;
+    Py_ssize_t prefix_len;
+    const Py_UCS4 *name = qname_local(node, &local_len, &prefix_len);
+    return ucs4_ascii_eq(name, local_len, local) && node_prefix_is_xsl(eng->sheet_tree, node, prefix_len);
+}
+
+static int is_xsl(const engine *eng, const th_node *node, const char *local) {
+    return eng->xsl_ns_dynamic ? is_xsl_dynamic(eng, node, local) : is_xsl_fast(eng, node, local);
 }
 
 /* Whether an element is in the XSLT namespace (an xsl:* element), the test that tells
    an instruction from a literal result element. The caller only asks about elements. */
-static int is_any_xsl(const engine *eng, const th_node *node) {
-    Py_ssize_t plen = eng->xsl_prefix_len;
-    return node->text_len > plen + 1 && node->text[plen] == ':' &&
-           memcmp(node->text, eng->xsl_prefix, (size_t)plen * sizeof(Py_UCS4)) == 0;
+static int is_any_xsl_fast(const engine *eng, const th_node *node) {
+    Py_ssize_t prefix_len = eng->xsl_prefix_len;
+    return node->text_len > prefix_len + 1 && node->text[prefix_len] == ':' &&
+           memcmp(node->text, eng->xsl_prefix, (size_t)prefix_len * sizeof(Py_UCS4)) == 0;
+}
+
+static int is_any_xsl_dynamic(const engine *eng, const th_node *node) {
+    Py_ssize_t local_len;
+    Py_ssize_t prefix_len;
+    (void)qname_local(node, &local_len, &prefix_len);
+    return node_prefix_is_xsl(eng->sheet_tree, node, prefix_len);
 }
 
 /* The value of node's attribute named `name` (ASCII), or NULL when absent. Returns a
@@ -2835,8 +2890,6 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
 
 /* ---- the body instantiation walk ------------------------------------------ */
 
-static const char XSLT_NS[] = "http://www.w3.org/1999/XSL/Transform";
-
 static const Py_UCS4 *alias_result_uri(const engine *eng, const char *prefix, Py_ssize_t prefix_len,
                                        Py_ssize_t *out_len);
 
@@ -2995,7 +3048,26 @@ static int copy_namespace_decls(engine *eng, th_node *lre, th_node *copy, th_nod
 /* Whether attribute name `name` carries the stylesheet's XSLT-namespace prefix, i.e. it is an
    XSLT directive (xsl:exclude-result-prefixes, xsl:use-attribute-sets, ...) placed on a literal
    result element, which the spec strips from the output rather than copying. */
-static int is_xsl_attr(const engine *eng, const char *name, Py_ssize_t name_len) {
+static int is_xsl_attr(const engine *eng, const th_node *node, const char *name, Py_ssize_t name_len) {
+    if (eng->xsl_ns_dynamic) {
+        const char *colon = memchr(name, ':', (size_t)name_len);
+        if (colon == NULL) {
+            return 0;
+        }
+        Py_ssize_t prefix_len = colon - name;
+        for (const th_node *ancestor = node; ancestor != NULL; ancestor = ancestor->parent) {
+            for (Py_ssize_t index = 0; index < ancestor->attr_count; index++) {
+                const th_node_attr *attr = &ancestor->attrs[index];
+                Py_ssize_t decl_len = 0;
+                const char *decl = th_attr_name(eng->sheet_tree, attr->name_atom, &decl_len);
+                if (decl_len == prefix_len + 6 && memcmp(decl, "xmlns:", 6) == 0 &&
+                    memcmp(decl + 6, name, (size_t)prefix_len) == 0) {
+                    return ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS);
+                }
+            }
+        }
+        return 0;
+    }
     Py_ssize_t prefix_len = eng->xsl_prefix_len;
     if (name_len <= prefix_len || name[prefix_len] != ':') {
         return 0;
@@ -3013,17 +3085,30 @@ static int is_xsl_attr(const engine *eng, const char *name, Py_ssize_t name_len)
 static const Py_UCS4 *xsl_prefixed_attr(const engine *eng, const th_node *node, const char *local,
                                         Py_ssize_t *out_len) {
     Py_ssize_t local_len = (Py_ssize_t)strlen(local);
+    if (!eng->xsl_ns_dynamic) {
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            Py_ssize_t name_len = 0;
+            const char *name = th_attr_name(eng->sheet_tree, node->attrs[index].name_atom, &name_len);
+            if (!is_xsl_attr(eng, node, name, name_len)) {
+                continue;
+            }
+            Py_ssize_t offset = eng->xsl_prefix_len + 1;
+            if (name_len - offset == local_len && memcmp(name + offset, local, (size_t)local_len) == 0) {
+                *out_len = node->attrs[index].value_len;
+                return node->attrs[index].value;
+            }
+        }
+        return NULL;
+    }
     for (Py_ssize_t index = 0; index < node->attr_count; index++) {
         Py_ssize_t name_len = 0;
         const char *name = th_attr_name(eng->sheet_tree, node->attrs[index].name_atom, &name_len);
-        if (!is_xsl_attr(eng, name, name_len)) {
+        const char *colon = memchr(name, ':', (size_t)name_len);
+        if (colon == NULL || name_len - (colon - name) - 1 != local_len ||
+            memcmp(colon + 1, local, (size_t)local_len) != 0) {
             continue;
         }
-        Py_ssize_t offset = eng->xsl_prefix_len + 1;
-        if (name_len - offset != local_len) {
-            continue;
-        }
-        if (memcmp(name + offset, local, (size_t)local_len) == 0) {
+        if (is_xsl_attr(eng, node, name, name_len)) {
             *out_len = node->attrs[index].value_len;
             return node->attrs[index].value;
         }
@@ -3058,7 +3143,7 @@ static int instantiate_literal(engine *eng, th_node *element, th_node *out_paren
         if (name_len == 5 && memcmp(name, "xmlns", 5) == 0) {
             continue;
         }
-        if (is_xsl_attr(eng, name, name_len)) {
+        if (is_xsl_attr(eng, element, name, name_len)) {
             continue;
         }
         Py_UCS4 *resolved;
@@ -3189,9 +3274,7 @@ static enum xsl_instr xsl_classify(const Py_UCS4 *local, Py_ssize_t len) {
     return XSL_OTHER;
 }
 
-/* Instantiate one instruction (an xsl:* element, a literal result element, or a text
-   node) into out_parent. */
-static int instantiate_one(engine *eng, th_node *node, th_node *out_parent) {
+static int instantiate_non_element(engine *eng, th_node *node, th_node *out_parent) {
     if (node->type == TH_NODE_TEXT) {
         Py_ssize_t text_len = 0;
         Py_UCS4 *text = th_node_data(eng->sheet_tree, node, &text_len);
@@ -3217,16 +3300,11 @@ static int instantiate_one(engine *eng, th_node *node, th_node *out_parent) {
         PyMem_Free(text);
         return rc;
     }
-    if (node->type != TH_NODE_ELEMENT) {
-        return 0; /* comments / PIs in the stylesheet are ignored */
-    }
-    if (!is_any_xsl(eng, node)) {
-        if (is_extension_element(eng, node)) {
-            return instantiate_fallback(eng, node, out_parent);
-        }
-        return instantiate_literal(eng, node, out_parent);
-    }
-    switch (xsl_classify(node->text + eng->xsl_prefix_len + 1, node->text_len - eng->xsl_prefix_len - 1)) {
+    return 0;
+}
+
+static int instantiate_classified(engine *eng, th_node *node, th_node *out_parent, enum xsl_instr instruction) {
+    switch (instruction) {
     case XSL_VALUE_OF:
         return do_value_of(eng, node, out_parent);
     case XSL_APPLY_TEMPLATES:
@@ -3333,6 +3411,38 @@ static int instantiate_one(engine *eng, th_node *node, th_node *out_parent) {
     }
 }
 
+/* Instantiate one instruction (an xsl:* element, a literal result element, or a text
+   node) into out_parent. */
+static int instantiate_one_fast(engine *eng, th_node *node, th_node *out_parent) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return instantiate_non_element(eng, node, out_parent);
+    }
+    if (!is_any_xsl_fast(eng, node)) {
+        if (is_extension_element(eng, node)) {
+            return instantiate_fallback(eng, node, out_parent);
+        }
+        return instantiate_literal(eng, node, out_parent);
+    }
+    Py_ssize_t offset = eng->xsl_prefix_len + 1;
+    return instantiate_classified(eng, node, out_parent, xsl_classify(node->text + offset, node->text_len - offset));
+}
+
+static int instantiate_one_dynamic(engine *eng, th_node *node, th_node *out_parent) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return instantiate_non_element(eng, node, out_parent);
+    }
+    if (!is_any_xsl_dynamic(eng, node)) {
+        if (is_extension_element(eng, node)) {
+            return instantiate_fallback(eng, node, out_parent);
+        }
+        return instantiate_literal(eng, node, out_parent);
+    }
+    Py_ssize_t local_len;
+    Py_ssize_t prefix_len;
+    const Py_UCS4 *local = qname_local(node, &local_len, &prefix_len);
+    return instantiate_classified(eng, node, out_parent, xsl_classify(local, local_len));
+}
+
 /* Instantiate every child of `body` (skipping the param declarations already bound). */
 static int instantiate_body(engine *eng, th_node *body, th_node *out_parent) {
     if (++eng->depth > XSLT_MAX_DEPTH) {
@@ -3342,14 +3452,22 @@ static int instantiate_body(engine *eng, th_node *body, th_node *out_parent) {
     }
     Py_ssize_t scope_mark = eng->scope_len;
     int rc = 0;
-    for (th_node *child = body->first_child; child != NULL && rc == 0; child = child->next_sibling) {
-        /* xsl:param leads a template body and xsl:sort leads a for-each; both are read
-           by the parent, not instantiated. A stray xsl:with-param falls through to
-           instantiate_one, which produces nothing for it. */
-        if (is_xsl(eng, child, "param") || is_xsl(eng, child, "sort")) {
-            continue;
+    if (eng->xsl_ns_dynamic) {
+        for (th_node *child = body->first_child; child != NULL && rc == 0; child = child->next_sibling) {
+            if (is_xsl_dynamic(eng, child, "param") || is_xsl_dynamic(eng, child, "sort")) {
+                continue;
+            }
+            rc = instantiate_one_dynamic(eng, child, out_parent);
         }
-        rc = instantiate_one(eng, child, out_parent);
+    } else {
+        for (th_node *child = body->first_child; child != NULL && rc == 0; child = child->next_sibling) {
+            /* xsl:param leads a template body and xsl:sort leads a for-each; both are read
+               by the parent, not instantiated. A stray xsl:with-param produces nothing. */
+            if (is_xsl_fast(eng, child, "param") || is_xsl_fast(eng, child, "sort")) {
+                continue;
+            }
+            rc = instantiate_one_fast(eng, child, out_parent);
+        }
     }
     scope_drop(eng, scope_mark); /* local xsl:variable bindings fall out of scope */
     eng->depth--;
@@ -3673,20 +3791,46 @@ static void parse_output(engine *eng, th_node *element) {
     }
 }
 
-/* Resolve the prefix bound to the XSLT namespace from the stylesheet root's xmlns
-   declarations, defaulting to "xsl". Sets eng->xsl_prefix to a freshly allocated
-   code-point buffer (freed in engine_clear). Returns 0, or -1 on allocation failure. */
+/* Resolve the namespace spelling used by the principal stylesheet root, falling
+   back to any XSLT binding for a simplified stylesheet and then to "xsl". */
 static int resolve_xsl_prefix(engine *eng, th_node *root) {
     const char *prefix = "xsl";
     Py_ssize_t prefix_len = 3;
+    int resolved = 0;
+    Py_ssize_t root_prefix_len = 0;
+    while (root_prefix_len < root->text_len && root->text[root_prefix_len] != ':') {
+        root_prefix_len++;
+    }
+    if (root_prefix_len == root->text_len) {
+        root_prefix_len = 0;
+    }
     for (Py_ssize_t index = 0; index < root->attr_count; index++) {
         const th_node_attr *attr = &root->attrs[index];
         Py_ssize_t name_len = 0;
         const char *name = th_attr_name(eng->sheet_tree, attr->name_atom, &name_len);
-        /* A parse_xml stylesheet never has a valueless attribute, so attr->value is set. */
-        if (name_len > 6 && memcmp(name, "xmlns:", 6) == 0 && ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS)) {
-            prefix = name + 6;
-            prefix_len = name_len - 6;
+        int root_decl = root_prefix_len == 0 ? name_len == 5 && memcmp(name, "xmlns", 5) == 0
+                                             : name_len == root_prefix_len + 6 && memcmp(name, "xmlns:", 6) == 0;
+        for (Py_ssize_t offset = 0; root_decl && offset < root_prefix_len; offset++) {
+            root_decl = (Py_UCS4)(unsigned char)name[offset + 6] == root->text[offset];
+        }
+        if (root_decl && ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS)) {
+            prefix = name + name_len - root_prefix_len;
+            prefix_len = root_prefix_len;
+            resolved = 1;
+            break;
+        }
+    }
+    if (!resolved) {
+        for (Py_ssize_t index = 0; index < root->attr_count; index++) {
+            const th_node_attr *attr = &root->attrs[index];
+            Py_ssize_t name_len = 0;
+            const char *name = th_attr_name(eng->sheet_tree, attr->name_atom, &name_len);
+            if (name_len > 6 && memcmp(name, "xmlns:", 6) == 0 &&
+                ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS)) {
+                prefix = name + 6;
+                prefix_len = name_len - 6;
+                break;
+            }
         }
     }
     Py_UCS4 *owned = ucs4_from_ascii(prefix, prefix_len, &eng->xsl_prefix_len);
@@ -3694,6 +3838,45 @@ static int resolve_xsl_prefix(engine *eng, th_node *root) {
         return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
     }
     eng->xsl_prefix = owned;
+    return 0;
+}
+
+static int namespace_declares_prefix(const engine *eng, const char *name, Py_ssize_t name_len) {
+    if (name_len != eng->xsl_prefix_len + 6) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < eng->xsl_prefix_len; index++) {
+        if ((Py_UCS4)(unsigned char)name[index + 6] != eng->xsl_prefix[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int stylesheet_has_dynamic_namespace(const engine *eng, th_node *root) {
+    for (th_node *node = root; node != NULL; node = preorder_next(node, root)) {
+        if (node->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+            const th_node_attr *attr = &node->attrs[index];
+            Py_ssize_t name_len = 0;
+            const char *name = th_attr_name(eng->sheet_tree, attr->name_atom, &name_len);
+            int declaration =
+                (name_len == 5 && memcmp(name, "xmlns", 5) == 0) || (name_len > 6 && memcmp(name, "xmlns:", 6) == 0);
+            if (!declaration) {
+                continue;
+            }
+            int selected = namespace_declares_prefix(eng, name, name_len);
+            int binds_xsl = ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS);
+            if (node == root && selected) {
+                continue;
+            }
+            if (selected || binds_xsl) {
+                return 1;
+            }
+        }
+    }
     return 0;
 }
 
@@ -3976,6 +4159,10 @@ static int analyze(engine *eng, th_node *sheet_root, th_node **imports, Py_ssize
     if (resolve_xsl_prefix(eng, sheet_root) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;                                 /* GCOVR_EXCL_LINE */
     }
+    eng->xsl_ns_dynamic = eng->xsl_prefix_len == 0 || stylesheet_has_dynamic_namespace(eng, sheet_root);
+    for (Py_ssize_t index = 0; !eng->xsl_ns_dynamic && index < nimports; index++) {
+        eng->xsl_ns_dynamic = stylesheet_has_dynamic_namespace(eng, imports[index]);
+    }
     /* A document element that is not xsl:stylesheet/xsl:transform is a simplified stylesheet
        (section 2.3): a literal result element carrying xsl:version whose whole content is the
        body of an implicit template matching the document root. */
@@ -4132,7 +4319,8 @@ static PyObject *run_transform(engine *eng, th_node *sheet_root, PyObject *param
     PyObject *result = NULL;
     int rc = bind_globals(eng, params);
     if (rc == 0) {
-        rc = eng->simplified ? instantiate_one(eng, sheet_root, out_root)
+        rc = eng->simplified ? (eng->xsl_ns_dynamic ? instantiate_one_dynamic(eng, sheet_root, out_root)
+                                                    : instantiate_one_fast(eng, sheet_root, out_root))
                              : apply_to_item(eng, (xp_item){eng->src_root, -1}, 1, 1, NULL, 0, NULL, 0, out_root);
     }
     if (rc == 0) {
@@ -4162,33 +4350,6 @@ static th_node *stylesheet_root(th_node *node) {
     return NULL; /* GCOVR_EXCL_LINE: an XML document always has a root element */
 }
 
-static int is_stylesheet_import(th_tree *tree, th_node *root, th_node *node) {
-    if (node->type != TH_NODE_ELEMENT) {
-        return 0;
-    }
-    const char *prefix = "xsl";
-    Py_ssize_t prefix_len = 3;
-    for (Py_ssize_t index = 0; index < root->attr_count; index++) {
-        const th_node_attr *attr = &root->attrs[index];
-        Py_ssize_t name_len = 0;
-        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
-        if (name_len > 6 && memcmp(name, "xmlns:", 6) == 0 && ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS)) {
-            prefix = name + 6;
-            prefix_len = name_len - 6;
-            break;
-        }
-    }
-    if (node->text_len != prefix_len + 7 || node->text[prefix_len] != ':') {
-        return 0;
-    }
-    for (Py_ssize_t index = 0; index < prefix_len; index++) {
-        if (node->text[index] != (Py_UCS4)(unsigned char)prefix[index]) {
-            return 0;
-        }
-    }
-    return ucs4_ascii_eq(node->text + prefix_len + 1, 6, "import");
-}
-
 static PyObject *stylesheet_import_hrefs(PyObject *module, PyObject *stylesheet, PyObject *base) {
     PyObject *hrefs = PyList_New(0);
     if (hrefs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -4207,7 +4368,13 @@ static PyObject *stylesheet_import_hrefs(PyObject *module, PyObject *stylesheet,
     th_node *root = stylesheet_root(node);
     if (root != NULL) {
         for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
-            if (!is_stylesheet_import(tree, root, child)) {
+            if (child->type != TH_NODE_ELEMENT) {
+                continue;
+            }
+            Py_ssize_t local_len;
+            Py_ssize_t prefix_len;
+            const Py_UCS4 *local = qname_local(child, &local_len, &prefix_len);
+            if (!ucs4_ascii_eq(local, local_len, "import") || !node_prefix_is_xsl(tree, child, prefix_len)) {
                 continue;
             }
             if (base == Py_None) {

@@ -428,6 +428,52 @@ def test_transform_custom_xslt_prefix() -> None:
     assert _run("<r/>", body, prefix="t") == "ok"
 
 
+def test_transform_default_xslt_namespace() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform">'
+        '<output method="text"/><template match="/"><value-of select="\'ok\'"/></template></stylesheet>'
+    )
+    assert transform(sheet, turbohtml.parse_xml("<r/>")) == "ok"
+
+
+def test_transform_default_namespace_template_param() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform">'
+        '<output method="text"/><template match="/"><param name="value" select="\'ok\'"/>'
+        '<value-of select="$value"/></template></stylesheet>'
+    )
+    assert transform(sheet, turbohtml.parse_xml("<r/>")) == "ok"
+
+
+def test_transform_default_namespace_sort() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform"><output method="text"/>'
+        '<template match="/"><for-each select="r/n"><sort select="." data-type="number" order="descending"/>'
+        '<value-of select="."/></for-each></template></stylesheet>'
+    )
+    assert transform(sheet, turbohtml.parse_xml("<r><n>1</n><n>2</n></r>")) == "21"
+
+
+def test_transform_descendant_xslt_prefix_binding() -> None:
+    body = (
+        '<xsl:template match="/"><t:value-of xmlns:t="http://www.w3.org/1999/XSL/Transform" '
+        "select=\"'ok'\"/></xsl:template>"
+    )
+    assert _run("<r/>", body) == "ok"
+
+
+def test_transform_rebound_xslt_prefix_is_literal() -> None:
+    body = (
+        '<xsl:template match="/"><out xmlns:xsl="urn:literal"><xsl:value-of select="\'wrong\'"/></out></xsl:template>'
+    )
+    assert "<xsl:value-of" in _run("<r/>", body, method="xml")
+
+
+def test_transform_unqualified_import_is_literal() -> None:
+    body = '<import/><xsl:template match="/">ok</xsl:template>'
+    assert _run("<r/>", body) == "ok"
+
+
 def test_transform_conflict_resolution_prefers_specific_pattern() -> None:
     body = (
         '<xsl:template match="/"><xsl:apply-templates select="r/*"/></xsl:template>'
@@ -1949,6 +1995,27 @@ def test_transform_attribute_set_applied_to_literal_element() -> None:
     assert _collapse(_run("<r/>", body, method="xml")) == '<out a="1">x</out>'
 
 
+def test_transform_attribute_set_uses_rebound_xslt_prefix() -> None:
+    body = (
+        '<xsl:attribute-set name="s"><xsl:attribute name="a">1</xsl:attribute></xsl:attribute-set>'
+        '<xsl:template match="/"><out xmlns:t="http://www.w3.org/1999/XSL/Transform" '
+        't:aaaaaaaaaaaaaaaaaa="ignored" t:use-attribute-sets="s"/></xsl:template>'
+    )
+    assert _collapse(_run("<r/>", body, method="xml")) == '<out a="1"/>'
+
+
+def test_transform_unbound_attribute_prefix_is_literal() -> None:
+    body = (
+        '<xsl:template match="/"><out xmlns:t="http://www.w3.org/1999/XSL/Transform" xmlns:u="urn:literal" '
+        'u:use-attribute-sets="s"/></xsl:template>'
+    )
+    sheet = _sheet(body, method="xml")
+    out = sheet.find("out")
+    assert out is not None
+    del out.attrs["xmlns:u"]
+    assert 'u:use-attribute-sets="s"' in transform(sheet, turbohtml.parse_xml("<r/>"))
+
+
 def test_transform_attribute_set_own_attribute_overrides_set() -> None:
     body = (
         '<xsl:attribute-set name="s"><xsl:attribute name="a">1</xsl:attribute></xsl:attribute-set>'
@@ -2152,6 +2219,32 @@ def test_transform_fallback_runs_for_extension_element() -> None:
     assert transform(_sheet(body, declare=declare), turbohtml.parse_xml("<r/>")) == "done"
 
 
+def test_transform_default_namespace_fallback_runs_for_extension_element() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform" xmlns:e="urn:ext" '
+        'extension-element-prefixes="e"><output method="text"/><template match="/">'
+        "<e:go><fallback>done</fallback></e:go></template></stylesheet>"
+    )
+    assert transform(sheet, turbohtml.parse_xml("<r/>")) == "done"
+
+
+def test_transform_default_namespace_does_not_skip_literal_param() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform"><output method="text"/>'
+        '<template match="/"><param xmlns="urn:literal">kept</param></template></stylesheet>'
+    )
+    assert transform(sheet, turbohtml.parse_xml("<r/>")) == "kept"
+
+
+def test_transform_default_namespace_stops_after_error() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform"><output method="text"/>'
+        '<template match="/"><value-of select="$missing"/><text>unreachable</text></template></stylesheet>'
+    )
+    with pytest.raises(ValueError, match="unbound"):
+        transform(sheet, turbohtml.parse_xml("<r/>"))
+
+
 def test_transform_extension_element_without_fallback_yields_nothing() -> None:
     body = '<xsl:template match="/">[<e:go/>]</xsl:template>'
     declare = 'xmlns:e="urn:ext" extension-element-prefixes="e"'
@@ -2164,6 +2257,23 @@ def test_transform_simplified_stylesheet() -> None:
         '<v><xsl:value-of select="r/n"/></v></out>'
     )
     assert _canon(transform(sheet, turbohtml.parse_xml("<r><n>7</n></r>"))) == "<out><v>7</v></out>"
+
+
+def test_transform_simplified_stylesheet_resolves_root_namespace() -> None:
+    sheet = turbohtml.parse_xml(
+        '<l:out a="1" xmlns:l="urn:literal" xmlns:t="http://www.w3.org/1999/XSL/Transform" '
+        'xmlns:u="http://www.w3.org/1999/XSL/Transform" t:version="1.0">'
+        "<t:value-of select=\"'ok'\"/></l:out>"
+    )
+    assert ">ok</l:out>" in transform(sheet, turbohtml.parse_xml("<r/>"))
+
+
+def test_transform_default_namespace_ignores_similar_root_attribute() -> None:
+    sheet = turbohtml.parse_xml(
+        '<stylesheet aaaaa="x" version="1.0" xmlns="http://www.w3.org/1999/XSL/Transform">'
+        '<output method="text"/><template match="/">ok</template></stylesheet>'
+    )
+    assert transform(sheet, turbohtml.parse_xml("<r/>")) == "ok"
 
 
 def test_transform_import_loads_external_templates(tmp_path: Path) -> None:
@@ -2251,6 +2361,43 @@ def test_transform_import_allows_repeated_completed_path(tmp_path: Path) -> None
         turbohtml.parse_xml(main.read_text(encoding="utf-8")), turbohtml.parse_xml("<r><a/></r>"), base_url=str(main)
     )
     assert _canon(result) == "ok"
+
+
+def test_transform_default_namespace_import(tmp_path: Path) -> None:
+    namespace = 'xmlns="http://www.w3.org/1999/XSL/Transform"'
+    (tmp_path / "base.xsl").write_text(
+        f'<stylesheet version="1.0" {namespace}><template match="a">[<value-of select="."/>]</template></stylesheet>',
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.xsl"
+    main.write_text(
+        f'<stylesheet version="1.0" {namespace}><import href="base.xsl"/>'
+        '<template match="/"><apply-templates select="r/a"/></template></stylesheet>',
+        encoding="utf-8",
+    )
+    result = transform(
+        turbohtml.parse_xml(main.read_text(encoding="utf-8")),
+        turbohtml.parse_xml("<r><a>x</a></r>"),
+        base_url=str(main),
+    )
+    assert _canon(result) == "[x]"
+
+
+def test_transform_import_resolves_its_own_xslt_prefix(tmp_path: Path) -> None:
+    (tmp_path / "base.xsl").write_text(
+        '<t:stylesheet version="1.0" xmlns:t="http://www.w3.org/1999/XSL/Transform">'
+        '<t:template match="a">[<t:value-of select="."/>]</t:template></t:stylesheet>',
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.xsl"
+    main.write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="base.xsl"/><xsl:template match="/">'
+        '<xsl:apply-templates select="r/a"/></xsl:template></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
+    assert _canon(transform(sheet, turbohtml.parse_xml("<r><a>x</a></r>"), base_url=str(main))) == "[x]"
 
 
 def test_transform_import_resolves_file_url_base(tmp_path: Path) -> None:
@@ -2377,6 +2524,22 @@ def test_transform_import_missing_href_errors(tmp_path: Path) -> None:
     )
     sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
     with pytest.raises(ValueError, match="href attribute"):
+        transform(sheet, turbohtml.parse_xml("<r/>"), base_url=str(main))
+
+
+def test_transform_nested_import_missing_href_errors(tmp_path: Path) -> None:
+    (tmp_path / "base.xsl").write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:import/></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.xsl"
+    main.write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="base.xsl"/></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
+    with pytest.raises(ValueError, match="requires an href"):
         transform(sheet, turbohtml.parse_xml("<r/>"), base_url=str(main))
 
 
