@@ -195,6 +195,9 @@ from ._stubs.query import (
     _register_xpath_string as _register_xpath_string,
 )
 from ._stubs.query import (
+    _select_many as _select_many,
+)
+from ._stubs.query import (
     _xpath_parse as _xpath_parse,
 )
 from ._stubs.query import (

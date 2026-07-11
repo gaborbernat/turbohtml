@@ -48,15 +48,6 @@ static void nodevec_push(nodevec *vec, th_node *node) {
     vec->items[vec->len++] = node;
 }
 
-/* The topmost ancestor of node (its root): a shadow root for a shadow-tree node, the
-   document for a light-DOM node, or the node itself when it is detached. */
-static th_node *node_root(th_node *node) {
-    while (node->parent != NULL) {
-        node = node->parent;
-    }
-    return node;
-}
-
 /* Whether node is an HTML <slot> element (the shadow tree's insertion point). */
 static int is_slot(const th_node *node) {
     return node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML && node->atom == TH_TAG_SLOT;

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from typing import cast
+
+import pytest
+
 from turbohtml import Element, parse
-from turbohtml.query import Query
+from turbohtml.query import Query, SelectorSyntaxError
 
 _DOC = "<ul id=list><li class=item>a</li><li class='item on'>b</li><li class=item>c</li></ul><p id=p>after</p>"
 
@@ -48,6 +52,63 @@ def test_find_across_multiple_nodes_deduplicates() -> None:
     divs = Query(doc.select("div"))
     assert len(divs) == 2
     assert _tags(divs.find("a")) == ["a"]
+
+
+def test_find_across_reversed_nested_roots_keeps_document_order() -> None:
+    doc = parse(
+        '<div id="outer"><p id="before"></p><section id="inner"><a id="link"></a></section><p id="after"></p></div>'
+    )
+    outer = doc.select_one("#outer")
+    inner = doc.select_one("#inner")
+    assert outer is not None
+    assert inner is not None
+    assert [element.attrs["id"] for element in Query([inner, outer]).find("*")] == ["before", "inner", "link", "after"]
+
+
+def test_find_across_documents_keeps_first_document_order() -> None:
+    first = parse('<main id="first"><p id="a"></p></main>').select_one("main")
+    second = parse('<main id="second"><p id="b"></p></main>').select_one("main")
+    assert first is not None
+    assert second is not None
+    assert [element.attrs["id"] for element in Query([second, first]).find("p")] == ["b", "a"]
+
+
+def test_find_across_interleaved_documents_groups_each_document() -> None:
+    first = parse('<main><p id="a"></p></main><main><p id="c"></p></main>').select("main")
+    second = parse('<main><p id="b"></p></main>').select_one("main")
+    assert second is not None
+    assert [element.attrs["id"] for element in Query([first[0], second, first[1]]).find("p")] == ["a", "c", "b"]
+
+
+def test_find_across_interleaved_detached_roots_keeps_first_root_order() -> None:
+    first = parse('<main><p id="a"></p></main><main><p id="c"></p></main>').select("main")
+    second = parse('<main><p id="b"></p></main>').select_one("main")
+    assert second is not None
+    first[0].extract()
+    first[1].extract()
+    assert [element.attrs["id"] for element in Query([first[0], second, first[1]]).find("p")] == ["a", "b", "c"]
+
+
+def test_find_across_detached_roots_keeps_first_root_order() -> None:
+    document = parse('<main id="first"><p id="a"></p></main><main id="second"><p id="b"></p></main>')
+    first, second = document.select("main")
+    first.extract()
+    second.extract()
+    assert [element.attrs["id"] for element in Query([second, first]).find("p")] == ["b", "a"]
+
+
+def test_find_empty_query_is_empty() -> None:
+    assert len(Query([]).find("*")) == 0
+
+
+@pytest.mark.parametrize(
+    ("selector", "error"),
+    [pytest.param("[", SelectorSyntaxError, id="syntax"), pytest.param(cast("str", 1), TypeError, id="type")],
+)
+def test_find_multiple_roots_rejects_invalid_selector(selector: str, error: type[Exception]) -> None:
+    roots = parse("<main></main><main></main>").select("main")
+    with pytest.raises(error):
+        Query(roots).find(selector)
 
 
 def test_filter_keeps_matching_elements() -> None:

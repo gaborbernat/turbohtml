@@ -348,6 +348,54 @@ static inline int is_ancestor(th_node *candidate, th_node *node) {
     return 0;
 }
 
+static inline Py_ssize_t node_index(th_node *node) {
+    Py_ssize_t index = 0;
+    for (th_node *previous = node->prev_sibling; previous != NULL; previous = previous->prev_sibling) {
+        index++;
+    }
+    return index;
+}
+
+/* A shadow root, document, or detached node can each top a connected tree. */
+static inline th_node *node_root(th_node *node) {
+    while (node->parent != NULL) {
+        node = node->parent;
+    }
+    return node;
+}
+
+static inline int node_order(th_node *left, th_node *right) {
+    Py_ssize_t left_depth = 0;
+    for (th_node *node = left; node->parent != NULL; node = node->parent) {
+        left_depth++;
+    }
+    Py_ssize_t right_depth = 0;
+    for (th_node *node = right; node->parent != NULL; node = node->parent) {
+        right_depth++;
+    }
+    th_node *left_at = left;
+    th_node *right_at = right;
+    while (left_depth > right_depth) {
+        left_at = left_at->parent;
+        left_depth--;
+        if (left_at == right) {
+            return 1;
+        }
+    }
+    while (right_depth > left_depth) {
+        right_at = right_at->parent;
+        right_depth--;
+        if (right_at == left) {
+            return -1;
+        }
+    }
+    while (left_at->parent != right_at->parent) {
+        left_at = left_at->parent;
+        right_at = right_at->parent;
+    }
+    return node_index(left_at) < node_index(right_at) ? -1 : 1;
+}
+
 /* Walk back in document order from current, skipping origin's ancestors so the
    preceding axis stays disjoint from the ancestors axis. */
 static inline th_node *preceding_skip(th_node *current, th_node *origin) {

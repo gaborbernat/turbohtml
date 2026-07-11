@@ -103,6 +103,45 @@ PyObject *turbohtml_register_selector_error(PyObject *module, PyObject *type) {
     Py_RETURN_NONE;
 }
 
+static int append_selected(PyObject *out, module_state *state, PyObject *handle, th_node *origin,
+                           sel_compiled *compiled) {
+    int error = 0;
+    sel_has_memo has_memo = {0};
+    const sel_simple *single = sel_single_simple(compiled);
+    uint16_t subject = selector_subject_atom(compiled);
+    HandleObject *handle_obj = (HandleObject *)handle;
+    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL};
+    if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
+        Py_ssize_t end = handle_obj->index_offsets[subject + 1];
+        for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
+            th_node *node = handle_obj->index_nodes[pos];
+            int matched =
+                single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx);
+            if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+                error = 1;                                                 /* GCOVR_EXCL_LINE */
+                break;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+    } else {
+        for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
+            if (node->type != TH_NODE_ELEMENT) {
+                continue;
+            }
+            int matched =
+                single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx);
+            if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+                error = 1;                                                 /* GCOVR_EXCL_LINE */
+                break;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    sel_has_memo_free(&has_memo);
+    if (error) { /* GCOVR_EXCL_START: append_wrapped failed to allocate */
+        return -1;
+    } /* GCOVR_EXCL_STOP */
+    return 0;
+}
+
 PyObject *node_select(PyObject *self, PyObject *arg) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
@@ -115,47 +154,149 @@ PyObject *node_select(PyObject *self, PyObject *arg) {
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int error = 0;
-    sel_has_memo has_memo = {0};       /* shared across the walk so :has() memoizes its subtree scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: a concurrent mutate must not rewire mid-walk */
     HandleObject *handle_obj = (HandleObject *)handle;
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, handle_obj, arg);
     if (compiled == NULL) {
-        error = 1;
+        error = -1;
     } else {
-        /* a single simple selector (one group, one compound, one simple) is tested
-           with sel_match_simple directly, skipping the group/combinator machinery */
-        const sel_simple *single = sel_single_simple(compiled);
-        uint16_t subject = selector_subject_atom(compiled);
-        sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL};
-        if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
-            /* only the candidate subjects need the matcher, drawn in document order
-               from the atom bucket instead of a full pre-order walk */
-            Py_ssize_t end = handle_obj->index_offsets[subject + 1];
-            for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
-                th_node *node = handle_obj->index_nodes[pos];
-                int matched =
-                    single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx);
-                if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-                    break;     /* GCOVR_EXCL_LINE: allocation-failure path */
-                }
-            }
+        error = append_selected(out, state, handle, origin, compiled);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        Py_DECREF(out);
+        return NULL;
+    }
+    return out;
+}
+
+typedef struct {
+    NodeObject *node;
+    int processed;
+} multi_root;
+
+PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
+    PyObject *roots_obj;
+    PyObject *selector;
+    if (!PyArg_ParseTuple(args, "O!U:_select_many", &PyList_Type, &roots_obj, &selector)) {
+        return NULL;
+    }
+    Py_ssize_t count = PyList_GET_SIZE(roots_obj);
+    PyObject *out = PyList_New(0);
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+    if (count == 0) {
+        return out;
+    }
+    multi_root *roots = PyMem_Calloc((size_t)count, sizeof(multi_root));
+    th_node **group = PyMem_Malloc((size_t)count * sizeof(th_node *));
+    PyObject **batches = PyMem_Calloc((size_t)count, sizeof(PyObject *));
+    if (roots == NULL || group == NULL || batches == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyMem_Free(roots);                                   /* GCOVR_EXCL_LINE */
+        PyMem_Free(group);                                   /* GCOVR_EXCL_LINE */
+        PyMem_Free(batches);                                 /* GCOVR_EXCL_LINE */
+        Py_DECREF(out);                                      /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory();                             /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < count; index++) {
+        roots[index].node = (NodeObject *)PyList_GET_ITEM(roots_obj, index);
+    }
+    module_state *state = PyModule_GetState(module);
+    int error = 0;
+    for (Py_ssize_t first = 0; first < count;) {
+        if (roots[first].processed) {
+            first++;
+            continue;
+        }
+        NodeObject *anchor = roots[first].node;
+        Py_BEGIN_CRITICAL_SECTION(anchor->handle);
+        sel_compiled *compiled = cached_compile(state->selector_error, (HandleObject *)anchor->handle, selector);
+        if (compiled == NULL) {
+            error = 1;
         } else {
-            for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
-                if (node->type != TH_NODE_ELEMENT) {
-                    continue;
+            while (1) {
+                Py_ssize_t tree_first = -1;
+                for (Py_ssize_t index = first; index < count; index++) {
+                    if (!roots[index].processed && roots[index].node->handle == anchor->handle) {
+                        tree_first = index;
+                        break;
+                    }
                 }
-                int matched =
-                    single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx);
-                if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-                    break;     /* GCOVR_EXCL_LINE: allocation-failure path */
+                if (tree_first < 0) {
+                    break;
+                }
+                th_node *top = node_root(roots[tree_first].node->node);
+                Py_ssize_t group_count = 0;
+                for (Py_ssize_t index = tree_first; index < count; index++) {
+                    NodeObject *candidate = roots[index].node;
+                    if (!roots[index].processed && candidate->handle == anchor->handle &&
+                        node_root(candidate->node) == top) {
+                        roots[index].processed = 1;
+                        group[group_count++] = candidate->node;
+                    }
+                }
+                for (Py_ssize_t index = 1; index < group_count; index++) {
+                    th_node *node = group[index];
+                    Py_ssize_t position = index;
+                    while (position > 0 && node_order(node, group[position - 1]) < 0) {
+                        group[position] = group[position - 1];
+                        position--;
+                    }
+                    group[position] = node;
+                }
+                PyObject *selected = out;
+                if (tree_first != 0) {
+                    selected = PyList_New(0);
+                    if (selected == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                        error = 1;          /* GCOVR_EXCL_LINE */
+                        break;              /* GCOVR_EXCL_LINE */
+                    }
+                    batches[tree_first] = selected;
+                }
+                th_node *covered = NULL;
+                for (Py_ssize_t index = 0; index < group_count; index++) {
+                    th_node *origin = group[index];
+                    if (covered != NULL && is_ancestor(covered, origin)) {
+                        continue;
+                    }
+                    covered = origin;
+                    int append_error = append_selected(selected, state, anchor->handle, origin, compiled);
+                    if (append_error < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                        error = 1;          /* GCOVR_EXCL_LINE */
+                        break;              /* GCOVR_EXCL_LINE */
+                    }
+                }
+                if (error) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    break;   /* GCOVR_EXCL_LINE */
                 }
             }
         }
+        Py_END_CRITICAL_SECTION();
+        if (error) {
+            break;
+        }
+        first++;
     }
-    Py_END_CRITICAL_SECTION();
-    sel_has_memo_free(&has_memo);
+    if (!error) {
+        for (Py_ssize_t index = 1; index < count; index++) {
+            if (batches[index] == NULL) {
+                continue;
+            }
+            Py_ssize_t size = PyList_GET_SIZE(out);
+            int extend_error = PyList_SetSlice(out, size, size, batches[index]);
+            if (extend_error < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                error = 1;          /* GCOVR_EXCL_LINE: allocation failure */
+                break;              /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    for (Py_ssize_t index = 1; index < count; index++) {
+        Py_XDECREF(batches[index]);
+    }
+    PyMem_Free(batches);
+    PyMem_Free(group);
+    PyMem_Free(roots);
     if (error) {
         Py_DECREF(out);
         return NULL;
