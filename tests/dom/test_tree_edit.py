@@ -41,6 +41,25 @@ def test_append_adopts_subtree_from_another_tree() -> None:
     assert doc.find("section") is None  # the source tree no longer holds it
 
 
+def test_append_preserves_node_hash() -> None:
+    node = _found(parse("<span>x</span>"), "span")
+    held = {node}
+    Element("div").append(node)
+    second_destination = Element("main")
+    second_destination.append(node)
+    assert node in held
+    assert _found(second_destination, "span") in held
+
+
+def test_append_preserves_hashes_for_multiple_adoptions() -> None:
+    nodes = [Element(f"x-{index}") for index in range(9)]
+    held = set(nodes)
+    destination = Element("div")
+    for node in nodes:
+        destination.append(node)
+    assert all(node in held for node in destination.children)
+
+
 def test_append_adopts_every_attribute_shape() -> None:
     # data-custom-xyz is no known atom, so adoption must re-intern its name across
     # trees; the valueless and empty values (both "") must survive the copy too

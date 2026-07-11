@@ -89,8 +89,8 @@ static PyObject *node_richcompare(PyObject *left, PyObject *right, int op) {
 }
 
 static Py_hash_t node_hash(PyObject *self) {
-    Py_hash_t hash = (Py_hash_t)(uintptr_t)((NodeObject *)self)->node;
-    return hash == -1 ? -2 : hash; /* GCOVR_EXCL_BR_LINE: an arena pointer is never (Py_hash_t)-1 */
+    NodeObject *node = (NodeObject *)self;
+    return handle_node_hash((HandleObject *)node->handle, node->node);
 }
 
 PyDoc_STRVAR(equals_doc, "equals(other, /)\n--\n\n"
