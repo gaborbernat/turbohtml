@@ -1,10 +1,14 @@
 # Subsystem: query (_c/query) — XPath compilation hooks, smart-string registration, and the compiled expression object.
 from collections.abc import Callable
+from pathlib import Path
 from typing import final
 
 from .dom import Element, Node
 
 def _xpath_parse(expression: str, /) -> str: ...
+def _xslt_resolve_imports(
+    stylesheet: Node, base_url: str | None, loader: Callable[[str | Path, str], tuple[Node, Path, Path]], /
+) -> list[Node] | None: ...
 def _xslt_transform(
     stylesheet: Node, source: Node, params: dict[str, str] | None = ..., imports: list[Node] | None = ..., /
 ) -> str: ...

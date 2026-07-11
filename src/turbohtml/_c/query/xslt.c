@@ -3684,8 +3684,7 @@ static int resolve_xsl_prefix(engine *eng, th_node *root) {
         Py_ssize_t name_len = 0;
         const char *name = th_attr_name(eng->sheet_tree, attr->name_atom, &name_len);
         /* A parse_xml stylesheet never has a valueless attribute, so attr->value is set. */
-        if (name_len > 6 && memcmp(name, "xmlns:", 6) == 0 &&
-            ucs4_ascii_eq(attr->value, attr->value_len, "http://www.w3.org/1999/XSL/Transform")) {
+        if (name_len > 6 && memcmp(name, "xmlns:", 6) == 0 && ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS)) {
             prefix = name + 6;
             prefix_len = name_len - 6;
         }
@@ -4161,6 +4160,228 @@ static th_node *stylesheet_root(th_node *node) {
         }
     }
     return NULL; /* GCOVR_EXCL_LINE: an XML document always has a root element */
+}
+
+static int is_stylesheet_import(th_tree *tree, th_node *root, th_node *node) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return 0;
+    }
+    const char *prefix = "xsl";
+    Py_ssize_t prefix_len = 3;
+    for (Py_ssize_t index = 0; index < root->attr_count; index++) {
+        const th_node_attr *attr = &root->attrs[index];
+        Py_ssize_t name_len = 0;
+        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
+        if (name_len > 6 && memcmp(name, "xmlns:", 6) == 0 && ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS)) {
+            prefix = name + 6;
+            prefix_len = name_len - 6;
+            break;
+        }
+    }
+    if (node->text_len != prefix_len + 7 || node->text[prefix_len] != ':') {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < prefix_len; index++) {
+        if (node->text[index] != (Py_UCS4)(unsigned char)prefix[index]) {
+            return 0;
+        }
+    }
+    return ucs4_ascii_eq(node->text + prefix_len + 1, 6, "import");
+}
+
+static PyObject *stylesheet_import_hrefs(PyObject *module, PyObject *stylesheet, PyObject *base) {
+    PyObject *hrefs = PyList_New(0);
+    if (hrefs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    th_tree *tree;
+    th_node *node;
+    if (turbohtml_node_borrow(module, stylesheet, &tree, &node) < 0) {
+        Py_DECREF(hrefs);
+        return NULL;
+    }
+    PyObject *handle = turbohtml_node_handle(stylesheet);
+    (void)handle;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    th_node *root = stylesheet_root(node);
+    if (root != NULL) {
+        for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
+            if (!is_stylesheet_import(tree, root, child)) {
+                continue;
+            }
+            if (base == Py_None) {
+                PyErr_SetString(PyExc_ValueError,
+                                "xsl:import needs a base_url to resolve the imported stylesheet's href against");
+                error = 1;
+                break;
+            }
+            Py_ssize_t href_len = 0;
+            const Py_UCS4 *href_value = attr_lookup(tree, child, "href", &href_len);
+            if (href_value == NULL) {
+                PyErr_SetString(PyExc_ValueError, "xsl:import requires an href attribute");
+                error = 1;
+                break;
+            }
+            PyObject *href = make_str(href_value, href_len);
+            if (href == NULL || PyList_Append(hrefs, href) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                Py_XDECREF(href);                                 /* GCOVR_EXCL_LINE */
+                error = 1;                                        /* GCOVR_EXCL_LINE */
+                break;                                            /* GCOVR_EXCL_LINE */
+            }
+            Py_DECREF(href);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        Py_DECREF(hrefs);
+        return NULL;
+    }
+    return hrefs;
+}
+
+static int raise_import_cycle(PyObject *active, PyObject *path) {
+    Py_ssize_t count = PyList_GET_SIZE(active);
+    PyObject *parts = PyList_New(count + 1);
+    if (parts == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;       /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *part = PyObject_Str(PyList_GET_ITEM(active, index));
+        if (part == NULL) {   /* GCOVR_EXCL_BR_LINE: Path.__str__ only allocates */
+            Py_DECREF(parts); /* GCOVR_EXCL_LINE */
+            return -1;        /* GCOVR_EXCL_LINE */
+        }
+        PyList_SET_ITEM(parts, index, part);
+    }
+    PyObject *part = PyObject_Str(path);
+    if (part == NULL) {   /* GCOVR_EXCL_BR_LINE: Path.__str__ only allocates */
+        Py_DECREF(parts); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    PyList_SET_ITEM(parts, count, part);
+    PyObject *separator = PyUnicode_FromString(" -> ");
+    if (separator == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        Py_DECREF(parts);    /* GCOVR_EXCL_LINE */
+        return -1;           /* GCOVR_EXCL_LINE */
+    }
+    PyObject *chain = PyUnicode_Join(separator, parts);
+    Py_XDECREF(separator);
+    Py_DECREF(parts);
+    if (chain == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;       /* GCOVR_EXCL_LINE */
+    }
+    PyErr_Format(PyExc_ValueError, "circular xsl:import: %U", chain);
+    Py_DECREF(chain);
+    return -1;
+}
+
+static int resolve_stylesheet_imports(PyObject *module, PyObject *stylesheet, PyObject *base, PyObject *loader,
+                                      PyObject *imports, PyObject *active, PyObject *active_set) {
+    PyObject *hrefs = stylesheet_import_hrefs(module, stylesheet, base);
+    if (hrefs == NULL) {
+        return -1;
+    }
+    Py_ssize_t count = PyList_GET_SIZE(hrefs);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *loaded = PyObject_CallFunctionObjArgs(loader, base, PyList_GET_ITEM(hrefs, index), NULL);
+        if (loaded == NULL) {
+            Py_DECREF(hrefs);
+            return -1;
+        }
+        if (!PyTuple_Check(loaded) || PyTuple_GET_SIZE(loaded) != 3) { /* GCOVR_EXCL_START: private loader invariant */
+            Py_DECREF(loaded);
+            Py_DECREF(hrefs);
+            PyErr_SetString(PyExc_TypeError, "xslt: import loader must return (stylesheet, path, current_path)");
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        PyObject *imported = PyTuple_GET_ITEM(loaded, 0);
+        PyObject *next_base = PyTuple_GET_ITEM(loaded, 1);
+        if (PyList_GET_SIZE(active) == 0) {
+            PyObject *current_path = PyTuple_GET_ITEM(loaded, 2);
+            if (PyList_Append(active, current_path) < 0) { /* GCOVR_EXCL_START: allocation failure */
+                Py_DECREF(loaded);
+                Py_DECREF(hrefs);
+                return -1;
+            } /* GCOVR_EXCL_STOP */
+            if (PyDict_SetItem(active_set, current_path, Py_None) < 0) { /* GCOVR_EXCL_START: allocation failure */
+                Py_DECREF(loaded);
+                Py_DECREF(hrefs);
+                return -1;
+            } /* GCOVR_EXCL_STOP */
+        }
+        int contains = PyDict_Contains(active_set, next_base);
+        if (contains < 0) { /* GCOVR_EXCL_START: canonical Path hashes do not fail */
+            Py_DECREF(loaded);
+            Py_DECREF(hrefs);
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        if (contains) {
+            int status = raise_import_cycle(active, next_base);
+            Py_DECREF(loaded);
+            Py_DECREF(hrefs);
+            return status;
+        }
+        if (PyList_Append(active, next_base) < 0) { /* GCOVR_EXCL_START: allocation failure */
+            Py_DECREF(loaded);
+            Py_DECREF(hrefs);
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        if (PyDict_SetItem(active_set, next_base, Py_None) < 0) { /* GCOVR_EXCL_START: allocation failure */
+            Py_DECREF(loaded);
+            Py_DECREF(hrefs);
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        if (Py_EnterRecursiveCall(" while resolving xsl:import") != 0) { /* GCOVR_EXCL_START: recursion limit */
+            Py_DECREF(loaded);
+            Py_DECREF(hrefs);
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        int status = resolve_stylesheet_imports(module, imported, next_base, loader, imports, active, active_set);
+        Py_LeaveRecursiveCall();
+        if (status == 0) {
+            (void)PyDict_DelItem(active_set, next_base);
+            (void)PySequence_DelItem(active, PyList_GET_SIZE(active) - 1);
+            status = PyList_Append(imports, imported);
+        }
+        Py_DECREF(loaded);
+        if (status < 0) {
+            Py_DECREF(hrefs);
+            return -1;
+        }
+    }
+    Py_DECREF(hrefs);
+    return 0;
+}
+
+PyObject *turbohtml_xslt_resolve_imports(PyObject *module, PyObject *args) {
+    PyObject *stylesheet;
+    PyObject *base;
+    PyObject *loader;
+    if (!PyArg_ParseTuple(args, "OOO:_xslt_resolve_imports", &stylesheet, &base, &loader)) { /* GCOVR_EXCL_BR_LINE */
+        return NULL; /* GCOVR_EXCL_LINE: private typed boundary */
+    }
+    PyObject *imports = PyList_New(0);
+    PyObject *active = PyList_New(0);
+    PyObject *active_set = PyDict_New();
+    if (imports == NULL || active == NULL || active_set == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        Py_XDECREF(imports);                                       /* GCOVR_EXCL_LINE */
+        Py_XDECREF(active);                                        /* GCOVR_EXCL_LINE */
+        Py_XDECREF(active_set);                                    /* GCOVR_EXCL_LINE */
+        return NULL;                                               /* GCOVR_EXCL_LINE */
+    }
+    int status = resolve_stylesheet_imports(module, stylesheet, base, loader, imports, active, active_set);
+    Py_DECREF(active_set);
+    Py_DECREF(active);
+    if (status < 0) {
+        Py_DECREF(imports);
+        return NULL;
+    }
+    if (PyList_GET_SIZE(imports) == 0) {
+        Py_DECREF(imports);
+        Py_RETURN_NONE;
+    }
+    return imports;
 }
 
 PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
