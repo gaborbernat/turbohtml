@@ -43,60 +43,9 @@ static Py_ssize_t node_length(th_node *node) {
     return count;
 }
 
-/* The node's position among its siblings (its DOM index). */
-static Py_ssize_t node_index(th_node *node) {
-    Py_ssize_t index = 0;
-    for (th_node *prev = node->prev_sibling; prev != NULL; prev = prev->prev_sibling) {
-        index++;
-    }
-    return index;
-}
-
-/* The topmost ancestor (the root of the node's tree). */
-static th_node *node_root(th_node *node) {
-    while (node->parent != NULL) {
-        node = node->parent;
-    }
-    return node;
-}
-
 /* Whether ancestor is node or one of its ancestors. */
 static int is_inclusive_ancestor(th_node *ancestor, th_node *node) {
     return ancestor == node || is_ancestor(ancestor, node);
-}
-
-/* Tree order of two distinct nodes sharing a root: -1 when left precedes right in a pre-order walk,
-   +1 when it follows. An ancestor precedes its descendants. */
-static int node_order(th_node *left, th_node *right) {
-    Py_ssize_t left_depth = 0;
-    for (th_node *walk = left; walk->parent != NULL; walk = walk->parent) {
-        left_depth++;
-    }
-    Py_ssize_t right_depth = 0;
-    for (th_node *walk = right; walk->parent != NULL; walk = walk->parent) {
-        right_depth++;
-    }
-    th_node *left_at = left;
-    th_node *right_at = right;
-    while (left_depth > right_depth) {
-        left_at = left_at->parent;
-        left_depth--;
-        if (left_at == right) {
-            return 1; /* right is an ancestor of left, so left follows it */
-        }
-    }
-    while (right_depth > left_depth) {
-        right_at = right_at->parent;
-        right_depth--;
-        if (right_at == left) {
-            return -1; /* left is an ancestor of right, so left precedes it */
-        }
-    }
-    while (left_at->parent != right_at->parent) {
-        left_at = left_at->parent;
-        right_at = right_at->parent;
-    }
-    return node_index(left_at) < node_index(right_at) ? -1 : 1;
 }
 
 /* Compare two boundary points sharing a root: -1 (left before right), 0 (equal), +1 (left after). */

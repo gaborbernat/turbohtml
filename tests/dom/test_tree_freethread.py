@@ -16,6 +16,7 @@ from __future__ import annotations
 import threading
 
 import turbohtml
+from turbohtml.query import Query
 
 
 def _doc(divs: int) -> turbohtml.Document:
@@ -100,6 +101,30 @@ def test_concurrent_reads_and_mixed_mutations_are_memory_safe() -> None:
 
     _run(reader, extractor, appender)
     assert body.serialize().startswith("<body>")  # still well-formed after the concurrent churn
+
+
+def test_concurrent_multi_root_query_is_one_tree_snapshot() -> None:
+    document = turbohtml.parse('<main><section id="a"><p id="x"></p></section><section id="b"><p id="y"></p></section>')
+    first, second = document.select("section")
+    moved = document.select_one("#y")
+    assert moved is not None
+    first.extract()
+    second.extract()
+    query = Query([second, first])
+    start = threading.Barrier(2)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(500):
+            assert sorted(element.attrs["id"] for element in query.find("p")) == ["x", "y"]
+
+    def mutator() -> None:
+        start.wait()
+        for _ in range(250):
+            first.append(moved)
+            second.append(moved)
+
+    _run(reader, mutator)
 
 
 def test_concurrent_lazy_node_iterators_and_extract_is_memory_safe() -> None:

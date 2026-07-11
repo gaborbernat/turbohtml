@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast, overload
 
-from turbohtml._html import Document, Element, parse
+from turbohtml._html import Document, Element, _select_many, parse
 
 from ._match import (
     DEBUG,
@@ -125,7 +125,7 @@ class Query:  # noqa: PLR0904  # a fluent wrapper mirrors pyquery's broad chaina
         if len(self._nodes) == 1:
             # the C select() already returns unique results in document order
             return Query._wrap(self._nodes[0].select(selector))
-        return Query(_unique(match for node in self._nodes for match in node.select(selector)))
+        return Query._wrap(_select_many(self._nodes, selector))
 
     def filter(self, selector: str) -> Query:
         """
