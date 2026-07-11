@@ -8,6 +8,7 @@
 #include "core/common.h"
 
 #include "core/ascii.h"
+#include "core/vec.h"
 #include "dom/tree.h"
 #include "query/xpath/xpath.h"
 
@@ -56,13 +57,20 @@ typedef struct {
 } path_id_map;
 
 typedef struct {
+    th_node *node;
+    Py_hash_t hash;
+} node_hash_override;
+
+typedef struct {
+    Py_ssize_t len;
+    Py_ssize_t cap;
+    node_hash_override items[];
+} node_hash_overrides;
+
+typedef struct {
     PyObject_HEAD th_tree *tree;
     PyObject *source;   /* the input str whose storage the tree's spans borrow */
     PyObject *encoding; /* the resolved encoding name for bytes input, else None */
-    /* WHATWG encoding confidence: a byte-order mark, the encoding argument, or a <meta>
-       declaration makes it certain; a prescan-free sniff leaves it a guess. Meaningless,
-       and always 0, when encoding is None. */
-    int encoding_certain;
     /* Lazy per-tree element index, bucketed by tag atom: index_nodes holds every
        element in document (pre-order) order grouped by atom, with the bucket for
        atom a spanning index_nodes[index_offsets[a] .. index_offsets[a + 1]).
@@ -70,13 +78,52 @@ typedef struct {
        drops it. Read and written only under the handle's critical section. */
     th_node **index_nodes;
     Py_ssize_t *index_offsets; /* th_tag_count + 2 entries; NULL until built */
+    path_id_map *path_ids;     /* css_path id-occurrence map; NULL until first css_path */
+    node_hash_overrides *hash_overrides;
+    /* WHATWG encoding confidence: a byte-order mark, the encoding argument, or a <meta>
+       declaration makes it certain; a prescan-free sniff leaves it a guess. Meaningless,
+       and always 0, when encoding is None. */
+    int encoding_certain;
     int index_built;
-    path_id_map *path_ids; /* css_path id-occurrence map; NULL until first css_path */
     sel_cache_entry sel_cache[SEL_CACHE_CAP];
     int sel_cache_len;
     xpath_cache_entry xpath_cache[XPATH_CACHE_CAP];
     int xpath_cache_len;
 } HandleObject;
+
+static inline Py_hash_t handle_node_hash(const HandleObject *handle, const th_node *node) {
+    if (handle->hash_overrides != NULL) {
+        for (Py_ssize_t index = 0; index < handle->hash_overrides->len; index++) {
+            if (handle->hash_overrides->items[index].node == node) {
+                return handle->hash_overrides->items[index].hash;
+            }
+        }
+    }
+    Py_hash_t hash = (Py_hash_t)(uintptr_t)node;
+    return hash == -1 ? -2 : hash; /* GCOVR_EXCL_BR_LINE: an arena pointer is never (Py_hash_t)-1 */
+}
+
+static inline int handle_add_hash_override(HandleObject *handle, th_node *node, Py_hash_t hash) {
+    node_hash_overrides *overrides = handle->hash_overrides;
+    Py_ssize_t len = overrides == NULL ? 0 : overrides->len;
+    if (overrides == NULL || len == overrides->cap) {
+        size_t cap, bytes;
+        int grew = th_grow_cap((size_t)len + 1, overrides == NULL ? 0 : (size_t)overrides->cap, 8,
+                               sizeof(node_hash_override), &cap, &bytes);
+        if (!grew || bytes > SIZE_MAX - sizeof(node_hash_overrides)) { /* GCOVR_EXCL_BR_LINE: size overflow */
+            return -1;                                                 /* GCOVR_EXCL_LINE */
+        }
+        overrides = PyMem_Realloc(overrides, sizeof(node_hash_overrides) + bytes);
+        if (overrides == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;           /* GCOVR_EXCL_LINE */
+        }
+        overrides->cap = (Py_ssize_t)cap;
+        handle->hash_overrides = overrides;
+    }
+    overrides->items[len] = (node_hash_override){node, hash};
+    overrides->len = len + 1;
+    return 0;
+}
 
 typedef struct {
     PyObject_HEAD PyObject *handle; /* _TreeHandle keeping tree + source alive */

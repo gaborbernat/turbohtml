@@ -1963,11 +1963,15 @@ th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_ob
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION2(anchor->handle, source_handle);
     copy = th_tree_copy_node(dest_tree, tree_of(child_obj), child->node);
-    if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    if (copy != NULL && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        handle_add_hash_override((HandleObject *)anchor->handle, copy,
+                                 handle_node_hash((HandleObject *)source_handle, child->node)) == 0) {
         handle_drop_index(source_handle);
         th_node_remove_observed(tree_of(child_obj), child->node);
         Py_SETREF(child->handle, Py_NewRef(anchor->handle));
         child->node = copy;
+    } else {
+        copy = NULL; /* GCOVR_EXCL_LINE */
     }
     Py_END_CRITICAL_SECTION2();
 #ifdef Py_GIL_DISABLED

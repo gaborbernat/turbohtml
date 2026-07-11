@@ -505,6 +505,15 @@ def test_insert_node_into_element() -> None:
     assert _tags(div.children) == ["p", "b", "p"]
 
 
+def test_insert_node_preserves_hash_across_trees() -> None:
+    node = Element("b")
+    held = {node}
+    destination = Element("div")
+    Range(destination).insert_node(node)
+    assert node in held
+    assert destination.children[0] in held
+
+
 def test_insert_node_splits_text() -> None:
     doc = parse("<p>HelloWorld</p>")
     text = _found(doc, "p").children[0]
