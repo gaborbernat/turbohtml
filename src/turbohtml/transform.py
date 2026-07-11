@@ -30,64 +30,27 @@ stylesheet imports. Validated against libxslt's XSLT 1.0 Recommendation test cor
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from ._html import Element, _xslt_transform, parse_xml
+from ._html import _xslt_resolve_imports, _xslt_transform, parse_xml
 
 if TYPE_CHECKING:
     from ._html import Node
 
 __all__ = ["Transform", "transform"]
 
-_XSLT_NS = "http://www.w3.org/1999/XSL/Transform"
 
-
-def _xsl_prefix(root: Element) -> str:
-    """Return the prefix bound to the XSLT namespace on a stylesheet root, defaulting to ``xsl``."""
-    for name, value in root.attrs.items():
-        if name.startswith("xmlns:") and value == _XSLT_NS:
-            return name[6:]
-    return "xsl"
-
-
-def _load_imports(root: Element, base: Path) -> list[Node]:
-    """
-    Resolve the ``xsl:import`` chain under ``root`` into parsed stylesheets, lowest import precedence first.
-
-    Each import's own imports precede it (lower precedence) and, within a stylesheet, a later import outranks an earlier
-    one, exactly the section 2.6.2 precedence order the C engine's conflict resolution then applies.
-    """
-    prefix = _xsl_prefix(root)
-    imports: list[Node] = []
-    for child in root.children:
-        if not isinstance(child, Element) or child.tag != f"{prefix}:import":
-            continue
-        href = child.attrs.get("href")
-        if href is None:
-            msg = "xsl:import requires an href attribute"
-            raise ValueError(msg)
-        path = _import_path(base, str(href))
-        imported = parse_xml(path.read_text(encoding="utf-8"))
-        # parse_xml raises HTMLParseError on a document with no root element, so imported.root is set here.
-        imports.extend(_load_imports(cast("Element", imported.root), path.parent))
-        imports.append(imported)
-    return imports
+def _load_import(base: str | Path, href: str) -> tuple[Node, Path, Path]:
+    current = _base_path(base).resolve() if isinstance(base, str) else base
+    path = _import_path(current.parent, href).resolve()
+    return parse_xml(path.read_text(encoding="utf-8")), path, current
 
 
 def _resolve(stylesheet: Node, base_url: str | None) -> list[Node] | None:
     """Return the imported stylesheets a transform must merge, or None when the stylesheet imports nothing."""
-    root = stylesheet if isinstance(stylesheet, Element) else getattr(stylesheet, "root", None)
-    if not isinstance(root, Element):
-        return None
-    prefix = _xsl_prefix(root)
-    if not any(isinstance(child, Element) and child.tag == f"{prefix}:import" for child in root.children):
-        return None
-    if base_url is None:
-        msg = "xsl:import needs a base_url to resolve the imported stylesheet's href against"
-        raise ValueError(msg)
-    return _load_imports(root, _base_path(base_url).parent)
+    return _xslt_resolve_imports(stylesheet, base_url, _load_import)
 
 
 def _base_path(base_url: str) -> Path:

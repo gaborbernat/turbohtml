@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -2182,6 +2182,75 @@ def test_transform_import_loads_external_templates(tmp_path: Path) -> None:
     sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
     result = transform(sheet, turbohtml.parse_xml("<r><a>x</a></r>"), base_url=str(main))
     assert _canon(result) == "[x]"
+
+
+def test_transform_import_ignores_foreign_same_length_prefix() -> None:
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:bad="urn:bad" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl-import href="missing.xsl"/><bad:import href="missing.xsl"/>'
+        '<xsl:template match="/">ok</xsl:template></xsl:stylesheet>'
+    )
+    assert _canon(transform(sheet, turbohtml.parse_xml("<r/>"))) == "ok"
+
+
+def test_transform_import_detects_default_prefix_without_root_attributes() -> None:
+    sheet = turbohtml.parse_xml(
+        '<root><xsl:import xmlns:xsl="http://www.w3.org/1999/XSL/Transform" href="missing.xsl"/></root>'
+    )
+    with pytest.raises(ValueError, match="needs a base_url"):
+        Transform(sheet)
+
+
+def test_transform_rejects_non_node_stylesheet() -> None:
+    with pytest.raises(TypeError):
+        Transform(cast("turbohtml.Node", "not a node"))
+
+
+def test_transform_import_rejects_self_cycle(tmp_path: Path) -> None:
+    main = tmp_path / "main.xsl"
+    main.write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="main.xsl"/></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    path = main.resolve()
+    with pytest.raises(ValueError, match=rf"^{re.escape(f'circular xsl:import: {path} -> {path}')}$"):
+        transform(
+            turbohtml.parse_xml(main.read_text(encoding="utf-8")), turbohtml.parse_xml("<r/>"), base_url=str(main)
+        )
+
+
+def test_transform_import_rejects_indirect_cycle(tmp_path: Path) -> None:
+    main = tmp_path / "main.xsl"
+    imported = tmp_path / "imported.xsl"
+    namespace = 'version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"'
+    main.write_text(f'<xsl:stylesheet {namespace}><xsl:import href="imported.xsl"/></xsl:stylesheet>', encoding="utf-8")
+    imported.write_text(f'<xsl:stylesheet {namespace}><xsl:import href="main.xsl"/></xsl:stylesheet>', encoding="utf-8")
+    chain = " -> ".join(str(path.resolve()) for path in (main, imported, main))
+    with pytest.raises(ValueError, match=rf"^{re.escape(f'circular xsl:import: {chain}')}$"):
+        transform(
+            turbohtml.parse_xml(main.read_text(encoding="utf-8")), turbohtml.parse_xml("<r/>"), base_url=str(main)
+        )
+
+
+def test_transform_import_allows_repeated_completed_path(tmp_path: Path) -> None:
+    imported = tmp_path / "imported.xsl"
+    imported.write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:template match="a">ok</xsl:template></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.xsl"
+    main.write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="imported.xsl"/><xsl:import href="imported.xsl"/>'
+        '<xsl:template match="/"><xsl:apply-templates select="r/a"/></xsl:template></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    result = transform(
+        turbohtml.parse_xml(main.read_text(encoding="utf-8")), turbohtml.parse_xml("<r><a/></r>"), base_url=str(main)
+    )
+    assert _canon(result) == "ok"
 
 
 def test_transform_import_resolves_file_url_base(tmp_path: Path) -> None:

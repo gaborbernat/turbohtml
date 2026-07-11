@@ -68,6 +68,7 @@ PyObject *turbohtml_is_normalized(PyObject *module, PyObject *args);
    equivalent XPath 1.0 expression; matches METH_VARARGS. */
 PyObject *turbohtml_css_to_xpath(PyObject *module, PyObject *args);
 PyObject *turbohtml_css_specificity(PyObject *module, PyObject *args);
+PyObject *turbohtml_xslt_resolve_imports(PyObject *module, PyObject *args);
 
 /* Implemented in css/cssom/cssom.c: the CSS Object Model cascade (issue #546).
    _css_parse_declarations(text) and _css_parse_rules(text) parse a declaration block
