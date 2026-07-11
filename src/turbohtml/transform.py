@@ -129,5 +129,4 @@ def transform(stylesheet: Node, source: Node, /, *, base_url: str | None = None,
     :param params: top-level ``xsl:param`` values, each an XPath expression string.
     :returns: the transformed document serialized under the stylesheet's ``xsl:output`` method.
     """
-    imports = _resolve(stylesheet, base_url)
-    return _xslt_transform(stylesheet, source, params or None, imports)
+    return _xslt_transform(stylesheet, source, params or None, _resolve(stylesheet, base_url))
