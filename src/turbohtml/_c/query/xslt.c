@@ -3869,7 +3869,10 @@ static int stylesheet_has_dynamic_namespace(const engine *eng, th_node *root) {
             }
             int selected = namespace_declares_prefix(eng, name, name_len);
             int binds_xsl = ucs4_ascii_eq(attr->value, attr->value_len, XSLT_NS);
-            if ((selected || binds_xsl) && !(node == root && selected && binds_xsl)) {
+            if (node == root && selected) {
+                continue;
+            }
+            if (selected || binds_xsl) {
                 return 1;
             }
         }
