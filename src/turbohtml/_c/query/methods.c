@@ -136,7 +136,10 @@ static int append_selected(PyObject *out, module_state *state, PyObject *handle,
         }
     }
     sel_has_memo_free(&has_memo);
-    return error ? -1 : 0;
+    if (error) { /* GCOVR_EXCL_START: append_wrapped failed to allocate */
+        return -1;
+    } /* GCOVR_EXCL_STOP */
+    return 0;
 }
 
 PyObject *node_select(PyObject *self, PyObject *arg) {
