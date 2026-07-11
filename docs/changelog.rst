@@ -7,6 +7,29 @@
 .. towncrier release notes start
 
 *********************
+ v1.4.0 (2026-07-11)
+*********************
+
+Features - 1.4.0
+================
+
+- Add ``capture_attributes=False`` for tag-and-text token streams, and reduce DOM allocation for large documents.
+  (:issue:`640`)
+
+Bug fixes - 1.4.0
+=================
+
+- Keep a :class:`turbohtml.Node` hash stable across cross-document adoption so sets and dictionaries can still find it.
+  (:issue:`634`)
+- Copy source subtrees from one state during DOM adoption, Range operations, and XSLT under free-threaded Python.
+  (:issue:`635`)
+- Recognize XSLT instructions by namespace URI and local name, including stylesheets with a default XSLT namespace or
+  rebound prefix. (:issue:`636`)
+- Raise :exc:`ValueError` with the import chain for circular ``xsl:import`` references. (:issue:`637`)
+- Return :meth:`turbohtml.query.Query.find` results in document order across connected roots; retain root input order
+  across disconnected trees. (:issue:`638`)
+
+*********************
  v1.3.1 (2026-07-10)
 *********************
 
