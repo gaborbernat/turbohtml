@@ -89,6 +89,10 @@ typedef struct {
     int sel_cache_len;
     xpath_cache_entry *xpath_cache;
     int xpath_cache_len;
+    void *css_sheets;
+    Py_ssize_t css_sheet_count;
+    uint32_t css_sheet_attr_gen;
+    int css_sheets_ready;
 } HandleObject;
 
 static inline Py_hash_t handle_node_hash(const HandleObject *handle, const th_node *node) {
@@ -581,6 +585,9 @@ static inline int append_wrapped(PyObject *out, module_state *state, PyObject *h
 /* Free a handle's compiled-selector and compiled-XPath caches. Lives in query/methods.c
    with the bindings that populate them. */
 void handle_clear_caches(HandleObject *handle);
+
+/* Defined in cssom.c, where the private css_sheet type lives. */
+void handle_clear_css_cache(HandleObject *handle);
 
 /* Drop a handle's cached selector index and id map after a structural mutation. Lives in
    element.c beside the mutation bindings; query/methods.c calls it from prune/remove/strip. */

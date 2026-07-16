@@ -1062,6 +1062,7 @@ static PyObject *element_attr(PyObject *self, PyObject *args, PyObject *kwds) {
    under the handle's critical section from every structural mutator. */
 void handle_drop_index(PyObject *handle_obj) {
     HandleObject *handle = (HandleObject *)handle_obj;
+    handle_clear_css_cache(handle);
     PyMem_Free(handle->index_offsets);
     PyMem_Free(handle->index_nodes);
     handle->index_offsets = NULL;
