@@ -337,6 +337,7 @@ OPERATIONS: dict[str, Operation] = {
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
     "detect-language": Operation("detect a text's natural language", "us"),
+    "idna": Operation("normalize 4,100 URLs with Unicode hosts", "ms"),
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
     "links-filter": Operation("extract filtered page links", "us"),
 }
@@ -676,6 +677,7 @@ _URL_SHAPES = (
     "http://münchen.example/straße/{index}?b=2&a=1",
 )
 _URL_BATCH = tuple(shape.format(index=index) for index in range(20) for shape in _URL_SHAPES)
+_IDNA_URLS: Final[tuple[str, ...]] = tuple(f"https://münchen-{index}.example/" for index in range(4100))
 
 _ENCODING_ASCII = "The quick brown fox jumps over the lazy dog near the river bank early today. "
 _ENCODING_FRENCH = "Précédemment, la créativité française était très développée près de Paris ici. "
@@ -874,6 +876,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "decode": _decode_cases,
     "normalize": _normalize_cases,
     "detect-language": _language_cases,
+    "idna": lambda: (("4,100 uncached Unicode hosts", _IDNA_URLS),),
     "urls-clean": lambda: (
         ("clean 100 URLs", ("clean", _URL_BATCH)),
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),

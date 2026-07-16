@@ -74,6 +74,9 @@ static const th_idna_map_row *map_row(Py_UCS4 cp) {
 
 /* The canonical combining class of `cp`, 0 when the sorted table has no row for it (the default, and every starter). */
 static uint8_t ccc_of(Py_UCS4 cp) {
+    if (cp < th_idna_ccc[0].code) {
+        return 0;
+    }
     int lo = 0;
     int hi = th_idna_ccc_count;
     while (lo < hi) {
@@ -93,6 +96,9 @@ static uint8_t ccc_of(Py_UCS4 cp) {
 /* The full canonical decomposition row for `cp`, or NULL when it does not decompose (Hangul is handled by the caller).
  */
 static const th_idna_decomp_row *decomp_row(Py_UCS4 cp) {
+    if (cp < th_idna_decomp[0].code) {
+        return NULL;
+    }
     int lo = 0;
     int hi = th_idna_decomp_count;
     while (lo < hi) {
@@ -152,13 +158,18 @@ static Py_UCS4 pair_compose(Py_UCS4 first, Py_UCS4 second) {
 static Py_ssize_t map_host(const Py_UCS4 *input, Py_ssize_t in_len, Py_UCS4 *out) {
     Py_ssize_t at = 0;
     for (Py_ssize_t index = 0; index < in_len; index++) {
-        const th_idna_map_row *row = map_row(input[index]);
+        Py_UCS4 cp = input[index];
+        if (cp < 0x80) {
+            out[at++] = cp >= 'A' && cp <= 'Z' ? cp + ('a' - 'A') : cp;
+            continue;
+        }
+        const th_idna_map_row *row = map_row(cp);
         if (row->status == 1) {
             for (uint8_t offset = 0; offset < row->length; offset++) {
                 out[at++] = th_idna_map_pool[row->offset + offset];
             }
         } else if (row->status != 2) { /* 0 keeps the code point; 2 drops it (the ignored set) */
-            out[at++] = input[index];
+            out[at++] = cp;
         }
     }
     return at;
