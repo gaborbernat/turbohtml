@@ -253,53 +253,49 @@ static const char *implicit_role_for(uint16_t tag_atom) {
     return NULL;
 }
 
-/* Obsolete (non-conforming) HTML elements from the WHATWG "Non-conforming features"
-   table. Matched by tag spelling, not atom, so spellings the atom table never interns
-   (acronym, blink, isindex, spacer) are still caught. */
+/* Obsolete element spellings the atom table does not intern. */
 static const char *const OBSOLETE_ELEMENTS[] = {
-    "acronym",  "applet",    "basefont", "big",     "blink",   "center",  "dir",
-    "font",     "frame",     "frameset", "isindex", "listing", "marquee", "nobr",
-    "noframes", "plaintext", "spacer",   "strike",  "tt",      "xmp",     "bgsound",
+    "acronym",
+    "blink",
+    "spacer",
 };
 static const size_t OBSOLETE_ELEMENT_COUNT = sizeof(OBSOLETE_ELEMENTS) / sizeof(OBSOLETE_ELEMENTS[0]);
 
-/* Obsolete attributes. tag_atom == TH_TAG_UNKNOWN marks a presentational attribute that
-   is non-conforming on any element; a specific atom restricts the finding to that
-   element, the way the WHATWG obsolete-attributes table scopes link/vlink to body and
-   frame/rules to table. */
-typedef struct {
-    const char *name;
-    uint16_t tag_atom;
-} obsolete_attr;
-
-static const obsolete_attr OBSOLETE_ATTRS[] = {
-    {"align", TH_TAG_UNKNOWN},
-    {"bgcolor", TH_TAG_UNKNOWN},
-    {"background", TH_TAG_UNKNOWN},
-    {"bordercolor", TH_TAG_UNKNOWN},
-    {"cellpadding", TH_TAG_UNKNOWN},
-    {"cellspacing", TH_TAG_UNKNOWN},
-    {"valign", TH_TAG_UNKNOWN},
-    {"hspace", TH_TAG_UNKNOWN},
-    {"vspace", TH_TAG_UNKNOWN},
-    {"nowrap", TH_TAG_UNKNOWN},
-    {"clear", TH_TAG_UNKNOWN},
-    {"compact", TH_TAG_UNKNOWN},
-    {"noshade", TH_TAG_UNKNOWN},
-    {"link", TH_TAG_BODY},
-    {"vlink", TH_TAG_BODY},
-    {"alink", TH_TAG_BODY},
-    {"text", TH_TAG_BODY},
-    {"frame", TH_TAG_TABLE},
-    {"rules", TH_TAG_TABLE},
-    {"language", TH_TAG_SCRIPT},
-    {"charset", TH_TAG_A},
-    {"charset", TH_TAG_LINK},
-    {"rev", TH_TAG_A},
-    {"rev", TH_TAG_LINK},
-    {"longdesc", TH_TAG_IMG},
-};
-static const size_t OBSOLETE_ATTR_COUNT = sizeof(OBSOLETE_ATTRS) / sizeof(OBSOLETE_ATTRS[0]);
+static int obsolete_attr_on(uint32_t attr_atom, uint16_t tag_atom) {
+    switch (attr_atom) {
+    case TH_ATTR_ALIGN:
+    case TH_ATTR_BGCOLOR:
+    case TH_ATTR_BACKGROUND:
+    case TH_ATTR_BORDERCOLOR:
+    case TH_ATTR_CELLPADDING:
+    case TH_ATTR_CELLSPACING:
+    case TH_ATTR_VALIGN:
+    case TH_ATTR_HSPACE:
+    case TH_ATTR_VSPACE:
+    case TH_ATTR_NOWRAP:
+    case TH_ATTR_CLEAR:
+    case TH_ATTR_COMPACT:
+    case TH_ATTR_NOSHADE:
+        return 1;
+    case TH_ATTR_LINK:
+    case TH_ATTR_VLINK:
+    case TH_ATTR_ALINK:
+    case TH_ATTR_TEXT:
+        return tag_atom == TH_TAG_BODY;
+    case TH_ATTR_FRAME:
+    case TH_ATTR_RULES:
+        return tag_atom == TH_TAG_TABLE;
+    case TH_ATTR_LANGUAGE:
+        return tag_atom == TH_TAG_SCRIPT;
+    case TH_ATTR_CHARSET:
+    case TH_ATTR_REV:
+        return tag_atom == TH_TAG_A || tag_atom == TH_TAG_LINK;
+    case TH_ATTR_LONGDESC:
+        return tag_atom == TH_TAG_IMG;
+    default:
+        return 0;
+    }
+}
 
 /* Script types that a classic script may carry redundantly: omitting type has the same
    effect, so the WHATWG standard asks authors to leave it out. "module" and any data
@@ -403,6 +399,33 @@ static void check_alt(confctx *ctx, th_node *node) {
 }
 
 static void check_obsolete_element(confctx *ctx, th_node *node) {
+    switch (node->atom) {
+    case TH_TAG_APPLET:
+    case TH_TAG_BASEFONT:
+    case TH_TAG_BIG:
+    case TH_TAG_BGSOUND:
+    case TH_TAG_CENTER:
+    case TH_TAG_DIR:
+    case TH_TAG_FONT:
+    case TH_TAG_FRAME:
+    case TH_TAG_FRAMESET:
+    case TH_TAG_ISINDEX:
+    case TH_TAG_LISTING:
+    case TH_TAG_MARQUEE:
+    case TH_TAG_NOBR:
+    case TH_TAG_NOFRAMES:
+    case TH_TAG_PLAINTEXT:
+    case TH_TAG_STRIKE:
+    case TH_TAG_TT:
+    case TH_TAG_XMP:
+        report(ctx, node, "obsolete-element", SEVERITY_ERROR, "the %s element is obsolete",
+               th_tag_table[node->atom - 1].name);
+        return;
+    case TH_TAG_UNKNOWN:
+        break;
+    default:
+        return;
+    }
     size_t index = 0;
     for (; index < OBSOLETE_ELEMENT_COUNT; index++) {
         if (ucs4_ci_equals_ascii(node->text, node->text_len, OBSOLETE_ELEMENTS[index])) {
@@ -416,16 +439,10 @@ static void check_obsolete_element(confctx *ctx, th_node *node) {
 static void check_obsolete_attributes(confctx *ctx, th_node *node) {
     Py_ssize_t attr_index = 0;
     for (; attr_index < node->attr_count; attr_index++) {
-        Py_ssize_t name_len = 0;
-        const char *name = th_attr_name(ctx->tree, node->attrs[attr_index].name_atom, &name_len);
-        size_t rule = 0;
-        for (; rule < OBSOLETE_ATTR_COUNT; rule++) {
-            int scoped = OBSOLETE_ATTRS[rule].tag_atom == TH_TAG_UNKNOWN || OBSOLETE_ATTRS[rule].tag_atom == node->atom;
-            if (scoped && bytes_ci_equals_ascii(name, name_len, OBSOLETE_ATTRS[rule].name)) {
-                report(ctx, node, "obsolete-attribute", SEVERITY_ERROR, "the %s attribute is obsolete",
-                       OBSOLETE_ATTRS[rule].name);
-                break;
-            }
+        uint32_t attr_atom = node->attrs[attr_index].name_atom;
+        if (obsolete_attr_on(attr_atom, node->atom)) {
+            report(ctx, node, "obsolete-attribute", SEVERITY_ERROR, "the %s attribute is obsolete",
+                   th_attr_table[attr_atom - 1].name);
         }
     }
 }
