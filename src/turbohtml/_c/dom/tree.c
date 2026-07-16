@@ -74,34 +74,19 @@ static uint16_t intern_atom(const th_buf *name, uint8_t *out_flags) {
         return TH_TAG_UNKNOWN;                                  /* non-ASCII / empty tag names are never atoms */
     }
     const unsigned char *str = (const unsigned char *)name->data;
-    /* dispatch on the first byte to one small bucket, then linear-scan it: the
-       length pre-check rejects most candidates before any memcmp, and the
-       compared tail skips the shared first byte */
-    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign): a tag-name buffer is always initialized
-    unsigned first = str[0];
-    int index = th_tag_first[first];
-    int end = th_tag_first[first + 1];
-    for (; index < end; index++) {
-        const th_tag_entry *entry = &th_tag_table[index];
-        if (entry->name_len != name->len) {
-            continue;
-        }
-        /* Compare the tail (the first byte is the bucket) with an inline loop:
-           tag names are short, so this beats a libc memcmp call's overhead. */
-        const unsigned char *en = (const unsigned char *)entry->name + 1;
-        int eq = 1;
-        for (Py_ssize_t pos = 1; pos < name->len; pos++) {
-            if (str[pos] != en[pos - 1]) {
-                eq = 0;
-                break;
-            }
-        }
-        if (eq) {
-            *out_flags = entry->flags;
-            return entry->atom;
-        }
+    size_t slot = ((size_t)name->len * TH_TAG_HASH_LENGTH + (size_t)str[0] * TH_TAG_HASH_FIRST +
+                   (size_t)str[name->len - 1] * TH_TAG_HASH_LAST + (size_t)str[name->len > 1] * TH_TAG_HASH_SECOND) &
+                  TH_TAG_HASH_MASK;
+    uint8_t index = th_tag_hash[slot];
+    if (index == 0) {
+        return TH_TAG_UNKNOWN;
     }
-    return TH_TAG_UNKNOWN;
+    const th_tag_entry *entry = &th_tag_table[index - 1];
+    if (entry->name_len != name->len || memcmp(entry->name, str, (size_t)name->len) != 0) {
+        return TH_TAG_UNKNOWN;
+    }
+    *out_flags = entry->flags;
+    return entry->atom;
 }
 
 /* The token's interned tag atom, cached on the token by the run loop once per

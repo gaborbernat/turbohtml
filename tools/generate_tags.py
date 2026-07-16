@@ -2,12 +2,12 @@
 Generate src/turbohtml/_c/data/tag_atom.h from the HTML element categories.
 
 The tree builder compares element identities as integers, never strings: the
-tokenizer's lowercased tag name is interned once at element insertion via a
-first-byte bucket lookup over the sorted name table here, and every later check
-(is this a special element? a formatting element? in scope?) reads an integer
-atom and its category bitmask. The category sets (special / formatting / scoping) are the
-ones the WHATWG tree-construction algorithm special-cases; keeping them in a
-generated table means a spec change is a regeneration, not a code edit.
+tokenizer's lowercased tag name is interned once through a generated index, and
+every later check (is this a special element? a formatting element? in scope?)
+reads an integer atom and its category bitmask. The category sets (special /
+formatting / scoping) are the ones the WHATWG tree-construction algorithm
+special-cases; keeping them in a generated table means a spec change is a
+regeneration, not a code edit.
 
 Usage:  python tools/generate_tags.py src/turbohtml/_c/data/tag_atom.h
 """
@@ -16,6 +16,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Final
+
+__all__ = ["generate"]
+
+_TAG_HASH_COEFFICIENTS: Final = (845, 797, 163, 777)
+_TAG_HASH_MASK: Final = 1023
 
 # Element categories the tree-construction algorithm tests against, in the HTML
 # namespace. The foreign-content insertion mode handles MathML/SVG scoping
@@ -207,6 +213,20 @@ CATEGORY_FLAGS = {
 }
 
 
+def _tag_hash_rows(names: list[str]) -> str:
+    slots = [0] * (_TAG_HASH_MASK + 1)
+    length, first, last, second = _TAG_HASH_COEFFICIENTS
+    for index, name in enumerate(names, start=1):
+        slot = (
+            len(name) * length + ord(name[0]) * first + ord(name[-1]) * last + ord(name[min(1, len(name) - 1)]) * second
+        ) & _TAG_HASH_MASK
+        if slots[slot]:
+            msg = f"tag hash collision between {names[slots[slot] - 1]!r} and {name!r}"
+            raise RuntimeError(msg)
+        slots[slot] = index
+    return ", ".join(f"{index}u" for index in slots)
+
+
 def generate(out_path: Path) -> None:
     """Write the generated tag-atom C header to *out_path*."""
     names = sorted(SPECIAL | FORMATTING | SCOPING | RAWTEXT | RCDATA | FOREIGN | EXTRA)
@@ -227,8 +247,7 @@ def generate(out_path: Path) -> None:
     # Names are sorted, so entries sharing a first byte are contiguous.
     # first_index[b] holds the offset of the first entry whose name starts with a
     # byte >= b, so the bucket for byte b is [first_index[b], first_index[b + 1]).
-    # Interning then scans one first-byte bucket rather than binary-searching the
-    # whole table.
+    # Shared query and mutation lookups scan one bucket rather than the whole table.
     first_index = [len(names)] * 257
     for index, name in enumerate(names):
         first_byte = ord(name[0])
@@ -263,6 +282,16 @@ def generate(out_path: Path) -> None:
         f"static const int th_tag_count = {len(names)};\n"
         "static const th_tag_entry th_tag_table[] = {\n"
         f"{chr(10).join(table_lines)}\n"
+        "};\n\n"
+        "/* Collision-free index over the fixed tag set. A lookup still verifies the\n"
+        "   spelling because an unknown name can share a generated slot. */\n"
+        f"#define TH_TAG_HASH_LENGTH {_TAG_HASH_COEFFICIENTS[0]}u\n"
+        f"#define TH_TAG_HASH_FIRST {_TAG_HASH_COEFFICIENTS[1]}u\n"
+        f"#define TH_TAG_HASH_LAST {_TAG_HASH_COEFFICIENTS[2]}u\n"
+        f"#define TH_TAG_HASH_SECOND {_TAG_HASH_COEFFICIENTS[3]}u\n"
+        f"#define TH_TAG_HASH_MASK {_TAG_HASH_MASK}u\n"
+        "static const uint8_t th_tag_hash[TH_TAG_HASH_MASK + 1] = {\n"
+        f"    {_tag_hash_rows(names)}\n"
         "};\n\n"
         "static const uint32_t th_tag_wide_names[] = {\n"
         f"    {', '.join(f'{char}u' for char in wide_names)}\n"

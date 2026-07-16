@@ -363,7 +363,10 @@ OPERATIONS: dict[str, Operation] = {
 
 def _parse_cases() -> tuple[tuple[str, object], ...]:
     """Return the corpus documents the parse suite runs over (loaded from the html5lib-python submodule)."""
-    return tuple((name, corpus.corpus_text(relative, encoding)) for name, relative, encoding in corpus.CORPUS_FILES)
+    return (
+        *((name, corpus.corpus_text(relative, encoding)) for name, relative, encoding in corpus.CORPUS_FILES),
+        ("common tags (13 kB)", "<div><span>x</span></div>" * 500),
+    )
 
 
 def _readpath_cases() -> tuple[tuple[str, object], ...]:
