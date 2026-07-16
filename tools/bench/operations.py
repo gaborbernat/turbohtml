@@ -336,6 +336,7 @@ OPERATIONS: dict[str, Operation] = {
     "encoding": Operation("detect a byte stream's encoding", "us"),
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
+    "detect-language": Operation("detect a text's natural language", "us"),
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
     "links-filter": Operation("extract filtered page links", "us"),
 }
@@ -741,6 +742,14 @@ def _normalize_cases() -> tuple[tuple[str, object], ...]:
     )
 
 
+def _language_cases() -> tuple[tuple[str, object], ...]:
+    return (
+        ("english book (64 KiB)", corpus.corpus("war-and-peace/2600.txt", 1 << 16)),
+        ("cyrillic prose (4 KiB)", _ENCODING_RUSSIAN * 50),
+        ("hangul prose (4 KiB)", "한국어는 아름다운 언어이며 배우기 쉽고 재미있는 언어입니다. " * 100),
+    )
+
+
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "build": lambda: _ROWS,
     "build-e": lambda: _ROWS,
@@ -864,6 +873,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "encoding": _encoding_cases,
     "decode": _decode_cases,
     "normalize": _normalize_cases,
+    "detect-language": _language_cases,
     "urls-clean": lambda: (
         ("clean 100 URLs", ("clean", _URL_BATCH)),
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),

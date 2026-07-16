@@ -118,9 +118,9 @@ static int th_lang_cmp_ranked(const void *left, const void *right) {
 }
 
 /* Extract the text's ranked trigrams. Returns the number kept (the 600 most
-   frequent, or fewer), writing them sorted by key into out for a binary-search
-   lookup; out[i].count doubles as the trigram's rank. Returns -1 on allocation
-   failure. */
+   frequent, or fewer), writing them sorted by key into out for a linear merge
+   with each profile; out[i].count doubles as the trigram's rank. Returns -1 on
+   allocation failure. */
 static Py_ssize_t th_lang_text_trigrams(int kind, const void *data, Py_ssize_t len, th_lang_ranked_trigram **out) {
     uint64_t *keys = PyMem_Malloc(sizeof(uint64_t) * (size_t)(len + 1));
     if (keys == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -165,24 +165,6 @@ static Py_ssize_t th_lang_text_trigrams(int kind, const void *data, Py_ssize_t l
     return kept;
 }
 
-static int th_lang_rank_of(const th_lang_ranked_trigram *ranked, Py_ssize_t kept, uint64_t key, uint32_t *rank) {
-    Py_ssize_t low = 0;
-    Py_ssize_t high = kept - 1;
-    while (low <= high) {
-        Py_ssize_t mid = low + (high - low) / 2;
-        if (ranked[mid].key == key) {
-            *rank = ranked[mid].count;
-            return 1;
-        }
-        if (ranked[mid].key < key) {
-            low = mid + 1;
-        } else {
-            high = mid - 1;
-        }
-    }
-    return 0;
-}
-
 /* whatlang's calculate_distance (src/trigrams/detection.rs): sum each profile
    trigram's rank displacement (300 when absent), then correct for a text with
    fewer than 300 unique trigrams. The u32 arithmetic wraps exactly as whatlang's
@@ -190,11 +172,16 @@ static int th_lang_rank_of(const th_lang_ranked_trigram *ranked, Py_ssize_t kept
 static uint32_t th_lang_distance(const th_lang_profile *profile, const th_lang_ranked_trigram *ranked,
                                  Py_ssize_t kept) {
     uint32_t total = 0;
+    Py_ssize_t text_index = 0;
     for (uint16_t index = 0; index < profile->count; index++) {
-        uint64_t key = th_lang_pack(profile->trigrams[index].a, profile->trigrams[index].b, profile->trigrams[index].c);
-        uint32_t rank;
-        if (th_lang_rank_of(ranked, kept, key, &rank)) {
-            total += rank > index ? rank - index : index - rank;
+        uint64_t key = profile->keys[index];
+        while (text_index < kept && ranked[text_index].key < key) {
+            text_index++;
+        }
+        if (text_index < kept && ranked[text_index].key == key) {
+            uint32_t text_rank = ranked[text_index].count;
+            uint32_t profile_rank = profile->ranks[index];
+            total += text_rank > profile_rank ? text_rank - profile_rank : profile_rank - text_rank;
         } else {
             total += TH_LANG_MAX_TRIGRAM_DISTANCE;
         }
