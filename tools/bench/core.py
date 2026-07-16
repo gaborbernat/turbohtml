@@ -812,6 +812,12 @@ def normalize(text: str) -> None:
     _normalize("NFC", text)
 
 
+def idna(urls: tuple[str, ...]) -> None:
+    """Overflow the 1,024-entry cache so each IDNA conversion runs."""
+    for url in urls:
+        _normalize_url(url)
+
+
 def translate(selector: str) -> None:
     """Translate one CSS selector to XPath 1.0 with turbohtml's C translator."""
     _css_to_xpath(selector)
@@ -898,6 +904,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "linkify": (linkify, "turbohtml"),
     "detect": (detect, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
+    "idna": (idna, "turbohtml"),
     "markdown": (markdown, "turbohtml"),
     "markdown-google": (markdown_google, "turbohtml"),
     "tables": (tables, "turbohtml"),
