@@ -17,9 +17,10 @@
 
 #include "data/html_entities.h" /* html5_entity, HTML5_MAX_NAME_LEN */
 
-/* Binary search the named-reference table for the exact ASCII name. The
-   trailing ';' is part of the name for entities that require it, so callers
-   pass it as part of name/len when present. Returns NULL when nothing matches. */
+/* Binary search the named-reference table's first-byte bucket for the exact
+   ASCII name. The trailing ';' is part of the name for entities that require
+   it, so callers pass it as part of name/len when present. Returns NULL when
+   nothing matches. */
 const html5_entity *charref_find_entity(const char *name, Py_ssize_t len);
 
 /* Resolve the Windows-1252 / spec correction for a numeric reference. Returns
