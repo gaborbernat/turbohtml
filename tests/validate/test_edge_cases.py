@@ -240,9 +240,6 @@ def test_occurs_multi_digit_and_bounds() -> None:
     assert not xsd_ok(schema, "<r><a>1</a><a>2</a><a>3</a><a>4</a></r>")
 
 
-# ---- RELAX NG edges ----
-
-
 def rwrap(body: str) -> str:
     return f'<element name="doc" xmlns="{R}">{body}</element>'
 
@@ -350,10 +347,17 @@ def test_rng_xml_prefixed_name() -> None:
     assert rng_ok(schema, "<xml:space>preserve</xml:space>")
 
 
-def test_many_global_elements_growth() -> None:
-    globals_ = "".join(f'<xs:element name="g{n}" type="xs:string"/>' for n in range(12))
+@pytest.mark.parametrize(
+    ("document", "valid"),
+    [
+        pytest.param("<g31>x</g31>", True, id="found-after-collision"),
+        pytest.param("<missing>x</missing>", False, id="absent"),
+    ],
+)
+def test_many_global_elements_growth(document: str, *, valid: bool) -> None:
+    globals_ = "".join(f'<xs:element name="g{number}" type="xs:string"/>' for number in (*range(11), 31))
     schema = f"<xs:schema {XS}>{globals_}</xs:schema>"
-    assert xsd_ok(schema, "<g5>x</g5>")
+    assert xsd_ok(schema, document) is valid
 
 
 def test_instance_comment_before_root() -> None:

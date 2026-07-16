@@ -151,6 +151,16 @@ _VALIDATE_XSD = (
     "</xs:complexType></xs:element>"
     "</xs:sequence></xs:complexType></xs:element></xs:schema>"
 )
+_VALIDATE_GLOBAL_XSD: Final = (
+    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+    + "".join(f'<xs:element name="element{index}" type="xs:string"/>' for index in range(512))
+    + "".join(
+        f'<xs:simpleType name="Type{index}"><xs:restriction base="xs:string"/></xs:simpleType>' for index in range(512)
+    )
+    + '<xs:simpleType name="TargetType"><xs:restriction base="xs:string"/></xs:simpleType>'
+    '<xs:element name="target" type="TargetType"/></xs:schema>'
+)
+_VALIDATE_GLOBAL_DOC: Final = "<target>value</target>"
 # the same records catalog described in RELAX NG (XML syntax): grammar/define/ref, an interleave over the record's four
 # child patterns, oneOrMore, and XSD datatypes. RelaxNG drives a separate C compiler and validator (relaxng.h) that the
 # XSD validate op never reaches, so this is the only bench that exercises the RELAX NG engine.
@@ -786,7 +796,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "shadow": lambda: _ROWS,
     "parse": _parse_cases,
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
-    "validate": lambda: (("catalog XSD + doc", (_VALIDATE_XSD, _VALIDATE_DOC)),),
+    "validate": lambda: (
+        ("catalog XSD + doc", (_VALIDATE_XSD, _VALIDATE_DOC)),
+        ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
+    ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
     "parse-scripting": _readpath_cases,  # the real pages carry <noscript>, so the scripting rawtext path runs
     "parse-locations": _readpath_cases,  # real attribute-dense pages exercise the per-attribute span stamping

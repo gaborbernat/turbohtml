@@ -408,7 +408,9 @@ typedef struct {
 
 typedef struct {
     named_node *items;
+    named_node **slots;
     Py_ssize_t len, cap;
+    size_t slot_cap;
 } named_vec;
 
 typedef struct pattern pattern;
@@ -463,11 +465,57 @@ static int named_push(th_schema *schema, named_vec *vec, const Py_UCS4 *name, Py
     return 0;
 }
 
-static th_node *named_find(const named_vec *vec, const Py_UCS4 *name, Py_ssize_t len) {
+static uint64_t named_hash(const Py_UCS4 *name, Py_ssize_t len) {
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        hash ^= name[index];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static int named_index(th_schema *schema, named_vec *vec) {
+    if (vec->len < 8) {
+        return 0;
+    }
+    size_t cap = 8;
+    while (cap < (size_t)vec->len * 2) {
+        cap *= 2;
+    }
+    named_node **slots = arena_alloc(&schema->mem, cap * sizeof(named_node *));
+    if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;       /* GCOVR_EXCL_LINE */
+    }
+    memset(slots, 0, cap * sizeof(named_node *));
     for (Py_ssize_t index = 0; index < vec->len; index++) {
-        if (u_eq_u(vec->items[index].name, vec->items[index].len, name, len)) {
-            return vec->items[index].node;
+        named_node *item = &vec->items[index];
+        size_t slot = (size_t)named_hash(item->name, item->len) & (cap - 1);
+        while (slots[slot] != NULL) {
+            slot = (slot + 1) & (cap - 1);
         }
+        slots[slot] = item;
+    }
+    vec->slots = slots;
+    vec->slot_cap = cap;
+    return 0;
+}
+
+static th_node *named_find(const named_vec *vec, const Py_UCS4 *name, Py_ssize_t len) {
+    if (vec->slots == NULL) {
+        for (Py_ssize_t index = 0; index < vec->len; index++) {
+            if (u_eq_u(vec->items[index].name, vec->items[index].len, name, len)) {
+                return vec->items[index].node;
+            }
+        }
+        return NULL;
+    }
+    size_t slot = (size_t)named_hash(name, len) & (vec->slot_cap - 1);
+    while (vec->slots[slot] != NULL) {
+        named_node *item = vec->slots[slot];
+        if (u_eq_u(item->name, item->len, name, len)) {
+            return item->node;
+        }
+        slot = (slot + 1) & (vec->slot_cap - 1);
     }
     return NULL;
 }
