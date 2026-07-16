@@ -16,12 +16,9 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from itertools import starmap
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple
+from typing import Final, Literal, NamedTuple
 
 from turbohtml._html import Document, _date_scan, _date_scan_all, _date_url, parse
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 __all__ = [
     "DateExtraction",
@@ -135,19 +132,28 @@ def dates(html: str, options: DateExtraction | None = None, /) -> PublicationDat
     """
     active = options or _DEFAULT
     document = parse(html)
-    window = _Window(active.min_date or _EARLIEST, active.max_date or _today())
+    today = _today()
+    window = _Window(active.min_date or _EARLIEST, active.max_date or today)
     want = _PUBLISHED if active.original else _MODIFIED
-    stages: list[tuple[Signal, Callable[[], list[tuple[_Role, date]]]]] = [
-        ("url", lambda: _url_candidates(document)),
-        ("meta", lambda: _meta_candidates(document)),
-        ("json-ld", lambda: _json_candidates(document)),
-        ("time", lambda: _time_candidates(document)),
-    ]
-    if active.extensive_search:  # the whole-body text scan is the slow path; only reach it when the markup is silent
-        stages.append(("text", lambda: _text_candidates(document, window, original=active.original)))
-    for signal, produce in stages:
-        if found := _pick(produce(), want, window, active.output_format, signal):
-            return found
+    current_year = today.year
+    if found := _pick(_url_candidates(document), want, window, active.output_format, "url"):
+        return found
+    if found := _pick(_meta_candidates(document, current_year), want, window, active.output_format, "meta"):
+        return found
+    if found := _pick(_json_candidates(document, current_year), want, window, active.output_format, "json-ld"):
+        return found
+    if found := _pick(_time_candidates(document, current_year), want, window, active.output_format, "time"):
+        return found
+    if active.extensive_search and (
+        found := _pick(
+            _text_candidates(document, window, current_year, original=active.original),
+            want,
+            window,
+            active.output_format,
+            "text",
+        )
+    ):
+        return found
     return None
 
 
@@ -170,10 +176,10 @@ def _pick(
     for role, moment in candidates:
         if not window.holds(moment):
             continue
-        found = PublicationDate(moment.strftime(output_format), signal)
         if role in {want, _GENERIC}:
-            return found
-        reserve = reserve or found
+            return PublicationDate(moment.strftime(output_format), signal)
+        if reserve is None:
+            reserve = PublicationDate(moment.strftime(output_format), signal)
     return reserve
 
 
@@ -190,7 +196,7 @@ def _url_date(url: str) -> date | None:
     return date(*parts) if parts else None
 
 
-def _meta_candidates(document: Document) -> list[tuple[_Role, date]]:
+def _meta_candidates(document: Document, current_year: int) -> list[tuple[_Role, date]]:
     """Publication and modification dates from ``<meta>`` tags, keyed by name/property/itemprop/http-equiv/pubdate."""
     found: list[tuple[_Role, date]] = []
     for element in document.find_all("meta"):
@@ -201,20 +207,20 @@ def _meta_candidates(document: Document) -> list[tuple[_Role, date]]:
         keys = [attributes.get(name) for name in ("name", "property", "itemprop", "http-equiv")]
         if str(attributes.get("pubdate")).lower() == "pubdate":
             keys.append("pubdate")
-        if (role := _role_of(keys)) is not None and (moment := _scan(content)):
+        if (role := _role_of(keys)) is not None and (moment := _scan(content, current_year)):
             found.append((role, moment))
     return found
 
 
-def _json_candidates(document: Document) -> list[tuple[_Role, date]]:
+def _json_candidates(document: Document, current_year: int) -> list[tuple[_Role, date]]:
     """JSON-LD ``datePublished``/``dateModified`` values, from the structured-data engine's decoded blocks."""
     found: list[tuple[_Role, date]] = []
     for block in document.structured_data().json_ld:
-        _walk_json(block, found)
+        _walk_json(block, found, current_year)
     return found
 
 
-def _time_candidates(document: Document) -> list[tuple[_Role, date]]:
+def _time_candidates(document: Document, current_year: int) -> list[tuple[_Role, date]]:
     """
     Dates in temporal HTML markup: ``<time>`` elements and elements whose class/id/itemprop marks them as a date.
 
@@ -227,7 +233,7 @@ def _time_candidates(document: Document) -> list[tuple[_Role, date]]:
     for element in document.select(_DATE_MARKUP):
         attributes = element.attrs
         raw = attributes.get("datetime") or attributes.get("title")
-        moment = _scan(raw) if isinstance(raw, str) else _first_date(element.text)
+        moment = _scan(raw, current_year) if isinstance(raw, str) else _first_date(element.text, current_year)
         if moment is None:
             continue
         marker = (
@@ -242,7 +248,9 @@ def _time_candidates(document: Document) -> list[tuple[_Role, date]]:
     return found
 
 
-def _text_candidates(document: Document, window: _Window, *, original: bool) -> list[tuple[_Role, date]]:
+def _text_candidates(
+    document: Document, window: _Window, current_year: int, *, original: bool
+) -> list[tuple[_Role, date]]:
     """
     Recover the extensive last resort: the date that recurs most across the page's visible text.
 
@@ -253,7 +261,10 @@ def _text_candidates(document: Document, window: _Window, *, original: bool) -> 
     structured stages apply.
     """
     counts = Counter(
-        moment for body in document.find_all("body") for moment in _scan_all(body.text) if window.holds(moment)
+        moment
+        for body in document.find_all("body")
+        for moment in _scan_all(body.text, current_year)
+        if window.holds(moment)
     )
     if not counts:
         return []
@@ -272,19 +283,19 @@ def _role_of(keys: list[str | list[str] | None]) -> _Role | None:
     return None
 
 
-def _walk_json(node: object, found: list[tuple[_Role, date]]) -> None:
+def _walk_json(node: object, found: list[tuple[_Role, date]], current_year: int) -> None:
     """Collect datePublished/dateModified from a JSON-LD node, recursing through @graph and nested objects."""
     if isinstance(node, list):
         for item in node:
-            _walk_json(item, found)
+            _walk_json(item, found, current_year)
     elif isinstance(node, dict):
         for role, key in ((_PUBLISHED, "datePublished"), (_MODIFIED, "dateModified")):
             value = node.get(key)
-            if isinstance(value, str) and (moment := _scan(value)):
+            if isinstance(value, str) and (moment := _scan(value, current_year)):
                 found.append((role, moment))
         for value in node.values():
             if isinstance(value, (list, dict)):
-                _walk_json(value, found)
+                _walk_json(value, found, current_year)
 
 
 def _meta_value(document: Document, key: str) -> str | None:
@@ -304,21 +315,21 @@ def _token(value: str | list[str] | None) -> str:
     return value.lower() if isinstance(value, str) else ""
 
 
-def _first_date(text: str) -> date | None:
+def _first_date(text: str, current_year: int) -> date | None:
     """Return the first date of any spelling in a block of element text, written-out months included."""
-    parts = _date_scan_all(text, _today().year)
+    parts = _date_scan_all(text, current_year)
     return date(*parts[0]) if parts else None
 
 
-def _scan(text: str) -> date | None:
+def _scan(text: str, current_year: int) -> date | None:
     """Parse the first numeric date in a metadata string: ISO, an 8-digit stamp, or a day-month-year spelling."""
-    parts = _date_scan(text, _today().year)
+    parts = _date_scan(text, current_year)
     return date(*parts) if parts else None
 
 
-def _scan_all(text: str) -> list[date]:
+def _scan_all(text: str, current_year: int) -> list[date]:
     """Every ISO, day-month-year, and written-out date in a block of visible text, for frequency scoring."""
-    return list(starmap(date, _date_scan_all(text, _today().year)))
+    return list(starmap(date, _date_scan_all(text, current_year)))
 
 
 def _today() -> date:

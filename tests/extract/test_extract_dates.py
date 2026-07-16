@@ -129,6 +129,14 @@ def test_off_role_meta_is_the_reserve_when_no_wanted_role_exists() -> None:
     assert dates(html, DateExtraction(original=False)) == PublicationDate("2016-12-23", "meta")
 
 
+def test_first_off_role_meta_is_preserved() -> None:
+    html = (
+        '<meta property="article:published_time" content="2016-12-23">'
+        '<meta property="article:published_time" content="2017-02-01">'
+    )
+    assert dates(html, DateExtraction(original=False)) == PublicationDate("2016-12-23", "meta")
+
+
 def test_updated_class_marks_a_modification_date() -> None:
     html = '<span class="last-updated">2019-05-06</span><span class="published">2018-01-02</span>'
     assert dates(html, DateExtraction(original=True)) == PublicationDate("2018-01-02", "time")

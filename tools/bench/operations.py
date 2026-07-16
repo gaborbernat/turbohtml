@@ -886,7 +886,11 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "article": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
     "boilerplate": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
-    "date": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
+    "date": lambda: (
+        ("post (4 KiB)", _article_page(16)),
+        ("longform (16 KiB)", _article_page(72)),
+        ("100 meta candidates", "<head>" + "<meta name=date content=2024-05-06>" * 100 + "</head>"),
+    ),
     "text-render": lambda: (("article (2 KiB)", _TEXT_ARTICLE), ("table (4 KiB)", _TEXT_TABLE)),
     "text-collapsed": lambda: (("collapsed (2 KiB)", _TEXT_ARTICLE),),
     "text-main": lambda: (("main (4 KiB)", _TEXT_MAIN),),
