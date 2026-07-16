@@ -335,6 +335,69 @@ static const th_tag_entry th_tag_table[] = {
     {"xmp", 3u, TH_TAG_XMP, TH_TAG_SPECIAL | TH_TAG_RAWTEXT, 707u},
 };
 
+/* Collision-free index over the fixed tag set. A lookup still verifies the
+   spelling because an unknown name can share a generated slot. */
+#define TH_TAG_HASH_LENGTH 845u
+#define TH_TAG_HASH_FIRST 797u
+#define TH_TAG_HASH_LAST 163u
+#define TH_TAG_HASH_SECOND 777u
+#define TH_TAG_HASH_MASK 1023u
+static const uint8_t th_tag_hash[TH_TAG_HASH_MASK + 1] = {
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   107u, 0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   135u, 0u,   71u,  0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   118u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   91u,  0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   10u,  18u,  0u,   76u,  0u,   149u, 0u,   115u, 0u,   9u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   45u,  134u, 0u,
+    0u,   50u,  0u,   75u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   24u,  0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   15u,  0u,   37u,  43u,  0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   32u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    65u,  0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   143u, 0u,   0u,   0u,   0u,   58u,
+    0u,   0u,   0u,   0u,  98u,  0u,   0u,   0u,   0u,   29u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   99u,
+    0u,   0u,   0u,   0u,  0u,   0u,   112u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   35u,  0u,   85u,  0u,   0u,   0u,   0u,   0u,   123u,
+    0u,   0u,   0u,   0u,  108u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   117u, 0u,   0u,
+    0u,   0u,   141u, 62u, 0u,   0u,   0u,   57u,  0u,   78u,  104u, 0u,   0u,   0u,   0u,   11u,  0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   49u,  0u,   0u,   0u,   0u,   0u,   0u,   139u, 0u,   0u,   0u,   0u,   0u,
+    0u,   31u,  0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   94u,  0u,   0u,   147u, 0u,   82u,  0u,   83u,  0u,
+    0u,   0u,   14u,  0u,  0u,   126u, 67u,  0u,   0u,   2u,   0u,   0u,   0u,   150u, 0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  41u,  0u,   0u,   131u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   56u,  0u,   0u,   0u,
+    0u,   0u,   142u, 0u,  0u,   0u,   111u, 0u,   0u,   0u,   13u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   130u, 0u,   42u,  0u,   0u,   1u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   72u,  46u,  0u,   90u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   84u,  0u,   0u,   0u,   0u,   140u, 0u,   0u,   0u,
+    0u,   0u,   152u, 0u,  55u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   146u, 0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  120u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   92u,  0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   63u,  3u,   0u,   0u,   0u,   0u,   0u,
+    89u,  0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   93u,  0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   54u,  0u,   0u,   0u,   87u,  0u,   0u,
+    30u,  0u,   0u,   0u,  0u,   110u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   20u,  0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   33u,  0u,   0u,   124u, 0u,   0u,   95u,  0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   52u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   34u,  0u,   17u,  127u, 0u,
+    0u,   0u,   0u,   0u,  121u, 0u,   0u,   0u,   0u,   74u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   19u,
+    0u,   53u,  0u,   0u,  0u,   0u,   109u, 0u,   0u,   144u, 0u,   0u,   0u,   102u, 132u, 0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   137u, 0u,   151u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   39u,  0u,   0u,   0u,   0u,   0u,   0u,   105u,
+    0u,   0u,   0u,   0u,  66u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   119u, 0u,   0u,  0u,   0u,   0u,   0u,   25u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   60u,  0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   106u, 0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   4u,  27u,  0u,   0u,   47u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    79u,  0u,   0u,   0u,  0u,   0u,   129u, 0u,   0u,   136u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   6u,   0u,
+    0u,   80u,  0u,   0u,  0u,   86u,  96u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    125u, 0u,   0u,   38u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   81u,  0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   68u,  0u,  0u,   0u,   0u,   0u,   0u,   0u,   23u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  59u,  0u,   0u,   0u,   0u,   48u,  100u, 0u,   103u, 0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   16u, 0u,   0u,   0u,   44u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  101u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   36u,  7u,
+    0u,   148u, 0u,   0u,  0u,   0u,   0u,   0u,   0u,   70u,  113u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   128u, 88u,  0u,  0u,   0u,   0u,   0u,   61u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   5u,   116u, 0u,   0u,   0u,   0u,   77u,  0u,   0u,   0u,   97u,  0u,
+    0u,   0u,   0u,   0u,  21u,  0u,   133u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,
+    0u,   0u,   0u,   0u,  0u,   0u,   0u,   0u,   64u,  0u,   0u,   0u,   0u,   0u,   0u,   22u,  0u,   12u,  145u,
+    26u,  0u,   0u,   0u,  0u,   0u,   0u,   0u,   0u,   0u,   0u,   51u,  0u,   0u,   0u,   8u,   0u,   0u,   0u,
+    138u, 0u,   40u,  0u,  0u,   0u,   0u,   69u,  0u,   28u,  0u,   0u,   0u,   0u,   73u,  0u,   0u,   0u,   114u,
+    0u,   0u,   0u,   0u,  122u, 0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u,   0u};
+
 static const uint32_t th_tag_wide_names[] = {
     97u,  97u,  98u,  98u,  114u, 97u,  100u, 100u, 114u, 101u, 115u, 115u, 97u,  110u, 110u, 111u, 116u, 97u,  116u,
     105u, 111u, 110u, 45u,  120u, 109u, 108u, 97u,  112u, 112u, 108u, 101u, 116u, 97u,  114u, 101u, 97u,  97u,  114u,
