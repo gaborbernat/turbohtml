@@ -32,6 +32,9 @@ enum {
 
 /* The canonical combining class of `cp`, 0 when the sorted table has no row for it (the default, every starter). */
 static uint8_t ccc_of(Py_UCS4 cp) {
+    if (cp < th_norm_ccc[0].code) {
+        return 0;
+    }
     int lo = 0;
     int hi = th_norm_ccc_count;
     while (lo < hi) {
@@ -50,6 +53,9 @@ static uint8_t ccc_of(Py_UCS4 cp) {
 
 /* The decomposition row for `cp` in a table of `count` rows, or NULL when the code point is absent. */
 static const th_norm_decomp_row *decomp_row(const th_norm_decomp_row *table, int count, Py_UCS4 cp) {
+    if (cp < table[0].code) {
+        return NULL;
+    }
     int lo = 0;
     int hi = count;
     while (lo < hi) {
@@ -116,6 +122,9 @@ static Py_UCS4 pair_compose(Py_UCS4 first, Py_UCS4 second) {
 
 /* The NFC (column 0) or NFKC (column 1) quick-check value of `cp`: Yes when the sorted range table has no row. */
 static uint8_t qc_of(Py_UCS4 cp, int nfkc) {
+    if (cp < th_norm_qc[0].first) {
+        return TH_QC_YES;
+    }
     int lo = 0;
     int hi = th_norm_qc_count - 1;
     while (lo < hi) {
@@ -298,6 +307,9 @@ PyObject *turbohtml_normalize(PyObject *Py_UNUSED(module), PyObject *args) {
     if (!PyArg_ParseTuple(args, "iU", &form, &text)) {
         return NULL;
     }
+    if (PyUnicode_IS_ASCII(text)) {
+        return Py_NewRef(text);
+    }
     Py_ssize_t len = PyUnicode_GET_LENGTH(text);
     int kind = PyUnicode_KIND(text);
     const void *data = PyUnicode_DATA(text);
@@ -314,6 +326,9 @@ PyObject *turbohtml_is_normalized(PyObject *Py_UNUSED(module), PyObject *args) {
     PyObject *text = NULL;
     if (!PyArg_ParseTuple(args, "iU", &form, &text)) {
         return NULL;
+    }
+    if (PyUnicode_IS_ASCII(text)) {
+        Py_RETURN_TRUE;
     }
     Py_ssize_t len = PyUnicode_GET_LENGTH(text);
     int kind = PyUnicode_KIND(text);

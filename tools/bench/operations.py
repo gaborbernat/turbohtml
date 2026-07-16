@@ -728,12 +728,13 @@ def _normalize_cases() -> tuple[tuple[str, object], ...]:
     """
     Return the strings the Unicode-normalization suite folds to NFC.
 
-    Already-NFC prose and a real page exercise the quick-check fast path (the common case both engines short-circuit),
-    while the NFD-decomposed French forces the full decompose/reorder/compose pipeline.
+    The ASCII book matches the CodSpeed case. Already-NFC prose and a real page exercise the quick-check path, while
+    the NFD-decomposed French forces the full decompose/reorder/compose pipeline.
     """
     _name, filename, url = corpus.REAL_PAGES[2]  # the mozilla blog, 95 kB of real UTF-8 markup
     french = _ENCODING_FRENCH * 50
     return (
+        ("ascii book (64 KiB)", corpus.corpus("war-and-peace/2600.txt", 1 << 16)),
         ("nfc french (4 kB)", french),
         ("nfd french (4 kB)", unicodedata.normalize("NFD", french)),
         ("utf-8 page (95 kB)", corpus.large_text(filename, url)),
