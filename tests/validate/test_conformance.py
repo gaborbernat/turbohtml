@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import parse
+from turbohtml import Element, parse
 from turbohtml.conformance import ConformanceMessage, ConformanceReport, check, check_html
 
 CLEAN = '<html lang="en"><head><title>Doc</title></head><body><h1>Hi</h1></body></html>'
@@ -101,32 +101,83 @@ def test_conformance_alt_text_rules(inner: str, expected: str | None) -> None:
 
 
 @pytest.mark.parametrize(
-    "inner",
+    "tag",
     [
-        pytest.param("<center>x</center>", id="center"),
-        pytest.param('<font size="3">x</font>', id="font"),
-        pytest.param("<acronym>x</acronym>", id="acronym-uninterned"),
-        pytest.param("<blink>x</blink>", id="blink-uninterned"),
-        pytest.param("<marquee>x</marquee>", id="marquee"),
+        pytest.param("acronym", id="acronym-uninterned"),
+        pytest.param("applet", id="applet"),
+        pytest.param("basefont", id="basefont"),
+        pytest.param("big", id="big"),
+        pytest.param("bgsound", id="bgsound"),
+        pytest.param("blink", id="blink-uninterned"),
+        pytest.param("center", id="center"),
+        pytest.param("dir", id="dir"),
+        pytest.param("font", id="font"),
+        pytest.param("frame", id="frame"),
+        pytest.param("frameset", id="frameset"),
+        pytest.param("isindex", id="isindex"),
+        pytest.param("listing", id="listing"),
+        pytest.param("marquee", id="marquee"),
+        pytest.param("nobr", id="nobr"),
+        pytest.param("noframes", id="noframes"),
+        pytest.param("plaintext", id="plaintext"),
+        pytest.param("spacer", id="spacer-uninterned"),
+        pytest.param("strike", id="strike"),
+        pytest.param("tt", id="tt"),
+        pytest.param("xmp", id="xmp"),
     ],
 )
-def test_conformance_obsolete_elements(inner: str) -> None:
-    assert "obsolete-element" in codes(body(inner))
+def test_conformance_obsolete_elements(tag: str) -> None:
+    assert "obsolete-element" in [message.code for message in check(Element(tag)).messages]
+
+
+def test_conformance_custom_element_is_not_obsolete() -> None:
+    assert "obsolete-element" not in [message.code for message in check(Element("custom-element")).messages]
 
 
 @pytest.mark.parametrize(
-    ("inner", "flagged"),
+    ("tag", "attr", "flagged"),
     [
-        pytest.param('<p align="center">x</p>', True, id="align-any-element"),
-        pytest.param('<table bgcolor="red"></table>', True, id="bgcolor-any-element"),
-        pytest.param('<body link="blue">x</body>', True, id="link-scoped-to-body"),
-        pytest.param('<table frame="box"></table>', True, id="frame-scoped-to-table"),
-        pytest.param('<p frame="box">x</p>', False, id="frame-not-on-p"),
-        pytest.param('<p title="ok">x</p>', False, id="conforming-attribute"),
+        pytest.param("p", "align", True, id="align-any-element"),
+        pytest.param("p", "background", True, id="background-any-element"),
+        pytest.param("p", "bgcolor", True, id="bgcolor-any-element"),
+        pytest.param("p", "bordercolor", True, id="bordercolor-any-element"),
+        pytest.param("p", "cellpadding", True, id="cellpadding-any-element"),
+        pytest.param("p", "cellspacing", True, id="cellspacing-any-element"),
+        pytest.param("p", "clear", True, id="clear-any-element"),
+        pytest.param("p", "compact", True, id="compact-any-element"),
+        pytest.param("p", "hspace", True, id="hspace-any-element"),
+        pytest.param("p", "noshade", True, id="noshade-any-element"),
+        pytest.param("p", "nowrap", True, id="nowrap-any-element"),
+        pytest.param("p", "valign", True, id="valign-any-element"),
+        pytest.param("p", "vspace", True, id="vspace-any-element"),
+        pytest.param("body", "alink", True, id="alink-on-body"),
+        pytest.param("body", "link", True, id="link-on-body"),
+        pytest.param("body", "text", True, id="text-on-body"),
+        pytest.param("body", "vlink", True, id="vlink-on-body"),
+        pytest.param("table", "frame", True, id="frame-on-table"),
+        pytest.param("table", "rules", True, id="rules-on-table"),
+        pytest.param("script", "language", True, id="language-on-script"),
+        pytest.param("a", "charset", True, id="charset-on-a"),
+        pytest.param("link", "charset", True, id="charset-on-link"),
+        pytest.param("a", "rev", True, id="rev-on-a"),
+        pytest.param("link", "rev", True, id="rev-on-link"),
+        pytest.param("img", "longdesc", True, id="longdesc-on-img"),
+        pytest.param("p", "alink", False, id="alink-not-on-p"),
+        pytest.param("p", "link", False, id="link-not-on-p"),
+        pytest.param("p", "text", False, id="text-not-on-p"),
+        pytest.param("p", "vlink", False, id="vlink-not-on-p"),
+        pytest.param("p", "frame", False, id="frame-not-on-p"),
+        pytest.param("p", "rules", False, id="rules-not-on-p"),
+        pytest.param("p", "language", False, id="language-not-on-p"),
+        pytest.param("p", "charset", False, id="charset-not-on-p"),
+        pytest.param("p", "rev", False, id="rev-not-on-p"),
+        pytest.param("p", "longdesc", False, id="longdesc-not-on-p"),
+        pytest.param("p", "title", False, id="conforming-attribute"),
     ],
 )
-def test_conformance_obsolete_attributes(inner: str, *, flagged: bool) -> None:
-    assert ("obsolete-attribute" in codes(body(inner))) is flagged
+def test_conformance_obsolete_attributes(tag: str, attr: str, *, flagged: bool) -> None:
+    element = Element(tag, {attr: "x"})
+    assert ("obsolete-attribute" in [message.code for message in check(element).messages]) is flagged
 
 
 @pytest.mark.parametrize(
