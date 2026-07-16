@@ -907,6 +907,14 @@ static int xsd_compile(th_schema *schema) {
             named_push(schema, bucket, name, name_len, child);
         }
     }
+    named_vec *tables[] = {&schema->elements,   &schema->complex_types, &schema->simple_types,
+                           &schema->attributes, &schema->groups,        &schema->attr_groups};
+    for (size_t index = 0; index < sizeof(tables) / sizeof(tables[0]); index++) {
+        if (named_index(schema, tables[index]) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            PyErr_NoMemory();                         /* GCOVR_EXCL_LINE */
+            return 0;                                 /* GCOVR_EXCL_LINE */
+        }
+    }
     return 1;
 }
 
