@@ -928,6 +928,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "specificity": (specificity, "turbohtml"),
     "xpath": (xpath, "turbohtml"),
     "transform": (transform, "turbohtml"),
+    "transform-sort": (transform, "turbohtml"),
     "transform-dense": (transform, "turbohtml"),
     "minify-css": (minify_css, "turbohtml"),
     "minify-js": (minify_js, "turbohtml"),
