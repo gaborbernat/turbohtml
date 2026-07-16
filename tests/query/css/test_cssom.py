@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import Element, parse
+from turbohtml import Element, Text, parse
 from turbohtml.build import E
 from turbohtml.cssom import ComputedStyle, RuleList, StyleDeclaration, StyleRule, StyleSheet, computed_style
 
@@ -404,6 +404,46 @@ def test_computed_style_reads_multiple_style_sheets_in_document_order() -> None:
     paragraph = document.select_one("p")
     assert isinstance(paragraph, Element)
     assert computed_style(paragraph)["color"] == "blue"
+
+
+def test_computed_style_repeated_call_keeps_value() -> None:
+    document = parse("<style>p { color: red }</style><p></p>")
+    paragraph = document.select_one("p")
+    assert isinstance(paragraph, Element)
+    assert computed_style(paragraph)["color"] == computed_style(paragraph)["color"] == "red"
+
+
+def test_computed_style_tracks_stylesheet_text_mutation() -> None:
+    document = parse("<style>p { color: red }</style><p></p>")
+    style = document.select_one("style")
+    paragraph = document.select_one("p")
+    assert isinstance(style, Element)
+    assert isinstance(paragraph, Element)
+    assert computed_style(paragraph)["color"] == "red"
+    text = style.children[0]
+    assert isinstance(text, Text)
+    text.data = "p { color: blue }"
+    assert computed_style(paragraph)["color"] == "blue"
+
+
+def test_computed_style_tracks_stylesheet_insertion() -> None:
+    document = parse("<head><style>p { color: red }</style></head><body><p></p></body>")
+    head = document.select_one("head")
+    paragraph = document.select_one("p")
+    assert isinstance(head, Element)
+    assert isinstance(paragraph, Element)
+    assert computed_style(paragraph)["color"] == "red"
+    head.append(Element("style", children=[Text("p { color: blue }")]))
+    assert computed_style(paragraph)["color"] == "blue"
+
+
+def test_computed_style_recompiles_after_new_attribute_name() -> None:
+    document = parse("<style>p[data-late] { color: red }</style><p></p>")
+    paragraph = document.select_one("p")
+    assert isinstance(paragraph, Element)
+    assert computed_style(paragraph)["color"] == "canvastext"
+    paragraph.attrs["data-late"] = "yes"
+    assert computed_style(paragraph)["color"] == "red"
 
 
 def test_computed_style_surface() -> None:

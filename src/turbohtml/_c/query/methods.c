@@ -9,6 +9,7 @@
 #include "css/select/selector.h"
 
 void handle_clear_caches(HandleObject *handle) {
+    handle_clear_css_cache(handle);
     for (int index = 0; index < handle->sel_cache_len; index++) {
         selector_free(handle->sel_cache[index].compiled);
         Py_DECREF(handle->sel_cache[index].key);

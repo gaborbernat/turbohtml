@@ -964,6 +964,13 @@ static void css_free_sheets(css_sheet *sheets, Py_ssize_t count) {
     PyMem_Free(sheets);
 }
 
+void handle_clear_css_cache(HandleObject *handle) {
+    css_free_sheets(handle->css_sheets, handle->css_sheet_count);
+    handle->css_sheets = NULL;
+    handle->css_sheet_count = 0;
+    handle->css_sheets_ready = 0;
+}
+
 /* Collect every <style> element's text under root (document order), parsing each
    into a sheet whose selectors are compiled against tree. A selector that fails to
    compile leaves compiled[rule] NULL so the rule matches nothing. Returns the sheet
@@ -1041,6 +1048,25 @@ fail:                               /* GCOVR_EXCL_LINE: allocation-failure path 
     css_free_sheets(sheets, count); /* GCOVR_EXCL_LINE: allocation-failure path */
     *out_count = -1;                /* GCOVR_EXCL_LINE: allocation-failure path */
     return NULL;                    /* GCOVR_EXCL_LINE: allocation-failure path */
+}
+
+static css_sheet *css_cached_sheets(module_state *state, HandleObject *handle, Py_ssize_t *out_count) {
+    uint32_t attr_gen = th_tree_attr_generation(handle->tree);
+    if (!handle->css_sheets_ready || handle->css_sheet_attr_gen != attr_gen) {
+        handle_clear_css_cache(handle);
+        Py_ssize_t count = 0;
+        css_sheet *sheets = css_collect_sheets(state, handle->tree, th_tree_document(handle->tree), &count);
+        if (count < 0) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            *out_count = -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        handle->css_sheets = sheets;
+        handle->css_sheet_count = count;
+        handle->css_sheet_attr_gen = attr_gen;
+        handle->css_sheets_ready = 1;
+    }
+    *out_count = handle->css_sheet_count;
+    return handle->css_sheets;
 }
 
 /* Run the whole cascade for element against the collected sheets plus its inline
@@ -1149,19 +1175,20 @@ PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg) {
         PyErr_SetString(PyExc_TypeError, "computed style requires an Element");
         return NULL;
     }
-    PyObject *handle = ((NodeObject *)arg)->handle;
+    PyObject *handle_obj = ((NodeObject *)arg)->handle;
+    HandleObject *handle = (HandleObject *)handle_obj;
     th_node *element = ((NodeObject *)arg)->node;
-    th_tree *tree = ((HandleObject *)handle)->tree;
+    th_tree *tree = handle->tree;
     css_value final_map[NUM_PROPS] = {0};
     int failed = 0;
-    Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: sheet collection and matching read the tree */
+    Py_BEGIN_CRITICAL_SECTION(handle_obj); /* per-tree lock: sheet collection and matching read the tree */
     th_node **chain = NULL;
     Py_ssize_t chain_len = css_ancestor_chain(element, &chain);
     if (chain_len < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         failed = 1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     } else {             /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         Py_ssize_t sheet_count = 0;
-        css_sheet *sheets = css_collect_sheets(state, tree, th_tree_document(tree), &sheet_count);
+        css_sheet *sheets = css_cached_sheets(state, handle, &sheet_count);
         if (sheet_count < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             failed = 1;        /* GCOVR_EXCL_LINE: allocation-failure path */
         } else {               /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
@@ -1178,7 +1205,6 @@ PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg) {
                 }
             }
             memcpy(final_map, parent, sizeof(final_map)); /* the last element resolved is the target */
-            css_free_sheets(sheets, sheet_count);
         }
     }
     PyMem_Free(chain);
