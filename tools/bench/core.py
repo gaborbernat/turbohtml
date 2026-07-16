@@ -26,6 +26,7 @@ from turbohtml.convert import css_specificity as _css_specificity
 from turbohtml.convert import css_to_xpath as _css_to_xpath
 from turbohtml.cssom import computed_style as _computed_style
 from turbohtml.detect import detect as _detect_encoding
+from turbohtml.detect import detect_language as _detect_language
 from turbohtml.detect import normalize as _normalize
 from turbohtml.extract import boilerplate as _extract_boilerplate
 from turbohtml.extract import clean_url as _clean_url
@@ -801,6 +802,11 @@ def decode(case: tuple[str, bytes]) -> None:
     data.decode(f"whatwg-{label}")
 
 
+def detect_language(text: str) -> None:
+    """Detect a string's natural language with turbohtml's trigram scorer."""
+    _detect_language(text)
+
+
 def normalize(text: str) -> None:
     """Normalize text to Unicode NFC with turbohtml's C engine (quick-checked, then decompose/reorder/compose)."""
     _normalize("NFC", text)
@@ -921,6 +927,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "stream": (stream, "turbohtml"),
     "encoding": (encoding, "turbohtml"),
     "decode": (decode, "turbohtml"),
+    "detect-language": (detect_language, "turbohtml"),
     "urls-clean": (urls_clean, "turbohtml"),
     "links-filter": (links_filter, "turbohtml"),
 }

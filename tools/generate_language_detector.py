@@ -204,8 +204,8 @@ def emit_banner(revision: str) -> list[str]:
         "",
         "   These are whatlang's Unicode script ranges (mapping each code point to a script),",
         "   its script-to-language grouping, its language metadata, and its character-trigram",
-        "   profiles (300 most-frequent trigrams per language, most-frequent first -- the",
-        "   Cavnar-Trenkle rank model the detector scores text against). */",
+        "   profiles (300 trigrams per language, packed in key order with their source",
+        "   frequency ranks for the Cavnar-Trenkle model). */",
         "",
         "#include <stdint.h>",
         "",
@@ -290,14 +290,21 @@ def emit_groups(order: list[tuple[str, str]], groups: dict[str, tuple[str, str]]
 
 
 def emit_trigram_arrays(profiles: Profiles, lang_code: dict[str, str]) -> list[str]:
-    """Render one packed 300-trigram array per language, four trigrams to a line."""
-    lines = ["typedef struct {", "    uint32_t a;", "    uint32_t b;", "    uint32_t c;", "} th_lang_trigram;", ""]
+    """Render key-sorted trigram and source-rank arrays for each language."""
+    lines: list[str] = []
     for static in _PROFILE_STATICS:
         for lang, trigrams in profiles[static]:
-            lines.append(f"static const th_lang_trigram th_lang_trigrams_{lang_code[lang]}[{len(trigrams)}] = {{")
-            for start in range(0, len(trigrams), 4):
-                chunk = "".join(f"{{0x{a:04X},0x{b:04X},0x{c:04X}}}, " for a, b, c in trigrams[start : start + 4])
-                lines.append(f"    {chunk.rstrip()}")
+            ranked = sorted((((a << 42) | (b << 21) | c, rank) for rank, (a, b, c) in enumerate(trigrams)))
+            lines.append(f"static const uint64_t th_lang_keys_{lang_code[lang]}[{len(ranked)}] = {{")
+            lines.extend(
+                "    " + " ".join(f"0x{key:016X}," for key, _rank in ranked[start : start + 4])
+                for start in range(0, len(ranked), 4)
+            )
+            lines.extend(("};", f"static const uint16_t th_lang_ranks_{lang_code[lang]}[{len(ranked)}] = {{"))
+            lines.extend(
+                "    " + " ".join(f"{rank}," for _key, rank in ranked[start : start + 20])
+                for start in range(0, len(ranked), 20)
+            )
             lines.append("};")
     return lines
 
@@ -308,7 +315,8 @@ def emit_profile_lists(profiles: Profiles, lang_code: dict[str, str], lang_id: d
         "",
         "typedef struct {",
         "    uint8_t lang;",
-        "    const th_lang_trigram *trigrams;",
+        "    const uint64_t *keys;",
+        "    const uint16_t *ranks;",
         "    uint16_t count;",
         "} th_lang_profile;",
         "",
@@ -317,7 +325,8 @@ def emit_profile_lists(profiles: Profiles, lang_code: dict[str, str], lang_id: d
         entries = profiles[static]
         lines.append(f"static const th_lang_profile th_lang_profiles_{static[:-6].lower()}[{len(entries)}] = {{")
         lines += [
-            f"    {{{lang_id[lang]}, th_lang_trigrams_{lang_code[lang]}, {len(trigrams)}}},"
+            f"    {{{lang_id[lang]}, th_lang_keys_{lang_code[lang]}, "
+            f"th_lang_ranks_{lang_code[lang]}, {len(trigrams)}}},"
             for lang, trigrams in entries
         ]
         lines.append("};")
