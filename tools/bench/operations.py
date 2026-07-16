@@ -340,6 +340,7 @@ OPERATIONS: dict[str, Operation] = {
     "idna": Operation("normalize 4,100 URLs with Unicode hosts", "ms"),
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
     "links-filter": Operation("extract filtered page links", "us"),
+    "links-external": Operation("extract links outside the base site", "ms"),
 }
 
 
@@ -678,6 +679,11 @@ _URL_SHAPES = (
 )
 _URL_BATCH = tuple(shape.format(index=index) for index in range(20) for shape in _URL_SHAPES)
 _IDNA_URLS: Final[tuple[str, ...]] = tuple(f"https://münchen-{index}.example/" for index in range(4100))
+_EXTERNAL_LINKS_HTML: Final = "".join(
+    f'<a href="https://{host}/post/{index}">link</a>'
+    for index in range(300)
+    for host in (f"news-{index}.example.co.uk", f"tenant-{index}.github.io", f"bucket-{index}.s3.amazonaws.com")
+)
 
 _ENCODING_ASCII = "The quick brown fox jumps over the lazy dog near the river bank early today. "
 _ENCODING_FRENCH = "Précédemment, la créativité française était très développée près de Paris ici. "
@@ -882,4 +888,5 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),
     ),
     "links-filter": _readpath_cases,
+    "links-external": lambda: (("900 mixed-site links", _EXTERNAL_LINKS_HTML),),
 }

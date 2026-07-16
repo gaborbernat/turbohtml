@@ -17,6 +17,17 @@
 
 enum { PSL_NORMAL = 0, PSL_WILDCARD = 1, PSL_EXCEPTION = 2 };
 
+static int rule_compare(const Py_UCS4 *candidate, Py_ssize_t length, const char *rule, Py_ssize_t rule_length) {
+    Py_ssize_t shared = length < rule_length ? length : rule_length;
+    for (Py_ssize_t index = 0; index < shared; index++) {
+        Py_UCS4 right = (unsigned char)rule[index];
+        if (candidate[index] != right) {
+            return candidate[index] < right ? -1 : 1;
+        }
+    }
+    return length < rule_length ? -1 : length > rule_length;
+}
+
 /* Is the single label [cand, cand+len) an IANA TLD? Bucketed on its first byte in tld_table.h, matched
    case-insensitively; a digit-led label (an IPv4 octet) buckets into an empty range and falls through to 0. */
 static int is_iana_tld(const Py_UCS4 *cand, Py_ssize_t len) {
@@ -25,19 +36,19 @@ static int is_iana_tld(const Py_UCS4 *cand, Py_ssize_t len) {
     if (first > 255) {
         return 0;
     }
-    for (int index = th_tld_first[first]; index < th_tld_first[first + 1]; index++) {
-        if (th_tld_table[index].name_len != len) {
-            continue;
-        }
-        int matched = 1;
-        for (Py_ssize_t offset = 0; offset < len; offset++) {
-            if ((Py_UCS4)(unsigned char)th_tld_table[index].name[offset] != cand[offset]) {
-                matched = 0;
-                break;
-            }
-        }
-        if (matched) {
+    int low = th_tld_first[first];
+    int high = th_tld_first[first + 1];
+    while (low < high) {
+        int middle = low + (high - low) / 2;
+        const th_tld_entry *entry = &th_tld_table[middle];
+        int order = rule_compare(cand, len, entry->name, entry->name_len);
+        if (order == 0) {
             return 1;
+        }
+        if (order < 0) {
+            high = middle;
+        } else {
+            low = middle + 1;
         }
     }
     return 0;
@@ -51,19 +62,19 @@ static int psl_kind(const Py_UCS4 *cand, Py_ssize_t len) {
     if (first > 255) {
         return -1;
     }
-    for (int index = th_psl_first[first]; index < th_psl_first[first + 1]; index++) {
-        if (th_psl_table[index].name_len != len) {
-            continue;
+    int low = th_psl_first[first];
+    int high = th_psl_first[first + 1];
+    while (low < high) {
+        int middle = low + (high - low) / 2;
+        const th_psl_entry *entry = &th_psl_table[middle];
+        int order = rule_compare(cand, len, entry->name, entry->name_len);
+        if (order == 0) {
+            return entry->kind;
         }
-        int matched = 1;
-        for (Py_ssize_t offset = 0; offset < len; offset++) {
-            if ((Py_UCS4)(unsigned char)th_psl_table[index].name[offset] != cand[offset]) {
-                matched = 0;
-                break;
-            }
-        }
-        if (matched) {
-            return th_psl_table[index].kind;
+        if (order < 0) {
+            high = middle;
+        } else {
+            low = middle + 1;
         }
     }
     return -1;

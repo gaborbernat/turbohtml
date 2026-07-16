@@ -841,6 +841,11 @@ def links_filter(text: str) -> None:
     _extract_links(text, _LINKS_BASE)
 
 
+def links_external(text: str) -> None:
+    """Collect links outside the base URL's registrable domain."""
+    _extract_links(text, "https://www.example.co.uk/", external_only=True)
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
     "build": (build, "turbohtml"),
     "build-e": (build_e, "turbohtml"),
@@ -937,4 +942,5 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "detect-language": (detect_language, "turbohtml"),
     "urls-clean": (urls_clean, "turbohtml"),
     "links-filter": (links_filter, "turbohtml"),
+    "links-external": (links_external, "turbohtml"),
 }
