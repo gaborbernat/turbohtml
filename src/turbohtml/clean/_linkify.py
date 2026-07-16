@@ -245,6 +245,11 @@ class Linker:
             url = matched
         else:
             url = "http://" + matched
+        if len(self.callbacks) == 1 and self.callbacks[0] is nofollow:
+            attrs = {"href": url}
+            if _is_web_url(url):
+                attrs["rel"] = "nofollow"
+            return Element("a", attrs, [Text(matched)])
         link = LinkCandidate(url, matched)
         for callback in self.callbacks:
             result = callback(link)

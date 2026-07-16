@@ -175,6 +175,11 @@ def test_linkify_email_when_enabled() -> None:
     assert out == 'reach <a href="mailto:bob@example.com">bob@example.com</a> now'
 
 
+def test_linkify_default_callback_leaves_email_rel_absent() -> None:
+    out = linkify("reach bob@example.com now", Linkify(parse_email=True))
+    assert out == 'reach <a href="mailto:bob@example.com">bob@example.com</a> now'
+
+
 def test_linkify_email_local_part_ends_at_unicode_space() -> None:
     # Unicode whitespace bounds the email local part the way an ASCII space does (issue #53)
     out = linkify("foo\xa0bar@example.com", Linkify(parse_email=True, callbacks=_no_callbacks()))

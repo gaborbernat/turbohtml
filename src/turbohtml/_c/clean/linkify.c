@@ -138,18 +138,28 @@ static int is_known_tld(int kind, const void *data, Py_ssize_t start, Py_ssize_t
     if (first < 'a' || first > 'z') {
         return tuple_has_label(extra_tlds, kind, data, start, end);
     }
-    for (int index = th_tld_first[first]; index < th_tld_first[first + 1]; index++) {
-        if (th_tld_table[index].name_len != length) {
-            continue;
-        }
-        int matched = 1;
-        for (Py_ssize_t offset = 0; offset < length; offset++) {
-            if ((Py_UCS4)(unsigned char)th_tld_table[index].name[offset] != lower_ascii(READ(start + offset))) {
-                matched = 0;
+    int low = th_tld_first[first];
+    int high = th_tld_first[first + 1];
+    while (low < high) {
+        int middle = low + (high - low) / 2;
+        Py_ssize_t compared = length < th_tld_table[middle].name_len ? length : th_tld_table[middle].name_len;
+        int order = 0;
+        for (Py_ssize_t offset = 0; offset < compared; offset++) {
+            Py_UCS4 candidate = lower_ascii(READ(start + offset));
+            Py_UCS4 table = (unsigned char)th_tld_table[middle].name[offset];
+            if (candidate != table) {
+                order = candidate < table ? -1 : 1;
                 break;
             }
         }
-        if (matched) {
+        if (order == 0 && length != th_tld_table[middle].name_len) {
+            order = length < th_tld_table[middle].name_len ? -1 : 1;
+        }
+        if (order < 0) {
+            high = middle;
+        } else if (order > 0) {
+            low = middle + 1;
+        } else {
             return 1;
         }
     }
