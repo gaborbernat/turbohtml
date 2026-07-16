@@ -329,6 +329,7 @@ OPERATIONS: dict[str, Operation] = {
     "specificity": Operation("CSS selector specificity", "us"),
     "xpath": Operation("XPath feature surface (9.6 kB)", "us"),
     "transform": Operation("XSLT transform a catalog (120 rows)", "us"),
+    "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
     "minify-css": Operation("minify CSS", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
@@ -612,6 +613,25 @@ def _transform_cases() -> tuple[tuple[str, object], ...]:
     return (("catalog (120 rows)", (_XSLT_SHEET, _XSLT_SOURCE)),)
 
 
+_XSLT_SORT_SHEET: Final = (
+    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+    '<xsl:template match="/"><out><xsl:for-each select="r/n">'
+    '<xsl:sort select="@key" data-type="number"/><xsl:value-of select="@key"/><xsl:text>,</xsl:text>'
+    "</xsl:for-each></out></xsl:template></xsl:stylesheet>"
+)
+
+
+def _transform_sort_cases() -> tuple[tuple[str, object], ...]:
+    """Return shuffled numeric sorts at sizes that expose node-set scaling."""
+    return tuple(
+        (
+            f"numeric sort ({rows:,} rows)",
+            (_XSLT_SORT_SHEET, "<r>" + "".join(f'<n key="{index * 73 % rows}"/>' for index in range(rows)) + "</r>"),
+        )
+        for rows in (120, 2_000)
+    )
+
+
 # one instruction unit weighted toward the elements late in the old is_xsl probe chain: copy-of, variable, number,
 # comment and message (the last probe). Instantiating each dispatched through a chain of is_xsl calls that re-tested
 # the xsl prefix per candidate; the classify-once switch (#605) tests it once, so a late instruction stops paying for
@@ -866,6 +886,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "specificity": lambda: _TRANSLATE_CASES,
     "xpath": _xpath_cases,
     "transform": _transform_cases,
+    "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,
     "minify-css": _minify_cases,
     "minify-js": _minify_js_cases,

@@ -1917,8 +1917,6 @@ static int eval_test(engine *eng, th_node *instruction, int *out_bool) {
 /* ---- sorting -------------------------------------------------------------- */
 
 typedef struct {
-    th_node *node;
-    Py_ssize_t attr;
     Py_UCS4 *key;
     Py_ssize_t key_len;
     double number;
@@ -1929,6 +1927,53 @@ typedef struct {
     int numeric;
     int descending;
 } sort_spec;
+
+typedef struct {
+    Py_ssize_t index;
+    const sort_item *items;
+    const sort_spec *specs;
+    int nspecs;
+} sort_row;
+
+static int sort_row_order(const void *left_ptr, const void *right_ptr) {
+    const sort_row *left = left_ptr;
+    const sort_row *right = right_ptr;
+    for (int spec = 0; spec < left->nspecs; spec++) {
+        const sort_item *left_item = &left->items[left->index * left->nspecs + spec];
+        const sort_item *right_item = &right->items[right->index * right->nspecs + spec];
+        int cmp;
+        if (left->specs[spec].numeric) {
+            int left_nan = isnan(left_item->number);
+            int right_nan = isnan(right_item->number);
+            if (left_nan && right_nan) {
+                cmp = 0;
+            } else if (left_nan) {
+                cmp = -1;
+            } else if (right_nan) {
+                cmp = 1;
+            } else {
+                cmp = left_item->number < right_item->number ? -1 : (left_item->number > right_item->number ? 1 : 0);
+            }
+        } else {
+            Py_ssize_t shared = left_item->key_len < right_item->key_len ? left_item->key_len : right_item->key_len;
+            cmp = 0;
+            for (Py_ssize_t position = 0; position < shared && cmp == 0; position++) {
+                cmp = left_item->key[position] < right_item->key[position]
+                          ? -1
+                          : (left_item->key[position] > right_item->key[position] ? 1 : 0);
+            }
+            if (cmp == 0) {
+                cmp =
+                    left_item->key_len < right_item->key_len ? -1 : (left_item->key_len > right_item->key_len ? 1 : 0);
+            }
+        }
+        if (cmp != 0) {
+            return left->specs[spec].descending ? -cmp : cmp;
+        }
+    }
+    /* Source order is the final key so qsort preserves XSLT stability. */
+    return (left->index > right->index) - (left->index < right->index);
+}
 
 /* Compile the xsl:sort children of an instruction into sort specs. Returns the count
    (0 when none), or -1 on error, filling specs (up to `max`). */
@@ -1976,7 +2021,6 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
     if (set->len < 2) {
         return 0;
     }
-    /* Precompute each spec's key per item, then insertion-sort (stable). */
     sort_item *items = PyMem_Malloc((size_t)set->len * (size_t)nspecs * sizeof(sort_item));
     if (items == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
         return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -1984,8 +2028,6 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
     for (Py_ssize_t index = 0; index < set->len; index++) {
         for (int spec = 0; spec < nspecs; spec++) {
             sort_item *slot = &items[index * nspecs + spec];
-            slot->node = set->items[index].node;
-            slot->attr = set->items[index].attr;
             xp_result value;
             int status = eval_program(eng, specs[spec].prog, set->items[index].node, index + 1, set->len, &value);
             if (status < 0) {
@@ -2010,8 +2052,7 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
             slot->number = parse_number(slot->key, slot->key_len);
         }
     }
-    /* Stable insertion sort over row indices. */
-    Py_ssize_t *order = PyMem_Malloc((size_t)set->len * sizeof(Py_ssize_t));
+    sort_row *order = PyMem_Malloc((size_t)set->len * sizeof(sort_row));
     if (order == NULL) {                                                 /* GCOVR_EXCL_BR_LINE: alloc */
         for (Py_ssize_t index = 0; index < set->len * nspecs; index++) { /* GCOVR_EXCL_LINE */
             PyMem_Free(items[index].key);                                /* GCOVR_EXCL_LINE */
@@ -2020,53 +2061,9 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
         return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < set->len; index++) {
-        order[index] = index;
+        order[index] = (sort_row){index, items, specs, nspecs};
     }
-    for (Py_ssize_t index = 1; index < set->len; index++) {
-        Py_ssize_t current = order[index];
-        Py_ssize_t probe = index - 1;
-        while (probe >= 0) {
-            Py_ssize_t compare = order[probe];
-            int decision = 0;
-            for (int spec = 0; spec < nspecs && decision == 0; spec++) {
-                sort_item *a = &items[compare * nspecs + spec];
-                sort_item *b = &items[current * nspecs + spec];
-                int cmp;
-                if (specs[spec].numeric) {
-                    int a_nan = isnan(a->number);
-                    int b_nan = isnan(b->number);
-                    if (a_nan && b_nan) {
-                        cmp = 0;
-                    } else if (a_nan) {
-                        cmp = -1;
-                    } else if (b_nan) {
-                        cmp = 1;
-                    } else {
-                        cmp = a->number < b->number ? -1 : (a->number > b->number ? 1 : 0);
-                    }
-                } else {
-                    Py_ssize_t min_len = a->key_len < b->key_len ? a->key_len : b->key_len;
-                    cmp = 0;
-                    for (Py_ssize_t pos = 0; pos < min_len && cmp == 0; pos++) {
-                        cmp = a->key[pos] < b->key[pos] ? -1 : (a->key[pos] > b->key[pos] ? 1 : 0);
-                    }
-                    if (cmp == 0) {
-                        cmp = a->key_len < b->key_len ? -1 : (a->key_len > b->key_len ? 1 : 0);
-                    }
-                }
-                if (specs[spec].descending) {
-                    cmp = -cmp;
-                }
-                decision = cmp;
-            }
-            if (decision <= 0) {
-                break;
-            }
-            order[probe + 1] = order[probe];
-            probe--;
-        }
-        order[probe + 1] = current;
-    }
+    qsort(order, (size_t)set->len, sizeof(sort_row), sort_row_order);
     xp_item *sorted = PyMem_Malloc((size_t)set->len * sizeof(xp_item));
     if (sorted == NULL) {                                                /* GCOVR_EXCL_BR_LINE: alloc */
         PyMem_Free(order);                                               /* GCOVR_EXCL_LINE */
@@ -2077,7 +2074,7 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
         return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < set->len; index++) {
-        sorted[index] = set->items[order[index]];
+        sorted[index] = set->items[order[index].index];
     }
     memcpy(set->items, sorted, (size_t)set->len * sizeof(xp_item));
     PyMem_Free(sorted);
