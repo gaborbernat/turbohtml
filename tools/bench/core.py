@@ -200,6 +200,11 @@ def validate_rng(case: tuple[str, str]) -> None:
     validator.validate(turbohtml.parse_xml(document))
 
 
+def compile_rng(schema: str) -> None:
+    """Measure schema construction rather than the cached validation path."""
+    _RelaxNG(schema)
+
+
 def parse_scripting(text: str) -> None:
     """Parse with the WHATWG scripting flag on, so <noscript> content tokenizes as raw text."""
     turbohtml.parse(text, scripting=True)
@@ -856,6 +861,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse-xml": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
+    "compile-rng": (compile_rng, "turbohtml"),
     "parse-scripting": (parse_scripting, "turbohtml"),
     "parse-locations": (parse_locations, "turbohtml"),
     "parse-shadow": (parse_shadow, "turbohtml"),

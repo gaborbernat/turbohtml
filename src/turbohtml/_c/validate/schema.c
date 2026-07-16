@@ -415,17 +415,25 @@ typedef struct {
 
 typedef struct pattern pattern;
 
+typedef struct def_part {
+    th_node *node;
+    struct def_part *next;
+} def_part;
+
 typedef struct def_entry {
     const Py_UCS4 *name;
     Py_ssize_t len;
     th_node *first; /* first <define> element for this name */
+    def_part *extra, *last;
     pattern *built; /* memoized pattern, NULL until first resolved */
     int building;   /* recursion guard */
 } def_entry;
 
 typedef struct {
     def_entry *items;
+    size_t *slots;
     Py_ssize_t len, cap;
+    size_t slot_cap;
 } def_vec;
 
 typedef struct th_schema {

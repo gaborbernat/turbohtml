@@ -296,11 +296,19 @@ def test_rng_recursive_attribute_ref() -> None:
 
 
 def test_rng_many_defines_growth() -> None:
-    defines = "".join(f'<define name="d{n}"><element name="e{n}"><text/></element></define>' for n in range(12))
-    refs = "".join(f'<ref name="d{n}"/>' for n in range(12))
-    body = "".join(f"<e{n}>x</e{n}>" for n in range(12))
+    numbers = range(21)
+    defines = "".join(
+        f'<define name="d{number}"><element name="e{number}"><text/></element></define>' for number in numbers
+    )
+    refs = "".join(f'<ref name="d{number}"/>' for number in numbers)
+    body = "".join(f"<e{number}>x</e{number}>" for number in numbers)
     schema = rgrammar(f'<start><element name="r"><group>{refs}</group></element></start>{defines}')
     assert rng_ok(schema, f"<r>{body}</r>")
+
+
+def test_rng_many_defines_missing_ref() -> None:
+    defines = "".join(f'<define name="d{number}"><empty/></define>' for number in (*range(10), 19, 20))
+    assert not rng_ok(rgrammar(f'<start><ref name="missing"/></start>{defines}'), "<r/>")
 
 
 def test_rng_start_requires_two_top_level() -> None:
@@ -1168,15 +1176,23 @@ def test_rng_data_with_whitespace_and_nonparam_child() -> None:
     assert not rng_ok(schema, "<s>a</s>")
 
 
-def test_rng_multiple_defines_dedup_and_combine() -> None:
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param("<r><a>1</a></r>", id="first"),
+        pytest.param("<r><b>2</b></r>", id="second"),
+        pytest.param("<r><c>3</c></r>", id="third"),
+    ],
+)
+def test_rng_multiple_defines_dedup_and_combine(document: str) -> None:
     schema = (
         f'<grammar xmlns="{R}"><start><element name="r"><ref name="x"/></element></start>'
         '<define name="x"><element name="a"><text/></element></define>'
         '<define name="x" combine="choice"><element name="b"><text/></element></define>'
+        '<define name="x" combine="choice"><element name="c"><text/></element></define>'
         '<define name="y"><empty/></define></grammar>'
     )
-    assert rng_ok(schema, "<r><a>1</a></r>")
-    assert rng_ok(schema, "<r><b>2</b></r>")
+    assert rng_ok(schema, document)
 
 
 def test_schema_with_unnamespaced_sequence_is_not_recognized() -> None:

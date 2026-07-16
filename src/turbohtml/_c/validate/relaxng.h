@@ -135,6 +135,107 @@ static pattern *pat_onemore(th_schema *schema, pattern *p1) {
 
 static pattern *rng_resolve(th_schema *schema, int def_index);
 
+static uint64_t def_hash(const Py_UCS4 *name, Py_ssize_t len) {
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        hash ^= name[index];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static void def_slot_add(def_vec *defines, Py_ssize_t index) {
+    def_entry *entry = &defines->items[index];
+    size_t slot = (size_t)def_hash(entry->name, entry->len) & (defines->slot_cap - 1);
+    while (defines->slots[slot] != 0) {
+        slot = (slot + 1) & (defines->slot_cap - 1);
+    }
+    defines->slots[slot] = (size_t)index + 1;
+}
+
+static int def_index(th_schema *schema) {
+    def_vec *defines = &schema->defines;
+    size_t cap = defines->slot_cap == 0 ? 32 : defines->slot_cap * 2;
+    size_t *slots = arena_alloc(&schema->mem, cap * sizeof(size_t));
+    if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;       /* GCOVR_EXCL_LINE */
+    }
+    memset(slots, 0, cap * sizeof(size_t));
+    defines->slots = slots;
+    defines->slot_cap = cap;
+    for (Py_ssize_t index = 0; index < defines->len; index++) {
+        def_slot_add(defines, index);
+    }
+    return 0;
+}
+
+static Py_ssize_t def_find(const def_vec *defines, const Py_UCS4 *name, Py_ssize_t len) {
+    if (defines->slots == NULL) {
+        for (Py_ssize_t index = 0; index < defines->len; index++) {
+            if (u_eq_u(defines->items[index].name, defines->items[index].len, name, len)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+    size_t slot = (size_t)def_hash(name, len) & (defines->slot_cap - 1);
+    while (defines->slots[slot] != 0) {
+        Py_ssize_t index = (Py_ssize_t)defines->slots[slot] - 1;
+        if (u_eq_u(defines->items[index].name, defines->items[index].len, name, len)) {
+            return index;
+        }
+        slot = (slot + 1) & (defines->slot_cap - 1);
+    }
+    return -1;
+}
+
+static int def_add(th_schema *schema, const th_node_attr *name, th_node *node) {
+    def_vec *defines = &schema->defines;
+    Py_ssize_t index = def_find(defines, name->value, name->value_len);
+    if (index >= 0) {
+        def_entry *entry = &defines->items[index];
+        def_part *part = arena_alloc(&schema->mem, sizeof(*part));
+        if (part == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;      /* GCOVR_EXCL_LINE */
+        }
+        part->node = node;
+        part->next = NULL;
+        if (entry->last == NULL) {
+            entry->extra = part;
+        } else {
+            entry->last->next = part;
+        }
+        entry->last = part;
+        return 0;
+    }
+    if (defines->len == defines->cap) {
+        Py_ssize_t cap = defines->cap ? defines->cap * 2 : 8;
+        def_entry *items = arena_alloc(&schema->mem, (size_t)cap * sizeof(def_entry));
+        if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;       /* GCOVR_EXCL_LINE */
+        }
+        if (defines->len > 0) {
+            memcpy(items, defines->items, (size_t)defines->len * sizeof(def_entry));
+        }
+        defines->items = items;
+        defines->cap = cap;
+    }
+    index = defines->len++;
+    defines->items[index] = (def_entry){
+        .name = name->value,
+        .len = name->value_len,
+        .first = node,
+    };
+    if ((defines->slots == NULL && defines->len == 8) ||
+        (defines->slots != NULL && (size_t)defines->len * 2 > defines->slot_cap)) {
+        return def_index(schema);
+    }
+    if (defines->slots != NULL) {
+        def_slot_add(defines, index);
+    }
+    return 0;
+}
+
 /* The RELAX NG `ns` in scope at `node` (inherited from the nearest ancestor-or-self
    ns attribute), or (NULL, 0) for no namespace. */
 static void rng_scope_ns(th_tree *tree, th_node *node, const Py_UCS4 **uri, Py_ssize_t *uri_len) {
@@ -434,13 +535,11 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
     }
     if (is_schema_el(tree, node, RNG_NS, "ref")) {
         const th_node_attr *name = attr_exact(tree, node, "name", 4);
-        for (Py_ssize_t index = 0; index < schema->defines.len; index++) {
-            if (u_eq_u(schema->defines.items[index].name, schema->defines.items[index].len, name->value,
-                       name->value_len)) {
-                pattern *node_pat = pat_new(schema, P_REF);
-                node_pat->def_index = (int)index;
-                return node_pat;
-            }
+        Py_ssize_t index = def_find(&schema->defines, name->value, name->value_len);
+        if (index >= 0) {
+            pattern *node_pat = pat_new(schema, P_REF);
+            node_pat->def_index = (int)index;
+            return node_pat;
         }
         return schema->p_notallowed;
     }
@@ -454,17 +553,9 @@ static pattern *rng_resolve(th_schema *schema, int def_index) {
     }
     entry->built = schema->p_empty; /* placeholder guards direct build recursion */
     pattern *combined = NULL;
-    for (th_node *define = schema->root->first_child; define != NULL; define = define->next_sibling) {
-        if (!is_schema_el(schema->tree, define, RNG_NS, "define")) {
-            continue;
-        }
-        const th_node_attr *name = attr_exact(schema->tree, define, "name", 4);
-        if (name == NULL) {
-            continue;
-        }
-        if (!u_eq_u(name->value, name->value_len, entry->name, entry->len)) {
-            continue;
-        }
+    th_node *define = entry->first;
+    def_part *part = entry->extra;
+    for (;;) {
         pattern *body = rng_build_children(schema, define, NULL);
         const th_node_attr *combine = attr_exact(schema->tree, define, "combine", 7);
         int interleave = 0;
@@ -478,10 +569,12 @@ static pattern *rng_resolve(th_schema *schema, int def_index) {
         } else {
             combined = pat_choice(schema, combined, body);
         }
+        if (part == NULL) {
+            break;
+        }
+        define = part->node;
+        part = part->next;
     }
-    if (combined == NULL) {              /* GCOVR_EXCL_BR_LINE: every def_index has at least one matching define */
-        combined = schema->p_notallowed; /* GCOVR_EXCL_LINE */
-    } /* GCOVR_EXCL_LINE: llvm miscredits the closing brace of the unexecuted guard */
     entry->built = combined;
     return entry->built;
 }
@@ -880,32 +973,10 @@ static int rng_compile(th_schema *schema) {
             if (name == NULL) {
                 continue;
             }
-            int found = 0;
-            for (Py_ssize_t index = 0; index < schema->defines.len && !found; index++) {
-                found = u_eq_u(schema->defines.items[index].name, schema->defines.items[index].len, name->value,
-                               name->value_len);
+            if (def_add(schema, name, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+                PyErr_NoMemory();                   /* GCOVR_EXCL_LINE */
+                return 0;                           /* GCOVR_EXCL_LINE */
             }
-            if (found) {
-                continue;
-            }
-            if (schema->defines.len == schema->defines.cap) {
-                Py_ssize_t cap = schema->defines.cap ? schema->defines.cap * 2 : 8;
-                def_entry *items = arena_alloc(&schema->mem, (size_t)cap * sizeof(def_entry));
-                if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-                    return 0;        /* GCOVR_EXCL_LINE */
-                }
-                if (schema->defines.len > 0) {
-                    memcpy(items, schema->defines.items, (size_t)schema->defines.len * sizeof(def_entry));
-                }
-                schema->defines.items = items;
-                schema->defines.cap = cap;
-            }
-            def_entry *entry = &schema->defines.items[schema->defines.len++];
-            entry->name = name->value;
-            entry->len = name->value_len;
-            entry->first = child;
-            entry->built = NULL;
-            entry->building = 0;
         }
     }
     th_node *start = first_schema_child(tree, schema->root, RNG_NS, "start");

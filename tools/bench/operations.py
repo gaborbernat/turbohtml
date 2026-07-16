@@ -180,6 +180,11 @@ _VALIDATE_RNG = (
     "</element></define>"
     "</grammar>"
 )
+_COMPILE_RNG: Final = (
+    '<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><ref name="target"/></start>'
+    + "".join(f'<define name="definition{index}"><empty/></define>' for index in range(1_023))
+    + '<define name="target"><element name="target"><text/></element></define></grammar>'
+)
 
 _SANITIZE_TEMPLATES = dedent("""\
     <article class=card>
@@ -264,6 +269,7 @@ OPERATIONS: dict[str, Operation] = {
     "parse-xml": Operation("parse XML to a tree", "us"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
+    "compile-rng": Operation("compile a RELAX NG schema", "us"),
     "parse-scripting": Operation("parse to a tree (scripting on)", "us"),
     "parse-locations": Operation("parse to a tree (source locations)", "us"),
     "parse-shadow": Operation("parse declarative shadow roots", "us"),
@@ -801,6 +807,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
     ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
+    "compile-rng": lambda: (("catalog grammar", _VALIDATE_RNG), ("1,024 definitions", _COMPILE_RNG)),
     "parse-scripting": _readpath_cases,  # the real pages carry <noscript>, so the scripting rawtext path runs
     "parse-locations": _readpath_cases,  # real attribute-dense pages exercise the per-attribute span stamping
     "parse-shadow": lambda: (("component gallery", _SHADOW_DOC),),
