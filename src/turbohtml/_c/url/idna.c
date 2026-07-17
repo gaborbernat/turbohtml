@@ -93,6 +93,9 @@ static uint8_t ccc_of(Py_UCS4 cp) {
     return 0;
 }
 
+/* The quick-check fast path serves th_url_to_ascii alone, which the standalone fuzz build drops with the rest of the
+   CPython boundary; gate these two helpers with it so that build has no unused function. */
+#ifndef TH_IDNA_STANDALONE
 /* Return `cp`'s NFC quick-check value: 0 Yes, 1 No, 2 Maybe. */
 static uint8_t qc_of(Py_UCS4 cp) {
     if (cp < th_idna_qc[0].first) {
@@ -125,6 +128,7 @@ static int nfc_is_normalized(const Py_UCS4 *input, Py_ssize_t len) {
     }
     return 1;
 }
+#endif /* TH_IDNA_STANDALONE */
 
 /* The full canonical decomposition row for `cp`, or NULL when it does not decompose (Hangul is handled by the caller).
  */
