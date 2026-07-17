@@ -267,6 +267,21 @@ def test_microdata_function_base_url_omitted_is_verbatim() -> None:
             id="itemref-resolves-past-non-matching-ids",
         ),
         pytest.param(
+            '<div id=a><span itemprop="a">first</span></div>'
+            '<div id=ba><span itemprop="ba">different length</span></div>'
+            '<div id=q><span itemprop="q">collision</span></div>'
+            '<div id=a><span itemprop="a">duplicate</span></div>'
+            '<div itemscope itemref="a ba q missing"></div>',
+            [
+                MicrodataItem(
+                    type=None,
+                    id=None,
+                    properties={"a": ["first"], "ba": ["different length"], "q": ["collision"]},
+                )
+            ],
+            id="itemref-keeps-first-duplicate-id-after-collision",
+        ),
+        pytest.param(
             '<div itemscope itemref><span itemprop="a">x</span></div>',
             [MicrodataItem(type=None, id=None, properties={"a": ["x"]})],
             id="valueless-itemref-ignored",

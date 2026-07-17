@@ -901,6 +901,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "socialcard": (socialcard, "turbohtml"),
     "structured": (structured, "turbohtml"),
     "microdata": (microdata, "turbohtml"),
+    "microdata-itemref": (microdata, "turbohtml"),
     "syndication": (syndication, "turbohtml"),
     "sanitize": (sanitize, "turbohtml"),
     "sanitize-templates": (sanitize_templates, "turbohtml"),
