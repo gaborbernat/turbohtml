@@ -314,7 +314,7 @@ static TH_HOT int th_dec_euc_jp(th_decoder *dec, Py_UCS4 *point) {
     }
 }
 
-/* The spec's "index gb18030 ranges code point", a binary search over the sorted range starts. */
+/* The spec's "index gb18030 ranges code point", using fixed rounds because four-byte pointers vary independently. */
 static int th_dec_gb18030_range(uint32_t pointer, Py_UCS4 *point) {
     if ((pointer > 39419 && pointer < 189000) || pointer > 1237575) {
         return 0;
@@ -323,17 +323,15 @@ static int th_dec_gb18030_range(uint32_t pointer, Py_UCS4 *point) {
         *point = 0xE7C7;
         return 1;
     }
-    size_t low = 0;
-    size_t high = sizeof(th_gb18030_ranges) / sizeof(th_gb18030_ranges[0]);
-    while (low + 1 < high) {
-        size_t mid = low + (high - low) / 2;
-        if (th_gb18030_ranges[mid].pointer <= pointer) {
-            low = mid;
-        } else {
-            high = mid;
-        }
+    size_t left = 0;
+    size_t remaining = sizeof(th_gb18030_ranges) / sizeof(th_gb18030_ranges[0]);
+    while (remaining > 1) {
+        size_t half = remaining / 2;
+        size_t middle = left + half;
+        left = th_gb18030_ranges[middle].pointer <= pointer ? middle : left;
+        remaining -= half;
     }
-    *point = th_gb18030_ranges[low].code_point + (pointer - th_gb18030_ranges[low].pointer);
+    *point = th_gb18030_ranges[left].code_point + (pointer - th_gb18030_ranges[left].pointer);
     return 1;
 }
 

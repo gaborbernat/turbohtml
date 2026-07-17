@@ -148,6 +148,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "markup-op": ("markup-op-book", lambda: ("striptags", _book_html())),
     "detect": ("detect-book", lambda: ("find", _book_text())),
     "normalize": ("normalize-decomposed", lambda: INPUTS["normalize"]()[2][1]),
+    "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 
 

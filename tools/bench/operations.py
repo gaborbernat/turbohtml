@@ -775,6 +775,10 @@ def _decode_cases() -> tuple[tuple[str, object], ...]:
     japanese = _decode_page(_ENCODING_JAPANESE)
     return (
         ("shift_jis japanese (8 kB)", ("shift_jis", japanese.encode("cp932"))),
+        (
+            "gb18030 astral (16 kB)",
+            ("gb18030", "".join(chr(0x10000 + (index * 7919) % 0xE0000) for index in range(4096)).encode("gb18030")),
+        ),
         ("windows-1252 french (9 kB)", ("windows-1252", _decode_page(_ENCODING_FRENCH).encode("cp1252"))),
         ("gb18030 japanese (8 kB)", ("gb18030", japanese.encode("gb18030"))),
         ("iso-2022-jp japanese (8 kB)", ("iso-2022-jp", japanese.encode("iso2022_jp"))),
