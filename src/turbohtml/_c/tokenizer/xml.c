@@ -14,6 +14,8 @@
 #include "dom/tree.h"
 #include "dom/tree_internal.h" /* arena, node_new, node_append, copy_input_span */
 
+#include "core/vec.h"
+
 #include <string.h>
 
 static int xml_is_space(Py_UCS4 ch) {
@@ -166,13 +168,20 @@ static int scratch_push(xml_parser *parser, Py_UCS4 ch) {
 /* Widen the input range [start, start+len) into the reusable name buffer. */
 static Py_UCS4 *widen(xml_parser *parser, Py_ssize_t start, Py_ssize_t len) {
     if (len > parser->names_cap) {
-        Py_UCS4 *grown = PyMem_Realloc(parser->names, (size_t)len * sizeof(Py_UCS4));
+        size_t cap;
+        size_t bytes;
+        int grew = th_grow_cap((size_t)len, (size_t)parser->names_cap, 64, sizeof(Py_UCS4), &cap, &bytes);
+        if (!grew) {                  /* GCOVR_EXCL_BR_LINE: size overflow needs an input no allocation could hold */
+            parser->tree->failed = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return NULL;              /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        }
+        Py_UCS4 *grown = PyMem_Realloc(parser->names, bytes);
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         parser->names = grown;
-        parser->names_cap = len;
+        parser->names_cap = (Py_ssize_t)cap;
     }
     for (Py_ssize_t index = 0; index < len; index++) {
         parser->names[index] = cp(parser, start + index);
@@ -183,15 +192,21 @@ static Py_UCS4 *widen(xml_parser *parser, Py_ssize_t start, Py_ssize_t len) {
 /* Encode the input range [start, start+len) as UTF-8 into the reusable buffer;
  *out_len receives the byte count. NULL on allocation failure. */
 static const char *encode_utf8(xml_parser *parser, Py_ssize_t start, Py_ssize_t len, Py_ssize_t *out_len) {
-    Py_ssize_t needed = len * 4;
-    if (needed > parser->u8_cap) {
-        char *grown = PyMem_Realloc(parser->u8, (size_t)needed);
+    if (len > parser->u8_cap) {
+        size_t cap;
+        size_t bytes;
+        int grew = th_grow_cap((size_t)len, (size_t)parser->u8_cap, 64, 4, &cap, &bytes);
+        if (!grew) {                  /* GCOVR_EXCL_BR_LINE: size overflow needs an input no allocation could hold */
+            parser->tree->failed = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return NULL;              /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        }
+        char *grown = PyMem_Realloc(parser->u8, bytes);
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         parser->u8 = grown;
-        parser->u8_cap = needed;
+        parser->u8_cap = (Py_ssize_t)cap;
     }
     Py_ssize_t out = 0;
     for (Py_ssize_t index = 0; index < len; index++) {

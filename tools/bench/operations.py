@@ -267,6 +267,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow": Operation("attach a shadow tree with slots and flatten", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-xml": Operation("parse XML to a tree", "us"),
+    "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
     "compile-rng": Operation("compile a RELAX NG schema", "us"),
@@ -805,6 +806,12 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "shadow": lambda: _ROWS,
     "parse": _parse_cases,
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
+    "parse-xml-names": lambda: (
+        (
+            "1k growing attributes",
+            "<r>" + "".join("<e " + "a" * length + '="x"/>' for length in range(1, 1_001)) + "</r>",
+        ),
+    ),
     "validate": lambda: (
         ("catalog XSD + doc", (_VALIDATE_XSD, _VALIDATE_DOC)),
         ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
