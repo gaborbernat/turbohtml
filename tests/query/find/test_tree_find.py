@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 # document order of elements: html, head, body, section, h2, p, p, a
 _DOC = '<section><h2 id="t">T</h2><p class="lead big">one</p><p class="big">two</p><a href="/x">l</a></section>'
+_LONG_NEEDLE: Final[str] = "a" * 65 + "ba"
 
 
 def _tags(elements: list[Element]) -> list[str]:
@@ -485,6 +486,7 @@ def test_text_callable_error_propagates(query: Callable[[Document], object]) -> 
         pytest.param(
             "<section><p>Buy <b>now</b></p></section>", re.compile(r"Buynow"), [], id="literal-longer-than-text"
         ),
+        pytest.param("<section><p>Buy now</p></section>", re.compile(r""), ["p"], id="literal-empty"),
         # a literal can mismatch partway in before matching at a later offset
         pytest.param(
             "<section><p>no not now</p></section>", re.compile(r"now"), ["p"], id="literal-partial-then-match"
@@ -496,6 +498,24 @@ def test_text_callable_error_propagates(query: Callable[[Document], object]) -> 
 def test_text_literal_regex_searches_substring(html: str, text_filter: re.Pattern[str], tags: list[str]) -> None:
     section = _el(parse(html).find("section"))
     assert _tags(section.find_all(text=text_filter)) == tags
+
+
+@pytest.mark.parametrize(
+    ("text", "pattern", "count"),
+    [
+        pytest.param("a" * 400, _LONG_NEEDLE, 0, id="overlapping-miss"),
+        pytest.param("a" * 10 + _LONG_NEEDLE + "c" * 200, _LONG_NEEDLE, 1, id="direct-late-match"),
+        pytest.param("a" * 200 + _LONG_NEEDLE, _LONG_NEEDLE, 1, id="fallback-late-match"),
+        pytest.param("a" * 200 + "c" + "a" * 199, _LONG_NEEDLE, 0, id="late-miss"),
+        pytest.param("a" * 400, "a" * 65 + "b", 0, id="prefilter-miss"),
+        pytest.param("a" * 100, _LONG_NEEDLE, 0, id="short-hay-miss"),
+        pytest.param("a" * 65, _LONG_NEEDLE, 0, id="needle-longer"),
+        pytest.param(_LONG_NEEDLE, _LONG_NEEDLE, 1, id="exact-match"),
+    ],
+)
+def test_text_literal_regex_long_search(text: str, pattern: str, count: int) -> None:
+    section = _el(parse(f"<section><p>{text}</p></section>").find("section"))
+    assert len(section.find_all(text=re.compile(pattern))) == count
 
 
 def test_text_literal_regex_find_returns_first() -> None:
