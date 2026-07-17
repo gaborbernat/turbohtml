@@ -61,6 +61,67 @@ static inline uint64_t sbuf_special_mask(uint64_t word, int escape_angle, int es
     return mask;
 }
 
+/* Skip step for the clean-run scan: the same special set tested a vector at a time rather than a
+   64-bit pair. The tree holds text as UCS-4, so every serialized run pays this scan, and four lanes
+   per step halves the probes over the long unescaped spans documents are made of. The step only
+   skips: when it reports a hit the SWAR pair loop below rescans the block and names the exact code
+   point, so the vector arms never decide where a special is. escape.c carries the same per-arch
+   split for its sizing scan. */
+#if defined(__aarch64__) || defined(_M_ARM64)
+
+#include <arm_neon.h>
+
+#define SBUF_SCAN_STEP 4
+
+static inline int sbuf_block_has_special(const Py_UCS4 *text, int escape_angle, int escape_quote, int escape_nbsp) {
+    uint32x4_t lanes = vld1q_u32((const uint32_t *)text);
+    uint32x4_t hits = vceqq_u32(lanes, vdupq_n_u32('&'));
+    if (escape_angle) {
+        hits = vorrq_u32(hits, vorrq_u32(vceqq_u32(lanes, vdupq_n_u32('<')), vceqq_u32(lanes, vdupq_n_u32('>'))));
+    }
+    if (escape_quote) {
+        hits = vorrq_u32(hits, vceqq_u32(lanes, vdupq_n_u32('"')));
+    }
+    if (escape_nbsp) {
+        hits = vorrq_u32(hits, vceqq_u32(lanes, vdupq_n_u32(0xA0)));
+    }
+    return vmaxvq_u32(hits) != 0;
+}
+
+#elif defined(__SSE2__) || defined(_M_X64)
+
+#include <emmintrin.h>
+
+#define SBUF_SCAN_STEP 4
+
+static inline int sbuf_block_has_special(const Py_UCS4 *text, int escape_angle, int escape_quote, int escape_nbsp) {
+    __m128i lanes = _mm_loadu_si128((const __m128i *)text);
+    __m128i hits = _mm_cmpeq_epi32(lanes, _mm_set1_epi32('&'));
+    if (escape_angle) {
+        hits = _mm_or_si128(hits, _mm_or_si128(_mm_cmpeq_epi32(lanes, _mm_set1_epi32('<')),
+                                               _mm_cmpeq_epi32(lanes, _mm_set1_epi32('>'))));
+    }
+    if (escape_quote) {
+        hits = _mm_or_si128(hits, _mm_cmpeq_epi32(lanes, _mm_set1_epi32('"')));
+    }
+    if (escape_nbsp) {
+        hits = _mm_or_si128(hits, _mm_cmpeq_epi32(lanes, _mm_set1_epi32(0xA0)));
+    }
+    return _mm_movemask_epi8(hits) != 0;
+}
+
+#else
+
+#define SBUF_SCAN_STEP UCS4_LANES
+
+static inline int sbuf_block_has_special(const Py_UCS4 *text, int escape_angle, int escape_quote, int escape_nbsp) {
+    uint64_t word;
+    memcpy(&word, text, sizeof(word));
+    return sbuf_special_mask(word, escape_angle, escape_quote, escape_nbsp) != 0;
+}
+
+#endif
+
 /* Emit the replacement for a flagged character. */
 static inline void sbuf_put_special(sbuf *out, Py_UCS4 character, int formatter) {
     const char *name = formatter == TH_FMT_NAMED ? th_entity_name(character) : NULL;
@@ -102,12 +163,12 @@ static inline void sbuf_put_named_text(sbuf *out, const Py_UCS4 *text, Py_ssize_
 
 /* Append text under the WHATWG or MINIMAL formatter, bulk-copying each run with
    nothing to escape and rewriting only the specials between. The tree stores
-   text as UCS-4, so the clean-run scan tests two code points per 64-bit word
-   with the same SWAR lane probes escape.c uses, hopping over the long unescaped
-   spans real documents are made of instead of classifying every character. When
-   a pair holds a special, its exact code point is recovered from the lane mask
-   over a word built low-lane-first, so the position is independent of byte order
-   and of which character class matched. */
+   text as UCS-4, so the clean-run scan hops SBUF_SCAN_STEP code points at a time
+   over the long unescaped spans real documents are made of instead of
+   classifying every character. Once the step stops, the SWAR pair probes walk
+   the block to name the special: its exact code point is recovered from the lane
+   mask over a word built low-lane-first, so the position is independent of byte
+   order, of which character class matched, and of which arch scanned. */
 static inline void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr, int formatter) {
     if (formatter == TH_FMT_NAMED) {
         sbuf_put_named_text(out, text, len);
@@ -120,6 +181,12 @@ static inline void sbuf_put_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len,
     while (index < len) {
         Py_ssize_t start = index;
         Py_ssize_t special = -1;
+        while (index + SBUF_SCAN_STEP <= len) {
+            if (sbuf_block_has_special(&text[index], escape_angle, escape_quote, escape_nbsp)) {
+                break;
+            }
+            index += SBUF_SCAN_STEP;
+        }
         while (index + UCS4_LANES <= len) {
             uint64_t word;
             memcpy(&word, &text[index], sizeof(word));
