@@ -35,6 +35,60 @@ static inline uint64_t mini_ws_mask(uint64_t word) {
            swar_haslane32(word, '\f') | swar_haslane32(word, '\r');
 }
 
+/* Skip step for the collapse scan: the stop set tested a vector at a time rather than a 64-bit pair.
+   Collapsed prose is mostly runs with no whitespace and nothing to escape, and the tree holds it as
+   UCS-4, so four lanes per step halves the probes over those runs. Every ASCII whitespace character
+   sits at or below the space, so one ordered compare covers the five the pair probe spells out; the
+   C0 controls it also catches are false stops rather than wrong answers, because the step only
+   skips. When it stops, the SWAR pair loop rescans the block and decides what is actually there. */
+#if defined(__aarch64__) || defined(_M_ARM64)
+
+#include <arm_neon.h>
+
+#define MINI_SCAN_STEP 4
+
+static inline int mini_block_has_stop(const Py_UCS4 *text, int escape_nbsp) {
+    uint32x4_t lanes = vld1q_u32((const uint32_t *)text);
+    uint32x4_t hits = vcleq_u32(lanes, vdupq_n_u32(' '));
+    hits = vorrq_u32(hits, vorrq_u32(vceqq_u32(lanes, vdupq_n_u32('&')), vceqq_u32(lanes, vdupq_n_u32('<'))));
+    hits = vorrq_u32(hits, vceqq_u32(lanes, vdupq_n_u32('>')));
+    if (escape_nbsp) {
+        hits = vorrq_u32(hits, vceqq_u32(lanes, vdupq_n_u32(0xA0)));
+    }
+    return vmaxvq_u32(hits) != 0;
+}
+
+#elif defined(__SSE2__) || defined(_M_X64)
+
+#include <emmintrin.h>
+
+#define MINI_SCAN_STEP 4
+
+static inline int mini_block_has_stop(const Py_UCS4 *text, int escape_nbsp) {
+    /* SSE2 compares signed; every stop code point is below 0x80000000 so the order still holds. */
+    __m128i lanes = _mm_loadu_si128((const __m128i *)text);
+    __m128i hits = _mm_cmplt_epi32(lanes, _mm_set1_epi32(' ' + 1));
+    hits = _mm_or_si128(
+        hits, _mm_or_si128(_mm_cmpeq_epi32(lanes, _mm_set1_epi32('&')), _mm_cmpeq_epi32(lanes, _mm_set1_epi32('<'))));
+    hits = _mm_or_si128(hits, _mm_cmpeq_epi32(lanes, _mm_set1_epi32('>')));
+    if (escape_nbsp) {
+        hits = _mm_or_si128(hits, _mm_cmpeq_epi32(lanes, _mm_set1_epi32(0xA0)));
+    }
+    return _mm_movemask_epi8(hits) != 0;
+}
+
+#else
+
+#define MINI_SCAN_STEP UCS4_LANES
+
+static inline int mini_block_has_stop(const Py_UCS4 *text, int escape_nbsp) {
+    uint64_t word;
+    memcpy(&word, text, sizeof(word));
+    return (sbuf_special_mask(word, 1, 0, escape_nbsp) | mini_ws_mask(word)) != 0;
+}
+
+#endif
+
 /* Whether a code point must be escaped when it appears in collapsed text: the
    structural characters (text never escapes the double quote), the no-break space
    under WHATWG, and -- under the NAMED formatter -- any character with a reference. */
@@ -73,6 +127,12 @@ static void mini_put_collapsed_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t l
         }
         Py_ssize_t start = index;
         if (formatter != TH_FMT_NAMED) {
+            while (index + MINI_SCAN_STEP <= len) {
+                if (mini_block_has_stop(&text[index], escape_nbsp)) {
+                    break;
+                }
+                index += MINI_SCAN_STEP;
+            }
             while (index + UCS4_LANES <= len) {
                 uint64_t word;
                 memcpy(&word, &text[index], sizeof(word));
