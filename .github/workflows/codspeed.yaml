@@ -6,8 +6,13 @@ on:
     tags-ignore: ["**"]
   pull_request:
 concurrency:
-  group: codspeed-${{ github.ref }}
-  cancel-in-progress: true
+  # Key push runs by commit, pull-request runs by ref. Every main commit is a base measurement some
+  # open PR compares against, so it must run to completion; keying pushes by ref meant the next main
+  # commit canceled the previous one's benchmark mid-run, leaving CodSpeed to diff against a partial
+  # or stale base and report drift on untouched benchmarks. Pull-request runs still supersede their
+  # own older commits.
+  group: codspeed-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
