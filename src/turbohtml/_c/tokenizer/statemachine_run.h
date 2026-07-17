@@ -1979,6 +1979,12 @@ th_dispatch:
         self->state = ST_CDATA;
         TH_DISPATCH();
     }
+#if !TH_THREADED
+    /* Every state ends in TH_DISPATCH, so control never falls out of the switch. MSVC does not
+       follow that and warns C4715; the threaded form ends every path in a computed goto, where
+       no marker is needed. */
+    Py_UNREACHABLE();
+#endif
 }
 
 #undef TH_DISPATCH
