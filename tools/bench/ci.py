@@ -4,10 +4,9 @@ Real, offline benchmark cases for the CodSpeed CI regression gate.
 The pyperf suite times every operation in :data:`bench.core.OPERATIONS` over real corpora (see :mod:`bench.corpus`).
 :func:`benchmarks` walks that same registry and pairs each turbohtml operation with a lazy loader for one of those real
 inputs -- the vendored html5lib-python and War-and-Peace corpora for the markup and text operations, the pinned upstream
-stylesheet and JS library for the minifiers, and the bench's own inline cases for the rest. Both suites therefore share
-the operation list and the corpus, so a new operation added to ``OPERATIONS`` is benchmarked here automatically. The
-loaders are lazy so the corpus is read only when a benchmark runs (under ``--codspeed``); a case whose corpus is missing
-raises, and the test skips it.
+stylesheet and JS library for the minifiers, and the bench's own inline cases for the rest. Selected operations add a
+second case when one input cannot cover the relevant branch patterns. The loaders are lazy so the corpus is read only
+when a benchmark runs (under ``--codspeed``); a case whose corpus is missing raises, and the test skips it.
 
 Operations whose inline case is too small to clear Valgrind's heap-jitter floor are re-homed on a large real corpus and
 surfaced under a corpus-qualified benchmark id (see :data:`_RESIZED`), so the noise-prone identity retires and a stable
@@ -17,7 +16,7 @@ one takes its place without CodSpeed reading the input change as a regression.
 from __future__ import annotations
 
 from functools import cache, partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from bench import corpus
 from bench.core import OPERATIONS
@@ -150,11 +149,12 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "normalize": ("normalize-decomposed", lambda: INPUTS["normalize"]()[2][1]),
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
+_ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {"idna-varied": ("idna", 1)}
 
 
-def _inline(operation: str) -> object:
-    """Return the first case the bench already defines inline for ``operation`` (no corpus needed)."""
-    return INPUTS[operation]()[0][1]
+def _inline(operation: str, case_index: int = 0) -> object:
+    """Return one case the bench already defines inline for ``operation`` (no corpus needed)."""
+    return INPUTS[operation]()[case_index][1]
 
 
 def loader_for(operation: str) -> Callable[[], object]:
@@ -174,6 +174,8 @@ def benchmarks() -> Iterator[tuple[str, object, Callable[[], object]]]:
     for name, (run, _owner) in OPERATIONS.items():
         identity = _RESIZED[name][0] if name in _RESIZED else name
         yield identity, run, loader_for(name)
+    for identity, (name, case_index) in _ADDITIONAL_CASES.items():
+        yield identity, OPERATIONS[name][0], partial(_inline, name, case_index)
 
 
 __all__ = [

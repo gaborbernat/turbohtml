@@ -202,6 +202,7 @@ def test_punycode_delta_overflow_is_rejected(label: str) -> None:
     ("first", "second"),
     [
         pytest.param("\u1100", "\u1100", id="leading-then-leading"),
+        pytest.param("\u1100", "\u1100\u0301", id="leading-then-leading-with-mark"),
         pytest.param("\uac01", "\u11a8", id="lvt-syllable-then-trailing"),
         pytest.param("\uac00", "\u0301", id="lv-syllable-then-non-trailing"),
     ],
