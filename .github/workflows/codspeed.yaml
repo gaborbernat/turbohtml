@@ -49,7 +49,11 @@ jobs:
           # GitHub hands each run a different physical CPU (Intel Xeon with AVX-512, or AMD EPYC without), and glibc
           # dispatches a different SIMD memcpy/memmove per CPU, so Callgrind counts different instructions for the same
           # code and untouched benchmarks drift a few percent run to run. Force one baseline path on every CPU.
-          GLIBC_TUNABLES: "glibc.cpu.hwcaps=-AVX512F,-AVX512VL,-AVX512BW,-AVX512DQ,-AVX512CD,-AVX2,-AVX,-ERMS,-FSRM"
+          # arena_max pins the other half of that dispatch: glibc sizes the malloc arena count from the core count
+          # (8 * ncores), so a runner with a different core count takes different paths through malloc and Callgrind
+          # counts those too. Every op here allocates -- the tokenizer and DOM grow their buffers as they parse -- so
+          # the arena count reaches the measurement. One arena is the same arena on every runner.
+          GLIBC_TUNABLES: "glibc.cpu.hwcaps=-AVX512F,-AVX512VL,-AVX512BW,-AVX512DQ,-AVX512CD,-AVX2,-AVX,-ERMS,-FSRM:glibc.malloc.arena_max=1"
         with:
           mode: simulation
           run: .tox/codspeed/bin/python -m pytest tests/benchmarks --codspeed
