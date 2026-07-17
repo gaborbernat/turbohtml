@@ -1,9 +1,9 @@
 /* Character-reference table lookups shared by unescape() and the tokenizer.
 
    These are pure table queries over the generated arrays in html_entities.h:
-   a binary search over the sorted named-reference table and two binary
-   searches over the numeric-correction tables. They hold no state and never
-   touch Python objects. */
+   a binary search over one first-byte bucket in the sorted named-reference
+   table and two binary searches over the numeric-correction tables. They hold
+   no state and never touch Python objects. */
 
 #include "tokenizer/charref.h"
 
@@ -23,7 +23,7 @@ static int cmp_name(const char *left, Py_ssize_t left_len, const char *right, un
 
 const html5_entity *charref_find_entity(const char *name, Py_ssize_t len) {
     /* the names html.escape emits dominate real input, so try them with one
-       comparison each before paying for the ~11-round binary search */
+       comparison each before searching their buckets */
     switch (name[0]) {
     case 'a':
         if (len == 4 && memcmp(name, "amp;", 4) == 0) {
@@ -51,7 +51,8 @@ const html5_entity *charref_find_entity(const char *name, Py_ssize_t len) {
     default:
         break;
     }
-    int low = 0, high = html5_count - 1;
+    unsigned first = (unsigned char)name[0];
+    int low = html5_first[first], high = html5_first[first + 1] - 1;
     while (low <= high) {
         int mid = (low + high) >> 1;
         const html5_entity *entity = &html5_entities[mid];
