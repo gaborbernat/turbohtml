@@ -10,7 +10,7 @@ from __future__ import annotations
 import functools
 import re
 from dataclasses import replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import turbohtml
 from bench.timing import Mutating
@@ -100,6 +100,7 @@ _SANITIZER_XML = _clean.Sanitizer(replace(_clean.Policy.relaxed(), xml=True))
 _LINKS_BASE = "https://example.com/base/"
 _URL_HINT_BASE = "http://site.com/"
 _FIND_TEXT_PATTERN = re.compile(r"test")  # ubiquitous in the wpt corpus, so the predicate does real work
+_FIND_TEXT_OVERLAP_PATTERN: Final[re.Pattern[str]] = re.compile("a" * 4096 + "b")
 _CSS = "div a[href]"  # a descendant combinator with an attribute test, common in scrapers
 _HAS = "div:has(a)"  # the :has() relational pseudo-class
 _STRIP = "code, a, q"  # a bulk set of tags to drop or unwrap
@@ -279,6 +280,11 @@ def match(text: str) -> None:
 def find_text(text: str) -> None:
     """Collect every element whose collected text matches the regex with turbohtml's find_all."""
     _parsed(text).find_all(text=_FIND_TEXT_PATTERN)
+
+
+def find_text_overlap(text: str) -> None:
+    """Exercise the overlap that makes a naive literal substring scan quadratic."""
+    _parsed(text).find(text=_FIND_TEXT_OVERLAP_PATTERN)
 
 
 def text_content(text: str) -> None:
@@ -876,6 +882,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "computed-style-dense": (computed_style, "turbohtml"),
     "match": (match, "turbohtml"),
     "find-text": (find_text, "turbohtml"),
+    "find-text-overlap": (find_text_overlap, "turbohtml"),
     "text-content": (text_content, "turbohtml"),
     "serialize": (serialize, "turbohtml"),
     "conformance": (conformance, "turbohtml"),

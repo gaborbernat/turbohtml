@@ -649,16 +649,82 @@ static Py_ssize_t subtree_text_len(th_node *node) {
     return total;
 }
 
-/* Whether needle's code points occur as a contiguous run in hay (the literal-regex
-   substring test, mirroring re.search over a metacharacter-free pattern). */
-static int ucs4_contains(const Py_UCS4 *hay, Py_ssize_t hay_len, const Py_UCS4 *needle, Py_ssize_t needle_len) {
-    for (Py_ssize_t start = 0; start + needle_len <= hay_len; start++) {
+static int ucs4_contains_naive(const Py_UCS4 *hay, Py_ssize_t hay_len, const Py_UCS4 *needle, Py_ssize_t needle_len,
+                               Py_ssize_t offset) {
+    for (Py_ssize_t start = offset; start + needle_len <= hay_len; start++) {
         Py_ssize_t index = 0;
         while (index < needle_len && hay[start + index] == needle[index]) {
             index++;
         }
         if (index == needle_len) {
             return 1;
+        }
+    }
+    return 0;
+}
+
+static int ucs4_contains_kmp(const Py_UCS4 *hay, Py_ssize_t hay_len, const Py_UCS4 *needle, Py_ssize_t needle_len,
+                             Py_ssize_t offset) {
+    Py_ssize_t *prefix = PyMem_Malloc((size_t)needle_len * sizeof(*prefix));
+    if (prefix == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    prefix[0] = 0;
+    for (Py_ssize_t index = 1, matched = 0; index < needle_len; index++) {
+        while (matched > 0 && needle[index] != needle[matched]) {
+            matched = prefix[matched - 1];
+        }
+        if (needle[index] == needle[matched]) {
+            matched++;
+        }
+        prefix[index] = matched;
+    }
+    Py_ssize_t matched = 0;
+    for (Py_ssize_t index = offset; index < hay_len; index++) {
+        while (matched > 0 && hay[index] != needle[matched]) {
+            matched = prefix[matched - 1];
+        }
+        if (hay[index] == needle[matched]) {
+            matched++;
+            if (matched == needle_len) {
+                PyMem_Free(prefix);
+                return 1;
+            }
+        }
+    }
+    PyMem_Free(prefix);
+    return 0;
+}
+
+static int ucs4_contains(const Py_UCS4 *hay, Py_ssize_t hay_len, const Py_UCS4 *needle, Py_ssize_t needle_len) {
+    if (needle_len == 0) {
+        return 1;
+    }
+    if (needle_len > hay_len) {
+        return 0;
+    }
+    if (memcmp(hay, needle, (size_t)needle_len * sizeof(Py_UCS4)) == 0) {
+        return 1;
+    }
+    if (needle_len <= 64 || hay_len < 256) {
+        return ucs4_contains_naive(hay, hay_len, needle, needle_len, 1);
+    }
+    size_t candidates = 64;
+    Py_ssize_t last = needle_len - 1;
+    for (Py_ssize_t start = 1; start + needle_len <= hay_len; start++) {
+        if (hay[start + last] != needle[last]) {
+            continue;
+        }
+        if (memcmp(hay + start, needle, (size_t)needle_len * sizeof(Py_UCS4)) == 0) {
+            return 1;
+        }
+        candidates--;
+        if (candidates == 0) {
+            int found = ucs4_contains_kmp(hay, hay_len, needle, needle_len, start + 1);
+            if (found >= 0) { /* GCOVR_EXCL_BR_LINE: negative only after unforceable allocation failure */
+                return found;
+            }
+            return ucs4_contains_naive(hay, hay_len, needle, needle_len, start + 1); /* GCOVR_EXCL_LINE */
         }
     }
     return 0;
