@@ -35,6 +35,7 @@ typedef struct {
 /* One grid row, its cells grown on demand as cells and colspans reach further right. */
 typedef struct {
     grid_cell *cells;
+    Py_ssize_t width;
     Py_ssize_t cap;
 } grid_row;
 
@@ -91,20 +92,29 @@ static Py_ssize_t parse_span(th_node *cell, uint32_t name_atom) {
 
 /* Grow row so column index `needed - 1` is addressable, zero-initializing the new slots. -1 on allocation failure. */
 static int ensure_columns(grid_row *row, Py_ssize_t needed) {
+    if (needed > row->width) {
+        row->width = needed;
+    }
     if (needed <= row->cap) {
         return 0;
     }
-    grid_cell *cells = PyMem_Realloc(row->cells, (size_t)needed * sizeof(grid_cell));
+    size_t cap;
+    size_t bytes;
+    int grew = th_grow_cap((size_t)needed, (size_t)row->cap, 8, sizeof(grid_cell), &cap, &bytes);
+    if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a table no allocation could hold */
+        return -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+    }
+    grid_cell *cells = PyMem_Realloc(row->cells, bytes);
     if (cells == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    for (Py_ssize_t index = row->cap; index < needed; index++) {
+    for (Py_ssize_t index = row->cap; index < (Py_ssize_t)cap; index++) {
         cells[index].text = NULL;
         cells[index].len = 0;
         cells[index].present = 0;
     }
     row->cells = cells;
-    row->cap = needed;
+    row->cap = (Py_ssize_t)cap;
     return 0;
 }
 
@@ -294,8 +304,8 @@ static int build_grid_locked(th_tree *tree, th_node *table, table_grid *grid) {
 static Py_ssize_t grid_width(const table_grid *grid) {
     Py_ssize_t width = 0;
     for (Py_ssize_t row = 0; row < grid->row_count; row++) {
-        if (grid->rows[row].cap > width) {
-            width = grid->rows[row].cap;
+        if (grid->rows[row].width > width) {
+            width = grid->rows[row].width;
         }
     }
     return width;
@@ -303,7 +313,7 @@ static Py_ssize_t grid_width(const table_grid *grid) {
 
 /* The text at (row, col) as a str: the trimmed cell text, or "" for an empty or never-filled slot. */
 static PyObject *cell_to_str(const grid_row *row, Py_ssize_t col) {
-    if (col < row->cap && row->cells[col].present && row->cells[col].text != NULL) {
+    if (col < row->width && row->cells[col].present && row->cells[col].text != NULL) {
         return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, row->cells[col].text, row->cells[col].len);
     }
     return PyUnicode_FromString("");

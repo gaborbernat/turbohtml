@@ -927,6 +927,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "markdown": (markdown, "turbohtml"),
     "markdown-google": (markdown_google, "turbohtml"),
     "tables": (tables, "turbohtml"),
+    "tables-wide": (tables, "turbohtml"),
     "article": (article, "turbohtml"),
     "boilerplate": (boilerplate, "turbohtml"),
     "date": (date, "turbohtml"),
