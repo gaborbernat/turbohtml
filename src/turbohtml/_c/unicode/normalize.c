@@ -56,18 +56,18 @@ static const th_norm_decomp_row *decomp_row(const th_norm_decomp_row *table, int
     if (cp < table[0].code) {
         return NULL;
     }
-    int lo = 0;
-    int hi = count;
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (table[mid].code < cp) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
+    /* Code points vary independently, so selecting either half is unpredictable. */
+    int left = 0;
+    int remaining = count;
+    while (remaining > 1) {
+        int half = remaining / 2;
+        int middle = left + half;
+        left = table[middle].code < cp ? middle : left;
+        remaining -= half;
     }
-    if (lo < count && table[lo].code == cp) {
-        return &table[lo];
+    left += table[left].code < cp;
+    if (left < count && table[left].code == cp) {
+        return &table[left];
     }
     return NULL;
 }
