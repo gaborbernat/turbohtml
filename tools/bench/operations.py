@@ -254,9 +254,8 @@ class Operation:
 # functions return the minified text; the worker records its byte length once (deterministic) beside the timing.
 SIZE_OPS: Final[frozenset[str]] = frozenset({"minify", "minify-css", "minify-js"})
 
-# The streaming rewrite never builds a tree; a full-parse peer must. This op's table carries the peak resident memory
-# of doing the task in a fresh process alongside time, so the tree turbohtml avoids surfaces as bytes it never holds.
-MEMORY_OPS: Final[frozenset[str]] = frozenset({"rewrite"})
+# Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
+MEMORY_OPS: Final[frozenset[str]] = frozenset({"parse-dense", "rewrite"})
 
 
 OPERATIONS: dict[str, Operation] = {
@@ -266,6 +265,7 @@ OPERATIONS: dict[str, Operation] = {
     "emit": Operation("emit a built tree", "us"),
     "shadow": Operation("attach a shadow tree with slots and flatten", "us"),
     "parse": Operation("parse to a tree", "us"),
+    "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
@@ -804,6 +804,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "emit": lambda: _ROWS,
     "shadow": lambda: _ROWS,
     "parse": _parse_cases,
+    "parse-dense": lambda: (("2.6 MB / 200k nodes", "<div><span>x</span></div>" * 100_000),),
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
     "validate": lambda: (
         ("catalog XSD + doc", (_VALIDATE_XSD, _VALIDATE_DOC)),

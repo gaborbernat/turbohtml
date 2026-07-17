@@ -13,6 +13,7 @@
 #include <string.h>
 
 #define ARENA_BLOCK ((Py_ssize_t)64 * 1024)
+#define ARENA_MAX_BLOCK ((Py_ssize_t)256 * 1024)
 
 typedef struct arena_block {
     struct arena_block *next;
@@ -115,7 +116,13 @@ static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {
     size = (size + 15) & ~(Py_ssize_t)15; /* 16-byte align */
     arena_block *block = tree->arena;
     if (block == NULL || block->used + size > block->cap) {
-        Py_ssize_t cap = size > ARENA_BLOCK ? size : ARENA_BLOCK;
+        Py_ssize_t cap = ARENA_BLOCK;
+        if (block != NULL) {
+            cap = block->cap < ARENA_MAX_BLOCK ? block->cap * 2 : ARENA_MAX_BLOCK;
+        }
+        if (cap < size) {
+            cap = size;
+        }
         arena_block *fresh = PyMem_Malloc(sizeof(arena_block) + (size_t)cap);
         if (fresh == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
