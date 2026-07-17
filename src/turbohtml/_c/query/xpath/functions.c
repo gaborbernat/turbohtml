@@ -2,6 +2,7 @@
    parsel and scrapy lean on, and the Python hook the parser conformance tests call. */
 
 #include "core/common.h"
+#include "core/vec.h"
 #include "dom/tree.h"
 #include "query/xpath/internal.h"
 #include "query/xpath/xpath.h"
@@ -327,11 +328,22 @@ static int node_lang(xp_ctx *ctx, xp_result *arg) {
     return result;
 }
 
-/* True when `token` appears as a whitespace-delimited entry in `list`. */
-static int token_in_list(const Py_UCS4 *list, Py_ssize_t list_len, const Py_UCS4 *token, Py_ssize_t token_len) {
-    if (token_len == 0) {
-        return 0;
+typedef struct {
+    const Py_UCS4 *value;
+    Py_ssize_t len;
+} xp_id_token;
+
+static uint64_t id_token_hash(const Py_UCS4 *value, Py_ssize_t len) {
+    uint64_t hash = 14695981039346656037u;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        hash ^= value[index];
+        hash *= 1099511628211u;
     }
+    return hash;
+}
+
+static int id_token_set_build(const Py_UCS4 *list, Py_ssize_t list_len, xp_id_token **slots, size_t *mask) {
+    Py_ssize_t count = 0;
     Py_ssize_t index = 0;
     while (index < list_len) {
         while (index < list_len && xp_is_space(list[index])) {
@@ -341,7 +353,56 @@ static int token_in_list(const Py_UCS4 *list, Py_ssize_t list_len, const Py_UCS4
         while (index < list_len && !xp_is_space(list[index])) {
             index++;
         }
-        if (index - start == token_len && memcmp(list + start, token, (size_t)token_len * sizeof(Py_UCS4)) == 0) {
+        count += index > start;
+    }
+    if (count == 0) {
+        *slots = NULL;
+        *mask = 0;
+        return 0;
+    }
+    size_t cap;
+    size_t bytes;
+    int grew = th_grow_cap((size_t)count * 2, 0, 8, sizeof(xp_id_token), &cap, &bytes);
+    if (!grew) {   /* GCOVR_EXCL_BR_LINE: the string cannot hold enough tokens to overflow */
+        return -1; /* GCOVR_EXCL_LINE: unreachable size-overflow path */
+    }
+    *slots = PyMem_Calloc(1, bytes);
+    if (*slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    *mask = cap - 1;
+    index = 0;
+    while (index < list_len) {
+        while (index < list_len && xp_is_space(list[index])) {
+            index++;
+        }
+        Py_ssize_t start = index;
+        while (index < list_len && !xp_is_space(list[index])) {
+            index++;
+        }
+        Py_ssize_t len = index - start;
+        if (len == 0) {
+            continue;
+        }
+        size_t probe = id_token_hash(list + start, len) & *mask;
+        while ((*slots)[probe].value != NULL &&
+               ((*slots)[probe].len != len ||
+                memcmp((*slots)[probe].value, list + start, (size_t)len * sizeof(Py_UCS4)) != 0)) {
+            probe = (probe + 1) & *mask;
+        }
+        if ((*slots)[probe].value == NULL) {
+            (*slots)[probe] = (xp_id_token){list + start, len};
+        }
+    }
+    return 0;
+}
+
+static int id_token_set_contains(const xp_id_token *slots, size_t mask, const Py_UCS4 *value, Py_ssize_t len) {
+    if (slots == NULL || len == 0) {
+        return 0;
+    }
+    for (size_t probe = id_token_hash(value, len) & mask; slots[probe].value != NULL; probe = (probe + 1) & mask) {
+        if (slots[probe].len == len && memcmp(slots[probe].value, value, (size_t)len * sizeof(Py_UCS4)) == 0) {
             return 1;
         }
     }
@@ -382,6 +443,12 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
             return -1;      /* GCOVR_EXCL_LINE */
         }
     }
+    xp_id_token *ids;
+    size_t id_mask;
+    if (id_token_set_build(list, list_len, &ids, &id_mask) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyMem_Free(list);                                         /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                                                /* GCOVR_EXCL_LINE */
+    }
     int rc = 0;
     for (struct th_node *node = th_tree_document(ctx->tree); node != NULL; node = document_next(node)) {
         if (node->type != TH_NODE_ELEMENT) {
@@ -389,7 +456,7 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
         }
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
             if (node->attrs[index].name_atom == TH_ATTR_ID &&
-                token_in_list(list, list_len, node->attrs[index].value, node->attrs[index].value_len)) {
+                id_token_set_contains(ids, id_mask, node->attrs[index].value, node->attrs[index].value_len)) {
                 if (ns_push(&out->nodes, node, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     rc = -1;                              /* GCOVR_EXCL_LINE */
                 } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
@@ -397,6 +464,7 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
             }
         }
     }
+    PyMem_Free(ids);
     PyMem_Free(list);
     if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
         xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
