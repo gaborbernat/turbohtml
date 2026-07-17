@@ -55,6 +55,14 @@ _STRUCTURED_PAGE = dedent("""\
       </div>
     </body>""")
 
+_MICRODATA_ITEMREF: Final = (
+    '<div itemscope itemref="'
+    + " ".join(f"r{index}" for index in range(1_000))
+    + '"></div>'
+    + "<i></i>" * 4_000
+    + "".join(f"<meta id=r{index} itemprop=p content=x>" for index in range(1_000))
+)
+
 _FEED_ITEM = dedent("""\
     <item>
       <title>Release {index}: what changed</title>
@@ -311,6 +319,7 @@ OPERATIONS: dict[str, Operation] = {
     "socialcard": Operation("social-card extraction", "us"),
     "structured": Operation("structured-data extraction", "us"),
     "microdata": Operation("Microdata item extraction", "us"),
+    "microdata-itemref": Operation("resolve 1,000 Microdata item references", "ms"),
     "syndication": Operation("RSS/Atom feed parsing", "us"),
     "sanitize": Operation("sanitize", "us"),
     "sanitize-templates": Operation("sanitize (template-safe)", "us"),
@@ -864,6 +873,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "structured": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
     "microdata": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
+    "microdata-itemref": lambda: (("references after 4,000 nodes", _MICRODATA_ITEMREF),),
     "syndication": lambda: (("rss 30 items", _FEED_XML),),
     "sanitize": lambda: (
         ("comment", "<p>Thanks for the <a href='http://example.com'>link</a>! <script>evil()</script></p>"),
