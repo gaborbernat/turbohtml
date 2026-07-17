@@ -325,6 +325,7 @@ OPERATIONS: dict[str, Operation] = {
     "markdown": Operation("HTML to Markdown", "us"),
     "markdown-google": Operation("Google Docs export to Markdown", "us"),
     "tables": Operation("extract table grids", "us"),
+    "tables-wide": Operation("extract a wide table grid", "us"),
     "article": Operation("article extraction", "us"),
     "boilerplate": Operation("paragraph boilerplate classification", "us"),
     "date": Operation("publication-date extraction", "us"),
@@ -894,6 +895,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("rows (1000 rows)", ("rows", _table_html(1_000))),
         ("records (1000 rows)", ("records", _table_html(1_000))),
     ),
+    "tables-wide": lambda: (("10k columns", ("rows", "<table><tr>" + "<td>x</td>" * 10_000 + "</tr></table>")),),
     "article": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
     "boilerplate": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
     "date": lambda: (
