@@ -606,13 +606,20 @@ static PyObject *rw_set_attribute(rw_handle *self, PyObject *args) {
         PyErr_SetString(PyExc_ValueError, "attribute name must not be empty");
         return NULL;
     }
-    uint32_t atom = rw_attr_atom(self->ctx->tree, buf, len);
+    uint32_t atom = th_attr_atom(buf, (size_t)len);
     self->open->edited = 1;
     th_node *node = self->open->node;
     Py_ssize_t new_len;
     Py_UCS4 *copy = rw_copy_ucs4(value, &new_len);
     if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (atom == TH_ATTR_UNKNOWN) {
+        uint32_t count = self->ctx->tree->attr_rec_count;
+        atom = intern_attr_dynamic(self->ctx->tree, buf, len);
+        if (self->ctx->tree->attr_rec_count != count) {
+            goto append;
+        }
     }
     for (Py_ssize_t index = 0; index < node->attr_count; index++) {
         if (node->attrs[index].name_atom == atom) {
@@ -622,7 +629,9 @@ static PyObject *rw_set_attribute(rw_handle *self, PyObject *args) {
             Py_RETURN_NONE;
         }
     }
-    th_node_attr *slot = rw_attr_grow(node);
+    th_node_attr *slot;
+append:
+    slot = rw_attr_grow(node);
     if (slot == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(copy); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */

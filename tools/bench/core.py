@@ -705,6 +705,19 @@ def rewrite(text: str) -> None:
     )
 
 
+def rewrite_attributes(text: str) -> None:
+    """Add 1,000 distinct custom attributes in one streaming handler."""
+    _rewrite(text, elements=(("x", _rewrite_attributes),))
+
+
+def _rewrite_attributes(element: _RewriteElement) -> None:
+    for name in _REWRITE_ATTR_NAMES:
+        element.set_attribute(name, "x")
+
+
+_REWRITE_ATTR_NAMES: Final[tuple[str, ...]] = tuple(f"a{index}" for index in range(1_000))
+
+
 def css_path(text: str) -> None:
     """Generate the unique CSS selector that re-finds every element with turbohtml's css_path."""
     for node in _parsed(text).descendants:
@@ -950,6 +963,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "sax": (sax, "turbohtml"),
     "treebuild": (treebuild, "turbohtml"),
     "rewrite": (rewrite, "turbohtml"),
+    "rewrite-attributes": (rewrite_attributes, "turbohtml"),
     "path": (css_path, "turbohtml"),
     "path-xpath": (xpath_path, "turbohtml"),
     "translate": (translate, "turbohtml"),
