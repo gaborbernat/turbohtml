@@ -8282,6 +8282,10 @@ typedef struct {
 } th_idna_comp_row;
 
 static const int th_idna_comp_count = 961;
+/* The lowest `second` of any pair. Sorting by (first, second) leaves no row holding this bound the
+   way th_idna_ccc[0].code holds the combining table's, so table_compose reads it to reject a pair
+   below every composition without probing. */
+static const uint32_t th_idna_comp_second_min = 0x300;
 static const th_idna_comp_row th_idna_comp[] = {
     {0x3C, 0x338, 0x226E}, {0x3D, 0x338, 0x2260}, {0x3E, 0x338, 0x226F}, {0x41, 0x300, 0xC0}, {0x41, 0x301, 0xC1},
     {0x41, 0x302, 0xC2}, {0x41, 0x303, 0xC3}, {0x41, 0x304, 0x100}, {0x41, 0x306, 0x102}, {0x41, 0x307, 0x226},
