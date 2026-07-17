@@ -866,6 +866,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse": (parse, "turbohtml"),
     "parse-dense": (parse, "turbohtml"),
     "parse-xml": (parse_xml, "turbohtml"),
+    "parse-xml-names": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
     "compile-rng": (compile_rng, "turbohtml"),
