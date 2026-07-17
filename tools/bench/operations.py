@@ -356,6 +356,7 @@ OPERATIONS: dict[str, Operation] = {
     "translate": Operation("CSS selector to XPath 1.0", "us"),
     "specificity": Operation("CSS selector specificity", "us"),
     "xpath": Operation("XPath feature surface (9.6 kB)", "us"),
+    "xpath-id": Operation("resolve 1,000 XPath id tokens", "us"),
     "transform": Operation("XSLT transform a catalog (120 rows)", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
@@ -515,6 +516,7 @@ _XPATH_PARITY = (
     ("$rows/div (node-set variable)", "node_set_variable"),
     ("//a[@href] (precompiled, reused)", "precompiled"),
 )
+_XPATH_ID_DOC: Final = "".join(f"<i id=r{index}></i>" for index in range(5_000))
 
 
 def _table_html(data_rows: int) -> str:
@@ -942,6 +944,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "translate": lambda: _TRANSLATE_CASES,
     "specificity": lambda: _TRANSLATE_CASES,
     "xpath": _xpath_cases,
+    "xpath-id": lambda: (("1,000 ids among 5,000 elements", _XPATH_ID_DOC),),
     "transform": _transform_cases,
     "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,

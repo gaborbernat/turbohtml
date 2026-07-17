@@ -746,6 +746,7 @@ _SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
 _COUNT_EXTENSIONS = {(None, "ext_count"): _count_ext}
 _NODESET_EXTENSIONS = {(None, "ext_first_two"): _first_two_ext}
 _REUSE = turbohtml.XPath("//a[@href]")
+_ID_REUSE = turbohtml.XPath("id('" + " ".join(f"r{index}" for index in range(1_000)) + "')")
 
 
 @functools.cache
@@ -787,6 +788,11 @@ def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with turbohtml's compiled-program engine, by case kind."""
     kind, text = case
     _XPATH_CALLS[kind](_parsed(text), text)
+
+
+def xpath_id(text: str) -> None:
+    """Resolve a large precompiled id() token set against a cached parsed document."""
+    _ID_REUSE(_parsed(text))
 
 
 def minify_css(css: str) -> str:
@@ -949,6 +955,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "translate": (translate, "turbohtml"),
     "specificity": (specificity, "turbohtml"),
     "xpath": (xpath, "turbohtml"),
+    "xpath-id": (xpath_id, "turbohtml"),
     "transform": (transform, "turbohtml"),
     "transform-sort": (transform, "turbohtml"),
     "transform-dense": (transform, "turbohtml"),

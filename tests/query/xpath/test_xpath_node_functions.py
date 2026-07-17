@@ -69,6 +69,11 @@ def test_id_string_value(ids: turbohtml.Node) -> None:
     assert ids.xpath("string(id('b'))") == "two"
 
 
+def test_id_hash_collisions_keep_document_order() -> None:
+    document = turbohtml.parse("<p id=a></p><div id=ba></div><span id=q></span><i id=x></i>")
+    assert tags(document.xpath("id('a ba q a missing')")) == ["p", "div", "span"]
+
+
 @pytest.fixture
 def foreign() -> turbohtml.Node:
     return turbohtml.parse(NS_HTML)
