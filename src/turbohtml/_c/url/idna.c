@@ -93,6 +93,43 @@ static uint8_t ccc_of(Py_UCS4 cp) {
     return 0;
 }
 
+/* The quick-check fast path serves th_url_to_ascii alone, which the standalone fuzz build drops with the rest of the
+   CPython boundary; gate these two helpers with it so that build has no unused function. */
+#ifndef TH_IDNA_STANDALONE
+/* Return `cp`'s NFC quick-check value: 0 Yes, 1 No, 2 Maybe. */
+static uint8_t qc_of(Py_UCS4 cp) {
+    if (cp < th_idna_qc[0].first) {
+        return 0;
+    }
+    int lo = 0;
+    int hi = th_idna_qc_count - 1;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (cp > th_idna_qc[mid].last) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    const th_idna_qc_row *row = &th_idna_qc[lo];
+    return cp >= row->first && cp <= row->last ? row->value : 0;
+}
+
+/* Return 1 when Unicode's NFC quick check reaches a conclusive Yes for input[0,len). */
+static int nfc_is_normalized(const Py_UCS4 *input, Py_ssize_t len) {
+    uint8_t last_class = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 cp = input[index];
+        uint8_t klass = ccc_of(cp);
+        if ((klass != 0 && klass < last_class) || qc_of(cp) != 0) {
+            return 0;
+        }
+        last_class = klass;
+    }
+    return 1;
+}
+#endif /* TH_IDNA_STANDALONE */
+
 /* The full canonical decomposition row for `cp`, or NULL when it does not decompose (Hangul is handled by the caller).
  */
 static const th_idna_decomp_row *decomp_row(Py_UCS4 cp) {
@@ -502,14 +539,19 @@ PyObject *th_url_to_ascii(PyObject *host) {
     for (Py_ssize_t index = 0; index < in_len; index++) {
         input[index] = PyUnicode_READ(kind, data, index);
     }
-    Py_ssize_t mapped_len = map_host(input, in_len, mapped);
-    Py_UCS4 *norm = PyMem_Malloc((size_t)(mapped_len * 4 + 1) * sizeof(Py_UCS4));
-    if (norm == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(input);       /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(mapped);      /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    Py_ssize_t norm_len = map_host(input, in_len, mapped);
+    const Py_UCS4 *norm = mapped;
+    Py_UCS4 *normalized = NULL;
+    if (!nfc_is_normalized(mapped, norm_len)) {
+        normalized = PyMem_Malloc((size_t)(norm_len * 4 + 1) * sizeof(Py_UCS4));
+        if (normalized == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(input);       /* GCOVR_EXCL_LINE: allocation-failure path */
+            PyMem_Free(mapped);      /* GCOVR_EXCL_LINE: allocation-failure path */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        norm_len = nfc(mapped, norm_len, normalized);
+        norm = normalized;
     }
-    Py_ssize_t norm_len = nfc(mapped, mapped_len, norm);
     /* punycode encoding expands a label by at most ~7x (a base-36 delta run per code point), and the xn-- re-encode
        path holds the decoded label plus its re-encoding; 16x the normalized length bounds both with room to spare. */
     Py_UCS4 *out = PyMem_Malloc((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
@@ -517,7 +559,7 @@ PyObject *th_url_to_ascii(PyObject *host) {
     if (out == NULL || scratch == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(input);                /* GCOVR_EXCL_LINE: allocation-failure path */
         PyMem_Free(mapped);               /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(norm);                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(normalized);           /* GCOVR_EXCL_LINE: allocation-failure path */
         PyMem_Free(out);                  /* GCOVR_EXCL_LINE: allocation-failure path */
         PyMem_Free(scratch);              /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory();          /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -548,7 +590,7 @@ PyObject *th_url_to_ascii(PyObject *host) {
     }
     PyMem_Free(input);
     PyMem_Free(mapped);
-    PyMem_Free(norm);
+    PyMem_Free(normalized);
     PyMem_Free(out);
     PyMem_Free(scratch);
     return result;

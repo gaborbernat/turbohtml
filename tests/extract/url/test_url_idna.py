@@ -155,6 +155,13 @@ def test_decomposed_label_composes_to_the_precomposed_form() -> None:
     assert _url_to_ascii("\u00e1.com") == "xn--1ca.com"
 
 
+def test_trailing_mark_without_a_composition_stays_decomposed() -> None:
+    """A precomposed base (s-dot-below U+1E63) with a trailing acute (U+0301) that forms no further
+    composition: the table search lands on the base's row but no pair matches, so the mark is left
+    combining rather than folded away."""
+    assert _url_to_ascii("\u1e63\u0301.com") == "xn--lsa331l.com"
+
+
 def test_combining_marks_are_canonically_reordered() -> None:
     """Marks out of canonical order (acute U+0301 before dot-below U+0323) sort by class into one NFC label."""
     assert _url_to_ascii("q\u0301\u0323.com") == _url_to_ascii("q\u0323\u0301.com")
@@ -202,6 +209,7 @@ def test_punycode_delta_overflow_is_rejected(label: str) -> None:
     ("first", "second"),
     [
         pytest.param("\u1100", "\u1100", id="leading-then-leading"),
+        pytest.param("\u1100", "\u1100\u0301", id="leading-then-leading-with-mark"),
         pytest.param("\uac01", "\u11a8", id="lvt-syllable-then-trailing"),
         pytest.param("\uac00", "\u0301", id="lv-syllable-then-non-trailing"),
     ],
