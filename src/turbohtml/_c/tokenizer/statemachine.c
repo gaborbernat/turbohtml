@@ -1068,7 +1068,7 @@ enum run_result { RUN_EMITTED, RUN_NEED_MORE, RUN_DONE };
     {                                                                                                                  \
         self->eof_code = NULL;                                                                                         \
         self->state = ST_BOGUS_DOCTYPE;                                                                                \
-        continue;                                                                                                      \
+        TH_DISPATCH();                                                                                                 \
     }
 
 #define TH_ONES UINT64_C(0x0101010101010101)
