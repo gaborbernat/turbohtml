@@ -223,6 +223,30 @@ def test_minify_css(source: str, expected: str) -> None:
     assert minify_css(source) == expected
 
 
+@pytest.mark.parametrize("count", [pytest.param(40, id="stack"), pytest.param(300, id="heap")])
+def test_minify_css_many_unique_rules(count: int) -> None:
+    source = "".join(f".c{index}{{--p{index}:{index + 1}px}}" for index in range(count))
+    assert minify_css(source) == source
+
+
+def test_minify_css_many_rules_merge_same_selector() -> None:
+    middle = "".join(f".c{index}{{--p{index}:{index + 1}px}}" for index in range(40))
+    assert minify_css(f".target{{color:red}}{middle}.target{{background:blue}}") == (
+        f".target{{color:red;background:blue}}{middle}"
+    )
+
+
+def test_minify_css_many_rules_merge_same_body() -> None:
+    middle = "".join(f".c{index}{{--p{index}:{index + 1}px}}" for index in range(40))
+    assert minify_css(f".first{{color:red}}{middle}.last{{color:red}}") == f".first,.last{{color:red}}{middle}"
+
+
+def test_minify_css_many_rules_keep_blocked_merge() -> None:
+    middle = "".join(f".c{index}{{--p{index}:{index + 1}px}}" for index in range(40))
+    source = f".target{{color:red}}{middle}.block{{color:blue}}.target{{color:green}}"
+    assert minify_css(source) == source
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     [

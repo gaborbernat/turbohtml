@@ -649,6 +649,30 @@ static int rule_run_eq(const css_buf *pool, Py_ssize_t a_off, Py_ssize_t a_len, 
     return a_len == b_len && memcmp(pool->data + a_off, pool->data + b_off, (size_t)a_len * sizeof(css_char)) == 0;
 }
 
+static uint32_t css_rule_hash(const css_buf *pool, Py_ssize_t off, Py_ssize_t len) {
+    uint32_t hash = css_hash_run(pool->data + off, len);
+    return hash | (hash == 0);
+}
+
+static int css_rule_hash_seen(const uint32_t *table, size_t mask, uint32_t hash) {
+    size_t slot = hash & mask;
+    while (table[slot] != 0) {
+        if (table[slot] == hash) {
+            return 1;
+        }
+        slot = (slot + 1) & mask;
+    }
+    return 0;
+}
+
+static void css_rule_hash_add(uint32_t *table, size_t mask, uint32_t hash) {
+    size_t slot = hash & mask;
+    while (table[slot] != 0 && table[slot] != hash) {
+        slot = (slot + 1) & mask;
+    }
+    table[slot] = hash;
+}
+
 /* Re-minify "prev_body;it_body" so a same-selector merge dedups overlapping declarations the same way one rule would.
  */
 static void css_merge_rule_bodies(css_buf *pool, rule_item *prev, const rule_item *it, int baseline) {
@@ -778,6 +802,20 @@ static int css_bodies_conflict(const css_buf *pool, Py_ssize_t a_off, Py_ssize_t
    property the moved body sets (so the cascade cannot change); an opaque node (a bang comment) or a conflicting rule
    ends the reach. Consecutive @media blocks with an identical prelude fold into one wrapper. */
 static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baseline) {
+    uint32_t stack_hashes[1024];
+    uint32_t *hashes = NULL;
+    size_t hash_cap = 0;
+    if (items->len > 32) {
+        hash_cap = 128;
+        while (hash_cap < (size_t)items->len * 4) {
+            hash_cap *= 2;
+        }
+        hashes = hash_cap <= sizeof(stack_hashes) / sizeof(stack_hashes[0]) ? stack_hashes
+                                                                            : css_malloc(hash_cap * sizeof(uint32_t));
+        if (hashes != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure falls back to the backward scan */
+            memset(hashes, 0, hash_cap * sizeof(uint32_t));
+        }
+    }
     Py_ssize_t media_prev = -1;
     Py_ssize_t media_prev_prelude = 0;
     for (Py_ssize_t index = 0; index < items->len; index++) {
@@ -808,9 +846,18 @@ static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baselin
             continue;
         }
         media_prev = -1;
+        uint32_t selector_hash = css_rule_hash(pool, it->sel_off, it->sel_len);
+        uint32_t body_hash = css_rule_hash(pool, it->body_off, it->body_len);
+        if (hashes != NULL && !css_rule_hash_seen(hashes, hash_cap - 1, selector_hash) &&
+            !css_rule_hash_seen(hashes, hash_cap - 1, body_hash)) {
+            css_rule_hash_add(hashes, hash_cap - 1, selector_hash);
+            css_rule_hash_add(hashes, hash_cap - 1, body_hash);
+            continue;
+        }
         /* Reach back for a rule to merge into, keeping the merged rule at the earlier position so this rule's body
            moves back. Each intervening rule that sets a property this body sets ends the reach; an opaque node does
            too. */
+        rule_item *merged = NULL;
         for (Py_ssize_t back = index - 1; back >= 0; back--) {
             rule_item *target = &items->items[back];
             if (target->dropped) {
@@ -822,6 +869,7 @@ static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baselin
             if (rule_run_eq(pool, target->sel_off, target->sel_len, it->sel_off, it->sel_len)) {
                 css_merge_rule_bodies(pool, target, it, baseline);
                 it->dropped = 1;
+                merged = target;
                 break;
             }
             if (rule_run_eq(pool, target->body_off, target->body_len, it->body_off, it->body_len)) {
@@ -833,12 +881,24 @@ static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baselin
                 target->sel_len = selector.len;
                 cbuf_free(&selector);
                 it->dropped = 1;
+                merged = target;
                 break;
             }
             if (css_bodies_conflict(pool, target->body_off, target->body_len, it->body_off, it->body_len)) {
                 break;
             }
         }
+        if (hashes != NULL) {
+            if (merged != NULL) {
+                selector_hash = css_rule_hash(pool, merged->sel_off, merged->sel_len);
+                body_hash = css_rule_hash(pool, merged->body_off, merged->body_len);
+            }
+            css_rule_hash_add(hashes, hash_cap - 1, selector_hash);
+            css_rule_hash_add(hashes, hash_cap - 1, body_hash);
+        }
+    }
+    if (hashes != NULL && hashes != stack_hashes) {
+        css_free(hashes);
     }
 }
 
