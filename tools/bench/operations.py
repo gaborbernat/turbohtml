@@ -733,6 +733,36 @@ _URL_SHAPES = (
 )
 _URL_BATCH = tuple(shape.format(index=index) for index in range(20) for shape in _URL_SHAPES)
 _IDNA_URLS: Final[tuple[str, ...]] = tuple(f"https://münchen-{index}.example/" for index in range(4100))
+# The münchen workload repeats one host, so every lookup walks the same rows. These labels spread the searches across
+# ranges a single Latin-1 vowel does not reach: Latin Extended, Greek (with the final sigma the mapping rewrites),
+# Cyrillic, Arabic, Hebrew, Devanagari, Thai, CJK, and Hangul, whose jamo compose arithmetically rather than through
+# the table. The last two labels are typed decomposed, so composition and canonical ordering run instead of falling
+# through.
+_IDNA_LABELS: Final[tuple[str, ...]] = (
+    "münchen",
+    "zürich",
+    "gdańsk",
+    "kraków",
+    "plzeň",
+    "tromsø",
+    "straße",
+    "ΟΔΥΣΣΕΥΣ",
+    "αθήνα",
+    "москва",
+    "київ",
+    "القاهرة",
+    "ירושלים",
+    "मुंबई",
+    "กรุงเทพ",
+    "東京",
+    "北京",
+    "서울",
+    "cafe\u0301",  # e + combining acute, which composition folds back to the precomposed é
+    "viet\u0301\u0323",  # an above mark typed before a below one, so canonical ordering has to swap them
+)
+_IDNA_VARIED_URLS: Final[tuple[str, ...]] = tuple(
+    f"https://{_IDNA_LABELS[index % len(_IDNA_LABELS)]}-{index}.example/" for index in range(4100)
+)
 _EXTERNAL_LINKS_HTML: Final = "".join(
     f'<a href="https://{host}/post/{index}">link</a>'
     for index in range(300)
@@ -961,7 +991,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "decode": _decode_cases,
     "normalize": _normalize_cases,
     "detect-language": _language_cases,
-    "idna": lambda: (("4,100 uncached Unicode hosts", _IDNA_URLS),),
+    "idna": lambda: (
+        ("4,100 uncached Unicode hosts", _IDNA_URLS),
+        ("4,100 varied-script hosts", _IDNA_VARIED_URLS),
+    ),
     "urls-clean": lambda: (
         ("clean 100 URLs", ("clean", _URL_BATCH)),
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),

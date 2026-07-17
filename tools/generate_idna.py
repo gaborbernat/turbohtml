@@ -309,6 +309,10 @@ def _emit(
         "    uint32_t composed;\n"
         "} th_idna_comp_row;\n\n"
         f"static const int th_idna_comp_count = {len(pairs)};\n"
+        "/* The lowest `second` of any pair. Sorting by (first, second) leaves no row holding this bound the\n"
+        "   way th_idna_ccc[0].code holds the combining table's, so table_compose reads it to reject a pair\n"
+        "   below every composition without probing. */\n"
+        f"static const uint32_t th_idna_comp_second_min = 0x{min(second for _, second, _ in pairs):X};\n"
         f"static const th_idna_comp_row th_idna_comp[] = {{\n{comp_rows}\n}};\n\n"
         "#endif /* TURBOHTML_IDNA_TABLE_H */\n"
     )

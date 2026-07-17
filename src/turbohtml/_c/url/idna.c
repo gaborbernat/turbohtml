@@ -118,6 +118,12 @@ static const th_idna_decomp_row *decomp_row(Py_UCS4 cp) {
 /* The tabled canonical composition of the pair (first, second), or 0 when the sorted table pairs them into nothing; 0
    is a safe "no composition" sentinel because U+0000 is never a composition target. */
 static Py_UCS4 table_compose(Py_UCS4 first, Py_UCS4 second) {
+    /* Every canonical composition pairs a starter with a combining mark, so no row's `second` falls below the table's
+       lowest one. A run of unaccented text makes NFC probe adjacent starters, whose second is an ordinary letter; one
+       comparison rejects that pair instead of a search that cannot match. */
+    if (second < th_idna_comp_second_min) {
+        return 0;
+    }
     int lo = 0;
     int hi = th_idna_comp_count;
     while (lo < hi) {
