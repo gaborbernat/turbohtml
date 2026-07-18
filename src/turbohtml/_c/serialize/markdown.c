@@ -28,12 +28,6 @@
 /* Keep the depth-guard wrappers out of line: inlined into their many call sites,
    the compiler emits a separate branch counter per copy and the guard-taken edge
    reads as uncovered in all but the one copy a deep tree exercises. */
-#if defined(_MSC_VER)
-#define TH_NOINLINE __declspec(noinline)
-#else
-#define TH_NOINLINE __attribute__((noinline))
-#endif
-
 /* Whether an element's own Markdown markup is dropped under the strip/convert
    filter, leaving its children to render transparently in the surrounding flow.
    A strip set names the tags to drop; a convert set names the only tags to keep,
