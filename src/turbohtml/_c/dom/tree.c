@@ -82,8 +82,17 @@ static uint16_t intern_atom(const th_buf *name, uint8_t *out_flags) {
         return TH_TAG_UNKNOWN;
     }
     const th_tag_entry *entry = &th_tag_table[index - 1];
-    if (entry->name_len != name->len || memcmp(entry->name, str, (size_t)name->len) != 0) {
+    if (entry->name_len != name->len) {
         return TH_TAG_UNKNOWN;
+    }
+    /* Verify with an inline byte loop, not memcmp: tag names are 1-10 bytes, so a
+       libc call's setup costs more than the compare it saves -- most of all for the
+       one-byte names (p, a, b, ...) a parse hits far more often than div or span. */
+    const unsigned char *en = (const unsigned char *)entry->name;
+    for (Py_ssize_t pos = 0; pos < name->len; pos++) {
+        if (str[pos] != en[pos]) {
+            return TH_TAG_UNKNOWN;
+        }
     }
     *out_flags = entry->flags;
     return entry->atom;
