@@ -15,6 +15,24 @@
 #define ARENA_BLOCK ((Py_ssize_t)64 * 1024)
 #define ARENA_MAX_BLOCK ((Py_ssize_t)256 * 1024)
 
+/* Keep the one-time span realization out of line so need_text() stays small
+   enough to inline into the serialize/text walks (see the header comment). Its
+   arena_alloc grew a geometric-growth branch, and inlining that whole cold path
+   into need_text pushed the accessor past the caller's inline budget. */
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define TH_MAYBE_UNUSED __attribute__((unused))
+#else
+#define TH_MAYBE_UNUSED
+#endif
+
 typedef struct arena_block {
     struct arena_block *next;
     Py_ssize_t used;
@@ -142,7 +160,7 @@ static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {
 /* Copy the input span [off, off+length) into a freshly arena-allocated UCS4
    array, widening the borrowed input to code points. Shared by slice
    materialization and the lazy realization of zero-copy text spans. */
-static inline Py_UCS4 *copy_input_span(th_tree *tree, Py_ssize_t off, Py_ssize_t length) {
+static TH_NOINLINE TH_MAYBE_UNUSED Py_UCS4 *copy_input_span(th_tree *tree, Py_ssize_t off, Py_ssize_t length) {
     Py_UCS4 *out = arena_alloc(tree, length * (Py_ssize_t)sizeof(Py_UCS4));
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
