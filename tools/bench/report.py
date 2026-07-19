@@ -20,6 +20,7 @@ import json
 from typing import TYPE_CHECKING
 
 from bench import operations
+from bench.stats import NOISY_CV
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,16 +57,39 @@ def _case_names(operation: str, stats: dict[str, _Stat]) -> list[str]:
     return names
 
 
-def _cell(stat: _Stat, scale: float, unit: str) -> str:
-    """Format one measurement as ``<mean> <unit> ±<relative stdev>%``; the caller passes only measured stats."""
+def _coefficient_of_variation(stat: _Stat) -> float:
+    """Return the run-to-run spread as a fraction of the mean; the dimensionless noise level of one measurement."""
     mean, stdev = float(stat["mean"]), float(stat["stdev"])
-    relative = stdev / mean * 100 if mean else 0.0
-    return f"{mean * scale:8.1f} {unit} ±{relative:3.0f}%"
+    return stdev / mean if mean else 0.0
+
+
+def _cell(stat: _Stat, scale: float, unit: str) -> str:
+    """
+    Format one measurement as ``<mean> <unit> ±<relative stdev>%``, trailing ``!`` on a spread too wide to compare.
+
+    A number whose spread rivals the differences worth comparing reads exactly like a solid one in a table, so the
+    marker says which cells the machine dominated rather than leaving a reader to work it out from the percentage.
+    """
+    marker = "!" if _coefficient_of_variation(stat) > NOISY_CV else " "
+    return f"{float(stat['mean']) * scale:8.1f} {unit} ±{_coefficient_of_variation(stat) * 100:3.0f}%{marker}"
 
 
 def _memory_cell(stat: _Stat) -> str:
     """Format one measured case's peak resident memory as ``<N.N MB>``; appended for a memory op only."""
     return f"{float(stat['peak']) / 1e6:6.1f} MB"
+
+
+def _noisy_cells(operation: str, stats: dict[str, _Stat]) -> list[str]:
+    """Return ``case/party`` for every measured cell whose spread is too wide to compare against."""
+    noisy: list[str] = []
+    for key, stat in stats.items():
+        operation_name, rest = key.split("|", 1)
+        if operation_name != operation or stat.get("error") is not None or "mean" not in stat:
+            continue
+        if _coefficient_of_variation(stat) > NOISY_CV:
+            case, label = rest.rsplit("|", 1)
+            noisy.append(f"{case}/{label}")
+    return noisy
 
 
 def render(operation: str, stats: dict[str, _Stat]) -> None:
@@ -97,6 +121,9 @@ def render(operation: str, stats: dict[str, _Stat]) -> None:
                     cell = f"{cell} {_memory_cell(other)}"
                 row += f"{cell:>{_COMPETITOR_COL}}"
         print(row)
+    if noisy := _noisy_cells(operation, stats):
+        # a run whose cells are mostly marked measured the machine, so say so once rather than per row
+        print(f"  noise: {len(noisy)} cell(s) past {NOISY_CV:.0%} spread, not a basis for comparison: {noisy}")
     if TABLE_JSON_DIR is not None:
         _emit_table_json(operation, stats, TABLE_JSON_DIR)
 
@@ -129,24 +156,45 @@ def rst_safe(label: str) -> str:
     return label.replace("\\", "\\\\").replace("*", "\\*").replace("|", "\\|").replace("`", "\\`")
 
 
+def _spread_cells(stat: _Stat | None, *, extra: str | None) -> list[float | None]:
+    """
+    Return a party's noise level for one case, aligned with :func:`_cells`.
+
+    Only the timing carries a spread: a minified size is a byte count and peak memory is a high-water mark, so the
+    leading metric's slot stays empty rather than inventing a dispersion for a number that has none.
+    """
+    if stat is None or stat.get("error") is not None or "mean" not in stat:
+        return [None, None] if extra else [None]
+    variation = _coefficient_of_variation(stat)
+    return [None, variation] if extra else [variation]
+
+
 def _emit_table_json(operation: str, stats: dict[str, _Stat], directory: Path) -> None:
     """Write one operation's raw means (plus size or peak memory) as the docs' bench-table feed DIR/<op>.json."""
     competitors = _labels(operation, stats)[1:]
     extra = _extra_metric(operation)
     rows: list[list[str | float | None]] = []
+    spread: list[list[float | None]] = []
     for case_name in _case_names(operation, stats):
         if (turbo := stats.get(f"{operation}|{case_name}|turbohtml")) is None:
             continue
         row: list[str | float | None] = [case_name, *_cells(turbo, extra=extra)]
+        # the leading slot mirrors the row's case label so a spread cell shares its value's index
+        noise: list[float | None] = [None, *_spread_cells(turbo, extra=extra)]
         for label in competitors:
-            row += _cells(stats.get(f"{operation}|{case_name}|{label}"), extra=extra)
+            other = stats.get(f"{operation}|{case_name}|{label}")
+            row += _cells(other, extra=extra)
+            noise += _spread_cells(other, extra=extra)
         rows.append(row)
+        spread.append(noise)
     metrics = [{"size": "size", "peak": "memory"}[extra], "time"] if extra else []
     feed = {
         "label": operations.OPERATIONS[operation].title,
         "parties": ["turbohtml", *competitors],
         "metrics": metrics,
         "rows": rows,
+        # one coefficient of variation per timing cell, so a published table can show what a figure is worth
+        "spread": spread,
     }
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{operation}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
