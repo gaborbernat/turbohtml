@@ -96,8 +96,11 @@ What dominate has that turbohtml does not
 Performance
 ===========
 
-``E`` is about three to four times faster than dominate. The same ``<ul>`` of rows -- a class, a ``data`` attribute, and
-a text child apiece -- built both ways:
+``E`` is about three to four times faster than dominate on the same ``<ul>`` of rows -- a class, a ``data`` attribute,
+and a text child apiece. The table below also splits that build into its construct and emit halves and covers the
+``escape`` and ``unescape`` helpers dominate exposes: escaping runs 1.7 to 18 times faster, and unescaping stays within
+an order of magnitude on short strings but pulls 327 times ahead on a 4 MiB book and past 2,000 on the escaped copy,
+where dominate's scan takes whole seconds:
 
 .. bench-table::
     :file: bench/dominate.json

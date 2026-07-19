@@ -283,23 +283,23 @@
     ],
     [
       "tag every link rel=nofollow — daring fireball (10 kB)",
-      3.2368665170127524e-06,
-      1.074260023414079e-05
+      3.2811139816975774e-06,
+      1.1745816060818962e-05
     ],
     [
       "tag every link rel=nofollow — ars technica (56 kB)",
-      1.1548953497945529e-05,
-      2.738736729739344e-05
+      1.2007345627118582e-05,
+      3.801935177113099e-05
     ],
     [
       "tag every link rel=nofollow — mozilla blog (95 kB)",
-      1.7909769589152802e-05,
-      4.045355638477114e-05
+      1.9445394193221926e-05,
+      4.750510557964086e-05
     ],
     [
       "tag every link rel=nofollow — whatwg spec (235 kB)",
-      3.627036745304698e-05,
-      6.11926979047439e-05
+      3.8890884846172945e-05,
+      0.00011085690787856113
     ],
     [
       "class add/remove on every link — daring fireball (10 kB)",
@@ -363,43 +363,43 @@
     ],
     [
       "replace body inner HTML — daring fireball (10 kB)",
-      2.0596297521861356e-06,
-      1.3779626603730814e-05
+      2.3547956920684974e-06,
+      1.611675483677762e-05
     ],
     [
       "replace body inner HTML — ars technica (56 kB)",
-      7.2303293480994546e-06,
-      4.706699214575376e-05
+      8.4642317853915e-06,
+      5.368113280231531e-05
     ],
     [
       "replace body inner HTML — mozilla blog (95 kB)",
-      1.1443677640580556e-05,
-      0.00010602964521998123
+      1.3067479234389149e-05,
+      0.00011917243232062447
     ],
     [
       "replace body inner HTML — whatwg spec (235 kB)",
-      3.397645720847701e-05,
-      0.00025601838699458314
+      3.8941558572721156e-05,
+      0.0002831344532599663
     ],
     [
       "replace body text — daring fireball (10 kB)",
-      1.122958337422079e-06,
-      9.156980081807358e-06
+      1.2272819389277008e-06,
+      1.0054155909304066e-05
     ],
     [
       "replace body text — ars technica (56 kB)",
-      6.201986878669648e-06,
-      4.222902697274359e-05
+      6.751919514454603e-06,
+      4.711099385327581e-05
     ],
     [
       "replace body text — mozilla blog (95 kB)",
-      1.0387964167139312e-05,
-      0.00010161350149265521
+      1.1303429797789496e-05,
+      0.00011064785789471898
     ],
     [
       "replace body text — whatwg spec (235 kB)",
-      3.2792049400143244e-05,
-      0.0002537457286697039
+      3.612875788405745e-05,
+      0.0002820522175378907
     ],
     [
       "walk every descendant — daring fireball (10 kB)",
@@ -622,57 +622,57 @@
       0.005943165710171646
     ],
     [
-      "XPath feature surface (9.6 kB) — //div",
+      "XPath feature surface (9.6 kB) — \\`\\`//div\\`\\`",
       1.7043127604162342e-06,
       1.1359151629856494e-05
     ],
     [
-      "XPath feature surface (9.6 kB) — //a[@href]",
+      "XPath feature surface (9.6 kB) — \\`\\`//a[@href]\\`\\`",
       3.7018016172026457e-07,
       3.880662450524616e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — //div//a[@href]",
+      "XPath feature surface (9.6 kB) — \\`\\`//div//a[@href]\\`\\`",
       1.535648027776541e-06,
       9.893845920968166e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — /html/body/div",
+      "XPath feature surface (9.6 kB) — \\`\\`/html/body/div\\`\\`",
       8.013924494898461e-07,
       6.176613320422556e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — //div//a[1]",
+      "XPath feature surface (9.6 kB) — \\`\\`//div//a[1]\\`\\`",
       9.51260307715529e-06,
       9.934997095761844e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — //a[contains(@href, '/')]",
+      "XPath feature surface (9.6 kB) — \\`\\`//a[contains(@href, '/')]\\`\\`",
       3.649867165889109e-07,
       4.107154825809071e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — //div[position() <= 3]",
+      "XPath feature surface (9.6 kB) — \\`\\`//div[position() <= 3]\\`\\`",
       5.7119476308227965e-06,
       1.346102124604916e-05
     ],
     [
-      "XPath feature surface (9.6 kB) — //a/ancestor::div",
+      "XPath feature surface (9.6 kB) — \\`\\`//a/ancestor::div\\`\\`",
       3.8278571227364406e-07,
       2.3865196553174427e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — //a \\| //span",
+      "XPath feature surface (9.6 kB) — \\`\\`//a \\| //span\\`\\`",
       6.15382493807104e-07,
       3.1651885763335957e-06
     ],
     [
-      "XPath feature surface (9.6 kB) — //\\*[local-name() = 'a']",
+      "XPath feature surface (9.6 kB) — \\`\\`//\\*[local-name() = 'a']\\`\\`",
       4.582888728836091e-06,
       1.4165250903748945e-05
     ],
     [
-      "XPath feature surface (9.6 kB) — count(//a)",
+      "XPath feature surface (9.6 kB) — \\`\\`count(//a)\\`\\`",
       3.8080705795917603e-07,
       2.421810625656088e-06
     ],

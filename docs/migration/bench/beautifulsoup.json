@@ -227,6 +227,26 @@
       0.010901792145644625
     ],
     [
+      "tag every link rel=nofollow — daring fireball (10 kB)",
+      3.2811139816975774e-06,
+      2.3264235007166196e-05
+    ],
+    [
+      "tag every link rel=nofollow — ars technica (56 kB)",
+      1.2007345627118582e-05,
+      6.269989804745062e-05
+    ],
+    [
+      "tag every link rel=nofollow — mozilla blog (95 kB)",
+      1.9445394193221926e-05,
+      0.00012831483005963187
+    ],
+    [
+      "tag every link rel=nofollow — whatwg spec (235 kB)",
+      3.8890884846172945e-05,
+      0.00043775636921357847
+    ],
+    [
       "class add/remove on every link — daring fireball (10 kB)",
       2.651717164559031e-06,
       2.1563632289556267e-05
@@ -285,6 +305,46 @@
       "unwrap tags keep content (strip_tags) — whatwg spec (235 kB)",
       0.0006621171877137992,
       0.03764929114937938
+    ],
+    [
+      "replace body inner HTML — daring fireball (10 kB)",
+      2.3547956920684974e-06,
+      0.00010307279166236565
+    ],
+    [
+      "replace body inner HTML — ars technica (56 kB)",
+      8.4642317853915e-06,
+      0.00017455561353566887
+    ],
+    [
+      "replace body inner HTML — mozilla blog (95 kB)",
+      1.3067479234389149e-05,
+      0.00022661090981538715
+    ],
+    [
+      "replace body inner HTML — whatwg spec (235 kB)",
+      3.8941558572721156e-05,
+      0.0009441474629738877
+    ],
+    [
+      "replace body text — daring fireball (10 kB)",
+      1.2272819389277008e-06,
+      2.666516654059592e-05
+    ],
+    [
+      "replace body text — ars technica (56 kB)",
+      6.751919514454603e-06,
+      8.870444010256051e-05
+    ],
+    [
+      "replace body text — mozilla blog (95 kB)",
+      1.1303429797789496e-05,
+      0.00013525513185186355
+    ],
+    [
+      "replace body text — whatwg spec (235 kB)",
+      3.612875788405745e-05,
+      0.0007960744759808828
     ],
     [
       "walk every descendant — daring fireball (10 kB)",

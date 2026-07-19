@@ -217,12 +217,14 @@ edge ahead (0.6x and 0.8x).
  Unescaping
 ************
 
-:func:`turbohtml.unescape` against :func:`python:html.unescape` (the ``stdlib`` column) and `w3lib
-<https://github.com/scrapy/w3lib>`_'s ``replace_entities``, the Scrapy helper that resolves the same references. It
-gains the most on entity-heavy input, where the standard library pays a Python call per match and w3lib runs a
-regular-expression substitution with a Python callback per match; turbohtml hops between ``&`` occurrences in C and
-bulk-copies the clean spans between references, so it leads html.unescape by 10 to 16 times and w3lib by 15 to 24 times
-on the reference-dense inputs.
+:func:`turbohtml.unescape` against :func:`python:html.unescape` (the ``stdlib`` column), `w3lib
+<https://github.com/scrapy/w3lib>`_'s ``replace_entities``, the Scrapy helper that resolves the same references, and
+dominate's ``util.unescape``. It gains the most on entity-heavy input, where the standard library pays a Python call per
+match and w3lib runs a regular-expression substitution with a Python callback per match; turbohtml hops between ``&``
+occurrences in C and bulk-copies the clean spans between references, so it leads html.unescape by 11 to 17 times and
+w3lib by 15 to 28 times on the reference-dense inputs. dominate sits in that same range on the small strings, but its
+scan turns multi-megabyte input into whole seconds, trailing by 327 times on the 4 MiB book and past 2,000 on the
+escaped copy.
 
 .. bench-table::
     :file: bench/unescaping.json
@@ -508,10 +510,9 @@ constructor above -- the price of the leading-mapping and per-child dispatch the
 Editing a parsed tree: tag every ``<a>`` with ``rel="nofollow"``, a link-rewriting pass. Because the pass mutates the
 tree, each library rebuilds a fresh parse before every iteration outside the timed region, then the timed call walks its
 links and sets the attribute (turbohtml through the live :attr:`~turbohtml.Element.attrs` mapping, resiliparse and
-selectolax through their node setters, lxml through ``Element.set``, pyquery through its ``attr``). turbohtml leads
-resiliparse by 1.5 to 2 times, lxml by two to three, and selectolax and pyquery by three to eight. BeautifulSoup
-reparses the whole document each iteration and cannot finish the sweep within the harness's time bound, so it has no
-entry.
+selectolax through their node setters, lxml through ``Element.set``, pyquery through its ``attr``, BeautifulSoup through
+item assignment). turbohtml leads resiliparse by 1.7 to 2.4 times, lxml by 2.5 to 3.6, selectolax by 3.7 to 5.6, and
+pyquery and BeautifulSoup by 3.4 to 11 times, the gap widening with the page as each reparse costs more.
 
 .. bench-table::
     :file: bench/editing.json
@@ -527,10 +528,10 @@ ten to eighteen times, and BeautifulSoup by up to thirty-seven times.
 
 Two content setters replace the body's children on a freshly parsed tree. :meth:`~turbohtml.Element.set_inner_html`
 reparses a fixed fragment in the ``<body>``'s context and splices it in one C call, against lxml clearing the body and
-appending ``fragments_fromstring`` and pyquery's ``.html()``; it leads them by seven to nine and two to eleven times.
-:meth:`~turbohtml.Element.set_text` replaces the children with one verbatim text node, against lxml and pyquery, leading
-by seven to ten and two to thirteen times. BeautifulSoup reparses the whole page each iteration and cannot finish either
-sweep within the time bound, so it has no entry.
+appending ``fragments_fromstring``, pyquery's ``.html()``, and BeautifulSoup clearing it and appending a reparsed soup;
+it leads them by 6.4 to 9.2, 1.7 to 11, and 17 to 44 times. :meth:`~turbohtml.Element.set_text` replaces the children
+with one verbatim text node, against the same three, leading by 7.0 to 9.8, 2.6 to 14, and 12 to 22 times. BeautifulSoup
+trails furthest because it reparses the whole page on every iteration where the others splice into a live tree.
 
 .. bench-table::
     :file: bench/editing-3.json
