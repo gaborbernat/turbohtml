@@ -1,5 +1,5 @@
 {
-  "label": "input",
+  "label": "layout-aware text",
   "parties": [
     "turbohtml",
     "inscriptis",
@@ -10,36 +10,36 @@
   "rows": [
     [
       "article (2 KiB)",
-      2e-06,
-      0.00017,
-      9.28e-05,
-      2e-05
+      1.4789983961020307e-06,
+      0.00016065679397930427,
+      9.196150679381768e-05,
+      2.165898996947154e-05
     ],
     [
       "table (4 KiB)",
-      1e-05,
-      0.0009,
-      0.00025,
-      5.1e-05
+      9.532537503176285e-06,
+      0.0008397280381662616,
+      0.000246625493779599,
+      5.0074257085460276e-05
     ],
     [
       "collapsed (2 KiB)",
-      2e-06,
+      1.969680531092403e-06,
       "no equivalent operation",
-      9.5e-05,
+      9.495287443665272e-05,
       "no equivalent operation"
     ],
     [
       "main (4 KiB)",
-      3e-06,
+      3.36329582921735e-06,
       "no equivalent operation",
       "no equivalent operation",
-      2e-05
+      2.001226823710548e-05
     ],
     [
       "annotated (4 KiB)",
-      3e-06,
-      0.000201,
+      2.6648518437699665e-06,
+      0.0002004633955702199,
       "no equivalent operation",
       "no equivalent operation"
     ]

@@ -1,17 +1,17 @@
 {
-  "label": "input",
+  "label": "parse a fragment",
   "parties": [
     "turbohtml",
-    "lxml",
-    "html5lib"
+    "html5lib",
+    "lxml"
   ],
   "metrics": [],
   "rows": [
     [
       "table-row fragment (2 kB)",
-      1.1e-05,
-      3.45e-05,
-      0.000837
+      9.619130326695332e-06,
+      0.0008218845543069619,
+      3.4871010694340994e-05
     ]
   ]
 }
