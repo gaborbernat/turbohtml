@@ -25,7 +25,8 @@ from bench import corpus, operations, report
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = Path(__file__).resolve().parents[1]
 _COMPETITOR_DIR = Path(__file__).resolve().parent / "competitors"
-_COMPETITOR_TIMEOUT = 900.0  # seconds for one competitor's whole operation; past it the library is hanging, not slow
+_COMPETITOR_TIMEOUT = 5400.0  # seconds for one competitor's whole operation; generous so a slow library that reparses
+# the page every mutation iteration (BeautifulSoup) or walks multi-megabyte input (dominate) is measured, not dropped
 
 
 def _string_tuple(node: ast.Tuple) -> tuple[str, ...]:
