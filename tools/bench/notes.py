@@ -28,16 +28,16 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
-    "minify-js": {party: _STRIPPER_JS for party in ("rjsmin", "jsmin", "css-html-js-minify")},
-    "minify-css": {party: _STRIPPER_CSS for party in ("rcssmin", "cssmin", "css-html-js-minify")},
+    "minify-js": dict.fromkeys(("rjsmin", "jsmin", "css-html-js-minify"), _STRIPPER_JS),
+    "minify-css": dict.fromkeys(("rcssmin", "cssmin", "css-html-js-minify"), _STRIPPER_CSS),
     "strip-remove": {
         "w3lib": (
             "removes the tags with a regular expression over the raw string and never parses, so it cannot honor "
             "nesting or the tokenizer rules that decide where an element really ends"
         ),
     },
-    "build-e": {party: _BUILDER for party in ("simple-html", "markyp", "yattag", "htbuilder", "htpy", "fast-html")},
-    "construct": {party: _BUILDER for party in ("simple-html", "markyp", "htbuilder", "htpy")},
+    "build-e": dict.fromkeys(("simple-html", "markyp", "yattag", "htbuilder", "htpy", "fast-html"), _BUILDER),
+    "construct": dict.fromkeys(("simple-html", "markyp", "htbuilder", "htpy"), _BUILDER),
     "decode": {
         "stdlib": (
             "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that "
