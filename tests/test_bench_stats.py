@@ -72,13 +72,13 @@ def test_geometric_mean_of_nothing_is_none() -> None:
 
 
 def test_geometric_mean_is_reference_invariant() -> None:
-    """Inverting every ratio inverts the aggregate, so neither build is favoured by table direction."""
+    """Inverting every ratio inverts the aggregate, so neither build is favored by table direction."""
     ratios = [0.5, 2.0, 1.25]
     assert geometric_mean(ratios) == pytest.approx(1 / geometric_mean([1 / ratio for ratio in ratios]))
 
 
 def test_noisy_threshold_matches_the_documented_level() -> None:
-    """The gate's cutoff is the one the docstring names, so prose and behaviour cannot drift apart."""
+    """The gate's cutoff is the one the docstring names, so prose and behavior cannot drift apart."""
     assert pytest.approx(0.05) == NOISY_CV
 
 

@@ -74,10 +74,13 @@ def _case_names(operation: str, stats: dict[str, dict[str, float]]) -> list[str]
     return names
 
 
-def _rows(op_labels: dict[str, str], stats: dict[str, dict[str, float]]) -> list[list[str | float | None]]:
-    """Build a library's rows across every shared operation-case; prefix the label with the op title if it spans ops."""
+def _rows(
+    op_labels: dict[str, str], stats: dict[str, dict[str, float]]
+) -> tuple[list[list[str | float | None]], list[list[float | None]]]:
+    """Build a library's rows and their spread across every shared operation-case, prefixing labels that span ops."""
     prefixed = len(op_labels) > 1
     rows: list[list[str | float | None]] = []
+    spread: list[list[float | None]] = []
     for operation, meta in ((op, operations.OPERATIONS[op]) for op in operations.OPERATIONS if op in op_labels):
         label = op_labels[operation]
         for case in _case_names(operation, stats):
@@ -88,9 +91,11 @@ def _rows(op_labels: dict[str, str], stats: dict[str, dict[str, float]]) -> list
             row_label = rst_safe(f"{meta.title} — {case}" if prefixed else case)
             if operation in _SIZE_OPS:
                 rows.append([row_label, turbo["size"], turbo["mean"], other["size"], other["mean"]])
+                spread.append([None, None, turbo.get("cv"), None, other.get("cv")])
             else:
                 rows.append([row_label, turbo["mean"], other["mean"]])
-    return rows
+                spread.append([None, turbo.get("cv"), other.get("cv")])
+    return rows, spread
 
 
 def _caption(path: Path) -> str:
@@ -112,7 +117,8 @@ def emit_migration_feeds(
         slug = _slug(stem)
         if not (docs_root / "migration" / f"{slug}.rst").exists():
             continue
-        if not (rows := _rows(op_labels, stats)):
+        rows, spread = _rows(op_labels, stats)
+        if not rows:
             skipped.append(slug)
             continue
         feed = {
@@ -120,6 +126,7 @@ def emit_migration_feeds(
             "parties": ["turbohtml", next(iter(op_labels.values()))],
             "metrics": ["size", "time"] if op_labels.keys() <= _SIZE_OPS else [],
             "rows": rows,
+            "spread": spread,
         }
         (directory / f"{slug}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
     return skipped
@@ -131,13 +138,19 @@ def stats_from_feeds(feeds_dir: Path) -> dict[str, dict[str, float]]:
     for path in feeds_dir.glob("*.json"):
         feed = json.loads(path.read_text(encoding="utf-8"))
         width = 2 if feed.get("metrics") == ["size", "time"] else 1
-        for row in feed["rows"]:
+        spread = feed.get("spread") or []
+        for position, row in enumerate(feed["rows"]):
+            noise = spread[position] if position < len(spread) else None
             for index, party in enumerate(feed["parties"]):
-                cells = row[1 + index * width : 1 + index * width + width]
+                start = 1 + index * width
+                cells = row[start : start + width]
+                # the timing's coefficient of variation travels with the value, so the migration table can show it
+                variation = noise[start + width - 1] if noise else None
+                variation = variation if isinstance(variation, (int, float)) else 0.0
                 if width == 2 and isinstance(cells[-1], (int, float)):
-                    stats[f"{path.stem}|{row[0]}|{party}"] = {"mean": cells[1], "stdev": 0.0, "size": cells[0]}
+                    stats[f"{path.stem}|{row[0]}|{party}"] = {"mean": cells[1], "cv": variation, "size": cells[0]}
                 elif width == 1 and isinstance(cells[0], (int, float)):
-                    stats[f"{path.stem}|{row[0]}|{party}"] = {"mean": cells[0], "stdev": 0.0}
+                    stats[f"{path.stem}|{row[0]}|{party}"] = {"mean": cells[0], "cv": variation}
     return stats
 
 

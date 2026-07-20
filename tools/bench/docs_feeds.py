@@ -129,30 +129,50 @@ TABLES: Final[dict[str, str | Combined]] = {
 }
 
 
-def _cell(feed: dict, party: str, case: str) -> float | str | None:
-    """Return the time one party measured for one case, or None when the operation has no such column or row."""
+def _cell(feed: dict, party: str, case: str, key: str = "rows") -> float | str | None:
+    """
+    Return what one party recorded for one case, or None when the operation has no such column or row.
+
+    ``key`` selects the array to read: the measurements, or the spread that says what they are worth. Both share a
+    layout, so one lookup serves each.
+    """
     if party not in feed["parties"]:
+        return None
+    source = feed.get(key)
+    if not source:
         return None
     index = feed["parties"].index(party)
     width = 2 if feed["metrics"] == ["size", "time"] else 1
     offset = 1 if width == 2 else 0
-    for row in feed["rows"]:
+    for position, row in enumerate(feed["rows"]):
         if row[0] == case:
-            return row[1 + index * width + offset]
+            if position >= len(source):
+                return None
+            return source[position][1 + index * width + offset]
     return None
 
 
 def _combine(spec: Combined, feeds: dict[str, dict]) -> dict:
-    """Assemble one guide table from the operations its rows and columns name."""
+    """Assemble one guide table from the operations its rows and columns name, spread included."""
     rows: list[list[float | str | None]] = []
+    spread: list[list[float | None]] = []
     for case, row_operation in spec.rows:
         cells: list[float | str | None] = [case]
+        noise: list[float | None] = [None]  # leading slot mirrors the case label, as in the per-operation feeds
         for party in spec.parties:
             operation, column = spec.columns.get(party, (row_operation, party))
             value = _cell(feeds[operation], column, case)
             cells.append(_NO_EQUIVALENT if value is None else value)
+            noise.append(_cell(feeds[operation], column, case, key="spread"))
         rows.append(cells)
-    return {"label": spec.label, "parties": list(spec.parties), "metrics": [], "rows": rows}
+        spread.append(noise)
+    return {
+        "label": spec.label,
+        "parties": list(spec.parties),
+        "metrics": [],
+        "rows": rows,
+        "spread": spread,
+    }
 
 
 def emit_docs_feeds(feeds_dir: Path, out_dir: Path) -> list[str]:

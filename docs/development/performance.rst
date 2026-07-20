@@ -45,7 +45,7 @@ across by hand:
 :func:`turbohtml.escape` against the standard library's :func:`python:html.escape` (the ``stdlib`` column), dominate's
 text escape, and the nh3 ammonia binding. It gains the most on text that needs little escaping, where the SIMD scan
 classifies sixteen bytes at a time and copies clean stretches in bulk: on 4 MiB of no-op prose it runs 22 times faster
-than html.escape and 66 times faster than nh3. The gap narrows to two to four times on tiny strings and escape-dense
+than html.escape and 65 times faster than nh3. The gap narrows to two to four times on tiny strings and escape-dense
 markup, where call overhead and the escaping itself dominate.
 
 .. bench-table::
@@ -221,8 +221,8 @@ edge ahead (0.6x and 0.8x).
 <https://github.com/scrapy/w3lib>`_'s ``replace_entities``, the Scrapy helper that resolves the same references, and
 dominate's ``util.unescape``. It gains the most on entity-heavy input, where the standard library pays a Python call per
 match and w3lib runs a regular-expression substitution with a Python callback per match; turbohtml hops between ``&``
-occurrences in C and bulk-copies the clean spans between references, so it leads html.unescape by 11 to 17 times and
-w3lib by 15 to 28 times on the reference-dense inputs. dominate sits in that same range on the small strings, but its
+occurrences in C and bulk-copies the clean spans between references, so it leads html.unescape by up to 15 times and
+w3lib by up to 22 times on the reference-dense inputs. dominate sits in that same range on the small strings, but its
 scan turns multi-megabyte input into whole seconds, trailing by 327 times on the 4 MiB book and past 2,000 on the
 escaped copy.
 
@@ -252,8 +252,8 @@ over libxml2), `selectolax <https://github.com/rushter/selectolax>`_ and `resili
 <https://github.com/chatnoir-eu/chatnoir-resiliparse>`_ (both wrapping `lexbor <https://lexbor.com>`_), `html5-parser
 <https://html5-parser.readthedocs.io>`_ (the C gumbo binding), `BeautifulSoup
 <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ over ``html.parser``, and html5lib. turbohtml leads
-resiliparse by 1.2 to 3.5 times, runs three to six times faster than lxml, parsel, pyquery, and selectolax, five to
-thirteen times faster than html5-parser, and 48 to 90 times faster than the pure-Python BeautifulSoup and html5lib,
+resiliparse by 1.2 to 3.5 times, runs roughly three to six times faster than lxml, parsel, pyquery, and selectolax, five
+to thirteen times faster than html5-parser, and 35 to 93 times faster than the pure-Python BeautifulSoup and html5lib,
 while building the WHATWG tree that lxml's libxml2 does not.
 
 resiliparse stays closest because its ``HTMLTree.parse`` is a thin call straight into lexbor's native tree, while
@@ -274,7 +274,7 @@ lineage.
 :func:`turbohtml.parse_fragment` parses an ``innerHTML``-style snippet in a container's context rather than a whole
 document, against lxml's ``lxml.html.fromstring`` and html5lib's ``parseFragment``. The input is a table-row fragment
 parsed in its ``<tbody>`` context, where the WHATWG algorithm's table rules apply. turbohtml runs the same C engine it
-uses for whole documents, so it parses the fragment nearly four times faster than lxml and roughly eighty-five times
+uses for whole documents, so it parses the fragment nearly four times faster than lxml and roughly eighty-eight times
 faster than the pure-Python html5lib.
 
 .. bench-table::
@@ -289,7 +289,7 @@ way each library reaches for it (turbohtml's :meth:`~turbohtml.Node.find_all`, r
 selectors, lxml's XPath ``findall``, parsel's and pyquery's and BeautifulSoup's selectors, and soupsieve directly). A
 tag-only query resolves the name to an interned atom and walks the subtree comparing integers, with no per-element
 string built and no matcher dispatch. It stays ahead of resiliparse's lexbor pass by 1.3 times on the small blog
-widening to 21 times on the spec, leads lxml's C XPath engine by 14 to 24 times, and runs 12 to over 1,400 times ahead
+widening to 22 times on the spec, leads lxml's C XPath engine by 14 to 24 times, and runs 12 to over 1,400 times ahead
 of pyquery, selectolax, parsel, BeautifulSoup, and soupsieve.
 
 .. bench-table::
@@ -332,7 +332,7 @@ element's collected subtree text), raced against ``BeautifulSoup.find_all(string
 on lxml, parsel, and pyquery. When the ``text=`` filter is a plain string or a literal (no regex metacharacters,
 case-sensitive) compiled pattern, turbohtml gathers each candidate's collected text and matches it in C -- no Python
 ``str`` built, no per-element ``re.search`` call -- where the others walk the tree in Python, so it leads every
-competitor by 1.3 to 2.9 times across these pages. A case-insensitive or otherwise non-literal pattern keeps the
+competitor by 1.2 to 3.0 times across these pages. A case-insensitive or otherwise non-literal pattern keeps the
 per-element Python path.
 
 .. bench-table::
@@ -393,8 +393,8 @@ The ``text`` suite collects the visible text two ways. First, the raw text join 
 pass: turbohtml's :attr:`~turbohtml.Node.text` property concatenates every descendant text run, against lxml's
 ``text_content()``, resiliparse's node text, selectolax's ``text()``, BeautifulSoup's ``get_text()``, and parsel's and
 pyquery's text extraction. turbohtml gathers the runs in one C walk into a buffer reserved up front, so it stays level
-with lxml and resiliparse, leads selectolax and BeautifulSoup by roughly an order of magnitude, and runs 40 to 150 times
-ahead of pyquery and parsel, which box each match in a wrapper first.
+with lxml and resiliparse, leads selectolax and BeautifulSoup by six to seven times, and runs 99 to 145 times ahead of
+parsel, which boxes each match in a wrapper first. pyquery swings from a shade ahead on one page to 57 times behind.
 
 .. bench-table::
     :file: bench/text-content.json
@@ -405,7 +405,7 @@ Second, the layout-aware string-to-text extraction: :meth:`turbohtml.Node.to_tex
 <https://github.com/chatnoir-eu/chatnoir-resiliparse>`_'s ``extract_plain_text``. inscriptis and html-text both build an
 lxml tree in Python and resiliparse renders text off the lexbor tree it parses to, where turbohtml does the whole layout
 in one C walk; inscriptis additionally lays tables out as aligned columns, which html-text and resiliparse skip.
-turbohtml leads resiliparse by five to fifteen times, html-text by 26 to 62 times, and inscriptis by 88 to 109 times.
+turbohtml leads resiliparse by five to fifteen times, html-text by 27 to 61 times, and inscriptis by 77 to 108 times.
 
 .. bench-table::
     :file: bench/text-content-2.json
@@ -511,8 +511,8 @@ Editing a parsed tree: tag every ``<a>`` with ``rel="nofollow"``, a link-rewriti
 tree, each library rebuilds a fresh parse before every iteration outside the timed region, then the timed call walks its
 links and sets the attribute (turbohtml through the live :attr:`~turbohtml.Element.attrs` mapping, resiliparse and
 selectolax through their node setters, lxml through ``Element.set``, pyquery through its ``attr``, BeautifulSoup through
-item assignment). turbohtml leads resiliparse by 1.7 to 2.4 times, lxml by 2.5 to 3.6, selectolax by 3.7 to 5.6, and
-pyquery and BeautifulSoup by 3.4 to 11 times, the gap widening with the page as each reparse costs more.
+item assignment). turbohtml leads resiliparse by 1.4 to 2.1 times, lxml by 1.7 to 3.7, selectolax by 3.0 to 4.9, and
+pyquery and BeautifulSoup by 2.8 to 12 times, the gap widening with the page as each reparse costs more.
 
 .. bench-table::
     :file: bench/editing.json
@@ -529,8 +529,8 @@ ten to eighteen times, and BeautifulSoup by up to thirty-seven times.
 Two content setters replace the body's children on a freshly parsed tree. :meth:`~turbohtml.Element.set_inner_html`
 reparses a fixed fragment in the ``<body>``'s context and splices it in one C call, against lxml clearing the body and
 appending ``fragments_fromstring``, pyquery's ``.html()``, and BeautifulSoup clearing it and appending a reparsed soup;
-it leads them by 6.4 to 9.2, 1.7 to 11, and 17 to 44 times. :meth:`~turbohtml.Element.set_text` replaces the children
-with one verbatim text node, against the same three, leading by 7.0 to 9.8, 2.6 to 14, and 12 to 22 times. BeautifulSoup
+it leads them by 6.6 to 9.4, 1.7 to 11, and 15 to 42 times. :meth:`~turbohtml.Element.set_text` replaces the children
+with one verbatim text node, against the same three, leading by 6.8 to 9.9, 2.3 to 14, and 11 to 22 times. BeautifulSoup
 trails furthest because it reparses the whole page on every iteration where the others splice into a live tree.
 
 .. bench-table::
@@ -735,7 +735,7 @@ the one case where the CPython codec's table lookup edges ahead.
 cleaner, and `w3lib <https://w3lib.readthedocs.io/>`_'s ``safe_url_string``/``canonicalize_url``, Scrapy's URL
 utilities. The per-URL pass wins 2x-6x by scanning each component once in C-backed regexes and percent-encoding only
 when a scan finds something to encode, where both competitors re-encode unconditionally through urllib's per-character
-quoters. Page-level filtered extraction parses the real WHATWG DOM and cleans each link, and finishes 2.0x-3.3x ahead of
+quoters. Page-level filtered extraction parses the real WHATWG DOM and cleans each link, and finishes 2.0x-3.2x ahead of
 courlan's regex scan, because each distinct href is cleaned once and absolute links skip resolution. The anchor
 collectors selectolax, BeautifulSoup, and parsel land ahead of turbohtml on this row because they only gather ``<a
 href>`` and skip the cleaning and filtering it does.
