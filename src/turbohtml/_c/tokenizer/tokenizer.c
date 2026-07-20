@@ -19,6 +19,10 @@ typedef struct {
     PyObject_HEAD th_tokenizer *sm;
     PyObject *source; /* borrowed-input owner for one-shot tokenize(), else NULL */
     int closed;       /* set by close()/__exit__; feed() after it is an error until reset() */
+    /* Where the token dispatch() last handed over began, so a handler asking for its position reads a field
+       instead of the loop writing two Python attributes per token. */
+    Py_ssize_t line;
+    Py_ssize_t col;
 } TokenizerObject;
 
 typedef struct {
@@ -158,6 +162,8 @@ static PyObject *tokenizer_new(PyTypeObject *type, PyObject *args, PyObject *kwd
     }
     self->source = NULL;
     self->closed = 0;
+    self->line = 1;
+    self->col = 0;
     self->sm = th_tok_new();
     if (self->sm == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -236,6 +242,8 @@ static PyObject *tokenizer_reset(PyObject *self, PyObject *Py_UNUSED(ignored)) {
     Py_BEGIN_CRITICAL_SECTION(self); /* th_tok_reset mutates the shared state machine */
     th_tok_reset(((TokenizerObject *)self)->sm);
     ((TokenizerObject *)self)->closed = 0;
+    ((TokenizerObject *)self)->line = 1;
+    ((TokenizerObject *)self)->col = 0;
     Py_END_CRITICAL_SECTION();
     Py_RETURN_NONE;
 }
@@ -263,7 +271,199 @@ static PyObject *tokenizer_iter(PyObject *self) {
     return iter_new(state_of(self), self);
 }
 
+/* The handlers dispatch() drives, bound once per call: a token then costs one call instead of an attribute lookup
+   and a Python-level walk over the token's fields. */
+typedef struct {
+    PyObject *starttag;
+    PyObject *startendtag;
+    PyObject *endtag;
+    PyObject *data;
+    PyObject *comment;
+    PyObject *decl;
+} sax_handlers;
+
+static void handlers_release(sax_handlers *bound) {
+    Py_XDECREF(bound->starttag);
+    Py_XDECREF(bound->startendtag);
+    Py_XDECREF(bound->endtag);
+    Py_XDECREF(bound->data);
+    Py_XDECREF(bound->comment);
+    Py_XDECREF(bound->decl);
+}
+
+static int handlers_bind(sax_handlers *bound, PyObject *handler) {
+    bound->starttag = PyObject_GetAttrString(handler, "handle_starttag");
+    bound->startendtag = PyObject_GetAttrString(handler, "handle_startendtag");
+    bound->endtag = PyObject_GetAttrString(handler, "handle_endtag");
+    bound->data = PyObject_GetAttrString(handler, "handle_data");
+    bound->comment = PyObject_GetAttrString(handler, "handle_comment");
+    bound->decl = PyObject_GetAttrString(handler, "handle_decl");
+    if (bound->starttag == NULL || bound->startendtag == NULL || bound->endtag == NULL || bound->data == NULL ||
+        bound->comment == NULL || bound->decl == NULL) {
+        handlers_release(bound);
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *attrs_of(const th_token *record) {
+    PyObject *list = PyList_New(record->attr_count);
+    if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (Py_ssize_t index = 0; index < record->attr_count; index++) {
+        const th_attr *attr = &record->attrs[index];
+        PyObject *name = th_buf_to_str(&attr->name);
+        /* a valueless attribute reports "", the empty string the WHATWG tokenizer assigns it */
+        PyObject *value = th_buf_to_str(&attr->value);
+        PyObject *pair = (name != NULL && value != NULL) ? PyTuple_Pack(2, name, value) : NULL;
+        Py_XDECREF(name);
+        Py_XDECREF(value);
+        if (pair == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(list);
+            return NULL;
+        }
+        PyList_SET_ITEM(list, index, pair);
+    }
+    return list;
+}
+
+/* A TEXT run is either an untouched span of the machine's input or its own buffer; the span is resolved here rather
+   than held, because the next step may move the storage under it. */
+static PyObject *text_of(const th_tokenizer *sm, const th_token *record) {
+    if (!record->is_slice) {
+        return th_buf_to_str(&record->text);
+    }
+    int kind;
+    const char *data = th_tok_input_data(sm, &kind);
+    return th_str_from_kind(kind, data + record->src_start * kind, record->src_len);
+}
+
+/* The DOCTYPE spelled as html.parser hands it to handle_decl: the leading "<!" and trailing ">" removed. */
+static PyObject *doctype_of(const th_token *record) {
+    PyObject *name = th_buf_to_str(&record->name);
+    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *decl = NULL;
+    if (record->has_public_id) {
+        PyObject *public_id = th_buf_to_str(&record->public_id);
+        PyObject *system_id = record->has_system_id ? th_buf_to_str(&record->system_id) : NULL;
+        if (public_id != NULL && (system_id != NULL || !record->has_system_id)) {
+            decl = system_id != NULL ? th_str_format("DOCTYPE %U PUBLIC \"%U\" \"%U\"", name, public_id, system_id)
+                                     : th_str_format("DOCTYPE %U PUBLIC \"%U\"", name, public_id);
+        }
+        Py_XDECREF(public_id);
+        Py_XDECREF(system_id);
+    } else if (record->has_system_id) {
+        PyObject *system_id = th_buf_to_str(&record->system_id);
+        if (system_id != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            decl = th_str_format("DOCTYPE %U SYSTEM \"%U\"", name, system_id);
+        }
+        Py_XDECREF(system_id);
+    } else {
+        decl = record->name.len != 0 ? th_str_format("DOCTYPE %U", name) : PyUnicode_FromString("DOCTYPE");
+    }
+    Py_DECREF(name);
+    return decl;
+}
+
+PyDoc_STRVAR(tokenizer_dispatch_doc, "dispatch(handler)\n--\n\n"
+                                     "Drive handler's handle_* methods over the tokens completed so far.\n\n"
+                                     "The same tokens iterating the tokenizer would yield, delivered without\n"
+                                     "building a Token for each one.\n\n"
+                                     ":param handler: an object with the html.parser handle_* methods.\n"
+                                     ":raises AttributeError: if handler is missing one of them.");
+
+static PyObject *tokenizer_dispatch(PyObject *self, PyObject *handler) {
+    sax_handlers bound;
+    if (handlers_bind(&bound, handler) < 0) {
+        return NULL;
+    }
+    TokenizerObject *tokenizer = (TokenizerObject *)self;
+    th_tokenizer *sm = tokenizer->sm;
+    PyObject *result = NULL;
+    while (result == NULL) {
+        PyObject *first = NULL;
+        PyObject *second = NULL;
+        PyObject *target = NULL;
+        int drained = 0;
+        /* the state machine, its record buffers and its free list are mutated here, so the owning tokenizer is
+           locked while a record is read and copied out; the handler runs outside the lock */
+        Py_BEGIN_CRITICAL_SECTION(self);
+        th_token *record;
+        switch (th_tok_next(sm, &record)) { /* GCOVR_EXCL_BR_LINE: the TH_STEP_ERROR edge needs an allocation
+                                               failure, which cannot be forced from a test */
+        case TH_STEP_TOKEN:
+            tokenizer->line = record->line;
+            tokenizer->col = record->col;
+            if (record->kind == TH_START_TAG) {
+                first = th_buf_to_str(&record->name);
+                second = attrs_of(record);
+                target = record->self_closing ? bound.startendtag : bound.starttag;
+                int model = content_model_for(&record->name);
+                if (model >= 0) {
+                    th_tok_switch(sm, (enum th_initial_state)model);
+                }
+            } else if (record->kind == TH_END_TAG) {
+                first = th_buf_to_str(&record->name);
+                target = bound.endtag;
+            } else if (record->kind == TH_TEXT) {
+                first = text_of(sm, record);
+                target = bound.data;
+            } else if (record->kind == TH_COMMENT) {
+                first = th_buf_to_str(&record->text);
+                target = bound.comment;
+            } else {
+                first = doctype_of(record);
+                target = bound.decl;
+            }
+            break;
+        case TH_STEP_ERROR:   /* GCOVR_EXCL_LINE: the only step error is an out-of-memory condition */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;            /* GCOVR_EXCL_LINE */
+        default:              /* NEED_MORE or DONE: every buffered token has been handed over */
+            drained = 1;
+            break;
+        }
+        Py_END_CRITICAL_SECTION();
+        if (drained) {
+            handlers_release(&bound);
+            Py_RETURN_NONE;
+        }
+        /* a failed conversion, or the step error above, leaves the exception set */
+        if (first == NULL || (target == bound.starttag && second == NULL) ||
+            (target == bound.startendtag && second == NULL)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            Py_XDECREF(first);
+            Py_XDECREF(second);
+            handlers_release(&bound);
+            return NULL;
+        }
+        PyObject *call = second != NULL ? PyObject_CallFunctionObjArgs(target, first, second, NULL)
+                                        : PyObject_CallFunctionObjArgs(target, first, NULL);
+        Py_DECREF(first);
+        Py_XDECREF(second);
+        if (call == NULL) {
+            handlers_release(&bound);
+            return NULL;
+        }
+        Py_DECREF(call);
+    }
+    handlers_release(&bound);
+    return result;
+}
+
+PyDoc_STRVAR(tokenizer_position_doc, "position()\n--\n\n"
+                                     "The 1-based line and 0-based column where the last dispatched token began.");
+
+static PyObject *tokenizer_position(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    TokenizerObject *tokenizer = (TokenizerObject *)self;
+    return Py_BuildValue("(nn)", tokenizer->line, tokenizer->col);
+}
+
 static PyMethodDef tokenizer_methods[] = {
+    {"dispatch", tokenizer_dispatch, METH_O, tokenizer_dispatch_doc},
+    {"position", tokenizer_position, METH_NOARGS, tokenizer_position_doc},
     {"feed", tokenizer_feed, METH_O, tokenizer_feed_doc},
     {"close", tokenizer_close, METH_NOARGS, tokenizer_close_doc},
     {"reset", tokenizer_reset, METH_NOARGS, tokenizer_reset_doc},
