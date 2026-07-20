@@ -574,6 +574,19 @@ typedef struct engine {
     int gen_counter;
     int depth;
 
+    /* One level's number is its preceding matching siblings plus one, so numbering a run of siblings rescans the
+       whole run for each of them and costs O(n^2) over the run. The memo carries the previous answer forward:
+       level_number(node) is level_number(node->prev_sibling) plus whether that sibling counted. It holds the
+       criteria the answer was computed under, because the default criteria follow the current node's type and
+       name, and a run numbered under different criteria cannot reuse it. */
+    const th_node *number_memo_node;
+    long number_memo_value;
+    const match_set *number_memo_set;
+    int number_memo_have_count;
+    int number_memo_type;
+    const Py_UCS4 *number_memo_name;
+    Py_ssize_t number_memo_name_len;
+
     const char *error;
     int py_error;
 } engine;
@@ -2314,15 +2327,45 @@ static int number_counts(const engine *eng, const match_set *count_set, int have
             memcmp(node->text, eng->cur_node->text, (size_t)node->text_len * sizeof(Py_UCS4)) == 0);
 }
 
+/* Whether the memo was taken under the same criteria this call uses, so its answer still applies. */
+static int number_memo_applies(const engine *eng, const match_set *count_set, int have_count) {
+    if (eng->number_memo_node == NULL || eng->number_memo_have_count != have_count ||
+        eng->number_memo_set != count_set) {
+        return 0;
+    }
+    if (have_count) {
+        return 1;
+    }
+    /* the default criteria read the current node's type and, for elements, its name */
+    return eng->number_memo_type == (int)eng->cur_node->type &&
+           eng->number_memo_name_len == eng->cur_node->text_len &&
+           (eng->cur_node->text_len == 0 ||
+            memcmp(eng->number_memo_name, eng->cur_node->text,
+                   (size_t)eng->cur_node->text_len * sizeof(Py_UCS4)) == 0);
+}
+
 /* The count of node plus its preceding siblings that match the count criteria (one level's
-   number). */
-static long level_number(const engine *eng, const match_set *count_set, int have_count, th_node *node) {
+   number). Numbering a run of siblings walks it once in total rather than once per sibling: the
+   answer for a node is the answer for its previous sibling plus whether that sibling counted. */
+static long level_number(engine *eng, const match_set *count_set, int have_count, th_node *node) {
     long count = 1;
-    for (th_node *prev = node->prev_sibling; prev != NULL; prev = prev->prev_sibling) {
-        if (number_counts(eng, count_set, have_count, prev)) {
-            count++;
+    th_node *prev = node->prev_sibling;
+    if (prev != NULL && prev == eng->number_memo_node && number_memo_applies(eng, count_set, have_count)) {
+        count = eng->number_memo_value + (number_counts(eng, count_set, have_count, prev) ? 1 : 0);
+    } else {
+        for (; prev != NULL; prev = prev->prev_sibling) {
+            if (number_counts(eng, count_set, have_count, prev)) {
+                count++;
+            }
         }
     }
+    eng->number_memo_node = node;
+    eng->number_memo_value = count;
+    eng->number_memo_set = count_set;
+    eng->number_memo_have_count = have_count;
+    eng->number_memo_type = (int)eng->cur_node->type;
+    eng->number_memo_name = eng->cur_node->text;
+    eng->number_memo_name_len = eng->cur_node->text_len;
     return count;
 }
 
