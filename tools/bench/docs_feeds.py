@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from bench.notes import NOTES
+
 _NO_EQUIVALENT: Final = "no equivalent operation"
 
 
@@ -167,12 +169,19 @@ def _combine(spec: Combined, feeds: dict[str, dict]) -> dict:
             noise.append(variation if isinstance(variation, (int, float)) else None)
         rows.append(cells)
         spread.append(noise)
+    # a combined table draws each column from its own operation, so a note follows the operation that column came from
+    notes: dict[str, str] = {}
+    for party in spec.parties:
+        operation, column = spec.columns.get(party, (spec.rows[0][1], party))
+        if (note := NOTES.get(operation, {}).get(column)) is not None:
+            notes[party] = note
     return {
         "label": spec.label,
         "parties": list(spec.parties),
         "metrics": [],
         "rows": rows,
         "spread": spread,
+        "notes": notes,
     }
 
 
@@ -195,7 +204,11 @@ def emit_docs_feeds(feeds_dir: Path, out_dir: Path) -> list[str]:
                 break
             feeds[operation] = json.loads(path.read_text(encoding="utf-8"))
         else:
-            feed = feeds[spec] if isinstance(spec, str) else _combine(spec, feeds)
+            if isinstance(spec, str):
+                feed = feeds[spec]
+                feed["notes"] = {party: NOTES[spec][party] for party in feed["parties"] if party in NOTES.get(spec, {})}
+            else:
+                feed = _combine(spec, feeds)
             (out_dir / f"{name}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
     return missing
 

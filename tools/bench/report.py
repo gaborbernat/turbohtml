@@ -20,6 +20,7 @@ import json
 from typing import TYPE_CHECKING
 
 from bench import operations
+from bench.notes import NOTES
 from bench.stats import NOISY_CV
 
 if TYPE_CHECKING:
@@ -195,6 +196,8 @@ def _emit_table_json(operation: str, stats: dict[str, _Stat], directory: Path) -
         "rows": rows,
         # one coefficient of variation per timing cell, so a published table can show what a figure is worth
         "spread": spread,
+        # why a column does not compare like for like, for the parties that answer a different question
+        "notes": {party: note for party, note in NOTES.get(operation, {}).items() if party in competitors},
     }
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{operation}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")

@@ -129,18 +129,32 @@ _HOMEPAGES: Final = {
 
 
 def _format_time(seconds: float) -> str:
+    """Scale a duration to the largest unit it fills; never exponent notation, which reads as a defect in a table."""
     for unit, factor in _TIME_UNITS:
         if seconds >= factor:
-            return f"{seconds / factor:.3g} {unit}"
-    return f"{seconds / 1e-9:.3g} ns"
+            return _fixed(seconds / factor, unit)
+    return _fixed(seconds / 1e-9, "ns")
+
+
+def _fixed(value: float, unit: str) -> str:
+    """Render a scaled figure in plain decimal: three significant digits, grouped once it runs past a thousand."""
+    if value >= 1000:
+        return f"{value:,.0f} {unit}"
+    return f"{value:.3g} {unit}"
 
 
 def _format_size(size: float) -> str:
-    return f"{size / 1000:.1f} kB" if size >= 1000 else f"{size:.0f} B"
+    for unit, factor in (("MB", 1e6), ("kB", 1e3)):
+        if size >= factor:
+            return _fixed(size / factor, unit)
+    return f"{size:.0f} B"
 
 
 def _format_memory(size: float) -> str:
-    return f"{size / 1e6:.1f} MB" if size >= 1e6 else f"{size / 1e3:.0f} kB"
+    for unit, factor in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if size >= factor:
+            return _fixed(size / factor, unit)
+    return f"{size:.0f} B"
 
 
 def _ratio_spread(spread: list[Any] | None, index: int, turbo_index: int) -> float | None:
@@ -246,6 +260,12 @@ def _mark_entry(ordinal: int) -> nodes.entry:
     return entry
 
 
+def _ordered_notes(feed: dict[str, Any], parties: list[str]) -> list[str]:
+    """Return the noted parties in the order their columns appear, so ordinals read left to right."""
+    notes = feed.get("notes") or {}
+    return [party for party in parties if party in notes]
+
+
 def _legend(reasons: dict[str, int]) -> nodes.container:
     """Spell each numbered reason out under the table; reason text is literal so a message cannot inject markup."""
     legend = nodes.container(classes=["bench-legend"])
@@ -277,8 +297,10 @@ class BenchTable(Directive):
         group += nodes.colspec(colwidth=2)
         for _ in range(ncols - 1):
             group += nodes.colspec(colwidth=1)
-        group += self._head(feed["label"], parties, feed["metrics"])
         reasons = _reason_map(rows)
+        # notes number on from the empty-cell reasons so one legend carries both without colliding ordinals
+        notes = {party: len(reasons) + offset for offset, party in enumerate(_ordered_notes(feed, parties), start=1)}
+        group += self._head(feed["label"], parties, feed["metrics"], notes)
         body = nodes.tbody()
         group += body
         for row_index, cells in enumerate(rows):
@@ -287,11 +309,14 @@ class BenchTable(Directive):
                 raise self.error(msg)
             noise = spread[row_index] if row_index < len(spread) else None
             body += self._body_row(cells, parties, metrics, reasons, noise)
-        if not reasons:
+        legend = dict(reasons)
+        for party, ordinal in notes.items():
+            legend[f"{party} {feed['notes'][party]}"] = ordinal
+        if not legend:
             return [table]
-        return [table, _legend(reasons)]
+        return [table, _legend(legend)]
 
-    def _head(self, label: str, parties: list[str], metrics: list[str]) -> nodes.thead:
+    def _head(self, label: str, parties: list[str], metrics: list[str], notes: dict[str, int]) -> nodes.thead:
         head = nodes.thead()
         party_row = nodes.row()
         label_cell = self._entry(label)
@@ -308,6 +333,12 @@ class BenchTable(Directive):
                 cell += paragraph
             else:
                 cell = self._entry(party)
+            # a party whose column answers a different question is marked at the header, not per cell: the caveat
+            # applies to everything below it
+            if (ordinal := notes.get(party)) is not None:
+                superscript = nodes.superscript()
+                superscript += nodes.Text(str(ordinal))
+                cell.children[0] += superscript
             if metrics:
                 cell["morecols"] = len(metrics) - 1
             party_row += cell
