@@ -248,6 +248,17 @@ def _parsed(text: str) -> turbohtml.Document:
     return turbohtml.parse(text)
 
 
+def _whole(text: str) -> turbohtml.Document:
+    """
+    Parse the string afresh, for an operation whose competitors take a string rather than a tree.
+
+    turbohtml exposes these as node methods, so timing them off the cached tree would compare a conversion against
+    every competitor's parse plus conversion. The comparison these tables make is end to end, string in and result
+    out, so the parse belongs inside the measurement on both sides.
+    """
+    return turbohtml.parse(text)
+
+
 def find(text: str) -> None:
     """Collect every anchor with turbohtml's find_all."""
     _parsed(text).find_all("a")
@@ -522,7 +533,7 @@ def markdown(case: tuple[str, str]) -> None:
     """Convert HTML to Markdown with turbohtml, with the default or the fully-configured option surface."""
     kind, text = case
     if kind == "configured":
-        _parsed(text).to_markdown(
+        _whole(text).to_markdown(
             _Markdown(
                 inline=_Markdown.Inline(strong="__", emphasis="_"),
                 links=_Markdown.Links(style="reference"),
@@ -531,26 +542,26 @@ def markdown(case: tuple[str, str]) -> None:
             )
         )
     else:
-        _parsed(text).to_markdown()
+        _whole(text).to_markdown()
 
 
 def markdown_google(text: str) -> None:
     """Convert a Google Docs export to Markdown with turbohtml's google_doc mode."""
-    _parsed(text).to_markdown(_Markdown.google_doc())
+    _whole(text).to_markdown(_Markdown.google_doc())
 
 
 def tables(case: tuple[str, str]) -> None:
     """Extract table grids with turbohtml: every table as rows, or the first table keyed by its header."""
     kind, text = case
     if kind == "rows":
-        _parsed(text).tables()
-    elif (table := _parsed(text).find("table")) is not None:
+        _whole(text).tables()
+    elif (table := _whole(text).find("table")) is not None:
         table.records()
 
 
 def article(text: str) -> None:
     """Extract the content body and metadata with turbohtml in one C pass."""
-    _parsed(text).article()
+    _whole(text).article()
 
 
 def boilerplate(text: str) -> None:
@@ -565,22 +576,22 @@ def date(text: str) -> None:
 
 def text_render(text: str) -> None:
     """Render layout-aware visible text with turbohtml's to_text, walking the tree in C."""
-    _parsed(text).to_text()
+    _whole(text).to_text()
 
 
 def text_collapsed(text: str) -> None:
     """Join turbohtml's stripped_strings into the collapsed, layout-free word stream."""
-    " ".join(_parsed(text).stripped_strings)
+    " ".join(_whole(text).stripped_strings)
 
 
 def text_main(text: str) -> None:
     """Extract the boilerplate-stripped main text with turbohtml's main_text in one C pass."""
-    _parsed(text).main_text()
+    _whole(text).main_text()
 
 
 def text_annotated(text: str) -> None:
     """Render annotated layout text with turbohtml, recording spans for matching elements in C."""
-    _parsed(text).to_annotated_text(_ANNOTATION_RULES)
+    _whole(text).to_annotated_text(_ANNOTATION_RULES)
 
 
 def extract_attr(text: str) -> None:
@@ -654,25 +665,25 @@ class _Node:
 class _NodeBuilder:
     """Retarget the parser at :class:`_Node`; parse_into binds each method per instance, hence the PLR6301 waivers."""
 
-    def create_document(self) -> _Node:  # noqa: PLR6301
+    def create_document(self) -> _Node:  # ruff:ignore[no-self-use]
         return _Node("#document")
 
-    def create_doctype(self, name: str, public_id: str | None, system_id: str | None) -> _Node:  # noqa: ARG002, PLR6301
+    def create_doctype(self, name: str, public_id: str | None, system_id: str | None) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node("#doctype")
 
-    def create_element(self, name: str, namespace: str, attrs: tuple[tuple[str, str | None], ...]) -> _Node:  # noqa: ARG002, PLR6301
+    def create_element(self, name: str, namespace: str, attrs: tuple[tuple[str, str | None], ...]) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node(name)
 
-    def create_text(self, data: str) -> _Node:  # noqa: ARG002, PLR6301
+    def create_text(self, data: str) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node("#text")
 
-    def create_comment(self, data: str) -> _Node:  # noqa: ARG002, PLR6301
+    def create_comment(self, data: str) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node("#comment")
 
-    def create_pi(self, data: str) -> _Node:  # noqa: ARG002, PLR6301
+    def create_pi(self, data: str) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node("#pi")
 
-    def append(self, parent: _Node, child: _Node) -> None:  # noqa: PLR6301
+    def append(self, parent: _Node, child: _Node) -> None:  # ruff:ignore[no-self-use]
         parent.children.append(child)
 
 

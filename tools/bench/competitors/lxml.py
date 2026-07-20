@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urljoin
 
 import lxml.etree as lxml_etree  # ty: ignore[unresolved-import]  # C extension, ships no type stubs
 from lxml import html as lxml_html
@@ -216,8 +217,13 @@ def links_rewrite(text: str) -> None:
 
 
 def links_filter(text: str) -> None:
-    """Collect the links and keep the on-page ones, filtering the hrefs lxml's iterlinks() yields."""
-    _ = [link for _element, _attr, link, _pos in _parsed(text).iterlinks() if not link.startswith(("#", "javascript:"))]
+    """Collect the cleaned, absolutized, deduplicated page links, the work turbohtml's extract_links does."""
+    # not iterlinks(): that yields every URL-bearing attribute in the document, so img/script/link sources land in
+    # a set the reference builds from anchors alone
+    seen: dict[str, None] = {}
+    for href in lxml_html.document_fromstring(text).xpath("//a/@href"):
+        seen[urljoin(_LINKS_BASE, href)] = None
+    _ = list(seen)
 
 
 def find_text(text: str) -> None:
@@ -307,7 +313,7 @@ def xpath(case: tuple[str, str]) -> None:
 
 
 @functools.cache
-def _xslt_compiled(sheet: str, source: str):  # noqa: ANN202  # lxml.etree is untyped, so the compiled types are inferred
+def _xslt_compiled(sheet: str, source: str):  # ruff:ignore[missing-return-type-private-function]  # lxml.etree is untyped, so the compiled types are inferred
     """Compile the stylesheet and parse the source once, so the op times only the transformation."""
     transform = lxml_etree.XSLT(lxml_etree.fromstring(sheet.encode()))
     return transform, lxml_etree.fromstring(source.encode())

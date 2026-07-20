@@ -1,4 +1,4 @@
-"""BeautifulSoup: parse, the constructor build, and the read-path queries."""
+"""BeautifulSoup over the lxml tree builder: the same API, the backend its own docs recommend for speed."""
 
 from __future__ import annotations
 
@@ -6,15 +6,17 @@ import functools
 import re
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup, Comment, UnicodeDammit
+from bs4 import BeautifulSoup, Comment
 from bs4.element import AttributeValueList
 
 from bench.timing import Mutating
 
-# UnicodeDammit only sniffs when an optional detector backend is installed. Without one it answers windows-1252 for
-# every high-byte stream and utf-8 for Shift_JIS, which is fast and wrong; chardet is the backend bs4 documents first.
-REQUIREMENTS = ("beautifulsoup4[chardet]>=4.15",)
+REQUIREMENTS = ("beautifulsoup4>=4.15", "lxml>=5.2", "soupsieve>=2.5")
 
+# Only the operations whose cost depends on the tree builder appear here. Building a tree through ``new_tag`` and
+# sniffing bytes through UnicodeDammit run the same code on either backend, so measuring them twice would add a
+# duplicate column to those tables without telling a reader anything.
+_BACKEND = "lxml"
 _FIND_TEXT_PATTERN = re.compile(r"test")
 _SET_HTML = "<p>Updated <a href='/x'>link</a> and <b>bold</b>.</p><ul><li>one</li><li>two</li></ul>"
 _SET_TEXT = "Replacement text, escaped & verbatim."
@@ -23,55 +25,19 @@ _LINKS_BASE = "https://example.com/base/"
 
 
 def parse(text: str) -> None:
-    """Parse a whole document with BeautifulSoup over its stdlib html.parser backend."""
-    BeautifulSoup(text, "html.parser")
-
-
-def build(count: int) -> None:
-    """Build a ``<ul>`` of rows with BeautifulSoup's ``new_tag`` and ``.string``, then serialize (the workload)."""
-    soup = BeautifulSoup("", "html.parser")
-    ul = soup.new_tag("ul")
-    for index in range(count):
-        li = soup.new_tag("li", attrs={"class": "item", "data-i": str(index)})
-        li.string = f"item {index}"
-        ul.append(li)
-    _ = ul.decode()
-
-
-def construct(count: int) -> None:
-    """Construct ``count`` elements with attributes and text, in isolation from serialization."""
-    soup = BeautifulSoup("", "html.parser")
-    for index in range(count):
-        li = soup.new_tag("li", attrs={"class": "item", "data-i": str(index)})
-        li.string = f"item {index}"
-
-
-@functools.cache
-def _tree(count: int) -> object:
-    """Return a built ``<ul>`` of ``count`` rows, cached so ``serialize`` times only the emit step."""
-    soup = BeautifulSoup("", "html.parser")
-    ul = soup.new_tag("ul")
-    for index in range(count):
-        li = soup.new_tag("li", attrs={"class": "item", "data-i": str(index)})
-        li.string = f"item {index}"
-        ul.append(li)
-    return ul
-
-
-def emit(count: int) -> None:
-    """Emit a pre-built ``count``-row tree with ``.decode()``."""
-    _ = _tree(count).decode()  # ty: ignore[unresolved-attribute]  # bs4 Tag has no stubs
+    """Parse a whole document with BeautifulSoup over the lxml backend."""
+    BeautifulSoup(text, _BACKEND)
 
 
 def _fresh(text: str) -> BeautifulSoup:
     """Parse a fresh document for the mutating operations, which each iteration must run on an unmodified tree."""
-    return BeautifulSoup(text, "html.parser")
+    return BeautifulSoup(text, _BACKEND)
 
 
 @functools.cache
 def _parsed(text: str) -> BeautifulSoup:
     """Return a document parsed once, cached so the read-path operations time only the query."""
-    return BeautifulSoup(text, "html.parser")
+    return BeautifulSoup(text, _BACKEND)
 
 
 def find(text: str) -> None:
@@ -140,14 +106,9 @@ def strip_tags(text: str) -> None:
     _ = soup.decode()
 
 
-def encoding(data: bytes) -> None:
-    """Detect a byte stream's encoding with BeautifulSoup's UnicodeDammit sniffer."""
-    _ = UnicodeDammit(data).original_encoding
-
-
 def rewrite(text: str) -> None:
     """Full parse, mutate, serialize -- the DOM round-trip the streamer skips: rel=nofollow, lazy img, drop comments."""
-    soup = BeautifulSoup(text, "html.parser")
+    soup = BeautifulSoup(text, _BACKEND)
     for anchor in soup.select("a[href]"):
         anchor["rel"] = "nofollow"
     for image in soup.find_all("img"):
@@ -167,7 +128,7 @@ def set_html(soup: BeautifulSoup) -> None:
     """Clear a freshly parsed body and append a reparsed fragment, BeautifulSoup's inner-HTML shape."""
     body = soup.find_all("body")[0]
     body.clear()
-    for node in list(BeautifulSoup(_SET_HTML, "html.parser").children):
+    for node in list(BeautifulSoup(_SET_HTML, _BACKEND).children):
         body.append(node)
 
 
@@ -203,7 +164,7 @@ def links_rewrite(text: str) -> None:
 def links_filter(text: str) -> None:
     """Collect the cleaned, absolutized, deduplicated page links, the work turbohtml's extract_links does."""
     seen: dict[str, None] = {}
-    for anchor in BeautifulSoup(text, "html.parser").find_all("a"):
+    for anchor in BeautifulSoup(text, _BACKEND).find_all("a"):
         if href := anchor.get("href"):
             seen[urljoin(_LINKS_BASE, str(href))] = None
     _ = list(seen)
@@ -235,32 +196,28 @@ def links_absolutize(soup: BeautifulSoup) -> None:
 
 
 OPERATIONS = {
-    "parse": (parse, "BeautifulSoup (html.parser)"),
-    "build": (build, "BeautifulSoup (html.parser)"),
-    "construct": (construct, "BeautifulSoup (html.parser)"),
-    "emit": (emit, "BeautifulSoup (html.parser)"),
-    "find": (find, "BeautifulSoup (html.parser)"),
-    "select": (select, "BeautifulSoup (html.parser)"),
-    "select-has": (select_has, "BeautifulSoup (html.parser)"),
-    "find-text": (find_text, "BeautifulSoup (html.parser)"),
-    "text-content": (text_content, "BeautifulSoup (html.parser)"),
-    "serialize": (serialize, "BeautifulSoup (html.parser)"),
-    "class-edit": (class_edit, "BeautifulSoup (html.parser)"),
-    "extract-attr": (extract_attr, "BeautifulSoup (html.parser)"),
-    "extract-text": (extract_text, "BeautifulSoup (html.parser)"),
-    "strip-remove": (strip_remove, "BeautifulSoup (html.parser)"),
-    "strip-tags": (strip_tags, "BeautifulSoup (html.parser)"),
-    "rewrite": (rewrite, "BeautifulSoup (html.parser)"),
-    "encoding": (encoding, "BeautifulSoup (html.parser)"),
-    "edit": (Mutating(_fresh, edit), "BeautifulSoup (html.parser)"),
-    "set-html": (Mutating(_fresh, set_html), "BeautifulSoup (html.parser)"),
-    "set-text": (Mutating(_fresh, set_text), "BeautifulSoup (html.parser)"),
-    "navigate": (navigate, "BeautifulSoup (html.parser)"),
-    "match": (match, "BeautifulSoup (html.parser)"),
-    "links-extract": (links_extract, "BeautifulSoup (html.parser)"),
-    "links-rewrite": (links_rewrite, "BeautifulSoup (html.parser)"),
-    "links-filter": (links_filter, "BeautifulSoup (html.parser)"),
-    "socialcard": (socialcard, "BeautifulSoup (html.parser)"),
-    "extract-url": (extract_url, "BeautifulSoup (html.parser)"),
-    "links-absolutize": (Mutating(_fresh, links_absolutize), "BeautifulSoup (html.parser)"),
+    "parse": (parse, "BeautifulSoup (lxml)"),
+    "find": (find, "BeautifulSoup (lxml)"),
+    "select": (select, "BeautifulSoup (lxml)"),
+    "select-has": (select_has, "BeautifulSoup (lxml)"),
+    "find-text": (find_text, "BeautifulSoup (lxml)"),
+    "text-content": (text_content, "BeautifulSoup (lxml)"),
+    "serialize": (serialize, "BeautifulSoup (lxml)"),
+    "class-edit": (class_edit, "BeautifulSoup (lxml)"),
+    "extract-attr": (extract_attr, "BeautifulSoup (lxml)"),
+    "extract-text": (extract_text, "BeautifulSoup (lxml)"),
+    "strip-remove": (strip_remove, "BeautifulSoup (lxml)"),
+    "strip-tags": (strip_tags, "BeautifulSoup (lxml)"),
+    "rewrite": (rewrite, "BeautifulSoup (lxml)"),
+    "edit": (Mutating(_fresh, edit), "BeautifulSoup (lxml)"),
+    "set-html": (Mutating(_fresh, set_html), "BeautifulSoup (lxml)"),
+    "set-text": (Mutating(_fresh, set_text), "BeautifulSoup (lxml)"),
+    "navigate": (navigate, "BeautifulSoup (lxml)"),
+    "match": (match, "BeautifulSoup (lxml)"),
+    "links-extract": (links_extract, "BeautifulSoup (lxml)"),
+    "links-rewrite": (links_rewrite, "BeautifulSoup (lxml)"),
+    "links-filter": (links_filter, "BeautifulSoup (lxml)"),
+    "socialcard": (socialcard, "BeautifulSoup (lxml)"),
+    "extract-url": (extract_url, "BeautifulSoup (lxml)"),
+    "links-absolutize": (Mutating(_fresh, links_absolutize), "BeautifulSoup (lxml)"),
 }

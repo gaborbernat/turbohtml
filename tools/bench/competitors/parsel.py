@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 from cssselect import HTMLTranslator
 from lxml import html as _lxml_html
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 REQUIREMENTS = ("parsel>=1.11", "cssselect>=1.2")
+
+_LINKS_BASE = "https://example.com/base/"  # the base turbohtml resolves relative hrefs against
 _TRANSLATOR = HTMLTranslator()
 
 
@@ -63,12 +66,12 @@ def links_extract(text: str) -> None:
 
 
 def links_filter(text: str) -> None:
-    """Collect the anchor hrefs and keep the on-page links, mirroring the cleaned-link filter."""
-    _ = [
-        href
-        for href in _parsed(text).css("a::attr(href)").getall()
-        if href and not href.startswith(("#", "javascript:"))
-    ]
+    """Collect the cleaned, absolutized, deduplicated page links, the work turbohtml's extract_links does."""
+    seen: dict[str, None] = {}
+    for href in Selector(text=text).css("a::attr(href)").getall():
+        if href:
+            seen[urljoin(_LINKS_BASE, href)] = None
+    _ = list(seen)
 
 
 def extract_attr(text: str) -> None:

@@ -87,8 +87,18 @@ def links_rewrite(text: str) -> None:
 
 
 def links_filter(text: str) -> None:
-    """Collect the hrefs of anchors that carry one, selectolax's closest analog to a link filter."""
-    _ = [anchor.attributes.get("href") for anchor in _parsed(text).css("a[href]")]
+    """
+    Collect the cleaned, absolutized, deduplicated page links, the work turbohtml's extract_links does.
+
+    Reading the raw href off each anchor is not the same operation: it leaves the on-page and script targets in,
+    resolves nothing against the base, and returns a link once per occurrence. A dict keyed by the resolved URL
+    dedupes in insertion order, which is what a caller replacing extract_links has to write for themselves.
+    """
+    seen: dict[str, None] = {}
+    for anchor in LexborHTMLParser(text.encode()).css("a[href]"):
+        if href := anchor.attributes.get("href"):
+            seen[urljoin(_LINKS_BASE, href)] = None
+    _ = list(seen)
 
 
 def class_edit(text: str) -> None:

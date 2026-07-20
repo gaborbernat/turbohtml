@@ -17,13 +17,29 @@ _LINKS_BASE = "https://example.com/base/"
 
 @functools.cache
 def _parsed(text: str) -> PyQuery:
-    """Return a document parsed once, cached so the read-path operations time only the query."""
-    return PyQuery(text)
+    """
+    Return a document parsed once, cached so the read-path operations time only the query.
+
+    ``parser="html"`` is not optional. Left to itself PyQuery tries XML first, which succeeds on a page carrying an
+    ``xmlns`` and puts every element in the XHTML namespace; un-namespaced selectors then match nothing and the
+    operation times an empty node set instead of the query.
+    """
+    return PyQuery(text, parser="html")
+
+
+def _fresh(text: str) -> PyQuery:
+    """
+    Parse a fresh tree for the mutating operations, which each iteration must run on an unmodified document.
+
+    Passing ``PyQuery`` itself as the factory would take the XML-first default and hit the empty-node-set trap the
+    cached parse above documents, so the mutation would run over nothing and time as though it were free.
+    """
+    return PyQuery(text, parser="html")
 
 
 def parse(text: str) -> None:
     """Parse a whole document into a queryable tree through PyQuery."""
-    PyQuery(text)
+    PyQuery(text, parser="html")
 
 
 def find(text: str) -> None:
@@ -63,12 +79,12 @@ def links_extract(text: str) -> None:
 
 
 def links_filter(text: str) -> None:
-    """Collect the anchor hrefs and keep the on-page links, mirroring the cleaned-link filter."""
-    _ = [
-        href
-        for item in _parsed(text)("a").items()
-        if (href := item.attr("href")) and not href.startswith(("#", "javascript:"))
-    ]
+    """Collect the cleaned, absolutized, deduplicated page links, the work turbohtml's extract_links does."""
+    seen: dict[str, None] = {}
+    for item in PyQuery(text, parser="html")("a").items():
+        if href := item.attr("href"):
+            seen[urljoin(_LINKS_BASE, href)] = None
+    _ = list(seen)
 
 
 def edit(page: PyQuery) -> None:
@@ -97,7 +113,7 @@ def links_rewrite(text: str) -> None:
 
 def socialcard(text: str) -> None:
     """Read every meta tag's property/content on a freshly parsed tree, the card-tag scan pyquery allows."""
-    document = PyQuery(text)
+    document = PyQuery(text, parser="html")
     for item in document("meta").items():
         item.attr("property")
         item.attr("content")
@@ -106,7 +122,7 @@ def socialcard(text: str) -> None:
 def extract_url(case: tuple[str, str]) -> None:
     """Read a freshly parsed document's own URL hint with pyquery: the base href or the meta refresh."""
     kind, text = case
-    document = PyQuery(text)
+    document = PyQuery(text, parser="html")
     if kind == "base":
         document("base").attr("href")
     else:
@@ -115,14 +131,14 @@ def extract_url(case: tuple[str, str]) -> None:
 
 def strip_remove(text: str) -> None:
     """Drop every code/a/q subtree with pyquery's remove, then serialize."""
-    page = PyQuery(text)
+    page = PyQuery(text, parser="html")
     page("code, a, q").remove()
     _ = str(page)
 
 
 def strip_tags(text: str) -> None:
     """Unwrap every code/a/q element keeping its content with lxml's drop_tag under pyquery, then serialize."""
-    page = PyQuery(text)
+    page = PyQuery(text, parser="html")
     for element in page("code, a, q"):
         element.drop_tag()
     _ = str(page)
@@ -168,16 +184,16 @@ OPERATIONS = {
     "find-text": (find_text, "pyquery"),
     "text-content": (text_content, "pyquery"),
     "serialize": (serialize, "pyquery"),
-    "edit": (Mutating(PyQuery, edit), "pyquery"),
+    "edit": (Mutating(_fresh, edit), "pyquery"),
     "class-edit": (class_edit, "pyquery"),
     "strip-remove": (strip_remove, "pyquery"),
     "strip-tags": (strip_tags, "pyquery"),
-    "set-html": (Mutating(PyQuery, set_html), "pyquery"),
-    "set-text": (Mutating(PyQuery, set_text), "pyquery"),
+    "set-html": (Mutating(_fresh, set_html), "pyquery"),
+    "set-text": (Mutating(_fresh, set_text), "pyquery"),
     "navigate": (navigate, "pyquery"),
     "chain": (chain, "pyquery"),
     "links-extract": (links_extract, "pyquery"),
-    "links-absolutize": (Mutating(PyQuery, links_absolutize), "pyquery"),
+    "links-absolutize": (Mutating(_fresh, links_absolutize), "pyquery"),
     "links-rewrite": (links_rewrite, "pyquery"),
     "socialcard": (socialcard, "pyquery"),
     "extract-attr": (extract_attr, "pyquery"),
