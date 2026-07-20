@@ -103,7 +103,7 @@ def venv_python(
     return python
 
 
-def _core_python(workdir: Path, *, pgo: bool) -> Path:
+def baseline_python(workdir: Path, *, pgo: bool) -> Path:
     """
     Provision the turbohtml baseline venv, plain by default or with the shipped PGO+LTO release recipe when ``pgo``.
 
@@ -234,19 +234,19 @@ def run(command: str, pyperf_args: tuple[str, ...] = (), *, pgo: bool = False) -
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
         if command in COMPETITORS:
-            report_package(command, pyperf_args, workdir=workdir, core_python=_core_python(workdir, pgo=pgo))
+            report_package(command, pyperf_args, workdir=workdir, core_python=baseline_python(workdir, pgo=pgo))
         elif command == "core":
-            report_core(pyperf_args, workdir=workdir, core_python=_core_python(workdir, pgo=pgo))
+            report_core(pyperf_args, workdir=workdir, core_python=baseline_python(workdir, pgo=pgo))
         elif command == "interpreters":
             from bench import interpreters  # noqa: PLC0415  # imports orchestrator, so bind it once the command asks
 
             interpreters.build(workdir, pyperf_args)
         elif command == "all":
-            core_python = _core_python(workdir, pgo=pgo)
+            core_python = baseline_python(workdir, pgo=pgo)
             for operation in operations.OPERATIONS:
                 report_operation(operation, pyperf_args, workdir=workdir, core_python=core_python)
         elif command in operations.OPERATIONS:
-            report_operation(command, pyperf_args, workdir=workdir, core_python=_core_python(workdir, pgo=pgo))
+            report_operation(command, pyperf_args, workdir=workdir, core_python=baseline_python(workdir, pgo=pgo))
         else:
             choices = ", ".join(["core", "all", "interpreters", *operations.OPERATIONS, *COMPETITORS])
             msg = f"unknown command {command!r}; choose one of: {choices}"
