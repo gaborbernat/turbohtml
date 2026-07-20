@@ -163,7 +163,8 @@ def _combine(spec: Combined, feeds: dict[str, dict]) -> dict:
             operation, column = spec.columns.get(party, (row_operation, party))
             value = _cell(feeds[operation], column, case)
             cells.append(_NO_EQUIVALENT if value is None else value)
-            noise.append(_cell(feeds[operation], column, case, key="spread"))
+            variation = _cell(feeds[operation], column, case, key="spread")
+            noise.append(variation if isinstance(variation, (int, float)) else None)
         rows.append(cells)
         spread.append(noise)
     return {

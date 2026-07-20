@@ -18,10 +18,25 @@ sys.path.insert(0, str(_ROOT / "tools"))
 
 from bench.stats import (  # ruff:ignore[module-import-not-at-top-of-file]
     NOISY_CV,
+    Summary,
     geometric_mean,
     ratio_variation,
     summarize,
 )
+
+
+def _summary(samples: list[float]) -> Summary:
+    """Summarize rounds that are known to exist, narrowing away the None the empty case returns."""
+    summary = summarize(samples)
+    assert summary is not None
+    return summary
+
+
+def _aggregate(ratios: list[float]) -> float:
+    """Aggregate ratios that are known usable, narrowing away the None the empty case returns."""
+    aggregate = geometric_mean(ratios)
+    assert aggregate is not None
+    return aggregate
 
 
 def test_summarize_of_nothing_is_none() -> None:
@@ -31,12 +46,12 @@ def test_summarize_of_nothing_is_none() -> None:
 
 def test_median_is_the_estimate_not_the_mean() -> None:
     """One scheduling spike must not drag the estimate the way it drags the mean."""
-    assert summarize([10.0, 10.0, 10.0, 10.0, 100.0]).median == pytest.approx(10.0)
+    assert _summary([10.0, 10.0, 10.0, 10.0, 100.0]).median == pytest.approx(10.0)
 
 
 def test_median_ignores_round_count() -> None:
     """Runs measured with different round counts stay comparable, which best-of-n would not."""
-    assert summarize([10.0, 12.0, 14.0]).median == pytest.approx(summarize([10.0, 12.0, 14.0] * 3).median)
+    assert _summary([10.0, 12.0, 14.0]).median == pytest.approx(_summary([10.0, 12.0, 14.0] * 3).median)
 
 
 @pytest.mark.parametrize(
@@ -49,19 +64,19 @@ def test_median_ignores_round_count() -> None:
 )
 def test_noisy_flags_only_wide_spread(samples: list[float], *, expected: bool) -> None:
     """The noise gauge separates a usable measurement from one the machine dominates."""
-    assert summarize(samples).noisy is expected
+    assert _summary(samples).noisy is expected
 
 
 def test_cv_is_dimensionless() -> None:
     """Scaling every round leaves the noise level unchanged, so the threshold means the same at any magnitude."""
-    small = summarize([1.0, 2.0, 3.0])
-    large = summarize([1000.0, 2000.0, 3000.0])
+    small = _summary([1.0, 2.0, 3.0])
+    large = _summary([1000.0, 2000.0, 3000.0])
     assert small.cv == pytest.approx(large.cv)
 
 
 def test_outliers_are_counted_but_kept() -> None:
     """A spike is reported and still counted in the rounds, since dropping it would bias an A/B."""
-    summary = summarize([10.0, 10.1, 10.2, 10.3, 500.0])
+    summary = _summary([10.0, 10.1, 10.2, 10.3, 500.0])
     assert summary.outliers == 1
     assert summary.rounds == 5
 
@@ -74,7 +89,7 @@ def test_geometric_mean_of_nothing_is_none() -> None:
 def test_geometric_mean_is_reference_invariant() -> None:
     """Inverting every ratio inverts the aggregate, so neither build is favored by table direction."""
     ratios = [0.5, 2.0, 1.25]
-    assert geometric_mean(ratios) == pytest.approx(1 / geometric_mean([1 / ratio for ratio in ratios]))
+    assert _aggregate(ratios) == pytest.approx(1 / _aggregate([1 / ratio for ratio in ratios]))
 
 
 def test_noisy_threshold_matches_the_documented_level() -> None:
