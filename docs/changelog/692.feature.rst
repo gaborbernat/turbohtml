@@ -1,0 +1,7 @@
+Dispatch SAX events from C. :func:`turbohtml.saxparse.sax_parse` used to build a tuple, a typed record, and an
+isinstance chain for every event before calling the handler; the tokenizer now binds the six handler methods once and
+drives them straight off the tree walk. Callgrind on the WHATWG specification measures 43.7% fewer instructions with
+instruction-cache misses down 71%, and a 38,590-call differential against the previous dispatch found no divergence.
+The pull form :func:`~turbohtml.saxparse.iter_events` keeps its typed records. URL cleaning's tracking-parameter
+vocabulary and dot-segment resolution, and :func:`turbohtml.query.escape_identifier`'s CSSOM escape loop, moved to C
+the same way, each validated by a differential run against the retired Python (302,762 and 4,828 inputs).
