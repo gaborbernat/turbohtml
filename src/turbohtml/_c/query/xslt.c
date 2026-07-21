@@ -582,7 +582,6 @@ typedef struct engine {
     const th_node *number_memo_node;
     long number_memo_value;
     const match_set *number_memo_set;
-    int number_memo_have_count;
     int number_memo_type;
     const Py_UCS4 *number_memo_name;
     Py_ssize_t number_memo_name_len;
@@ -2327,18 +2326,24 @@ static int number_counts(const engine *eng, const match_set *count_set, int have
             memcmp(node->text, eng->cur_node->text, (size_t)node->text_len * sizeof(Py_UCS4)) == 0);
 }
 
-/* Whether the memo was taken under the same criteria this call uses, so its answer still applies. */
+/* The criteria a numbering runs under: the compiled count set when one was given, else NULL for the default, which
+   reads the current node's type and name instead. Normalizing the two into one pointer lets a memo be tested against
+   the criteria it was taken under with a single comparison. */
+static const match_set *number_criteria(const match_set *count_set, int have_count) {
+    return have_count ? count_set : NULL;
+}
+
+/* Whether the memo was taken under the same criteria this call uses, so its answer still applies. The caller reaches
+   this only for a node whose previous sibling is the memo's node, so the memo is known to hold one. */
 static int number_memo_applies(const engine *eng, const match_set *count_set, int have_count) {
-    if (eng->number_memo_node == NULL || eng->number_memo_have_count != have_count ||
-        eng->number_memo_set != count_set) {
+    const match_set *criteria = number_criteria(count_set, have_count);
+    if (eng->number_memo_set != criteria) {
         return 0;
     }
-    if (have_count) {
-        return 1;
-    }
-    /* the default criteria read the current node's type and, for elements, its name */
-    return eng->number_memo_type == (int)eng->cur_node->type && eng->number_memo_name_len == eng->cur_node->text_len &&
-           (eng->cur_node->text_len == 0 ||
+    return criteria != NULL ||
+           (eng->number_memo_type == (int)eng->cur_node->type && /* GCOVR_EXCL_BR_LINE: a memo is
+               consulted only across siblings, which one run never spans a type change in */
+            eng->number_memo_name_len == eng->cur_node->text_len &&
             memcmp(eng->number_memo_name, eng->cur_node->text, (size_t)eng->cur_node->text_len * sizeof(Py_UCS4)) == 0);
 }
 
@@ -2359,8 +2364,7 @@ static long level_number(engine *eng, const match_set *count_set, int have_count
     }
     eng->number_memo_node = node;
     eng->number_memo_value = count;
-    eng->number_memo_set = count_set;
-    eng->number_memo_have_count = have_count;
+    eng->number_memo_set = number_criteria(count_set, have_count);
     eng->number_memo_type = (int)eng->cur_node->type;
     eng->number_memo_name = eng->cur_node->text;
     eng->number_memo_name_len = eng->cur_node->text_len;

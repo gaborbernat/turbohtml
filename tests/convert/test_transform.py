@@ -833,6 +833,42 @@ def test_transform_number_over_mixed_siblings_counts_same_name() -> None:
     assert _run("<r><a/><b/><a/><b/></r>", body) == "1,2,"
 
 
+def test_transform_number_alternating_names_numbers_each_name_separately() -> None:
+    # numbering walks the run carrying the previous answer forward, so alternating names must not let a <b>'s number
+    # continue from the <a> before it
+    body = (
+        '<xsl:template match="/"><xsl:for-each select="r/*"><xsl:value-of select="name()"/>'
+        "<xsl:number/>,</xsl:for-each></xsl:template>"
+    )
+    assert _run("<r><a/><bb/><a/><bb/><a/></r>", body) == "a1,bb1,a2,bb2,a3,"
+
+
+def test_transform_number_with_count_pattern_over_a_run() -> None:
+    # an explicit count set fixes the criteria for the whole run, the other way the carried-forward answer is reused
+    body = '<xsl:template match="/"><xsl:for-each select="r/n"><xsl:number count="n"/>,</xsl:for-each></xsl:template>'
+    assert _run("<r><n/><n/><n/></r>", body) == "1,2,3,"
+
+
+def test_transform_number_mixing_counted_and_default_over_one_run() -> None:
+    # the same run numbered with and without a count pattern: the answer carried forward under one criterion must
+    # not answer for the other
+    body = (
+        '<xsl:template match="/"><xsl:for-each select="r/n">'
+        '<xsl:number/>-<xsl:number count="n"/>,</xsl:for-each></xsl:template>'
+    )
+    assert _run("<r><n/><n/><n/></r>", body) == "1-1,2-2,3-3,"
+
+
+def test_transform_number_two_count_patterns_over_one_run() -> None:
+    # count="r" resolves to the ancestor <r>, which has no preceding <r> siblings, so it stays 1 while count="n"
+    # advances; a memo held for one pattern must not answer for the other
+    body = (
+        '<xsl:template match="/"><xsl:for-each select="r/n">'
+        '<xsl:number count="n"/>-<xsl:number count="r"/>,</xsl:for-each></xsl:template>'
+    )
+    assert _run("<r><n/><n/><n/></r>", body) == "1-1,2-1,3-1,"
+
+
 def test_transform_number_on_attribute_is_one() -> None:
     body = (
         '<xsl:template match="/"><xsl:apply-templates select="//n/@id"/></xsl:template>'

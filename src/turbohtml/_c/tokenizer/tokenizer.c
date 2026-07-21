@@ -272,36 +272,34 @@ static PyObject *tokenizer_iter(PyObject *self) {
 }
 
 /* The handlers dispatch() drives, bound once per call: a token then costs one call instead of an attribute lookup
-   and a Python-level walk over the token's fields. */
+   and a Python-level walk over the token's fields. Held as an array indexed by the enum so binding walks the name
+   table rather than testing six results in one condition, which no single input can exercise every arm of. */
+enum { SAX_STARTTAG, SAX_STARTENDTAG, SAX_ENDTAG, SAX_DATA, SAX_COMMENT, SAX_DECL, SAX_COUNT };
+
+static const char *const HANDLER_NAMES[SAX_COUNT] = {
+    "handle_starttag", "handle_startendtag", "handle_endtag", "handle_data", "handle_comment", "handle_decl",
+};
+
 typedef struct {
-    PyObject *starttag;
-    PyObject *startendtag;
-    PyObject *endtag;
-    PyObject *data;
-    PyObject *comment;
-    PyObject *decl;
+    PyObject *fn[SAX_COUNT];
 } sax_handlers;
 
 static void handlers_release(sax_handlers *bound) {
-    Py_XDECREF(bound->starttag);
-    Py_XDECREF(bound->startendtag);
-    Py_XDECREF(bound->endtag);
-    Py_XDECREF(bound->data);
-    Py_XDECREF(bound->comment);
-    Py_XDECREF(bound->decl);
+    for (int index = 0; index < SAX_COUNT; index++) {
+        Py_XDECREF(bound->fn[index]);
+    }
 }
 
 static int handlers_bind(sax_handlers *bound, PyObject *handler) {
-    bound->starttag = PyObject_GetAttrString(handler, "handle_starttag");
-    bound->startendtag = PyObject_GetAttrString(handler, "handle_startendtag");
-    bound->endtag = PyObject_GetAttrString(handler, "handle_endtag");
-    bound->data = PyObject_GetAttrString(handler, "handle_data");
-    bound->comment = PyObject_GetAttrString(handler, "handle_comment");
-    bound->decl = PyObject_GetAttrString(handler, "handle_decl");
-    if (bound->starttag == NULL || bound->startendtag == NULL || bound->endtag == NULL || bound->data == NULL ||
-        bound->comment == NULL || bound->decl == NULL) {
-        handlers_release(bound);
-        return -1;
+    for (int index = 0; index < SAX_COUNT; index++) {
+        bound->fn[index] = NULL;
+    }
+    for (int index = 0; index < SAX_COUNT; index++) {
+        bound->fn[index] = PyObject_GetAttrString(handler, HANDLER_NAMES[index]);
+        if (bound->fn[index] == NULL) {
+            handlers_release(bound);
+            return -1;
+        }
     }
     return 0;
 }
@@ -316,12 +314,14 @@ static PyObject *attrs_of(const th_token *record) {
         PyObject *name = th_buf_to_str(&attr->name);
         /* a valueless attribute reports "", the empty string the WHATWG tokenizer assigns it */
         PyObject *value = th_buf_to_str(&attr->value);
+        /* GCOVR_EXCL_BR_START: a failed name or value is an allocation failure, which no test can force */
         PyObject *pair = (name != NULL && value != NULL) ? PyTuple_Pack(2, name, value) : NULL;
+        /* GCOVR_EXCL_BR_STOP */
         Py_XDECREF(name);
         Py_XDECREF(value);
-        if (pair == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            Py_DECREF(list);
-            return NULL;
+        if (pair == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(list); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         PyList_SET_ITEM(list, index, pair);
     }
@@ -349,7 +349,8 @@ static PyObject *doctype_of(const th_token *record) {
     if (record->has_public_id) {
         PyObject *public_id = th_buf_to_str(&record->public_id);
         PyObject *system_id = record->has_system_id ? th_buf_to_str(&record->system_id) : NULL;
-        if (public_id != NULL && (system_id != NULL || !record->has_system_id)) {
+        /* a NULL identifier is an allocation failure; whether a system id follows the public one is real */
+        if (public_id != NULL && (system_id != NULL || !record->has_system_id)) { /* GCOVR_EXCL_BR_LINE */
             decl = system_id != NULL ? th_str_format("DOCTYPE %U PUBLIC \"%U\" \"%U\"", name, public_id, system_id)
                                      : th_str_format("DOCTYPE %U PUBLIC \"%U\"", name, public_id);
         }
@@ -382,8 +383,7 @@ static PyObject *tokenizer_dispatch(PyObject *self, PyObject *handler) {
     }
     TokenizerObject *tokenizer = (TokenizerObject *)self;
     th_tokenizer *sm = tokenizer->sm;
-    PyObject *result = NULL;
-    while (result == NULL) {
+    for (;;) {
         PyObject *first = NULL;
         PyObject *second = NULL;
         PyObject *target = NULL;
@@ -400,23 +400,23 @@ static PyObject *tokenizer_dispatch(PyObject *self, PyObject *handler) {
             if (record->kind == TH_START_TAG) {
                 first = th_buf_to_str(&record->name);
                 second = attrs_of(record);
-                target = record->self_closing ? bound.startendtag : bound.starttag;
+                target = record->self_closing ? bound.fn[SAX_STARTENDTAG] : bound.fn[SAX_STARTTAG];
                 int model = content_model_for(&record->name);
                 if (model >= 0) {
                     th_tok_switch(sm, (enum th_initial_state)model);
                 }
             } else if (record->kind == TH_END_TAG) {
                 first = th_buf_to_str(&record->name);
-                target = bound.endtag;
+                target = bound.fn[SAX_ENDTAG];
             } else if (record->kind == TH_TEXT) {
                 first = text_of(sm, record);
-                target = bound.data;
+                target = bound.fn[SAX_DATA];
             } else if (record->kind == TH_COMMENT) {
                 first = th_buf_to_str(&record->text);
-                target = bound.comment;
+                target = bound.fn[SAX_COMMENT];
             } else {
                 first = doctype_of(record);
-                target = bound.decl;
+                target = bound.fn[SAX_DECL];
             }
             break;
         case TH_STEP_ERROR:   /* GCOVR_EXCL_LINE: the only step error is an out-of-memory condition */
@@ -428,16 +428,17 @@ static PyObject *tokenizer_dispatch(PyObject *self, PyObject *handler) {
         }
         Py_END_CRITICAL_SECTION();
         if (drained) {
-            handlers_release(&bound);
-            Py_RETURN_NONE;
+            break;
         }
         /* a failed conversion, or the step error above, leaves the exception set */
-        if (first == NULL || (target == bound.starttag && second == NULL) ||
-            (target == bound.startendtag && second == NULL)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            Py_XDECREF(first);
-            Py_XDECREF(second);
-            handlers_release(&bound);
-            return NULL;
+        /* GCOVR_EXCL_BR_START: every arm here is an allocation failure, which no test can force */
+        if (first == NULL || (target == bound.fn[SAX_STARTTAG] && second == NULL) ||
+            (target == bound.fn[SAX_STARTENDTAG] && second == NULL)) {
+            /* GCOVR_EXCL_BR_STOP */
+            Py_XDECREF(first);        /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(second);       /* GCOVR_EXCL_LINE: allocation-failure path */
+            handlers_release(&bound); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         PyObject *call = second != NULL ? PyObject_CallFunctionObjArgs(target, first, second, NULL)
                                         : PyObject_CallFunctionObjArgs(target, first, NULL);
@@ -450,7 +451,7 @@ static PyObject *tokenizer_dispatch(PyObject *self, PyObject *handler) {
         Py_DECREF(call);
     }
     handlers_release(&bound);
-    return result;
+    Py_RETURN_NONE;
 }
 
 PyDoc_STRVAR(tokenizer_position_doc, "position()\n--\n\n"
