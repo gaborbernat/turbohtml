@@ -88,32 +88,32 @@
     [
       "//a[ends-with(@href, ...)] (XPath 2.0)",
       5.060536199715434e-07,
-      "'ends-with'",
-      "'ends-with'"
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions",
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
     ],
     [
       "string-join(//a/@href, ...) (XPath 2.0)",
       6.685359339083282e-07,
-      "'string-join'",
-      "'string-join'"
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions",
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
     ],
     [
       "//a[lower-case(@href) = ...] (XPath 2.0)",
       5.030406976895089e-07,
-      "'lower-case'",
-      "'lower-case'"
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions",
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
     ],
     [
       "//a[matches(@href, ...)] (XPath 2.0)",
       4.918041359713854e-07,
-      "'matches'",
-      "'matches'"
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions",
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
     ],
     [
       "replace(//a/@href, ...) (XPath 2.0)",
       1.3304652638860641e-06,
-      "'replace'",
-      "'replace'"
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions",
+      "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
     ],
     [
       "set:distinct(//a) (EXSLT)",
