@@ -2337,11 +2337,9 @@ static int number_memo_applies(const engine *eng, const match_set *count_set, in
         return 1;
     }
     /* the default criteria read the current node's type and, for elements, its name */
-    return eng->number_memo_type == (int)eng->cur_node->type &&
-           eng->number_memo_name_len == eng->cur_node->text_len &&
+    return eng->number_memo_type == (int)eng->cur_node->type && eng->number_memo_name_len == eng->cur_node->text_len &&
            (eng->cur_node->text_len == 0 ||
-            memcmp(eng->number_memo_name, eng->cur_node->text,
-                   (size_t)eng->cur_node->text_len * sizeof(Py_UCS4)) == 0);
+            memcmp(eng->number_memo_name, eng->cur_node->text, (size_t)eng->cur_node->text_len * sizeof(Py_UCS4)) == 0);
 }
 
 /* The count of node plus its preceding siblings that match the count criteria (one level's
