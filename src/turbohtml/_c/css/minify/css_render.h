@@ -103,8 +103,9 @@ static int css_prop_is_color(const css_char *prop, Py_ssize_t len) {
                                               "flood-color",
                                               "lighting-color",
                                               "text-emphasis-color"};
+    css_char first = css_lower(prop[0]);
     for (size_t index = 0; index < sizeof(color_props) / sizeof(color_props[0]); index++) {
-        if (css_run_ieq(prop, len, color_props[index])) {
+        if (css_run_ieq_first(prop, len, first, color_props[index])) {
             return 1;
         }
     }
@@ -146,8 +147,9 @@ static void css_render_raw_value(token_vec *vec, Py_ssize_t start, Py_ssize_t en
 }
 
 static int css_prop_in(const css_char *prop, Py_ssize_t len, const char *const *list, size_t count) {
+    css_char first = css_lower(prop[0]);
     for (size_t index = 0; index < count; index++) {
-        if (css_run_ieq(prop, len, list[index])) {
+        if (css_run_ieq_first(prop, len, first, list[index])) {
             return 1;
         }
     }

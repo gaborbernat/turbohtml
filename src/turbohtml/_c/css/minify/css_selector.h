@@ -186,9 +186,14 @@ static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start,
             }
         } else if (token->kind != CSS_WS) {
             /* custom-property names are case-sensitive (CSS Variables 1 §2: "--foo" and "--FOO" are distinct), so a
-               --* name is kept verbatim; every other property name is ASCII case-insensitive and lower-cased. */
-            for (Py_ssize_t pos = 0; pos < token->text_len; pos++) {
-                cbuf_putc(pool, is_custom ? token->text[pos] : css_lower(token->text[pos]));
+               --* name is kept verbatim -- a bulk copy, which a framework :root of hundreds of them leans on; every
+               other property name is ASCII case-insensitive and lower-cased byte by byte. */
+            if (is_custom) {
+                cbuf_put_run(pool, token->text, token->text_len);
+            } else {
+                for (Py_ssize_t pos = 0; pos < token->text_len; pos++) {
+                    cbuf_putc(pool, css_lower(token->text[pos]));
+                }
             }
         }
     }
@@ -288,8 +293,12 @@ static const char *css_longhand_list(const css_char *prop, Py_ssize_t prop_len) 
     if (prop_len < 4) {
         return NULL;
     }
+    /* Every shorthand literal is lower-case, so its first byte is the lower-cased first byte of a matching property.
+       Gating on it skips the css_run_ieq call for the majority of names that share no initial letter with any
+       shorthand -- the common case for a declaration list that is mostly longhands and custom properties. */
+    css_char first = css_lower(prop[0]);
     for (size_t index = 0; index < sizeof(shorthands) / sizeof(shorthands[0]); index++) {
-        if (css_run_ieq(prop, prop_len, shorthands[index])) {
+        if ((css_char)(unsigned char)shorthands[index][0] == first && css_run_ieq(prop, prop_len, shorthands[index])) {
             return longhands[index];
         }
     }

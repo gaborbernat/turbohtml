@@ -25,9 +25,13 @@ static int css_decl_has_substitution(const css_buf *pool, const css_decl *decl) 
 }
 
 static Py_ssize_t css_find_active_decl(const decl_vec *decls, const css_buf *pool, const char *name) {
+    /* name is a lower-case longhand literal; a declaration whose lowered first byte differs cannot match, so this
+       skips the css_run_ieq call for every declaration that is not this longhand (nearly all of them). */
+    css_char first = (css_char)(unsigned char)name[0];
     for (Py_ssize_t index = 0; index < decls->len; index++) {
         const css_decl *decl = &decls->items[index];
-        if (!decl->dropped && !decl->nested && css_run_ieq(pool->data + decl->prop_off, decl->prop_len, name)) {
+        if (!decl->dropped && !decl->nested && css_lower(pool->data[decl->prop_off]) == first &&
+            css_run_ieq(pool->data + decl->prop_off, decl->prop_len, name)) {
             return index;
         }
     }
