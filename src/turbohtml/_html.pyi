@@ -282,6 +282,9 @@ from ._stubs.tokenizer import (
     _RewriteHandle as _RewriteHandle,
 )
 from ._stubs.tokenizer import (
+    _sax_dispatch as _sax_dispatch,
+)
+from ._stubs.tokenizer import (
     _sax_events as _sax_events,
 )
 from ._stubs.tokenizer import (

@@ -280,3 +280,157 @@ int sax_register(PyObject *module, module_state *state) {
     }
     return 0;
 }
+
+/* The handler methods _sax_dispatch drives, bound once per call and indexed by the enum, so binding walks the name
+   table rather than testing six lookups in one condition. */
+enum { SAX_H_START, SAX_H_END, SAX_H_CHARACTERS, SAX_H_COMMENT, SAX_H_DOCTYPE, SAX_H_PI, SAX_H_COUNT };
+
+static const char *const SAX_HANDLER_NAMES[SAX_H_COUNT] = {
+    "start_element", "end_element", "characters", "comment", "doctype", "processing_instruction",
+};
+
+typedef struct {
+    PyObject *fn[SAX_H_COUNT];
+} sax_dispatch_handlers;
+
+static void sax_handlers_release(sax_dispatch_handlers *bound) {
+    for (int index = 0; index < SAX_H_COUNT; index++) {
+        Py_XDECREF(bound->fn[index]);
+    }
+}
+
+static int sax_handlers_bind(sax_dispatch_handlers *bound, PyObject *handler) {
+    for (int index = 0; index < SAX_H_COUNT; index++) {
+        bound->fn[index] = NULL;
+    }
+    for (int index = 0; index < SAX_H_COUNT; index++) {
+        bound->fn[index] = PyObject_GetAttrString(handler, SAX_HANDLER_NAMES[index]);
+        if (bound->fn[index] == NULL) {
+            sax_handlers_release(bound);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Call one bound handler for entering node; 0 to continue, -1 with an exception set to stop. A node that emits
+   nothing on entry (the document root, a template content fragment) continues without a call. */
+static int dispatch_enter(th_tree *tree, th_node *node, sax_dispatch_handlers *bound) {
+    PyObject *result = NULL;
+    switch (node->type) {
+    case TH_NODE_ELEMENT: {
+        PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, node->text, node->text_len);
+        if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *attrs = attrs_tuple(tree, node);
+        if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(tag);  /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        result = PyObject_CallFunctionObjArgs(bound->fn[SAX_H_START], tag, attrs, NULL);
+        Py_DECREF(tag);
+        Py_DECREF(attrs);
+        break;
+    }
+    case TH_NODE_TEXT:
+    case TH_NODE_COMMENT: {
+        PyObject *data = data_str(tree, node);
+        if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        int which = node->type == TH_NODE_TEXT             ? SAX_H_CHARACTERS
+                    : (node->tag_flags & TH_COMMENT_IS_PI) ? SAX_H_PI
+                                                           : SAX_H_COMMENT;
+        result = PyObject_CallFunctionObjArgs(bound->fn[which], data, NULL);
+        Py_DECREF(data);
+        break;
+    }
+    case TH_NODE_DOCTYPE: {
+        /* the tuple event builder is reused, then unpacked, so the identifier extraction lives in one place */
+        PyObject *event = doctype_event(tree, node);
+        if (event == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        result = PyObject_CallFunctionObjArgs(bound->fn[SAX_H_DOCTYPE], PyTuple_GET_ITEM(event, 1),
+                                              PyTuple_GET_ITEM(event, 2), PyTuple_GET_ITEM(event, 3), NULL);
+        Py_DECREF(event);
+        break;
+    }
+    default: /* TH_NODE_DOCUMENT and TH_NODE_CONTENT emit nothing themselves */
+        return 0;
+    }
+    if (result == NULL) {
+        return -1;
+    }
+    Py_DECREF(result);
+    return 0;
+}
+
+/* Call the end_element handler when leaving node; 0 to continue, -1 with an exception set to stop. Only an
+   element has a close. */
+static int dispatch_leave(th_node *node, sax_dispatch_handlers *bound) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return 0;
+    }
+    PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, node->text, node->text_len);
+    if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = PyObject_CallFunctionObjArgs(bound->fn[SAX_H_END], tag, NULL);
+    Py_DECREF(tag);
+    if (result == NULL) {
+        return -1;
+    }
+    Py_DECREF(result);
+    return 0;
+}
+
+/* _sax_dispatch(html, handler): parse and drive the handler's methods over the events in document order, building
+   no per-event record. The push form of the walk _sax_events streams; sax_parse wraps this. */
+PyObject *turbohtml_sax_dispatch(PyObject *Py_UNUSED(module), PyObject *args) {
+    PyObject *html;
+    PyObject *handler;
+    if (!PyArg_ParseTuple(args, "UO:_sax_dispatch", &html, &handler)) {
+        return NULL;
+    }
+    sax_dispatch_handlers bound;
+    if (sax_handlers_bind(&bound, handler) < 0) {
+        return NULL;
+    }
+    th_tree *tree = th_tree_parse(PyUnicode_KIND(html), PyUnicode_DATA(html), PyUnicode_GET_LENGTH(html), 0, 0, 0, 1);
+    if (tree == NULL) {               /* GCOVR_EXCL_BR_LINE: only an allocation failure returns NULL */
+        sax_handlers_release(&bound); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory();      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_node *cursor = th_tree_document(tree);
+    int leaving = 0;
+    int failed = 0;
+    while (!failed) {
+        th_node *node = cursor;
+        if (!leaving) {
+            failed = dispatch_enter(tree, node, &bound) < 0;
+            if (node->first_child != NULL) {
+                cursor = node->first_child;
+            } else {
+                leaving = 1;
+            }
+        } else {
+            failed = dispatch_leave(node, &bound) < 0;
+            if (node->next_sibling != NULL) {
+                cursor = node->next_sibling;
+                leaving = 0;
+            } else if (node->parent != NULL) {
+                cursor = node->parent;
+            } else {
+                break;
+            }
+        }
+    }
+    th_tree_free(tree);
+    sax_handlers_release(&bound);
+    if (failed) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}

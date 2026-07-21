@@ -197,6 +197,7 @@ static PyMethodDef html_methods[] = {
     {"_build_document", (PyCFunction)(void (*)(void))turbohtml_build_document, METH_VARARGS | METH_KEYWORDS, NULL},
     {"_tokenize_states", turbohtml_tokenize_states, METH_VARARGS, NULL},
     {"_sax_events", turbohtml_sax_events, METH_O, NULL},
+    {"_sax_dispatch", turbohtml_sax_dispatch, METH_VARARGS, NULL},
     {"_parse_into", turbohtml_parse_into, METH_VARARGS, NULL},
     {"_rewrite", turbohtml_rewrite, METH_VARARGS, NULL},
     {"_parse_tree", turbohtml_parse_tree, METH_VARARGS, NULL},
