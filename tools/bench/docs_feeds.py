@@ -81,6 +81,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "querying-3": "select-has",
     "querying-4": "find-text",
     "querying-5": "xpath",
+    "querying-6": "escape-identifier",
     "sanitize": "sanitize",
     "sanitize-templates": "sanitize-templates",
     "serializing": "serialize",
