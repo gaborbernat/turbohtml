@@ -221,7 +221,9 @@ def main() -> None:
     """Regenerate migration feeds from per-operation feeds. Args: FEEDS_DIR OUT_DIR DOCS_ROOT COMPETITOR_DIR."""
     feeds_dir, out_dir, docs_root, competitor_dir = (Path(argument) for argument in sys.argv[1:5])
     if skipped := emit_migration_feeds(stats_from_feeds(feeds_dir), competitor_dir, out_dir, docs_root):
-        print(f"pages with no fresh measurement, left as committed: {skipped}")
+        # to stderr so a redirected sweep still surfaces it: a page silently losing its table is the failure to catch
+        message = f"migration: {len(skipped)} page(s) with no shared measurement, left as committed: {skipped}"
+        print(message, file=sys.stderr)
 
 
 __all__ = ["discover_labels", "emit_migration_feeds", "stats_from_feeds"]
