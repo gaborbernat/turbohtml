@@ -41,7 +41,14 @@ def match(text: str) -> None:
         _SELECT.match(anchor)
 
 
+def escape_identifier(idents: tuple[str, ...]) -> None:
+    """Escape each raw identifier with soupsieve's escape."""
+    for ident in idents:
+        soupsieve.escape(ident)
+
+
 OPERATIONS = {
+    "escape-identifier": (escape_identifier, "soupsieve"),
     "find": (find, "soupsieve"),
     "select": (select, "soupsieve"),
     "select-has": (select_has, "soupsieve"),
