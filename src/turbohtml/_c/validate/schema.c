@@ -523,7 +523,7 @@ static Py_ssize_t schema_count_elements(th_node *parent) {
 }
 
 /* One in-scope xmlns binding; the stack grows entering an element that declares bindings and shrinks leaving
-   it, so resolving a prefix is a top-down scan of what is genuinely in scope instead of an ancestor walk. */
+   it, so resolving a prefix is a top-down scan of what is in scope instead of an ancestor walk. */
 typedef struct {
     const char *prefix; /* UTF-8 bytes into the interned attribute name; "" for the default namespace */
     Py_ssize_t prefix_len;

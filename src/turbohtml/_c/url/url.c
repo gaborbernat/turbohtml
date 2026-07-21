@@ -1279,7 +1279,7 @@ error:
 }
 
 /* An ASCII lowercase letter, the [a-z] the language-segment pattern matches (the leading path segment is already
-   lowercased, so an uppercase or non-ASCII code point simply fails and the segment is not a language marker). */
+   lowercased, so an uppercase or non-ASCII code point fails and the segment is not a language marker). */
 static int is_ascii_lower(Py_UCS4 ch) {
     return ch >= 'a' && ch <= 'z';
 }
