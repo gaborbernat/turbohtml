@@ -33,6 +33,10 @@ _SIZE_OPS: Final = frozenset({"minify", "minify-css", "minify-js"})
 _MEMORY_OPS: Final = frozenset({"parse-dense", "rewrite"})
 _WIDE_OPS: Final = _SIZE_OPS | _MEMORY_OPS
 
+# Why a cell is empty when the library is measured in more than one configuration: the operation runs the same
+# code whichever one is chosen, so benchmarking it twice would publish a duplicate column.
+_SHARED_WITH_OTHER_VARIANT: Final = "same in both configurations, so measured once"
+
 # A competitor module's stem maps to its migration page's slug by turning ``_`` into ``-``; these libraries
 # name the two differently, so the map pins them. A stem with no ``docs/migration/<slug>.rst`` is skipped, so
 # columns that only appear inside another library's table (cchardet, cssmin, css_html_js_minify) fall out.
@@ -85,7 +89,7 @@ def _case_names(operation: str, stats: dict[str, dict[str, float]]) -> list[str]
 
 def _rows(
     variants: list[dict[str, str]], stats: dict[str, dict[str, float]]
-) -> tuple[list[list[str | float | None]], list[list[float | None]]]:
+) -> tuple[list[list[str | float | None]], list[list[float | None]], list[str | None]]:
     """
     Build a library's rows and their spread across every shared operation-case, prefixing labels that span ops.
 
@@ -94,12 +98,14 @@ def _rows(
     does not measure an operation leaves its cells empty rather than dropping the row for the ones that do.
     """
     covered = {operation for variant in variants for operation in variant}
+    labels = [next(iter(variant.values())) for variant in variants]
     prefixed = len(covered) > 1
     # a leading metric only makes sense when every shared operation carries one; a library that spans a memory
     # operation and timing-only ones would otherwise emit rows of two different widths into one table
     wide = bool(_leading_metric(covered))
     rows: list[list[str | float | None]] = []
     spread: list[list[float | None]] = []
+    caveats: list[str | None] = []
     for operation, meta in ((op, operations.OPERATIONS[op]) for op in operations.OPERATIONS if op in covered):
         for case in _case_names(operation, stats):
             turbo = stats.get(f"{operation}|{case}|turbohtml")
@@ -110,22 +116,29 @@ def _rows(
             if turbo is None or all(other is None for other in others):
                 continue
             row_label = rst_safe(f"{meta.title} — {case}" if prefixed else case)
+            # a configuration that skips an operation another one measures skips it because the two run the same
+            # code there, so the cell says that rather than leaving an unexplained blank
+            absent: list[str | None] = [
+                None if operation in variant else _SHARED_WITH_OTHER_VARIANT for variant in variants
+            ]
             if wide:
                 lead = "size" if operation in _SIZE_OPS else "peak"
                 row: list[str | float | None] = [row_label, turbo[lead], turbo["mean"]]
                 noise: list[float | None] = [None, None, turbo.get("cv")]
-                for other in others:
-                    row += [None, None] if other is None else [other[lead], other["mean"]]
+                for other, gap in zip(others, absent, strict=True):
+                    row += [gap, gap] if other is None else [other[lead], other["mean"]]
                     noise += [None, None if other is None else other.get("cv")]
             else:
                 row = [row_label, turbo["mean"]]
                 noise = [None, turbo.get("cv")]
-                for other in others:
-                    row.append(None if other is None else other["mean"])
+                for other, gap in zip(others, absent, strict=True):
+                    row.append(gap if other is None else other["mean"])
                     noise.append(None if other is None else other.get("cv"))
             rows.append(row)
             spread.append(noise)
-    return rows, spread
+            # a library page mixes operations, so a caveat belongs on the rows of the operation it describes
+            caveats.append(next((NOTES[operation][label] for label in labels if label in NOTES.get(operation, {})), None))
+    return rows, spread, caveats
 
 
 def _leading_metric(ops: Iterable[str]) -> list[str]:
@@ -159,7 +172,7 @@ def emit_migration_feeds(
     for slug, variants in by_slug.items():
         if not (docs_root / "migration" / f"{slug}.rst").exists():
             continue
-        rows, spread = _rows(variants, stats)
+        rows, spread, caveats = _rows(variants, stats)
         if not rows:
             skipped.append(slug)
             continue
@@ -170,13 +183,9 @@ def emit_migration_feeds(
             "metrics": _leading_metric({operation for variant in variants for operation in variant}),
             "rows": rows,
             "spread": spread,
-            # a migration page mixes operations, so a note applies once the library is noted for any of them
-            "notes": {
-                label: note
-                for variant, label in zip(variants, labels, strict=True)
-                for operation in variant
-                if (note := NOTES.get(operation, {}).get(label)) is not None
-            },
+            # keyed by row rather than by column: a library page mixes operations, and a caveat that belongs to one
+            # of them would otherwise read as covering every row the library appears in
+            "row_notes": {str(index): note for index, note in enumerate(caveats) if note is not None},
         }
         (directory / f"{slug}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
     return skipped

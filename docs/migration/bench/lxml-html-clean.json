@@ -59,7 +59,9 @@
       0.1153154111287691
     ]
   ],
-  "notes": {
-    "lxml-html-clean": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing"
+  "row_notes": {
+    "2": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
+    "3": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
+    "4": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing"
   }
 }

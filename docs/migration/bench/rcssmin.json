@@ -96,7 +96,12 @@
       0.029345195540840696
     ]
   ],
-  "notes": {
-    "rcssmin": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700"
+  "row_notes": {
+    "0": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
+    "1": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
+    "2": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
+    "3": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
+    "4": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
+    "5": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700"
   }
 }

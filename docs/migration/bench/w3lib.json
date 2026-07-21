@@ -199,7 +199,10 @@
       0.04726044582904961
     ]
   ],
-  "notes": {
-    "w3lib": "removes the tags with a regular expression over the raw string and never parses, so it cannot honor nesting or the tokenizer rules that decide where an element really ends"
+  "row_notes": {
+    "7": "removes the tags with a regular expression over the raw string and never parses, so it cannot honor nesting or the tokenizer rules that decide where an element really ends",
+    "8": "removes the tags with a regular expression over the raw string and never parses, so it cannot honor nesting or the tokenizer rules that decide where an element really ends",
+    "9": "removes the tags with a regular expression over the raw string and never parses, so it cannot honor nesting or the tokenizer rules that decide where an element really ends",
+    "10": "removes the tags with a regular expression over the raw string and never parses, so it cannot honor nesting or the tokenizer rules that decide where an element really ends"
   }
 }

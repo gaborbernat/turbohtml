@@ -11,55 +11,55 @@
       "build a list (constructors) — 100 rows",
       5.7091425532007634e-05,
       0.0007816329752283006,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "build a list (constructors) — 1k rows",
       0.0005440194775019336,
       0.007474331593887958,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "build a list (constructors) — 10k rows",
       0.005411195857050188,
       0.0822198923851829,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "construct N elements (no serialize) — 100 rows",
       4.288681538374325e-05,
       0.0002607024263738822,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "construct N elements (no serialize) — 1k rows",
       0.0004355111897590784,
       0.0025463228632058113,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "construct N elements (no serialize) — 10k rows",
       0.0043399677733759745,
       0.025400459164908778,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "emit a built tree — 100 rows",
       4.327393534175883e-06,
       0.0003889943512641973,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "emit a built tree — 1k rows",
       4.2981901363721896e-05,
       0.003848052945007415,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "emit a built tree — 10k rows",
       0.00045268575032271957,
       0.040861342851712834,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "parse to a tree — wpt tiny (0.6 kB)",
@@ -611,37 +611,37 @@
       "detect a byte stream's encoding — ascii (1 kB)",
       2.683881651736423e-06,
       0.00016621675959527238,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "detect a byte stream's encoding — utf-8 russian (4 kB)",
       8.42264663110844e-06,
       0.0002101907146917862,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "detect a byte stream's encoding — windows-1251 russian (4 kB)",
       0.00023194885286178155,
       0.0007660471198960295,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "detect a byte stream's encoding — windows-1252 french (4 kB)",
       0.00022984596078382916,
       0.0009623634165715581,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "detect a byte stream's encoding — shift_jis japanese (4 kB)",
       0.00010243962940137408,
       0.0007823282336403281,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "detect a byte stream's encoding — utf-8 page (95 kB)",
       1.0262474480586075e-06,
       0.0017221563046708372,
-      null
+      "same in both configurations, so measured once"
     ],
     [
       "extract filtered page links — daring fireball (10 kB)",
@@ -1330,5 +1330,5 @@
       0.12059134279394809
     ]
   ],
-  "notes": {}
+  "row_notes": {}
 }

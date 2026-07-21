@@ -439,7 +439,11 @@
       0.02023617070051036
     ]
   ],
-  "notes": {
-    "stdlib": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error"
+  "row_notes": {
+    "38": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
+    "39": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
+    "40": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
+    "41": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
+    "42": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error"
   }
 }

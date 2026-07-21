@@ -769,7 +769,14 @@
       0.016350123964366924
     ]
   ],
-  "notes": {
-    "resiliparse": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree"
+  "row_notes": {
+    "19": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "20": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "21": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "22": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "39": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "40": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "41": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "42": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree"
   }
 }

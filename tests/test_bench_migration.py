@@ -93,7 +93,13 @@ def test_operation_one_backend_skips_keeps_the_row(tmp_path: Path) -> None:
             "encoding|bytes|bs4 (html.parser)": {"mean": 8.0, "cv": 0.02},
         },
     )
-    assert ["detect a byte stream's encoding — bytes", 1.0, 8.0, None] in feed["rows"]
+    # the configuration that skips the operation says why rather than leaving the cell blank
+    assert [
+        "detect a byte stream's encoding — bytes",
+        1.0,
+        8.0,
+        "same in both configurations, so measured once",
+    ] in feed["rows"]
 
 
 def test_spread_aligns_with_every_variant(tmp_path: Path) -> None:
