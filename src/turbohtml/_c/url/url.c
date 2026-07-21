@@ -998,7 +998,7 @@ PyObject *turbohtml_url_remove_dot_segments(PyObject *Py_UNUSED(module), PyObjec
         ends[kept] = 0;
         kept += 1;
     }
-    Py_ssize_t total = kept > 0 ? kept - 1 : 0;
+    Py_ssize_t total = kept - 1; /* kept >= 1: the final segment always records one entry or bumps the trailing dot */
     for (Py_ssize_t index = 0; index < kept; index++) {
         total += ends[index] - starts[index];
     }
