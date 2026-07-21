@@ -78,8 +78,8 @@ escape each untrusted operand through the same C ``escape``.
 :func:`turbohtml.clean.linkify` against `bleach <https://bleach.readthedocs.io>`_'s ``linkify``, the HTML-aware
 linkifier it succeeds, and `lxml-html-clean <https://github.com/fedora-python/lxml_html_clean>`_'s ``autolink``. All
 three parse the HTML and rewrite it. turbohtml's C candidate scan and its own tree carry it past bleach's html5lib pass
-by seven to twenty times. It leads lxml's autolink on the comment and 4 KiB markup inputs and trails it on the plain 1
-KiB prose row (0.6x), though that row is not a like-for-like comparison: ``autolink`` only rewrites URLs already inside
+by six to twenty times. It leads lxml's autolink on the comment and 4 KiB markup inputs and trails it on the plain 1 KiB
+prose row (0.6x), though that row is not a like-for-like comparison: ``autolink`` only rewrites URLs already inside
 markup and never linkifies an email address, so on plain prose it produces no links at all where turbohtml produces
 thirty. Its figure there is the cost of finding nothing.
 
@@ -89,8 +89,8 @@ thirty. Its figure there is the cost of finding nothing.
 The detection primitive on its own, :meth:`turbohtml.clean.LinkDetector.find` against ``LinkifyIt().match`` and
 :meth:`~turbohtml.clean.LinkDetector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the
 spans or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. It runs
-37 to 93 times faster, except on the ``has_link`` prose row (2.1x), where ``test`` short-circuits on the first link near
-the start.
+51 to 103 times faster, except on the ``has_link`` prose row (2.8x), where ``test`` short-circuits on the first link
+near the start.
 
 .. bench-table::
     :file: bench/linkify-2.json
@@ -207,11 +207,11 @@ navigation and footer each classifier must reject are part of the measured cost.
 finder, and the article extractors trafilatura, newspaper3k, goose3, and news-please that surface a date beside the body
 text. All read the same signals -- publication/modification ``<meta>`` tags, JSON-LD, ``<time>`` elements, and a date in
 the URL -- and are parse-bound; htmldate builds an lxml tree, turbohtml the WHATWG tree. turbohtml's early-exit over the
-structured signals runs 2.3 to 2.9 times faster than htmldate on the real pages and 15 to 21 times faster than
-trafilatura. The synthetic ``100 meta candidates`` row is the exception: a page stacked with a hundred date-like
-``<meta>`` tags forces turbohtml to weigh every candidate, where htmldate and trafilatura stop early and edge ahead
-(0.6x and 0.7x). htmldate stops by giving up, returning no date at all for that page, so its figure there is the cost of
-the search it abandoned rather than of finding what turbohtml reports.
+structured signals runs 2.9 to 3.3 times faster than htmldate on the real pages and 20 to 24 times faster than
+trafilatura. The synthetic ``100 meta candidates`` row -- a page stacked with a hundred date-like ``<meta>`` tags -- was
+the one case turbohtml lost, since it weighed every candidate where htmldate and trafilatura stopped early; moving that
+weighing into C turns it around, and turbohtml now leads the row too, 3.0 times over htmldate and 4.1 times over
+trafilatura.
 
 .. bench-table::
     :file: bench/date-extraction.json
@@ -329,6 +329,15 @@ and over a hundred times faster than BeautifulSoup and pyquery.
 
 .. bench-table::
     :file: bench/matching.json
+
+:func:`turbohtml.query.escape_identifier` escapes a raw string into a CSS identifier per the CSSOM
+serialize-an-identifier rules -- the safe way to drop an untrusted class or id into a selector -- against soupsieve's
+``escape``. The workload escapes a thousand identifiers spanning leading digits, embedded specials, astral characters,
+and a lone dash. turbohtml walks the code points and emits the escape in C, where soupsieve builds the result through a
+per-character Python loop, so it runs 16 times faster.
+
+.. bench-table::
+    :file: bench/querying-6.json
 
 A text-content search runs through :meth:`~turbohtml.Node.find_all` with ``text=`` (a regex matched against each
 element's collected subtree text), raced against ``BeautifulSoup.find_all(string=...)`` and the equivalent text filters
@@ -569,7 +578,7 @@ tables also carry the anchor collectors resiliparse, selectolax, BeautifulSoup, 
 ``<a href>`` and so do strictly less work. Each operation runs over the three real saved pages and the 235 kB WHATWG
 spec; extraction is read-only and rewrite applies an identity callback, so both reuse one cached parse, while absolutize
 rebuilds a fresh tree before each iteration since ``make_links_absolute`` rewrites the hrefs in place. turbohtml walks
-the attribute set in C and leads lxml's like-for-like helpers from low single digits up to over a hundred times, the gap
+the attribute set in C and leads lxml's like-for-like helpers from seven times up to over a hundred times, the gap
 widening with the link count; against the anchor-only collectors it does more work per element, so resiliparse and
 selectolax land near or just ahead on extraction while turbohtml pulls away on the rewrite.
 
@@ -655,9 +664,9 @@ comparison is output size, where turbohtml stays within a couple percent and com
 
 ``csscompressor`` (the YUI port) and ``cssmin`` (its BSD descendant) rewrite values to their shortest form the way
 turbohtml does, but as pure-Python regex passes they turn quadratic on a large stylesheet and trail the C engine by tens
-to over five hundred times, ``cssmin`` and ``css-html-js-minify`` reaching 2.8 seconds on the 745 kB ``bulma.css`` where
-turbohtml takes 5 ms. ``rcssmin`` is a C extension and faster than turbohtml, though it only strips comments and
-whitespace, so it leaves a larger result everywhere except the custom-property-heavy ``bulma.css``.
+to over four hundred times, ``cssmin`` and ``css-html-js-minify`` reaching roughly four seconds on the 745 kB
+``bulma.css`` where turbohtml takes 9 ms. ``rcssmin`` is a C extension and faster than turbohtml, though it only strips
+comments and whitespace, so it leaves a larger result everywhere except the custom-property-heavy ``bulma.css``.
 ``css-html-js-minify`` is among the slowest of the set. The three pure-Python tools and rcssmin also break value safety:
 each rewrites the internal whitespace of a custom-property value, which `CSS Variables 1 §2
 <https://www.w3.org/TR/css-variables-1/#defining-variables>`_ keeps as the literal token stream that ``var()`` splices
@@ -670,8 +679,8 @@ properties.
 declarations overridden elsewhere in the sheet and rewrites syntax for a browser-target set, so it reaches a smaller
 size than turbohtml on most of the corpus (turbohtml comes out ahead on ``normalize.css``). That target-dependent
 optimization is the same idea as turbohtml's ``baseline`` option carried further, and it is in scope. Its Rust engine
-runs about twice slower than turbohtml across the corpus, the cascade pass costing it the most on ``animate.css``, and
-it rejects ``foundation.css`` with a parse error on a media query the WHATWG recovery rules accept, where turbohtml
+runs 1.3 to 2.4 times slower than turbohtml across the corpus, its per-target cascade pass the added cost, and it
+rejects ``foundation.css`` with a parse error on a media query the WHATWG recovery rules accept, where turbohtml
 minifies all six. turbohtml gives the smallest value-safe output at the most compatible baseline and recovers from
 malformed input.
 
@@ -706,13 +715,15 @@ what ``requests`` uses), `faust-cchardet <https://github.com/faust-streaming/cCh
 uchardet; the original cchardet stops compiling at Python 3.11), `resiliparse <https://resiliparse.chatnoir.eu/>`_'s
 ``detect_encoding``, and BeautifulSoup's ``UnicodeDammit``, benchmarked with the ``chardet`` backend it only sniffs
 with. turbohtml resolves certain input -- a byte-order mark, a ``<meta>`` declaration, valid UTF-8, pure ASCII --
-structurally before any scoring, which is where the 70x-1700x rows on the pre-declared page come from, and its chardetng
-frequency scoring keeps declaration-less single-byte text 3.2x-4.0x ahead of chardet.
+structurally before any scoring, which is where the tens-to-nearly-2000x rows on the ASCII and pre-declared pages come
+from, and its chardetng frequency scoring keeps declaration-less single-byte text 3.9x-5.4x ahead of chardet.
 
-The two native C detectors, faust-cchardet and resiliparse, win two workloads. On a kilobyte of ASCII or UTF-8 all three
-native detectors finish inside five microseconds, where the winner is whoever has less to set up rather than whoever
-scans faster. On CJK-heavy bytes uchardet's tables stay about 2.5x ahead, because turbohtml decodes each candidate
-encoding to score it and a CJK stream leaves several candidates standing.
+resiliparse's native scan is quickest on the small and CJK inputs, ahead of turbohtml by 1.1 to 2.3 times where the
+structural checks find nothing to short-circuit on; faust-cchardet (uchardet) leads only the Shift_JIS row, 1.6 times.
+On everything else turbohtml's structural resolution runs away from the full-table scanners: uchardet spends 188
+microseconds on the 4 kB UTF-8 stream turbohtml settles in five, and 30 milliseconds on the 95 kB pre-declared page it
+settles in under one. CJK is the case both native detectors keep, since turbohtml decodes each candidate encoding to
+score it and a CJK stream leaves several standing.
 
 .. bench-table::
     :file: bench/encoding-detection.json
@@ -739,14 +750,14 @@ the one case where the CPython codec's table lookup edges ahead.
 :func:`turbohtml.extract.clean_url`, :func:`~turbohtml.extract.normalize_url`, and
 :func:`~turbohtml.extract.extract_links` against `courlan <https://github.com/adbar/courlan>`_, trafilatura's URL
 cleaner, and `w3lib <https://w3lib.readthedocs.io/>`_'s ``safe_url_string``/``canonicalize_url``, Scrapy's URL
-utilities. The per-URL pass wins 2x-6x by scanning each component once in C-backed regexes and percent-encoding only
+utilities. The per-URL pass wins 2.8x-7.5x by scanning each component once in C-backed regexes and percent-encoding only
 when a scan finds something to encode, where both competitors re-encode unconditionally through urllib's per-character
-quoters. Page-level filtered extraction parses the real WHATWG DOM and cleans each link, and finishes 2.0x-3.2x ahead of
+quoters. Page-level filtered extraction parses the real WHATWG DOM and cleans each link, and finishes 2.2x-3.8x ahead of
 courlan's regex scan, because each distinct href is cleaned once and absolute links skip resolution. Every tree-based
 competitor here resolves each href against the base and deduplicates the result, the work
 :func:`~turbohtml.extract.extract_links` does, so the row compares the same answer rather than a bare attribute read:
-lxml trails by 1.0 to 2.2 times, selectolax by 2.0 to 4.1, parsel and pyquery by 2.5 to 4.2, and BeautifulSoup by 7.2 to
-36.9 depending on its tree builder.
+lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by 2.2 to 3.8, and BeautifulSoup by 8.7 to
+38.0 depending on its tree builder.
 
 .. bench-table::
     :file: bench/url-cleaning.json

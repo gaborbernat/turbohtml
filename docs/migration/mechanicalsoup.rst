@@ -91,7 +91,9 @@ What MechanicalSoup has that turbohtml does not
 Performance
 ===========
 
-Not directly benchmarked.
+MechanicalSoup parses and queries nothing itself: it hands both to BeautifulSoup. The cost of the half turbohtml
+replaces is therefore BeautifulSoup's, measured against turbohtml on the :doc:`beautifulsoup` page. The form-reading
+surface turbohtml adds runs in the C core over the already-parsed tree, so it carries no separate parse cost to compare.
 
 ****************
  How to migrate

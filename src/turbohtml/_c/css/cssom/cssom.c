@@ -19,6 +19,7 @@
 #include "dom/nodes.h"
 #include "css/select/selector.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* One CSS longhand property the cascade resolves: its lowercase name, whether it
@@ -1239,5 +1240,49 @@ PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg) {
         PyTuple_SET_ITEM(result, index, pair);
     }
     css_free_map(final_map);
+    return result;
+}
+
+/* _css_escape_identifier(text): CSS.escape per the CSSOM serialize-an-identifier rules, so a raw class or id can be
+   dropped into a selector. Worst case every code point becomes "\XXXXXX " (8 UCS4), which bounds the buffer. */
+PyObject *turbohtml_css_escape_identifier(PyObject *Py_UNUSED(module), PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "escape_identifier() argument must be str");
+        return NULL;
+    }
+    Py_ssize_t len = PyUnicode_GET_LENGTH(arg);
+    int kind = PyUnicode_KIND(arg);
+    const void *data = PyUnicode_DATA(arg);
+    Py_UCS4 *out = PyMem_Malloc((size_t)(len > 0 ? len : 1) * 8 * sizeof(Py_UCS4));
+    if (out == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t at = 0;
+    for (Py_ssize_t position = 0; position < len; position++) {
+        Py_UCS4 code = PyUnicode_READ(kind, data, position);
+        int is_digit = code >= 0x30 && code <= 0x39;
+        /* a digit leading the identifier (or following an initial dash) cannot start a CSS name */
+        int leading_digit = is_digit && (position == 0 || (position == 1 && PyUnicode_READ(kind, data, 0) == '-'));
+        int is_name_char = code >= 0x80 || is_digit || code == '-' || code == '_' || (code >= 0x41 && code <= 0x5A) ||
+                           (code >= 0x61 && code <= 0x7A);
+        /* a lone "-" cannot stand as an identifier, so it is backslashed exactly like a non-name character */
+        int lone_dash = position == 0 && code == '-' && len == 1;
+        if (code == 0) {
+            out[at++] = 0xFFFD;
+        } else if (code <= 0x1F || code == 0x7F || leading_digit) {
+            char hex[16];
+            int wrote = snprintf(hex, sizeof(hex), "\\%x ", (unsigned int)code);
+            for (int index = 0; index < wrote; index++) {
+                out[at++] = (Py_UCS4)(unsigned char)hex[index];
+            }
+        } else if (is_name_char && !lone_dash) {
+            out[at++] = code;
+        } else {
+            out[at++] = '\\';
+            out[at++] = code;
+        }
+    }
+    PyObject *result = th_str_from_kind(PyUnicode_4BYTE_KIND, out, at);
+    PyMem_Free(out);
     return result;
 }

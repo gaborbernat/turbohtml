@@ -223,6 +223,11 @@ typedef struct {
     PyObject *owner;     /* the element/document the public call was made on, for wrapping enumerated nodes */
     PyObject *result;    /* list[Link] for enumerate, else NULL */
     PyObject *replace;   /* callable (str) -> str | None for rewrite, else NULL */
+    /* resolve_links only: the base URL's lowercased scheme, or NULL for the enumerate/rewrite paths. When set, a link
+       that urljoin(base, link) would return byte-for-byte (an absolute URL) is left untouched without the call. */
+    const char *base_scheme;
+    Py_ssize_t base_scheme_len;
+    int base_netloc_scheme; /* the base scheme reserializes an absolute same-scheme URL unchanged (http/https) */
     link_span *spans;
     Py_ssize_t span_count;
     Py_ssize_t span_cap;
@@ -282,15 +287,23 @@ static PyObject *ucs4_slice(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t e
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, value + start, end - start);
 }
 
-/* Append a Link(element, attr, url) for each span to the result list. `report_element` is the owning Element wrapper
-   and `report_attr` its attribute name (or None for <style> text); both are borrowed for the call's duration. */
-static int emit_enumerated(link_walk *walk, PyObject *report_element, PyObject *report_attr, const Py_UCS4 *value) {
+/* Append a Link(element, attr, url) for each span to the result list. The Element wrapper for `report_node` is minted
+   on the first link and cached in *report_element, so an element with no link (the vast majority on a real page) is
+   never wrapped. `report_attr` is the attribute name (or None for <style> text), borrowed for the call's duration. */
+static int emit_enumerated(link_walk *walk, PyObject **report_element, th_node *report_node, PyObject *report_attr,
+                           const Py_UCS4 *value) {
+    if (*report_element == NULL) {
+        *report_element = turbohtml_node_wrap_in(walk->owner, report_node);
+        if (*report_element == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
     for (Py_ssize_t index = 0; index < walk->span_count; index++) {
         PyObject *url = ucs4_slice(value, walk->spans[index].start, walk->spans[index].end);
         if (url == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *record = PyObject_CallFunction(walk->state->link_type, "OOO", report_element, report_attr, url);
+        PyObject *record = PyObject_CallFunction(walk->state->link_type, "OOO", *report_element, report_attr, url);
         Py_DECREF(url);
         if (record == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -340,6 +353,59 @@ static int splice_value(link_walk *walk, th_node *target, const char *attr_name,
     return status;
 }
 
+/* True when resolve_links can prove urljoin(base, [start, end)) returns the URL byte-for-byte, so the urljoin call (the
+   bulk of resolve's cost, stdlib Python) is skipped for an already-absolute link. Mirrors CPython urllib.parse.urljoin:
+   a reference with a scheme differing from the base's (case-insensitively) is returned verbatim; a same-scheme absolute
+   reference (scheme://netloc...) is reserialized, which reproduces the input only when the scheme is already lowercase,
+   an authority is present, and no tab/CR/LF (which urlsplit strips) appears. The same-scheme case is enabled only for
+   an http/https base, whose scheme reserializes through urlunsplit's netloc branch. */
+static int url_resolves_to_itself(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end, const char *base_scheme,
+                                  Py_ssize_t base_scheme_len, int base_netloc_scheme) {
+    if (!is_ascii_alpha(value[start])) { /* a scheme starts with a letter; a span is never empty (start < end) */
+        return 0;
+    }
+    Py_ssize_t colon = start + 1;
+    while (colon < end && value[colon] != ':') {
+        Py_UCS4 c = value[colon];
+        if (!is_ascii_alpha(c) && !is_ascii_digit(c) && c != '+' && c != '-' && c != '.') {
+            return 0;
+        }
+        colon++;
+    }
+    if (colon >= end) {
+        return 0;
+    }
+    Py_ssize_t scheme_len = colon - start;
+    int same_scheme = scheme_len == base_scheme_len;
+    for (Py_ssize_t index = 0; same_scheme && index < scheme_len; index++) {
+        same_scheme = lower_ascii(value[start + index]) == (Py_UCS4)(unsigned char)base_scheme[index];
+    }
+    if (!same_scheme) {
+        return 1;
+    }
+    if (!base_netloc_scheme) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < scheme_len; index++) {
+        if (value[start + index] != lower_ascii(value[start + index])) {
+            return 0;
+        }
+    }
+    if (colon + 2 >= end || value[colon + 1] != '/' || value[colon + 2] != '/') {
+        return 0;
+    }
+    Py_ssize_t netloc = colon + 3;
+    if (netloc >= end || value[netloc] == '/' || value[netloc] == '?' || value[netloc] == '#') {
+        return 0;
+    }
+    for (Py_ssize_t index = start; index < end; index++) {
+        if (value[index] == '\t' || value[index] == '\r' || value[index] == '\n') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Call replace(url) for each span and build a rewritten value, or leave the value untouched when every replacement is
    None or unchanged. */
 static int rewrite_value(link_walk *walk, th_node *target, const char *attr_name, Py_ssize_t attr_len,
@@ -353,6 +419,11 @@ static int rewrite_value(link_walk *walk, th_node *target, const char *attr_name
     int changed = 0;
     int failed = 0;
     for (Py_ssize_t index = 0; index < walk->span_count; index++) {
+        if (walk->base_scheme != NULL &&
+            url_resolves_to_itself(value, walk->spans[index].start, walk->spans[index].end, walk->base_scheme,
+                                   walk->base_scheme_len, walk->base_netloc_scheme)) {
+            continue; /* an absolute URL resolve_links would leave unchanged; skip the urljoin call */
+        }
         PyObject *url = ucs4_slice(value, walk->spans[index].start, walk->spans[index].end);
         if (url == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             failed = 1;    /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -392,11 +463,12 @@ static int rewrite_value(link_walk *walk, th_node *target, const char *attr_name
     return failed ? -1 : 0;
 }
 
-/* Scan one value with `scan`, then either record the spans or rewrite them. `report_element`/`report_attr` describe the
-   enumeration location; `target`/`attr_name`/`attr_len` describe where a rewrite writes back. */
-static int handle_value(link_walk *walk, PyObject *report_element, PyObject *report_attr, th_node *target,
-                        const char *attr_name, Py_ssize_t attr_len, const Py_UCS4 *value, Py_ssize_t len,
-                        scanner_fn scan) {
+/* Scan one value with `scan`, then either record the spans or rewrite them. `report_element` (the enumerate path's
+   lazily-wrapped element slot), `report_node`, and `report_attr` describe the enumeration location;
+   `target`/`attr_name`/ `attr_len` describe where a rewrite writes back. */
+static int handle_value(link_walk *walk, PyObject **report_element, th_node *report_node, PyObject *report_attr,
+                        th_node *target, const char *attr_name, Py_ssize_t attr_len, const Py_UCS4 *value,
+                        Py_ssize_t len, scanner_fn scan) {
     walk->span_count = 0;
     if (scan(value, len, collect_span, walk) < 0) { /* GCOVR_EXCL_BR_LINE: scan alloc only (collect_span realloc) */
         return -1;                                  /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -405,7 +477,7 @@ static int handle_value(link_walk *walk, PyObject *report_element, PyObject *rep
         return 0;
     }
     if (walk->result != NULL) {
-        return emit_enumerated(walk, report_element, report_attr, value);
+        return emit_enumerated(walk, report_element, report_node, report_attr, value);
     }
     return rewrite_value(walk, target, attr_name, attr_len, value, len);
 }
@@ -477,13 +549,7 @@ static int is_meta_refresh(link_walk *walk, th_node *element) {
 }
 
 static int process_element(link_walk *walk, th_node *element) {
-    PyObject *report_element = NULL;
-    if (walk->result != NULL) {
-        report_element = turbohtml_node_wrap_in(walk->owner, element);
-        if (report_element == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;                /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-    }
+    PyObject *report_element = NULL; /* the enumerate path wraps `element` lazily, on its first emitted link */
     int failed = 0;
     /* a <style>'s text children are a stylesheet, scanned for url()/@import like a style attribute. A parsed text node
        holds a zero-copy span, not a ready buffer, so its data is materialized (and freed) per child. The children are
@@ -508,8 +574,8 @@ static int process_element(link_walk *walk, th_node *element) {
                 failed = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
                 break;          /* GCOVR_EXCL_LINE */
             }
-            failed =
-                handle_value(walk, report_element, Py_None, children[index], NULL, 0, text, text_len, scan_css) < 0;
+            failed = handle_value(walk, &report_element, element, Py_None, children[index], NULL, 0, text, text_len,
+                                  scan_css) < 0;
             PyMem_Free(text);
         }
         PyMem_Free(children);
@@ -527,7 +593,7 @@ static int process_element(link_walk *walk, th_node *element) {
                     return -1;                  /* GCOVR_EXCL_LINE */
                 }
             }
-            failed = handle_value(walk, report_element, report_attr, element, "content", 7, content, len,
+            failed = handle_value(walk, &report_element, element, report_attr, element, "content", 7, content, len,
                                   scan_meta_refresh) < 0;
             Py_XDECREF(report_attr);
         }
@@ -547,8 +613,8 @@ static int process_element(link_walk *walk, th_node *element) {
                 break;                 /* GCOVR_EXCL_LINE */
             }
         }
-        failed = handle_value(walk, report_element, report_attr, element, name, name_len, element->attrs[index].value,
-                              element->attrs[index].value_len, scan) < 0;
+        failed = handle_value(walk, &report_element, element, report_attr, element, name, name_len,
+                              element->attrs[index].value, element->attrs[index].value_len, scan) < 0;
         Py_XDECREF(report_attr);
     }
     Py_XDECREF(report_element);
@@ -582,8 +648,15 @@ static int collect_subtree(link_walk *walk, th_node *root) {
 /* Shared engine: run the walk over `root` under `owner`'s per-tree critical section. The thin Node methods in
    dom/node.c derive (owner, tree, root) straight from the node and hand them here; the module state for the Link
    record type and the per-tree handle for the lock come off `owner`. */
-static PyObject *run_walk(PyObject *owner, th_tree *tree, th_node *root, PyObject *result, PyObject *replace) {
-    link_walk walk = {.tree = tree, .owner = owner, .result = result, .replace = replace};
+static PyObject *run_walk(PyObject *owner, th_tree *tree, th_node *root, PyObject *result, PyObject *replace,
+                          const char *base_scheme, Py_ssize_t base_scheme_len, int base_netloc_scheme) {
+    link_walk walk = {.tree = tree,
+                      .owner = owner,
+                      .result = result,
+                      .replace = replace,
+                      .base_scheme = base_scheme,
+                      .base_scheme_len = base_scheme_len,
+                      .base_netloc_scheme = base_netloc_scheme};
     walk.state = PyType_GetModuleState(Py_TYPE(owner));
     /* read the handle into the struct (always, so it is covered) rather than into the macro argument, which the GIL
        build's no-op Py_BEGIN_CRITICAL_SECTION does not evaluate */
@@ -618,7 +691,7 @@ PyObject *turbohtml_node_links(PyObject *owner, th_tree *tree, th_node *root) {
     if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return run_walk(owner, tree, root, result, NULL);
+    return run_walk(owner, tree, root, result, NULL, NULL, 0, 0);
 }
 
 /* Node.rewrite_links(replace) -> None. Calls replace(url) for every link; a str result replaces it, None leaves it. */
@@ -627,7 +700,27 @@ PyObject *turbohtml_node_rewrite_links(PyObject *owner, th_tree *tree, th_node *
         PyErr_SetString(PyExc_TypeError, "rewrite_links expected a callable");
         return NULL;
     }
-    return run_walk(owner, tree, root, NULL, replace);
+    return run_walk(owner, tree, root, NULL, replace, NULL, 0, 0);
+}
+
+/* base_url's scheme, lowercased into `out` (capacity `cap`), or 0 when it carries no parseable RFC 3986 scheme (alpha
+ *(alpha / digit / "+" / "-" / ".") ":") or one too long to be one, in which case the absolute-URL skip stays off. */
+static Py_ssize_t base_scheme_of(PyObject *base_url, char *out, Py_ssize_t cap) {
+    Py_ssize_t len = PyUnicode_GET_LENGTH(base_url);
+    if (len == 0 || !is_ascii_alpha(PyUnicode_READ_CHAR(base_url, 0))) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len && index < cap; index++) {
+        Py_UCS4 c = PyUnicode_READ_CHAR(base_url, index);
+        if (c == ':') {
+            return index;
+        }
+        if (!is_ascii_alpha(c) && !is_ascii_digit(c) && c != '+' && c != '-' && c != '.') {
+            return 0;
+        }
+        out[index] = (char)lower_ascii(c);
+    }
+    return 0;
 }
 
 /* Node.resolve_links(base_url) -> None. Rewrites every link absolute against base_url with functools.partial bound over
@@ -637,6 +730,10 @@ PyObject *turbohtml_node_resolve_links(PyObject *owner, th_tree *tree, th_node *
         PyErr_SetString(PyExc_TypeError, "resolve_links expected a base URL string");
         return NULL;
     }
+    char base_scheme[16];
+    Py_ssize_t base_scheme_len = base_scheme_of(base_url, base_scheme, (Py_ssize_t)sizeof(base_scheme));
+    int base_netloc_scheme = (base_scheme_len == 4 && memcmp(base_scheme, "http", 4) == 0) ||
+                             (base_scheme_len == 5 && memcmp(base_scheme, "https", 5) == 0);
     PyObject *parse_module = PyImport_ImportModule("urllib.parse");
     if (parse_module == NULL) { /* GCOVR_EXCL_BR_LINE: a stdlib import cannot be forced to fail from a test */
         return NULL;            /* GCOVR_EXCL_LINE: import-failure path */
@@ -663,7 +760,8 @@ PyObject *turbohtml_node_resolve_links(PyObject *owner, th_tree *tree, th_node *
     if (bound == NULL) { /* GCOVR_EXCL_BR_LINE: binding a partial cannot be forced to fail from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *result = run_walk(owner, tree, root, NULL, bound);
+    PyObject *result = run_walk(owner, tree, root, NULL, bound, base_scheme_len > 0 ? base_scheme : NULL,
+                                base_scheme_len, base_netloc_scheme);
     Py_DECREF(bound);
     return result;
 }

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple, cast
 
-from ._html import _sax_events
+from ._html import _sax_dispatch, _sax_events
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -157,16 +157,4 @@ def sax_parse(html: str, handler: SaxHandler) -> None:
     :param handler: a :class:`SaxHandler` (or subclass) whose overridden methods receive the events.
     :raises TypeError: if ``html`` is not a str.
     """
-    for event in iter_events(html):
-        if isinstance(event, StartElement):
-            handler.start_element(event.tag, event.attrs)
-        elif isinstance(event, EndElement):
-            handler.end_element(event.tag)
-        elif isinstance(event, Characters):
-            handler.characters(event.data)
-        elif isinstance(event, Comment):
-            handler.comment(event.data)
-        elif isinstance(event, Doctype):
-            handler.doctype(event.name, event.public_id, event.system_id)
-        else:
-            handler.processing_instruction(event.data)
+    _sax_dispatch(html, handler)

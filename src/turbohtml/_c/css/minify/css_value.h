@@ -80,6 +80,13 @@ static int comp_ieq(const css_buf *pool, const css_comp *comp, const char *ascii
     return css_run_ieq(pool->data + comp->off, comp->len, ascii);
 }
 
+/* css_run_ieq gated on a pre-lowered first byte. A property name shares a first letter with only a handful of the
+   literals a dispatch chain tests, so the caller lowers prop[0] once and this skips the call for every literal that
+   cannot match. The literals passed here are lower-case, so their first byte is the value first must equal. */
+static inline int css_run_ieq_first(const css_char *text, Py_ssize_t len, css_char first, const char *ascii) {
+    return (css_char)(unsigned char)ascii[0] == first && css_run_ieq(text, len, ascii);
+}
+
 /* Decimal integer width of a (possibly negative) exponent. */
 static int css_int_width(int value) {
     int width = value < 0 ? 1 : 0;

@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Final
 
 from bench import operations
 from bench.notes import NOTES
-from bench.report import rst_safe
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -32,6 +31,10 @@ _SIZE_OPS: Final = frozenset({"minify", "minify-css", "minify-js"})
 # a memory op leads with peak resident bytes, so its rows are two cells wide like a size op's
 _MEMORY_OPS: Final = frozenset({"parse-dense", "rewrite"})
 _WIDE_OPS: Final = _SIZE_OPS | _MEMORY_OPS
+
+# Why a variant repeats the sibling's figure when the library is measured in more than one configuration: the
+# operation runs the same code whichever one is chosen, so benchmarking it twice would publish a duplicate column.
+_SHARED_WITH_OTHER_VARIANT: Final = "same in both configurations, so measured once"
 
 # A competitor module's stem maps to its migration page's slug by turning ``_`` into ``-``; these libraries
 # name the two differently, so the map pins them. A stem with no ``docs/migration/<slug>.rst`` is skipped, so
@@ -43,6 +46,13 @@ _SLUG_OVERRIDES: Final = {
     "linkify_it": "linkify-it-py",
     "metadata_parser": "metadata_parser",
 }
+
+
+def _merge_caveat(note: str | None, *, shared: bool) -> str | None:
+    """Join an operation note with the measured-once caveat when a row repeats one figure across configurations."""
+    if not shared:
+        return note
+    return _SHARED_WITH_OTHER_VARIANT if note is None else f"{note}; {_SHARED_WITH_OTHER_VARIANT}"
 
 
 def _slug(stem: str) -> str:
@@ -85,21 +95,22 @@ def _case_names(operation: str, stats: dict[str, dict[str, float]]) -> list[str]
 
 def _rows(
     variants: list[dict[str, str]], stats: dict[str, dict[str, float]]
-) -> tuple[list[list[str | float | None]], list[list[float | None]]]:
+) -> tuple[list[list[str | float]], list[list[float | None]], list[str | None]]:
     """
     Build a library's rows and their spread across every shared operation-case, prefixing labels that span ops.
 
     ``variants`` holds one ``{op: label}`` per competitor module sharing this page, so a library benchmarked in more
     than one configuration (BeautifulSoup over each of its tree builders) columns them side by side. A variant that
-    does not measure an operation leaves its cells empty rather than dropping the row for the ones that do.
+    does not measure an operation shows the sibling's shared figure rather than dropping the row for the ones that do.
     """
     covered = {operation for variant in variants for operation in variant}
-    prefixed = len(covered) > 1
+    labels = [next(iter(variant.values())) for variant in variants]
     # a leading metric only makes sense when every shared operation carries one; a library that spans a memory
     # operation and timing-only ones would otherwise emit rows of two different widths into one table
     wide = bool(_leading_metric(covered))
-    rows: list[list[str | float | None]] = []
+    rows: list[list[str | float]] = []
     spread: list[list[float | None]] = []
+    caveats: list[str | None] = []
     for operation, meta in ((op, operations.OPERATIONS[op]) for op in operations.OPERATIONS if op in covered):
         for case in _case_names(operation, stats):
             turbo = stats.get(f"{operation}|{case}|turbohtml")
@@ -109,23 +120,39 @@ def _rows(
             ]
             if turbo is None or all(other is None for other in others):
                 continue
-            row_label = rst_safe(f"{meta.title} — {case}" if prefixed else case)
+            # a case name is an authored RST fragment (an XPath expression arrives already wrapped in ``code``
+            # backticks), so it passes through verbatim; escaping it here would double up on that markup
+            row_label = f"{meta.title} — {case}" if len(covered) > 1 else case
+            # a configuration that skips an operation runs the same code as the one measuring it, so its cells show
+            # the shared measurement and the row's note says the figure was measured once
+            measured = next(other for other in others if other is not None)
+            shared = any(other is None for other in others)
+            filled = [other if other is not None else measured for other in others]
+            row: list[str | float]
             if wide:
                 lead = "size" if operation in _SIZE_OPS else "peak"
-                row: list[str | float | None] = [row_label, turbo[lead], turbo["mean"]]
+                row = [row_label, turbo[lead], turbo["mean"]]
                 noise: list[float | None] = [None, None, turbo.get("cv")]
-                for other in others:
-                    row += [None, None] if other is None else [other[lead], other["mean"]]
-                    noise += [None, None if other is None else other.get("cv")]
+                for other in filled:
+                    row += [other[lead], other["mean"]]
+                    noise += [None, other.get("cv")]
             else:
                 row = [row_label, turbo["mean"]]
                 noise = [None, turbo.get("cv")]
-                for other in others:
-                    row.append(None if other is None else other["mean"])
-                    noise.append(None if other is None else other.get("cv"))
+                for other in filled:
+                    row.append(other["mean"])
+                    noise.append(other.get("cv"))
             rows.append(row)
             spread.append(noise)
-    return rows, spread
+            # a library page mixes operations, so a caveat belongs on the rows of the operation it describes; a row
+            # repeating one measurement across configurations says so beside any operation note
+            caveats.append(
+                _merge_caveat(
+                    next((NOTES[operation][label] for label in labels if label in NOTES.get(operation, {})), None),
+                    shared=shared,
+                )
+            )
+    return rows, spread, caveats
 
 
 def _leading_metric(ops: Iterable[str]) -> list[str]:
@@ -159,7 +186,7 @@ def emit_migration_feeds(
     for slug, variants in by_slug.items():
         if not (docs_root / "migration" / f"{slug}.rst").exists():
             continue
-        rows, spread = _rows(variants, stats)
+        rows, spread, caveats = _rows(variants, stats)
         if not rows:
             skipped.append(slug)
             continue
@@ -170,13 +197,9 @@ def emit_migration_feeds(
             "metrics": _leading_metric({operation for variant in variants for operation in variant}),
             "rows": rows,
             "spread": spread,
-            # a migration page mixes operations, so a note applies once the library is noted for any of them
-            "notes": {
-                label: note
-                for variant, label in zip(variants, labels, strict=True)
-                for operation in variant
-                if (note := NOTES.get(operation, {}).get(label)) is not None
-            },
+            # keyed by row rather than by column: a library page mixes operations, and a caveat that belongs to one
+            # of them would otherwise read as covering every row the library appears in
+            "row_notes": {str(index): note for index, note in enumerate(caveats) if note is not None},
         }
         (directory / f"{slug}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
     return skipped
@@ -209,7 +232,9 @@ def main() -> None:
     """Regenerate migration feeds from per-operation feeds. Args: FEEDS_DIR OUT_DIR DOCS_ROOT COMPETITOR_DIR."""
     feeds_dir, out_dir, docs_root, competitor_dir = (Path(argument) for argument in sys.argv[1:5])
     if skipped := emit_migration_feeds(stats_from_feeds(feeds_dir), competitor_dir, out_dir, docs_root):
-        print(f"pages with no fresh measurement, left as committed: {skipped}")
+        # to stderr so a redirected sweep still surfaces it: a page silently losing its table is the failure to catch
+        message = f"migration: {len(skipped)} page(s) with no shared measurement, left as committed: {skipped}"
+        print(message, file=sys.stderr)
 
 
 __all__ = ["discover_labels", "emit_migration_feeds", "stats_from_feeds"]

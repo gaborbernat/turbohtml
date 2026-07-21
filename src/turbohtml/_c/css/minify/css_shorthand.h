@@ -695,44 +695,50 @@ static void css_apply_handler(css_buf *pool, const css_char *prop, Py_ssize_t pr
             has_sep = 1;
         }
     }
+    css_char first = css_lower(prop[0]);
     if (!has_sep && css_prop_in(prop, prop_len, CSS_BOX_PROPS, sizeof(CSS_BOX_PROPS) / sizeof(char *))) {
         css_handle_box(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "background")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "background")) {
         css_handle_background(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "background-position")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "background-position")) {
         css_handle_background_position(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "background-repeat")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "background-repeat")) {
         css_handle_runs(pool, comps, css_collapse_repeat_run);
-    } else if (css_run_ieq(prop, prop_len, "background-size")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "background-size")) {
         css_handle_runs(pool, comps, css_collapse_size_run);
-    } else if (css_run_ieq(prop, prop_len, "border") || css_run_ieq(prop, prop_len, "border-top") ||
-               css_run_ieq(prop, prop_len, "border-bottom") || css_run_ieq(prop, prop_len, "border-left") ||
-               css_run_ieq(prop, prop_len, "border-right") || css_run_ieq(prop, prop_len, "outline") ||
-               css_run_ieq(prop, prop_len, "column-rule") || css_run_ieq(prop, prop_len, "text-decoration") ||
-               css_run_ieq(prop, prop_len, "text-emphasis")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "border") ||
+               css_run_ieq_first(prop, prop_len, first, "border-top") ||
+               css_run_ieq_first(prop, prop_len, first, "border-bottom") ||
+               css_run_ieq_first(prop, prop_len, first, "border-left") ||
+               css_run_ieq_first(prop, prop_len, first, "border-right") ||
+               css_run_ieq_first(prop, prop_len, first, "outline") ||
+               css_run_ieq_first(prop, prop_len, first, "column-rule") ||
+               css_run_ieq_first(prop, prop_len, first, "text-decoration") ||
+               css_run_ieq_first(prop, prop_len, first, "text-emphasis")) {
         css_handle_color_drop(pool, comps, prop, prop_len);
-    } else if (css_run_ieq(prop, prop_len, "border-color")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "border-color")) {
         css_handle_border_color(pool, comps);
     } else if (css_prop_in(prop, prop_len, CSS_CURRENTCOLOR_INIT, sizeof(CSS_CURRENTCOLOR_INIT) / sizeof(char *)) ||
                css_prop_in(prop, prop_len, CSS_SINGLE_COLOR, sizeof(CSS_SINGLE_COLOR) / sizeof(char *))) {
         css_handle_color_single(pool, comps, prop, prop_len);
-    } else if (css_run_ieq(prop, prop_len, "font-weight")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "font-weight")) {
         css_handle_font_weight(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "flex-basis")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "flex-basis")) {
         css_handle_flex_basis(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "flex-grow") || css_run_ieq(prop, prop_len, "order")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "flex-grow") ||
+               css_run_ieq_first(prop, prop_len, first, "order")) {
         css_handle_flex_grow(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "flex-shrink")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "flex-shrink")) {
         css_handle_flex_shrink(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "box-shadow")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "box-shadow")) {
         css_handle_runs(pool, comps, css_collapse_box_shadow_run);
-    } else if (css_run_ieq(prop, prop_len, "text-shadow")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "text-shadow")) {
         css_handle_text_shadow(pool, comps);
-    } else if (!has_sep && css_run_ieq(prop, prop_len, "flex")) {
+    } else if (!has_sep && css_run_ieq_first(prop, prop_len, first, "flex")) {
         css_handle_flex(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "font")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "font")) {
         css_handle_font(pool, comps);
-    } else if (css_run_ieq(prop, prop_len, "font-family")) {
+    } else if (css_run_ieq_first(prop, prop_len, first, "font-family")) {
         css_handle_font_family(pool, comps);
     }
 }

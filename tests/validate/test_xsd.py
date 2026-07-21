@@ -312,6 +312,15 @@ def test_target_namespace_qualified() -> None:
     assert not check(schema, "<r><a>x</a></r>").valid  # wrong namespace
 
 
+def test_many_namespace_declarations_keep_the_xs_binding() -> None:
+    # Nine xmlns declarations grow the in-scope namespace stack past its initial capacity; xmlns:xs comes first,
+    # so a grow that failed to copy the existing bindings would drop the xs binding and stop recognizing xs:element.
+    dummies = " ".join(f'xmlns:p{index}="urn:p{index}"' for index in range(8))
+    schema = f'<xs:schema {XS} {dummies}><xs:element name="a" type="xs:string"/></xs:schema>'
+    assert check(schema, "<a>x</a>").valid
+    assert not check(schema, "<a><child/></a>").valid
+
+
 def test_root_errors() -> None:
     schema = f'<xs:schema {XS}><xs:element name="known" type="xs:string"/></xs:schema>'
     assert not check(schema, "<unknown/>").valid

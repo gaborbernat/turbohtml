@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
@@ -260,10 +261,51 @@ def _mark_entry(ordinal: int) -> nodes.entry:
     return entry
 
 
+def _table_frame(ncols: int) -> tuple[nodes.table, nodes.tgroup]:
+    """Build the table and its column group: a wide first column for the row label, then one per metric column."""
+    table = nodes.table(classes=["bench-table"])
+    group = nodes.tgroup(cols=ncols)
+    table += group
+    group += nodes.colspec(colwidth=2)
+    for _ in range(ncols - 1):
+        group += nodes.colspec(colwidth=1)
+    return table, group
+
+
+@dataclass(frozen=True)
+class _Layout:
+    """What every row of one table shares: its columns, its metrics, and the numbered reasons its cells key into."""
+
+    parties: list[str]
+    metrics: list[str]
+    reasons: dict[str, int]
+
+
+def _row_caveats(feed: dict[str, Any], taken: int) -> tuple[dict[str, int], dict[int, int]]:
+    """Assign each distinct per-row caveat an ordinal after those already taken, and map each row to its ordinal."""
+    notes: dict[str, int] = {}
+    marks: dict[int, int] = {}
+    for index, note in sorted((int(key), value) for key, value in (feed.get("row_notes") or {}).items()):
+        notes.setdefault(note, taken + len(notes) + 1)
+        marks[index] = notes[note]
+    return notes, marks
+
+
 def _ordered_notes(feed: dict[str, Any], parties: list[str]) -> list[str]:
     """Return the noted parties in the order their columns appear, so ordinals read left to right."""
     notes = feed.get("notes") or {}
     return [party for party in parties if party in notes]
+
+
+def _merge_legend(
+    reasons: dict[str, int], notes: dict[str, int], row_notes: dict[str, int], feed: dict[str, Any]
+) -> dict[str, int]:
+    """Gather the empty-cell reasons, the column notes and the row caveats into one numbered legend."""
+    legend = dict(reasons)
+    for party, ordinal in notes.items():
+        legend[f"{party} {feed['notes'][party]}"] = ordinal
+    legend.update(row_notes)
+    return legend
 
 
 def _legend(reasons: dict[str, int]) -> nodes.container:
@@ -291,30 +333,34 @@ class BenchTable(Directive):
         metrics = feed["metrics"] or ["time"]
         parties, rows, spread = _order_columns(feed["parties"], metrics, feed["rows"], feed.get("spread") or [])
         ncols = 1 + len(parties) * len(metrics)
-        table = nodes.table(classes=["bench-table"])
-        group = nodes.tgroup(cols=ncols)
-        table += group
-        group += nodes.colspec(colwidth=2)
-        for _ in range(ncols - 1):
-            group += nodes.colspec(colwidth=1)
-        reasons = _reason_map(rows)
+        table, group = _table_frame(ncols)
+        layout = _Layout(parties, metrics, _reason_map(rows))
         # notes number on from the empty-cell reasons so one legend carries both without colliding ordinals
-        notes = {party: len(reasons) + offset for offset, party in enumerate(_ordered_notes(feed, parties), start=1)}
+        notes = {
+            party: len(layout.reasons) + offset for offset, party in enumerate(_ordered_notes(feed, parties), start=1)
+        }
+        row_notes, row_marks = _row_caveats(feed, len(layout.reasons) + len(notes))
         group += self._head(feed["label"], parties, feed["metrics"], notes)
+        group += self._body(rows, spread, layout, row_marks, ncols)
+        legend = _merge_legend(layout.reasons, notes, row_notes, feed)
+        return [table] if not legend else [table, _legend(legend)]
+
+    def _body(
+        self,
+        rows: list[list[Any]],
+        spread: list[Any],
+        layout: _Layout,
+        row_marks: dict[int, int],
+        ncols: int,
+    ) -> nodes.tbody:
         body = nodes.tbody()
-        group += body
-        for row_index, cells in enumerate(rows):
+        for index, cells in enumerate(rows):
             if len(cells) != ncols:
                 msg = f"bench-table row has {len(cells)} cells, expected {ncols}: {cells!r}"
                 raise self.error(msg)
-            noise = spread[row_index] if row_index < len(spread) else None
-            body += self._body_row(cells, parties, metrics, reasons, noise)
-        legend = dict(reasons)
-        for party, ordinal in notes.items():
-            legend[f"{party} {feed['notes'][party]}"] = ordinal
-        if not legend:
-            return [table]
-        return [table, _legend(legend)]
+            noise = spread[index] if index < len(spread) else None
+            body += self._body_row(cells, layout, noise, row_marks.get(index))
+        return body
 
     def _head(self, label: str, parties: list[str], metrics: list[str], notes: dict[str, int]) -> nodes.thead:
         head = nodes.thead()
@@ -352,15 +398,17 @@ class BenchTable(Directive):
         return head
 
     def _body_row(
-        self,
-        cells: list[Any],
-        parties: list[str],
-        metrics: list[str],
-        reasons: dict[str, int],
-        spread: list[Any] | None = None,
+        self, cells: list[Any], layout: _Layout, spread: list[Any] | None = None, caveat: int | None = None
     ) -> nodes.row:
+        parties, metrics, reasons = layout.parties, layout.metrics, layout.reasons
         row = nodes.row()
-        row += self._entry(str(cells[0]))
+        label = self._entry(str(cells[0]))
+        # a caveat that belongs to one operation marks that row, not the library's whole column
+        if caveat is not None:
+            superscript = nodes.superscript()
+            superscript += nodes.Text(str(caveat))
+            label.children[0] += superscript
+        row += label
         rendered: dict[int, tuple[str, str | None]] = {}
         marks: dict[int, int] = {}
         for metric_index, metric in enumerate(metrics):

@@ -368,6 +368,7 @@ OPERATIONS: dict[str, Operation] = {
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
     "detect-language": Operation("detect a text's natural language", "us"),
+    "escape-identifier": Operation("escape 1,000 raw CSS identifiers", "us"),
     "idna": Operation("normalize 4,100 URLs with Unicode hosts", "ms"),
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
     "links-filter": Operation("extract filtered page links", "us"),
@@ -991,6 +992,16 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "decode": _decode_cases,
     "normalize": _normalize_cases,
     "detect-language": _language_cases,
+    "escape-identifier": lambda: (
+        (
+            "mixed shapes (1,000)",
+            tuple(
+                shape.format(index)
+                for index in range(200)
+                for shape in ("item-{}", "{}leading-digit", "no escape {} needed?", "emoji-\U0001f642-{}", "-")
+            ),
+        ),
+    ),
     "idna": lambda: (
         ("4,100 uncached Unicode hosts", _IDNA_URLS),
         ("4,100 varied-script hosts", _IDNA_VARIED_URLS),

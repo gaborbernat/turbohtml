@@ -84,25 +84,6 @@ class DateExtraction:
 
 _DEFAULT: Final = DateExtraction()
 
-_PUBLISHED_KEYS: Final[frozenset[str]] = frozenset({
-    *("article.created", "article.published", "article:published", "article:published_time", "article_date_original"),
-    *("bt:pubdate", "citation_date", "citation_publication_date", "created", "date", "date_published", "datecreated"),
-    *("dateposted", "datepublished", "dc.date", "dc.date.created", "dc.date.issued", "dc.date.publication"),
-    *("dcterms.created", "dcterms.date", "dcterms.issued", "og:article:published_time", "og:published_time"),
-    *("og:pubdate", "parsely-pub-date", "pdate", "pubdate", "publish-date", "publish_date", "published_date"),
-    *("published_time", "publisheddate", "publication_date", "rnews:datepublished", "sailthru.date", "timestamp"),
-    *("datecreated", "datepublished", "pubyear"),  # itemprop spellings
-})
-"""Meta ``name``/``property``/``itemprop`` keys that mark a publication date, drawn from htmldate's vocabulary."""
-
-_MODIFIED_KEYS: Final[frozenset[str]] = frozenset({
-    *("article:modified", "article:modified_time", "article:post_modified", "datemodified", "dc.modified"),
-    *("dcterms.modified", "lastdate", "lastmod", "lastmodified", "last-modified", "modified", "modified_time"),
-    *("modificationdate", "og:article:modified_time", "og:modified_time", "og:updated_time", "revision_date"),
-    *("updated_time", "dateupdate"),  # itemprop spelling
-})
-"""Meta keys that mark a modification date."""
-
 # Elements that tend to carry a date, drawn from htmldate's class/id vocabulary but kept to the high-precision
 # markers (skipping its broad 'info'/'author'/'footer' catch-alls, which pull in unrelated dates).
 _DATE_MARKUP: Final = ", ".join((
@@ -138,7 +119,7 @@ def dates(html: str, options: DateExtraction | None = None, /) -> PublicationDat
     current_year = today.year
     if found := _pick(_url_candidates(document), want, window, active.output_format, "url"):
         return found
-    if found := _pick(_meta_candidates(document, current_year), want, window, active.output_format, "meta"):
+    if found := _meta_date(document, want, window, active.output_format, current_year):
         return found
     if found := _pick(_json_candidates(document, current_year), want, window, active.output_format, "json-ld"):
         return found
@@ -196,20 +177,27 @@ def _url_date(url: str) -> date | None:
     return date(*parts) if parts else None
 
 
-def _meta_candidates(document: Document, current_year: int) -> list[tuple[_Role, date]]:
-    """Publication and modification dates from ``<meta>`` tags, keyed by name/property/itemprop/http-equiv/pubdate."""
-    found: list[tuple[_Role, date]] = []
-    for element in document.find_all("meta"):
-        attributes = element.attrs
-        content = attributes.get("content") or attributes.get("datetime")
-        if not isinstance(content, str):
-            continue
-        keys = [attributes.get(name) for name in ("name", "property", "itemprop", "http-equiv")]
-        if str(attributes.get("pubdate")).lower() == "pubdate":
-            keys.append("pubdate")
-        if (role := _role_of(keys)) is not None and (moment := _scan(content, current_year)):
-            found.append((role, moment))
-    return found
+def _meta_date(
+    document: Document, want: _Role, window: _Window, output_format: str, current_year: int
+) -> PublicationDate | None:
+    """
+    Return the ``<meta>`` stage's date, keyed by name/property/itemprop/http-equiv/pubdate as htmldate reads them.
+
+    The walk that classifies each meta element against htmldate's key vocabulary and returns the winner :func:`_pick`
+    would runs in C (:meth:`Document._date_meta`); this shim passes the window and the wanted role and formats the
+    (year, month, day) the walk returns.
+    """
+    parts = document._date_meta(  # ruff:ignore[private-member-access]  # the Document type's private C entry point
+        1 if want == _PUBLISHED else 2,
+        current_year,
+        window.earliest.year,
+        window.earliest.month,
+        window.earliest.day,
+        window.latest.year,
+        window.latest.month,
+        window.latest.day,
+    )
+    return PublicationDate(date(*parts).strftime(output_format), "meta") if parts else None
 
 
 def _json_candidates(document: Document, current_year: int) -> list[tuple[_Role, date]]:
@@ -271,16 +259,6 @@ def _text_candidates(
     peak = max(counts.values())
     finalists = [moment for moment, count in counts.items() if count == peak]
     return [(_GENERIC, min(finalists) if original else max(finalists))]
-
-
-def _role_of(keys: list[str | list[str] | None]) -> _Role | None:
-    """Classify a meta element's keys as a publication or modification marker, or neither."""
-    lowered = {key.lower() for key in keys if isinstance(key, str)}
-    if lowered & _PUBLISHED_KEYS:
-        return _PUBLISHED
-    if lowered & _MODIFIED_KEYS:
-        return _MODIFIED
-    return None
 
 
 def _walk_json(node: object, found: list[tuple[_Role, date]], current_year: int) -> None:

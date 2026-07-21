@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from turbohtml.query import escape_identifier
@@ -26,7 +28,15 @@ from turbohtml.query import escape_identifier
         pytest.param("a\tb", "a\\9 b", id="interior-control"),
         pytest.param("\x7f", "\\7f ", id="delete-char"),
         pytest.param("\x00abc", "�abc", id="null-to-replacement"),
+        pytest.param("a1b", "a1b", id="digit-after-letter-stays"),
+        pytest.param("1-", "\\31 -", id="leading-digit-then-dash"),
+        pytest.param("-a1", "-a1", id="dash-letter-digit"),
     ],
 )
 def test_escape_matches_cssom(raw: str, expected: str) -> None:
     assert escape_identifier(raw) == expected
+
+
+def test_non_str_identifier_raises_type_error() -> None:
+    with pytest.raises(TypeError, match="must be str"):
+        escape_identifier(cast("str", b"raw-bytes"))

@@ -37,6 +37,7 @@ from turbohtml.migration.markupsafe import Markup as _Markup
 from turbohtml.migration.markupsafe import escape as _markup_escape
 from turbohtml.migration.stdlib import HTMLParser as _TurboHTMLParser
 from turbohtml.query import Query as _Query
+from turbohtml.query import escape_identifier as _escape_identifier
 from turbohtml.rewrite import Element as _RewriteElement
 from turbohtml.rewrite import rewrite as _rewrite
 from turbohtml.saxparse import SaxHandler as _SaxHandler
@@ -853,6 +854,12 @@ def normalize(text: str) -> None:
     _normalize("NFC", text)
 
 
+def escape_identifier(idents: tuple[str, ...]) -> None:
+    """Escape each raw identifier for use in a selector with turbohtml's CSSOM escape."""
+    for ident in idents:
+        _escape_identifier(ident)
+
+
 def idna(urls: tuple[str, ...]) -> None:
     """Overflow the 1,024-entry cache so each IDNA conversion runs."""
     for url in urls:
@@ -955,6 +962,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "linkify": (linkify, "turbohtml"),
     "detect": (detect, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
+    "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),
     "markdown": (markdown, "turbohtml"),
     "markdown-google": (markdown_google, "turbohtml"),

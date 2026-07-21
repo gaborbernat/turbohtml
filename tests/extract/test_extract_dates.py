@@ -257,6 +257,20 @@ def test_json_ld_date_nested_in_a_list_value() -> None:
     assert dates(html) == PublicationDate("2016-05-01", "json-ld")
 
 
+def test_out_of_window_json_ld_candidate_is_skipped() -> None:
+    # the only date predates the default 1995 floor, so the stage yields nothing rather than returning it
+    html = '<script type="application/ld+json">{"datePublished":"1990-01-01"}</script>'
+    assert dates(html, DateExtraction(extensive_search=False)) is None
+
+
+def test_first_off_role_json_ld_date_is_the_reserve() -> None:
+    # want=publication, two modification dates, so the first is held as the reserve and the second does not replace it
+    html = '<script type="application/ld+json">[{"dateModified":"2016-01-01"},{"dateModified":"2017-01-01"}]</script>'
+    assert dates(html, DateExtraction(original=True, extensive_search=False)) == PublicationDate(
+        "2016-01-01", "json-ld"
+    )
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

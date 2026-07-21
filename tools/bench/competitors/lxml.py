@@ -309,7 +309,12 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
 def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with lxml's libxml2 engine, by case kind."""
     kind, text = case
-    _XPATH_CALLS[kind](_parsed(text), text)
+    if (call := _XPATH_CALLS.get(kind)) is None:
+        # libxml2 is an XPath 1.0 engine; the XPath 2.0 string functions turbohtml adds have nothing to run on here,
+        # so the worker records this sentence as the empty cell's reason rather than a bare KeyError token
+        unsupported = "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
+        raise NotImplementedError(unsupported)
+    call(_parsed(text), text)
 
 
 @functools.cache

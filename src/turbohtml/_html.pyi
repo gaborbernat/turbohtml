@@ -150,7 +150,16 @@ from ._stubs.features import (
     _sanitize as _sanitize,
 )
 from ._stubs.features import (
+    _url_is_tracker as _url_is_tracker,
+)
+from ._stubs.features import (
     _url_join as _url_join,
+)
+from ._stubs.features import (
+    _url_language_matches as _url_language_matches,
+)
+from ._stubs.features import (
+    _url_normalize_query as _url_normalize_query,
 )
 from ._stubs.features import (
     _url_percent_decode as _url_percent_decode,
@@ -159,10 +168,19 @@ from ._stubs.features import (
     _url_percent_encode as _url_percent_encode,
 )
 from ._stubs.features import (
+    _url_remove_dot_segments as _url_remove_dot_segments,
+)
+from ._stubs.features import (
+    _url_scrub as _url_scrub,
+)
+from ._stubs.features import (
     _url_split as _url_split,
 )
 from ._stubs.features import (
     _url_to_ascii as _url_to_ascii,
+)
+from ._stubs.features import (
+    _url_variant_key as _url_variant_key,
 )
 from ._stubs.features import (
     annotation_surface as annotation_surface,
@@ -175,6 +193,9 @@ from ._stubs.query import (
 )
 from ._stubs.query import (
     _css_computed_style as _css_computed_style,
+)
+from ._stubs.query import (
+    _css_escape_identifier as _css_escape_identifier,
 )
 from ._stubs.query import (
     _css_parse_declarations as _css_parse_declarations,
@@ -274,6 +295,9 @@ from ._stubs.tokenizer import (
 )
 from ._stubs.tokenizer import (
     _RewriteHandle as _RewriteHandle,
+)
+from ._stubs.tokenizer import (
+    _sax_dispatch as _sax_dispatch,
 )
 from ._stubs.tokenizer import (
     _sax_events as _sax_events,

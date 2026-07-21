@@ -253,3 +253,50 @@ def test_gc_reclaims_a_reference_cycle_through_the_source() -> None:
 def test_non_str_argument_raises_type_error() -> None:
     with pytest.raises(TypeError, match="must be str"):
         list(iter_events(cast("str", b"<p>")))
+
+
+def test_sax_parse_requires_every_handler_method() -> None:
+    # dispatch binds the six methods once up front, so an object missing one fails before any parsing happens
+    with pytest.raises(AttributeError, match="start_element"):
+        sax_parse("<p>x</p>", cast("SaxHandler", object()))
+
+
+def test_sax_parse_non_str_raises_type_error() -> None:
+    with pytest.raises(TypeError):
+        sax_parse(cast("str", b"<p>"), SaxHandler())
+
+
+def test_handler_exception_in_start_stops_the_parse() -> None:
+    class FailingStart(SaxHandler):
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def start_element(self, tag: str, attrs: tuple[tuple[str, str | None], ...]) -> None:
+            self.seen.append(tag)
+            if tag == "i":
+                msg = f"stop at {tag} with {len(attrs)} attributes"
+                raise ValueError(msg)
+
+    handler = FailingStart()
+    with pytest.raises(ValueError, match="stop at i"):
+        sax_parse("<p><i>x</i></p>", handler)
+    # the walk stops where the handler raised rather than swallowing the error and continuing
+    assert handler.seen == ["html", "head", "body", "p", "i"]
+
+
+def test_handler_exception_in_end_stops_the_parse() -> None:
+    class FailingEnd(SaxHandler):
+        def __init__(self) -> None:
+            self.closed: list[str] = []
+
+        def end_element(self, tag: str) -> None:
+            self.closed.append(tag)
+            if tag == "p":
+                msg = f"stop closing {tag}"
+                raise RuntimeError(msg)
+
+    handler = FailingEnd()
+    with pytest.raises(RuntimeError, match="stop closing p"):
+        sax_parse("<p>x</p><div>y</div>", handler)
+    # the implied <head> closes before <p> opens, so it precedes the raise
+    assert handler.closed == ["head", "p"]

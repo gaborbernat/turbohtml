@@ -24,9 +24,9 @@ typedef struct {
 } edecl_vec;
 
 /* Whether `node` is an XSD element whose local name is one of the listed particles. */
-static int xsd_is_particle(th_tree *tree, th_node *node, const char *const *locals, size_t count) {
+static int xsd_is_particle(const th_schema *schema, th_node *node, const char *const *locals, size_t count) {
     for (size_t index = 0; index < count; index++) {
-        if (is_schema_el(tree, node, XSD_NS, locals[index])) {
+        if (is_schema_el(schema, node, XSD_NS, locals[index])) {
             return 1;
         }
     }
@@ -117,7 +117,7 @@ static void xsd_element_name(th_schema *schema, th_node *particle, edecl *out) {
     out->local_len = name_len;
     out->decl = particle;
     /* an element particle always has a parent (its model group or the schema) */
-    int global = is_schema_el(tree, particle->parent, XSD_NS, "schema");
+    int global = is_schema_el(schema, particle->parent, XSD_NS, "schema");
     if (global || schema->element_qualified) {
         out->uri = schema->target_ns;
         out->uri_len = schema->target_ns_len;
@@ -146,7 +146,7 @@ static th_node *xsd_group_model(th_schema *schema, th_node *group_ref) {
         return NULL;
     }
     for (th_node *child = group->first_child; child != NULL; child = child->next_sibling) {
-        if (xsd_is_particle(schema->tree, child, XSD_MODEL_GROUPS, 3)) {
+        if (xsd_is_particle(schema, child, XSD_MODEL_GROUPS, 3)) {
             return child;
         }
     } /* GCOVR_EXCL_LINE: llvm miscredits this loop-exit brace when the group has no model group */
@@ -173,14 +173,13 @@ static int edecl_push(th_schema *schema, edecl_vec *vec, const edecl *item) {
 /* Gather every element declaration reachable in a particle so a child can find its
    type by name (unique-particle-attribution makes the name→decl mapping unambiguous). */
 static void xsd_collect_edecls(th_schema *schema, th_node *particle, edecl_vec *vec) {
-    th_tree *tree = schema->tree;
-    if (is_schema_el(tree, particle, XSD_NS, "element")) {
+    if (is_schema_el(schema, particle, XSD_NS, "element")) {
         edecl want;
         xsd_element_name(schema, particle, &want);
         edecl_push(schema, vec, &want);
         return;
     }
-    if (is_schema_el(tree, particle, XSD_NS, "group")) {
+    if (is_schema_el(schema, particle, XSD_NS, "group")) {
         th_node *model = xsd_group_model(schema, particle);
         if (model != NULL) {
             xsd_collect_edecls(schema, model, vec);
@@ -188,7 +187,7 @@ static void xsd_collect_edecls(th_schema *schema, th_node *particle, edecl_vec *
         return;
     }
     for (th_node *child = particle->first_child; child != NULL; child = child->next_sibling) {
-        if (xsd_is_particle(tree, child, XSD_PARTICLES, 5)) {
+        if (xsd_is_particle(schema, child, XSD_PARTICLES, 5)) {
             xsd_collect_edecls(schema, child, vec);
         }
     }
@@ -271,9 +270,8 @@ static void xsd_match_occurs(th_schema *schema, th_tree *inst, th_node *particle
 
 static void xsd_match_once(th_schema *schema, th_tree *inst, th_node *particle, th_node **children, const posset *in,
                            posset *out) {
-    th_tree *tree = schema->tree;
     memset(out->pos, 0, (size_t)out->size);
-    if (is_schema_el(tree, particle, XSD_NS, "element")) {
+    if (is_schema_el(schema, particle, XSD_NS, "element")) {
         edecl want;
         xsd_element_name(schema, particle, &want);
         for (Py_ssize_t pos = 0; pos + 1 < in->size; pos++) {
@@ -287,14 +285,14 @@ static void xsd_match_once(th_schema *schema, th_tree *inst, th_node *particle, 
         }
         return;
     }
-    if (is_schema_el(tree, particle, XSD_NS, "group")) {
+    if (is_schema_el(schema, particle, XSD_NS, "group")) {
         th_node *model = xsd_group_model(schema, particle);
         if (model != NULL) {
             xsd_match_once(schema, inst, model, children, in, out);
         }
         return;
     }
-    if (is_schema_el(tree, particle, XSD_NS, "choice")) {
+    if (is_schema_el(schema, particle, XSD_NS, "choice")) {
         for (th_node *child = particle->first_child; child != NULL; child = child->next_sibling) {
             if (child->type != TH_NODE_ELEMENT) {
                 continue;
@@ -341,7 +339,7 @@ static void xsd_validate_all(valctx *ctx, th_node *all, th_node **children, Py_s
         qname name = node_qname(inst, children[index], children[index]->text, children[index]->text_len, 0);
         th_node *matched = NULL;
         for (th_node *particle = all->first_child; particle != NULL; particle = particle->next_sibling) {
-            if (!is_schema_el(tree, particle, XSD_NS, "element")) {
+            if (!is_schema_el(schema, particle, XSD_NS, "element")) {
                 continue;
             }
             edecl want;
@@ -362,7 +360,7 @@ static void xsd_validate_all(valctx *ctx, th_node *all, th_node **children, Py_s
         }
     }
     for (th_node *particle = all->first_child; particle != NULL; particle = particle->next_sibling) {
-        if (!is_schema_el(tree, particle, XSD_NS, "element") || xsd_occurs_min(tree, particle) == 0) {
+        if (!is_schema_el(schema, particle, XSD_NS, "element") || xsd_occurs_min(tree, particle) == 0) {
             continue;
         }
         edecl want;
@@ -405,7 +403,7 @@ static int xsd_base_id(th_schema *schema, th_node *owner, const Py_UCS4 *base, P
 
 static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *facets, int depth) {
     th_tree *tree = schema->tree;
-    th_node *restriction = first_schema_child(tree, simpletype, XSD_NS, "restriction");
+    th_node *restriction = first_schema_child(schema, simpletype, XSD_NS, "restriction");
     if (restriction == NULL) { /* list / union fall back to a permissive string base */
         return facets->base_id;
     }
@@ -415,7 +413,7 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
     if (base != NULL) {
         base_id = xsd_base_id(schema, restriction, base, base_len, facets, depth);
     } else {
-        th_node *inner = first_schema_child(tree, restriction, XSD_NS, "simpleType");
+        th_node *inner = first_schema_child(schema, restriction, XSD_NS, "simpleType");
         if (inner != NULL) {
             base_id = xsd_gather_facets(schema, inner, facets, depth + 1);
         }
@@ -522,7 +520,7 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
     }
     Py_ssize_t type_len = 0;
     const Py_UCS4 *type = xsd_attr(tree, effective, "type", &type_len);
-    th_node *inline_type = first_schema_child(tree, effective, XSD_NS, "simpleType");
+    th_node *inline_type = first_schema_child(schema, effective, XSD_NS, "simpleType");
     if (type != NULL) {
         facetset probe;
         facetset_init(&probe, DT_STRING);
@@ -549,7 +547,7 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
     th_schema *schema = ctx->schema;
     th_tree *tree = schema->tree;
     for (th_node *child = scope->first_child; child != NULL; child = child->next_sibling) {
-        if (is_schema_el(tree, child, XSD_NS, "attribute")) {
+        if (is_schema_el(schema, child, XSD_NS, "attribute")) {
             xsd_validate_attr_decl(ctx, instance, child);
             th_node *eff = child;
             Py_ssize_t ref_len = 0;
@@ -567,7 +565,7 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                 edecl item = {NULL, 0, name, name_len, eff};
                 edecl_push(schema, declared, &item);
             }
-        } else if (is_schema_el(tree, child, XSD_NS, "attributeGroup")) {
+        } else if (is_schema_el(schema, child, XSD_NS, "attributeGroup")) {
             Py_ssize_t ref_len = 0;
             const Py_UCS4 *ref = xsd_attr(tree, child, "ref", &ref_len);
             if (ref != NULL) {
@@ -579,11 +577,11 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                     xsd_collect_attrs(ctx, instance, group, declared);
                 }
             }
-        } else if (is_schema_el(tree, child, XSD_NS, "complexContent") ||
-                   is_schema_el(tree, child, XSD_NS, "simpleContent")) {
-            th_node *derivation = first_schema_child(tree, child, XSD_NS, "extension");
+        } else if (is_schema_el(schema, child, XSD_NS, "complexContent") ||
+                   is_schema_el(schema, child, XSD_NS, "simpleContent")) {
+            th_node *derivation = first_schema_child(schema, child, XSD_NS, "extension");
             if (derivation == NULL) {
-                derivation = first_schema_child(tree, child, XSD_NS, "restriction");
+                derivation = first_schema_child(schema, child, XSD_NS, "restriction");
             }
             if (derivation != NULL) {
                 Py_ssize_t base_len = 0;
@@ -637,10 +635,10 @@ static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, e
 
 /* ---- complex-type content ---- */
 
-static th_node *xsd_content_model(th_tree *tree, th_node *scope) {
+static th_node *xsd_content_model(const th_schema *schema, th_node *scope) {
     static const char *const models[] = {"sequence", "choice", "all", "group"};
     for (size_t index = 0; index < sizeof(models) / sizeof(models[0]); index++) {
-        th_node *model = first_schema_child(tree, scope, XSD_NS, models[index]);
+        th_node *model = first_schema_child(schema, scope, XSD_NS, models[index]);
         if (model != NULL) {
             return model;
         }
@@ -653,11 +651,11 @@ static th_node *xsd_content_model(th_tree *tree, th_node *scope) {
 static th_node *xsd_effective_model(th_schema *schema, th_node *ctype, th_node **base_model_out) {
     th_tree *tree = schema->tree;
     *base_model_out = NULL;
-    th_node *complex_content = first_schema_child(tree, ctype, XSD_NS, "complexContent");
+    th_node *complex_content = first_schema_child(schema, ctype, XSD_NS, "complexContent");
     if (complex_content != NULL) {
-        th_node *extension = first_schema_child(tree, complex_content, XSD_NS, "extension");
+        th_node *extension = first_schema_child(schema, complex_content, XSD_NS, "extension");
         th_node *derivation =
-            extension != NULL ? extension : first_schema_child(tree, complex_content, XSD_NS, "restriction");
+            extension != NULL ? extension : first_schema_child(schema, complex_content, XSD_NS, "restriction");
         if (derivation == NULL) {
             return NULL;
         }
@@ -675,16 +673,17 @@ static th_node *xsd_effective_model(th_schema *schema, th_node *ctype, th_node *
                 }
             }
         }
-        return xsd_content_model(tree, derivation);
+        return xsd_content_model(schema, derivation);
     }
-    return xsd_content_model(tree, ctype);
+    return xsd_content_model(schema, ctype);
 }
 
-static int xsd_is_mixed(th_tree *tree, th_node *ctype) {
+static int xsd_is_mixed(const th_schema *schema, th_node *ctype) {
+    th_tree *tree = schema->tree;
     if (xsd_attr_is(tree, ctype, "mixed", "true")) {
         return 1;
     }
-    th_node *complex_content = first_schema_child(tree, ctype, XSD_NS, "complexContent");
+    th_node *complex_content = first_schema_child(schema, ctype, XSD_NS, "complexContent");
     if (complex_content != NULL) {
         return xsd_attr_is(tree, complex_content, "mixed", "true");
     }
@@ -698,7 +697,7 @@ static void xsd_validate_complex(valctx *ctx, th_node *instance, th_node *ctype)
     edecl_vec declared = {NULL, 0, 0};
     xsd_validate_attrs(ctx, instance, ctype, &declared);
 
-    th_node *simple_content = first_schema_child(tree, ctype, XSD_NS, "simpleContent");
+    th_node *simple_content = first_schema_child(schema, ctype, XSD_NS, "simpleContent");
     if (simple_content != NULL) {
         for (th_node *child = instance->first_child; child != NULL; child = child->next_sibling) {
             if (child->type == TH_NODE_ELEMENT) {
@@ -706,9 +705,9 @@ static void xsd_validate_complex(valctx *ctx, th_node *instance, th_node *ctype)
                 break;
             }
         }
-        th_node *extension = first_schema_child(tree, simple_content, XSD_NS, "extension");
+        th_node *extension = first_schema_child(schema, simple_content, XSD_NS, "extension");
         th_node *derivation =
-            extension != NULL ? extension : first_schema_child(tree, simple_content, XSD_NS, "restriction");
+            extension != NULL ? extension : first_schema_child(schema, simple_content, XSD_NS, "restriction");
         Py_ssize_t text_len = 0;
         const Py_UCS4 *text = element_text(ctx, instance, &text_len);
         if (derivation != NULL) {
@@ -724,7 +723,7 @@ static void xsd_validate_complex(valctx *ctx, th_node *instance, th_node *ctype)
 
     th_node *base_model;
     th_node *model = xsd_effective_model(schema, ctype, &base_model);
-    int mixed = xsd_is_mixed(tree, ctype);
+    int mixed = xsd_is_mixed(schema, ctype);
     if (!mixed) {
         for (th_node *child = instance->first_child; child != NULL; child = child->next_sibling) {
             if (is_chardata(child) && !th_node_text_is_blank(inst, child)) {
@@ -751,7 +750,7 @@ static void xsd_validate_complex(valctx *ctx, th_node *instance, th_node *ctype)
         }
     }
 
-    if (model != NULL && is_schema_el(tree, model, XSD_NS, "all")) {
+    if (model != NULL && is_schema_el(schema, model, XSD_NS, "all")) {
         xsd_validate_all(ctx, model, children, nchildren);
         return;
     }
@@ -831,8 +830,8 @@ static void xsd_validate_element_inner(valctx *ctx, th_node *instance, th_node *
 
     Py_ssize_t type_len = 0;
     const Py_UCS4 *type = xsd_attr(tree, decl, "type", &type_len);
-    th_node *inline_complex = first_schema_child(tree, decl, XSD_NS, "complexType");
-    th_node *inline_simple = first_schema_child(tree, decl, XSD_NS, "simpleType");
+    th_node *inline_complex = first_schema_child(schema, decl, XSD_NS, "complexType");
+    th_node *inline_simple = first_schema_child(schema, decl, XSD_NS, "simpleType");
     if (type != NULL) {
         const Py_UCS4 *local, *prefix, *uri;
         Py_ssize_t local_len = 0, prefix_len = 0, uri_len = 0;
@@ -869,7 +868,7 @@ static void xsd_validate_element_inner(valctx *ctx, th_node *instance, th_node *
 
 static int xsd_compile(th_schema *schema) {
     th_tree *tree = schema->tree;
-    if (!is_schema_el(tree, schema->root, XSD_NS, "schema")) {
+    if (!is_schema_el(schema, schema->root, XSD_NS, "schema")) {
         PyErr_SetString(PyExc_ValueError, "root element is not an xs:schema");
         return 0;
     }
@@ -890,17 +889,17 @@ static int xsd_compile(th_schema *schema) {
             continue;
         }
         named_vec *bucket = NULL;
-        if (is_schema_el(tree, child, XSD_NS, "element")) {
+        if (is_schema_el(schema, child, XSD_NS, "element")) {
             bucket = &schema->elements;
-        } else if (is_schema_el(tree, child, XSD_NS, "complexType")) {
+        } else if (is_schema_el(schema, child, XSD_NS, "complexType")) {
             bucket = &schema->complex_types;
-        } else if (is_schema_el(tree, child, XSD_NS, "simpleType")) {
+        } else if (is_schema_el(schema, child, XSD_NS, "simpleType")) {
             bucket = &schema->simple_types;
-        } else if (is_schema_el(tree, child, XSD_NS, "attribute")) {
+        } else if (is_schema_el(schema, child, XSD_NS, "attribute")) {
             bucket = &schema->attributes;
-        } else if (is_schema_el(tree, child, XSD_NS, "group")) {
+        } else if (is_schema_el(schema, child, XSD_NS, "group")) {
             bucket = &schema->groups;
-        } else if (is_schema_el(tree, child, XSD_NS, "attributeGroup")) {
+        } else if (is_schema_el(schema, child, XSD_NS, "attributeGroup")) {
             bucket = &schema->attr_groups;
         }
         if (bucket != NULL) {

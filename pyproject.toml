@@ -83,6 +83,7 @@ dev = [
 ]
 test = [
   "covdefaults>=2.3",
+  "docutils>=0.22",             # render the docs bench-table directive in tests/test_bench_table_directive.py
   "elementpath>=5.1.3",         # the XPath 2.0 oracle the string-function differential test cross-checks against
   "httpx2>=2.5",                # the benchmark corpora and the tools/generate_* scripts fetch pinned data over it
   "jinja2>=3.1.6",              # the markup migration test renders templates with markupsafe swapped for turbohtml.markup
@@ -336,7 +337,10 @@ src.exclude = [
   "tests/html5lib-tests",
   "tools/html5lib-python"
 ]  # vendored suites, not our code
-environment.extra-paths = [ "tools" ]  # the CodSpeed benchmarks import the bench registry from tools/bench
+environment.extra-paths = [
+  "tools",
+  "docs/_ext"
+]  # bench registry from tools/bench; the bench-table directive from docs/_ext
 environment.python-version = "3.15"
 
 [tool.pytest]

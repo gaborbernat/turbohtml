@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
 
-from turbohtml._html import Document, Element, _matches_many, parse
+from turbohtml._html import Document, Element, _css_escape_identifier, _matches_many, parse
 from turbohtml._internal._selectors import SelectorSyntaxError
 
 if TYPE_CHECKING:
@@ -44,24 +44,7 @@ def escape_identifier(ident: str) -> str:
     :param ident: the raw identifier text.
     :returns: the identifier with CSS-significant characters backslash- or hex-escaped per the CSSOM rules.
     """
-    out: list[str] = []
-    for position, char in enumerate(ident):
-        code = ord(char)
-        is_digit = 0x30 <= code <= 0x39
-        # a digit leading the identifier (or following an initial dash) cannot start a CSS name, so it is hex-escaped
-        leading_digit = is_digit and (position == 0 or (position == 1 and ident[0] == "-"))
-        is_name_char = code >= 0x80 or is_digit or char in "-_" or 0x41 <= code <= 0x5A or 0x61 <= code <= 0x7A
-        if code == 0:
-            out.append("�")
-        elif code <= 0x1F or code == 0x7F or leading_digit:
-            out.append(f"\\{code:x} ")
-        elif position == 0 and code == 0x2D and len(ident) == 1:
-            out.append(f"\\{char}")
-        elif is_name_char:
-            out.append(char)
-        else:
-            out.append(f"\\{char}")
-    return "".join(out)
+    return _css_escape_identifier(ident)
 
 
 @dataclass(frozen=True)

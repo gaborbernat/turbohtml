@@ -544,6 +544,15 @@ static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py
         len = 1024;
     }
     while (pos < len) {
+        if (buf[pos] != '<') {
+            /* every branch below starts at a '<', so the bytes between tags are inert; jump the run in bulk rather
+               than stepping it one comparison at a time, the shape of prose or a legacy page that carries no meta */
+            const unsigned char *next = memchr(buf + pos, '<', (size_t)(len - pos));
+            if (next == NULL) {
+                break;
+            }
+            pos = next - buf;
+        }
         if (pos + 4 <= len && memcmp(buf + pos, "<!--", 4) == 0) {
             /* the spec closes the comment at the first '>' preceded by two '-' that comes after the '<', so the two
                dashes of "<!--" may double as the "--" of "-->" and "<!-->" is a complete comment */
@@ -552,7 +561,7 @@ static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py
                 at++;
             }
             pos = at + 3;
-        } else if (pos + 6 <= len && buf[pos] == '<' && (buf[pos + 1] | 32) == 'm' && (buf[pos + 2] | 32) == 'e' &&
+        } else if (pos + 6 <= len && (buf[pos + 1] | 32) == 'm' && (buf[pos + 2] | 32) == 'e' &&
                    (buf[pos + 3] | 32) == 't' && (buf[pos + 4] | 32) == 'a' &&
                    (is_attr_space(buf[pos + 5]) || buf[pos + 5] == '/')) {
             pos += 5;
@@ -588,9 +597,8 @@ static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py
                     return th_encoding_declared(entry);
                 }
             }
-        } else if (pos + 2 <= len && buf[pos] == '<' &&
-                   (is_ascii_alpha(buf[pos + 1]) ||
-                    (buf[pos + 1] == '/' && pos + 2 < len && is_ascii_alpha(buf[pos + 2])))) {
+        } else if (pos + 2 <= len && (is_ascii_alpha(buf[pos + 1]) ||
+                                      (buf[pos + 1] == '/' && pos + 2 < len && is_ascii_alpha(buf[pos + 2])))) {
             /* a start or end tag: skip the tag name, then consume its attributes
                so a '>' inside a quoted value does not terminate the tag early */
             pos += buf[pos + 1] == '/' ? 2 : 1;
@@ -601,8 +609,7 @@ static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py
                 /* attributes of an unrelated tag are discarded */
             }
             pos += pos < len ? 1 : 0;
-        } else if (pos + 2 <= len && buf[pos] == '<' &&
-                   (buf[pos + 1] == '!' || buf[pos + 1] == '?' || buf[pos + 1] == '/')) {
+        } else if (pos + 2 <= len && (buf[pos + 1] == '!' || buf[pos + 1] == '?' || buf[pos + 1] == '/')) {
             /* a bogus comment, including "</" not followed by a letter: skip to the next '>' */
             pos += 2;
             while (pos < len && buf[pos] != '>') {

@@ -316,7 +316,16 @@ static TH_HOT int th_dec_euc_jp(th_decoder *dec, Py_UCS4 *point) {
 
 /* The spec's "index gb18030 ranges code point", using fixed rounds because four-byte pointers vary independently. */
 static int th_dec_gb18030_range(uint32_t pointer, Py_UCS4 *point) {
-    if ((pointer > 39419 && pointer < 189000) || pointer > 1237575) {
+    if (pointer >= 189000u) {
+        /* the astral plane is the range list's final entry {189000, U+10000}, a single linear run to U+10FFFF, so it
+           resolves without the search the BMP entries need -- the whole cost of an astral-heavy stream */
+        if (pointer > 1237575u) {
+            return 0;
+        }
+        *point = (Py_UCS4)(0x10000u + (pointer - 189000u));
+        return 1;
+    }
+    if (pointer > 39419u) {
         return 0;
     }
     if (pointer == 7457) { /* the one pointer the range list cannot express */

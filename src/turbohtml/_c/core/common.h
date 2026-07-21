@@ -80,6 +80,10 @@ PyObject *turbohtml_css_parse_declarations(PyObject *module, PyObject *text);
 PyObject *turbohtml_css_parse_rules(PyObject *module, PyObject *text);
 PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg);
 
+/* CSS.escape per the CSSOM serialize-an-identifier rules, behind turbohtml.query.escape_identifier.
+   Matches METH_O. */
+PyObject *turbohtml_css_escape_identifier(PyObject *module, PyObject *arg);
+
 /* Implemented in dom/element.c: stores the SelectorSyntaxError type the selector
    and XPath parsers raise on a malformed expression (METH_O); turbohtml._selectors
    registers it on import. */
@@ -108,6 +112,30 @@ PyObject *turbohtml_url_percent_decode(PyObject *module, PyObject *arg);
    new reference, NULL with a ValueError set when a component cannot be split (an unbalanced IPv6 bracket). */
 PyObject *th_url_join(PyObject *base, PyObject *target);
 PyObject *turbohtml_url_join(PyObject *module, PyObject *args);
+
+/* _url_is_tracker(key): whether a lowercased query-parameter name names a referral rather than content, so a
+   crawl-oriented cleaner drops it. Matches METH_O. */
+PyObject *turbohtml_url_is_tracker(PyObject *module, PyObject *arg);
+
+/* _url_remove_dot_segments(path): resolve the "." and ".." segments of a path, in either their literal or
+   %2E spelling, as the WHATWG path state does (spec 4.4). Matches METH_O. */
+PyObject *turbohtml_url_remove_dot_segments(PyObject *module, PyObject *arg);
+
+/* _url_scrub(url): undo the HTML transport damage a scraped URL carries (edge C0/space strip, whitespace removal, CDATA
+   unwrap, markup-delimiter truncation, &amp; unescape) before it is split. Matches METH_O. */
+PyObject *turbohtml_url_scrub(PyObject *module, PyObject *arg);
+
+/* _url_variant_key(url): the scheme-and-trailing-slash-collapsed dedup key extract_links compares links by. METH_O. */
+PyObject *turbohtml_url_variant_key(PyObject *module, PyObject *arg);
+
+/* _url_normalize_query(query, allow, deny, strict, content, language): drop denied, tracker, or non-allowlisted query
+   parameters, encode the survivors, and sort them, the crawl cleaner's per-pair loop. Matches METH_VARARGS. */
+PyObject *turbohtml_url_normalize_query(PyObject *module, PyObject *args);
+
+/* _url_language_matches(query, path, hostname, language, strict, language_params, iso_639_1): judge a URL's own
+   language markers (a lang/language query parameter, a leading path segment, a strict-mode host label) against the
+   target language, the per-URL heuristics behind clean_url's language filter. Matches METH_VARARGS. */
+PyObject *turbohtml_url_language_matches(PyObject *module, PyObject *args);
 
 /* Implemented in url/idna.c. th_url_to_ascii runs the WHATWG domain-to-ASCII step (Unicode IDNA ToASCII, UTS #46 with
    Transitional_Processing=false and UseSTD3ASCIIRules=false): UTS #46 mapping, NFC, and per-label punycode. _urls.py
@@ -218,6 +246,13 @@ PyObject *turbohtml_node_tables(PyObject *owner, struct th_tree *tree, struct th
 PyObject *turbohtml_date_scan(PyObject *module, PyObject *args);
 PyObject *turbohtml_date_scan_all(PyObject *module, PyObject *args);
 PyObject *turbohtml_date_url(PyObject *module, PyObject *url);
+
+/* Document._date_meta(want, current_year, min_y, min_m, min_d, max_y, max_m, max_d)
+   -> (year, month, day) or None (METH_VARARGS): the <meta> stage of
+   turbohtml.extract.dates, walking the meta elements, classifying each publication
+   or modification date against htmldate's key vocabulary, and returning the winner
+   the shared _pick selection would. Registered on the document method table. */
+PyObject *turbohtml_document_date_meta(PyObject *self, PyObject *args);
 
 /* Implemented in tokenizer/tokenizer.c. tokenize() matches METH_VARARGS | METH_KEYWORDS;
    the internal conformance hook _tokenize_states matches METH_VARARGS. */

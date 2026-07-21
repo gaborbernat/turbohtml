@@ -154,7 +154,11 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
 def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with parsel's lxml-backed engine, by case kind."""
     kind, text = case
-    _XPATH_CALLS[kind](_parsed(text), text)
+    if (call := _XPATH_CALLS.get(kind)) is None:
+        # parsel runs on lxml's libxml2, an XPath 1.0 engine, so the same message keys both columns to one legend note
+        unsupported = "lxml's libxml2 is XPath 1.0, without the XPath 2.0 string functions"
+        raise NotImplementedError(unsupported)
+    call(_parsed(text), text)
 
 
 OPERATIONS = {

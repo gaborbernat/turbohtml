@@ -8,38 +8,40 @@
   "rows": [
     [
       "post (4 KiB)",
-      1.1735952601436376e-05,
-      2.6615594620693628e-05
+      5.9304065735214335e-06,
+      1.688457954903318e-05
     ],
     [
       "longform (16 KiB)",
-      1.7074957939418784e-05,
-      4.910956235685641e-05
+      1.030123477659591e-05,
+      3.404049680473994e-05
     ],
     [
       "100 meta candidates",
-      0.00013010201349554032,
-      7.602037720270498e-05
+      1.828077740384515e-05,
+      5.459096957357209e-05
     ]
   ],
   "spread": [
     [
       null,
-      0.04329384536759802,
-      0.033263737396463294
+      0.004697496985019512,
+      0.009112355406770883
     ],
     [
       null,
-      0.03092662857915166,
-      0.054986089231601934
+      0.007721833090606347,
+      0.016598368815392547
     ],
     [
       null,
-      0.03639475424630214,
-      0.0308781661300203
+      0.008026401759229225,
+      0.021206735172214816
     ]
   ],
-  "notes": {
-    "htmldate": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports"
+  "row_notes": {
+    "0": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
+    "1": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
+    "2": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports"
   }
 }

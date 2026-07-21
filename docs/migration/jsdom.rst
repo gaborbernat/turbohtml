@@ -410,6 +410,15 @@ turbohtml:
 
     childList 1
 
+*************
+ Performance
+*************
+
+jsdom runs on Node, never inside the CPython process, so it cannot share the per-venv Python harness that pairs
+turbohtml against a competitor on one input, and there is no in-process peer to benchmark it against. The traversal,
+range, and shadow-tree state machines this guide covers run in turbohtml's C core; only the ``NodeFilter`` callback
+re-enters Python, once per visited node.
+
 .. seealso::
 
     :doc:`/how-to/ranges`, :doc:`/how-to/shadow-dom`, and :doc:`/how-to/observing-mutations` for task-focused recipes,
