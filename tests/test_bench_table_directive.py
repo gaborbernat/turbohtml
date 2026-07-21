@@ -13,15 +13,11 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 from docutils import nodes
 from docutils.core import publish_doctree
 from docutils.parsers.rst import directives
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "docs" / "_ext"))
@@ -58,12 +54,10 @@ def _row_superscripts(doctree: nodes.document) -> list[list[str]]:
     return [[sup.astext() for sup in row.children[0].findall(nodes.superscript)] for row in body.findall(nodes.row)]
 
 
-def _legend_lines(doctree: nodes.document) -> Iterator[str]:
-    """Yield each spelled-out legend line under the table."""
-    for container in doctree.findall(nodes.container):
-        if "bench-legend" in container.get("classes", []):
-            for paragraph in container.findall(nodes.paragraph):
-                yield paragraph.astext()
+def _legend_lines(doctree: nodes.document) -> list[str]:
+    """Return each spelled-out legend line; the directive emits exactly one container, the legend under the table."""
+    legend = next(doctree.findall(nodes.container))
+    return [paragraph.astext() for paragraph in legend.findall(nodes.paragraph)]
 
 
 @pytest.mark.parametrize(
@@ -80,4 +74,4 @@ def test_row_note_superscript_marks_only_noted_rows(doctree: nodes.document, ind
 
 
 def test_row_note_legend_spells_each_distinct_caveat(doctree: nodes.document) -> None:
-    assert list(_legend_lines(doctree)) == [f"1 {_SHARED}", f"2 {_OTHER}"]
+    assert _legend_lines(doctree) == [f"1 {_SHARED}", f"2 {_OTHER}"]
