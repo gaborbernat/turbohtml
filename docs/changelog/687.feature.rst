@@ -1,7 +1,0 @@
-Number a run of siblings in one pass. ``xsl:number`` computes a level's number as the count of preceding siblings that
-match the count criteria, which rescanned the whole run for each sibling and cost time quadratic in the run length;
-``number_counts`` was 10.13% of all instructions executed by the instruction-dense transform workload, the largest
-single entry ahead of every CPython symbol. The engine now carries the previous answer forward, since a node's number is
-its previous sibling's number plus whether that sibling counted, and holds the criteria alongside it so a run numbered
-under different criteria does not reuse it. Callgrind measures 5.9% fewer instructions over that workload
-(:issue:`687`).

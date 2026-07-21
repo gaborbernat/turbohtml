@@ -1,6 +1,0 @@
-Dispatch the ``html.parser`` adapter's tokens from C. :class:`turbohtml.migration.stdlib.HTMLParser` used to loop in
-Python over the token stream, building a token object and reading six of its fields for every token; the tokenizer now
-calls the ``handle_*`` methods itself, binding them once per feed and passing the strings straight through. Under
-Callgrind that removes 30.8% of the instructions the whole workload executes and 46.7% of its indirect branches, which
-is what the interpreter spends on dispatch. The adapter now leads lxml's native target parser by 1.7 to 2.7 times where
-it previously trailed it, and html.parser by 7.5 to 11.2 times.

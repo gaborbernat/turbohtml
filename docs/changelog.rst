@@ -7,6 +7,77 @@
 .. towncrier release notes start
 
 *********************
+ v1.5.0 (2026-07-21)
+*********************
+
+Features - 1.5.0
+================
+
+- Speed the C core across the read, query, validation, and extraction paths. Measured against the 1.4.0 release on a
+  fixed workload, an id-selective XPath lookup runs about 260x faster, overlapping text search over 100x faster, Unicode
+  normalization about 6x, microdata itemref resolution about 5x, Relax NG compilation about 4x, and CSS minification,
+  conformance checking, attribute rewriting, date extraction, and computed-style resolution roughly 2x to 3x. Linear
+  table scans give way to hashed or indexed lookups for tag atoms, XPath id tokens, microdata itemrefs, the Relax NG and
+  XSD global tables, the encoding labels, and the entity names (:issue:`659`, :issue:`672`, :issue:`671`, :issue:`657`,
+  :issue:`656`, :issue:`661`, :issue:`660`, :issue:`651`, :issue:`654`). The substring and literal-regex searches, the
+  transform sort, and the CSS rule merge now bound their worst case instead of scanning to the end (:issue:`665`,
+  :issue:`664`, :issue:`666`, :issue:`652`, :issue:`662`). The tokenizer name buffers, the table grid rows, and the DOM
+  arena grow by doubling so a large document amortizes its allocation (:issue:`669`, :issue:`668`, :issue:`667`). The
+  GB18030 decoder, the NFC normalizer, the attribute rewriter, and the IDNA mapper drop the branchy table walks that a
+  common input never needed (:issue:`674`, :issue:`673`, :issue:`649`, :issue:`670`, :issue:`650`). Stylesheets cache
+  their parse, list filtering batches, the language detector merges its trigram profiles, and date extraction trims its
+  scan (:issue:`653`, :issue:`663`, :issue:`648`, :issue:`658`).
+
+  Serialize documents faster. The clean-run scan that hunts the next character needing an escape steps four UCS-4 code
+  points per SIMD probe rather than two, and since the tree stores text as UCS-4 this scan runs on every serialization.
+  The serialize benchmark improves by about 24%, and the gain carries into the strip and sanitize operations that
+  serialize their result (:issue:`676`). IDNA host normalization rejects a non-composing mark pair with one comparison
+  ahead of the composition-table search, saving the probes a run of unaccented text would otherwise spend (:issue:`680`,
+  :issue:`679`). (:issue:`676`)
+
+- Number a run of siblings in one pass. ``xsl:number`` computes a level's number as the count of preceding siblings that
+  match the count criteria, which rescanned the whole run for each sibling and cost time quadratic in the run length;
+  ``number_counts`` was 10.13% of all instructions executed by the instruction-dense transform workload, the largest
+  single entry ahead of every CPython symbol. The engine now carries the previous answer forward, since a node's number
+  is its previous sibling's number plus whether that sibling counted, and holds the criteria alongside it so a run
+  numbered under different criteria does not reuse it. Callgrind measures 5.9% fewer instructions over that workload
+  (:issue:`687`). (:issue:`687`)
+- Dispatch the ``html.parser`` adapter's tokens from C. :class:`turbohtml.migration.stdlib.HTMLParser` used to loop in
+  Python over the token stream, building a token object and reading six of its fields for every token; the tokenizer now
+  calls the ``handle_*`` methods itself, binding them once per feed and passing the strings straight through. Under
+  Callgrind that removes 30.8% of the instructions the whole workload executes and 46.7% of its indirect branches, which
+  is what the interpreter spends on dispatch. The adapter now leads lxml's native target parser by 1.7 to 2.7 times
+  where it previously trailed it, and html.parser by 7.5 to 11.2 times. (:issue:`689`)
+- Move the read path's per-item loops into C. :func:`turbohtml.saxparse.sax_parse` built a tuple, a typed record, and an
+  isinstance chain for every event; the tokenizer now binds the six handler methods once and drives them off the tree
+  walk, for 43.7% fewer instructions with instruction-cache misses down 71% on the WHATWG specification. URL cleaning
+  (:func:`turbohtml.extract.clean_url`, :func:`~turbohtml.extract.normalize_url`,
+  :func:`~turbohtml.extract.extract_links`), the :func:`~turbohtml.extract.dates` ``<meta>`` stage,
+  :func:`turbohtml.query.escape_identifier`, and :func:`turbohtml.clean.linkify`'s scheme classification each moved
+  their loops to C as well, for 3.5% to 56.8% fewer instructions on those operations. Differential runs against the
+  retired Python across 1,484,640, 809,481, 360,282, 302,762, 38,590, and 4,828 inputs found one divergence: the URL
+  resolver matches ``%2e`` in either case as the `WHATWG URL path state <https://url.spec.whatwg.org/#path-state>`_
+  specifies, which no public call reaches because percent-encoding uppercases escape hex first.
+  :func:`~turbohtml.saxparse.iter_events` keeps its typed records, since those are its public product.
+
+  Other hot paths keep their Python entry and shed work. XSD validation resolves each schema element's qname once at
+  compile time into a binary-searched table for 17.2% fewer instructions, built for XSD only after the eager cache
+  slowed RELAX NG compilation by 8.15%. The link walk mints element wrappers on first use (14.8% fewer) and skips the
+  URL join that already returns an absolute reference (67.8% fewer); the ``<meta>`` encoding prescan jumps inert bytes
+  with ``memchr`` (8.67% fewer on ASCII); the gb18030 decoder maps astral pointers by arithmetic (13.4% fewer); and CSS
+  property dispatch gates on the first byte (9.3% fewer on ``bootstrap.css``). The migration and benchmark tables also
+  stopped over-claiming: a caveat marks only the rows of the operation it describes, a shared measurement shows in both
+  columns, XPath labels render as inline code, and the CSS-stripper note gives the measured 1-3% size difference.
+  (:issue:`692`)
+
+Improved documentation - 1.5.0
+==============================
+
+- Refresh every benchmark comparison table in the performance and migration guides from a full profile-guided run, widen
+  the read-path tables to the competitors the suites gained, and rewrite the surrounding prose to the measured numbers.
+  (:issue:`686`)
+
+*********************
  v1.4.0 (2026-07-11)
 *********************
 
