@@ -247,8 +247,8 @@
     ]
   ],
   "notes": {
-    "css-html-js-minify": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "cssmin": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "rcssmin": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700"
+    "css-html-js-minify": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "cssmin": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "rcssmin": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS"
   }
 }

@@ -97,11 +97,11 @@
     ]
   ],
   "row_notes": {
-    "0": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "1": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "2": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "3": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "4": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700",
-    "5": "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where turbohtml writes #fff, 0 and 700"
+    "0": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "1": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "2": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "3": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "4": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS",
+    "5": "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on bulma, so the structural shortenings change little on already-tight framework CSS"
   }
 }

@@ -19,8 +19,9 @@ _STRIPPER_JS: Final = (
     "compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB"
 )
 _STRIPPER_CSS: Final = (
-    "strips whitespace and comments only, leaving #ffffff, 0px 0px 0px 0px and font-weight:bold unshortened where "
-    "turbohtml writes #fff, 0 and 700"
+    "strips whitespace and comments without parsing, so it applies none of the color, number, and shorthand rewrites "
+    "turbohtml does; on these stylesheets that leaves its output within 1.01-1.03x of turbohtml's, and 0.998x on "
+    "bulma, so the structural shortenings change little on already-tight framework CSS"
 )
 _BUILDER: Final = (
     "concatenates a string rather than constructing a navigable tree, so nothing it builds can afterwards be queried "
