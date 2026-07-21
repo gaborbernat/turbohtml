@@ -879,6 +879,32 @@ def test_transform_number_interleaved_count_patterns_stay_separate() -> None:
     assert _run("<r><a/><b/><a/><b/></r>", body) == "1-,-1,2-,-2,"
 
 
+def test_transform_number_alternating_same_length_names() -> None:
+    # the names are the same length, so telling them apart is the name comparison itself rather than the length
+    body = (
+        '<xsl:template match="/"><xsl:for-each select="r/*"><xsl:value-of select="name()"/>'
+        "<xsl:number/>,</xsl:for-each></xsl:template>"
+    )
+    assert _run("<r><a/><b/><a/><b/><a/></r>", body) == "a1,b1,a2,b2,a3,"
+
+
+def test_transform_number_multiple_levels_numbers_each_depth() -> None:
+    # level="multiple" numbers every ancestor in the chain, so consecutive counts land on nodes at different depths
+    # rather than on one run of siblings
+    body = (
+        '<xsl:template match="/"><xsl:for-each select="//c">'
+        '<xsl:number level="multiple" count="a|b|c"/>,</xsl:for-each></xsl:template>'
+    )
+    assert _run("<r><a><b><c/><c/></b><b><c/></b></a><a><b><c/></b></a></r>", body) == "111,112,121,211,"
+
+
+def test_transform_number_count_pattern_over_mixed_siblings() -> None:
+    # one instruction walking a mixed run: each node carries the previous answer forward, and a sibling the count
+    # pattern does not match must add nothing to it
+    body = '<xsl:template match="/"><xsl:for-each select="r/*"><xsl:number count="b"/>,</xsl:for-each></xsl:template>'
+    assert _run("<r><a/><b/><a/><b/></r>", body) == ",1,,2,"
+
+
 def test_transform_number_on_attribute_is_one() -> None:
     body = (
         '<xsl:template match="/"><xsl:apply-templates select="//n/@id"/></xsl:template>'

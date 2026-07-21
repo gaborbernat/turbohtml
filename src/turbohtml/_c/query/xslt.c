@@ -2351,7 +2351,9 @@ static long level_number(engine *eng, const th_node *instruction, const match_se
     long count = 1;
     th_node *prev = node->prev_sibling;
     if (prev != NULL && prev == eng->number_memo_node && number_memo_applies(eng, instruction, have_count)) {
-        count = eng->number_memo_value + (number_counts(eng, count_set, have_count, prev) ? 1 : 0);
+        /* the memo holds the node the previous call numbered, and a call only ever numbers a node that met
+           the count criteria, so reaching it through prev means prev counted */
+        count = eng->number_memo_value + 1;
     } else {
         for (; prev != NULL; prev = prev->prev_sibling) {
             if (number_counts(eng, count_set, have_count, prev)) {
