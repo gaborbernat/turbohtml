@@ -11,7 +11,6 @@ prose), or inside a caller's ``skip_tags``. Each found link becomes a :class:`Li
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, TypeAlias
 
@@ -26,10 +25,10 @@ _EMAIL_KIND: Final = 1
 # verbatim; only a bare domain (kind 0 without a ``scheme://``) is prefixed with ``http://``.
 _SCHEME_KIND: Final = 2
 
-# A leading ``scheme://`` tells a matched URL already carries its scheme; a bare domain (``example.com``, ``www.x.com``)
-# does not and is prefixed with ``http://``. Anchoring at the start avoids treating a ``://`` deeper in a bare domain's
-# path (an embedded redirect URL) as the link's own scheme.
-_SCHEME: Final = re.compile(r"[a-zA-Z][a-zA-Z0-9+.\-]*://")
+# A ``scheme://`` URL the scanner flagged as already carrying its scheme (the anchored ``[a-zA-Z][a-zA-Z0-9+.\-]*://``
+# rule, applied per match in C), so its url is the matched text verbatim. A bare domain (``example.com``, ``www.x.com``)
+# stays kind 0 and is prefixed with ``http://``; classifying in the scanner avoids re-running the rule here per match.
+_HAS_SCHEME_KIND: Final = 3
 
 # The ``scheme://host`` schemes autolinked when a config registers none: the fixed set linkify-it recognizes, so a typo
 # scheme or a ``javascript://`` payload stays plain text. A ``Linkify.schemes`` restricts to its own set (bleach), while
@@ -241,7 +240,7 @@ class Linker:
         """Build the ``<a>`` for one matched link, running the callbacks; return ``None`` if a callback vetoes it."""
         if kind == _EMAIL_KIND:
             url = "mailto:" + matched
-        elif _SCHEME.match(matched):  # the scanner already gated the scheme; a match here keeps its own scheme
+        elif kind == _HAS_SCHEME_KIND:  # the scanner flagged a ``scheme://`` URL, kept with its own scheme
             url = matched
         else:
             url = "http://" + matched
@@ -318,7 +317,7 @@ def _span_from_match(text: str, start: int, end: int, kind: int) -> LinkSpan:
     matched = text[start:end]
     if kind == _EMAIL_KIND:
         url = "mailto:" + matched
-    elif kind == _SCHEME_KIND or _SCHEME.match(matched):
+    elif kind in {_SCHEME_KIND, _HAS_SCHEME_KIND}:
         url = matched
     else:
         url = "http://" + matched

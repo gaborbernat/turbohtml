@@ -19,9 +19,14 @@
 #include <stdint.h>
 
 enum th_link_kind {
+    /* A bare domain (``example.com``): no scheme of its own, so the Python layer prefixes ``http://``. */
     TH_LINK_URL = 0,
     TH_LINK_EMAIL = 1,
+    /* A registered scheme-less URL (``tel:+1``, ``bitcoin:1abc``): its opaque part carries the scheme. */
     TH_LINK_SCHEME = 2,
+    /* A ``scheme://host`` URL: the scanner matched an explicit scheme, so the match is kept verbatim. Classifying it
+       here spares the Python layer a per-match re.match against the scheme grammar. */
+    TH_LINK_HAS_SCHEME = 3,
 };
 
 /* A non-ASCII Unicode White_Space code point (the ASCII ones are c <= 0x20). UTS46
@@ -473,7 +478,9 @@ static PyObject *do_scan(PyObject *text, int parse_email, int bare_domains, PyOb
         int found = 0;
         if (c == ':') {
             found = match_url(kind, data, pos, 0, len, &match_start, &match_end, url_schemes);
-            if (!found && schemes != NULL) {
+            if (found) {
+                link_kind = TH_LINK_HAS_SCHEME; /* a scheme://host URL carries its own scheme, kept verbatim */
+            } else if (schemes != NULL) {
                 found = match_scheme_less(kind, data, pos, 0, len, &match_start, &match_end, schemes);
                 link_kind = TH_LINK_SCHEME;
             }
