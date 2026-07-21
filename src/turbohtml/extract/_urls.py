@@ -55,9 +55,6 @@ _ISO_639_1: Final[frozenset[str]] = frozenset([
 ])
 """The ISO 639-1 two-letter language codes, gating which URL segments count as language markers."""
 
-# Names compiled from the public query-stripping lists (Firefox's query-stripping records, the ClearURLs rules, and
-# AdGuard's TrackParamFilter), the same sources courlan cites.
-
 _CONTENT_PARAMS: Final[frozenset[str]] = frozenset({
     "aid",
     "article_id",

@@ -187,7 +187,7 @@ def _meta_date(
     would runs in C (:meth:`Document._date_meta`); this shim passes the window and the wanted role and formats the
     (year, month, day) the walk returns.
     """
-    parts = document._date_meta(  # ruff:ignore[private-member-access]  # our own private C entry point on the Document type
+    parts = document._date_meta(  # ruff:ignore[private-member-access]  # the Document type's private C entry point
         1 if want == _PUBLISHED else 2,
         current_year,
         window.earliest.year,
