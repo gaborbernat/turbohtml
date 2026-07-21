@@ -1,0 +1,23 @@
+{
+  "label": "escape 1,000 raw CSS identifiers",
+  "parties": [
+    "turbohtml",
+    "soupsieve"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "mixed shapes (1,000)",
+      6.690426293687324e-05,
+      0.001079754202616338
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.018333627446141816,
+      0.007448910606025241
+    ]
+  ],
+  "notes": {}
+}

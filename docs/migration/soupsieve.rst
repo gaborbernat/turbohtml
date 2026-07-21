@@ -100,7 +100,8 @@ Performance
 
 soupsieve interprets each selector in Python per element; turbohtml compiles it against the tree once and matches by
 comparing interned integer atoms in C, so a compiled ``select`` runs 196 to 1,480 times faster across real pages and
-per-element ``match`` 78 to 145 times faster:
+per-element ``match`` 78 to 145 times faster. :func:`~turbohtml.query.escape_identifier` builds its CSS identifier in C
+where soupsieve's ``escape`` loops in Python, so it runs 16 times faster on a thousand mixed identifiers:
 
 .. bench-table::
     :file: bench/soupsieve.json
