@@ -137,7 +137,9 @@ def _rows(
             rows.append(row)
             spread.append(noise)
             # a library page mixes operations, so a caveat belongs on the rows of the operation it describes
-            caveats.append(next((NOTES[operation][label] for label in labels if label in NOTES.get(operation, {})), None))
+            caveats.append(
+                next((NOTES[operation][label] for label in labels if label in NOTES.get(operation, {})), None)
+            )
     return rows, spread, caveats
 
 
