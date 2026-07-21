@@ -158,26 +158,17 @@ static uint8_t quick_value(Py_UCS4 cp, int form) {
 /* Whether `input` is already in `form`: TH_QC_YES normalized, TH_QC_NO not, TH_QC_MAYBE undecided (a mark that may fold
    into a preceding starter, resolved by normalizing and comparing). Any combining mark out of canonical order settles
    it as not-normalized straight away. UAX #15 quick check. */
-static int quick_check(int kind, const void *data, Py_ssize_t len, int form, Py_ssize_t *first_unsettled) {
+static int quick_check(int kind, const void *data, Py_ssize_t len, int form) {
     uint8_t last_class = 0;
     int result = TH_QC_YES;
-    Py_ssize_t settled = 0; /* the last starter seen, the earliest point normalizing can have to begin from */
     for (Py_ssize_t index = 0; index < len; index++) {
         Py_UCS4 cp = PyUnicode_READ(kind, data, index);
         uint8_t klass = ccc_of(cp);
         if (klass != 0 && klass < last_class) {
-            *first_unsettled = settled;
             return TH_QC_NO;
         }
         uint8_t value = quick_value(cp, form);
-        /* A starter alone is not a safe place to begin: a Hangul V or T jamo has combining class zero and still
-           composes with what precedes it, and so does any character the form's quick check answers Maybe for. Only a
-           starter the check settles as Yes cannot combine leftwards, so only that one can start the work. */
-        if (result == TH_QC_YES && klass == 0 && value == TH_QC_YES) {
-            settled = index;
-        }
         if (value == TH_QC_NO) {
-            *first_unsettled = settled;
             return TH_QC_NO;
         }
         if (value == TH_QC_MAYBE) {
@@ -185,7 +176,6 @@ static int quick_check(int kind, const void *data, Py_ssize_t len, int form, Py_
         }
         last_class = klass;
     }
-    *first_unsettled = settled;
     return result;
 }
 
@@ -288,10 +278,7 @@ static PyObject *build_result(const Py_UCS4 *buf, Py_ssize_t len) {
 
 /* Normalize input[0,len) to `form`, returning a new str. Runs the full decompose -> reorder -> (compose) pipeline over
    a scratch buffer bounded by len * TH_NORM_MAX_EXPANSION. */
-/* Normalize only from `start`, a starter at or before the first code point the quick check could not settle. No
-   composition or reordering crosses a starter, so the text before it is already in the target form and is copied
-   through: a mostly-normalized document then pays the full pipeline only over the part that needs it. */
-static PyObject *normalize_full(int kind, const void *data, Py_ssize_t len, int form, Py_ssize_t start) {
+static PyObject *normalize_full(int kind, const void *data, Py_ssize_t len, int form) {
     int compat = form == TH_NFKC || form == TH_NFKD;
     /* len is a code-point count from a live str, far under the overflow bound; keep the guard on one line for the gate
      */
@@ -302,16 +289,12 @@ static PyObject *normalize_full(int kind, const void *data, Py_ssize_t len, int 
     if (buf == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    for (Py_ssize_t index = 0; index < start; index++) {
-        buf[index] = PyUnicode_READ(kind, data, index);
-    }
-    const void *tail = (const char *)data + start * kind;
-    Py_ssize_t count = decompose(kind, tail, len - start, buf + start, compat);
-    reorder(buf + start, count);
+    Py_ssize_t count = decompose(kind, data, len, buf, compat);
+    reorder(buf, count);
     if (form == TH_NFC || form == TH_NFKC) {
-        count = compose(buf + start, count);
+        count = compose(buf, count);
     }
-    PyObject *result = build_result(buf, start + count);
+    PyObject *result = build_result(buf, count);
     PyMem_Free(buf);
     return result;
 }
@@ -330,11 +313,10 @@ PyObject *turbohtml_normalize(PyObject *Py_UNUSED(module), PyObject *args) {
     Py_ssize_t len = PyUnicode_GET_LENGTH(text);
     int kind = PyUnicode_KIND(text);
     const void *data = PyUnicode_DATA(text);
-    Py_ssize_t start = 0;
-    if (quick_check(kind, data, len, form, &start) == TH_QC_YES) {
+    if (quick_check(kind, data, len, form) == TH_QC_YES) {
         return Py_NewRef(text);
     }
-    return normalize_full(kind, data, len, form, start);
+    return normalize_full(kind, data, len, form);
 }
 
 /* _is_normalized(form, text): True when text is already in form. A quick-check Maybe is settled by normalizing and
@@ -351,15 +333,14 @@ PyObject *turbohtml_is_normalized(PyObject *Py_UNUSED(module), PyObject *args) {
     Py_ssize_t len = PyUnicode_GET_LENGTH(text);
     int kind = PyUnicode_KIND(text);
     const void *data = PyUnicode_DATA(text);
-    Py_ssize_t start = 0;
-    int quick = quick_check(kind, data, len, form, &start);
+    int quick = quick_check(kind, data, len, form);
     if (quick == TH_QC_YES) {
         Py_RETURN_TRUE;
     }
     if (quick == TH_QC_NO) {
         Py_RETURN_FALSE;
     }
-    PyObject *normalized = normalize_full(kind, data, len, form, start);
+    PyObject *normalized = normalize_full(kind, data, len, form);
     if (normalized == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
