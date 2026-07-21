@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from bench.notes import NOTES
+
 _NO_EQUIVALENT: Final = "no equivalent operation"
 
 
@@ -129,30 +131,58 @@ TABLES: Final[dict[str, str | Combined]] = {
 }
 
 
-def _cell(feed: dict, party: str, case: str) -> float | str | None:
-    """Return the time one party measured for one case, or None when the operation has no such column or row."""
+def _cell(feed: dict, party: str, case: str, key: str = "rows") -> float | str | None:
+    """
+    Return what one party recorded for one case, or None when the operation has no such column or row.
+
+    ``key`` selects the array to read: the measurements, or the spread that says what they are worth. Both share a
+    layout, so one lookup serves each.
+    """
     if party not in feed["parties"]:
+        return None
+    source = feed.get(key)
+    if not source:
         return None
     index = feed["parties"].index(party)
     width = 2 if feed["metrics"] == ["size", "time"] else 1
     offset = 1 if width == 2 else 0
-    for row in feed["rows"]:
+    for position, row in enumerate(feed["rows"]):
         if row[0] == case:
-            return row[1 + index * width + offset]
+            if position >= len(source):
+                return None
+            return source[position][1 + index * width + offset]
     return None
 
 
 def _combine(spec: Combined, feeds: dict[str, dict]) -> dict:
-    """Assemble one guide table from the operations its rows and columns name."""
+    """Assemble one guide table from the operations its rows and columns name, spread included."""
     rows: list[list[float | str | None]] = []
+    spread: list[list[float | None]] = []
     for case, row_operation in spec.rows:
         cells: list[float | str | None] = [case]
+        noise: list[float | None] = [None]  # leading slot mirrors the case label, as in the per-operation feeds
         for party in spec.parties:
             operation, column = spec.columns.get(party, (row_operation, party))
             value = _cell(feeds[operation], column, case)
             cells.append(_NO_EQUIVALENT if value is None else value)
+            variation = _cell(feeds[operation], column, case, key="spread")
+            noise.append(variation if isinstance(variation, (int, float)) else None)
         rows.append(cells)
-    return {"label": spec.label, "parties": list(spec.parties), "metrics": [], "rows": rows}
+        spread.append(noise)
+    # a combined table draws each column from its own operation, so a note follows the operation that column came from
+    notes: dict[str, str] = {}
+    for party in spec.parties:
+        operation, column = spec.columns.get(party, (spec.rows[0][1], party))
+        if (note := NOTES.get(operation, {}).get(column)) is not None:
+            notes[party] = note
+    return {
+        "label": spec.label,
+        "parties": list(spec.parties),
+        "metrics": [],
+        "rows": rows,
+        "spread": spread,
+        "notes": notes,
+    }
 
 
 def emit_docs_feeds(feeds_dir: Path, out_dir: Path) -> list[str]:
@@ -174,7 +204,11 @@ def emit_docs_feeds(feeds_dir: Path, out_dir: Path) -> list[str]:
                 break
             feeds[operation] = json.loads(path.read_text(encoding="utf-8"))
         else:
-            feed = feeds[spec] if isinstance(spec, str) else _combine(spec, feeds)
+            if isinstance(spec, str):
+                feed = feeds[spec]
+                feed["notes"] = {party: NOTES[spec][party] for party in feed["parties"] if party in NOTES.get(spec, {})}
+            else:
+                feed = _combine(spec, feeds)
             (out_dir / f"{name}.json").write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
     return missing
 

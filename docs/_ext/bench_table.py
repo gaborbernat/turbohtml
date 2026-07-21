@@ -52,6 +52,9 @@ _MIN_SPAN: Final = {"size": math.log(1.10), "time": _TIME_SPAN, "memory": _TIME_
 # microseconds carry the micro sign the docs use throughout; the escape keeps the literal unambiguous
 _TIME_UNITS: Final = (("s", 1.0), ("ms", 1e-3), ("\u00b5s", 1e-6), ("ns", 1e-9))
 
+# below this the uncertainty rounds to nothing at the shown precision, so printing it only adds noise to the table
+_RATIO_SPREAD_FLOOR: Final = 0.005
+
 # every competitor header links to the project's home; a party absent here (the turbohtml columns) stays plain text
 _HOMEPAGES: Final = {
     "airium": "https://pypi.org/project/airium/",
@@ -126,32 +129,64 @@ _HOMEPAGES: Final = {
 
 
 def _format_time(seconds: float) -> str:
+    """Scale a duration to the largest unit it fills; never exponent notation, which reads as a defect in a table."""
     for unit, factor in _TIME_UNITS:
         if seconds >= factor:
-            return f"{seconds / factor:.3g} {unit}"
-    return f"{seconds / 1e-9:.3g} ns"
+            return _fixed(seconds / factor, unit)
+    return _fixed(seconds / 1e-9, "ns")
+
+
+def _fixed(value: float, unit: str) -> str:
+    """Render a scaled figure in plain decimal: three significant digits, grouped once it runs past a thousand."""
+    if value >= 1000:
+        return f"{value:,.0f} {unit}"
+    return f"{value:.3g} {unit}"
 
 
 def _format_size(size: float) -> str:
-    return f"{size / 1000:.1f} kB" if size >= 1000 else f"{size:.0f} B"
+    for unit, factor in (("MB", 1e6), ("kB", 1e3)):
+        if size >= factor:
+            return _fixed(size / factor, unit)
+    return f"{size:.0f} B"
 
 
 def _format_memory(size: float) -> str:
-    return f"{size / 1e6:.1f} MB" if size >= 1e6 else f"{size / 1e3:.0f} kB"
+    for unit, factor in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if size >= factor:
+            return _fixed(size / factor, unit)
+    return f"{size:.0f} B"
 
 
-def _format_ratio(ratio: float, metric: str) -> str:
+def _ratio_spread(spread: list[Any] | None, index: int, turbo_index: int) -> float | None:
+    """
+    Return the relative uncertainty of one ratio, or None when either side carries no spread.
+
+    The two timings are measured independently, so their relative uncertainties add in quadrature. A ratio quoted
+    without it reads firmer than the measurements under it actually are.
+    """
+    if not spread:
+        return None
+    numerator, denominator = spread[index], spread[turbo_index]
+    if not isinstance(numerator, (int, float)) or not isinstance(denominator, (int, float)):
+        return None
+    return math.hypot(numerator, denominator)
+
+
+def _format_ratio(ratio: float, metric: str, spread: float | None = None) -> str:
     if metric == "size":
         # sizes sit near 1.0, so keep enough decimals to tell 0.999x from parity
         decimals = 2 if abs(ratio - 1) >= 0.005 else 3
         return f"({ratio:.{decimals}f}x)"
     # time ratios round up at the displayed precision, so a 0.04x never collapses to a flat 0.0x
-    if ratio >= 100:
-        return f"({math.ceil(ratio)}x)"
-    return f"({math.ceil(ratio * 10) / 10:.1f}x)"
+    shown = f"{math.ceil(ratio)}x" if ratio >= 100 else f"{math.ceil(ratio * 10) / 10:.1f}x"
+    if spread is None or spread < _RATIO_SPREAD_FLOOR:
+        return f"({shown})"
+    return f"({shown} ±{spread * 100:.0f}%)"
 
 
-def _order_columns(parties: list[str], metrics: list[str], rows: list[list[Any]]) -> tuple[list[str], list[list[Any]]]:
+def _order_columns(
+    parties: list[str], metrics: list[str], rows: list[list[Any]], spread: list[list[Any]]
+) -> tuple[list[str], list[list[Any]], list[list[Any]]]:
     """
     Put turbohtml first, then each competitor by how close it comes overall, permuting every row to match.
 
@@ -181,10 +216,16 @@ def _order_columns(parties: list[str], metrics: list[str], rows: list[list[Any]]
             scores[party_index] += (scaled if math.isfinite(value) else 1.0) / width
 
     order = sorted(range(len(parties)), key=lambda index: ("turbohtml" not in parties[index], scores[index]))
-    reordered = [
-        [row[0], *[cell for party_index in order for cell in row[1 + party_index * width :][:width]]] for row in rows
-    ]
-    return [parties[party_index] for party_index in order], reordered
+
+    def permute(source: list[list[Any]]) -> list[list[Any]]:
+        return [
+            [row[0], *[cell for party_index in order for cell in row[1 + party_index * width :][:width]]]
+            for row in source
+        ]
+
+    # the spread shares the row layout, so it has to travel through the same permutation or a cell would inherit
+    # another party's uncertainty
+    return [parties[party_index] for party_index in order], permute(rows), permute(spread) if spread else []
 
 
 def _row_buckets(ratios: list[float], metric: str) -> list[str]:
@@ -219,6 +260,12 @@ def _mark_entry(ordinal: int) -> nodes.entry:
     return entry
 
 
+def _ordered_notes(feed: dict[str, Any], parties: list[str]) -> list[str]:
+    """Return the noted parties in the order their columns appear, so ordinals read left to right."""
+    notes = feed.get("notes") or {}
+    return [party for party in parties if party in notes]
+
+
 def _legend(reasons: dict[str, int]) -> nodes.container:
     """Spell each numbered reason out under the table; reason text is literal so a message cannot inject markup."""
     legend = nodes.container(classes=["bench-legend"])
@@ -242,7 +289,7 @@ class BenchTable(Directive):
         self.state.document.settings.record_dependencies.add(str(source))
         feed = json.loads(source.read_text(encoding="utf-8"))
         metrics = feed["metrics"] or ["time"]
-        parties, rows = _order_columns(feed["parties"], metrics, feed["rows"])
+        parties, rows, spread = _order_columns(feed["parties"], metrics, feed["rows"], feed.get("spread") or [])
         ncols = 1 + len(parties) * len(metrics)
         table = nodes.table(classes=["bench-table"])
         group = nodes.tgroup(cols=ncols)
@@ -250,20 +297,26 @@ class BenchTable(Directive):
         group += nodes.colspec(colwidth=2)
         for _ in range(ncols - 1):
             group += nodes.colspec(colwidth=1)
-        group += self._head(feed["label"], parties, feed["metrics"])
         reasons = _reason_map(rows)
+        # notes number on from the empty-cell reasons so one legend carries both without colliding ordinals
+        notes = {party: len(reasons) + offset for offset, party in enumerate(_ordered_notes(feed, parties), start=1)}
+        group += self._head(feed["label"], parties, feed["metrics"], notes)
         body = nodes.tbody()
         group += body
-        for cells in rows:
+        for row_index, cells in enumerate(rows):
             if len(cells) != ncols:
                 msg = f"bench-table row has {len(cells)} cells, expected {ncols}: {cells!r}"
                 raise self.error(msg)
-            body += self._body_row(cells, parties, metrics, reasons)
-        if not reasons:
+            noise = spread[row_index] if row_index < len(spread) else None
+            body += self._body_row(cells, parties, metrics, reasons, noise)
+        legend = dict(reasons)
+        for party, ordinal in notes.items():
+            legend[f"{party} {feed['notes'][party]}"] = ordinal
+        if not legend:
             return [table]
-        return [table, _legend(reasons)]
+        return [table, _legend(legend)]
 
-    def _head(self, label: str, parties: list[str], metrics: list[str]) -> nodes.thead:
+    def _head(self, label: str, parties: list[str], metrics: list[str], notes: dict[str, int]) -> nodes.thead:
         head = nodes.thead()
         party_row = nodes.row()
         label_cell = self._entry(label)
@@ -280,6 +333,12 @@ class BenchTable(Directive):
                 cell += paragraph
             else:
                 cell = self._entry(party)
+            # a party whose column answers a different question is marked at the header, not per cell: the caveat
+            # applies to everything below it
+            if (ordinal := notes.get(party)) is not None:
+                superscript = nodes.superscript()
+                superscript += nodes.Text(str(ordinal))
+                cell.children[0] += superscript
             if metrics:
                 cell["morecols"] = len(metrics) - 1
             party_row += cell
@@ -292,7 +351,14 @@ class BenchTable(Directive):
             head += metric_row
         return head
 
-    def _body_row(self, cells: list[Any], parties: list[str], metrics: list[str], reasons: dict[str, int]) -> nodes.row:
+    def _body_row(
+        self,
+        cells: list[Any],
+        parties: list[str],
+        metrics: list[str],
+        reasons: dict[str, int],
+        spread: list[Any] | None = None,
+    ) -> nodes.row:
         row = nodes.row()
         row += self._entry(str(cells[0]))
         rendered: dict[int, tuple[str, str | None]] = {}
@@ -315,7 +381,7 @@ class BenchTable(Directive):
                         figure = _format_time(value)
                     ratio = value / turbo
                     if party_index:
-                        figure += f" {_format_ratio(ratio, metric)}"
+                        figure += f" {_format_ratio(ratio, metric, _ratio_spread(spread, index, 1 + metric_index))}"
                     positions.append(index)
                     ratios.append(ratio)
                     rendered[index] = (figure, None)

@@ -21,12 +21,7 @@ browsers run:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
-from turbohtml._html import Tokenizer, TokenType
-
-if TYPE_CHECKING:
-    from turbohtml._html import Token
+from turbohtml._html import Tokenizer
 
 __all__ = ["HTMLParser"]
 
@@ -45,8 +40,6 @@ class HTMLParser:
         """Create a parser."""
         self.convert_charrefs = convert_charrefs
         self._tokenizer = Tokenizer()
-        self._lineno = 1
-        self._offset = 0
 
     def feed(self, data: str) -> None:
         """
@@ -54,19 +47,17 @@ class HTMLParser:
 
         :param data: the next chunk of HTML.
         """
-        for token in self._tokenizer.feed(data):
-            self._dispatch(token)
+        self._tokenizer.feed(data)
+        self._tokenizer.dispatch(self)
 
     def close(self) -> None:
         """Signal end of input, dispatching any tokens still buffered."""
-        for token in self._tokenizer.close():
-            self._dispatch(token)
+        self._tokenizer.close()
+        self._tokenizer.dispatch(self)
 
     def reset(self) -> None:
         """Discard the buffered input and position, ready to parse a new document."""
         self._tokenizer.reset()
-        self._lineno = 1
-        self._offset = 0
 
     def getpos(self) -> tuple[int, int]:
         """
@@ -74,29 +65,7 @@ class HTMLParser:
 
         :returns: the 1-based line and 0-based column of the token last dispatched.
         """
-        return (self._lineno, self._offset)
-
-    def _dispatch(self, token: Token) -> None:
-        # the token type guarantees the relevant fields are present, which the Token
-        # API (where every field is optional) cannot express, so they are narrowed here
-        self._lineno = token.line
-        self._offset = token.col
-        kind = token.type
-        if kind is TokenType.START_TAG:
-            tag = cast("str", token.tag)
-            attrs = cast("list[tuple[str, str | None]]", token.attrs or [])
-            if token.self_closing:
-                self.handle_startendtag(tag, attrs)
-            else:
-                self.handle_starttag(tag, attrs)
-        elif kind is TokenType.END_TAG:
-            self.handle_endtag(cast("str", token.tag))
-        elif kind is TokenType.TEXT:
-            self.handle_data(cast("str", token.data))
-        elif kind is TokenType.COMMENT:
-            self.handle_comment(cast("str", token.data))
-        else:  # TokenType.DOCTYPE
-            self.handle_decl(_doctype_decl(token))
+        return self._tokenizer.position()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """
@@ -171,16 +140,3 @@ class HTMLParser:
 
         :param data: the section text.
         """
-
-
-def _doctype_decl(token: Token) -> str:
-    parts = ["DOCTYPE"]
-    if token.name:
-        parts.append(token.name)
-    if token.public_id is not None:
-        parts.append(f'PUBLIC "{token.public_id}"')
-        if token.system_id is not None:
-            parts.append(f'"{token.system_id}"')
-    elif token.system_id is not None:
-        parts.append(f'SYSTEM "{token.system_id}"')
-    return " ".join(parts)

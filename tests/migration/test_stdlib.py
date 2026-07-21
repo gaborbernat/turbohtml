@@ -163,3 +163,59 @@ def test_convert_charrefs_argument_is_accepted_but_inert() -> None:
     parser.feed("a &amp; b")
     parser.close()
     assert parser.events == [("data", "a & b")]
+
+
+def test_raw_text_element_content_is_not_markup() -> None:
+    # a script's body is character data, so the dispatch has to switch the content model the way iteration does
+    parser = _Recorder()
+    parser.feed("<script>if (a < b) { x('<p>'); }</script>")
+    parser.close()
+    assert ("data", "if (a < b) { x('<p>'); }") in parser.events
+
+
+def test_doctype_with_public_and_system_identifiers() -> None:
+    parser = _Recorder()
+    parser.feed('<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">')
+    parser.close()
+    assert (
+        "decl",
+        'DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd"',
+    ) in parser.events
+
+
+def test_doctype_with_system_identifier_only() -> None:
+    parser = _Recorder()
+    parser.feed('<!DOCTYPE html SYSTEM "about:legacy-compat">')
+    parser.close()
+    assert ("decl", 'DOCTYPE html SYSTEM "about:legacy-compat"') in parser.events
+
+
+def test_doctype_without_a_name() -> None:
+    parser = _Recorder()
+    parser.feed("<!DOCTYPE>")
+    parser.close()
+    assert ("decl", "DOCTYPE") in parser.events
+
+
+def test_handler_exception_reaches_the_caller() -> None:
+    class Failing(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.seen: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            self.seen.append(tag)
+            msg = f"handler said no to {tag} with {len(attrs)} attributes"
+            raise ValueError(msg)
+
+    parser = Failing()
+    with pytest.raises(ValueError, match="handler said no to p"):
+        parser.feed("<p>")
+    assert parser.seen == ["p"]
+
+
+def test_doctype_with_public_identifier_only() -> None:
+    parser = _Recorder()
+    parser.feed('<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">')
+    parser.close()
+    assert ("decl", 'DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"') in parser.events

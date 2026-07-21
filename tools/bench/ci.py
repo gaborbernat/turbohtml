@@ -120,6 +120,10 @@ def _book_html() -> str:
 # real corpus under a new corpus-qualified id: the flaky small id retires with no base and the large one is gated
 # fresh, so the input change never reads as a regression. The synthetic tree builders, the fragment parser, the
 # single-selector translate, and the fixed URL batch have no document corpus to grow into and stay inline.
+# The eight document converters carry a ``-parse-`` id because their measurement changed: each used to query a
+# document parsed once and cached, which credited it with a parse no caller gets, and now parses the string it is
+# handed. Reusing the old id would have CodSpeed read the added parse as a regression against a figure that measured
+# less work, so the old identity retires and the new one gates from its own baseline.
 _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "socialcard": ("socialcard-spec", _spec),
     "structured": ("structured-spec", _spec),
@@ -132,16 +136,17 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "sanitize-custom-elements": ("sanitize-custom-elements-spec", _spec),
     "sanitize-xml": ("sanitize-xml-spec", _spec),
     "linkify": ("linkify-spec", _spec),
-    "markdown-google": ("markdown-google-spec", _spec),
-    "article": ("article-spec", _spec),
+    "markdown-google": ("markdown-google-parse-spec", _spec),
+    "article": ("article-parse-spec", _spec),
     "boilerplate": ("boilerplate-spec", _spec),
     "date": ("date-spec", _spec),
-    "text-render": ("text-render-spec", _spec),
-    "text-collapsed": ("text-collapsed-spec", _spec),
-    "text-main": ("text-main-spec", _spec),
-    "text-annotated": ("text-annotated-spec", _spec),
-    "markdown": ("markdown-spec", partial(_spec_case, "default")),
-    "tables": ("tables-spec", partial(_spec_case, "rows")),
+    "text-render": ("text-render-parse-spec", _spec),
+    "text-collapsed": ("text-collapsed-parse-spec", _spec),
+    "text-main": ("text-main-parse-spec", _spec),
+    "text-annotated": ("text-annotated-parse-spec", _spec),
+    "markdown": ("markdown-parse-spec", partial(_spec_case, "default")),
+    "tables": ("tables-parse-spec", partial(_spec_case, "rows")),
+    "tables-wide": ("tables-wide-parse", lambda: INPUTS["tables-wide"]()[0][1]),
     "extract-url": ("extract-url-spec", partial(_spec_case, "base")),
     "markup": ("markup-book", _book_text),
     "markup-op": ("markup-op-book", lambda: ("striptags", _book_html())),

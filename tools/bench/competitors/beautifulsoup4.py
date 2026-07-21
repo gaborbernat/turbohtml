@@ -201,12 +201,12 @@ def links_rewrite(text: str) -> None:
 
 
 def links_filter(text: str) -> None:
-    """Collect the anchor hrefs and keep the on-page links, mirroring the cleaned-link filter."""
-    _ = [
-        href
-        for anchor in _parsed(text).find_all("a")
-        if (href := anchor.get("href")) and not str(href).startswith(("#", "javascript:"))
-    ]
+    """Collect the cleaned, absolutized, deduplicated page links, the work turbohtml's extract_links does."""
+    seen: dict[str, None] = {}
+    for anchor in BeautifulSoup(text, "html.parser").find_all("a"):
+        if href := anchor.get("href"):
+            seen[urljoin(_LINKS_BASE, str(href))] = None
+    _ = list(seen)
 
 
 def socialcard(text: str) -> None:
@@ -235,32 +235,32 @@ def links_absolutize(soup: BeautifulSoup) -> None:
 
 
 OPERATIONS = {
-    "parse": (parse, "BeautifulSoup"),
-    "build": (build, "BeautifulSoup"),
-    "construct": (construct, "BeautifulSoup"),
-    "emit": (emit, "BeautifulSoup"),
-    "find": (find, "BeautifulSoup"),
-    "select": (select, "BeautifulSoup"),
-    "select-has": (select_has, "BeautifulSoup"),
-    "find-text": (find_text, "BeautifulSoup"),
-    "text-content": (text_content, "BeautifulSoup"),
-    "serialize": (serialize, "BeautifulSoup"),
-    "class-edit": (class_edit, "BeautifulSoup"),
-    "extract-attr": (extract_attr, "BeautifulSoup"),
-    "extract-text": (extract_text, "BeautifulSoup"),
-    "strip-remove": (strip_remove, "BeautifulSoup"),
-    "strip-tags": (strip_tags, "BeautifulSoup"),
-    "rewrite": (rewrite, "BeautifulSoup"),
-    "encoding": (encoding, "BeautifulSoup"),
-    "edit": (Mutating(_fresh, edit), "BeautifulSoup"),
-    "set-html": (Mutating(_fresh, set_html), "BeautifulSoup"),
-    "set-text": (Mutating(_fresh, set_text), "BeautifulSoup"),
-    "navigate": (navigate, "BeautifulSoup"),
-    "match": (match, "BeautifulSoup"),
-    "links-extract": (links_extract, "BeautifulSoup"),
-    "links-rewrite": (links_rewrite, "BeautifulSoup"),
-    "links-filter": (links_filter, "BeautifulSoup"),
-    "socialcard": (socialcard, "BeautifulSoup"),
-    "extract-url": (extract_url, "BeautifulSoup"),
-    "links-absolutize": (Mutating(_fresh, links_absolutize), "BeautifulSoup"),
+    "parse": (parse, "BeautifulSoup (html.parser)"),
+    "build": (build, "BeautifulSoup (html.parser)"),
+    "construct": (construct, "BeautifulSoup (html.parser)"),
+    "emit": (emit, "BeautifulSoup (html.parser)"),
+    "find": (find, "BeautifulSoup (html.parser)"),
+    "select": (select, "BeautifulSoup (html.parser)"),
+    "select-has": (select_has, "BeautifulSoup (html.parser)"),
+    "find-text": (find_text, "BeautifulSoup (html.parser)"),
+    "text-content": (text_content, "BeautifulSoup (html.parser)"),
+    "serialize": (serialize, "BeautifulSoup (html.parser)"),
+    "class-edit": (class_edit, "BeautifulSoup (html.parser)"),
+    "extract-attr": (extract_attr, "BeautifulSoup (html.parser)"),
+    "extract-text": (extract_text, "BeautifulSoup (html.parser)"),
+    "strip-remove": (strip_remove, "BeautifulSoup (html.parser)"),
+    "strip-tags": (strip_tags, "BeautifulSoup (html.parser)"),
+    "rewrite": (rewrite, "BeautifulSoup (html.parser)"),
+    "encoding": (encoding, "BeautifulSoup (html.parser)"),
+    "edit": (Mutating(_fresh, edit), "BeautifulSoup (html.parser)"),
+    "set-html": (Mutating(_fresh, set_html), "BeautifulSoup (html.parser)"),
+    "set-text": (Mutating(_fresh, set_text), "BeautifulSoup (html.parser)"),
+    "navigate": (navigate, "BeautifulSoup (html.parser)"),
+    "match": (match, "BeautifulSoup (html.parser)"),
+    "links-extract": (links_extract, "BeautifulSoup (html.parser)"),
+    "links-rewrite": (links_rewrite, "BeautifulSoup (html.parser)"),
+    "links-filter": (links_filter, "BeautifulSoup (html.parser)"),
+    "socialcard": (socialcard, "BeautifulSoup (html.parser)"),
+    "extract-url": (extract_url, "BeautifulSoup (html.parser)"),
+    "links-absolutize": (Mutating(_fresh, links_absolutize), "BeautifulSoup (html.parser)"),
 }

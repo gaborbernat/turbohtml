@@ -652,3 +652,11 @@ def test_concurrent_feed_on_shared_tokenizer_is_memory_safe() -> None:
     for thread in threads:
         thread.join()
     list(tokenizer.close())
+
+
+def test_dispatch_requires_every_handler() -> None:
+    # dispatch binds the handlers once per call, so an object missing one fails before any token is delivered
+    tokenizer = Tokenizer()
+    tokenizer.feed("<p>text</p>")
+    with pytest.raises(AttributeError, match="handle_"):
+        tokenizer.dispatch(object())

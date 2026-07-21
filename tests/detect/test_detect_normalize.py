@@ -174,3 +174,19 @@ def test_matches_runtime_unicodedata(form: NormalizationForm) -> None:  # pragma
         or is_normalized(form, chr(cp)) is not unicodedata.is_normalized(form, chr(cp))
     ]
     assert mismatches == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("abcé", id="short-settled-prefix"),
+        pytest.param("x" * 40 + "é" + "tail", id="long-settled-prefix"),
+        pytest.param("éabc", id="no-settled-prefix"),
+        pytest.param("가abcé", id="hangul-before-the-prefix"),
+    ],
+)
+@pytest.mark.parametrize("form", _FORMS)
+def test_text_before_the_first_unsettled_point_is_preserved(text: str, form: NormalizationForm) -> None:
+    # normalizing starts at the last settled starter and copies what precedes it, so a prefix that needs no work
+    # must survive byte for byte and the result must still match the reference
+    assert normalize(form, text) == unicodedata.normalize(form, text)

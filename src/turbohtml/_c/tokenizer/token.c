@@ -28,10 +28,7 @@ static module_state *state_of(PyObject *self) {
 }
 
 static PyObject *buf_to_str(const th_buf *buf) {
-    if (buf->len == 0) {
-        return PyUnicode_New(0, 0);
-    }
-    return th_str_from_kind(buf->kind, buf->data, buf->len);
+    return th_buf_to_str(buf);
 }
 
 /* Copy src into dst with every buffer packed into one arena allocation, so a

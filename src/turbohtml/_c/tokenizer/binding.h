@@ -29,6 +29,14 @@
 #define Py_END_CRITICAL_SECTION2() }
 #endif
 
+/* One token buffer as a str; an empty buffer has no storage to read, so it answers the empty string directly. */
+static inline PyObject *th_buf_to_str(const th_buf *buf) {
+    if (buf->len == 0) {
+        return PyUnicode_New(0, 0);
+    }
+    return th_str_from_kind(buf->kind, buf->data, buf->len);
+}
+
 typedef struct {
     PyObject *token_type;             /* Token */
     PyObject *tokenizer_type;         /* Tokenizer */
