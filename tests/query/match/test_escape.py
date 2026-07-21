@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from turbohtml.query import escape_identifier
@@ -30,3 +32,8 @@ from turbohtml.query import escape_identifier
 )
 def test_escape_matches_cssom(raw: str, expected: str) -> None:
     assert escape_identifier(raw) == expected
+
+
+def test_non_str_identifier_raises_type_error() -> None:
+    with pytest.raises(TypeError, match="must be str"):
+        escape_identifier(cast("str", b"raw-bytes"))
