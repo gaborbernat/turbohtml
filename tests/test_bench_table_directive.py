@@ -1,0 +1,83 @@
+"""
+Keep a per-row caveat marking only its own rows, and every caveat spelled out under the table.
+
+A note that belongs to one operation on a library page (lxml-html-clean linkifies but does not sanitize the same way)
+must superscript exactly the rows that operation produced, not the library's whole column. The feed carries the marks
+in ``row_notes``; these checks render the ``bench-table`` directive over a synthetic feed and fail if a noted row loses
+its superscript, an unnoted row gains one, two rows sharing a caveat stop sharing one ordinal, or the legend drops a
+caveat.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+from docutils import nodes
+from docutils.core import publish_doctree
+from docutils.parsers.rst import directives
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT / "docs" / "_ext"))
+
+from bench_table import BenchTable  # ruff:ignore[module-import-not-at-top-of-file]
+
+directives.register_directive("bench-table", BenchTable)
+
+_SHARED = "shared caveat"
+_OTHER = "other caveat"
+_FEED = {
+    "label": "operation",
+    "parties": ["turbohtml", "other"],
+    "metrics": [],
+    "rows": [["alpha", 1e-6, 2e-6], ["beta", 1e-6, 2e-6], ["gamma", 1e-6, 2e-6], ["delta", 1e-6, 2e-6]],
+    # rows 1 and 2 share one caveat, row 3 carries a second, row 0 carries none
+    "row_notes": {"1": _SHARED, "2": _SHARED, "3": _OTHER},
+}
+
+
+@pytest.fixture
+def doctree(tmp_path: Path) -> nodes.document:
+    """Render the synthetic feed through the directive and return the parsed document."""
+    (tmp_path / "feed.json").write_text(json.dumps(_FEED), encoding="utf-8")
+    page = tmp_path / "page.rst"
+    page.write_text(".. bench-table::\n    :file: feed.json\n", encoding="utf-8")
+    return publish_doctree(page.read_text(encoding="utf-8"), source_path=str(page))
+
+
+def _row_superscripts(doctree: nodes.document) -> list[list[str]]:
+    """Return the superscript ordinals carried by each body row's label cell, in row order."""
+    table = next(iter(doctree.findall(nodes.table)))
+    body = next(iter(table.findall(nodes.tbody)))
+    return [[sup.astext() for sup in row.children[0].findall(nodes.superscript)] for row in body.findall(nodes.row)]
+
+
+def _legend_lines(doctree: nodes.document) -> Iterator[str]:
+    """Yield each spelled-out legend line under the table."""
+    for container in doctree.findall(nodes.container):
+        if "bench-legend" in container.get("classes", []):
+            for paragraph in container.findall(nodes.paragraph):
+                yield paragraph.astext()
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [
+        pytest.param(0, [], id="unnoted-row-has-no-superscript"),
+        pytest.param(1, ["1"], id="first-shared-row-marked"),
+        pytest.param(2, ["1"], id="second-shared-row-reuses-ordinal"),
+        pytest.param(3, ["2"], id="distinct-caveat-gets-next-ordinal"),
+    ],
+)
+def test_row_note_superscript_marks_only_noted_rows(doctree: nodes.document, index: int, expected: list[str]) -> None:
+    assert _row_superscripts(doctree)[index] == expected
+
+
+def test_row_note_legend_spells_each_distinct_caveat(doctree: nodes.document) -> None:
+    assert list(_legend_lines(doctree)) == [f"1 {_SHARED}", f"2 {_OTHER}"]

@@ -83,6 +83,7 @@ dev = [
 ]
 test = [
   "covdefaults>=2.3",
+  "docutils>=0.22",             # render the docs bench-table directive in tests/test_bench_table_directive.py
   "elementpath>=5.1.3",         # the XPath 2.0 oracle the string-function differential test cross-checks against
   "httpx2>=2.5",                # the benchmark corpora and the tools/generate_* scripts fetch pinned data over it
   "jinja2>=3.1.6",              # the markup migration test renders templates with markupsafe swapped for turbohtml.markup
