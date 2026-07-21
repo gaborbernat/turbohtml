@@ -117,6 +117,22 @@ PyObject *turbohtml_url_is_tracker(PyObject *module, PyObject *arg);
    %2E spelling, as the WHATWG path state does (spec 4.4). Matches METH_O. */
 PyObject *turbohtml_url_remove_dot_segments(PyObject *module, PyObject *arg);
 
+/* _url_scrub(url): undo the HTML transport damage a scraped URL carries (edge C0/space strip, whitespace removal, CDATA
+   unwrap, markup-delimiter truncation, &amp; unescape) before it is split. Matches METH_O. */
+PyObject *turbohtml_url_scrub(PyObject *module, PyObject *arg);
+
+/* _url_variant_key(url): the scheme-and-trailing-slash-collapsed dedup key extract_links compares links by. METH_O. */
+PyObject *turbohtml_url_variant_key(PyObject *module, PyObject *arg);
+
+/* _url_normalize_query(query, allow, deny, strict, content, language): drop denied, tracker, or non-allowlisted query
+   parameters, encode the survivors, and sort them, the crawl cleaner's per-pair loop. Matches METH_VARARGS. */
+PyObject *turbohtml_url_normalize_query(PyObject *module, PyObject *args);
+
+/* _url_language_matches(query, path, hostname, language, strict, language_params, iso_639_1): judge a URL's own
+   language markers (a lang/language query parameter, a leading path segment, a strict-mode host label) against the
+   target language, the per-URL heuristics behind clean_url's language filter. Matches METH_VARARGS. */
+PyObject *turbohtml_url_language_matches(PyObject *module, PyObject *args);
+
 /* Implemented in url/idna.c. th_url_to_ascii runs the WHATWG domain-to-ASCII step (Unicode IDNA ToASCII, UTS #46 with
    Transitional_Processing=false and UseSTD3ASCIIRules=false): UTS #46 mapping, NFC, and per-label punycode. _urls.py
    reaches _url_to_ascii(host) for its registered-name hosts instead of the IDNA-2003 str.encode("idna") codec; the host
