@@ -30,3 +30,8 @@ from turbohtml.query import escape_identifier
 )
 def test_escape_matches_cssom(raw: str, expected: str) -> None:
     assert escape_identifier(raw) == expected
+
+
+def test_escape_identifier_rejects_non_str() -> None:
+    with pytest.raises(TypeError, match="must be str"):
+        escape_identifier(123)  # ty: ignore[invalid-argument-type]  # a non-str exercises the TypeError guard
