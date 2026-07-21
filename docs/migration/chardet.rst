@@ -40,8 +40,8 @@ call path, and returns a typed :class:`~turbohtml.detect.EncodingMatch` in place
       - ``detect``, ``detect_all``, ``UniversalDetector`` with a ``lang_filter``; no allow/exclude set, no language
         hint.
     - - Performance
-      - ASCII, valid UTF-8, and real web pages short-circuit before any scoring, resolving 24x to 1700x ahead; legacy
-        single-byte text runs 3.2x to 4.0x ahead. See the table below.
+      - ASCII, valid UTF-8, and real web pages short-circuit before any scoring, resolving 30x to 1500x ahead; legacy
+        single-byte text runs 3.9x to 5.4x ahead. See the table below.
       - Prober ensemble runs every model on every input; no fast path for clean UTF-8 or ASCII.
     - - Typing
       - Fully typed: ``EncodingMatch``, ``Detection``, ``EncodingDetector`` are annotated dataclasses/classes with
@@ -89,7 +89,7 @@ What chardet has that turbohtml does not
   resolve to the closest WHATWG candidate instead. No equivalent when you need one of those exact labels. A UTF-16 or
   UTF-32 stream that *does* carry a mark now reports its exact label (see below).
 - A raw CJK speed edge on the C fork. On CJK-heavy byte streams (the Shift_JIS row), ``cchardet``'s uchardet engine
-  stays about 2.5x ahead of turbohtml, which decodes each candidate encoding to score it and a CJK stream leaves several
+  stays about 1.6x ahead of turbohtml, which decodes each candidate encoding to score it and a CJK stream leaves several
   candidates standing. Workaround: keep ``faust-cchardet`` for that one workload if it dominates; turbohtml leads
   chardet on every row.
 
@@ -99,11 +99,11 @@ Performance
 .. bench-table::
     :file: bench/chardet.json
 
-Certain input short-circuits before any scoring, so ASCII, valid UTF-8, and real web pages resolve 24x to 1700x ahead of
-chardet's prober ensemble; declaration-less legacy single-byte text still runs 3.2x to 4.0x ahead. Both libraries decode
+Certain input short-circuits before any scoring, so ASCII, valid UTF-8, and real web pages resolve 30x to 1500x ahead of
+chardet's prober ensemble; declaration-less legacy single-byte text still runs 3.9x to 5.4x ahead. Both libraries decode
 a 15-sample multilingual differential correctly, though chardet often names a sibling or superset where turbohtml
 reports the WHATWG encoding a browser would pick. The one exception is CJK-heavy bytes, where ``cchardet``'s uchardet
-engine leads (the Shift_JIS row, 2.3x); turbohtml leads on the declaration-less single-byte rows.
+engine leads (the Shift_JIS row, 1.6x); turbohtml leads on the declaration-less single-byte rows.
 
 ****************
  How to migrate

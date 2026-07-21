@@ -33,8 +33,8 @@ which signal the date came from instead of a bare string. No second parse, no ``
       - Same five signals (meta, JSON-LD, time, URL, text) scored off the DOM; standard-library date parsing
       - Same five signals plus boilerplate pruning, occurrence scoring, and ``dateparser`` for wide locale coverage
     - - Performance
-      - 2x to 2.9x faster on boilerplate pages with no date metadata (early exit over structured signals)
-      - Edges ahead on clean metadata pages where the header lookup returns first
+      - 2.9x to 3.3x faster across the corpus, early exit over the structured signals (BOM/meta/JSON-LD/time)
+      - Builds an lxml tree and scores pruned text; no structural fast path
     - - Typing
       - Fully typed; returns a :class:`~turbohtml.extract.PublicationDate` NamedTuple or ``None``
       - Typed hints; returns ``str`` or ``None``
@@ -91,9 +91,9 @@ What htmldate has that turbohtml does not
 Performance
 ===========
 
-Both libraries are parse-bound. On clean metadata pages htmldate's header lookup returns first and edges ahead; on
-boilerplate pages with no date metadata turbohtml's early exit over the structured signals runs 2x to 2.9x faster than
-htmldate's tree-pruning text scoring:
+Both libraries are parse-bound. turbohtml's early exit over the structured signals runs 2.9x to 3.3x faster than
+htmldate's tree-pruning text scoring across the corpus, and the row that once favored htmldate -- a page stacked with a
+hundred date-like ``<meta>`` tags -- now goes to turbohtml too, since it weighs the candidates in C:
 
 .. bench-table::
     :file: bench/htmldate.json

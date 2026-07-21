@@ -35,7 +35,7 @@ everywhere, and recovers from malformed input that lightningcss rejects. The :cl
       - All of that plus cross-sheet dead-declaration removal, target-driven syntax rewriting, vendor prefixing,
         ``@import`` bundling
     - - Performance
-      - Faster on every corpus sheet, 1.8x to 2.6x (see Performance)
+      - Faster on every corpus sheet, 1.3x to 2.4x (see Performance)
       - Smaller output on most inputs by trading target configuration for size
     - - Typing
       - Fully typed, frozen ``CSSMinify`` config object
@@ -65,7 +65,7 @@ What turbohtml adds
   target list to configure and no way to emit syntax a target cannot parse.
 - WHATWG error recovery: turbohtml minifies malformed stylesheets that lightningcss's parser rejects, for example a
   media query in ``foundation.css`` that the WHATWG rules accept.
-- Faster on every sheet: up to 2.6x on ``normalize.css``, and ahead of the Rust engine even on the largest,
+- Faster on every sheet: up to 2.4x on ``normalize.css``, and ahead of the Rust engine even on the largest,
   ``bootstrap.css`` and ``bulma.css``.
 - Inline-declaration minify via :func:`turbohtml.clean.minify_css_inline` for bare ``style``-attribute declaration
   lists, without a surrounding selector or braces.
@@ -89,10 +89,10 @@ lightningcss produces the smaller output on most of the corpus -- up to seven pe
 those targets support. turbohtml applies only transforms that hold on any conformant browser, so its default output
 needs no target list and parses to the same cascade everywhere; the :class:`~turbohtml.clean.CSSMinify` ``baseline``
 year opts into the newer-syntax shorthand merges when you are ready to require them. On speed turbohtml leads across the
-corpus: 2.6x faster on ``normalize.css`` and 2.4x on ``pico.css``, down to 1.8x on ``animate.css``, and it stays ahead
-on the larger ``bootstrap.css`` and ``bulma.css`` at 2.1x each. turbohtml recovers from malformed CSS that lightningcss
-rejects: ``foundation.css`` raises a parse error on a media query the WHATWG rules accept, where turbohtml minifies all
-six stylesheets. Each ratio is against turbohtml:
+corpus: 2.4x faster on ``normalize.css`` and 2.1x on ``pico.css``, down to 1.3x on ``animate.css``, and it stays ahead
+on the larger ``bootstrap.css`` and ``bulma.css`` at 1.8x and 2.0x. turbohtml recovers from malformed CSS that
+lightningcss rejects: ``foundation.css`` raises a parse error on a media query the WHATWG rules accept, where turbohtml
+minifies all six stylesheets. Each ratio is against turbohtml:
 
 .. bench-table::
     :file: bench/lightningcss.json
