@@ -185,8 +185,8 @@ def test_matches_runtime_unicodedata(form: NormalizationForm) -> None:  # pragma
         pytest.param("가abcé", id="hangul-before-the-prefix"),
     ],
 )
-@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD"])
-def test_text_before_the_first_unsettled_point_is_preserved(text: str, form: str) -> None:
+@pytest.mark.parametrize("form", _FORMS)
+def test_text_before_the_first_unsettled_point_is_preserved(text: str, form: NormalizationForm) -> None:
     # normalizing starts at the last settled starter and copies what precedes it, so a prefix that needs no work
     # must survive byte for byte and the result must still match the reference
     assert normalize(form, text) == unicodedata.normalize(form, text)
