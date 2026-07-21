@@ -252,3 +252,10 @@ def test_error_location_localized() -> None:
 def test_schema_from_parsed_document() -> None:
     schema_doc = parse_xml(wrap("<text/>"))
     assert RelaxNG(schema_doc).is_valid(parse_xml("<doc>x</doc>"))
+
+
+def test_prefix_resolution_skips_a_decoy_attribute() -> None:
+    # the attribute is exactly as long as "xmlns:" plus the prefix but is not a namespace declaration, so the
+    # resolver's name comparison has to reject it rather than matching on length alone
+    schema = '<x:element xmlnsyy="decoy" xmlns:x="http://relaxng.org/ns/structure/1.0" name="r"><x:text/></x:element>'
+    assert RelaxNG(schema).validate(parse_xml("<r>hi</r>")).valid
