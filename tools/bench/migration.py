@@ -32,8 +32,8 @@ _SIZE_OPS: Final = frozenset({"minify", "minify-css", "minify-js"})
 _MEMORY_OPS: Final = frozenset({"parse-dense", "rewrite"})
 _WIDE_OPS: Final = _SIZE_OPS | _MEMORY_OPS
 
-# Why a cell is empty when the library is measured in more than one configuration: the operation runs the same
-# code whichever one is chosen, so benchmarking it twice would publish a duplicate column.
+# Why a variant repeats the sibling's figure when the library is measured in more than one configuration: the
+# operation runs the same code whichever one is chosen, so benchmarking it twice would publish a duplicate column.
 _SHARED_WITH_OTHER_VARIANT: Final = "same in both configurations, so measured once"
 
 # A competitor module's stem maps to its migration page's slug by turning ``_`` into ``-``; these libraries
@@ -95,21 +95,20 @@ def _case_names(operation: str, stats: dict[str, dict[str, float]]) -> list[str]
 
 def _rows(
     variants: list[dict[str, str]], stats: dict[str, dict[str, float]]
-) -> tuple[list[list[str | float | None]], list[list[float | None]], list[str | None]]:
+) -> tuple[list[list[str | float]], list[list[float | None]], list[str | None]]:
     """
     Build a library's rows and their spread across every shared operation-case, prefixing labels that span ops.
 
     ``variants`` holds one ``{op: label}`` per competitor module sharing this page, so a library benchmarked in more
     than one configuration (BeautifulSoup over each of its tree builders) columns them side by side. A variant that
-    does not measure an operation leaves its cells empty rather than dropping the row for the ones that do.
+    does not measure an operation shows the sibling's shared figure rather than dropping the row for the ones that do.
     """
     covered = {operation for variant in variants for operation in variant}
     labels = [next(iter(variant.values())) for variant in variants]
-    prefixed = len(covered) > 1
     # a leading metric only makes sense when every shared operation carries one; a library that spans a memory
     # operation and timing-only ones would otherwise emit rows of two different widths into one table
     wide = bool(_leading_metric(covered))
-    rows: list[list[str | float | None]] = []
+    rows: list[list[str | float]] = []
     spread: list[list[float | None]] = []
     caveats: list[str | None] = []
     for operation, meta in ((op, operations.OPERATIONS[op]) for op in operations.OPERATIONS if op in covered):
@@ -123,15 +122,16 @@ def _rows(
                 continue
             # a case name is an authored RST fragment (an XPath expression arrives already wrapped in ``code``
             # backticks), so it passes through verbatim; escaping it here would double up on that markup
-            row_label = f"{meta.title} — {case}" if prefixed else case
+            row_label = f"{meta.title} — {case}" if len(covered) > 1 else case
             # a configuration that skips an operation runs the same code as the one measuring it, so its cells show
             # the shared measurement and the row's note says the figure was measured once
             measured = next(other for other in others if other is not None)
             shared = any(other is None for other in others)
             filled = [other if other is not None else measured for other in others]
+            row: list[str | float]
             if wide:
                 lead = "size" if operation in _SIZE_OPS else "peak"
-                row: list[str | float | None] = [row_label, turbo[lead], turbo["mean"]]
+                row = [row_label, turbo[lead], turbo["mean"]]
                 noise: list[float | None] = [None, None, turbo.get("cv")]
                 for other in filled:
                     row += [other[lead], other["mean"]]
