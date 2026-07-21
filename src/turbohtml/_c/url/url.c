@@ -803,9 +803,9 @@ PyObject *turbohtml_url_join(PyObject *Py_UNUSED(module), PyObject *args) {
    referral, not the content, so two URLs differing only in them address the same page. Kept sorted so the exact-name
    test is a binary search. */
 static const char *const TRACKER_NAMES[] = {
-    "clickid", "dclid",  "efid",      "epik",   "fb_ref",  "fb_source", "fbclid", "gbraid",
-    "gclid",   "gclsrc", "igsh",      "igshid", "mkt_tok", "msclkid",   "partnerid", "s_cid",
-    "sc_cid",  "ttclid", "twclid",    "wbraid", "wickedid", "yclid",    "ysclid",
+    "clickid", "dclid",  "efid",   "epik",   "fb_ref",   "fb_source", "fbclid",    "gbraid",
+    "gclid",   "gclsrc", "igsh",   "igshid", "mkt_tok",  "msclkid",   "partnerid", "s_cid",
+    "sc_cid",  "ttclid", "twclid", "wbraid", "wickedid", "yclid",     "ysclid",
 };
 
 static const char *const TRACKER_PREFIXES[] = {
@@ -815,8 +815,8 @@ static const char *const TRACKER_PREFIXES[] = {
 /* The words a tracking key is built from, matched as a whole underscore-delimited word rather than a substring so
    "reference" is not read as "ref". */
 static const char *const TRACKER_WORDS[] = {
-    "aff",   "affi",   "affiliate", "campaign", "cid",    "clid",   "keyword", "kwd",
-    "medium", "ref",   "refer",     "referer",  "referrer", "session", "source", "uid", "xtor",
+    "aff", "affi",  "affiliate", "campaign", "cid",     "clid",   "keyword", "kwd",  "medium",
+    "ref", "refer", "referer",   "referrer", "session", "source", "uid",     "xtor",
 };
 
 static int tracker_name_known(const char *key, size_t len) {
