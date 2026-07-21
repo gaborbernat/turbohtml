@@ -407,3 +407,21 @@ def test_language_detection_rejects_an_out_of_range_threshold(threshold: float) 
 def test_language_detection_rejects_allowed_with_excluded() -> None:
     with pytest.raises(ValueError, match="mutually exclusive"):
         LanguageDetection(allowed=frozenset({"eng"}), excluded=frozenset({"deu"}))
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # each shape lands the prescan on a "<" whose following bytes exercise one dispatch arm the memchr jump
+        # otherwise skips past: a meta opened too close to the end, a meta closed by "/", a "</" with no room for
+        # its letter, and a bare "</" bogus comment
+        pytest.param(b"x" * 40 + b"<meta", id="meta-at-buffer-end"),
+        pytest.param(b'<meta/charset="windows-1250">\xe1', id="meta-self-closing-name"),
+        pytest.param(b"y" * 40 + b"</", id="closing-tag-at-buffer-end"),
+        pytest.param(b"<//not-a-tag><p>\xe1</p>", id="bogus-double-slash"),
+        pytest.param(b"<meta ><meta charset=windows-1251>\xd0", id="meta-space-no-attrs"),
+    ],
+)
+def test_prescan_dispatch_edges(payload: bytes) -> None:
+    # the answer only has to be a real decision; the point is that the prescan walks the shape without misreading it
+    assert detect(payload).encoding

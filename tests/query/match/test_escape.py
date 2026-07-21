@@ -28,6 +28,9 @@ from turbohtml.query import escape_identifier
         pytest.param("a\tb", "a\\9 b", id="interior-control"),
         pytest.param("\x7f", "\\7f ", id="delete-char"),
         pytest.param("\x00abc", "�abc", id="null-to-replacement"),
+        pytest.param("a1b", "a1b", id="digit-after-letter-stays"),
+        pytest.param("1-", "\\31 -", id="leading-digit-then-dash"),
+        pytest.param("-a1", "-a1", id="dash-letter-digit"),
     ],
 )
 def test_escape_matches_cssom(raw: str, expected: str) -> None:

@@ -593,9 +593,11 @@ static int schema_fill_qnames(th_schema *schema, th_node *parent, Py_ssize_t *at
             /* a bare xmlns binds the default namespace; its prefix is the empty string, not a slice past the name */
             const char *decl_prefix = alen > 5 ? abytes + 6 : "";
             Py_ssize_t decl_prefix_len = alen > 5 ? alen - 6 : 0;
+            /* GCOVR_EXCL_BR_START: arena OOM is unforceable from a test */
             if (ns_scope_push(schema, scope, decl_prefix, decl_prefix_len, child->attrs[index].value,
-                              child->attrs[index].value_len) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-                return -1;                                          /* GCOVR_EXCL_LINE */
+                              child->attrs[index].value_len) < 0) {
+                /* GCOVR_EXCL_BR_STOP */
+                return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
             }
         }
         const Py_UCS4 *local;
