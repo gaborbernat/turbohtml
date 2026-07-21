@@ -27,6 +27,7 @@
 #include "dom/tree.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char XSD_NS[] = "http://www.w3.org/2001/XMLSchema";
@@ -123,6 +124,20 @@ typedef struct {
     Py_ssize_t uri_len;
 } qname;
 
+/* The schema tree is immutable once compiled, yet is_schema_el reclassifies its element
+   nodes millions of times while a document validates (the content-model matcher revisits
+   the same particles on every step). resolve_ns walking the ancestor chain per call is the
+   validator's hottest cost, so each schema element node's namespace-resolved qname is
+   computed once at compile time and looked up by node pointer here. Built before any
+   compile classification runs and never mutated afterwards, so a compiled schema shared
+   across validating threads stays read-only. */
+struct th_schema;
+typedef struct {
+    th_node *node;
+    qname name;
+} sqname_entry;
+static const qname *schema_node_qname(const struct th_schema *schema, th_node *node);
+
 static void split_prefix(const Py_UCS4 *name, Py_ssize_t len, const Py_UCS4 **local, Py_ssize_t *local_len,
                          const Py_UCS4 **prefix, Py_ssize_t *prefix_len) {
     for (Py_ssize_t index = 0; index < len; index++) {
@@ -206,25 +221,25 @@ static qname node_qname(th_tree *tree, th_node *element, const Py_UCS4 *name, Py
     return out;
 }
 
-static int is_schema_el(th_tree *tree, th_node *node, const char *ns, const char *local) {
+static int is_schema_el(const struct th_schema *schema, th_node *node, const char *ns, const char *local) {
     if (node->type != TH_NODE_ELEMENT) {
         return 0;
     }
-    qname name = node_qname(tree, node, node->text, node->text_len, 0);
-    if (!u_eq_ascii(name.local, name.local_len, local)) {
+    const qname *name = schema_node_qname(schema, node);
+    if (!u_eq_ascii(name->local, name->local_len, local)) {
         return 0;
     }
-    if (name.uri == NULL) {
+    if (name->uri == NULL) {
         return 0;
     }
-    return u_eq_ascii(name.uri, name.uri_len, ns);
+    return u_eq_ascii(name->uri, name->uri_len, ns);
 }
 
 /* The first element child of `node` in the schema namespace `ns` with local name
    `local`, or NULL. */
-static th_node *first_schema_child(th_tree *tree, th_node *node, const char *ns, const char *local) {
+static th_node *first_schema_child(const struct th_schema *schema, th_node *node, const char *ns, const char *local) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        if (is_schema_el(tree, child, ns, local)) {
+        if (is_schema_el(schema, child, ns, local)) {
             return child;
         }
     }
@@ -451,7 +466,71 @@ typedef struct th_schema {
     pattern *start;
     pattern *p_empty, *p_notallowed, *p_text;
     def_vec defines;
+    /* every schema element node's resolved qname, sorted by node pointer for is_schema_el */
+    sqname_entry *sqnames;
+    Py_ssize_t sqname_count;
 } th_schema;
+
+/* Look up a schema element node's precomputed qname. schema_build_qname_cache enters every
+   element node of the schema tree before any classification runs, and is_schema_el only ever
+   asks about schema element nodes, so the search always hits. */
+static const qname *schema_node_qname(const th_schema *schema, th_node *node) {
+    Py_ssize_t lo = 0, hi = schema->sqname_count - 1;
+    while (lo <= hi) { /* GCOVR_EXCL_BR_LINE: the searched-for node is always present, so the loop exits by return */
+        Py_ssize_t mid = lo + ((hi - lo) >> 1);
+        th_node *at = schema->sqnames[mid].node;
+        if (at == node) {
+            return &schema->sqnames[mid].name;
+        }
+        if (at < node) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return NULL; /* GCOVR_EXCL_LINE: every schema element node is cached, so the search never misses */
+}
+
+static Py_ssize_t schema_count_elements(th_node *parent) {
+    Py_ssize_t total = 0;
+    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            total += 1 + schema_count_elements(child);
+        }
+    }
+    return total;
+}
+
+static void schema_fill_qnames(th_schema *schema, th_node *parent, Py_ssize_t *at) {
+    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            schema->sqnames[*at].node = child;
+            schema->sqnames[*at].name = node_qname(schema->tree, child, child->text, child->text_len, 0);
+            (*at)++;
+            schema_fill_qnames(schema, child, at);
+        }
+    }
+}
+
+static int sqname_cmp(const void *left, const void *right) {
+    th_node *left_node = ((const sqname_entry *)left)->node;
+    th_node *right_node = ((const sqname_entry *)right)->node;
+    return (left_node > right_node) - (left_node < right_node);
+}
+
+static int schema_build_qname_cache(th_schema *schema) {
+    th_node *document = th_tree_document(schema->tree);
+    Py_ssize_t count = schema_count_elements(document);
+    schema->sqnames = arena_alloc(&schema->mem, (size_t)count * sizeof(sqname_entry));
+    if (schema->sqnames == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;                 /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t at = 0;
+    schema_fill_qnames(schema, document, &at);
+    schema->sqname_count = count;
+    qsort(schema->sqnames, (size_t)count, sizeof(sqname_entry), sqname_cmp);
+    return 0;
+}
 
 static int named_push(th_schema *schema, named_vec *vec, const Py_UCS4 *name, Py_ssize_t len, th_node *node) {
     if (vec->len == vec->cap) {
@@ -625,6 +704,10 @@ PyObject *turbohtml_schema_compile(PyObject *module, PyObject *args) {
     schema->tree = tree;
     schema->source = Py_NewRef(source);
     schema->root = document_root(tree);
+    if (schema_build_qname_cache(schema) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        schema_free(schema);                    /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory();                /* GCOVR_EXCL_LINE */
+    }
     int ok = kind == 0 ? xsd_compile(schema) : rng_compile(schema);
     if (!ok) {
         schema_free(schema);

@@ -302,7 +302,7 @@ static nameclass *rng_nameclass_choice_children(th_schema *schema, th_node *node
         if (child->type != TH_NODE_ELEMENT) {
             continue;
         }
-        if (is_schema_el(schema->tree, child, RNG_NS, "except")) {
+        if (is_schema_el(schema, child, RNG_NS, "except")) {
             continue;
         }
         nameclass *part = rng_build_nameclass(schema, child);
@@ -323,13 +323,13 @@ static nameclass *rng_build_nameclass(th_schema *schema, th_node *node) {
     if (node == NULL) { /* a malformed <element>/<attribute> with no name class matches any name */
         return nc_new(schema, NC_ANY);
     }
-    if (is_schema_el(tree, node, RNG_NS, "name")) {
+    if (is_schema_el(schema, node, RNG_NS, "name")) {
         Py_ssize_t len = 0;
         const Py_UCS4 *text = element_text_raw(tree, node, &len);
         return nc_from_qname(schema, node, text, len, 0);
     }
-    if (is_schema_el(tree, node, RNG_NS, "anyName")) {
-        th_node *except = first_schema_child(tree, node, RNG_NS, "except");
+    if (is_schema_el(schema, node, RNG_NS, "anyName")) {
+        th_node *except = first_schema_child(schema, node, RNG_NS, "except");
         if (except == NULL) {
             return nc_new(schema, NC_ANY);
         }
@@ -338,7 +338,7 @@ static nameclass *rng_build_nameclass(th_schema *schema, th_node *node) {
         nc->b = rng_nameclass_choice_children(schema, except);
         return nc;
     }
-    if (is_schema_el(tree, node, RNG_NS, "nsName")) {
+    if (is_schema_el(schema, node, RNG_NS, "nsName")) {
         nameclass *nc = nc_new(schema, NC_NS);
         const th_node_attr *ns = attr_exact(tree, node, "ns", 2);
         if (ns == NULL) {
@@ -347,7 +347,7 @@ static nameclass *rng_build_nameclass(th_schema *schema, th_node *node) {
             nc->uri = ns->value;
             nc->uri_len = ns->value_len;
         }
-        th_node *except = first_schema_child(tree, node, RNG_NS, "except");
+        th_node *except = first_schema_child(schema, node, RNG_NS, "except");
         if (except == NULL) {
             return nc;
         }
@@ -423,16 +423,16 @@ static pattern *rng_build_children(th_schema *schema, th_node *node, th_node *sk
 
 static pattern *rng_build(th_schema *schema, th_node *node) {
     th_tree *tree = schema->tree;
-    if (is_schema_el(tree, node, RNG_NS, "empty")) {
+    if (is_schema_el(schema, node, RNG_NS, "empty")) {
         return schema->p_empty;
     }
-    if (is_schema_el(tree, node, RNG_NS, "text")) {
+    if (is_schema_el(schema, node, RNG_NS, "text")) {
         return schema->p_text;
     }
-    if (is_schema_el(tree, node, RNG_NS, "notAllowed")) {
+    if (is_schema_el(schema, node, RNG_NS, "notAllowed")) {
         return schema->p_notallowed;
     }
-    if (is_schema_el(tree, node, RNG_NS, "element")) {
+    if (is_schema_el(schema, node, RNG_NS, "element")) {
         pattern *node_pat = pat_new(schema, P_ELEMENT);
         const th_node_attr *name = attr_exact(tree, node, "name", 4);
         th_node *skip = NULL;
@@ -446,7 +446,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         node_pat->p1 = rng_build_children(schema, node, skip);
         return node_pat;
     }
-    if (is_schema_el(tree, node, RNG_NS, "attribute")) {
+    if (is_schema_el(schema, node, RNG_NS, "attribute")) {
         pattern *node_pat = pat_new(schema, P_ATTRIBUTE);
         const th_node_attr *name = attr_exact(tree, node, "name", 4);
         th_node *skip = NULL;
@@ -467,10 +467,10 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         node_pat->p1 = has_content ? rng_build_children(schema, node, skip) : schema->p_text;
         return node_pat;
     }
-    if (is_schema_el(tree, node, RNG_NS, "group")) {
+    if (is_schema_el(schema, node, RNG_NS, "group")) {
         return rng_build_children(schema, node, NULL);
     }
-    if (is_schema_el(tree, node, RNG_NS, "choice")) {
+    if (is_schema_el(schema, node, RNG_NS, "choice")) {
         pattern *combined = schema->p_notallowed;
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
             if (child->type == TH_NODE_ELEMENT) {
@@ -479,7 +479,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         }
         return combined;
     }
-    if (is_schema_el(tree, node, RNG_NS, "interleave")) {
+    if (is_schema_el(schema, node, RNG_NS, "interleave")) {
         pattern *combined = schema->p_empty;
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
             if (child->type == TH_NODE_ELEMENT) {
@@ -488,24 +488,24 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         }
         return combined;
     }
-    if (is_schema_el(tree, node, RNG_NS, "optional")) {
+    if (is_schema_el(schema, node, RNG_NS, "optional")) {
         return pat_choice(schema, rng_build_children(schema, node, NULL), schema->p_empty);
     }
-    if (is_schema_el(tree, node, RNG_NS, "zeroOrMore")) {
+    if (is_schema_el(schema, node, RNG_NS, "zeroOrMore")) {
         return pat_choice(schema, pat_onemore(schema, rng_build_children(schema, node, NULL)), schema->p_empty);
     }
-    if (is_schema_el(tree, node, RNG_NS, "oneOrMore")) {
+    if (is_schema_el(schema, node, RNG_NS, "oneOrMore")) {
         return pat_onemore(schema, rng_build_children(schema, node, NULL));
     }
-    if (is_schema_el(tree, node, RNG_NS, "mixed")) {
+    if (is_schema_el(schema, node, RNG_NS, "mixed")) {
         return pat_interleave(schema, rng_build_children(schema, node, NULL), schema->p_text);
     }
-    if (is_schema_el(tree, node, RNG_NS, "list")) {
+    if (is_schema_el(schema, node, RNG_NS, "list")) {
         pattern *node_pat = pat_new(schema, P_LIST);
         node_pat->p1 = rng_build_children(schema, node, NULL);
         return node_pat;
     }
-    if (is_schema_el(tree, node, RNG_NS, "data")) {
+    if (is_schema_el(schema, node, RNG_NS, "data")) {
         pattern *node_pat = pat_new(schema, P_DATA);
         node_pat->datatype_id = rng_datatype_id(schema, node);
         facetset *facets = arena_alloc(&schema->mem, sizeof(*facets));
@@ -514,7 +514,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         }
         facetset_init(facets, node_pat->datatype_id);
         for (th_node *param = node->first_child; param != NULL; param = param->next_sibling) {
-            if (is_schema_el(tree, param, RNG_NS, "param")) {
+            if (is_schema_el(schema, param, RNG_NS, "param")) {
                 const th_node_attr *pname = attr_exact(tree, param, "name", 4);
                 Py_ssize_t vlen = 0;
                 const Py_UCS4 *value = element_text_raw(tree, param, &vlen);
@@ -526,14 +526,14 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         node_pat->facets = facets;
         return node_pat;
     }
-    if (is_schema_el(tree, node, RNG_NS, "value")) {
+    if (is_schema_el(schema, node, RNG_NS, "value")) {
         pattern *node_pat = pat_new(schema, P_VALUE);
         node_pat->datatype_id = rng_datatype_id(schema, node);
         node_pat->value = element_text_raw(tree, node, &node_pat->value_len);
         node_pat->value_ws = dt_default_ws(node_pat->datatype_id);
         return node_pat;
     }
-    if (is_schema_el(tree, node, RNG_NS, "ref")) {
+    if (is_schema_el(schema, node, RNG_NS, "ref")) {
         const th_node_attr *name = attr_exact(tree, node, "name", 4);
         Py_ssize_t index = def_find(&schema->defines, name->value, name->value_len);
         if (index >= 0) {
@@ -963,12 +963,12 @@ static int rng_compile(th_schema *schema) {
     schema->p_empty = pat_new(schema, P_EMPTY);
     schema->p_notallowed = pat_new(schema, P_NOTALLOWED);
     schema->p_text = pat_new(schema, P_TEXT);
-    if (!is_schema_el(tree, schema->root, RNG_NS, "grammar")) {
+    if (!is_schema_el(schema, schema->root, RNG_NS, "grammar")) {
         schema->start = rng_build(schema, schema->root);
         return 1;
     }
     for (th_node *child = schema->root->first_child; child != NULL; child = child->next_sibling) {
-        if (is_schema_el(tree, child, RNG_NS, "define")) {
+        if (is_schema_el(schema, child, RNG_NS, "define")) {
             const th_node_attr *name = attr_exact(tree, child, "name", 4);
             if (name == NULL) {
                 continue;
@@ -979,7 +979,7 @@ static int rng_compile(th_schema *schema) {
             }
         }
     }
-    th_node *start = first_schema_child(tree, schema->root, RNG_NS, "start");
+    th_node *start = first_schema_child(schema, schema->root, RNG_NS, "start");
     if (start == NULL) {
         PyErr_SetString(PyExc_ValueError, "grammar has no start element");
         return 0;
