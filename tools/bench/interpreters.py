@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from bench import operations, orchestrator
-from bench.report import rst_safe
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -81,7 +80,8 @@ def _rows(measured: dict[str, dict[str, dict[str, float | str]]]) -> Iterator[li
     """One row per operation-case; the label carries the operation title because the table spans several."""
     for operation in OPERATIONS:
         for case, cells in measured[operation].items():
-            label = rst_safe(f"{operations.OPERATIONS[operation].title} — {case}")
+            # the case name is an authored RST fragment, so it is rendered verbatim rather than re-escaped
+            label = f"{operations.OPERATIONS[operation].title} — {case}"
             yield [label, *(cells.get(party) for party, _ in INTERPRETERS)]
 
 

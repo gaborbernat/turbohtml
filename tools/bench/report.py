@@ -152,11 +152,6 @@ def _cells(stat: _Stat | None, *, extra: str | None) -> list[float | str | None]
     return [stat[extra], stat["mean"]] if extra else [stat["mean"]]
 
 
-def rst_safe(label: str) -> str:
-    """Escape the RST inline-markup starters (an XPath case can carry ``*`` or ``|``); the directive parses labels."""
-    return label.replace("\\", "\\\\").replace("*", "\\*").replace("|", "\\|").replace("`", "\\`")
-
-
 def _spread_cells(stat: _Stat | None, *, extra: str | None) -> list[float | None]:
     """
     Return a party's noise level for one case, aligned with :func:`_cells`.

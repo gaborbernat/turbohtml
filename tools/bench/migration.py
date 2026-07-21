@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Final
 
 from bench import operations
 from bench.notes import NOTES
-from bench.report import rst_safe
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -115,7 +114,9 @@ def _rows(
             ]
             if turbo is None or all(other is None for other in others):
                 continue
-            row_label = rst_safe(f"{meta.title} — {case}" if prefixed else case)
+            # a case name is an authored RST fragment (an XPath expression arrives already wrapped in ``code``
+            # backticks), so it passes through verbatim; escaping it here would double up on that markup
+            row_label = f"{meta.title} — {case}" if prefixed else case
             # a configuration that skips an operation another one measures skips it because the two run the same
             # code there, so the cell says that rather than leaving an unexplained blank
             absent: list[str | None] = [
