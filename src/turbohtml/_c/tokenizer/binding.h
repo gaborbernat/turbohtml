@@ -131,6 +131,11 @@ PyObject *turbohtml_rewrite(PyObject *module, PyObject *args);
    METH_O. */
 PyObject *turbohtml_sax_events(PyObject *module, PyObject *arg);
 
+/* Parse markup and drive a handler object's start_element/end_element/characters/comment/doctype/
+   processing_instruction methods over the events in document order, building no per-event record; the push
+   form behind turbohtml.saxparse.sax_parse. Matches METH_VARARGS: (source, handler). */
+PyObject *turbohtml_sax_dispatch(PyObject *module, PyObject *args);
+
 /* Parse markup and drive a caller-supplied builder object over the constructed tree in
    document order (create_document/create_doctype/create_element/create_text/
    create_comment/create_pi/append), returning whatever the builder made its root without
