@@ -28,7 +28,12 @@
 #include "core/ascii.h"
 #include "core/common.h"
 
+#include "dom/nodes.h"
+#include "tokenizer/binding.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
+
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define CP(index) PyUnicode_READ(kind, data, (index))
 
@@ -502,33 +507,27 @@ static int append_ymd(PyObject *list, int year, int month, int day) {
     return rc; /* GCOVR_EXCL_BR_LINE: PyList_Append only fails on allocation failure */
 }
 
-/* _scan: the first numeric date, trying ISO, then the compact stamp, then the
-   day-month-year spelling. ISO and compact fall through to the next pattern when
-   their first match is calendar-impossible; day-month-year is the last, so its
-   result (valid or None) is returned as is. */
-PyObject *turbohtml_date_scan(PyObject *Py_UNUSED(module), PyObject *args) {
-    PyObject *text;
-    int current_year;
-    if (!PyArg_ParseTuple(args, "Ui:_date_scan", &text, &current_year)) {
-        return NULL;
-    }
-    int kind = PyUnicode_KIND(text);
-    const void *data = PyUnicode_DATA(text);
-    Py_ssize_t len = PyUnicode_GET_LENGTH(text);
-    int year, month, day;
+/* The first numeric date in the text -- ISO, then the compact stamp, then the
+   day-month-year spelling, each tried in turn. ISO and compact fall through to the
+   next pattern when their first match is calendar-impossible; day-month-year is the
+   last, so its first match (valid or not) settles the answer. Writes (year, month,
+   day) and returns 1 on a hit, 0 when the text carries no date. Shared by the
+   _date_scan entry point and the <meta> date walk. */
+static int scan_first_date(const void *data, int kind, Py_ssize_t len, int current_year, int *year, int *month,
+                           int *day) {
     Py_ssize_t end;
     for (Py_ssize_t pos = 0; pos < len; pos++) {
-        if (iso_at(data, kind, len, pos, &year, &month, &day, &end)) {
-            if (ymd_valid(year, month, day)) {
-                return Py_BuildValue("(iii)", year, month, day);
+        if (iso_at(data, kind, len, pos, year, month, day, &end)) {
+            if (ymd_valid(*year, *month, *day)) {
+                return 1;
             }
             break;
         }
     }
     for (Py_ssize_t pos = 0; pos < len; pos++) {
-        if ((pos == 0 || !is_ascii_digit(CP(pos - 1))) && compact_at(data, kind, len, pos, &year, &month, &day)) {
-            if (ymd_valid(year, month, day)) {
-                return Py_BuildValue("(iii)", year, month, day);
+        if ((pos == 0 || !is_ascii_digit(CP(pos - 1))) && compact_at(data, kind, len, pos, year, month, day)) {
+            if (ymd_valid(*year, *month, *day)) {
+                return 1;
             }
             break;
         }
@@ -538,11 +537,27 @@ PyObject *turbohtml_date_scan(PyObject *Py_UNUSED(module), PyObject *args) {
         if ((pos == 0 || !is_ascii_digit(CP(pos - 1))) &&
             dmy_at(data, kind, len, pos, &raw_day, &raw_month, &raw_year, &end)) {
             int resolved_year = correct_year(raw_year, current_year);
-            if (dmy_resolve(raw_day, raw_month, resolved_year, &month, &day)) {
-                return Py_BuildValue("(iii)", resolved_year, month, day);
+            if (dmy_resolve(raw_day, raw_month, resolved_year, month, day)) {
+                *year = resolved_year;
+                return 1;
             }
             break;
         }
+    }
+    return 0;
+}
+
+/* _scan: the first numeric date, or None. */
+PyObject *turbohtml_date_scan(PyObject *Py_UNUSED(module), PyObject *args) {
+    PyObject *text;
+    int current_year;
+    if (!PyArg_ParseTuple(args, "Ui:_date_scan", &text, &current_year)) {
+        return NULL;
+    }
+    int year, month, day;
+    if (scan_first_date(PyUnicode_DATA(text), PyUnicode_KIND(text), PyUnicode_GET_LENGTH(text), current_year, &year,
+                        &month, &day)) {
+        return Py_BuildValue("(iii)", year, month, day);
     }
     Py_RETURN_NONE;
 }
@@ -665,6 +680,263 @@ PyObject *turbohtml_date_url(PyObject *Py_UNUSED(module), PyObject *url) {
             }
             break;
         }
+    }
+    Py_RETURN_NONE;
+}
+
+/* The <meta> date stage of turbohtml.extract.dates.
+
+   Python gathered every meta candidate into a list and then ran the shared _pick
+   selection over it; both now run here in one walk. The vocabularies below are
+   htmldate's meta key lists (the same tables the Python module held), sorted so a
+   lowercased key resolves by binary search. Every entry is lowercase ASCII, so a
+   key with a non-ASCII code point -- or one longer than the longest entry -- can
+   match neither list and is rejected before the search. */
+
+/* The longest vocabulary entry, "og:article:published_time" and
+   "citation_publication_date", both 25 bytes; the fold buffer holds that plus a
+   terminator. */
+#define MAX_KEY_LEN 25
+
+static const char *const PUBLISHED_KEYS[] = {
+    "article.created",
+    "article.published",
+    "article:published",
+    "article:published_time",
+    "article_date_original",
+    "bt:pubdate",
+    "citation_date",
+    "citation_publication_date",
+    "created",
+    "date",
+    "date_published",
+    "datecreated",
+    "dateposted",
+    "datepublished",
+    "dc.date",
+    "dc.date.created",
+    "dc.date.issued",
+    "dc.date.publication",
+    "dcterms.created",
+    "dcterms.date",
+    "dcterms.issued",
+    "og:article:published_time",
+    "og:pubdate",
+    "og:published_time",
+    "parsely-pub-date",
+    "pdate",
+    "pubdate",
+    "publication_date",
+    "publish-date",
+    "publish_date",
+    "published_date",
+    "published_time",
+    "publisheddate",
+    "pubyear",
+    "rnews:datepublished",
+    "sailthru.date",
+    "timestamp",
+};
+
+static const char *const MODIFIED_KEYS[] = {
+    "article:modified",
+    "article:modified_time",
+    "article:post_modified",
+    "datemodified",
+    "dateupdate",
+    "dc.modified",
+    "dcterms.modified",
+    "last-modified",
+    "lastdate",
+    "lastmod",
+    "lastmodified",
+    "modificationdate",
+    "modified",
+    "modified_time",
+    "og:article:modified_time",
+    "og:modified_time",
+    "og:updated_time",
+    "revision_date",
+    "updated_time",
+};
+
+/* The date roles a meta key can carry; 0 is "neither key list matched". */
+enum { META_NONE = 0, META_PUBLISHED = 1, META_MODIFIED = 2 };
+
+static int key_set_compare(const void *probe, const void *entry) {
+    return strcmp((const char *)probe, *(const char *const *)entry);
+}
+
+static int key_in_set(const char *key, const char *const *set, size_t count) {
+    return bsearch(key, set, count, sizeof(*set), key_set_compare) != NULL;
+}
+
+/* Fold an attribute value to a lowercase-ASCII C string in out, returning 1 on
+   success. A code point above U+007F, or a value longer than the longest key,
+   cannot equal any (lowercase, ASCII) vocabulary entry, so both short-circuit to 0
+   rather than folding. */
+static int fold_key(const Py_UCS4 *value, Py_ssize_t len, char *out) {
+    if (len > MAX_KEY_LEN) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 codepoint = value[index];
+        if (codepoint > 0x7F) {
+            return 0;
+        }
+        out[index] = (char)((codepoint >= 'A' && codepoint <= 'Z') ? codepoint + ('a' - 'A') : codepoint);
+    }
+    out[len] = '\0';
+    return 1;
+}
+
+/* Which key list, if any, an attribute value falls in. */
+static int key_role(const Py_UCS4 *value, Py_ssize_t len) {
+    char folded[MAX_KEY_LEN + 1];
+    if (value == NULL || !fold_key(value, len, folded)) {
+        return META_NONE;
+    }
+    if (key_in_set(folded, PUBLISHED_KEYS, sizeof(PUBLISHED_KEYS) / sizeof(*PUBLISHED_KEYS))) {
+        return META_PUBLISHED;
+    }
+    if (key_in_set(folded, MODIFIED_KEYS, sizeof(MODIFIED_KEYS) / sizeof(*MODIFIED_KEYS))) {
+        return META_MODIFIED;
+    }
+    return META_NONE;
+}
+
+/* The value of a by-name attribute (property, pubdate: neither is an interned
+   atom), or NULL when the node has none. */
+static const th_node_attr *named_attr(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    Py_ssize_t index = th_node_attr_find(tree, node, name, name_len);
+    return index < 0 ? NULL : &node->attrs[index];
+}
+
+/* The date role of a <meta> element from its name/property/itemprop/http-equiv keys
+   and a pubdate="pubdate" flag, publication winning over modification (htmldate's
+   _role_of returns the publication role whenever any key carries it). */
+static int meta_role(th_tree *tree, th_node *node) {
+    const th_node_attr *keys[] = {
+        find_node_attr(node, TH_ATTR_NAME),
+        named_attr(tree, node, "property", 8),
+        find_node_attr(node, TH_ATTR_ITEMPROP),
+        find_node_attr(node, TH_ATTR_HTTP_EQUIV),
+    };
+    int modified = 0;
+    for (size_t index = 0; index < sizeof(keys) / sizeof(*keys); index++) {
+        if (keys[index] == NULL) {
+            continue;
+        }
+        int role = key_role(keys[index]->value, keys[index]->value_len);
+        if (role == META_PUBLISHED) {
+            return META_PUBLISHED;
+        }
+        if (role == META_MODIFIED) {
+            modified = 1;
+        }
+    }
+    /* pubdate="pubdate" adds the literal key "pubdate", itself a publication key. */
+    const th_node_attr *pubdate = named_attr(tree, node, "pubdate", 7);
+    char folded[MAX_KEY_LEN + 1];
+    if (pubdate != NULL && pubdate->value != NULL && fold_key(pubdate->value, pubdate->value_len, folded) &&
+        strcmp(folded, "pubdate") == 0) {
+        return META_PUBLISHED;
+    }
+    return modified ? META_MODIFIED : META_NONE;
+}
+
+/* The text a <meta> dates from: its content, or its datetime when content is
+   absent or empty (htmldate reads `content or datetime`; an absent or empty
+   attribute has a NULL value here). Writes the length and returns the value, or
+   NULL when neither is present, which the caller drops. */
+static const Py_UCS4 *meta_date_text(th_node *node, Py_ssize_t *out_len) {
+    const th_node_attr *content = find_node_attr(node, TH_ATTR_CONTENT);
+    if (content != NULL && content->value != NULL) {
+        *out_len = content->value_len;
+        return content->value;
+    }
+    const th_node_attr *datetime = find_node_attr(node, TH_ATTR_DATETIME);
+    if (datetime != NULL && datetime->value != NULL) {
+        *out_len = datetime->value_len;
+        return datetime->value;
+    }
+    *out_len = 0;
+    return NULL;
+}
+
+/* Whether year-month-day is at least the min bound; the parts compare like the
+   ordinals htmldate's window uses, monotonically, so a component compare suffices. */
+static int date_at_least(int year, int month, int day, int min_year, int min_month, int min_day) {
+    if (year != min_year) {
+        return year > min_year;
+    }
+    if (month != min_month) {
+        return month > min_month;
+    }
+    return day >= min_day;
+}
+
+/* Document._date_meta(want, current_year, min_y, min_m, min_d, max_y, max_m, max_d)
+   -> (year, month, day) or None.
+
+   The <meta> stage of turbohtml.extract.dates, gathering and selection fused into
+   one walk. want is META_PUBLISHED (original=True) or META_MODIFIED; a candidate
+   whose role matches want wins on sight -- htmldate's _pick returns the first
+   wanted-role hit -- so the walk stops at the first such element instead of scoring
+   the rest. A date outside [min, max] is ignored; the first in-window off-role date
+   is the fallback _pick returns when no wanted-role date appears. */
+PyObject *turbohtml_document_date_meta(PyObject *self, PyObject *args) {
+    int want, current_year, min_year, min_month, min_day, max_year, max_month, max_day;
+    if (!PyArg_ParseTuple(args, "iiiiiiii:_date_meta", &want, &current_year, &min_year, &min_month, &min_day, &max_year,
+                          &max_month, &max_day)) {
+        return NULL;
+    }
+    th_tree *tree = tree_of(self);
+    th_node *root = ((NodeObject *)self)->node;
+    int wanted_hit = 0, wanted_year = 0, wanted_month = 0, wanted_day = 0;
+    int reserve_hit = 0, reserve_year = 0, reserve_month = 0, reserve_day = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
+        if (node->type != TH_NODE_ELEMENT || node->atom != TH_TAG_META) {
+            continue;
+        }
+        int role = meta_role(tree, node);
+        if (role == META_NONE) {
+            continue;
+        }
+        Py_ssize_t len;
+        const Py_UCS4 *text = meta_date_text(node, &len);
+        if (text == NULL) {
+            continue;
+        }
+        int year, month, day;
+        if (!scan_first_date(text, PyUnicode_4BYTE_KIND, len, current_year, &year, &month, &day)) {
+            continue;
+        }
+        if (!date_at_least(year, month, day, min_year, min_month, min_day) ||
+            !date_at_least(max_year, max_month, max_day, year, month, day)) {
+            continue;
+        }
+        if (role == want) {
+            wanted_hit = 1;
+            wanted_year = year;
+            wanted_month = month;
+            wanted_day = day;
+            break;
+        }
+        if (!reserve_hit) {
+            reserve_hit = 1;
+            reserve_year = year;
+            reserve_month = month;
+            reserve_day = day;
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (wanted_hit) {
+        return Py_BuildValue("(iii)", wanted_year, wanted_month, wanted_day);
+    }
+    if (reserve_hit) {
+        return Py_BuildValue("(iii)", reserve_year, reserve_month, reserve_day);
     }
     Py_RETURN_NONE;
 }

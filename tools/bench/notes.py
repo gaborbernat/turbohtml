@@ -51,12 +51,11 @@ NOTES: Final[dict[str, dict[str, str]]] = {
             "links at all, so that timing is the cost of finding nothing"
         ),
     },
-    "date": {
-        "htmldate": (
-            "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of "
-            "finding the date turbohtml reports"
-        ),
-    },
+    "date": dict.fromkeys(
+        ("htmldate", "trafilatura"),
+        "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of "
+        "finding the date turbohtml reports",
+    ),
     "text-content": {
         "resiliparse": (
             "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so "
