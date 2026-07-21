@@ -227,6 +227,13 @@ PyObject *turbohtml_date_scan(PyObject *module, PyObject *args);
 PyObject *turbohtml_date_scan_all(PyObject *module, PyObject *args);
 PyObject *turbohtml_date_url(PyObject *module, PyObject *url);
 
+/* Document._date_meta(want, current_year, min_y, min_m, min_d, max_y, max_m, max_d)
+   -> (year, month, day) or None (METH_VARARGS): the <meta> stage of
+   turbohtml.extract.dates, walking the meta elements, classifying each publication
+   or modification date against htmldate's key vocabulary, and returning the winner
+   the shared _pick selection would. Registered on the document method table. */
+PyObject *turbohtml_document_date_meta(PyObject *self, PyObject *args);
+
 /* Implemented in tokenizer/tokenizer.c. tokenize() matches METH_VARARGS | METH_KEYWORDS;
    the internal conformance hook _tokenize_states matches METH_VARARGS. */
 PyObject *turbohtml_tokenize(PyObject *module, PyObject *args, PyObject *kwargs);
