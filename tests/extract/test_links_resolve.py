@@ -98,7 +98,7 @@ def _resolved_href(href: str, base: str) -> str:
 
 
 # resolve_links skips urljoin for an already-absolute link it would return unchanged; every case must still match the
-# stdlib join it stands in for, whether the link is skipped (absolute) or actually rejoined (relative, or a would-be
+# stdlib join it stands in for, whether the link is skipped (absolute) or rejoined (relative, or a would-be
 # skip that urljoin rewrites). The href carries no surrounding whitespace, so the scanned span is the whole value.
 @pytest.mark.parametrize(
     ("base", "href"),
