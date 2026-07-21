@@ -20,9 +20,11 @@ from urllib.parse import urlunsplit
 
 from turbohtml._html import (
     _registrable_domain,
+    _url_is_tracker,
     _url_join,
     _url_percent_decode,
     _url_percent_encode,
+    _url_remove_dot_segments,
     _url_split,
     _url_to_ascii,
     parse,
@@ -52,35 +54,6 @@ _ISO_639_1: Final[frozenset[str]] = frozenset([
 
 # Names compiled from the public query-stripping lists (Firefox's query-stripping records, the ClearURLs rules, and
 # AdGuard's TrackParamFilter), the same sources courlan cites.
-_TRACKER_NAMES: Final[frozenset[str]] = frozenset({
-    "clickid",
-    "dclid",
-    "efid",
-    "epik",
-    "fb_ref",
-    "fb_source",
-    "fbclid",
-    "gbraid",
-    "gclid",
-    "gclsrc",
-    "igsh",
-    "igshid",
-    "mkt_tok",
-    "msclkid",
-    "partnerid",
-    "s_cid",
-    "sc_cid",
-    "ttclid",
-    "twclid",
-    "wbraid",
-    "wickedid",
-    "yclid",
-    "ysclid",
-})
-_TRACKER_PREFIXES: Final = ("ad_", "ads_", "ga_", "gs_", "hsa_", "itm_", "mc_", "mtm_", "oly_", "pk_", "utm_", "vero_")
-_TRACKER_WORDS: Final = re.compile(
-    r"(?:^|_)(?:aff(?:i(?:liate)?)?|campaign|cl?id|keyword|kwd|medium|refer(?:r?er)?|ref|session|source|uid|xtor)(?:_|$)"
-)
 
 _CONTENT_PARAMS: Final[frozenset[str]] = frozenset({
     "aid",
@@ -353,7 +326,7 @@ def _normalize(parts: _Split, options: UrlCleaning) -> str:
     netloc = _normalize_netloc(parts, scheme) if parts.netloc else ""
     path = _encode(parts.path, _SET_PATH)
     if netloc:
-        path = _remove_dot_segments(path)
+        path = _url_remove_dot_segments(path)
     query = _normalize_query(parts.query, options)
     if netloc and scheme in _WEB_SCHEMES and not path:
         path = "/"  # a special URL with a host never serializes an empty path (URL serializing, spec 4.5)
@@ -406,26 +379,6 @@ def _encode(text: str, url_set: int) -> str:
         raise ValueError(msg) from exc
 
 
-def _remove_dot_segments(path: str) -> str:
-    """Resolve ``.`` and ``..`` segments, including their ``%2e`` spellings, as the path state does (spec 4.4)."""
-    if "." not in path and "%2E" not in path:
-        return path
-    output: list[str] = []
-    dotted = ""
-    for segment in path.split("/"):
-        dotted = segment.replace("%2E", ".")
-        if dotted == ".":
-            continue
-        if dotted == "..":
-            if len(output) > 1:
-                output.pop()
-        else:
-            output.append(segment)
-    if dotted in {".", ".."}:
-        output.append("")
-    return "/".join(output)
-
-
 def _normalize_query(query: str, options: UrlCleaning) -> str:
     """Drop denied, tracker, or non-allowlisted parameters and sort the rest, keeping each pair's raw encoding."""
     allow = {name.lower() for name in options.query_allow} if options.query_allow is not None else None
@@ -442,21 +395,11 @@ def _normalize_query(query: str, options: UrlCleaning) -> str:
         elif options.strict:
             dropped = key not in _CONTENT_PARAMS and key not in _LANGUAGE_PARAMS
         else:
-            dropped = _is_tracker(key)
+            dropped = _url_is_tracker(key)
         if dropped:
             continue
         kept.append((key, _encode(pair, _SET_QUERY)))
     return "&".join(pair for _key, pair in sorted(kept))
-
-
-def _is_tracker(key: str) -> bool:
-    """Match a query-parameter name against the compiled tracking-parameter vocabulary."""
-    return (
-        key in _TRACKER_NAMES
-        or key.startswith(_TRACKER_PREFIXES)
-        or key.endswith("clid")
-        or _TRACKER_WORDS.search(key) is not None
-    )
 
 
 def _normalize_fragment(fragment: str, options: UrlCleaning) -> str:
@@ -464,7 +407,7 @@ def _normalize_fragment(fragment: str, options: UrlCleaning) -> str:
     if "=" in fragment:
         if "&" in fragment:
             return _normalize_query(fragment, options)
-        if _is_tracker(_url_percent_decode(fragment.partition("=")[0]).lower()):
+        if _url_is_tracker(_url_percent_decode(fragment.partition("=")[0]).lower()):
             return ""
     return _encode(fragment, _SET_FRAGMENT)
 

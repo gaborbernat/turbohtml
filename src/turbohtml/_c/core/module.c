@@ -230,6 +230,8 @@ static PyMethodDef html_methods[] = {
     {"_url_percent_encode", turbohtml_url_percent_encode, METH_VARARGS, NULL},
     {"_url_percent_decode", turbohtml_url_percent_decode, METH_O, NULL},
     {"_url_join", turbohtml_url_join, METH_VARARGS, NULL},
+    {"_url_is_tracker", turbohtml_url_is_tracker, METH_O, NULL},
+    {"_url_remove_dot_segments", turbohtml_url_remove_dot_segments, METH_O, NULL},
     {"_url_to_ascii", turbohtml_url_to_ascii, METH_O, NULL},
     {"_sanitize", turbohtml_sanitize, METH_VARARGS, NULL},
     {"_grow_probe", turbohtml_grow_probe, METH_VARARGS, NULL},

@@ -798,3 +798,205 @@ PyObject *turbohtml_url_join(PyObject *Py_UNUSED(module), PyObject *args) {
     }
     return th_url_join(base, target);
 }
+
+/* The tracking-parameter vocabulary. A crawl-oriented cleaner drops these query keys because they identify the
+   referral, not the content, so two URLs differing only in them address the same page. Kept sorted so the exact-name
+   test is a binary search. */
+static const char *const TRACKER_NAMES[] = {
+    "clickid", "dclid",  "efid",      "epik",   "fb_ref",  "fb_source", "fbclid", "gbraid",
+    "gclid",   "gclsrc", "igsh",      "igshid", "mkt_tok", "msclkid",   "partnerid", "s_cid",
+    "sc_cid",  "ttclid", "twclid",    "wbraid", "wickedid", "yclid",    "ysclid",
+};
+
+static const char *const TRACKER_PREFIXES[] = {
+    "ad_", "ads_", "ga_", "gs_", "hsa_", "itm_", "mc_", "mtm_", "oly_", "pk_", "utm_", "vero_",
+};
+
+/* The words a tracking key is built from, matched as a whole underscore-delimited word rather than a substring so
+   "reference" is not read as "ref". */
+static const char *const TRACKER_WORDS[] = {
+    "aff",   "affi",   "affiliate", "campaign", "cid",    "clid",   "keyword", "kwd",
+    "medium", "ref",   "refer",     "referer",  "referrer", "session", "source", "uid", "xtor",
+};
+
+static int tracker_name_known(const char *key, size_t len) {
+    size_t low = 0;
+    size_t high = sizeof(TRACKER_NAMES) / sizeof(TRACKER_NAMES[0]);
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        int order = strncmp(TRACKER_NAMES[mid], key, len);
+        if (order == 0 && TRACKER_NAMES[mid][len] != '\0') {
+            order = 1;
+        }
+        if (order == 0) {
+            return 1;
+        }
+        if (order < 0) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return 0;
+}
+
+static int tracker_word_at(const char *key, size_t start, size_t end) {
+    size_t len = end - start;
+    for (size_t index = 0; index < sizeof(TRACKER_WORDS) / sizeof(TRACKER_WORDS[0]); index++) {
+        if (strlen(TRACKER_WORDS[index]) == len && strncmp(TRACKER_WORDS[index], key + start, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* _url_is_tracker(key): whether a lowercased query-parameter name identifies a referral rather than content. */
+PyObject *turbohtml_url_is_tracker(PyObject *Py_UNUSED(module), PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "_url_is_tracker() argument must be str");
+        return NULL;
+    }
+    Py_ssize_t size;
+    const char *key = PyUnicode_AsUTF8AndSize(arg, &size);
+    if (key == NULL) { /* GCOVR_EXCL_BR_LINE: a lone surrogate cannot reach here from a decoded parameter name */
+        return NULL;   /* GCOVR_EXCL_LINE: unencodable-name path */
+    }
+    size_t len = (size_t)size;
+    if (tracker_name_known(key, len)) {
+        Py_RETURN_TRUE;
+    }
+    for (size_t index = 0; index < sizeof(TRACKER_PREFIXES) / sizeof(TRACKER_PREFIXES[0]); index++) {
+        size_t plen = strlen(TRACKER_PREFIXES[index]);
+        if (len >= plen && strncmp(key, TRACKER_PREFIXES[index], plen) == 0) {
+            Py_RETURN_TRUE;
+        }
+    }
+    if (len >= 4 && strncmp(key + len - 4, "clid", 4) == 0) {
+        Py_RETURN_TRUE;
+    }
+    /* each underscore-delimited word, so a tracking word anywhere in the name matches but a longer word containing
+       one does not */
+    size_t start = 0;
+    for (size_t index = 0; index <= len; index++) {
+        if (index == len || key[index] == '_') {
+            if (tracker_word_at(key, start, index)) {
+                Py_RETURN_TRUE;
+            }
+            start = index + 1;
+        }
+    }
+    Py_RETURN_FALSE;
+}
+
+/* Whether the segment work[start,end) spells "." or ".." once its %2E escapes are read as dots; `dots` receives the
+   dot count so the caller can tell the two apart. A segment of anything else answers zero. */
+static int dot_segment(const Py_UCS4 *work, Py_ssize_t start, Py_ssize_t end, int *dots) {
+    int count = 0;
+    for (Py_ssize_t index = start; index < end;) {
+        if (work[index] == '.') {
+            index += 1;
+        } else if (index + 2 < end && work[index] == '%' && work[index + 1] == '2' &&
+                   (work[index + 2] == 'E' || work[index + 2] == 'e')) {
+            index += 3;
+        } else {
+            return 0;
+        }
+        count += 1;
+        if (count > 2) {
+            return 0;
+        }
+    }
+    *dots = count;
+    return count == 1 || count == 2;
+}
+
+/* _url_remove_dot_segments(path): resolve the "." and ".." segments of a path, in either their literal or %2E
+   spelling, keeping every other segment's encoding verbatim. */
+PyObject *turbohtml_url_remove_dot_segments(PyObject *Py_UNUSED(module), PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "_url_remove_dot_segments() argument must be str");
+        return NULL;
+    }
+    Py_ssize_t len = PyUnicode_GET_LENGTH(arg);
+    int kind = PyUnicode_KIND(arg);
+    const void *data = PyUnicode_DATA(arg);
+    Py_UCS4 *work = PyMem_Malloc((size_t)(len + 1) * sizeof(Py_UCS4));
+    if (work == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int dotted = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        work[index] = PyUnicode_READ(kind, data, index);
+        if (work[index] == '.' || work[index] == '%') {
+            dotted = 1;
+        }
+    }
+    if (!dotted) { /* no segment can be dotted, so the path resolves to itself */
+        PyMem_Free(work);
+        return Py_NewRef(arg);
+    }
+    /* segment starts, so popping a ".." is dropping the last recorded start */
+    Py_ssize_t *starts = PyMem_Malloc((size_t)(len + 2) * sizeof(Py_ssize_t));
+    Py_ssize_t *ends = PyMem_Malloc((size_t)(len + 2) * sizeof(Py_ssize_t));
+    if (starts == NULL || ends == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(work);                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(starts);               /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(ends);                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory();          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t kept = 0;
+    Py_ssize_t start = 0;
+    int last_dots = 0;
+    for (Py_ssize_t index = 0; index <= len; index++) {
+        if (index != len && work[index] != '/') {
+            continue;
+        }
+        last_dots = 0;
+        int single = dot_segment(work, start, index, &last_dots);
+        if (single && last_dots == 1) {
+            last_dots = 1;
+        } else if (single) {
+            /* a ".." drops the previous segment, but never the leading empty one a rooted path opens with */
+            if (kept > 1) {
+                kept -= 1;
+            }
+        } else {
+            starts[kept] = start;
+            ends[kept] = index;
+            kept += 1;
+            last_dots = 0;
+        }
+        start = index + 1;
+    }
+    if (last_dots != 0) { /* a trailing dot segment leaves the path ending in a separator */
+        starts[kept] = 0;
+        ends[kept] = 0;
+        kept += 1;
+    }
+    Py_ssize_t total = kept > 0 ? kept - 1 : 0;
+    for (Py_ssize_t index = 0; index < kept; index++) {
+        total += ends[index] - starts[index];
+    }
+    Py_UCS4 *out = PyMem_Malloc((size_t)(total + 1) * sizeof(Py_UCS4));
+    if (out == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(work);        /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(starts);      /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(ends);        /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t at = 0;
+    for (Py_ssize_t index = 0; index < kept; index++) {
+        if (index != 0) {
+            out[at++] = '/';
+        }
+        for (Py_ssize_t scan = starts[index]; scan < ends[index]; scan++) {
+            out[at++] = work[scan];
+        }
+    }
+    PyObject *result = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, out, at);
+    PyMem_Free(work);
+    PyMem_Free(starts);
+    PyMem_Free(ends);
+    PyMem_Free(out);
+    return result;
+}

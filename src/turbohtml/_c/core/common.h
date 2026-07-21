@@ -109,6 +109,14 @@ PyObject *turbohtml_url_percent_decode(PyObject *module, PyObject *arg);
 PyObject *th_url_join(PyObject *base, PyObject *target);
 PyObject *turbohtml_url_join(PyObject *module, PyObject *args);
 
+/* _url_is_tracker(key): whether a lowercased query-parameter name names a referral rather than content, so a
+   crawl-oriented cleaner drops it. Matches METH_O. */
+PyObject *turbohtml_url_is_tracker(PyObject *module, PyObject *arg);
+
+/* _url_remove_dot_segments(path): resolve the "." and ".." segments of a path, in either their literal or
+   %2E spelling, as the WHATWG path state does (spec 4.4). Matches METH_O. */
+PyObject *turbohtml_url_remove_dot_segments(PyObject *module, PyObject *arg);
+
 /* Implemented in url/idna.c. th_url_to_ascii runs the WHATWG domain-to-ASCII step (Unicode IDNA ToASCII, UTS #46 with
    Transitional_Processing=false and UseSTD3ASCIIRules=false): UTS #46 mapping, NFC, and per-label punycode. _urls.py
    reaches _url_to_ascii(host) for its registered-name hosts instead of the IDNA-2003 str.encode("idna") codec; the host
