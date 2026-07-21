@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml.extract import UrlCleaning, normalize_url
+from turbohtml.extract import UrlCleaning, clean_url, normalize_url
 
 
 @pytest.mark.parametrize(
@@ -70,3 +70,32 @@ def test_w3lib_preset_drops_the_fragment() -> None:
 def test_w3lib_preset_canonicalizes_like_canonicalize_url() -> None:
     url = "http://www.example.com/do?c=3&b=5&b=2&a=50#frag"
     assert normalize_url(url, UrlCleaning.w3lib()) == "http://www.example.com/do?a=50&b=2&b=5&c=3"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        pytest.param("https://x.org/p?wickedclid=1&keep=2", "https://x.org/p?keep=2", id="clid-suffix-dropped"),
+        pytest.param("https://x.org/p?lucid=1", "https://x.org/p?lucid=1", id="near-miss-lucid-kept"),
+        pytest.param("https://x.org/p?ref_source=1", "https://x.org/p", id="tracker-word-underscore"),
+        pytest.param("https://x.org/p?reference=1", "https://x.org/p?reference=1", id="longer-word-kept"),
+    ],
+)
+def test_tracker_suffix_and_word_boundaries(url: str, expected: str) -> None:
+    assert clean_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        pytest.param("https://x.org/a/%2E%2E/b", "https://x.org/b", id="uppercase-escape-parent"),
+        pytest.param("https://x.org/a/%2E/b", "https://x.org/a/b", id="uppercase-escape-self"),
+        pytest.param("https://x.org/a/../../b", "https://x.org/b", id="parent-past-root-clamps"),
+        # a trailing dot segment resolves to the directory, so the slash survives (path state, spec 4.4)
+        pytest.param("https://x.org/a/b/..", "https://x.org/a/", id="trailing-parent-keeps-slash"),
+        pytest.param("https://x.org/a/.", "https://x.org/a/", id="trailing-self-keeps-slash"),
+        pytest.param("https://x.org/...", "https://x.org/...", id="triple-dot-is-a-segment"),
+    ],
+)
+def test_dot_segment_resolution(url: str, expected: str) -> None:
+    assert clean_url(url) == expected
