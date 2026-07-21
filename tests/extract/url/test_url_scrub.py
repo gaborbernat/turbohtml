@@ -20,8 +20,30 @@ _C0_AND_SPACE = "".join(map(chr, range(0x21)))
 _MARKUP_DELIMITER = re.compile(r'[<>"]')
 
 
+# CPython's str whitespace (Py_UNICODE_ISSPACE), pinned because PyPy's str.split() disagrees on the C0 separators
+# 0x1C-0x1F, and the C scrub follows CPython's predicate on every interpreter
+_PY_WHITESPACE = frozenset(
+    map(
+        chr,
+        (
+            *range(0x09, 0x0E),
+            *range(0x1C, 0x21),
+            0x85,
+            0xA0,
+            0x1680,
+            *range(0x2000, 0x200B),
+            0x2028,
+            0x2029,
+            0x202F,
+            0x205F,
+            0x3000,
+        ),
+    )
+)
+
+
 def _oracle_scrub(url: str) -> str:
-    remainder = "".join(url.strip(_C0_AND_SPACE).split())
+    remainder = "".join(char for char in url.strip(_C0_AND_SPACE) if char not in _PY_WHITESPACE)
     if remainder.startswith("<![CDATA["):
         remainder = remainder.removeprefix("<![CDATA[").removesuffix("]]>")
     remainder = _MARKUP_DELIMITER.split(remainder, maxsplit=1)[0].replace("&amp;", "&")
