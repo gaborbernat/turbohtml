@@ -544,6 +544,15 @@ static const th_encoding_entry *th_encoding_prescan(const unsigned char *buf, Py
         len = 1024;
     }
     while (pos < len) {
+        if (buf[pos] != '<') {
+            /* every branch below starts at a '<', so the bytes between tags are inert; jump the run in bulk rather
+               than stepping it one comparison at a time, the shape of prose or a legacy page that carries no meta */
+            const unsigned char *next = memchr(buf + pos, '<', (size_t)(len - pos));
+            if (next == NULL) {
+                break;
+            }
+            pos = next - buf;
+        }
         if (pos + 4 <= len && memcmp(buf + pos, "<!--", 4) == 0) {
             /* the spec closes the comment at the first '>' preceded by two '-' that comes after the '<', so the two
                dashes of "<!--" may double as the "--" of "-->" and "<!-->" is a complete comment */
