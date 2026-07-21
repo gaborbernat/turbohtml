@@ -40,7 +40,13 @@ def _oracle(query: str, allow: frozenset[str] | None, deny: frozenset[str], *, s
             dropped = _url_is_tracker(key)
         if dropped:
             continue
-        kept.append((key, _url_percent_encode(pair, _QUERY_SET)))
+        try:
+            encoded = _url_percent_encode(pair, _QUERY_SET)
+        except UnicodeEncodeError as exc:
+            # the retired shim converted the encoder's failure to the public ValueError; the C does the same inline
+            msg = f"URL component {pair!r} has a character that cannot be percent-encoded: {exc.reason}"
+            raise ValueError(msg) from exc
+        kept.append((key, encoded))
     return "&".join(pair for _key, pair in sorted(kept))
 
 
@@ -54,6 +60,7 @@ def _outcome(call: Callable[[], str]) -> tuple[object, ...]:
 _QUERIES = (
     "",
     "a=1",
+    "ok=1&bad=\udcff",  # a lone surrogate cannot percent-encode, so both sides must fail identically
     "a=1&b=2",
     "b=2&a=1",
     "id=1&utm_source=x",

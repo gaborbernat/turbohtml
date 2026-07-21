@@ -11,55 +11,55 @@
       "build a list (constructors) — 100 rows",
       5.7091425532007634e-05,
       0.0007816329752283006,
-      "same in both configurations, so measured once"
+      0.0007816329752283006
     ],
     [
       "build a list (constructors) — 1k rows",
       0.0005440194775019336,
       0.007474331593887958,
-      "same in both configurations, so measured once"
+      0.007474331593887958
     ],
     [
       "build a list (constructors) — 10k rows",
       0.005411195857050188,
       0.0822198923851829,
-      "same in both configurations, so measured once"
+      0.0822198923851829
     ],
     [
       "construct N elements (no serialize) — 100 rows",
       4.288681538374325e-05,
       0.0002607024263738822,
-      "same in both configurations, so measured once"
+      0.0002607024263738822
     ],
     [
       "construct N elements (no serialize) — 1k rows",
       0.0004355111897590784,
       0.0025463228632058113,
-      "same in both configurations, so measured once"
+      0.0025463228632058113
     ],
     [
       "construct N elements (no serialize) — 10k rows",
       0.0043399677733759745,
       0.025400459164908778,
-      "same in both configurations, so measured once"
+      0.025400459164908778
     ],
     [
       "emit a built tree — 100 rows",
       4.327393534175883e-06,
       0.0003889943512641973,
-      "same in both configurations, so measured once"
+      0.0003889943512641973
     ],
     [
       "emit a built tree — 1k rows",
       4.2981901363721896e-05,
       0.003848052945007415,
-      "same in both configurations, so measured once"
+      0.003848052945007415
     ],
     [
       "emit a built tree — 10k rows",
       0.00045268575032271957,
       0.040861342851712834,
-      "same in both configurations, so measured once"
+      0.040861342851712834
     ],
     [
       "parse to a tree — wpt tiny (0.6 kB)",
@@ -611,37 +611,37 @@
       "detect a byte stream's encoding — ascii (1 kB)",
       2.683881651736423e-06,
       0.00016621675959527238,
-      "same in both configurations, so measured once"
+      0.00016621675959527238
     ],
     [
       "detect a byte stream's encoding — utf-8 russian (4 kB)",
       8.42264663110844e-06,
       0.0002101907146917862,
-      "same in both configurations, so measured once"
+      0.0002101907146917862
     ],
     [
       "detect a byte stream's encoding — windows-1251 russian (4 kB)",
       0.00023194885286178155,
       0.0007660471198960295,
-      "same in both configurations, so measured once"
+      0.0007660471198960295
     ],
     [
       "detect a byte stream's encoding — windows-1252 french (4 kB)",
       0.00022984596078382916,
       0.0009623634165715581,
-      "same in both configurations, so measured once"
+      0.0009623634165715581
     ],
     [
       "detect a byte stream's encoding — shift_jis japanese (4 kB)",
       0.00010243962940137408,
       0.0007823282336403281,
-      "same in both configurations, so measured once"
+      0.0007823282336403281
     ],
     [
       "detect a byte stream's encoding — utf-8 page (95 kB)",
       1.0262474480586075e-06,
       0.0017221563046708372,
-      "same in both configurations, so measured once"
+      0.0017221563046708372
     ],
     [
       "extract filtered page links — daring fireball (10 kB)",
@@ -673,55 +673,55 @@
       null,
       0.01788392867332312,
       0.03121492351385784,
-      null
+      0.03121492351385784
     ],
     [
       null,
       0.02098234232783449,
       0.032482085826574664,
-      null
+      0.032482085826574664
     ],
     [
       null,
       0.024406729859124777,
       0.09801825368387174,
-      null
+      0.09801825368387174
     ],
     [
       null,
       0.02944875019031374,
       0.011449485274073672,
-      null
+      0.011449485274073672
     ],
     [
       null,
       0.024838279255060405,
       0.0259580795839295,
-      null
+      0.0259580795839295
     ],
     [
       null,
       0.0409794960756543,
       0.015063071698137679,
-      null
+      0.015063071698137679
     ],
     [
       null,
       0.013612393164726814,
       0.026381832222267913,
-      null
+      0.026381832222267913
     ],
     [
       null,
       0.00837903216048809,
       0.0035044858351730617,
-      null
+      0.0035044858351730617
     ],
     [
       null,
       0.02765221451091796,
       0.03831919610907921,
-      null
+      0.03831919610907921
     ],
     [
       null,
@@ -1273,37 +1273,37 @@
       null,
       0.017880736659094357,
       0.018251613038969026,
-      null
+      0.018251613038969026
     ],
     [
       null,
       0.013928849417596853,
       0.04709186896538359,
-      null
+      0.04709186896538359
     ],
     [
       null,
       0.030374690128129544,
       0.05534154336710747,
-      null
+      0.05534154336710747
     ],
     [
       null,
       0.024415342494636606,
       0.01597170853773811,
-      null
+      0.01597170853773811
     ],
     [
       null,
       0.011882884549205048,
       0.07681575774619458,
-      null
+      0.07681575774619458
     ],
     [
       null,
       0.027875914121933836,
       0.02169554352319668,
-      null
+      0.02169554352319668
     ],
     [
       null,
@@ -1330,5 +1330,21 @@
       0.12059134279394809
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "0": "same in both configurations, so measured once",
+    "1": "same in both configurations, so measured once",
+    "2": "same in both configurations, so measured once",
+    "3": "same in both configurations, so measured once",
+    "4": "same in both configurations, so measured once",
+    "5": "same in both configurations, so measured once",
+    "6": "same in both configurations, so measured once",
+    "7": "same in both configurations, so measured once",
+    "8": "same in both configurations, so measured once",
+    "100": "same in both configurations, so measured once",
+    "101": "same in both configurations, so measured once",
+    "102": "same in both configurations, so measured once",
+    "103": "same in both configurations, so measured once",
+    "104": "same in both configurations, so measured once",
+    "105": "same in both configurations, so measured once"
+  }
 }

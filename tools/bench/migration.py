@@ -48,6 +48,13 @@ _SLUG_OVERRIDES: Final = {
 }
 
 
+def _merge_caveat(note: str | None, *, shared: bool) -> str | None:
+    """Join an operation note with the measured-once caveat when a row repeats one figure across configurations."""
+    if not shared:
+        return note
+    return _SHARED_WITH_OTHER_VARIANT if note is None else f"{note}; {_SHARED_WITH_OTHER_VARIANT}"
+
+
 def _slug(stem: str) -> str:
     """Return the migration page slug for a competitor module stem."""
     return _SLUG_OVERRIDES.get(stem, stem.replace("_", "-"))
@@ -117,29 +124,33 @@ def _rows(
             # a case name is an authored RST fragment (an XPath expression arrives already wrapped in ``code``
             # backticks), so it passes through verbatim; escaping it here would double up on that markup
             row_label = f"{meta.title} — {case}" if prefixed else case
-            # a configuration that skips an operation another one measures skips it because the two run the same
-            # code there, so the cell says that rather than leaving an unexplained blank
-            absent: list[str | None] = [
-                None if operation in variant else _SHARED_WITH_OTHER_VARIANT for variant in variants
-            ]
+            # a configuration that skips an operation runs the same code as the one measuring it, so its cells show
+            # the shared measurement and the row's note says the figure was measured once
+            measured = next(other for other in others if other is not None)
+            shared = any(other is None for other in others)
+            filled = [other if other is not None else measured for other in others]
             if wide:
                 lead = "size" if operation in _SIZE_OPS else "peak"
                 row: list[str | float | None] = [row_label, turbo[lead], turbo["mean"]]
                 noise: list[float | None] = [None, None, turbo.get("cv")]
-                for other, gap in zip(others, absent, strict=True):
-                    row += [gap, gap] if other is None else [other[lead], other["mean"]]
-                    noise += [None, None if other is None else other.get("cv")]
+                for other in filled:
+                    row += [other[lead], other["mean"]]
+                    noise += [None, other.get("cv")]
             else:
                 row = [row_label, turbo["mean"]]
                 noise = [None, turbo.get("cv")]
-                for other, gap in zip(others, absent, strict=True):
-                    row.append(gap if other is None else other["mean"])
-                    noise.append(None if other is None else other.get("cv"))
+                for other in filled:
+                    row.append(other["mean"])
+                    noise.append(other.get("cv"))
             rows.append(row)
             spread.append(noise)
-            # a library page mixes operations, so a caveat belongs on the rows of the operation it describes
+            # a library page mixes operations, so a caveat belongs on the rows of the operation it describes; a row
+            # repeating one measurement across configurations says so beside any operation note
             caveats.append(
-                next((NOTES[operation][label] for label in labels if label in NOTES.get(operation, {})), None)
+                _merge_caveat(
+                    next((NOTES[operation][label] for label in labels if label in NOTES.get(operation, {})), None),
+                    shared=shared,
+                )
             )
     return rows, spread, caveats
 

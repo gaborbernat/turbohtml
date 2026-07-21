@@ -193,6 +193,8 @@ from ._stubs.query import (
 )
 from ._stubs.query import (
     _css_computed_style as _css_computed_style,
+)
+from ._stubs.query import (
     _css_escape_identifier as _css_escape_identifier,
 )
 from ._stubs.query import (
@@ -296,6 +298,8 @@ from ._stubs.tokenizer import (
 )
 from ._stubs.tokenizer import (
     _sax_dispatch as _sax_dispatch,
+)
+from ._stubs.tokenizer import (
     _sax_events as _sax_events,
 )
 from ._stubs.tokenizer import (

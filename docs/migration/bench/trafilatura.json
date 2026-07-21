@@ -69,5 +69,9 @@
       0.09149282207360948
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "2": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
+    "3": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
+    "4": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports"
+  }
 }
