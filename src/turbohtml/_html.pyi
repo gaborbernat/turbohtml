@@ -150,6 +150,9 @@ from ._stubs.features import (
     _sanitize as _sanitize,
 )
 from ._stubs.features import (
+    _url_is_tracker as _url_is_tracker,
+)
+from ._stubs.features import (
     _url_join as _url_join,
 )
 from ._stubs.features import (
@@ -157,6 +160,9 @@ from ._stubs.features import (
 )
 from ._stubs.features import (
     _url_percent_encode as _url_percent_encode,
+)
+from ._stubs.features import (
+    _url_remove_dot_segments as _url_remove_dot_segments,
 )
 from ._stubs.features import (
     _url_split as _url_split,
