@@ -183,6 +183,9 @@ from ._stubs.query import (
     _css_computed_style as _css_computed_style,
 )
 from ._stubs.query import (
+    _css_escape_identifier as _css_escape_identifier,
+)
+from ._stubs.query import (
     _css_parse_declarations as _css_parse_declarations,
 )
 from ._stubs.query import (

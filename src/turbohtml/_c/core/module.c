@@ -213,6 +213,7 @@ static PyMethodDef html_methods[] = {
     {"_css_parse_declarations", turbohtml_css_parse_declarations, METH_O, NULL},
     {"_css_parse_rules", turbohtml_css_parse_rules, METH_O, NULL},
     {"_css_computed_style", turbohtml_css_computed_style, METH_O, NULL},
+    {"_css_escape_identifier", turbohtml_css_escape_identifier, METH_O, NULL},
     {"_minify_js", turbohtml_minify_js, METH_VARARGS, NULL},
     {"_minify_js_tokens", turbohtml_minify_js_tokens, METH_O, NULL},
     {"_minify_js_parse", turbohtml_minify_js_parse, METH_O, NULL},

@@ -80,6 +80,10 @@ PyObject *turbohtml_css_parse_declarations(PyObject *module, PyObject *text);
 PyObject *turbohtml_css_parse_rules(PyObject *module, PyObject *text);
 PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg);
 
+/* CSS.escape per the CSSOM serialize-an-identifier rules, behind turbohtml.query.escape_identifier.
+   Matches METH_O. */
+PyObject *turbohtml_css_escape_identifier(PyObject *module, PyObject *arg);
+
 /* Implemented in dom/element.c: stores the SelectorSyntaxError type the selector
    and XPath parsers raise on a malformed expression (METH_O); turbohtml._selectors
    registers it on import. */
