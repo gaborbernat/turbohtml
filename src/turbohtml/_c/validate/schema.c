@@ -559,14 +559,12 @@ static int ns_scope_push(th_schema *schema, ns_scope *scope, const char *prefix,
     return 0;
 }
 
-/* The innermost binding for prefix, the constant xml namespace, or no namespace at all. */
+/* The innermost binding for prefix, or no namespace at all. The xml prefix needs no special case here: the
+   cache resolves schema-element tag prefixes, an xml:-prefixed schema element is foreign, and is_schema_el
+   maps both the xml namespace and no namespace to "not a schema element" -- resolve_ns keeps the xml rule for
+   the document path, where xml:lang and friends are observable. */
 static void ns_scope_resolve(const ns_scope *scope, const Py_UCS4 *prefix, Py_ssize_t prefix_len, const Py_UCS4 **uri,
                              Py_ssize_t *uri_len) {
-    if (prefix_len == 3 && u_eq_ascii(prefix, 3, "xml")) {
-        *uri = xml_namespace_uri();
-        *uri_len = sizeof(XML_URI) - 1;
-        return;
-    }
     for (Py_ssize_t index = scope->len - 1; index >= 0; index--) {
         const ns_binding *binding = &scope->items[index];
         if (binding->prefix_len == prefix_len && u_eq_ascii(prefix, prefix_len, binding->prefix)) {
