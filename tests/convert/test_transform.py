@@ -869,6 +869,16 @@ def test_transform_number_two_count_patterns_over_one_run() -> None:
     assert _run("<r><n/><n/><n/></r>", body) == "1-1,2-1,3-1,"
 
 
+def test_transform_number_interleaved_count_patterns_stay_separate() -> None:
+    # two xsl:number instructions alternating over one run: each must count under its own pattern, so a number
+    # carried forward for one cannot answer for the other
+    body = (
+        '<xsl:template match="/"><xsl:for-each select="r/*">'
+        '<xsl:number count="a"/>-<xsl:number count="b"/>,</xsl:for-each></xsl:template>'
+    )
+    assert _run("<r><a/><b/><a/><b/></r>", body) == "1-,-1,2-,-2,"
+
+
 def test_transform_number_on_attribute_is_one() -> None:
     body = (
         '<xsl:template match="/"><xsl:apply-templates select="//n/@id"/></xsl:template>'

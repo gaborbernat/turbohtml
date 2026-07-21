@@ -581,7 +581,10 @@ typedef struct engine {
        name, and a run numbered under different criteria cannot reuse it. */
     const th_node *number_memo_node;
     long number_memo_value;
-    const match_set *number_memo_set;
+    /* The xsl:number element the memo was taken for. The count set itself is a local of the instruction handler, so
+       its address repeats across calls and cannot identify the criteria; the instruction can, since its count
+       attribute is fixed and two instructions are two nodes. */
+    const th_node *number_memo_instruction;
     int number_memo_type;
     const Py_UCS4 *number_memo_name;
     Py_ssize_t number_memo_name_len;
@@ -2326,21 +2329,14 @@ static int number_counts(const engine *eng, const match_set *count_set, int have
             memcmp(node->text, eng->cur_node->text, (size_t)node->text_len * sizeof(Py_UCS4)) == 0);
 }
 
-/* The criteria a numbering runs under: the compiled count set when one was given, else NULL for the default, which
-   reads the current node's type and name instead. Normalizing the two into one pointer lets a memo be tested against
-   the criteria it was taken under with a single comparison. */
-static const match_set *number_criteria(const match_set *count_set, int have_count) {
-    return have_count ? count_set : NULL;
-}
-
-/* Whether the memo was taken under the same criteria this call uses, so its answer still applies. The caller reaches
-   this only for a node whose previous sibling is the memo's node, so the memo is known to hold one. */
-static int number_memo_applies(const engine *eng, const match_set *count_set, int have_count) {
-    const match_set *criteria = number_criteria(count_set, have_count);
-    if (eng->number_memo_set != criteria) {
+/* Whether the memo was taken under the same criteria this call uses, so its answer still applies: the same xsl:number
+   instruction, and, when that instruction names no count pattern, the same current-node type and name the default
+   criteria read. The caller reaches this only for a node whose previous sibling is the memo's node. */
+static int number_memo_applies(const engine *eng, const th_node *instruction, int have_count) {
+    if (eng->number_memo_instruction != instruction) {
         return 0;
     }
-    return criteria != NULL ||
+    return have_count ||
            (eng->number_memo_type == (int)eng->cur_node->type && /* GCOVR_EXCL_BR_LINE: a memo is
                consulted only across siblings, which one run never spans a type change in */
             eng->number_memo_name_len == eng->cur_node->text_len &&
@@ -2350,10 +2346,11 @@ static int number_memo_applies(const engine *eng, const match_set *count_set, in
 /* The count of node plus its preceding siblings that match the count criteria (one level's
    number). Numbering a run of siblings walks it once in total rather than once per sibling: the
    answer for a node is the answer for its previous sibling plus whether that sibling counted. */
-static long level_number(engine *eng, const match_set *count_set, int have_count, th_node *node) {
+static long level_number(engine *eng, const th_node *instruction, const match_set *count_set, int have_count,
+                         th_node *node) {
     long count = 1;
     th_node *prev = node->prev_sibling;
-    if (prev != NULL && prev == eng->number_memo_node && number_memo_applies(eng, count_set, have_count)) {
+    if (prev != NULL && prev == eng->number_memo_node && number_memo_applies(eng, instruction, have_count)) {
         count = eng->number_memo_value + (number_counts(eng, count_set, have_count, prev) ? 1 : 0);
     } else {
         for (; prev != NULL; prev = prev->prev_sibling) {
@@ -2364,7 +2361,7 @@ static long level_number(engine *eng, const match_set *count_set, int have_count
     }
     eng->number_memo_node = node;
     eng->number_memo_value = count;
-    eng->number_memo_set = number_criteria(count_set, have_count);
+    eng->number_memo_instruction = instruction;
     eng->number_memo_type = (int)eng->cur_node->type;
     eng->number_memo_name = eng->cur_node->text;
     eng->number_memo_name_len = eng->cur_node->text_len;
@@ -2466,7 +2463,7 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
                 }
             }
             for (Py_ssize_t index = depth - 1; index >= 0; index--) {
-                values[nvalues++] = level_number(eng, &count_set, have_count, chain[index]);
+                values[nvalues++] = level_number(eng, instruction, &count_set, have_count, chain[index]);
             }
         } else {
             /* single (the default): the nearest ancestor-or-self that matches count, bounded by
@@ -2482,7 +2479,7 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
                 }
             }
             if (target != NULL) {
-                values[nvalues++] = level_number(eng, &count_set, have_count, target);
+                values[nvalues++] = level_number(eng, instruction, &count_set, have_count, target);
             }
         }
     }
