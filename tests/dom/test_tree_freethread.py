@@ -14,6 +14,7 @@ runs each test in one thread per core at once, multiplying the contention.
 from __future__ import annotations
 
 import threading
+from typing import cast
 
 import turbohtml
 from turbohtml.query import Query
@@ -116,7 +117,7 @@ def test_concurrent_multi_root_query_is_one_tree_snapshot() -> None:
     def reader() -> None:
         start.wait()
         for _ in range(500):
-            assert sorted(element.attrs["id"] for element in query.find("p")) == ["x", "y"]
+            assert sorted(cast("str", element.attrs["id"]) for element in query.find("p")) == ["x", "y"]
 
     def mutator() -> None:
         start.wait()
