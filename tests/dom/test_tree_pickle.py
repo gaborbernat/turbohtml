@@ -6,7 +6,7 @@ import pickle  # ruff:ignore[suspicious-pickle-import]  # round-tripping our own
 
 import pytest
 
-from turbohtml import CData, Comment, Doctype, Document, Element, Node, ProcessingInstruction, Text, parse
+from turbohtml import CData, Comment, Doctype, Document, Element, Node, ProcessingInstruction, Text, parse, parse_xml
 from turbohtml._html import _reconstruct  # the private pickle hook
 
 
@@ -75,6 +75,31 @@ def test_document_round_trips() -> None:
     clone = _roundtrip(doc)
     assert isinstance(clone, Document)
     assert clone.html == doc.html
+
+
+def test_xml_document_round_trips_case_sensitively() -> None:
+    doc = parse_xml('<Root Attr="v"><Child X="1"/><![CDATA[r]]><?pi d?></Root>')
+    clone = _roundtrip(doc)
+    assert isinstance(clone, Document)
+    root = clone.root
+    assert isinstance(root, Element)
+    assert root.attrs["Attr"] == "v"
+    assert "attr" not in root.attrs
+    assert root.html == '<Root Attr="v"><Child X="1"></Child><![CDATA[r]]><?pi d></Root>'
+
+
+def test_xml_element_subtree_round_trips_case_sensitively() -> None:
+    root = parse_xml('<Root><Child X="1"><Gc Y="2"/></Child></Root>').root
+    assert isinstance(root, Element)
+    clone = _roundtrip(root.children[0])
+    assert isinstance(clone, Element)
+    assert clone.tag == "Child"
+    assert clone.attrs["X"] == "1"
+    assert "x" not in clone.attrs
+    grandchild = clone.children[0]
+    assert isinstance(grandchild, Element)
+    assert grandchild.tag == "Gc"
+    assert grandchild.attrs["Y"] == "2"
 
 
 @pytest.mark.parametrize(

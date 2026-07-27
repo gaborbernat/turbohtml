@@ -1793,8 +1793,9 @@ static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len
     return 0;
 }
 
-/* Fill a constructed element's attribute slots from the keys of attrs. */
-static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyObject *keys) {
+/* Fill a constructed element's attribute slots from the keys of attrs. fold lowercases
+   each name for an HTML tree; an XML tree keeps case, so its names are stored verbatim. */
+static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyObject *keys, int fold) {
     Py_ssize_t count = PyList_GET_SIZE(keys);
     for (Py_ssize_t index = 0; index < count; index++) {
         PyObject *name = PyList_GET_ITEM(keys, index);
@@ -1810,13 +1811,13 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
         if (name_utf8 == NULL) { /* GCOVR_EXCL_BR_LINE: a lone-surrogate name cannot encode, hard to force */
             return -1;           /* GCOVR_EXCL_LINE: surrogate path */
         }
-        char *lower = PyMem_Malloc((size_t)name_len);
-        if (lower == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        char *stored = PyMem_Malloc((size_t)name_len);
+        if (stored == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         for (Py_ssize_t byte = 0; byte < name_len; byte++) {
             char ch = name_utf8[byte];
-            lower[byte] = ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
+            stored[byte] = fold && ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
         }
         PyObject *value = PyObject_GetItem(attrs, name);
         Py_UCS4 *points;
@@ -1825,11 +1826,11 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
         int bad = value == NULL || element_attr_value(value, &points, &value_len, &has_value) < 0;
         Py_XDECREF(value);
         if (bad) {
-            PyMem_Free(lower);
+            PyMem_Free(stored);
             return -1;
         }
-        int rc = th_tree_set_attr(tree, node, index, lower, name_len, points, value_len, has_value);
-        PyMem_Free(lower);
+        int rc = th_tree_set_attr(tree, node, index, stored, name_len, points, value_len, has_value);
+        PyMem_Free(stored);
         PyMem_Free(points);
         if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1845,8 +1846,10 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
 /* Build an Element wrapper for tag with attrs, without the public constructor's
    name validation. The parser and pickle reconstruction produce tag names (e.g.
    "a<b" from malformed input) that Element() rejects but that must round-trip
-   unchanged, so the trusted callers reach the element through this helper. */
-PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs) {
+   unchanged, so the trusted callers reach the element through this helper. xml keeps
+   the tag and attribute names case-sensitive (no fold, no builtin atom), so an element
+   unpickled from an XML tree matches parse_xml's storage. */
+PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs, int xml) {
     Py_ssize_t tag_len = PyUnicode_GET_LENGTH(tag);
     PyObject *keys = NULL;
     Py_ssize_t attr_count = 0;
@@ -1866,17 +1869,20 @@ PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs) {
         Py_XDECREF(keys);        /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    Py_ssize_t utf8_len;
-    const char *utf8 = PyUnicode_AsUTF8AndSize(tag, &utf8_len);
+    th_tree_set_xml(tree, xml);
     uint16_t atom = TH_TAG_UNKNOWN;
-    char stack[ELEMENT_TAG_LOWER_STACK_BYTES];
-    if (utf8 != NULL && utf8_len <= (Py_ssize_t)sizeof(stack)) {
-        for (Py_ssize_t byte = 0; byte < utf8_len; byte++) {
-            stack[byte] = utf8[byte] >= 'A' && utf8[byte] <= 'Z' ? (char)(utf8[byte] + 32) : utf8[byte];
+    if (!xml) { /* an XML tree stores every element as an unknown atom, keeping its spelling */
+        Py_ssize_t utf8_len;
+        const char *utf8 = PyUnicode_AsUTF8AndSize(tag, &utf8_len);
+        char stack[ELEMENT_TAG_LOWER_STACK_BYTES];
+        if (utf8 != NULL && utf8_len <= (Py_ssize_t)sizeof(stack)) {
+            for (Py_ssize_t byte = 0; byte < utf8_len; byte++) {
+                stack[byte] = utf8[byte] >= 'A' && utf8[byte] <= 'Z' ? (char)(utf8[byte] + 32) : utf8[byte];
+            }
+            atom = th_tag_lookup(stack, utf8_len);
+        } else {
+            PyErr_Clear(); /* a surrogate or very long custom tag is not in the table */
         }
-        atom = th_tag_lookup(stack, utf8_len);
-    } else {
-        PyErr_Clear(); /* a surrogate or very long custom tag is not in the table */
     }
     Py_UCS4 *tag_points = atom == TH_TAG_UNKNOWN ? PyUnicode_AsUCS4Copy(tag) : NULL;
     if (atom == TH_TAG_UNKNOWN && tag_points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -1884,9 +1890,9 @@ PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs) {
         Py_XDECREF(keys);                               /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;                                    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    /* Unknown tag names are ASCII-lowercased to match what the parser stores.
-       Known names already point at their lowercase generated entry. */
-    for (Py_ssize_t index = 0; index < tag_len && tag_points != NULL; index++) {
+    /* An HTML unknown tag is ASCII-lowercased to match what the parser stores; a known
+       name already points at its lowercase entry, and an XML name keeps its case. */
+    for (Py_ssize_t index = 0; !xml && index < tag_len && tag_points != NULL; index++) {
         if (tag_points[index] >= 'A' && tag_points[index] <= 'Z') {
             tag_points[index] += 32;
         }
@@ -1898,7 +1904,7 @@ PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs) {
         Py_XDECREF(keys);        /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (keys != NULL && fill_element_attrs(tree, node, attrs, keys) < 0) {
+    if (keys != NULL && fill_element_attrs(tree, node, attrs, keys, !xml) < 0) {
         th_tree_free(tree);
         Py_DECREF(keys);
         return NULL;
@@ -1922,7 +1928,7 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if (validate_name(tag, 0) < 0) {
         return NULL;
     }
-    PyObject *element = make_element(type, tag, attrs);
+    PyObject *element = make_element(type, tag, attrs, 0); /* the public constructor builds HTML elements */
     if (element == NULL) {
         return NULL;
     }

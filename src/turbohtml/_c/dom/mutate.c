@@ -28,6 +28,10 @@ int th_tree_is_xml(const th_tree *tree) {
     return tree->xml;
 }
 
+void th_tree_set_xml(th_tree *tree, int xml) {
+    tree->xml = xml;
+}
+
 /* Construct an empty document-fragment node in tree's arena: the container the
    Range content operations (dom/range.c) fill and hand back. */
 th_node *th_tree_make_fragment(th_tree *tree) {

@@ -210,6 +210,10 @@ th_tree *th_tree_new(void);
    rather than folded to the HTML parser's lowercased names. */
 int th_tree_is_xml(const th_tree *tree);
 
+/* Carry the XML mode onto a tree built by copying nodes out of an XML one, so the
+   copy keeps case-sensitive name lookups. */
+void th_tree_set_xml(th_tree *tree, int xml);
+
 /* Construct a text/comment/doctype/cdata node (by enum th_node_type) owning a copy
    of the data code points in the tree's arena. NULL on allocation failure. */
 th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len);
