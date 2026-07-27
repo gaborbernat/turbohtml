@@ -7,6 +7,21 @@
 .. towncrier release notes start
 
 *********************
+ v1.5.1 (2026-07-27)
+*********************
+
+Bug fixes - 1.5.1
+=================
+
+- Match tag and attribute names case-sensitively on a :func:`turbohtml.parse_xml` document: an uppercase name like ``Y``
+  reads through :attr:`~turbohtml.Element.attrs` instead of raising :exc:`KeyError`, CSS selectors tell ``[Attr]`` from
+  ``[attr]`` and ``Child`` from ``child``, and :func:`pickle.loads`/:func:`copy.deepcopy` round-trip the tree without
+  folding its names to the HTML parser's lowercase. (:issue:`695`)
+- Normalize line endings in a :func:`turbohtml.parse_xml` document per XML 1.0 §2.11 across attribute values, CDATA
+  sections, comments, and processing instructions: a literal ``CRLF`` folds to a single ``LF`` (one space in an
+  attribute value) rather than two, matching the text-content path and every other conformant XML parser. (:issue:`696`)
+
+*********************
  v1.5.0 (2026-07-21)
 *********************
 

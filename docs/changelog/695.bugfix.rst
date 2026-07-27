@@ -1,4 +1,0 @@
-Match tag and attribute names case-sensitively on a :func:`turbohtml.parse_xml` document: an uppercase name like ``Y``
-reads through :attr:`~turbohtml.Element.attrs` instead of raising :exc:`KeyError`, CSS selectors tell ``[Attr]`` from
-``[attr]`` and ``Child`` from ``child``, and :func:`pickle.loads`/:func:`copy.deepcopy` round-trip the tree without
-folding its names to the HTML parser's lowercase.
