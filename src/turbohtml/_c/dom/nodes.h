@@ -593,9 +593,10 @@ void handle_clear_css_cache(HandleObject *handle);
    element.c beside the mutation bindings; query/methods.c calls it from prune/remove/strip. */
 void handle_drop_index(PyObject *handle_obj);
 
-/* Lower-case an attribute-name str into a freshly allocated (PyMem_Free) UTF-8 buffer, or
-   NULL with an exception set. Defined in element.c; query/methods.c reuses it for re(). */
-char *attr_key_utf8(PyObject *key, Py_ssize_t *out_len);
+/* Encode an attribute-name str into a freshly allocated (PyMem_Free) UTF-8 buffer for a
+   lookup on tree, folding case for HTML but not XML, or NULL with an exception set.
+   Defined in element.c; query/methods.c reuses it for re(). */
+char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len);
 
 PyObject *node_get_text(PyObject *self, void *Py_UNUSED(closure));
 PyObject *element_get_tag(PyObject *self, void *Py_UNUSED(closure));

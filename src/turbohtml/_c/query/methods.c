@@ -542,16 +542,16 @@ static PyObject *regex_find_first(PyObject *compiled, PyObject *source, PyObject
     return value;
 }
 
-/* Resolve the optional attr keyword into a lowercased UTF-8 name (the caller frees
-   it with PyMem_Free), leaving *name NULL when the regex should run over text. A
+/* Resolve the optional attr keyword into a UTF-8 name for a lookup on tree (the caller
+   frees it with PyMem_Free), leaving *name NULL when the regex should run over text. A
    non-str, non-None attr raises TypeError. Returns 0, or -1 with an exception. */
-static int regex_attr_name(PyObject *attr_obj, char **name, Py_ssize_t *name_len) {
+static int regex_attr_name(th_tree *tree, PyObject *attr_obj, char **name, Py_ssize_t *name_len) {
     *name = NULL;
     *name_len = 0;
     if (attr_obj == NULL || attr_obj == Py_None) {
         return 0;
     }
-    *name = attr_key_utf8(attr_obj, name_len);
+    *name = attr_key_utf8(tree, attr_obj, name_len);
     return *name == NULL ? -1 : 0;
 }
 
@@ -564,7 +564,7 @@ PyObject *node_re(PyObject *self, PyObject *args, PyObject *kwds) {
     }
     char *attr_name;
     Py_ssize_t attr_len;
-    if (regex_attr_name(attr_obj, &attr_name, &attr_len) < 0) {
+    if (regex_attr_name(tree_of(self), attr_obj, &attr_name, &attr_len) < 0) {
         return NULL;
     }
     module_state *state = state_of(self);
@@ -601,7 +601,7 @@ PyObject *node_re_first(PyObject *self, PyObject *args, PyObject *kwds) {
     }
     char *attr_name;
     Py_ssize_t attr_len;
-    if (regex_attr_name(attr_obj, &attr_name, &attr_len) < 0) {
+    if (regex_attr_name(tree_of(self), attr_obj, &attr_name, &attr_len) < 0) {
         return NULL;
     }
     module_state *state = state_of(self);

@@ -206,6 +206,10 @@ th_tree *th_tree_parse_xml(int kind, const void *data, Py_ssize_t length);
    allocation failure (no Python error is set). */
 th_tree *th_tree_new(void);
 
+/* Whether the tree was parsed under XML rules, so name lookups are case-sensitive
+   rather than folded to the HTML parser's lowercased names. */
+int th_tree_is_xml(const th_tree *tree);
+
 /* Construct a text/comment/doctype/cdata node (by enum th_node_type) owning a copy
    of the data code points in the tree's arena. NULL on allocation failure. */
 th_node *th_tree_make_data_node(th_tree *tree, int type, const Py_UCS4 *data, Py_ssize_t len);

@@ -1202,6 +1202,7 @@ th_tree *th_tree_parse_xml(int kind, const void *data, Py_ssize_t length) {
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     tree->can_span = 1; /* text nodes may span into the borrowed input */
+    tree->xml = 1;      /* case-sensitive tag and attribute names */
     tree->kind = kind;
     tree->data = data;
     tree->length = length;

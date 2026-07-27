@@ -1,0 +1,3 @@
+Match tag and attribute names case-sensitively on a :func:`turbohtml.parse_xml` document: an uppercase name like ``Y``
+reads through :attr:`~turbohtml.Element.attrs` instead of raising :exc:`KeyError`, and CSS selectors tell ``[Attr]``
+from ``[attr]`` and ``Child`` from ``child``.

@@ -24,6 +24,10 @@ th_tree *th_tree_new(void) {
     return PyMem_Calloc(1, sizeof(th_tree));
 }
 
+int th_tree_is_xml(const th_tree *tree) {
+    return tree->xml;
+}
+
 /* Construct an empty document-fragment node in tree's arena: the container the
    Range content operations (dom/range.c) fill and hand back. */
 th_node *th_tree_make_fragment(th_tree *tree) {
@@ -289,8 +293,9 @@ Py_ssize_t th_node_attr_find(th_tree *tree, th_node *node, const char *name, Py_
     }
     /* A foreign element can store a case-adjusted attribute name (definitionURL)
        whose atom differs from the lowercased probe, so match case-insensitively
-       against the stored names; the probe is already lowercased by the caller. */
-    if (node->ns != TH_NS_HTML) {
+       against the stored names; the probe is already lowercased by the caller. XML
+       keeps names case-sensitive, so its exact-atom match above is the only pass. */
+    if (!tree->xml && node->ns != TH_NS_HTML) {
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
             Py_ssize_t stored_len;
             const char *stored = th_attr_name(tree, node->attrs[index].name_atom, &stored_len);

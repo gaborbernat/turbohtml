@@ -11,10 +11,11 @@ static int validate_name(PyObject *name, int is_attr);
 
 static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len, int *has_value);
 
-/* ASCII-lowercase a str key into a freshly allocated UTF-8 buffer so a lookup
-   matches the parser's lowercased names; *out_len its length. NULL with TypeError
-   when the key is not a str. Caller frees with PyMem_Free. */
-char *attr_key_utf8(PyObject *key, Py_ssize_t *out_len) {
+/* Encode a str key into a freshly allocated UTF-8 buffer for an attribute lookup;
+   *out_len its length. Folded to match an HTML tree's lowercased names, kept verbatim
+   for a case-sensitive XML tree. NULL with TypeError when the key is not a str. Caller
+   frees with PyMem_Free. */
+char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len) {
     if (!PyUnicode_Check(key)) {
         PyErr_SetString(PyExc_TypeError, "attribute name must be a str");
         return NULL;
@@ -24,16 +25,17 @@ char *attr_key_utf8(PyObject *key, Py_ssize_t *out_len) {
     if (utf8 == NULL) { /* GCOVR_EXCL_BR_LINE: a lone-surrogate name cannot encode, hard to force */
         return NULL;    /* GCOVR_EXCL_LINE: surrogate path */
     }
-    char *lower = PyMem_Malloc((size_t)(len ? len : 1));
-    if (lower == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    char *name = PyMem_Malloc((size_t)(len ? len : 1));
+    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    int fold = !th_tree_is_xml(tree);
     for (Py_ssize_t index = 0; index < len; index++) {
         char ch = utf8[index];
-        lower[index] = ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
+        name[index] = fold && ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
     }
     *out_len = len;
-    return lower;
+    return name;
 }
 
 /* The live mutable view of an element's attributes: a mapping name -> value over
@@ -66,7 +68,7 @@ static Py_ssize_t attrs_length(PyObject *self) {
 
 static PyObject *attrs_subscript(PyObject *self, PyObject *key) {
     Py_ssize_t len;
-    char *name = attr_key_utf8(key, &len);
+    char *name = attr_key_utf8(tree_of(self), key, &len);
     if (name == NULL) {
         return NULL;
     }
@@ -94,7 +96,7 @@ static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
     th_tree *tree = tree_of(self);
     if (value == NULL) {
         Py_ssize_t len;
-        char *name = attr_key_utf8(key, &len);
+        char *name = attr_key_utf8(tree, key, &len);
         if (name == NULL) {
             return -1;
         }
@@ -117,7 +119,7 @@ static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
         return -1;
     }
     Py_ssize_t len;
-    char *name = attr_key_utf8(key, &len);
+    char *name = attr_key_utf8(tree, key, &len);
     if (name == NULL) { /* GCOVR_EXCL_BR_LINE: a validated name is a str that encodes */
         return -1;      /* GCOVR_EXCL_LINE: unreachable after validate_name */
     }
@@ -143,7 +145,7 @@ static int attrs_contains(PyObject *self, PyObject *key) {
         return 0; /* a non-str key is never an attribute name */
     }
     Py_ssize_t len;
-    char *name = attr_key_utf8(key, &len);
+    char *name = attr_key_utf8(tree_of(self), key, &len);
     if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here, so this cannot fail */
         return -1;      /* GCOVR_EXCL_LINE: unreachable */
     }
@@ -250,7 +252,7 @@ static PyObject *attrs_get(PyObject *self, PyObject *args) {
     }
     if (PyUnicode_Check(key)) {
         Py_ssize_t len;
-        char *name = attr_key_utf8(key, &len);
+        char *name = attr_key_utf8(tree_of(self), key, &len);
         if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here */
             return NULL;    /* GCOVR_EXCL_LINE: unreachable */
         }
@@ -1035,7 +1037,7 @@ static PyObject *element_attr(PyObject *self, PyObject *args, PyObject *kwds) {
         return NULL;
     }
     Py_ssize_t name_len;
-    char *name = attr_key_utf8(name_obj, &name_len);
+    char *name = attr_key_utf8(tree_of(self), name_obj, &name_len);
     if (name == NULL) {
         return NULL;
     }

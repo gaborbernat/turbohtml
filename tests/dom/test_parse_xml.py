@@ -229,6 +229,59 @@ def test_non_ascii_attribute_names_encode() -> None:
     assert dict(root_of(doc).attrs) == {"é": "a", "中": "b", "\U0001d538": "c"}
 
 
+def test_attribute_name_lookup_is_case_sensitive() -> None:
+    root = root_of(parse_xml('<test x="a" Y="b">t</test>'))
+    assert root.attrs["Y"] == "b"
+    assert root.attrs["x"] == "a"
+    with pytest.raises(KeyError):
+        root.attrs["y"]
+    with pytest.raises(KeyError):
+        root.attrs["X"]
+
+
+def test_attribute_get_and_contains_are_case_sensitive() -> None:
+    root = root_of(parse_xml('<test Y="b">t</test>'))
+    assert root.attrs.get("Y") == "b"
+    assert root.attrs.get("y") is None
+    assert "Y" in root.attrs
+    assert "y" not in root.attrs
+
+
+def test_attr_method_is_case_sensitive() -> None:
+    root = root_of(parse_xml('<test Y="b">t</test>'))
+    assert root.attr("Y") == "b"
+    assert root.attr("y") is None
+    assert root.attr("y", "fallback") == "fallback"
+
+
+def test_attributes_differing_only_in_case_are_distinct() -> None:
+    root = root_of(parse_xml('<test a="lower" A="upper"/>'))
+    assert root.attrs["a"] == "lower"
+    assert root.attrs["A"] == "upper"
+
+
+def test_attribute_set_preserves_case_and_stays_distinct() -> None:
+    root = root_of(parse_xml('<test Y="b"/>'))
+    root.attrs["Z"] = "c"
+    root.attrs["z"] = "d"
+    assert dict(root.attrs) == {"Y": "b", "Z": "c", "z": "d"}
+
+
+def test_attribute_delete_is_case_sensitive() -> None:
+    root = root_of(parse_xml('<test Y="b"/>'))
+    with pytest.raises(KeyError):
+        del root.attrs["y"]
+    del root.attrs["Y"]
+    assert dict(root.attrs) == {}
+
+
+def test_re_over_attribute_is_case_sensitive() -> None:
+    root = root_of(parse_xml('<test Y="abc"/>'))
+    assert root.re(r"(\w)", attr="Y") == ["a", "b", "c"]
+    assert root.re(r"(\w)", attr="y") == []
+    assert root.re_first(r"(\w)", attr="y", default="none") == "none"
+
+
 def test_lowercase_hex_character_reference() -> None:
     assert data_of(root_of(parse_xml("<r>&#xe9;&#xff;</r>")).children[0]) == "éÿ"
 
