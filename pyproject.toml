@@ -254,6 +254,8 @@ line-length = 120
 extend-exclude = [
   "tests/conformance/chardetng",
   "tests/conformance/encoding_rs",
+  "tests/conformance/libxml2",
+  "tests/conformance/libxslt",
   "tests/conformance/unicodetools",
   "tests/html5lib-tests",
   "tools/html5lib-python"
@@ -333,6 +335,8 @@ max_supported_python = "3.15"
 src.exclude = [
   "tests/conformance/chardetng",
   "tests/conformance/encoding_rs",
+  "tests/conformance/libxml2",
+  "tests/conformance/libxslt",
   "tests/conformance/unicodetools",
   "tests/html5lib-tests",
   "tools/html5lib-python"
