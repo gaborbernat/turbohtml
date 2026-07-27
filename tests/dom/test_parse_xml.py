@@ -195,6 +195,36 @@ def test_attribute_value_whitespace_folds_to_space() -> None:
     assert dict(root_of(parse_xml('<r a="x\ty\nz\rw"/>')).attrs) == {"a": "x y z w"}
 
 
+def test_attribute_value_crlf_folds_to_one_space() -> None:
+    # XML 2.11 collapses CRLF to a single LF before 3.3.3 folds it to one space, not two
+    assert dict(root_of(parse_xml('<r a="x\r\ny\r\n\tz"/>')).attrs) == {"a": "x y  z"}
+
+
+def test_cdata_normalizes_line_endings() -> None:
+    assert data_of(root_of(parse_xml("<r><![CDATA[a\r\nb\rc]]></r>")).children[0]) == "a\nb\nc"
+
+
+def test_cdata_trailing_carriage_return_folds_to_lf() -> None:
+    # a lone CR as the last content character still folds, exercising the CRLF look-ahead's edge
+    assert data_of(root_of(parse_xml("<r><![CDATA[a\r]]></r>")).children[0]) == "a\n"
+
+
+def test_attribute_ending_in_carriage_return_is_unterminated() -> None:
+    with pytest.raises(HTMLParseError) as info:
+        parse_xml('<r a="x\r')
+    assert info.value.error.code == "xml-unterminated-attribute"
+
+
+def test_comment_normalizes_line_endings() -> None:
+    assert data_of(root_of(parse_xml("<r><!--a\r\nb\rc-->x</r>")).children[0]) == "a\nb\nc"
+
+
+def test_processing_instruction_normalizes_line_endings() -> None:
+    pi = root_of(parse_xml("<r><?t a\r\nb\rc?></r>")).children[0]
+    assert isinstance(pi, ProcessingInstruction)
+    assert pi.data == "a\nb\nc"
+
+
 def test_attribute_reference_is_resolved() -> None:
     assert dict(root_of(parse_xml('<r a="1 &lt; 2"/>')).attrs) == {"a": "1 < 2"}
 

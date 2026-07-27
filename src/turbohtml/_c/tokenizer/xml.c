@@ -189,6 +189,29 @@ static Py_UCS4 *widen(xml_parser *parser, Py_ssize_t start, Py_ssize_t len) {
     return parser->names;
 }
 
+/* Widen a span into the reusable buffer, folding CR and CRLF to a single LF for XML
+   line-ending normalization (2.11); *out_len receives the folded length. Comments,
+   CDATA, and PI data copy through here so their line endings match parsed text. */
+static Py_UCS4 *widen_lf(xml_parser *parser, Py_ssize_t start, Py_ssize_t len, Py_ssize_t *out_len) {
+    Py_UCS4 *buf = widen(parser, start, len);
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t write = 0;
+    for (Py_ssize_t read = 0; read < len; read++) {
+        Py_UCS4 ch = buf[read];
+        if (ch == '\r') {
+            ch = '\n';
+            if (read + 1 < len && buf[read + 1] == '\n') {
+                read++;
+            }
+        }
+        buf[write++] = ch;
+    }
+    *out_len = write;
+    return buf;
+}
+
 /* Encode the input range [start, start+len) as UTF-8 into the reusable buffer;
  *out_len receives the byte count. NULL on allocation failure. */
 static const char *encode_utf8(xml_parser *parser, Py_ssize_t start, Py_ssize_t len, Py_ssize_t *out_len) {
@@ -564,11 +587,12 @@ static int consume_comment(xml_parser *parser) {
                 record(parser, "xml-double-hyphen-in-comment", parser->pos);
                 return -1;
             }
-            Py_UCS4 *data = widen(parser, start, parser->pos - start);
+            Py_ssize_t data_len;
+            Py_UCS4 *data = widen_lf(parser, start, parser->pos - start, &data_len);
             if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
             }
-            th_node *node = th_tree_make_data_node(parser->tree, TH_NODE_COMMENT, data, parser->pos - start);
+            th_node *node = th_tree_make_data_node(parser->tree, TH_NODE_COMMENT, data, data_len);
             if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
             }
@@ -596,11 +620,12 @@ static int consume_cdata(xml_parser *parser) {
     Py_ssize_t start = parser->pos;
     while (parser->pos < parser->length) {
         if (starts_with(parser, parser->pos, "]]>")) {
-            Py_UCS4 *data = widen(parser, start, parser->pos - start);
+            Py_ssize_t data_len;
+            Py_UCS4 *data = widen_lf(parser, start, parser->pos - start, &data_len);
             if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
             }
-            th_node *node = th_tree_make_data_node(parser->tree, TH_NODE_CDATA, data, parser->pos - start);
+            th_node *node = th_tree_make_data_node(parser->tree, TH_NODE_CDATA, data, data_len);
             if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
             }
@@ -812,11 +837,12 @@ static int consume_pi(xml_parser *parser) {
             return -1;                                 /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    Py_UCS4 *data = widen(parser, data_start, data_end - data_start);
+    Py_ssize_t data_len;
+    Py_UCS4 *data = widen_lf(parser, data_start, data_end - data_start, &data_len);
     if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    th_node *node = th_tree_make_pi(parser->tree, parser->scratch, parser->scratch_len, data, data_end - data_start);
+    th_node *node = th_tree_make_pi(parser->tree, parser->scratch, parser->scratch_len, data, data_len);
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -995,8 +1021,15 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
             record(parser, "xml-invalid-char", parser->pos);
             return -1;
         }
-        if (ch == '\t' || ch == '\n' || ch == '\r') {
-            ch = ' '; /* attribute-value normalization folds literal whitespace to space */
+        if (ch == '\r') {
+            /* line-ending normalization (XML 2.11) folds CR and CRLF to a single LF before
+               attribute-value normalization turns that LF into one space, not two */
+            if (parser->pos + 1 < parser->length && cp(parser, parser->pos + 1) == '\n') {
+                parser->pos++;
+            }
+            ch = ' ';
+        } else if (ch == '\t' || ch == '\n') {
+            ch = ' '; /* attribute-value normalization folds a literal tab or LF to space */
         }
         if (scratch_push(parser, ch) < 0) { /* GCOVR_EXCL_BR_LINE: allocation unreachable */
             return -1;                      /* GCOVR_EXCL_LINE: allocation-failure path */
