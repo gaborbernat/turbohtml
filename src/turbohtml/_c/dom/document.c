@@ -1522,6 +1522,20 @@ static PyObject *node_pickle_data(PyObject *self, th_node *node) {
     }
     case TH_NODE_DOCUMENT:
     case TH_NODE_CONTENT:
+        /* An XML tree serializes under XML rules so the round-trip reparses with
+           parse_xml and keeps case-sensitive names; th_node_html would lower them. */
+        if (th_tree_is_xml(tree_of(self))) {
+            th_serialize_opts opts = {0};
+            opts.xml = 1;
+            Py_ssize_t len;
+            Py_UCS4 *markup = th_node_serialize(tree_of(self), node, &opts, NULL, 0, &len);
+            if (markup == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            PyObject *result = ucs4_to_str(markup, len);
+            PyMem_Free(markup);
+            return result;
+        }
         return str_from_accessor(th_node_html, tree_of(self), node);
     }
     Py_RETURN_NONE; /* GCOVR_EXCL_LINE: unreachable, the switch is exhaustive */
@@ -1541,7 +1555,9 @@ PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored)) {
         Py_DECREF(reconstruct);             /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;                        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *result = Py_BuildValue("(O(iNN))", reconstruct, (int)node->type, data, children);
+    /* the xml flag rebuilds a document/content payload with parse_xml; other kinds ignore it */
+    PyObject *result =
+        Py_BuildValue("(O(iNNi))", reconstruct, (int)node->type, data, children, th_tree_is_xml(tree_of(self)));
     Py_DECREF(reconstruct);
     return result;
 }
@@ -1590,7 +1606,8 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
     int kind;
     PyObject *data;
     PyObject *children;
-    if (!PyArg_ParseTuple(args, "iOO", &kind, &data, &children)) {
+    int xml = 0; /* set for a document/content payload serialized under XML rules */
+    if (!PyArg_ParseTuple(args, "iOO|i", &kind, &data, &children, &xml)) {
         return NULL;
     }
     module_state *state = PyModule_GetState(module);
@@ -1619,7 +1636,7 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
             PyErr_SetString(PyExc_ValueError, "namespace out of range");
             return NULL;
         }
-        node = make_element((PyTypeObject *)state->element_type, tag, element_attrs);
+        node = make_element((PyTypeObject *)state->element_type, tag, element_attrs, xml);
         if (node != NULL) {
             ((NodeObject *)node)->node->ns = (uint8_t)ns;
         }
@@ -1633,7 +1650,7 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
         if (call_args == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        node = turbohtml_parse(module, call_args, NULL);
+        node = xml ? turbohtml_parse_xml(module, call_args, NULL) : turbohtml_parse(module, call_args, NULL);
         Py_DECREF(call_args);
         break;
     }

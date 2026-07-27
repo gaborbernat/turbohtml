@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from turbohtml import Doctype, Element, Text, parse
+from turbohtml import Doctype, Element, Text, parse, parse_xml
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,6 +24,22 @@ def test_duplicates_a_standalone_subtree(duplicate: Callable[[Element], Element]
     assert clone is not div
     assert clone.html == '<div id="a"><b>x</b>y</div>'
     assert clone.parent is None  # both shallow and deep yield a detached root, not a view
+
+
+@pytest.mark.parametrize(
+    "duplicate",
+    [pytest.param(copy.copy, id="shallow"), pytest.param(copy.deepcopy, id="deep")],
+)
+def test_xml_duplicate_keeps_names_case_sensitive(duplicate: Callable[[Element], Element]) -> None:
+    root = parse_xml('<Root Attr="v"><Child X="1"/></Root>').root
+    assert isinstance(root, Element)
+    clone = duplicate(root)
+    assert clone.tag == "Root"
+    assert clone.attrs["Attr"] == "v"
+    assert "attr" not in clone.attrs
+    child = clone.children[0]
+    assert isinstance(child, Element)
+    assert child.attrs["X"] == "1"
 
 
 def test_copy_is_independent_of_the_original() -> None:

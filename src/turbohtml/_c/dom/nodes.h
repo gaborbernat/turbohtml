@@ -593,9 +593,10 @@ void handle_clear_css_cache(HandleObject *handle);
    element.c beside the mutation bindings; query/methods.c calls it from prune/remove/strip. */
 void handle_drop_index(PyObject *handle_obj);
 
-/* Lower-case an attribute-name str into a freshly allocated (PyMem_Free) UTF-8 buffer, or
-   NULL with an exception set. Defined in element.c; query/methods.c reuses it for re(). */
-char *attr_key_utf8(PyObject *key, Py_ssize_t *out_len);
+/* Encode an attribute-name str into a freshly allocated (PyMem_Free) UTF-8 buffer for a
+   lookup on tree, folding case for HTML but not XML, or NULL with an exception set.
+   Defined in element.c; query/methods.c reuses it for re(). */
+char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len);
 
 PyObject *node_get_text(PyObject *self, void *Py_UNUSED(closure));
 PyObject *element_get_tag(PyObject *self, void *Py_UNUSED(closure));
@@ -618,7 +619,7 @@ PyObject *wrap_fresh_tree_node(module_state *state, th_tree *tree, th_node *node
 PyObject *data_node_in_fresh_tree(module_state *state, int node_type, PyObject *data);
 PyObject *node_copy(PyObject *self, PyObject *Py_UNUSED(ignored));
 PyObject *node_deepcopy(PyObject *self, PyObject *Py_UNUSED(memo));
-PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs);
+PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs, int xml);
 PyObject *node_insert_before(PyObject *self, PyObject *nodes);
 PyObject *node_insert_after(PyObject *self, PyObject *nodes);
 PyObject *node_replace_with(PyObject *self, PyObject *nodes);

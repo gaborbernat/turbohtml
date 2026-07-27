@@ -55,6 +55,7 @@ static PyObject *node_copy_impl(PyObject *self) {
     if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    th_tree_set_xml(tree, th_tree_is_xml(tree_of(self)));
     NodeObject *source = (NodeObject *)self;
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION(source->handle);

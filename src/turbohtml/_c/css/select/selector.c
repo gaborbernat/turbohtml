@@ -151,14 +151,17 @@ static void sel_string(sel_parser *parser, const Py_UCS4 **out, Py_ssize_t *out_
     *out_len = write - start;
 }
 
-/* UTF-8 encode a slice and resolve it to a tag atom. */
-static uint16_t sel_tag_atom(const Py_UCS4 *name, Py_ssize_t len) {
+/* UTF-8 encode a slice and resolve it to a tag atom. Folded for an HTML tree's
+   lowercased tags, kept verbatim for a case-sensitive XML tree; a NULL tree is the
+   CSS-to-XPath translator, which folds. */
+static uint16_t sel_tag_atom(th_tree *tree, const Py_UCS4 *name, Py_ssize_t len) {
     char bytes[64];
     Py_ssize_t at = 0;
+    int fold = tree == NULL || !th_tree_is_xml(tree);
     for (Py_ssize_t index = 0; index < len && at < (Py_ssize_t)sizeof(bytes) - 4; index++) {
         Py_UCS4 ch = name[index];
-        if (ch >= 'A' && ch <= 'Z') {
-            ch += 32; /* tag names match case-insensitively */
+        if (fold && ch >= 'A' && ch <= 'Z') {
+            ch += 32;
         }
         if (ch < 0x80) {
             bytes[at++] = (char)ch;
@@ -169,13 +172,16 @@ static uint16_t sel_tag_atom(const Py_UCS4 *name, Py_ssize_t len) {
     return th_tag_lookup(bytes, at);
 }
 
+/* HTML attribute names are lowercased in the tree, so the selector name folds to match;
+   XML keeps case. The caller only resolves an atom when the tree is non-NULL. */
 static uint32_t sel_attr_atom(th_tree *tree, const Py_UCS4 *name, Py_ssize_t len) {
     char bytes[128];
     Py_ssize_t at = 0;
+    int fold = !th_tree_is_xml(tree);
     for (Py_ssize_t index = 0; index < len && at < (Py_ssize_t)sizeof(bytes) - 4; index++) {
         Py_UCS4 ch = name[index];
-        if (ch >= 'A' && ch <= 'Z') {
-            ch += 32; /* attribute names are lowercased in the tree */
+        if (fold && ch >= 'A' && ch <= 'Z') {
+            ch += 32;
         }
         if (ch < 0x80) {
             bytes[at++] = (char)ch;
@@ -387,7 +393,7 @@ static void sel_type_local(sel_parser *parser, sel_simple *simple) {
                (sel_is_ident(parser->src[parser->pos]) || parser->src[parser->pos] == '\\')) {
         simple->kind = 'e';
         sel_ident(parser, &simple->name, &simple->name_len);
-        simple->tag_atom = sel_tag_atom(simple->name, simple->name_len);
+        simple->tag_atom = sel_tag_atom(parser->tree, simple->name, simple->name_len);
     } else {
         sel_fail(parser, "expected a type or '*' after the namespace prefix");
     }
@@ -760,7 +766,7 @@ static void sel_one(sel_parser *parser, sel_simple *simple) {
             sel_type_local(parser, simple);
         } else {
             simple->kind = 'e';
-            simple->tag_atom = sel_tag_atom(simple->name, simple->name_len);
+            simple->tag_atom = sel_tag_atom(parser->tree, simple->name, simple->name_len);
         }
     }
 }
@@ -1825,12 +1831,16 @@ int sel_match_simple(th_node *node, const sel_simple *simple, const sel_ctx *ctx
     case ':':
         return sel_match_pseudo(node, simple, ctx);
     case 'e':
-        if (simple->tag_atom != TH_TAG_UNKNOWN) {
-            return node->atom == simple->tag_atom;
+        if (simple->tag_atom != TH_TAG_UNKNOWN && node->atom == simple->tag_atom) {
+            return 1;
         }
-        /* a custom/unknown tag is stored lowercased; type selectors are ASCII case-insensitive
-           in HTML, so match it case-insensitively like the builtin-atom path above does */
-        return sel_eq(node->text, node->text_len, simple->name, simple->name_len, 1);
+        /* An XML element keeps its literal spelling under TH_TAG_UNKNOWN even when the name
+           looks like a builtin, so a builtin-atom selector falls back to a spelling compare;
+           an HTML element carrying a different builtin atom does not match. */
+        if (node->atom != TH_TAG_UNKNOWN) {
+            return 0;
+        }
+        return sel_eq(node->text, node->text_len, simple->name, simple->name_len, !th_tree_is_xml(ctx->tree));
     case '#': {
         /* class/ID selectors are case-sensitive in no-quirks mode, ASCII
            case-insensitive in quirks mode (Selectors-4 §6.1/§6.2) */
