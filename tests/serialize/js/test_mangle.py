@@ -74,7 +74,9 @@ def test_renames(source: str, expected: str) -> None:
 
 def _run(code: str) -> str:
     assert _NODE is not None  # the callers are skipped when node is unavailable
-    result = subprocess.run([_NODE, "-e", code], capture_output=True, text=True, timeout=60, check=False)  # ruff:ignore[subprocess-without-shell-equals-true]
+    # the first node start on a cold Windows runner has taken over a minute on its own; the timeout
+    # is only here to bound a snippet that never returns, so it sits well clear of a slow launch
+    result = subprocess.run([_NODE, "-e", code], capture_output=True, text=True, timeout=300, check=False)  # ruff:ignore[subprocess-without-shell-equals-true]
     return result.stdout + result.stderr
 
 
