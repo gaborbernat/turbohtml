@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 import turbohtml
-from turbohtml._html import _xslt_transform
+from turbohtml._html import _xslt_compile, _xslt_transform
 from turbohtml.transform import Transform, transform
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from pytest_mock import MockerFixture
 
 _NS = 'xmlns:xsl="http://www.w3.org/1999/XSL/Transform"'
 
@@ -38,7 +40,7 @@ def _sheet(body: str, *, method: str = "text", declare: str = "", prefix: str = 
 
 def _run(source: str, body: str, *, method: str = "text", prefix: str = "xsl", **params: str) -> str:
     """Parse a source document and body stylesheet and return the transform result."""
-    return transform(_sheet(body, method=method, prefix=prefix), turbohtml.parse_xml(source), **params)
+    return Transform(_sheet(body, method=method, prefix=prefix))(turbohtml.parse_xml(source), **params)
 
 
 def _collapse(text: str) -> str:
@@ -600,6 +602,19 @@ def test_transform_bad_select_expression_raises() -> None:
         _run("<r/>", '<xsl:template match="/"><xsl:value-of select="@("/></xsl:template>')
 
 
+def test_transform_bad_select_expression_fails_during_construction() -> None:
+    sheet = _sheet('<xsl:template match="/"><xsl:value-of select="@("/></xsl:template>')
+    with pytest.raises(ValueError, match="value-of select"):
+        Transform(sheet)
+
+
+@pytest.mark.parametrize("attribute", ["count", "from"])
+def test_transform_bad_number_pattern_fails_during_construction(attribute: str) -> None:
+    sheet = _sheet(f'<xsl:template match="/"><xsl:number {attribute}="@("/></xsl:template>')
+    with pytest.raises(ValueError, match="pattern"):
+        Transform(sheet)
+
+
 def test_transform_for_each_on_non_node_set_raises() -> None:
     with pytest.raises(ValueError, match="not a node-set"):
         _run("<r/>", '<xsl:template match="/"><xsl:for-each select="1 + 1">x</xsl:for-each></xsl:template>')
@@ -608,7 +623,7 @@ def test_transform_for_each_on_non_node_set_raises() -> None:
 def test_transform_params_must_be_a_dict() -> None:
     sheet = _sheet('<xsl:template match="/">x</xsl:template>')
     with pytest.raises(TypeError, match="dict or None"):
-        _xslt_transform(sheet, turbohtml.parse_xml("<r/>"), ["not", "a", "dict"])  # ty: ignore[invalid-argument-type]  # wrong type on purpose
+        _xslt_transform(_xslt_compile(sheet), turbohtml.parse_xml("<r/>"), ["not", "a", "dict"])  # ty: ignore[invalid-argument-type]  # wrong type on purpose
 
 
 def test_transform_stylesheet_without_root_element_raises() -> None:
@@ -626,9 +641,13 @@ def test_transform_too_many_union_alternatives_raises() -> None:
         _run("<r/>", body)
 
 
-def test_transform_too_many_sort_keys_raises() -> None:
+@pytest.mark.parametrize(
+    "instruction",
+    [pytest.param("for-each", id="for-each"), pytest.param("apply-templates", id="apply-templates")],
+)
+def test_transform_too_many_sort_keys_raises(instruction: str) -> None:
     sorts = "".join('<xsl:sort select="."/>' for _ in range(9))
-    body = f'<xsl:template match="/"><xsl:for-each select="r/n">{sorts}x</xsl:for-each></xsl:template>'
+    body = f'<xsl:template match="/"><xsl:{instruction} select="r/n">{sorts}x</xsl:{instruction}></xsl:template>'
     with pytest.raises(ValueError, match="too many sort keys"):
         _run("<r><n/></r>", body)
 
@@ -641,6 +660,34 @@ def test_transform_too_many_parameters_raises() -> None:
     )
     with pytest.raises(ValueError, match="too many parameters"):
         _run("<r/>", body)
+
+
+def test_transform_with_param_error_after_valid_value_raises() -> None:
+    body = (
+        '<xsl:template match="/"><xsl:call-template name="t">'
+        '<xsl:with-param name="first" select="1"/><xsl:with-param name="second" select="$missing"/>'
+        '</xsl:call-template></xsl:template><xsl:template name="t"/>'
+    )
+    with pytest.raises(ValueError, match="unbound"):
+        _run("<r/>", body)
+
+
+def test_transform_default_param_error_raises() -> None:
+    body = (
+        '<xsl:template match="/"><xsl:call-template name="t"/></xsl:template>'
+        '<xsl:template name="t"><xsl:param name="value" select="$missing"/></xsl:template>'
+    )
+    with pytest.raises(ValueError, match="unbound"):
+        _run("<r/>", body)
+
+
+def test_transform_match_template_default_param_error_raises() -> None:
+    body = (
+        '<xsl:template match="/"><xsl:apply-templates select="r/n"/></xsl:template>'
+        '<xsl:template match="n"><xsl:param name="value" select="$missing"/></xsl:template>'
+    )
+    with pytest.raises(ValueError, match="unbound"):
+        _run("<r><n/></r>", body)
 
 
 def test_transform_recursion_depth_is_bounded() -> None:
@@ -984,6 +1031,18 @@ def test_transform_avt_with_bad_expression_raises() -> None:
         _run("<r/>", '<xsl:template match="/"><a href="{@(}">x</a></xsl:template>', method="xml")
 
 
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        pytest.param('<xsl:element name="{@("/>', id="name"),
+        pytest.param('<out><xsl:attribute name="a" namespace="{@("/></out>', id="namespace"),
+    ],
+)
+def test_transform_instruction_avt_with_bad_expression_raises(instruction: str) -> None:
+    with pytest.raises(ValueError, match="attribute value template"):
+        _run("<r/>", f'<xsl:template match="/">{instruction}</xsl:template>', method="xml")
+
+
 def test_transform_avt_expression_evaluation_error_raises() -> None:
     with pytest.raises(ValueError, match="unbound"):
         _run("<r/>", '<xsl:template match="/"><a href="{$undefined}">x</a></xsl:template>', method="xml")
@@ -999,6 +1058,8 @@ def test_transform_avt_expression_evaluation_error_raises() -> None:
         ),
         pytest.param('<xsl:template match="/"><xsl:if test="@(">x</xsl:if></xsl:template>', id="if-test"),
         pytest.param('<xsl:template match="/"><xsl:number value="@("/></xsl:template>', id="number-value"),
+        pytest.param('<xsl:template match="/"><xsl:number count="@("/></xsl:template>', id="number-count"),
+        pytest.param('<xsl:template match="/"><xsl:number from="@("/></xsl:template>', id="number-from"),
         pytest.param(
             '<xsl:template match="/"><xsl:variable name="v" select="@("/><xsl:value-of select="$v"/></xsl:template>',
             id="variable-select",
@@ -1337,7 +1398,7 @@ def test_transform_top_level_param_bad_expression_raises() -> None:
 
 def test_transform_bad_arguments_raise_type_error() -> None:
     with pytest.raises(TypeError):
-        _xslt_transform("not a node", turbohtml.parse_xml("<r/>"))  # ty: ignore[invalid-argument-type]  # wrong type on purpose
+        _xslt_compile("not a node")  # ty: ignore[invalid-argument-type]  # wrong type on purpose
 
 
 def test_transform_large_match_and_key_sets_force_hash_collisions() -> None:
@@ -1506,7 +1567,7 @@ def test_transform_missing_arguments_raise() -> None:
 def test_transform_non_node_source_raises() -> None:
     sheet = _sheet('<xsl:template match="/">x</xsl:template>')
     with pytest.raises(TypeError):
-        _xslt_transform(sheet, "not a node")  # ty: ignore[invalid-argument-type]  # wrong type on purpose
+        _xslt_transform(_xslt_compile(sheet), "not a node")  # ty: ignore[invalid-argument-type]  # wrong type on purpose
 
 
 def test_transform_unknown_xsl_element_instantiates_nothing() -> None:
@@ -2362,8 +2423,129 @@ def test_transform_import_loads_external_templates(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
-    result = transform(sheet, turbohtml.parse_xml("<r><a>x</a></r>"), base_url=str(main))
+    result = transform(sheet, turbohtml.parse_xml("<r><a>x</a></r>"), base_url=str(main), import_root=tmp_path)
     assert _canon(result) == "[x]"
+
+
+def test_transform_import_missing_file_raises(tmp_path: Path) -> None:
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="missing.xsl"/></xsl:stylesheet>'
+    )
+    with pytest.raises(FileNotFoundError):
+        Transform(sheet, base_url=str(tmp_path / "main.xsl"))
+
+
+def test_transform_import_malformed_xml_raises(tmp_path: Path) -> None:
+    (tmp_path / "bad.xsl").write_text("<", encoding="utf-8")
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="bad.xsl"/></xsl:stylesheet>'
+    )
+    with pytest.raises(turbohtml.HTMLParseError, match="xml-invalid-name"):
+        Transform(sheet, base_url=str(tmp_path / "main.xsl"))
+
+
+@pytest.mark.parametrize("field", [pytest.param("base", id="base"), pytest.param("href", id="href")])
+def test_transform_import_malformed_url_raises(tmp_path: Path, field: str) -> None:
+    href = "http://[" if field == "href" else "base.xsl"
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        f'<xsl:import href="{href}"/></xsl:stylesheet>'
+    )
+    base_url = "http://[" if field == "base" else str(tmp_path / "main.xsl")
+    with pytest.raises(ValueError, match="Invalid IPv6 URL"):
+        Transform(sheet, base_url=base_url)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        pytest.param("", id="empty"),
+        pytest.param(r"C:\main.xsl", id="backslash"),
+        pytest.param("C:/main.xsl", id="slash"),
+    ],
+)
+def test_transform_import_windows_drive_is_local(base_url: str) -> None:
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="missing.xsl"/></xsl:stylesheet>'
+    )
+    with pytest.raises(FileNotFoundError):
+        Transform(sheet, base_url=base_url)
+
+
+def test_transform_import_rejects_invalid_root_type(tmp_path: Path) -> None:
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="base.xsl"/></xsl:stylesheet>'
+    )
+    with pytest.raises(TypeError):
+        Transform(sheet, base_url=str(tmp_path / "main.xsl"), import_root=cast("Path", object()))
+
+
+def test_transform_import_can_be_disabled(tmp_path: Path) -> None:
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="base.xsl"/></xsl:stylesheet>'
+    )
+    with pytest.raises(ValueError, match="xsl:import is disabled"):
+        Transform(sheet, base_url=str(tmp_path / "main.xsl"), allow_imports=False)
+
+
+def test_transform_import_disabled_allows_self_contained_stylesheet() -> None:
+    assert (
+        Transform(_sheet('<xsl:template match="/">ok</xsl:template>'), allow_imports=False)(turbohtml.parse_xml("<r/>"))
+        == "ok"
+    )
+
+
+def test_transform_self_contained_skips_import_policy(mocker: MockerFixture) -> None:
+    mocker.patch("pathlib.Path", autospec=True, side_effect=AssertionError("import policy initialized"))
+    assert (
+        Transform(_sheet('<xsl:template match="/">ok</xsl:template>'), import_root=".")(turbohtml.parse_xml("<r/>"))
+        == "ok"
+    )
+
+
+@pytest.mark.parametrize(
+    "href_kind", [pytest.param("parent", id="parent traversal"), pytest.param("absolute", id="absolute")]
+)
+def test_transform_import_root_rejects_path_escape(tmp_path: Path, href_kind: str) -> None:
+    root = tmp_path / "styles"
+    root.mkdir()
+    outside = tmp_path / "outside.xsl"
+    outside.write_text('<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform"/>', encoding="utf-8")
+    href = "../outside.xsl" if href_kind == "parent" else str(outside)
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        f'<xsl:import href="{href}"/></xsl:stylesheet>'
+    )
+    with pytest.raises(ValueError, match="path escapes import_root"):
+        transform(
+            sheet,
+            turbohtml.parse_xml("<r/>"),
+            base_url=str(root / "main.xsl"),
+            import_root=root,
+        )
+
+
+def test_transform_import_root_rejects_symlink_escape(tmp_path: Path) -> None:
+    root = tmp_path / "styles"
+    root.mkdir()
+    outside = tmp_path / "outside.xsl"
+    outside.write_text('<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform"/>', encoding="utf-8")
+    link = root / "linked.xsl"
+    try:
+        link.symlink_to(outside)
+    except OSError as error:  # pragma: no cover - Windows may deny symlink creation
+        pytest.skip(f"symlinks unavailable: {error}")
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="linked.xsl"/></xsl:stylesheet>'
+    )
+    with pytest.raises(ValueError, match="path escapes import_root"):
+        transform(sheet, turbohtml.parse_xml("<r/>"), base_url=str(root / "main.xsl"), import_root=root)
 
 
 def test_transform_import_ignores_foreign_same_length_prefix() -> None:
@@ -2576,7 +2758,9 @@ def test_transform_import_nested(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
-    assert _canon(transform(sheet, turbohtml.parse_xml("<r><a/></r>"), base_url=str(main))) == "leaf"
+    assert (
+        _canon(transform(sheet, turbohtml.parse_xml("<r><a/></r>"), base_url=str(main), import_root=tmp_path)) == "leaf"
+    )
 
 
 def test_transform_import_without_base_url_errors() -> None:
@@ -2650,18 +2834,18 @@ def test_transform_attribute_set_two_names_with_trailing_space() -> None:
     assert _collapse(_run("<r/>", body, method="xml")) == '<out a="1" b="2"/>'
 
 
-_POISON = '<xsl:attribute-set name="bad"><xsl:attribute name="{">v</xsl:attribute></xsl:attribute-set>'
+_POISON = '<xsl:attribute-set name="bad"><xsl:attribute name="{$missing}">v</xsl:attribute></xsl:attribute-set>'
 
 
 def test_transform_attribute_set_error_propagates_through_literal() -> None:
     body = f'{_POISON}<xsl:template match="/"><out xsl:use-attribute-sets="bad"/></xsl:template>'
-    with pytest.raises(ValueError, match="attribute value template"):
+    with pytest.raises(ValueError, match="unbound"):
         _run("<r/>", body, method="xml")
 
 
 def test_transform_attribute_set_error_propagates_through_element() -> None:
     body = f'{_POISON}<xsl:template match="/"><xsl:element name="out" use-attribute-sets="bad"/></xsl:template>'
-    with pytest.raises(ValueError, match="attribute value template"):
+    with pytest.raises(ValueError, match="unbound"):
         _run("<r/>", body, method="xml")
 
 
@@ -2671,7 +2855,7 @@ def test_transform_attribute_set_error_propagates_through_copy() -> None:
         '<xsl:template match="/"><xsl:apply-templates select="r"/></xsl:template>'
         '<xsl:template match="r"><xsl:copy use-attribute-sets="bad"/></xsl:template>'
     )
-    with pytest.raises(ValueError, match="attribute value template"):
+    with pytest.raises(ValueError, match="unbound"):
         _run("<r/>", body, method="xml")
 
 
@@ -2681,7 +2865,7 @@ def test_transform_attribute_set_error_propagates_through_chain() -> None:
         '<xsl:attribute-set name="s" use-attribute-sets="bad"/>'
         '<xsl:template match="/"><out xsl:use-attribute-sets="s"/></xsl:template>'
     )
-    with pytest.raises(ValueError, match="attribute value template"):
+    with pytest.raises(ValueError, match="unbound"):
         _run("<r/>", body, method="xml")
 
 
@@ -2694,8 +2878,11 @@ def test_transform_attribute_with_prefixed_name_and_namespace() -> None:
 
 
 def test_transform_attribute_namespace_bad_avt_errors() -> None:
-    body = '<xsl:template match="/"><out><xsl:attribute name="a" namespace="{">v</xsl:attribute></out></xsl:template>'
-    with pytest.raises(ValueError, match="attribute value template"):
+    body = (
+        '<xsl:template match="/"><out><xsl:attribute name="a" namespace="{$missing}">v</xsl:attribute>'
+        "</out></xsl:template>"
+    )
+    with pytest.raises(ValueError, match="unbound"):
         _run("<r/>", body, method="xml")
 
 
@@ -2791,16 +2978,6 @@ def test_transform_import_with_malformed_declaration_errors(tmp_path: Path) -> N
         transform(sheet, turbohtml.parse_xml("<r/>"), base_url=str(main))
 
 
-def test_transform_import_rejects_non_node_item() -> None:
-    sheet = turbohtml.parse_xml(
-        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
-        '<xsl:template match="/">x</xsl:template></xsl:stylesheet>'
-    )
-    with pytest.raises((TypeError, ValueError)):
-        # exercises the C-side node-borrow guard on a non-node import item
-        _xslt_transform(sheet, turbohtml.parse_xml("<r/>"), None, [object()])  # ty: ignore[invalid-argument-type]
-
-
 def test_transform_attribute_namespace_generates_when_element_has_other_attrs() -> None:
     body = (
         '<xsl:template match="/"><out other="1">'
@@ -2811,10 +2988,11 @@ def test_transform_attribute_namespace_generates_when_element_has_other_attrs() 
 
 def test_transform_fallback_body_error_propagates() -> None:
     body = (
-        '<xsl:template match="/"><e:go><xsl:fallback><xsl:value-of select="]["/></xsl:fallback></e:go></xsl:template>'
+        '<xsl:template match="/"><e:go><xsl:fallback><xsl:value-of select="$missing"/></xsl:fallback>'
+        "</e:go></xsl:template>"
     )
     declare = 'xmlns:e="urn:ext" extension-element-prefixes="e"'
-    with pytest.raises(ValueError, match="value-of"):
+    with pytest.raises(ValueError, match="unbound"):
         transform(_sheet(body, declare=declare), turbohtml.parse_xml("<r/>"))
 
 

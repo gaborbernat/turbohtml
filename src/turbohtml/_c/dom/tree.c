@@ -1200,9 +1200,6 @@ static void insert_comment(th_tree *tree, const th_token *token, th_node *parent
         return;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     node->text = buf_to_ucs4(tree, &token->text, &node->text_len);
-    if (token->is_pi) {
-        node->tag_flags |= TH_COMMENT_IS_PI; /* a `<?` bogus comment the SAX walk reports as a PI */
-    }
     if (parent != NULL) {
         node_append(parent, node);
         return;
@@ -1210,6 +1207,37 @@ static void insert_comment(th_tree *tree, const th_token *token, th_node *parent
     th_node *target, *before;
     insertion_location(tree, &target, &before);
     node_insert_before(target, node, before);
+}
+
+static void insert_pi(th_tree *tree, const th_token *token, th_node *parent) {
+    th_node *node = node_new(tree, TH_NODE_PI);
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    node->text_len = token->name.len + 1 + token->text.len;
+    node->text = arena_alloc(tree, node->text_len * (Py_ssize_t)sizeof(Py_UCS4));
+    if (node->text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;               /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    buf_write_ucs4(node->text, &token->name);
+    node->text[token->name.len] = ' ';
+    buf_write_ucs4(node->text + token->name.len + 1, &token->text);
+    node->attr_count = token->name.len;
+    if (parent != NULL) {
+        node_append(parent, node);
+        return;
+    }
+    th_node *target, *before;
+    insertion_location(tree, &target, &before);
+    node_insert_before(target, node, before);
+}
+
+static void insert_comment_or_pi(th_tree *tree, const th_token *token, th_node *parent) {
+    if (token->kind == TH_PI) {
+        insert_pi(tree, token, parent);
+    } else {
+        insert_comment(tree, token, parent);
+    }
 }
 
 /* Resolve a token's text (slice or owned buffer) into an arena UCS4 array. */
@@ -1267,47 +1295,79 @@ static int node_has_attr(const th_node *node, uint32_t atom) {
 /* The first HTML element with this atom in a depth-first walk of parent's
    subtree, not descending into nested selects. */
 static th_node *first_descendant_atom(th_node *parent, uint16_t atom) {
-    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
-        if (child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML) {
-            if (child->atom == atom) {
-                return child;
+    th_node *node = parent->first_child;
+    while (node != NULL) {
+        int skip_children = 0;
+        if (node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML) {
+            if (node->atom == atom) {
+                return node;
             }
             /* GCOVR_EXCL_START: a nested <select> start closes the open select, so a select never contains one */
-            if (child->atom == TH_TAG_SELECT) {
-                continue;
-            }
+            skip_children = node->atom == TH_TAG_SELECT;
             /* GCOVR_EXCL_STOP */
         }
-        th_node *found = first_descendant_atom(child, atom);
-        if (found != NULL) {
-            return found;
+        if (!skip_children && /* GCOVR_EXCL_BR_LINE: tree construction closes nested selects */
+            node->first_child != NULL) {
+            node = node->first_child;
+            continue;
         }
+        while (node != parent && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        node = node == parent ? NULL : node->next_sibling;
     }
     return NULL;
 }
 
-/* Deep-copy src's children, appending the copies to dst. */
+static th_node *copy_node_in_tree(th_tree *tree, th_node *source) {
+    if (source->type == TH_NODE_ELEMENT) {
+        th_node *copy = node_clone(tree, source);
+        if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
+            copy->ns = source->ns;
+        }
+        return copy;
+    }
+    th_node *copy = node_new(tree, source->type);
+    if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
+        copy->text = need_text(tree, source);
+        copy->text_len = source->text_len;
+        if (source->type == TH_NODE_PI || /* GCOVR_EXCL_BR_LINE: HTML cannot nest a doctype in selected content */
+            source->type == TH_NODE_DOCTYPE) {
+            copy->attr_count = source->attr_count;
+        }
+    }
+    return copy;
+}
+
+/* Deep-copy src's children into dst without consuming one C stack frame per level. */
 static void deep_copy_children(th_tree *tree, const th_node *src, th_node *dst) {
-    for (th_node *child = src->first_child; child != NULL; child = child->next_sibling) {
-        th_node *copy;
-        if (child->type == TH_NODE_ELEMENT) {
-            copy = node_clone(tree, child);
-            if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                copy->ns = child->ns;
+    const th_node *from = src;
+    th_node *copy = dst;
+    for (;;) {
+        if (from->first_child != NULL) {
+            from = from->first_child;
+            th_node *child = copy_node_in_tree(tree, (th_node *)from);
+            if (child == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
             }
-        } else {
-            copy = node_new(tree, child->type);
-            if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                /* Realize a zero-copy span before sharing the payload pointer. */
-                copy->text = need_text(tree, (th_node *)child);
-                copy->text_len = child->text_len;
-            }
+            node_append(copy, child);
+            copy = child;
+            continue;
         }
-        if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        while (from != src && from->next_sibling == NULL) {
+            from = from->parent;
+            copy = copy->parent;
         }
-        node_append(dst, copy);
-        deep_copy_children(tree, child, copy);
+        if (from == src) {
+            return;
+        }
+        from = from->next_sibling;
+        th_node *sibling = copy_node_in_tree(tree, (th_node *)from);
+        if (sibling == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return;            /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        }
+        node_append(copy->parent, sibling);
+        copy = sibling;
     }
 }
 
@@ -2084,8 +2144,8 @@ static enum th_drain drain_initial(th_tree *tree, th_token *tok, th_insert *dc) 
         dc->mode = M_BEFORE_HTML;
         return TH_DRAIN_NEXT;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, tree->document);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, tree->document);
         return TH_DRAIN_NEXT;
     }
     tree->quirks = 1; /* no doctype before content */
@@ -2094,8 +2154,8 @@ static enum th_drain drain_initial(th_tree *tree, th_token *tok, th_insert *dc) 
 }
 
 static enum th_drain drain_before_html(th_tree *tree, th_token *tok, th_insert *dc) {
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, tree->document);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, tree->document);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_TEXT) {
@@ -2130,8 +2190,8 @@ static enum th_drain drain_before_html(th_tree *tree, th_token *tok, th_insert *
 }
 
 static enum th_drain drain_before_head(th_tree *tree, th_token *tok, th_insert *dc) {
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_TEXT) {
@@ -2195,8 +2255,8 @@ static enum th_drain drain_in_head(th_tree *tree, th_token *tok, th_insert *dc) 
         dc->mode = M_AFTER_HEAD;
         return TH_DRAIN_REPROCESS;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG) {
@@ -2300,8 +2360,8 @@ static enum th_drain drain_in_head_noscript(th_tree *tree, th_token *tok, th_ins
         }
         return TH_DRAIN_NEXT;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_TEXT) {
@@ -2354,8 +2414,8 @@ static enum th_drain drain_after_head(th_tree *tree, th_token *tok, th_insert *d
         }
         tree->text_offset += ws; /* the body is created below; reprocess only the remainder there */
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_BODY) {
@@ -2504,8 +2564,8 @@ static enum th_drain drain_in_frameset(th_tree *tree, th_token *tok, th_insert *
         insert_whitespace_only(tree, text, len);
         return TH_DRAIN_NEXT;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG) {
@@ -2553,8 +2613,8 @@ static enum th_drain drain_after_frameset(th_tree *tree, th_token *tok, th_inser
         insert_whitespace_only(tree, text, len);
         return TH_DRAIN_NEXT;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_NOFRAMES) {
@@ -2618,8 +2678,8 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
         insert_text(tree, text, len);
         return TH_DRAIN_NEXT;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG) {
@@ -2844,9 +2904,9 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             return TH_DRAIN_NEXT;
         }
-        if (atom == TH_TAG_INPUT || atom == TH_TAG_KEYGEN) {
-            /* an input or keygen closes an open select entirely (and is
-               ignored outright in a select-context fragment) */
+        if (atom == TH_TAG_INPUT) {
+            /* an input closes an open select entirely (and is ignored outright
+               in a select-context fragment) */
             if (tree->fragment_root != NULL && tree->ctx_atom == TH_TAG_SELECT) {
                 return TH_DRAIN_NEXT;
             }
@@ -2926,7 +2986,9 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
         if (atom == TH_TAG_NOBR) {
             reconstruct_afe(tree);
             if (has_in_scope(tree, TH_TAG_NOBR)) {
-                adoption_agency(tree, TH_TAG_NOBR);
+                if (!adoption_agency(tree, TH_TAG_NOBR)) {
+                    any_other_end_tag(tree, TH_TAG_NOBR, tok);
+                }
                 reconstruct_afe(tree);
             }
             th_node *node = insert_element(tree, tok);
@@ -3077,8 +3139,9 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             return TH_DRAIN_NEXT;
         }
         if (flags & TH_TAG_FORMATTING) {
-            adoption_agency(tree, atom);
-            return TH_DRAIN_NEXT;
+            if (adoption_agency(tree, atom)) {
+                return TH_DRAIN_NEXT;
+            }
         }
         if (atom == TH_TAG_APPLET || atom == TH_TAG_MARQUEE || atom == TH_TAG_OBJECT) {
             if (has_in_scope(tree, atom)) {
@@ -3150,8 +3213,8 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
         dc->mode = dc->table_origin;
         return TH_DRAIN_NEXT;
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         dc->mode = dc->table_origin;
         return TH_DRAIN_NEXT;
     }
@@ -3325,8 +3388,8 @@ static enum th_drain drain_in_column_group(th_tree *tree, th_token *tok, th_inse
         }
         tree->text_offset += ws; /* reprocess only the remainder below */
     }
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, NULL);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, NULL);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HTML) {
@@ -3538,10 +3601,10 @@ static enum th_drain drain_in_cell(th_tree *tree, th_token *tok, th_insert *dc) 
 }
 
 static enum th_drain drain_after_body(th_tree *tree, th_token *tok, th_insert *dc) {
-    if (tok->kind == TH_COMMENT) {
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
         /* open[0] is always the html element in this mode, never the document */
         th_node *root = tree->open_len > 0 ? tree->open[0] : tree->document; /* GCOVR_EXCL_BR_LINE */
-        insert_comment(tree, tok, root);
+        insert_comment_or_pi(tree, tok, root);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_TEXT) {
@@ -3567,9 +3630,9 @@ static enum th_drain drain_after_body(th_tree *tree, th_token *tok, th_insert *d
 }
 
 static enum th_drain drain_after_after_body(th_tree *tree, th_token *tok, th_insert *dc) {
-    if (tok->kind == TH_COMMENT) {
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
         /* a fragment has no document node to attach to; use its root */
-        insert_comment(tree, tok, tree->fragment_root != NULL ? tree->fragment_root : tree->document);
+        insert_comment_or_pi(tree, tok, tree->fragment_root != NULL ? tree->fragment_root : tree->document);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_TEXT) {
@@ -3588,8 +3651,8 @@ static enum th_drain drain_after_after_body(th_tree *tree, th_token *tok, th_ins
 }
 
 static enum th_drain drain_after_after_frameset(th_tree *tree, th_token *tok, th_insert *dc) {
-    if (tok->kind == TH_COMMENT) {
-        insert_comment(tree, tok, tree->document);
+    if (tok->kind == TH_COMMENT || tok->kind == TH_PI) {
+        insert_comment_or_pi(tree, tok, tree->document);
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_TEXT) {

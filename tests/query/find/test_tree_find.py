@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 
-from turbohtml import Axis, Element, parse
+from turbohtml import Axis, Element, Text, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -277,12 +277,27 @@ def test_callable_error_propagates(id_filter: Filter) -> None:
         parse("<p>").find(id=id_filter)
 
 
-# a known-tag + attribute query rooted at the document reaches the matcher through the
-# atom-index bucket, so its error path is distinct from the general descendant walk's
+def test_find_rejects_multiple_tag_arguments() -> None:
+    with pytest.raises(TypeError):
+        parse("<p>").find("p", "div")  # ty: ignore[too-many-positional-arguments]
+
+
+def test_find_accepts_explicit_none_tag() -> None:
+    assert _el(parse("<p>x</p>").find(None)).tag == "html"
+
+
+# Prime the index so both queries reach the matcher through the atom bucket.
 @pytest.mark.parametrize("query", [lambda doc: doc.find("p", id=_raise), lambda doc: doc.find_all("p", id=_raise)])
 def test_indexed_tag_filter_error_propagates(query: Callable[[Document], object]) -> None:
+    document = parse("<p>x</p>")
+    assert len(document.find_all("p")) == 1
     with pytest.raises(ZeroDivisionError):
-        query(parse("<p>x</p>"))
+        query(document)
+
+
+def test_limited_tag_filter_error_propagates_without_building_index() -> None:
+    with pytest.raises(ZeroDivisionError):
+        parse("<p>x</p>").find_all("p", id=_raise, limit=1)
 
 
 @pytest.mark.parametrize(
@@ -565,6 +580,17 @@ def test_text_empty_string_matches_textless_element() -> None:
 def test_text_equal_length_different_content_does_not_match() -> None:
     # both are three code points, so the length gate passes and the content compare decides
     assert parse("<p>abc</p>").find_all(text="xyz") == []
+
+
+def test_text_scan_handles_programmatic_tree_beyond_parser_depth_cap() -> None:
+    root = Element("div")
+    parent = root
+    for _ in range(1_200):
+        child = Element("div")
+        parent.append(child)
+        parent = child
+    parent.append(Text("needle"))
+    assert root.find(text="needle") is not None
 
 
 # A non-literal regex keeps the Python path that snapshots candidates under the lock, where the

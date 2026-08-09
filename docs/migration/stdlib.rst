@@ -189,7 +189,7 @@ map onto SAX methods one-to-one:
     - - ``handle_decl(decl)``
       - ``doctype(name, public_id, system_id)``
     - - ``handle_pi(data)``
-      - ``processing_instruction(data)``
+      - ``processing_instruction(target, data)``
 
 .. testcode::
 

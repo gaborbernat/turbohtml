@@ -32,6 +32,9 @@ class _Recorder(HTMLParser):
     def handle_decl(self, decl: str) -> None:
         self.events.append(("decl", decl))
 
+    def handle_pi(self, data: str) -> None:
+        self.events.append(("pi", data))
+
 
 def _events(html: str) -> list[tuple[object, ...]]:
     parser = _Recorder()
@@ -54,8 +57,9 @@ def _events(html: str) -> list[tuple[object, ...]]:
         pytest.param("a &amp; b &#9731;", [("data", "a & b ☃")], id="charrefs-decoded"),
         # a valueless attribute's value is the empty string, not None
         pytest.param("<input disabled>", [("start", "input", [("disabled", "")])], id="valueless-attr"),
-        # processing instructions and CDATA are comments per the HTML spec
-        pytest.param("<?proc?>", [("comment", "?proc?")], id="processing-instruction-is-comment"),
+        pytest.param("<?proc?>", [("pi", "proc")], id="processing-instruction"),
+        pytest.param("<?proc data?>", [("pi", "proc data")], id="processing-instruction-data"),
+        pytest.param("<?xml version='1.0'?>", [("comment", "?xml version='1.0'?")], id="reserved-xml-target"),
         pytest.param("<![CDATA[x]]>", [("comment", "[CDATA[x]]")], id="cdata-is-comment"),
     ],
 )
@@ -130,7 +134,7 @@ def test_default_handlers_are_no_ops() -> None:
     parser = HTMLParser()
     parser.feed("<!doctype html><p>x &amp; y<br/><!--c--></p><?pi?>")
     parser.close()
-    # the never-called compatibility hooks exist and accept their argument
+    # the compatibility hooks exist and accept their argument
     parser.handle_pi("x")
     parser.handle_entityref("amp")
     parser.handle_charref("9731")

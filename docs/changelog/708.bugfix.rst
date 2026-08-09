@@ -1,0 +1,1 @@
+Recheck sanitizer callback and forced-attribute rewrites against every baseline safety rule.

@@ -30,8 +30,10 @@ element or stripped attribute, the way DOMPurify populates ``DOMPurify.removed``
 way sanitize-html's ``allowedStyles`` does. Key it ``{tag: {property: [pattern, ...]}}`` (``"*"`` matches every tag); a
 ``style`` declaration survives only when its property is listed for the element's tag or ``"*"`` and its value matches
 one of the patterns via an unanchored :func:`re.search`. It runs on top of ``css_properties`` and the dangerous-value
-baseline -- the property must still be in ``css_properties``, and ``expression()`` or a disallowed-scheme ``url()`` is
-dropped even when a pattern would admit it:
+baseline. The property must still be in ``css_properties``. The baseline drops ``expression()`` and disallowed-scheme
+``url()`` values even when a pattern admits them, including function names and URL schemes written with CSS escapes. It
+also rejects ``behavior`` and ``-moz-binding`` even if ``css_properties`` lists them. Strings and comments are tokenized
+as inert content rather than scanned as executable functions:
 
 .. testcode::
 
@@ -49,11 +51,16 @@ dropped even when a pattern would admit it:
 
     <p style="color: #0a0">ok</p>
 
+``Policy.attribute_filter`` replacements and ``Policy.set_attributes`` additions pass through the mandatory safety
+checks before serialization. These checks remove event handlers, disallowed URL and ``srcset`` schemes, unsafe CSS,
+media hosts outside ``media_hosts``, and values outside ``attribute_values``. Template stripping and named-property
+isolation run on the final values. HTML names created by these rules are ASCII-lowercased before the checks.
+
 ``Policy.transform_tags`` renames elements during the same walk, sanitize-html's ``transformTags``. Key it by source
 tag: map to a bare string to rename, or to a :class:`Transform` to rename and add attributes. The rename runs *before*
 the allowlist, so the renamed element is re-checked from scratch -- a transform decides an element's name but never its
 safety. Mapping a tag to ``script`` still drops it, and an added attribute is scrubbed like the element's own, so it
-must be allowlisted to survive:
+must be allowlisted to survive. HTML transform targets and injected attribute names are ASCII case-insensitive:
 
 .. testcode::
 
@@ -113,7 +120,8 @@ element. The safety baseline still runs on whatever the matcher keeps, so an ``o
 
 ``Policy.allow_html``, ``Policy.allow_svg``, and ``Policy.allow_mathml`` gate each namespace independently, DOMPurify's
 ``USE_PROFILES``. All default on; turning one off drops that whole namespace even when its tags are allowlisted, so a
-policy can keep SVG but not MathML:
+policy can keep SVG but not MathML. The baseline blocks SVG animation elements under an SVG policy because they can
+assign event handlers or script URLs at runtime:
 
 .. testcode::
 
@@ -231,9 +239,8 @@ insignificant whitespace, omit optional tags, unquote attributes, strip comments
 The HTML minify layout emits ``<style>`` bodies verbatim; to also minify embedded CSS, run :func:`minify_css` (below)
 over a ``<style>`` body yourself, which is what ``minify-html``'s ``minify_css`` did inline. Passing a :class:`JSMinify`
 as ``Minify(minify_js=...)`` rewrites inline ``<script>`` content, covering ``minify-html``'s ``minify_js``. The doctype
-is always normalized to ``<!doctype html>`` (``minify-html``'s ``minify_doctype`` is implicit), and HTML has no
-processing instructions to drop (``remove_processing_instructions`` is moot under the WHATWG parser, which reads them as
-bogus comments).
+is always normalized to ``<!doctype html>`` (``minify-html``'s ``minify_doctype`` is implicit). Processing instructions
+are preserved; turbohtml does not expose ``remove_processing_instructions``.
 
 *****************
  JS minification

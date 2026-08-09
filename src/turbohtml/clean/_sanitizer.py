@@ -141,16 +141,19 @@ class Policy:
     :param on_disallowed_tag: how to treat a tag not in ``tags`` (:class:`OnDisallowed`: escape, strip, or remove).
     :param strip_comments: drop HTML comments from the output.
     :param add_link_rel: ``rel`` tokens forced onto every kept ``<a href>`` (e.g. ``noopener``).
-    :param attribute_filter: an optional last word over every surviving attribute, returning a replacement value or
-        ``None`` to drop it.
+    :param attribute_filter: an optional rewrite for every surviving attribute, returning a replacement value or
+        ``None`` to drop it. The replacement passes through the safety checks before serialization.
     :param set_attributes: attribute values forced onto every kept instance of a tag (added if absent, overwritten if
-        present); unlike ``attribute_filter``, this can add attributes that were not there.
+        present); unlike ``attribute_filter``, this can add attributes that were not there. Added values pass through
+        the same URL, CSS, template, value, media-host, and named-property checks as parsed attributes.
     :param remove_with_content: disallowed tags whose whole subtree is dropped (e.g. ``script``/``style``) rather than
         escaped or stripped, so their text never leaks into the output.
     :param css_properties: the CSS property allowlist. A kept ``style`` attribute and, when ``style`` is in ``tags``,
         the ``<style>`` element's stylesheet body are both scrubbed against it: any declaration whose property name is
-        not in the set (or whose value smuggles ``expression()`` or a ``url()`` with a disallowed scheme) is dropped,
-        while selectors and block nesting are kept, so dangerous CSS cannot ride in on a kept ``style``.
+        not in the set (or whose value smuggles ``expression()`` or a ``url()`` with a disallowed scheme) is dropped.
+        The non-configurable baseline also drops ``behavior`` and ``-moz-binding``. CSS escapes are decoded before
+        these checks, while function-like text inside strings and comments remains inert. Selectors and block nesting
+        remain.
     :param attribute_prefixes: allow any attribute whose name starts with one of these prefixes (e.g. ``"data-"`` for
         every ``data-*``), on top of the exact-name and ``"*"`` matches in ``attributes``.
     :param attribute_values: restrict a kept attribute to literal values, keyed ``{tag: {attribute: allowed_values}}``;
@@ -198,7 +201,8 @@ class Policy:
         ``USE_PROFILES.html``. Independent of the tag allowlist, so it composes with ``allow_svg``/``allow_mathml`` to
         select which content languages a policy admits.
     :param allow_svg: keep SVG-namespace elements, DOMPurify's ``USE_PROFILES.svg``. Off drops every SVG element even
-        when its tag is in ``tags``.
+        when its tag is in ``tags``. The baseline rejects SVG animation elements because they can assign event handlers
+        or script URLs at runtime; an allowlist cannot keep them.
     :param allow_mathml: keep MathML-namespace elements, DOMPurify's ``USE_PROFILES.mathMl``. Off drops every MathML
         element even when its tag is in ``tags``.
     :param xml: emit well-formed XML/XHTML instead of HTML, DOMPurify's ``RETURN_DOM`` served through the XML
@@ -347,7 +351,7 @@ class Sanitizer:
         """Run the C walk over a freshly parsed fragment, appending drops to ``removed`` when it is not None."""
         policy = self.policy
         root = parse_fragment(html)
-        _sanitize(
+        return _sanitize(
             root,
             policy.tags,
             self._attributes,
@@ -375,7 +379,6 @@ class Sanitizer:
             policy.allow_svg,
             policy.allow_mathml,
         )
-        return root
 
 
 def sanitize(html: str, options: Policy | None = None) -> str:

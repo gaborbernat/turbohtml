@@ -6,11 +6,11 @@ Sanitizing is subtractive and layered: each configurable allowlist can only *rem
 under all of them sits a baseline no policy can reach. The order matters, so read a kept ``style`` attribute as the
 worked example.
 
-A style declaration passes through three gates in turn. First the non-configurable safety baseline: ``expression()``
-runs script in old IE, and ``url(javascript:...)`` carries a disallowed scheme, so either drops the whole declaration no
-matter what the policy says. Then ``css_properties``, the property-*name* allowlist: a property outside the set is gone
-even if its value is harmless. Only a declaration that clears both reaches ``allowed_styles``, the property-*value*
-allowlist, which keeps it only when its value matches one of the patterns listed for the element's tag (or ``"*"``).
+A style declaration passes through three gates in turn. The non-configurable safety baseline drops ``expression()``,
+``url(javascript:...)``, ``behavior``, and ``-moz-binding``. It decodes CSS escapes before matching tokens, while text
+inside strings and comments stays inert. Then ``css_properties`` drops names outside the property allowlist. A
+declaration that clears both reaches ``allowed_styles``, which checks its value against the patterns for the element's
+tag or ``"*"``.
 
 The layering is deliberately one-directional. ``allowed_styles`` *narrows* -- it can reject a value the earlier layers
 would have kept, but it can never re-admit one they dropped. A caller who writes ``{"color": [r".*"]}`` has not opened a
@@ -25,6 +25,13 @@ decision was taken out of the policy's hands entirely. The same shape governs th
 handlers, ``<script>``, and ``javascript:`` URLs are dropped below the allowlists, so no combination of ``tags``,
 ``attributes``, or ``attribute_filter`` settings can bring them back.
 
+``attribute_filter`` and ``set_attributes`` write after the first checks over parsed attributes. The sanitizer runs the
+value checks again after both mutation routes, over the data the serializer will emit. That final pass covers handlers,
+URL and ``srcset`` schemes, CSS, template markers, configured value sets, media hosts, and named-property isolation.
+Callbacks can narrow or rewrite policy output without gaining a route around the baseline. The final pass runs only when
+a callback or matching ``set_attributes`` rule wrote a value, so configuring one tag does not rescan every unrelated
+element.
+
 ``transform_tags`` is the one step that *adds* rather than removes -- it renames an element and can inject attributes --
 so its placement is what keeps the model intact. The rename runs at the very top, before the allowlist reads the tag,
 and then the walk continues on the renamed element as if the author had written the target: the allowlist decides its
@@ -32,7 +39,9 @@ disposition, the unsafe-tag baseline still escapes a ``script`` or ``iframe`` ta
 the element's own to be scrubbed by the same gates below. A transform therefore chooses an element's *name* while every
 gate underneath still governs its *safety*. Putting the additive step above the subtractive stack, instead of letting it
 write past the allowlist, is why ``{"b": "script"}`` cannot smuggle a live ``<script>`` and an injected ``href`` cannot
-carry a ``javascript:`` URL -- the transform hands its output back to the pipeline rather than around it.
+carry a ``javascript:`` URL -- the transform hands its output back to the pipeline rather than around it. HTML target
+and injected attribute names are ASCII-lowercased before those checks, matching browser name handling and preventing a
+mixed-case policy value from bypassing a lowercase safety rule.
 
 ``isolate_named_props`` is the other rewriting step, and its design turns on a constraint the layered model does not:
 turbohtml has no live DOM. DOM clobbering exploits *named access* -- an ``id`` or ``name`` whose value matches a
@@ -59,6 +68,17 @@ whose ``attributeNameCheck`` can readmit an ``on*`` handler if the caller's patt
 event-handler and URL baseline unconditional, so a custom-element policy is safe by construction the same way a
 ``style`` policy is. Only basic custom-element names reach the matcher -- a hyphenated name clear of the reserved
 ``annotation-xml``/``font-face`` set -- so a matcher cannot be tricked into keeping a real foreign element by its name.
+
+SVG animation needs an element rule in addition to direct attribute checks. ``animate``, ``set``, ``animateMotion``,
+``animateTransform``, and ``animateColor`` can assign the attribute named by ``attributeName`` at runtime. A value in
+``from``, ``to``, or ``values`` can write a script URL or event handler without placing that value in a direct URL or
+``on*`` attribute. The baseline blocks these animation elements under custom SVG allowlists.
+
+The policy walk uses an explicit checked stack rather than C recursion. Deep input therefore reaches the same final
+safety pass as shallow input; nesting cannot truncate the sanitized result or skip a descendant's checks.
+
+The native walk snapshots its input under the tree's critical section, then releases the shared tree before invoking a
+policy callback. Callback code may retain or mutate the original tree without racing the sanitizer's private copy.
 
 The ``allow_html``/``allow_svg``/``allow_mathml`` profiles are the coarsest subtractive layer of all: each drops a whole
 content language above the allowlist, so a namespace a policy disables is gone no matter which of its tags appear in

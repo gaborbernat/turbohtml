@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -35,6 +35,10 @@ if not TOKENIZER_DIR.is_dir() or not any(TOKENIZER_DIR.glob("*.test")):  # pragm
     raise RuntimeError(msg)
 
 _DOUBLE_ESCAPE = re.compile(r"\\u([0-9A-Fa-f]{4})")
+_PI_TOKEN_OVERRIDES: Final = {
+    "<?namespace>": [["ProcessingInstruction", "namespace", ""]],
+    "<?foo-->": [["ProcessingInstruction", "foo--", ""]],
+}
 
 
 def _decode_double(text: str) -> str:
@@ -43,6 +47,26 @@ def _decode_double(text: str) -> str:
 
 def _decode_token(token: list[Any]) -> list[Any]:
     return [_decode_double(item) if isinstance(item, str) else item for item in token]
+
+
+def _living_pi_expectation(
+    text: str, state: str, expected: list[Any], errors: list[tuple[str, int, int]]
+) -> tuple[list[Any], list[tuple[str, int, int]]]:
+    if state != "Data state" or not text.startswith("<?"):
+        return expected, errors
+    if not (first := text[2:3]):
+        return [], [("eof-in-processing-instruction", 1, 3)]
+    if first.isascii() and (first.isalpha() or first == "_"):
+        if text.endswith(">"):
+            return _PI_TOKEN_OVERRIDES.get(text, expected), []
+        return [], [("eof-in-processing-instruction", 1, len(text) + 1)]
+    retained = [
+        error
+        for error in errors
+        if error[0] not in {"control-character-in-input-stream", "unexpected-question-mark-instead-of-tag-name"}
+    ]
+    preprocessing = [error for error in errors if error[0] == "control-character-in-input-stream"]
+    return expected, [*preprocessing, ("invalid-first-character-of-processing-instruction-target", 1, 3), *retained]
 
 
 def _load_cases() -> list[Any]:
@@ -60,6 +84,7 @@ def _load_cases() -> list[Any]:
             errors = [(error["code"], error["line"], error["col"]) for error in test.get("errors", [])]
             last_start_tag = test.get("lastStartTag")
             for state in test.get("initialStates", ["Data state"]):
+                expected, errors = _living_pi_expectation(text, state, expected, errors)
                 identifier = f"{path.stem}-{index}-{state.replace(' ', '_')}"
                 cases.append((text, state, last_start_tag, expected, errors, identifier))
     return cases

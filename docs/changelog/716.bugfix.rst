@@ -1,0 +1,1 @@
+Parse living-standard HTML processing instructions as typed nodes and events while keeping reserved XML targets as comments.

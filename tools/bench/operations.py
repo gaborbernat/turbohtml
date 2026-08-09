@@ -263,7 +263,7 @@ class Operation:
 SIZE_OPS: Final[frozenset[str]] = frozenset({"minify", "minify-css", "minify-js"})
 
 # Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
-MEMORY_OPS: Final[frozenset[str]] = frozenset({"parse-dense", "rewrite"})
+MEMORY_OPS: Final[frozenset[str]] = frozenset({"find-cold", "parse-dense", "rewrite"})
 
 
 OPERATIONS: dict[str, Operation] = {
@@ -287,6 +287,7 @@ OPERATIONS: dict[str, Operation] = {
     "unescape": Operation("unescape", "us"),
     "tokenize": Operation("tokenize", "us"),
     "find": Operation("find every anchor", "us"),
+    "find-cold": Operation("query a cold 10,000-element tree", "us"),
     "select": Operation("select div a[href]", "us"),
     "select-has": Operation("select div:has(a)", "us"),
     "computed-style": Operation("computed style for every element", "us"),
@@ -332,6 +333,7 @@ OPERATIONS: dict[str, Operation] = {
     "markup": Operation("markupsafe-compatible escape", "ns"),
     "markup-op": Operation("Markup operations", "ns"),
     "linkify": Operation("linkify HTML", "us"),
+    "linkify-traversal": Operation("linkify a parsed tree through native target collection", "us"),
     "detect": Operation("detect links in text", "us"),
     "markdown": Operation("HTML to Markdown", "us"),
     "markdown-google": Operation("Google Docs export to Markdown", "us"),
@@ -359,6 +361,8 @@ OPERATIONS: dict[str, Operation] = {
     "xpath": Operation("XPath feature surface (9.6 kB)", "us"),
     "xpath-id": Operation("resolve 1,000 XPath id tokens", "us"),
     "transform": Operation("XSLT transform a catalog (120 rows)", "us"),
+    "transform-compile": Operation("compile an XSLT stylesheet with 300 templates", "us"),
+    "transform-reuse": Operation("apply one compiled 300-template stylesheet ten times", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
     "minify-css": Operation("minify CSS", "us"),
@@ -446,6 +450,26 @@ _LINKIFY_CASES = (
     ("comment (1 link, 1 email)", "Ping me at bob@example.com or see https://example.com for details."),
     ("prose (1 KiB)", "See https://example.com/path?q=1 and visit www.example.org for more. " * 15),
     ("markup (4 KiB)", '<p>Read <a href="https://kept.example">the post</a> then go to https://example.com/x. ' * 45),
+)
+
+_FIND_COLD_BODY: Final[str] = "<span>x</span>" * 10_000
+_FIND_COLD_CASES: Final = (
+    ("find early hit", ("find", "<a>x</a>" + _FIND_COLD_BODY)),
+    ("find late hit", ("find", _FIND_COLD_BODY + "<a>x</a>")),
+    ("find miss", ("find", _FIND_COLD_BODY)),
+    ("find_all", ("all", "<a>x</a>" + _FIND_COLD_BODY)),
+    ("find_all limit=1", ("limit", "<a>x</a>" + _FIND_COLD_BODY)),
+)
+
+_LINKIFY_TRAVERSAL_CASES: Final = (
+    ("text-heavy tree", ("default", "<article><p>" + "plain prose " * 8_000 + "https://example.com</p></article>")),
+    ("2,000 small text nodes", ("default", "<div>" + "<span>plain</span>" * 2_000 + "</div>")),
+    ("2,000 skipped nodes", ("skip", "<code><span>https://example.com</span></code>" * 2_000)),
+    (
+        "400 callback links",
+        ("callbacks", '<a href="https://kept.example">kept</a> https://example.com ' * 200),
+    ),
+    ("2,000 nodes without text", ("default", "<div></div>" * 2_000)),
 )
 
 _MARKDOWN_ARTICLE = "<h2>Heading</h2><p>A <b>bold</b> <a href='/x'>link</a> and <code>code</code>.</p>" * 18
@@ -648,6 +672,24 @@ _XSLT_SOURCE = (
 def _transform_cases() -> tuple[tuple[str, object], ...]:
     """Return the one XSLT case: a real stylesheet (sort, key, number, format-number) over a 120-row catalog."""
     return (("catalog (120 rows)", (_XSLT_SHEET, _XSLT_SOURCE)),)
+
+
+_XSLT_COMPILE_SHEET: Final = (
+    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+    '<xsl:output method="text"/><xsl:template match="/"><xsl:call-template name="t299"/></xsl:template>'
+    + "".join(
+        f'<xsl:template name="t{index}"><xsl:value-of select="\'{index}\'"/></xsl:template>' for index in range(299)
+    )
+    + '<xsl:template name="t299">'
+    + '<xsl:number count="root" from="/"/>' * 24
+    + "</xsl:template>"
+    + "</xsl:stylesheet>"
+)
+
+
+def _transform_compile_cases() -> tuple[tuple[str, object], ...]:
+    """Return a stylesheet whose expression and pattern compilation dominate its one used template."""
+    return (("300 templates", (_XSLT_COMPILE_SHEET, "<root/>")),)
 
 
 _XSLT_SORT_SHEET: Final = (
@@ -890,6 +932,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "links-absolutize": _readpath_cases,
     "links-rewrite": _readpath_cases,
     "find": _readpath_cases,
+    "find-cold": lambda: _FIND_COLD_CASES,
     "select": _readpath_cases,
     "select-has": _readpath_cases,
     "computed-style": lambda: (("styled page (3 kB)", _styled_page(8)), ("styled page (11 kB)", _styled_page(40))),
@@ -932,11 +975,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("join (escapes operands)", ("join", _MARKUP_JOIN_PARTS)),
     ),
     "linkify": lambda: _LINKIFY_CASES,
+    "linkify-traversal": lambda: _LINKIFY_TRAVERSAL_CASES,
     "detect": lambda: (
         ("find comment (1 link, 1 email)", ("find", _LINKIFY_CASES[0][1])),
         ("find prose (1 KiB)", ("find", _LINKIFY_CASES[1][1])),
         ("has_link comment", ("has", _LINKIFY_CASES[0][1])),
         ("has_link prose (1 KiB)", ("has", _LINKIFY_CASES[1][1])),
+        ("has_link early (220 KiB tail)", ("has", "https://example.com " + "tail " * 45_000)),
     ),
     "markdown": lambda: (
         ("article (2 KiB)", ("default", _MARKDOWN_ARTICLE)),
@@ -983,6 +1028,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "xpath": _xpath_cases,
     "xpath-id": lambda: (("1,000 ids among 5,000 elements", _XPATH_ID_DOC),),
     "transform": _transform_cases,
+    "transform-compile": _transform_compile_cases,
+    "transform-reuse": _transform_compile_cases,
     "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,
     "minify-css": _minify_cases,

@@ -1,0 +1,1 @@
+Repair ``nobr`` adoption-agency handling across table scopes.

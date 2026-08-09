@@ -324,11 +324,31 @@ def _xslt_compiled(sheet: str, source: str):  # ruff:ignore[missing-return-type-
     return transform, lxml_etree.fromstring(source.encode())
 
 
+@functools.cache
+def _xslt_sheet(sheet: str):  # ruff:ignore[missing-return-type-private-function]  # lxml.etree is untyped
+    """Parse a stylesheet once so the compile benchmark excludes XML parsing."""
+    return lxml_etree.fromstring(sheet.encode())
+
+
+def transform_compile(case: tuple[str, str]) -> None:
+    """Compile a parsed stylesheet with libxslt."""
+    sheet, _source = case
+    lxml_etree.XSLT(_xslt_sheet(sheet))
+
+
 def transform(case: tuple[str, str]) -> None:
     """Apply a compiled XSLT 1.0 stylesheet to a parsed source with lxml's libxslt engine."""
     sheet, source = case
     compiled, document = _xslt_compiled(sheet, source)
     compiled(document)
+
+
+def transform_reuse(case: tuple[str, str]) -> None:
+    """Apply one compiled stylesheet ten times."""
+    sheet, source = case
+    compiled, document = _xslt_compiled(sheet, source)
+    for _ in range(10):
+        compiled(document)
 
 
 class _Counter:
@@ -398,4 +418,6 @@ OPERATIONS = {
     "path-xpath": (getpath, "lxml getpath"),
     "xpath": (xpath, "lxml"),
     "transform": (transform, "lxml.etree"),
+    "transform-compile": (transform_compile, "lxml.etree"),
+    "transform-reuse": (transform_reuse, "lxml.etree"),
 }

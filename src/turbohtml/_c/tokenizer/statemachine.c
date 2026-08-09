@@ -156,6 +156,11 @@ enum state {
     ST_ATTR_VALUE_UNQ,
     ST_AFTER_ATTR_VALUE_QUOTED,
     ST_SELF_CLOSING_START_TAG,
+    ST_PI_OPEN,
+    ST_PI_TARGET,
+    ST_AFTER_PI_TARGET,
+    ST_PI_DATA,
+    ST_PI_QUESTIONABLE,
     ST_BOGUS_COMMENT,
     ST_MARKUP_DECL_OPEN,
     ST_COMMENT_START,
@@ -273,7 +278,6 @@ static void token_reset(th_token *tok) {
     }
     tok->attr_count = 0;
     tok->self_closing = 0;
-    tok->is_pi = 0;
     buf_reset(&tok->public_id);
     buf_reset(&tok->system_id);
     tok->has_public_id = 0;
@@ -957,6 +961,34 @@ static void init_markup(th_tokenizer *self, enum th_kind kind) {
     self->tok.line = self->mark_line;
     self->tok.col = self->mark_col;
     begin_markup_source(self);
+}
+
+static int buf_ascii_iequals(const th_buf *buf, const char *text, Py_ssize_t len) {
+    if (buf->len != len) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (lower_ascii(buf_read(buf, index)) != (Py_UCS4)(unsigned char)text[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void pi_from_temp(th_tokenizer *self) {
+    init_markup(self, TH_PI);
+    if (buf_copy(&self->tok.name, &self->temp) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        self->oom = 1;                                /* GCOVR_EXCL_LINE: allocation-failure path */
+    } /* GCOVR_EXCL_LINE: buffer allocation failure cannot be forced through the public API */
+}
+
+static void pi_temp_to_comment(th_tokenizer *self) {
+    init_markup(self, TH_COMMENT);
+    push(self, &self->tok.text, '?');
+    for (Py_ssize_t index = 0; index < self->temp.len; index++) {
+        push(self, &self->tok.text, buf_read(&self->temp, index));
+    }
+    self->eof_code = NULL;
 }
 
 /* Queue a TH_CHARREF token for an unresolved reference: the resolved code points

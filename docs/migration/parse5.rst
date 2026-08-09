@@ -142,7 +142,7 @@ method for method:
         def create_comment(self, data):
             return {"tag": "#comment", "children": []}
 
-        def create_pi(self, data):
+        def create_pi(self, target, data):
             return {"tag": "#pi", "children": []}
 
         def append(self, parent, child):
@@ -157,9 +157,8 @@ method for method:
 
     a http://www.w3.org/1999/xhtml
 
-Where parse5 folds ``<?...>`` into a comment, turbohtml routes it to a separate ``create_pi`` so you can keep it
-distinct, and a ``<template>``'s content is appended straight under the template handle. See :doc:`/how-to/treebuild`
-for the full builder recipe.
+Processing instructions reach ``create_pi(target, data)`` and a ``<template>``'s content is appended straight under the
+template handle. See :doc:`/how-to/treebuild` for the full builder recipe.
 
 ****************
  How to migrate

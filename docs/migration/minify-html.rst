@@ -145,7 +145,7 @@ Each fold is a field on :class:`~turbohtml.Minify`, so a flag becomes one keywor
     - - ``minify_doctype`` / ``do_not_minify_doctype``
       - the doctype is always normalized to ``<!doctype html>``
     - - ``remove_processing_instructions``
-      - the WHATWG algorithm has no processing instructions in the HTML namespace
+      - no equivalent; turbohtml preserves processing instructions
 
 The default call minifies with every HTML fold engaged:
 

@@ -108,6 +108,11 @@ _STRIP = "code, a, q"  # a bulk set of tags to drop or unwrap
 _SET_HTML = "<p>Updated <a href='/x'>link</a> and <b>bold</b>.</p><ul><li>one</li><li>two</li></ul>"
 _SET_TEXT = "Replacement text, escaped & verbatim."
 _DETECTOR = _LinkDetector()
+_LINKER: Final = _clean.Linker()
+_LINKER_SKIP: Final = _clean.Linker(_clean.Linkify(skip_tags=("code",)))
+_LINKER_CALLBACKS: Final = _clean.Linker(
+    _clean.Linkify(callbacks=(_clean.nofollow, _clean.target_blank), process_existing=True)
+)
 _ANNOTATION_RULES = {"h1": ["heading"], "b": ["emphasis"], "a": ["link"]}
 _XML = turbohtml.Html(xml=True)  # the XML/XHTML serialization config, reused across the timed calls
 
@@ -263,6 +268,23 @@ def _whole(text: str) -> turbohtml.Document:
 def find(text: str) -> None:
     """Collect every anchor with turbohtml's find_all."""
     _parsed(text).find_all("a")
+
+
+def find_cold(case: tuple[str, turbohtml.Document]) -> None:
+    """Run the requested first tag query before the tree has an index."""
+    kind, document = case
+    if kind == "find":
+        document.find("a")
+    elif kind == "all":
+        document.find_all("a")
+    else:
+        document.find_all("a", limit=1)
+
+
+def _find_cold_setup(case: tuple[str, str]) -> tuple[str, turbohtml.Document]:
+    """Build a fresh parsed tree outside the timed query."""
+    kind, text = case
+    return kind, turbohtml.parse(text)
 
 
 def select(text: str) -> None:
@@ -521,6 +543,17 @@ def linkify(text: str) -> None:
     _linkify(text)
 
 
+def linkify_traversal(case: tuple[str, str]) -> None:
+    """Linkify through a reused configuration so the structural walk stays visible in the timing."""
+    kind, text = case
+    if kind == "skip":
+        _LINKER_SKIP.linkify(text)
+    elif kind == "callbacks":
+        _LINKER_CALLBACKS.linkify(text)
+    else:
+        _LINKER.linkify(text)
+
+
 def detect(case: tuple[str, str]) -> None:
     """Scan plain text for links with turbohtml's Detector: find the spans or test for any link."""
     kind, text = case
@@ -681,7 +714,7 @@ class _NodeBuilder:
     def create_comment(self, data: str) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node("#comment")
 
-    def create_pi(self, data: str) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
+    def create_pi(self, target: str, data: str) -> _Node:  # ruff:ignore[unused-method-argument, no-self-use]
         return _Node("#pi")
 
     def append(self, parent: _Node, child: _Node) -> None:  # ruff:ignore[no-self-use]
@@ -750,11 +783,31 @@ def _xslt_compiled(sheet: str, source: str) -> tuple[_Transform, turbohtml.Docum
     return _Transform(turbohtml.parse_xml(sheet)), turbohtml.parse_xml(source)
 
 
+@functools.cache
+def _xslt_sheet(sheet: str) -> turbohtml.Document:
+    """Parse a stylesheet once so the compile benchmark excludes XML parsing."""
+    return turbohtml.parse_xml(sheet)
+
+
+def transform_compile(case: tuple[str, str]) -> None:
+    """Compile a parsed XSLT stylesheet into reusable native state."""
+    sheet, _source = case
+    _Transform(_xslt_sheet(sheet))
+
+
 def transform(case: tuple[str, str]) -> None:
     """Apply a compiled XSLT 1.0 stylesheet to a parsed source document with turbohtml.transform."""
     sheet, source = case
     compiled, document = _xslt_compiled(sheet, source)
     compiled(document)
+
+
+def transform_reuse(case: tuple[str, str]) -> None:
+    """Apply one compiled stylesheet ten times to catch per-application analysis."""
+    sheet, source = case
+    compiled, document = _xslt_compiled(sheet, source)
+    for _ in range(10):
+        compiled(document)
 
 
 def _count_ext(_context: object, nodes: list[object]) -> float:
@@ -915,6 +968,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "unescape": (unescape, "turbohtml"),
     "tokenize": (tokenize, "turbohtml"),
     "find": (find, "turbohtml"),
+    "find-cold": (Mutating(_find_cold_setup, find_cold), "turbohtml"),
     "select": (select, "turbohtml"),
     "select-has": (select_has, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
@@ -960,6 +1014,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "markup": (markup, "turbohtml"),
     "markup-op": (markup_op, "turbohtml"),
     "linkify": (linkify, "turbohtml"),
+    "linkify-traversal": (linkify_traversal, "turbohtml"),
     "detect": (detect, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
     "escape-identifier": (escape_identifier, "turbohtml"),
@@ -990,6 +1045,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "xpath": (xpath, "turbohtml"),
     "xpath-id": (xpath_id, "turbohtml"),
     "transform": (transform, "turbohtml"),
+    "transform-compile": (transform_compile, "turbohtml"),
+    "transform-reuse": (transform_reuse, "turbohtml"),
     "transform-sort": (transform, "turbohtml"),
     "transform-dense": (transform, "turbohtml"),
     "minify-css": (minify_css, "turbohtml"),

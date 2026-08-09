@@ -1,0 +1,1 @@
+Add ``allow_imports`` and ``import_root`` policies for constraining XSLT filesystem access.

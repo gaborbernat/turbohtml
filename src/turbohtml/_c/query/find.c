@@ -31,9 +31,10 @@ typedef struct {
     /* Fast path for a plain-string tag filter: resolve the name to an atom once
        so the per-node test is an integer compare instead of building a str for
        every element. tag_plain is set when tag is a single str; tag_atom is its
-       atom, or TH_TAG_UNKNOWN for a name outside the table (then the rare
-       unknown-atom elements are compared by name). */
+       atom, or TH_TAG_UNKNOWN for a name outside the table. XML names always
+       use the exact-name path, including names present in the HTML atom table. */
     int tag_plain;
+    int tag_exact;
     uint16_t tag_atom;
     /* Fast path for a plain-string class_ filter: its code points are copied
        once so each element's class tokens are compared without building a str
@@ -216,16 +217,10 @@ static int tag_plain_matches(const query_t *query, th_node *node) {
     if (query->tag_atom != TH_TAG_UNKNOWN) {
         return node->atom == query->tag_atom;
     }
-    if (node->atom != TH_TAG_UNKNOWN) {
+    if (!query->tag_exact && node->atom != TH_TAG_UNKNOWN) {
         return 0;
     }
-    PyObject *name = ucs4_to_str(node->text, node->text_len);
-    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    int equal = PyUnicode_Compare(name, query->tag) == 0;
-    Py_DECREF(name);
-    return equal;
+    return ucs4_equals_pystr(node->text, node->text_len, query->tag);
 }
 
 /* Whether an element matches the whole query. Returns 1/0, or -1 with an
@@ -431,6 +426,7 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     query->filter_plain = NULL;
     query->nattr = 0;
     query->tag_plain = 0;
+    query->tag_exact = 0;
     query->tag_atom = TH_TAG_UNKNOWN;
     query->class_ucs4 = NULL;
     query->class_len = 0;
@@ -441,17 +437,19 @@ static int build_query(PyObject *self, PyObject *args, PyObject *kwargs, int is_
     }
     if (tag != NULL && tag != Py_None) {
         query->tag = tag;
-        /* a plain str tag matches by interned atom; encode case-sensitively (a
-           find() name match is exact, unlike a case-insensitive CSS type) */
+        /* XML nodes keep exact names under TH_TAG_UNKNOWN, even when a name has an HTML atom. */
         if (PyUnicode_Check(tag)) {
-            Py_ssize_t blen;
-            const char *bytes = PyUnicode_AsUTF8AndSize(tag, &blen);
-            if (bytes == NULL) {
-                /* a lone surrogate cannot encode; fall back to the str-compare path */
-                PyErr_Clear();
-            } else {
-                query->tag_plain = 1;
-                query->tag_atom = blen > 0 ? th_tag_lookup(bytes, blen) : TH_TAG_UNKNOWN;
+            query->tag_plain = 1;
+            query->tag_exact = th_tree_is_xml(tree);
+            if (!query->tag_exact) {
+                Py_ssize_t blen;
+                const char *bytes = PyUnicode_AsUTF8AndSize(tag, &blen);
+                if (bytes == NULL) {
+                    /* A lone surrogate cannot encode, so the exact-name path handles it. */
+                    PyErr_Clear();
+                } else {
+                    query->tag_atom = blen > 0 ? th_tag_lookup(bytes, blen) : TH_TAG_UNKNOWN;
+                }
             }
         }
     }
@@ -639,11 +637,9 @@ static int snapshot_text_candidates(PyObject *self, const query_t *query, th_nod
    span, so a candidate's collected text is sized before it is gathered. */
 static Py_ssize_t subtree_text_len(th_node *node) {
     Py_ssize_t total = 0;
-    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        if (child->type == TH_NODE_TEXT) {
-            total += child->text_len;
-        } else if (child->type == TH_NODE_ELEMENT || child->type == TH_NODE_CONTENT) {
-            total += subtree_text_len(child);
+    for (th_node *descendant = node->first_child; descendant != NULL; descendant = preorder_next(descendant, node)) {
+        if (descendant->type == TH_NODE_TEXT) {
+            total += descendant->text_len;
         }
     }
     return total;
@@ -906,7 +902,7 @@ PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
        the child/sibling pointers mid-read (a no-op on the GIL build) */
     Py_BEGIN_CRITICAL_SECTION(handle);
     HandleObject *handle_obj = (HandleObject *)handle;
-    if (handle_use_index(handle_obj, origin, query_is_indexed_tag(&query))) {
+    if (handle_obj->index_built && handle_index_usable(handle_obj, origin) && query_is_indexed_tag(&query)) {
         Py_ssize_t pos = handle_obj->index_offsets[query.tag_atom];
         Py_ssize_t end = handle_obj->index_offsets[query.tag_atom + 1];
         if (query_is_simple_tag(&query)) {
@@ -981,7 +977,11 @@ PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs) {
        the child/sibling pointers mid-read (a no-op on the GIL build) */
     Py_BEGIN_CRITICAL_SECTION(handle);
     HandleObject *handle_obj = (HandleObject *)handle;
-    if (handle_use_index(handle_obj, origin, query_is_indexed_tag(&query))) {
+    int small_limit = query.limit >= 0 && query.limit <= 8;
+    int use_index =
+        small_limit ? handle_obj->index_built && handle_index_usable(handle_obj, origin) && query_is_indexed_tag(&query)
+                    : handle_use_index(handle_obj, origin, query_is_indexed_tag(&query));
+    if (use_index) {
         int simple = query_is_simple_tag(&query);
         Py_ssize_t end = handle_obj->index_offsets[query.tag_atom + 1];
         for (Py_ssize_t pos = handle_obj->index_offsets[query.tag_atom]; pos < end; pos++) {

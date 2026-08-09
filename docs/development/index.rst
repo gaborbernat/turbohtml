@@ -94,6 +94,56 @@ parse5). The convention is deliberate:
 The vendored ``html5lib-tests`` conformance data is separate: it lives under ``tests/dom``, ``tests/tokenizer``, and
 ``tests/encoding`` (not ``tests/conformance``) and runs in the ordinary matrix, so it is unaffected by the above.
 
+Living HTML parser corpus
+=========================
+
+The HTML tree builder also runs against the browser-maintained `WPT tree-construction fixtures
+<https://github.com/web-platform-tests/wpt/tree/4830edb033cb486fd0cd6f85b5e937cfc718704d/html/syntax/parsing/resources>`_.
+The committed corpus pins that revision: 1,920 cases from 61 files. The compatibility baseline uses the same 1,880 cases
+without an explicit scripting directive as JustHTML's comparison; the other 40 fixtures comprise 28 ``#script-off`` and
+12 ``#script-on`` cases, some of which require a browser host to execute script during parsing.
+
+The native tree dumper passes 1,872 of the 1,880 raw expectations. The remaining eight are the ``</p>`` and ``</br>``
+foreign-content expectations in `tests26.dat
+<https://github.com/web-platform-tests/wpt/blob/4830edb033cb486fd0cd6f85b5e937cfc718704d/html/syntax/parsing/resources/tests26.dat>`_
+and `foreign-fragment.dat
+<https://github.com/web-platform-tests/wpt/blob/4830edb033cb486fd0cd6f85b5e937cfc718704d/html/syntax/parsing/resources/foreign-fragment.dat>`_.
+They retain a foreign root where the WHATWG `rules for parsing tokens in foreign content
+<https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign>`_ require the token to be reprocessed in
+the current insertion mode. The adjusted expectations are recorded case by case in the generator and covered by a
+focused test; the adjusted result is 1,880/1,880. The committed JSON records total and non-script counts for every
+fixture; the refresh command prints each fixture's raw and adjusted pass count before the totals.
+
+.. list-table:: Non-script mismatch report
+    :header-rows: 1
+    :widths: 50 15 15
+
+    - - Category
+      - Raw
+      - Adjusted
+    - - Processing instructions
+      - 0
+      - 0
+    - - ``keygen`` in ``select``
+      - 0
+      - 0
+    - - ``nobr`` adoption agency
+      - 0
+      - 0
+    - - Foreign ``</p>`` and ``</br>``
+      - 8
+      - 0
+
+Refresh the pin quarterly and after a parsing-algorithm change. A sparse WPT checkout keeps the download small; the
+generator writes the corpus, prints raw and adjusted totals, lists any new mismatch, and exits nonzero unless every
+spec-adjusted case passes:
+
+.. code-block:: console
+
+    $ git clone --depth 1 --filter=blob:none --sparse https://github.com/web-platform-tests/wpt /tmp/wpt
+    $ git -C /tmp/wpt sparse-checkout set html/syntax/parsing/resources
+    $ .tox/dev/bin/python tools/generate_wpt_tree_corpus.py /tmp/wpt tests/conformance/data/wpt_html_tree.json
+
 *********
  Fuzzing
 *********

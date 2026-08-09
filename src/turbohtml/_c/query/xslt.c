@@ -503,6 +503,12 @@ typedef struct {
     int precedence;
 } xslt_nsalias;
 
+typedef struct {
+    const Py_UCS4 *source;
+    Py_ssize_t length;
+    xp_program *program;
+} xslt_expr;
+
 /* A source text node detached by whitespace stripping (section 3.4), kept so the caller's
    tree is restored to its original shape after the transform returns. */
 struct strip_entry {
@@ -542,6 +548,12 @@ typedef struct engine {
     xslt_nsalias *aliases;
     Py_ssize_t naliases;
     Py_ssize_t aliases_cap;
+    xslt_expr *expressions;
+    size_t expression_cap;
+    size_t expression_count;
+    xslt_expr *patterns;
+    size_t pattern_cap;
+    size_t pattern_count;
 
     Py_UCS4 *xsl_prefix;
     Py_ssize_t xsl_prefix_len;
@@ -591,6 +603,7 @@ typedef struct engine {
 
     const char *error;
     int py_error;
+    int owns_model;
 } engine;
 
 /* A cap on template-instantiation nesting (recursive apply-templates / named-template
@@ -811,7 +824,7 @@ static double default_priority(const Py_UCS4 *src, Py_ssize_t len) {
    equals the nodes the pattern matches: a relative pattern gains a leading
    "//" (descendant-or-self), an already-anchored one (/, //, id(, key() ) is used
    verbatim. Returns the program, or NULL with eng->error / eng->py_error set. */
-static xp_program *compile_pattern(engine *eng, const Py_UCS4 *src, Py_ssize_t len) {
+static xp_program *compile_pattern_new(engine *eng, const Py_UCS4 *src, Py_ssize_t len) {
     Py_ssize_t start;
     Py_ssize_t trimmed;
     trim(src, len, &start, &trimmed);
@@ -1322,8 +1335,8 @@ static int build_rule(engine *eng, xslt_rule *rule) {
     int status =
         xp_eval_at(rule->prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, xslt_extension, eng, &matched, &feature);
     if (status < 0) {
-        if (!PyErr_Occurred()) {
-            if (feature == NULL) {      /* GCOVR_EXCL_BR_LINE: a -3/-4 error always names a feature */
+        if (!PyErr_Occurred()) {   /* GCOVR_EXCL_BR_LINE: pattern evaluation sets an exception only on allocation */
+            if (feature == NULL) { /* GCOVR_EXCL_BR_LINE: a -3/-4 error always names a feature */
                 feature = "evaluation"; /* GCOVR_EXCL_LINE */
             } /* GCOVR_EXCL_LINE */
             PyErr_Format(PyExc_ValueError, "xslt: match pattern error (%s)", feature);
@@ -1370,6 +1383,167 @@ static xslt_rule *best_rule(engine *eng, th_node *node, Py_ssize_t attr, const P
 static int instantiate_body(engine *eng, th_node *body, th_node *out_parent);
 static int apply_templates(engine *eng, th_node *instruction, th_node *out_parent, const Py_UCS4 *mode,
                            Py_ssize_t mode_len);
+static const Py_UCS4 XPATH_DOT = '.';
+
+static size_t expression_hash(const Py_UCS4 *source, Py_ssize_t length) {
+    uintptr_t pointer = (uintptr_t)source;
+    return (size_t)(pointer ^ (pointer >> 17) ^ (uintptr_t)length * 0x9e3779b97f4a7c15ULL);
+}
+
+static xp_program *expression_lookup(const engine *eng, const Py_UCS4 *source, Py_ssize_t length) {
+    if (eng->expression_cap == 0) {
+        return NULL;
+    }
+    size_t slot = expression_hash(source, length) & (eng->expression_cap - 1);
+    while (eng->expressions[slot].program != NULL) {
+        /* A stylesheet buffer address identifies one immutable expression slice. */
+        /* GCOVR_EXCL_BR_START */
+        if (eng->expressions[slot].source == source && eng->expressions[slot].length == length) {
+            return eng->expressions[slot].program;
+        }
+        /* GCOVR_EXCL_BR_STOP */
+        slot = (slot + 1) & (eng->expression_cap - 1);
+    }
+    return NULL;
+}
+
+static int expression_grow(engine *eng) {
+    size_t new_cap = eng->expression_cap == 0 ? 16 : eng->expression_cap * 2;
+    /* A stylesheet cannot exhaust size_t. */
+    /* GCOVR_EXCL_BR_START */
+    if (new_cap < eng->expression_cap || new_cap > SIZE_MAX / sizeof(xslt_expr)) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    xslt_expr *expressions = PyMem_Calloc(new_cap, sizeof(xslt_expr));
+    if (expressions == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;             /* GCOVR_EXCL_LINE */
+    }
+    for (size_t index = 0; index < eng->expression_cap; index++) {
+        xslt_expr expression = eng->expressions[index];
+        if (expression.program == NULL) {
+            continue;
+        }
+        size_t slot = expression_hash(expression.source, expression.length) & (new_cap - 1);
+        while (expressions[slot].program != NULL) {
+            slot = (slot + 1) & (new_cap - 1);
+        }
+        expressions[slot] = expression;
+    }
+    PyMem_Free(eng->expressions);
+    eng->expressions = expressions;
+    eng->expression_cap = new_cap;
+    return 0;
+}
+
+static xp_program *compile_expression(engine *eng, const Py_UCS4 *source, Py_ssize_t length, char *error,
+                                      size_t error_size) {
+    xp_program *program = expression_lookup(eng, source, length);
+    if (program != NULL) {
+        return program;
+    }
+    if (!eng->owns_model) { /* GCOVR_EXCL_BR_LINE: compilation covers every immutable stylesheet expression */
+        snprintf(error, error_size, "stylesheet expression was not compiled"); /* GCOVR_EXCL_LINE */
+        return NULL;                                                           /* GCOVR_EXCL_LINE */
+    }
+    program = xp_compile(source, length, error, error_size);
+    if (program == NULL) {
+        return NULL;
+    }
+    /* Growth fails only on allocation or size overflow. */
+    /* GCOVR_EXCL_BR_START */
+    if ((eng->expression_count + 1) * 2 >= eng->expression_cap && expression_grow(eng) < 0) {
+        xp_free(program); /* GCOVR_EXCL_LINE */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    size_t slot = expression_hash(source, length) & (eng->expression_cap - 1);
+    while (eng->expressions[slot].program != NULL) {
+        slot = (slot + 1) & (eng->expression_cap - 1);
+    }
+    eng->expressions[slot] = (xslt_expr){source, length, program};
+    eng->expression_count++;
+    return program;
+}
+
+static xp_program *pattern_lookup(const engine *eng, const Py_UCS4 *source, Py_ssize_t length) {
+    if (eng->pattern_cap == 0) {
+        return NULL;
+    }
+    size_t slot = expression_hash(source, length) & (eng->pattern_cap - 1);
+    while (eng->patterns[slot].program != NULL) {
+        /* A stylesheet buffer address identifies one immutable pattern slice. */
+        /* GCOVR_EXCL_BR_START */
+        if (eng->patterns[slot].source == source && eng->patterns[slot].length == length) {
+            return eng->patterns[slot].program;
+        }
+        /* GCOVR_EXCL_BR_STOP */
+        slot = (slot + 1) & (eng->pattern_cap - 1);
+    }
+    return NULL;
+}
+
+static int pattern_grow(engine *eng) {
+    size_t new_cap = eng->pattern_cap == 0 ? 16 : eng->pattern_cap * 2;
+    /* A stylesheet cannot exhaust size_t. */
+    /* GCOVR_EXCL_BR_START */
+    if (new_cap < eng->pattern_cap || new_cap > SIZE_MAX / sizeof(xslt_expr)) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    xslt_expr *patterns = PyMem_Calloc(new_cap, sizeof(xslt_expr));
+    if (patterns == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;          /* GCOVR_EXCL_LINE */
+    }
+    for (size_t index = 0; index < eng->pattern_cap; index++) {
+        xslt_expr pattern = eng->patterns[index];
+        if (pattern.program == NULL) {
+            continue;
+        }
+        size_t slot = expression_hash(pattern.source, pattern.length) & (new_cap - 1);
+        while (patterns[slot].program != NULL) {
+            slot = (slot + 1) & (new_cap - 1);
+        }
+        patterns[slot] = pattern;
+    }
+    PyMem_Free(eng->patterns);
+    eng->patterns = patterns;
+    eng->pattern_cap = new_cap;
+    return 0;
+}
+
+static xp_program *compile_pattern(engine *eng, const Py_UCS4 *source, Py_ssize_t length) {
+    xp_program *program = pattern_lookup(eng, source, length);
+    if (program != NULL) {
+        return program;
+    }
+    if (!eng->owns_model) { /* GCOVR_EXCL_BR_LINE: compilation covers every immutable stylesheet pattern */
+        PyErr_SetString(PyExc_RuntimeError, "xslt: stylesheet pattern was not compiled"); /* GCOVR_EXCL_LINE */
+        fail_py(eng);                                                                     /* GCOVR_EXCL_LINE */
+        return NULL;                                                                      /* GCOVR_EXCL_LINE */
+    }
+    program = compile_pattern_new(eng, source, length);
+    if (program == NULL) {
+        return NULL;
+    }
+    /* Growth fails only on allocation or size overflow. */
+    /* GCOVR_EXCL_BR_START */
+    if ((eng->pattern_count + 1) * 2 >= eng->pattern_cap && pattern_grow(eng) < 0) {
+        xp_free(program); /* GCOVR_EXCL_LINE */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        fail_py(eng);     /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    size_t slot = expression_hash(source, length) & (eng->pattern_cap - 1);
+    while (eng->patterns[slot].program != NULL) {
+        slot = (slot + 1) & (eng->pattern_cap - 1);
+    }
+    eng->patterns[slot] = (xslt_expr){source, length, program};
+    eng->pattern_count++;
+    return program;
+}
 
 /* Evaluate an attribute value template ("literal {expr} literal") into freshly
    allocated code points. Returns 0 with the buffer and its length set through out_data
@@ -1378,7 +1552,8 @@ static int eval_avt(engine *eng, const Py_UCS4 *src, Py_ssize_t len, Py_UCS4 **o
     xb buffer = {0};
     for (Py_ssize_t index = 0; index < len; index++) {
         Py_UCS4 ch = src[index];
-        if (ch == '{' && index + 1 < len && src[index + 1] == '{') {
+        if (ch == '{' /* GCOVR_EXCL_BR_LINE: compilation rejects a trailing open brace */ && index + 1 < len &&
+            src[index + 1] == '{') {
             if (xb_add_char(&buffer, '{') < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 goto oom;                        /* GCOVR_EXCL_LINE */
             }
@@ -1403,16 +1578,18 @@ static int eval_avt(engine *eng, const Py_UCS4 *src, Py_ssize_t len, Py_UCS4 **o
                 end++;
             }
             char errbuf[256];
-            xp_program *prog = xp_compile(src + start, end - start, errbuf, sizeof(errbuf));
+            xp_program *prog = compile_expression(eng, src + start, end - start, errbuf, sizeof(errbuf));
+            /* A run only receives AVTs that precompile_stylesheet validated. */
+            /* GCOVR_EXCL_START */
             if (prog == NULL) {
                 xb_free(&buffer);
                 PyErr_Format(PyExc_ValueError, "xslt: bad expression in attribute value template: %s", errbuf);
                 fail_py(eng);
                 return -1;
             }
+            /* GCOVR_EXCL_STOP */
             xp_result value;
             int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
-            xp_free(prog);
             if (status < 0) {
                 xb_free(&buffer);
                 fail_py(eng);
@@ -1491,14 +1668,13 @@ static int do_value_of(engine *eng, th_node *instruction, th_node *out_parent) {
         return rc;
     }
     char errbuf[256];
-    xp_program *prog = xp_compile(select, select_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) {
-        PyErr_Format(PyExc_ValueError, "xslt: bad value-of select: %s", errbuf);
-        return fail_py(eng);
+    xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+        PyErr_Format(PyExc_ValueError, "xslt: bad value-of select: %s", errbuf); /* GCOVR_EXCL_LINE */
+        return fail_py(eng);                                                     /* GCOVR_EXCL_LINE */
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
-    xp_free(prog);
     if (status < 0) {
         return fail_py(eng);
     }
@@ -1542,10 +1718,10 @@ static int do_copy_of(engine *eng, th_node *instruction, th_node *out_parent) {
         return fail(eng, "xsl:copy-of requires a select attribute");
     }
     char errbuf[256];
-    xp_program *prog = xp_compile(select, select_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) {
-        PyErr_Format(PyExc_ValueError, "xslt: bad copy-of select: %s", errbuf);
-        return fail_py(eng);
+    xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+        PyErr_Format(PyExc_ValueError, "xslt: bad copy-of select: %s", errbuf); /* GCOVR_EXCL_LINE */
+        return fail_py(eng);                                                    /* GCOVR_EXCL_LINE */
     }
     /* A lone $var that is a result tree fragment copies the fragment's children. */
     if (prog->nodes[prog->root].kind == XN_VAR) {
@@ -1556,19 +1732,16 @@ static int do_copy_of(engine *eng, th_node *instruction, th_node *out_parent) {
                 for (th_node *child = eng->scope[index].rtf->first_child; child != NULL; child = child->next_sibling) {
                     th_node *copy = th_tree_copy_node(eng->out_tree, eng->out_tree, child);
                     if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-                        xp_free(prog);                     /* GCOVR_EXCL_LINE */
                         return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
                     }
                     th_node_append_child(out_parent, copy);
                 }
-                xp_free(prog);
                 return 0;
             }
         }
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
-    xp_free(prog);
     if (status < 0) {
         return fail_py(eng);
     }
@@ -1913,14 +2086,13 @@ static int eval_test(engine *eng, th_node *instruction, int *out_bool) {
         return fail(eng, "xsl:if/xsl:when requires a test attribute");
     }
     char errbuf[256];
-    xp_program *prog = xp_compile(test, test_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) {
-        PyErr_Format(PyExc_ValueError, "xslt: bad test: %s", errbuf);
-        return fail_py(eng);
+    xp_program *prog = compile_expression(eng, test, test_len, errbuf, sizeof(errbuf));
+    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed tests before a run */
+        PyErr_Format(PyExc_ValueError, "xslt: bad test: %s", errbuf); /* GCOVR_EXCL_LINE */
+        return fail_py(eng);                                          /* GCOVR_EXCL_LINE */
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
-    xp_free(prog);
     if (status < 0) {
         return fail_py(eng);
     }
@@ -2004,20 +2176,16 @@ static int compile_sorts(engine *eng, th_node *instruction, sort_spec *specs, in
         }
         Py_ssize_t select_len = 0;
         const Py_UCS4 *select = attr_lookup(eng->sheet_tree, child, "select", &select_len);
-        static const Py_UCS4 dot = '.';
         if (select == NULL) {
-            select = &dot;
+            select = &XPATH_DOT;
             select_len = 1;
         }
         char errbuf[256];
-        xp_program *prog = xp_compile(select, select_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) {
-            for (int index = 0; index < count; index++) {
-                xp_free(specs[index].prog);
-            }
-            PyErr_Format(PyExc_ValueError, "xslt: bad sort select: %s", errbuf);
-            fail_py(eng);
-            return -1;
+        xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed sort selects before a run */
+            PyErr_Format(PyExc_ValueError, "xslt: bad sort select: %s", errbuf); /* GCOVR_EXCL_LINE */
+            fail_py(eng);                                                        /* GCOVR_EXCL_LINE */
+            return -1;                                                           /* GCOVR_EXCL_LINE */
         }
         Py_ssize_t type_len = 0;
         const Py_UCS4 *type = attr_lookup(eng->sheet_tree, child, "data-type", &type_len);
@@ -2284,19 +2452,18 @@ static int build_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, ma
     Py_ssize_t starts[64];
     Py_ssize_t lens[64];
     int alternatives = split_union(pattern, len, starts, lens, 64);
-    if (alternatives < 0) {
-        return fail(eng, "xslt: xsl:number pattern has too many alternatives");
+    if (alternatives < 0) { /* GCOVR_EXCL_BR_LINE: compilation rejects oversized unions before a run */
+        return fail(eng, "xslt: xsl:number pattern has too many alternatives"); /* GCOVR_EXCL_LINE */
     }
     for (int index = 0; index < alternatives; index++) {
         xp_program *prog = compile_pattern(eng, pattern + starts[index], lens[index]);
-        if (prog == NULL) {
-            return -1;
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed patterns before a run */
+            return -1;      /* GCOVR_EXCL_LINE */
         }
         xp_result matched;
         const char *feature = NULL;
         int status =
             xp_eval_at(prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, xslt_extension, eng, &matched, &feature);
-        xp_free(prog);
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: the pattern compiled, so it evaluates */
             PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error"); /* GCOVR_EXCL_LINE */
             return fail_py(eng);                                              /* GCOVR_EXCL_LINE */
@@ -2396,14 +2563,13 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     int have_from = 0;
     if (value_expr != NULL) {
         char errbuf[256];
-        xp_program *prog = xp_compile(value_expr, value_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) {
-            PyErr_Format(PyExc_ValueError, "xslt: bad number value: %s", errbuf);
-            return fail_py(eng);
+        xp_program *prog = compile_expression(eng, value_expr, value_len, errbuf, sizeof(errbuf));
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed values before a run */
+            PyErr_Format(PyExc_ValueError, "xslt: bad number value: %s", errbuf); /* GCOVR_EXCL_LINE */
+            return fail_py(eng);                                                  /* GCOVR_EXCL_LINE */
         }
         xp_result result;
         int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &result);
-        xp_free(prog);
         if (status < 0) {
             return fail_py(eng);
         }
@@ -2418,17 +2584,19 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         const Py_UCS4 *from = attr_lookup(eng->sheet_tree, instruction, "from", &from_len);
         if (count != NULL) {
             have_count = 1;
-            if (build_matcher(eng, count, count_len, &count_set) < 0) {
-                match_set_free(&count_set);
-                return -1;
+            int count_failed = build_matcher(eng, count, count_len, &count_set);
+            if (count_failed < 0) {         /* GCOVR_EXCL_BR_LINE: compilation validates number patterns */
+                match_set_free(&count_set); /* GCOVR_EXCL_LINE */
+                return -1;                  /* GCOVR_EXCL_LINE */
             }
         }
         if (from != NULL) {
             have_from = 1;
-            if (build_matcher(eng, from, from_len, &from_set) < 0) {
-                match_set_free(&count_set);
-                match_set_free(&from_set);
-                return -1;
+            int from_failed = build_matcher(eng, from, from_len, &from_set);
+            if (from_failed < 0) {          /* GCOVR_EXCL_BR_LINE: compilation validates number patterns */
+                match_set_free(&count_set); /* GCOVR_EXCL_LINE */
+                match_set_free(&from_set);  /* GCOVR_EXCL_LINE */
+                return -1;                  /* GCOVR_EXCL_LINE */
             }
         }
         Py_ssize_t level_len = 0;
@@ -2515,13 +2683,12 @@ static int compute_binding(engine *eng, th_node *declaration, xp_result *out_val
     const Py_UCS4 *select = attr_lookup(eng->sheet_tree, declaration, "select", &select_len);
     if (select != NULL) {
         char errbuf[256];
-        xp_program *prog = xp_compile(select, select_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) {
-            PyErr_Format(PyExc_ValueError, "xslt: bad variable select: %s", errbuf);
-            return fail_py(eng);
+        xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed bindings before a run */
+            PyErr_Format(PyExc_ValueError, "xslt: bad variable select: %s", errbuf); /* GCOVR_EXCL_LINE */
+            return fail_py(eng);                                                     /* GCOVR_EXCL_LINE */
         }
         int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, out_value);
-        xp_free(prog);
         if (status < 0) {
             return fail_py(eng);
         }
@@ -2724,14 +2891,13 @@ static int do_for_each(engine *eng, th_node *instruction, th_node *out_parent) {
         return fail(eng, "xsl:for-each requires a select attribute");
     }
     char errbuf[256];
-    xp_program *prog = xp_compile(select, select_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) {
-        PyErr_Format(PyExc_ValueError, "xslt: bad for-each select: %s", errbuf);
-        return fail_py(eng);
+    xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+        PyErr_Format(PyExc_ValueError, "xslt: bad for-each select: %s", errbuf); /* GCOVR_EXCL_LINE */
+        return fail_py(eng);                                                     /* GCOVR_EXCL_LINE */
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
-    xp_free(prog);
     if (status < 0) {
         return fail_py(eng);
     }
@@ -2746,14 +2912,8 @@ static int do_for_each(engine *eng, th_node *instruction, th_node *out_parent) {
         return -1;
     }
     if (nspecs > 0 && sort_nodeset(eng, &value.nodes, specs, nspecs) < 0) {
-        for (int index = 0; index < nspecs; index++) {
-            xp_free(specs[index].prog);
-        }
         xp_result_free(&value);
         return -1;
-    }
-    for (int index = 0; index < nspecs; index++) {
-        xp_free(specs[index].prog);
     }
     th_node *saved_node = eng->cur_node;
     Py_ssize_t saved_attr = eng->cur_attr;
@@ -2859,13 +3019,12 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
     xp_result value;
     if (select != NULL) {
         char errbuf[256];
-        xp_program *prog = xp_compile(select, select_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) {
-            PyErr_Format(PyExc_ValueError, "xslt: bad apply-templates select: %s", errbuf);
-            return fail_py(eng);
+        xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+            PyErr_Format(PyExc_ValueError, "xslt: bad apply-templates select: %s", errbuf); /* GCOVR_EXCL_LINE */
+            return fail_py(eng);                                                            /* GCOVR_EXCL_LINE */
         }
         int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
-        xp_free(prog);
         if (status < 0) {
             return fail_py(eng);
         }
@@ -2893,14 +3052,8 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
         return -1;
     }
     if (nspecs > 0 && sort_nodeset(eng, &value.nodes, specs, nspecs) < 0) {
-        for (int index = 0; index < nspecs; index++) {
-            xp_free(specs[index].prog);
-        }
         xp_result_free(&value);
         return -1;
-    }
-    for (int index = 0; index < nspecs; index++) {
-        xp_free(specs[index].prog);
     }
     /* Heap, not stack: apply_templates is on the deep-recursion path (a template body
        applies templates that recurse), so keeping this array off the frame lets the
@@ -3582,7 +3735,6 @@ static int parse_template(engine *eng, th_node *element, int *position) {
         rule.mode = (Py_UCS4 *)mode;
         rule.mode_len = mode_len;
         if (push_rule(eng, rule) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            xp_free(prog);              /* GCOVR_EXCL_LINE */
             return -1;                  /* GCOVR_EXCL_LINE */
         }
     }
@@ -3604,18 +3756,17 @@ static int parse_key(engine *eng, th_node *element) {
         return -1;
     }
     char errbuf[256];
-    xp_program *use_prog = xp_compile(use, use_len, errbuf, sizeof(errbuf));
+    xp_program *use_prog = compile_expression(eng, use, use_len, errbuf, sizeof(errbuf));
     if (use_prog == NULL) {
-        xp_free(match_prog);
-        PyErr_Format(PyExc_ValueError, "xslt: bad key use expression: %s", errbuf);
+        if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only allocation sets an exception during compilation */
+            PyErr_Format(PyExc_ValueError, "xslt: bad key use expression: %s", errbuf);
+        }
         return fail_py(eng);
     }
     if (eng->nkeys == eng->keys_cap) {
         Py_ssize_t cap = eng->keys_cap == 0 ? 4 : eng->keys_cap * 2;
         xslt_key *grown = PyMem_Realloc(eng->keys, (size_t)cap * sizeof(xslt_key));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            xp_free(match_prog);               /* GCOVR_EXCL_LINE */
-            xp_free(use_prog);                 /* GCOVR_EXCL_LINE */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
         }
         eng->keys = grown;
@@ -3943,24 +4094,30 @@ static int rule_order(const void *left_ptr, const void *right_ptr) {
 
 /* ---- output serialization ------------------------------------------------- */
 
+static th_node *xslt_preorder_next(th_node *root, th_node *node) {
+    if (node->first_child != NULL) {
+        return node->first_child;
+    }
+    while (node != root && node->next_sibling == NULL) {
+        node = node->parent;
+    }
+    return node == root ? NULL : node->next_sibling;
+}
+
 /* Append the text of every Text descendant of node, in document order. */
 static int collect_output_text(th_node *node, xb *buffer) {
-    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        if (child->type == TH_NODE_TEXT) {
-            if (xb_add(buffer, child->text, child->text_len) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                          /* GCOVR_EXCL_LINE */
-            }
-        } else if (collect_output_text(child, buffer) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                       /* GCOVR_EXCL_LINE */
+    for (th_node *child = node->first_child; child != NULL; child = xslt_preorder_next(node, child)) {
+        if (child->type == TH_NODE_TEXT && /* GCOVR_EXCL_BR_LINE: the second condition fails only on allocation */
+            xb_add(buffer, child->text, child->text_len) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                          /* GCOVR_EXCL_LINE */
         }
     }
     return 0;
 }
 
-/* Retype every direct text-node child of a cdata-section-elements element to a CDATA node so
-   the serializer wraps it in <![CDATA[...]]> (section 16.1). Recurses the output tree. */
+/* Retype direct text children of cdata-section-elements so the serializer wraps them in CDATA. */
 static void apply_cdata_sections(engine *eng, th_node *node) {
-    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+    for (th_node *child = node->first_child; child != NULL; child = xslt_preorder_next(node, child)) {
         if (child->type != TH_NODE_ELEMENT) {
             continue;
         }
@@ -3971,7 +4128,6 @@ static void apply_cdata_sections(engine *eng, th_node *node) {
                 }
             }
         }
-        apply_cdata_sections(eng, child);
     }
 }
 
@@ -4063,31 +4219,99 @@ static PyObject *serialize_markup(engine *eng, th_node *root) {
 
 static void engine_clear(engine *eng) {
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
-        xp_free(eng->rules[index].prog);
         match_set_free(&eng->rules[index].matched);
     }
     PyMem_Free(eng->rules);
-    PyMem_Free(eng->named);
-    PyMem_Free(eng->globals);
     for (Py_ssize_t index = 0; index < eng->nkeys; index++) {
-        xp_free(eng->keys[index].match_prog);
-        xp_free(eng->keys[index].use_prog);
         strmap_free(&eng->keys[index].table);
     }
     PyMem_Free(eng->keys);
-    PyMem_Free(eng->attrsets);
-    PyMem_Free(eng->spaces);
-    PyMem_Free(eng->aliases);
+    if (eng->owns_model) {
+        PyMem_Free(eng->named);
+        PyMem_Free(eng->globals);
+        PyMem_Free(eng->attrsets);
+        PyMem_Free(eng->spaces);
+        PyMem_Free(eng->aliases);
+        PyMem_Free(eng->xsl_prefix);
+        for (size_t index = 0; index < eng->expression_cap; index++) {
+            if (eng->expressions[index].program != NULL) {
+                xp_free(eng->expressions[index].program);
+            }
+        }
+        PyMem_Free(eng->expressions);
+        for (size_t index = 0; index < eng->pattern_cap; index++) {
+            if (eng->patterns[index].program != NULL) {
+                xp_free(eng->patterns[index].program);
+            }
+        }
+        PyMem_Free(eng->patterns);
+    }
     PyMem_Free(eng->stripped);
     scope_drop(eng, 0);
     PyMem_Free(eng->scope);
-    PyMem_Free(eng->xsl_prefix);
     if (eng->out_tree != NULL) {
         th_tree_free(eng->out_tree);
     }
-    if (eng->merged_tree != NULL) {
+    /* snapshot_principal_stylesheet allocates this tree before model cleanup. */
+    /* GCOVR_EXCL_BR_START */
+    if (eng->owns_model && eng->merged_tree != NULL) {
         th_tree_free(eng->merged_tree);
     }
+    /* GCOVR_EXCL_BR_STOP */
+}
+
+static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree) {
+    *eng = *model;
+    eng->owns_model = 0;
+    eng->src_tree = src_tree;
+    eng->src_root = th_tree_document(src_tree);
+    eng->out_tree = NULL;
+    eng->rules = NULL;
+    eng->nrules = 0;
+    eng->rules_cap = 0;
+    eng->keys = NULL;
+    eng->nkeys = 0;
+    eng->keys_cap = 0;
+    eng->stripped = NULL;
+    eng->nstripped = 0;
+    eng->stripped_cap = 0;
+    eng->scope = NULL;
+    eng->scope_len = 0;
+    eng->scope_cap = 0;
+    eng->error = NULL;
+    eng->py_error = 0;
+    eng->ns_counter = 0;
+    eng->gen_counter = 0;
+    eng->depth = 0;
+    eng->number_memo_node = NULL;
+    eng->number_memo_instruction = NULL;
+    if (model->nrules > 0) {
+        eng->rules = PyMem_Malloc((size_t)model->nrules * sizeof(xslt_rule));
+        if (eng->rules == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            return -1;            /* GCOVR_EXCL_LINE */
+        }
+        memcpy(eng->rules, model->rules, (size_t)model->nrules * sizeof(xslt_rule));
+        eng->nrules = model->nrules;
+        eng->rules_cap = model->nrules;
+        for (Py_ssize_t index = 0; index < model->nrules; index++) {
+            memset(&eng->rules[index].matched, 0, sizeof(match_set));
+            eng->rules[index].built = 0;
+        }
+    }
+    if (model->nkeys > 0) {
+        eng->keys = PyMem_Malloc((size_t)model->nkeys * sizeof(xslt_key));
+        if (eng->keys == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            return -1;           /* GCOVR_EXCL_LINE */
+        }
+        memcpy(eng->keys, model->keys, (size_t)model->nkeys * sizeof(xslt_key));
+        eng->nkeys = model->nkeys;
+        eng->keys_cap = model->nkeys;
+        for (Py_ssize_t index = 0; index < model->nkeys; index++) {
+            memset(&eng->keys[index].table, 0, sizeof(strmap));
+            eng->keys[index].built = 0;
+        }
+    }
+    return 0;
 }
 
 /* Bind the global variables and params (params overridable by the passed dict). */
@@ -4291,32 +4515,230 @@ static int strip_record(engine *eng, th_node *node, th_node *parent, th_node *ne
     return 0;
 }
 
-/* Detach every strippable whitespace-only text node under element in document order, honoring
-   an inherited xml:space="preserve" (nearest xml:space ancestor wins). Recurses into children. */
-static int strip_walk(engine *eng, th_node *element, int inherited_preserve) {
+typedef struct {
+    th_node *element;
+    th_node *child;
+    int preserve;
+    int strips;
+} strip_frame;
+
+static int strip_push(engine *eng, strip_frame **frames, size_t *length, size_t *capacity, th_node *element,
+                      int inherited_preserve) {
+    if (*length == *capacity) {
+        size_t grown_capacity;
+        size_t bytes;
+        /* Source depth cannot exhaust size_t. */
+        /* GCOVR_EXCL_BR_START */
+        if (!th_grow_cap(*length + 1, *capacity, 16, sizeof(strip_frame), &grown_capacity, &bytes)) {
+            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        }
+        /* GCOVR_EXCL_BR_STOP */
+        strip_frame *grown = PyMem_Realloc(*frames, bytes);
+        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        }
+        *frames = grown;
+        *capacity = grown_capacity;
+    }
     int preserve = inherited_preserve;
     Py_ssize_t xmlspace_len = 0;
     const Py_UCS4 *xmlspace = attr_lookup(eng->src_tree, element, "xml:space", &xmlspace_len);
     if (xmlspace != NULL) {
         preserve = ucs4_ascii_eq(xmlspace, xmlspace_len, "preserve");
     }
-    int strips = !preserve && element_strips_space(eng, element);
-    th_node *child = element->first_child;
-    while (child != NULL) {
-        th_node *next = child->next_sibling;
+    (*frames)[(*length)++] =
+        (strip_frame){element, element->first_child, preserve, !preserve && element_strips_space(eng, element)};
+    return 0;
+}
+
+/* Detach strippable whitespace text in document order while tracking inherited xml:space on a heap stack. */
+static int strip_walk(engine *eng, th_node *element, int inherited_preserve) {
+    strip_frame *frames = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    int push_failed = strip_push(eng, &frames, &length, &capacity, element, inherited_preserve);
+    if (push_failed < 0) {  /* GCOVR_EXCL_BR_LINE: failure requires allocation exhaustion */
+        PyMem_Free(frames); /* GCOVR_EXCL_LINE */
+        return -1;          /* GCOVR_EXCL_LINE */
+    }
+    while (length > 0) {
+        strip_frame *frame = &frames[length - 1];
+        if (frame->child == NULL) {
+            length--;
+            continue;
+        }
+        th_node *child = frame->child;
+        frame->child = child->next_sibling;
         if (child->type == TH_NODE_TEXT) {
-            if (strips && th_node_text_is_blank(eng->src_tree, child)) {
-                if (strip_record(eng, child, element, next) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    return -1;                                     /* GCOVR_EXCL_LINE */
+            if (frame->strips && th_node_text_is_blank(eng->src_tree, child)) {
+                if (strip_record(eng, child, frame->element, frame->child) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    PyMem_Free(frames);                                           /* GCOVR_EXCL_LINE */
+                    return -1;                                                    /* GCOVR_EXCL_LINE */
                 }
                 th_node_remove(child);
             }
-        } else if (child->type == TH_NODE_ELEMENT && strip_walk(eng, child, preserve) < 0) { /* GCOVR_EXCL_BR_LINE */
-            return -1;                                                                       /* GCOVR_EXCL_LINE */
+        } else if (child->type == TH_NODE_ELEMENT && /* GCOVR_EXCL_BR_LINE: failure requires allocation exhaustion */
+                   strip_push(eng, &frames, &length, &capacity, child, frame->preserve) < 0) {
+            PyMem_Free(frames); /* GCOVR_EXCL_LINE */
+            return -1;          /* GCOVR_EXCL_LINE */
         }
-        child = next;
+    }
+    PyMem_Free(frames);
+    return 0;
+}
+
+static int precompile_expression(engine *eng, const Py_UCS4 *source, Py_ssize_t length, const char *context) {
+    char error[256];
+    if (compile_expression(eng, source, length, error, sizeof(error)) != NULL) {
+        return 0;
+    }
+    if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only allocation adds an exception during compilation */
+        PyErr_Format(PyExc_ValueError, "xslt: bad %s: %s", context, error);
+    }
+    return fail_py(eng);
+}
+
+static int precompile_avt(engine *eng, const Py_UCS4 *source, Py_ssize_t length) {
+    for (Py_ssize_t index = 0; index < length; index++) {
+        if (source[index] != '{' || (index + 1 < length && source[index + 1] == '{')) {
+            if (source[index] == '{') {
+                index++;
+            }
+            continue;
+        }
+        Py_ssize_t start = ++index;
+        Py_UCS4 quote = 0;
+        while (index < length && (quote != 0 || source[index] != '}')) {
+            if (quote != 0) {
+                if (source[index] == quote) {
+                    quote = 0;
+                }
+            } else if (source[index] == '\'' || source[index] == '"') {
+                quote = source[index];
+            }
+            index++;
+        }
+        if (precompile_expression(eng, source + start, index - start, "expression in attribute value template") < 0) {
+            return -1;
+        }
     }
     return 0;
+}
+
+static int precompile_attribute(engine *eng, th_node *element, const char *name, const char *context) {
+    Py_ssize_t length = 0;
+    const Py_UCS4 *source = attr_lookup(eng->sheet_tree, element, name, &length);
+    return source == NULL ? 0 : precompile_expression(eng, source, length, context);
+}
+
+static int precompile_pattern_attribute(engine *eng, th_node *element, const char *name) {
+    Py_ssize_t length = 0;
+    const Py_UCS4 *source = attr_lookup(eng->sheet_tree, element, name, &length);
+    if (source == NULL) {
+        return 0;
+    }
+    Py_ssize_t starts[64];
+    Py_ssize_t lengths[64];
+    int alternatives = split_union(source, length, starts, lengths, 64);
+    if (alternatives < 0) {
+        PyErr_Format(PyExc_ValueError, "xslt: xsl:number %s pattern has too many alternatives", name);
+        return fail_py(eng);
+    }
+    for (int index = 0; index < alternatives; index++) {
+        if (compile_pattern(eng, source + starts[index], lengths[index]) == NULL) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int precompile_instruction(engine *eng, th_node *element) {
+    const char *select_context = NULL;
+    const char *select_instructions[] = {"apply-templates", "for-each", "value-of",   "copy-of",
+                                         "variable",        "param",    "with-param", "sort"};
+    for (size_t index = 0; index < sizeof(select_instructions) / sizeof(select_instructions[0]); index++) {
+        if (is_xsl(eng, element, select_instructions[index])) {
+            select_context = select_instructions[index];
+            break;
+        }
+    }
+    if (select_context != NULL) {
+        char context[64];
+        snprintf(context, sizeof(context), "%s select", select_context);
+        if (precompile_attribute(eng, element, "select", context) < 0) {
+            return -1;
+        }
+    }
+    if ((is_xsl(eng, element, "if") || is_xsl(eng, element, "when")) &&
+        precompile_attribute(eng, element, "test", "test") < 0) {
+        return -1;
+    }
+    if (is_xsl(eng, element, "number")) {
+        if (precompile_attribute(eng, element, "value", "number value") < 0 ||
+            precompile_pattern_attribute(eng, element, "count") < 0 ||
+            precompile_pattern_attribute(eng, element, "from") < 0) {
+            return -1;
+        }
+    }
+    const char *avt_name = NULL;
+    if (is_xsl(eng, element, "element") || is_xsl(eng, element, "attribute") ||
+        is_xsl(eng, element, "processing-instruction")) {
+        avt_name = "name";
+    }
+    if (avt_name != NULL) {
+        Py_ssize_t length = 0;
+        const Py_UCS4 *source = attr_lookup(eng->sheet_tree, element, avt_name, &length);
+        if (source != NULL && precompile_avt(eng, source, length) < 0) {
+            return -1;
+        }
+    }
+    if (is_xsl(eng, element, "attribute")) {
+        Py_ssize_t length = 0;
+        const Py_UCS4 *source = attr_lookup(eng->sheet_tree, element, "namespace", &length);
+        if (source != NULL && precompile_avt(eng, source, length) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int precompile_literal_attributes(engine *eng, th_node *element) {
+    for (Py_ssize_t index = 0; index < element->attr_count; index++) {
+        const th_node_attr *attr = &element->attrs[index];
+        Py_ssize_t name_len = 0;
+        const char *name = th_attr_name(eng->sheet_tree, attr->name_atom, &name_len);
+        if ((name_len == 5 && memcmp(name, "xmlns", 5) == 0) || (name_len >= 6 && memcmp(name, "xmlns:", 6) == 0) ||
+            is_xsl_attr(eng, element, name, name_len)) {
+            continue;
+        }
+        if (precompile_avt(eng, attr->value, attr->value_len) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int node_is_xsl(engine *eng, th_node *node) {
+    Py_ssize_t local_len;
+    Py_ssize_t prefix_len;
+    (void)qname_local(node, &local_len, &prefix_len);
+    return node_prefix_is_xsl(eng->sheet_tree, node, prefix_len);
+}
+
+static int precompile_stylesheet(engine *eng, th_node *root) {
+    for (th_node *node = root; node != NULL; node = xslt_preorder_next(root, node)) {
+        if (node->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        if (node_is_xsl(eng, node)) {
+            if (precompile_instruction(eng, node) < 0) {
+                return -1;
+            }
+        } else if (precompile_literal_attributes(eng, node) < 0) {
+            return -1;
+        }
+    }
+    return precompile_expression(eng, &XPATH_DOT, 1, "sort select");
 }
 
 /* Re-attach the stripped text nodes in reverse order, so each node's saved successor is
@@ -4334,11 +4756,7 @@ static void strip_restore(engine *eng) {
 
 /* ---- the module entry point ----------------------------------------------- */
 
-static PyObject *run_transform(engine *eng, th_node *sheet_root, PyObject *params, th_node **imports,
-                               Py_ssize_t nimports) {
-    if (analyze(eng, sheet_root, imports, nimports) < 0) {
-        return NULL;
-    }
+static PyObject *run_transform(engine *eng, th_node *sheet_root, PyObject *params) {
     eng->out_tree = th_tree_new();
     if (eng->out_tree == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
@@ -4391,61 +4809,274 @@ static th_node *stylesheet_root(th_node *node) {
     return NULL; /* GCOVR_EXCL_LINE: an XML document always has a root element */
 }
 
-static PyObject *stylesheet_import_hrefs(PyObject *module, PyObject *stylesheet, PyObject *base) {
+static PyObject *stylesheet_import_hrefs(th_tree *tree, th_node *root, PyObject *base, int allow_imports) {
     PyObject *hrefs = PyList_New(0);
     if (hrefs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         return NULL;     /* GCOVR_EXCL_LINE */
     }
-    th_tree *tree;
-    th_node *node;
-    if (turbohtml_node_borrow(module, stylesheet, &tree, &node) < 0) {
-        Py_DECREF(hrefs);
-        return NULL;
-    }
-    PyObject *handle = turbohtml_node_handle(stylesheet);
-    (void)handle;
     int error = 0;
-    Py_BEGIN_CRITICAL_SECTION(handle);
-    th_node *root = stylesheet_root(node);
-    if (root != NULL) {
-        for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
-            if (child->type != TH_NODE_ELEMENT) {
-                continue;
-            }
-            Py_ssize_t local_len;
-            Py_ssize_t prefix_len;
-            const Py_UCS4 *local = qname_local(child, &local_len, &prefix_len);
-            if (!ucs4_ascii_eq(local, local_len, "import") || !node_prefix_is_xsl(tree, child, prefix_len)) {
-                continue;
-            }
-            if (base == Py_None) {
-                PyErr_SetString(PyExc_ValueError,
-                                "xsl:import needs a base_url to resolve the imported stylesheet's href against");
-                error = 1;
-                break;
-            }
-            Py_ssize_t href_len = 0;
-            const Py_UCS4 *href_value = attr_lookup(tree, child, "href", &href_len);
-            if (href_value == NULL) {
-                PyErr_SetString(PyExc_ValueError, "xsl:import requires an href attribute");
-                error = 1;
-                break;
-            }
-            PyObject *href = make_str(href_value, href_len);
-            if (href == NULL || PyList_Append(hrefs, href) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                Py_XDECREF(href);                                 /* GCOVR_EXCL_LINE */
-                error = 1;                                        /* GCOVR_EXCL_LINE */
-                break;                                            /* GCOVR_EXCL_LINE */
-            }
-            Py_DECREF(href);
+    for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type != TH_NODE_ELEMENT) {
+            continue;
         }
+        Py_ssize_t local_len;
+        Py_ssize_t prefix_len;
+        const Py_UCS4 *local = qname_local(child, &local_len, &prefix_len);
+        if (!ucs4_ascii_eq(local, local_len, "import") || !node_prefix_is_xsl(tree, child, prefix_len)) {
+            continue;
+        }
+        if (!allow_imports) {
+            PyErr_SetString(PyExc_ValueError, "xsl:import is disabled");
+            error = 1;
+            break;
+        }
+        if (base == Py_None) {
+            PyErr_SetString(PyExc_ValueError,
+                            "xsl:import needs a base_url to resolve the imported stylesheet's href against");
+            error = 1;
+            break;
+        }
+        Py_ssize_t href_len = 0;
+        const Py_UCS4 *href_value = attr_lookup(tree, child, "href", &href_len);
+        if (href_value == NULL) {
+            PyErr_SetString(PyExc_ValueError, "xsl:import requires an href attribute");
+            error = 1;
+            break;
+        }
+        PyObject *href = make_str(href_value, href_len);
+        if (href == NULL || PyList_Append(hrefs, href) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_XDECREF(href);                                 /* GCOVR_EXCL_LINE */
+            error = 1;                                        /* GCOVR_EXCL_LINE */
+            break;                                            /* GCOVR_EXCL_LINE */
+        }
+        Py_DECREF(href);
     }
-    Py_END_CRITICAL_SECTION();
     if (error) {
         Py_DECREF(hrefs);
         return NULL;
     }
     return hrefs;
+}
+
+static PyObject *stylesheet_node_import_hrefs(PyObject *module, PyObject *stylesheet, PyObject *base,
+                                              int allow_imports) {
+    th_tree *tree;
+    th_node *node;
+    int borrow_failed = turbohtml_node_borrow(module, stylesheet, &tree, &node);
+    if (borrow_failed < 0) { /* GCOVR_EXCL_BR_LINE: parse_xml supplies every imported node */
+        return NULL;         /* GCOVR_EXCL_LINE */
+    }
+    PyObject *hrefs;
+    Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(stylesheet));
+    th_node *root = stylesheet_root(node);
+    hrefs = root == NULL        /* GCOVR_EXCL_BR_LINE: parse_xml rejects imported documents without a root */
+                ? PyList_New(0) /* GCOVR_EXCL_LINE */
+                : stylesheet_import_hrefs(tree, root, base, allow_imports);
+    Py_END_CRITICAL_SECTION();
+    return hrefs;
+}
+
+typedef struct {
+    PyObject *path_type;
+    PyObject *urlparse;
+    PyObject *url2pathname;
+    PyObject *root;
+    int allow_imports;
+} import_policy;
+
+static void import_policy_clear(import_policy *policy) {
+    Py_XDECREF(policy->path_type);
+    Py_XDECREF(policy->urlparse);
+    Py_XDECREF(policy->url2pathname);
+    Py_XDECREF(policy->root);
+}
+
+static PyObject *import_path_from_url(import_policy *policy, PyObject *value, const char *name) {
+    if (!PyUnicode_Check(value)) {
+        return PyObject_CallOneArg(policy->path_type, value);
+    }
+    PyObject *parsed = PyObject_CallOneArg(policy->urlparse, value);
+    if (parsed == NULL) {
+        return NULL;
+    }
+    PyObject *scheme = PyObject_GetAttrString(parsed, "scheme");
+    PyObject *netloc = PyObject_GetAttrString(parsed, "netloc");
+    PyObject *url_path = PyObject_GetAttrString(parsed, "path");
+    /* urlparse results expose all three attributes. */
+    /* GCOVR_EXCL_BR_START */
+    if (scheme == NULL || netloc == NULL || url_path == NULL) {
+        Py_XDECREF(scheme);   /* GCOVR_EXCL_LINE */
+        Py_XDECREF(netloc);   /* GCOVR_EXCL_LINE */
+        Py_XDECREF(url_path); /* GCOVR_EXCL_LINE */
+        Py_DECREF(parsed);    /* GCOVR_EXCL_LINE */
+        return NULL;          /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    int is_file = PyUnicode_CompareWithASCIIString(scheme, "file") == 0;
+    int has_scheme = PyUnicode_GET_LENGTH(scheme) != 0;
+    int windows_drive = PyUnicode_GET_LENGTH(value) > 2 && PyUnicode_ReadChar(value, 1) == ':' &&
+                        (PyUnicode_ReadChar(value, 2) == '\\' || PyUnicode_ReadChar(value, 2) == '/');
+    PyObject *local = NULL;
+    if (is_file) {
+        int local_host =
+            PyUnicode_GET_LENGTH(netloc) == 0 || PyUnicode_CompareWithASCIIString(netloc, "localhost") == 0;
+        if (!local_host) {
+            PyErr_Format(PyExc_ValueError, "xsl:import %s file URL must point to a local path", name);
+        } else {
+            local = PyObject_CallOneArg(policy->url2pathname, url_path);
+        }
+    } else if ((has_scheme && !windows_drive) || PyUnicode_GET_LENGTH(netloc) != 0) {
+        PyErr_Format(PyExc_ValueError, "xsl:import %s must be a local path or file URL", name);
+    } else {
+        local = PyObject_CallOneArg(policy->url2pathname, value);
+    }
+    Py_DECREF(url_path);
+    Py_DECREF(netloc);
+    Py_DECREF(scheme);
+    Py_DECREF(parsed);
+    if (local == NULL) {
+        return NULL;
+    }
+    PyObject *path = PyObject_CallOneArg(policy->path_type, local);
+    Py_DECREF(local);
+    return path;
+}
+
+static PyObject *import_resolve(PyObject *path) {
+    return PyObject_CallMethod(path, "resolve", NULL);
+}
+
+static int import_check_root(import_policy *policy, PyObject *path) {
+    if (policy->root == NULL) {
+        return 0;
+    }
+    PyObject *inside = PyObject_CallMethod(path, "is_relative_to", "O", policy->root);
+    if (inside == NULL) { /* GCOVR_EXCL_BR_LINE: Path.is_relative_to returns bool or allocates */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    int allowed = PyObject_IsTrue(inside);
+    Py_DECREF(inside);
+    if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: bool truth testing cannot fail */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
+    if (!allowed) {
+        PyErr_Format(PyExc_ValueError, "xsl:import path escapes import_root: %S", path);
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *load_stylesheet_import(PyObject *module, import_policy *policy, PyObject *base, PyObject *href) {
+    PyObject *current_path = import_path_from_url(policy, base, "base_url");
+    if (current_path == NULL) {
+        return NULL;
+    }
+    PyObject *current = import_resolve(current_path);
+    Py_DECREF(current_path);
+    if (current == NULL) { /* GCOVR_EXCL_BR_LINE: Path.resolve fails here only on allocation */
+        return NULL;       /* GCOVR_EXCL_LINE */
+    }
+    PyObject *parent = PyObject_GetAttrString(current, "parent");
+    PyObject *href_path = import_path_from_url(policy, href, "href");
+    if (parent == NULL) {      /* GCOVR_EXCL_BR_LINE: pathlib paths always expose parent */
+        Py_XDECREF(href_path); /* GCOVR_EXCL_LINE */
+        Py_DECREF(current);    /* GCOVR_EXCL_LINE */
+        return NULL;           /* GCOVR_EXCL_LINE */
+    }
+    if (href_path == NULL) {
+        Py_XDECREF(href_path);
+        Py_DECREF(parent);
+        Py_DECREF(current);
+        return NULL;
+    }
+    PyObject *joined = PyNumber_TrueDivide(parent, href_path);
+    Py_DECREF(href_path);
+    Py_DECREF(parent);
+    if (joined == NULL) {   /* GCOVR_EXCL_BR_LINE: joining two pathlib paths fails only on allocation */
+        Py_DECREF(current); /* GCOVR_EXCL_LINE */
+        return NULL;        /* GCOVR_EXCL_LINE */
+    }
+    PyObject *path = import_resolve(joined);
+    Py_DECREF(joined);
+    if (path == NULL) {     /* GCOVR_EXCL_BR_LINE: Path.resolve fails here only on allocation */
+        Py_DECREF(current); /* GCOVR_EXCL_LINE */
+        return NULL;        /* GCOVR_EXCL_LINE */
+    }
+    if (import_check_root(policy, path) < 0) {
+        Py_XDECREF(path);
+        Py_DECREF(current);
+        return NULL;
+    }
+    PyObject *text = PyObject_CallMethod(path, "read_text", "s", "utf-8");
+    if (text == NULL) {
+        Py_DECREF(path);
+        Py_DECREF(current);
+        return NULL;
+    }
+    PyObject *parse_xml = PyObject_GetAttrString(module, "parse_xml");
+    if (parse_xml == NULL) { /* GCOVR_EXCL_BR_LINE: the extension module always exposes parse_xml */
+        Py_DECREF(text);     /* GCOVR_EXCL_LINE */
+        Py_DECREF(path);     /* GCOVR_EXCL_LINE */
+        Py_DECREF(current);  /* GCOVR_EXCL_LINE */
+        return NULL;         /* GCOVR_EXCL_LINE */
+    }
+    PyObject *stylesheet = PyObject_CallOneArg(parse_xml, text);
+    Py_DECREF(parse_xml);
+    Py_DECREF(text);
+    if (stylesheet == NULL) {
+        Py_DECREF(path);
+        Py_DECREF(current);
+        return NULL;
+    }
+    PyObject *loaded = PyTuple_Pack(3, stylesheet, path, current);
+    Py_DECREF(stylesheet);
+    Py_DECREF(path);
+    Py_DECREF(current);
+    return loaded;
+}
+
+static int import_policy_init(import_policy *policy, int allow_imports, PyObject *import_root) {
+    memset(policy, 0, sizeof(*policy));
+    policy->allow_imports = allow_imports;
+    PyObject *pathlib = PyImport_ImportModule("pathlib");
+    PyObject *parse = PyImport_ImportModule("urllib.parse");
+    PyObject *request = PyImport_ImportModule("urllib.request");
+    /* Importing bundled standard-library modules fails only on allocation. */
+    /* GCOVR_EXCL_BR_START */
+    if (pathlib == NULL || parse == NULL || request == NULL) {
+        Py_XDECREF(pathlib); /* GCOVR_EXCL_LINE */
+        Py_XDECREF(parse);   /* GCOVR_EXCL_LINE */
+        Py_XDECREF(request); /* GCOVR_EXCL_LINE */
+        return -1;           /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    policy->path_type = PyObject_GetAttrString(pathlib, "Path");
+    policy->urlparse = PyObject_GetAttrString(parse, "urlparse");
+    policy->url2pathname = PyObject_GetAttrString(request, "url2pathname");
+    Py_DECREF(request);
+    Py_DECREF(parse);
+    Py_DECREF(pathlib);
+    /* Bundled modules expose these attributes. */
+    /* GCOVR_EXCL_BR_START */
+    if (policy->path_type == NULL || policy->urlparse == NULL || policy->url2pathname == NULL) {
+        import_policy_clear(policy); /* GCOVR_EXCL_LINE */
+        return -1;                   /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    if (import_root != Py_None) {
+        PyObject *root_path = PyObject_CallOneArg(policy->path_type, import_root);
+        if (root_path == NULL) {
+            import_policy_clear(policy);
+            return -1;
+        }
+        policy->root = import_resolve(root_path);
+        Py_DECREF(root_path);
+        if (policy->root == NULL) {      /* GCOVR_EXCL_BR_LINE: Path.resolve fails here only on allocation */
+            import_policy_clear(policy); /* GCOVR_EXCL_LINE */
+            return -1;                   /* GCOVR_EXCL_LINE */
+        }
+    }
+    return 0;
 }
 
 static int raise_import_cycle(PyObject *active, PyObject *path) {
@@ -4484,68 +5115,54 @@ static int raise_import_cycle(PyObject *active, PyObject *path) {
     return -1;
 }
 
-static int resolve_stylesheet_imports(PyObject *module, PyObject *stylesheet, PyObject *base, PyObject *loader,
-                                      PyObject *imports, PyObject *active, PyObject *active_set) {
-    PyObject *hrefs = stylesheet_import_hrefs(module, stylesheet, base);
-    if (hrefs == NULL) {
-        return -1;
-    }
+static int resolve_import_hrefs(PyObject *module, PyObject *hrefs, PyObject *base, import_policy *policy,
+                                PyObject *imports, PyObject *active, PyObject *active_set) {
     Py_ssize_t count = PyList_GET_SIZE(hrefs);
     for (Py_ssize_t index = 0; index < count; index++) {
-        PyObject *loaded = PyObject_CallFunctionObjArgs(loader, base, PyList_GET_ITEM(hrefs, index), NULL);
+        PyObject *loaded = load_stylesheet_import(module, policy, base, PyList_GET_ITEM(hrefs, index));
         if (loaded == NULL) {
-            Py_DECREF(hrefs);
             return -1;
         }
-        if (!PyTuple_Check(loaded) || PyTuple_GET_SIZE(loaded) != 3) { /* GCOVR_EXCL_START: private loader invariant */
-            Py_DECREF(loaded);
-            Py_DECREF(hrefs);
-            PyErr_SetString(PyExc_TypeError, "xslt: import loader must return (stylesheet, path, current_path)");
-            return -1;
-        } /* GCOVR_EXCL_STOP */
         PyObject *imported = PyTuple_GET_ITEM(loaded, 0);
         PyObject *next_base = PyTuple_GET_ITEM(loaded, 1);
         if (PyList_GET_SIZE(active) == 0) {
             PyObject *current_path = PyTuple_GET_ITEM(loaded, 2);
             if (PyList_Append(active, current_path) < 0) { /* GCOVR_EXCL_START: allocation failure */
                 Py_DECREF(loaded);
-                Py_DECREF(hrefs);
                 return -1;
             } /* GCOVR_EXCL_STOP */
             if (PyDict_SetItem(active_set, current_path, Py_None) < 0) { /* GCOVR_EXCL_START: allocation failure */
                 Py_DECREF(loaded);
-                Py_DECREF(hrefs);
                 return -1;
             } /* GCOVR_EXCL_STOP */
         }
         int contains = PyDict_Contains(active_set, next_base);
         if (contains < 0) { /* GCOVR_EXCL_START: canonical Path hashes do not fail */
             Py_DECREF(loaded);
-            Py_DECREF(hrefs);
             return -1;
         } /* GCOVR_EXCL_STOP */
         if (contains) {
             int status = raise_import_cycle(active, next_base);
             Py_DECREF(loaded);
-            Py_DECREF(hrefs);
             return status;
         }
         if (PyList_Append(active, next_base) < 0) { /* GCOVR_EXCL_START: allocation failure */
             Py_DECREF(loaded);
-            Py_DECREF(hrefs);
             return -1;
         } /* GCOVR_EXCL_STOP */
         if (PyDict_SetItem(active_set, next_base, Py_None) < 0) { /* GCOVR_EXCL_START: allocation failure */
             Py_DECREF(loaded);
-            Py_DECREF(hrefs);
             return -1;
         } /* GCOVR_EXCL_STOP */
         if (Py_EnterRecursiveCall(" while resolving xsl:import") != 0) { /* GCOVR_EXCL_START: recursion limit */
             Py_DECREF(loaded);
-            Py_DECREF(hrefs);
             return -1;
         } /* GCOVR_EXCL_STOP */
-        int status = resolve_stylesheet_imports(module, imported, next_base, loader, imports, active, active_set);
+        PyObject *nested_hrefs = stylesheet_node_import_hrefs(module, imported, next_base, policy->allow_imports);
+        int status = nested_hrefs == NULL
+                         ? -1
+                         : resolve_import_hrefs(module, nested_hrefs, next_base, policy, imports, active, active_set);
+        Py_XDECREF(nested_hrefs);
         Py_LeaveRecursiveCall();
         if (status == 0) {
             (void)PyDict_DelItem(active_set, next_base);
@@ -4554,20 +5171,26 @@ static int resolve_stylesheet_imports(PyObject *module, PyObject *stylesheet, Py
         }
         Py_DECREF(loaded);
         if (status < 0) {
-            Py_DECREF(hrefs);
             return -1;
         }
     }
-    Py_DECREF(hrefs);
     return 0;
 }
 
-PyObject *turbohtml_xslt_resolve_imports(PyObject *module, PyObject *args) {
-    PyObject *stylesheet;
-    PyObject *base;
-    PyObject *loader;
-    if (!PyArg_ParseTuple(args, "OOO:_xslt_resolve_imports", &stylesheet, &base, &loader)) { /* GCOVR_EXCL_BR_LINE */
-        return NULL; /* GCOVR_EXCL_LINE: private typed boundary */
+static PyObject *resolve_import_list(PyObject *module, th_tree *tree, th_node *root, PyObject *base, int allow_imports,
+                                     PyObject *import_root) {
+    PyObject *hrefs = stylesheet_import_hrefs(tree, root, base, allow_imports);
+    if (hrefs == NULL) {
+        return NULL;
+    }
+    if (PyList_GET_SIZE(hrefs) == 0) {
+        Py_DECREF(hrefs);
+        Py_RETURN_NONE;
+    }
+    import_policy policy;
+    if (import_policy_init(&policy, allow_imports, import_root) < 0) {
+        Py_DECREF(hrefs);
+        return NULL;
     }
     PyObject *imports = PyList_New(0);
     PyObject *active = PyList_New(0);
@@ -4576,28 +5199,183 @@ PyObject *turbohtml_xslt_resolve_imports(PyObject *module, PyObject *args) {
         Py_XDECREF(imports);                                       /* GCOVR_EXCL_LINE */
         Py_XDECREF(active);                                        /* GCOVR_EXCL_LINE */
         Py_XDECREF(active_set);                                    /* GCOVR_EXCL_LINE */
+        import_policy_clear(&policy);                              /* GCOVR_EXCL_LINE */
+        Py_DECREF(hrefs);                                          /* GCOVR_EXCL_LINE */
         return NULL;                                               /* GCOVR_EXCL_LINE */
     }
-    int status = resolve_stylesheet_imports(module, stylesheet, base, loader, imports, active, active_set);
+    int status = resolve_import_hrefs(module, hrefs, base, &policy, imports, active, active_set);
+    Py_DECREF(hrefs);
+    import_policy_clear(&policy);
     Py_DECREF(active_set);
     Py_DECREF(active);
     if (status < 0) {
         Py_DECREF(imports);
         return NULL;
     }
-    if (PyList_GET_SIZE(imports) == 0) {
-        Py_DECREF(imports);
-        Py_RETURN_NONE;
-    }
     return imports;
 }
 
-PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
+typedef struct {
+    engine model;
+    th_node *sheet_root;
+} xslt_compiled;
+
+static const char XSLT_CAPSULE[] = "turbohtml.XSLT";
+
+static void xslt_compiled_free(PyObject *capsule) {
+    xslt_compiled *compiled = PyCapsule_GetPointer(capsule, XSLT_CAPSULE);
+    if (compiled == NULL) { /* GCOVR_EXCL_START: destructor only receives its own capsule */
+        PyErr_Clear();
+        return;
+    } /* GCOVR_EXCL_STOP */
+    engine_clear(&compiled->model);
+    PyMem_Free(compiled);
+}
+
+static int snapshot_principal_stylesheet(xslt_compiled *compiled, PyObject *stylesheet_obj, th_tree *sheet_tree,
+                                         th_node *sheet_node) {
+    (void)stylesheet_obj; /* used by the critical-section macro only on free-threaded builds */
+    compiled->model.merged_tree = th_tree_new();
+    if (compiled->model.merged_tree == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;                             /* GCOVR_EXCL_LINE */
+    }
+    int has_root = 0;
+    Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(stylesheet_obj));
+    th_node *sheet_root = stylesheet_root(sheet_node);
+    if (sheet_root != NULL) {
+        has_root = 1;
+        compiled->sheet_root = th_tree_copy_node(compiled->model.merged_tree, sheet_tree, sheet_root);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (!has_root) {
+        PyErr_SetString(PyExc_ValueError, "xslt: the stylesheet has no root element");
+        return -1;
+    }
+    if (compiled->sheet_root == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;                      /* GCOVR_EXCL_LINE */
+    }
+    compiled->model.sheet_tree = compiled->model.merged_tree;
+    return 0;
+}
+
+static int copy_imports(PyObject *module, xslt_compiled *compiled, PyObject *imports_obj, th_node ***out_imports,
+                        Py_ssize_t *out_nimports) {
+    Py_ssize_t nimports = imports_obj == Py_None ? 0 : PyList_GET_SIZE(imports_obj);
+    th_node **imports = nimports == 0 ? NULL : PyMem_Malloc((size_t)nimports * sizeof(th_node *));
+    if (nimports > 0 && imports == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;                         /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < nimports; index++) {
+        PyObject *item = PyList_GET_ITEM(imports_obj, index);
+        th_tree *import_tree;
+        th_node *import_node;
+        int borrow_failed = turbohtml_node_borrow(module, item, &import_tree, &import_node);
+        if (borrow_failed < 0) { /* GCOVR_EXCL_BR_LINE: parse_xml supplies every imported node */
+            PyMem_Free(imports); /* GCOVR_EXCL_LINE */
+            return -1;           /* GCOVR_EXCL_LINE */
+        }
+        int has_root = 0;
+        Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(item));
+        th_node *import_root = stylesheet_root(import_node);
+        if (import_root != NULL) { /* GCOVR_EXCL_BR_LINE: parse_xml rejects imported documents without a root */
+            has_root = 1;
+            imports[index] = th_tree_copy_node(compiled->model.merged_tree, import_tree, import_root);
+        }
+        Py_END_CRITICAL_SECTION();
+        if (!has_root) { /* GCOVR_EXCL_START: imports are parsed XML documents */
+            PyMem_Free(imports);
+            PyErr_SetString(PyExc_ValueError, "xslt: an imported stylesheet has no root element");
+            return -1;
+        } /* GCOVR_EXCL_STOP */
+        if (imports[index] == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            PyMem_Free(imports);      /* GCOVR_EXCL_LINE */
+            return -1;                /* GCOVR_EXCL_LINE */
+        }
+    }
+    *out_imports = imports;
+    *out_nimports = nimports;
+    return 0;
+}
+
+PyObject *turbohtml_xslt_compile(PyObject *module, PyObject *args) {
     PyObject *stylesheet_obj;
+    PyObject *base = Py_None;
+    PyObject *import_root = Py_None;
+    int allow_imports = 1;
+    /* Transform passes this typed signature. */
+    /* GCOVR_EXCL_BR_START */
+    if (!PyArg_ParseTuple(args, "O|OpO:_xslt_compile", &stylesheet_obj, &base, &allow_imports, &import_root)) {
+        return NULL; /* GCOVR_EXCL_LINE: private typed boundary */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    th_tree *sheet_tree;
+    th_node *sheet_node;
+    if (turbohtml_node_borrow(module, stylesheet_obj, &sheet_tree, &sheet_node) < 0) {
+        return NULL;
+    }
+    xslt_compiled *compiled = PyMem_Calloc(1, sizeof(xslt_compiled));
+    if (compiled == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+    }
+    compiled->model.module = module;
+    compiled->model.output_method = OUT_XML;
+    compiled->model.cur_attr = -1;
+    compiled->model.owns_model = 1;
+    if (snapshot_principal_stylesheet(compiled, stylesheet_obj, sheet_tree, sheet_node) < 0) {
+        engine_clear(&compiled->model);
+        PyMem_Free(compiled);
+        /* GCOVR_EXCL_START */
+        return PyErr_Occurred() ? NULL
+                                : PyErr_NoMemory(); /* GCOVR_EXCL_BR_LINE: the second path is allocation failure */
+        /* GCOVR_EXCL_STOP */
+    }
+    PyObject *imports_obj =
+        resolve_import_list(module, compiled->model.sheet_tree, compiled->sheet_root, base, allow_imports, import_root);
+    if (imports_obj == NULL) {
+        engine_clear(&compiled->model);
+        PyMem_Free(compiled);
+        return NULL;
+    }
+    th_node **imports = NULL;
+    Py_ssize_t nimports = 0;
+    int status = copy_imports(module, compiled, imports_obj, &imports, &nimports);
+    Py_DECREF(imports_obj);
+    if (status == 0) { /* GCOVR_EXCL_BR_LINE: copy_imports fails only on allocation or an invalid parser result */
+        status = analyze(&compiled->model, compiled->sheet_root, imports, nimports);
+    }
+    for (Py_ssize_t index = 0; status == 0 && index < nimports; index++) {
+        status = precompile_stylesheet(&compiled->model, imports[index]);
+    }
+    if (status == 0) {
+        status = precompile_stylesheet(&compiled->model, compiled->sheet_root);
+    }
+    PyMem_Free(imports);
+    if (status < 0) {
+        /* Allocation is the only error without an engine message or Python exception. */
+        /* GCOVR_EXCL_BR_START */
+        if (compiled->model.error != NULL && !PyErr_Occurred()) {
+            PyErr_Format(PyExc_ValueError, "%s", compiled->model.error);
+        } else if (!PyErr_Occurred()) {
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE */
+        /* GCOVR_EXCL_BR_STOP */
+        engine_clear(&compiled->model);
+        PyMem_Free(compiled);
+        return NULL;
+    }
+    PyObject *capsule = PyCapsule_New(compiled, XSLT_CAPSULE, xslt_compiled_free);
+    if (capsule == NULL) {              /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        engine_clear(&compiled->model); /* GCOVR_EXCL_LINE */
+        PyMem_Free(compiled);           /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE */
+    return capsule;
+}
+
+PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
+    PyObject *compiled_obj;
     PyObject *source_obj;
     PyObject *params = Py_None;
-    PyObject *imports_obj = Py_None;
-    if (!PyArg_ParseTuple(args, "OO|OO", &stylesheet_obj, &source_obj, &params, &imports_obj)) {
+    if (!PyArg_ParseTuple(args, "OO|O:_xslt_transform", &compiled_obj, &source_obj, &params)) {
         return NULL;
     }
     if (params == Py_None) {
@@ -4606,10 +5384,9 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
         PyErr_SetString(PyExc_TypeError, "xslt: params must be a dict or None");
         return NULL;
     }
-    th_tree *sheet_tree;
-    th_node *sheet_node;
-    if (turbohtml_node_borrow(module, stylesheet_obj, &sheet_tree, &sheet_node) < 0) {
-        return NULL;
+    xslt_compiled *compiled = PyCapsule_GetPointer(compiled_obj, XSLT_CAPSULE);
+    if (compiled == NULL) { /* GCOVR_EXCL_BR_LINE: Transform stores only this capsule type */
+        return NULL;        /* GCOVR_EXCL_LINE */
     }
     th_tree *src_tree;
     th_node *src_node;
@@ -4617,87 +5394,17 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
         return NULL;
     }
     (void)src_node; /* the transform roots at the source tree's document node */
-    th_node *sheet_root = stylesheet_root(sheet_node);
-    if (sheet_root == NULL) {
-        PyErr_SetString(PyExc_ValueError, "xslt: the stylesheet has no root element");
-        return NULL;
-    }
     engine eng = {0};
-    eng.module = module;
-    eng.sheet_tree = sheet_tree;
-    eng.src_tree = src_tree;
-    eng.src_root = th_tree_document(src_tree);
-    eng.output_method = OUT_XML;
-    eng.cur_attr = -1;
-    /* Imported stylesheets (section 2.6.2): the Python shim resolves each xsl:import's href and
-       passes the parsed sheets, lowest import precedence first. To keep every declaration in one
-       atom table, the principal and imported sheets are deep-copied into a private merged tree. */
-    th_node **imports = NULL;
-    Py_ssize_t nimports = 0;
-    if (imports_obj != Py_None) {
-        nimports = PySequence_Size(imports_obj);
-        if (nimports < 0) { /* GCOVR_EXCL_BR_LINE: the shim always passes a sequence or None */
-            return NULL;    /* GCOVR_EXCL_LINE */
-        }
-        eng.merged_tree = th_tree_new();
-        if (eng.merged_tree == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return PyErr_NoMemory();   /* GCOVR_EXCL_LINE */
-        }
-        imports = PyMem_Malloc((size_t)nimports * sizeof(th_node *));
-        if (imports == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
-            engine_clear(&eng);      /* GCOVR_EXCL_LINE */
-            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
-        }
-        for (Py_ssize_t index = 0; index < nimports; index++) {
-            PyObject *item = PySequence_GetItem(imports_obj, index);
-            if (item == NULL) { /* GCOVR_EXCL_START: a valid sequence yields no NULL item */
-                PyMem_Free(imports);
-                engine_clear(&eng);
-                return NULL;
-            } /* GCOVR_EXCL_STOP */
-            th_tree *import_tree;
-            th_node *import_node;
-            int ok = turbohtml_node_borrow(module, item, &import_tree, &import_node) == 0;
-            th_node *import_root = ok ? stylesheet_root(import_node) : NULL;
-            if (import_root == NULL) {
-                Py_DECREF(item);
-                PyMem_Free(imports);
-                engine_clear(&eng);
-                /* A borrow failure already set an exception; an XML-parsed import always has a
-                   root element, so the no-root guard is unreachable via the shim. */
-                const char *no_root = "xslt: an imported stylesheet has no root element";
-                if (ok) /* GCOVR_EXCL_BR_LINE: defensive; an XML-parsed import always has a root */
-                    PyErr_SetString(PyExc_ValueError, no_root); /* GCOVR_EXCL_LINE */
-                return NULL;
-            }
-            Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(item));
-            imports[index] = th_tree_copy_node(eng.merged_tree, import_tree, import_root);
-            Py_END_CRITICAL_SECTION();
-            Py_DECREF(item);
-            if (imports[index] == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
-                PyMem_Free(imports);      /* GCOVR_EXCL_LINE */
-                engine_clear(&eng);       /* GCOVR_EXCL_LINE */
-                return PyErr_NoMemory();  /* GCOVR_EXCL_LINE */
-            }
-        }
-        Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(stylesheet_obj));
-        sheet_root = th_tree_copy_node(eng.merged_tree, sheet_tree, sheet_root);
-        Py_END_CRITICAL_SECTION();
-        if (sheet_root == NULL) {    /* GCOVR_EXCL_BR_LINE: alloc */
-            PyMem_Free(imports);     /* GCOVR_EXCL_LINE */
-            engine_clear(&eng);      /* GCOVR_EXCL_LINE */
-            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
-        }
-        eng.sheet_tree = eng.merged_tree;
+    if (engine_start_run(&eng, &compiled->model, src_tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        engine_clear(&eng);                                       /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory();                                  /* GCOVR_EXCL_LINE */
     }
     PyObject *source_handle = turbohtml_node_handle(source_obj);
     (void)source_handle; /* used only by the critical-section macro, a no-op on the GIL build */
     PyObject *result = NULL;
-    /* The source and stylesheet trees drive the transform; the output tree is private. */
-    Py_BEGIN_CRITICAL_SECTION2(source_handle, turbohtml_node_handle(stylesheet_obj));
-    result = run_transform(&eng, sheet_root, params, imports, nimports);
-    Py_END_CRITICAL_SECTION2();
-    PyMem_Free(imports);
+    Py_BEGIN_CRITICAL_SECTION(source_handle);
+    result = run_transform(&eng, compiled->sheet_root, params);
+    Py_END_CRITICAL_SECTION();
     /* fail() sets eng.error without a Python exception; fail_py() sets the exception and
        leaves eng.error NULL. The two are exclusive, so eng.error != NULL implies no
        exception is set and the message needs raising. */

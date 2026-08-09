@@ -81,7 +81,11 @@ class _Schema:
         self._compiled: Final = _schema_compile(self._KIND, text)
 
     def validate(self, document: Document | Node) -> ValidationResult:
-        """Validate a parsed document (or element), returning the full :class:`ValidationResult`."""
+        """
+        Validate a parsed document (or element), returning the full :class:`ValidationResult`.
+
+        :raises RecursionError: when the instance exceeds the validator's safe nesting limit.
+        """
         valid, errors = _schema_validate(self._compiled, document)
         return ValidationResult(valid, tuple(starmap(ValidationError, errors)))
 
@@ -102,6 +106,7 @@ class XMLSchema(_Schema):
 
     :param source: the schema as XSD text, or a schema document parsed with :func:`turbohtml.parse_xml`.
     :raises ValueError: when the schema is malformed or its root is not ``xs:schema``.
+    :raises RecursionError: when the schema exceeds the compiler's safe nesting limit.
     """
 
     _KIND = 0
@@ -113,6 +118,7 @@ class RelaxNG(_Schema):
 
     :param source: the schema as RELAX NG text, or a schema document parsed with :func:`turbohtml.parse_xml`.
     :raises ValueError: when the schema is malformed.
+    :raises RecursionError: when the schema exceeds the compiler's safe nesting limit.
     """
 
     _KIND = 1

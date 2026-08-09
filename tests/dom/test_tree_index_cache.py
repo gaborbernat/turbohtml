@@ -135,8 +135,10 @@ def test_select_one_subtree_compound_uses_full_matcher() -> None:
 
 def test_find_single_subtree_origin_walks_off_index() -> None:
     # find() for one element rooted at a subtree cannot use the whole-tree index
-    section = parse(_DOC).find("section")
+    document = parse(_DOC)
+    section = document.find("section")
     assert section is not None
+    assert len(document.find_all("p")) == 3
     assert (first := section.find("p")) is not None
     assert first.text == "a"
 
@@ -167,3 +169,47 @@ def test_index_reused_on_repeated_whole_tree_query() -> None:
     assert one.text == "a"
     assert (two := doc.find("p")) is not None
     assert two.text == "a"
+
+
+def test_find_reuses_index_for_filtered_tag_query() -> None:
+    doc = parse(_DOC)
+    assert len(doc.find_all("p")) == 3
+    assert (match := doc.find("p", class_="tail")) is not None
+    assert match.text == "b"
+
+
+def test_find_all_with_small_limit_reuses_existing_index() -> None:
+    doc = parse(_DOC)
+    assert len(doc.find_all("p")) == 3
+    assert [element.text for element in doc.find_all("p", limit=1)] == ["a"]
+
+
+def test_find_with_existing_index_handles_empty_bucket() -> None:
+    doc = parse(_DOC)
+    assert len(doc.find_all("p")) == 3
+    assert doc.find("table") is None
+
+
+def test_find_with_existing_index_exhausts_filtered_bucket() -> None:
+    doc = parse(_DOC)
+    assert len(doc.find_all("p")) == 3
+    assert doc.find("p", class_="absent") is None
+
+
+def test_find_with_existing_index_walks_unknown_tag() -> None:
+    doc = parse(_DOC)
+    assert len(doc.find_all("p")) == 3
+    assert doc.find("custom") is None
+
+
+def test_limited_find_all_with_existing_index_walks_unknown_tag() -> None:
+    doc = parse(_DOC)
+    assert len(doc.find_all("p")) == 3
+    assert doc.find_all("custom", limit=1) == []
+
+
+def test_limited_find_all_with_existing_index_walks_subtree() -> None:
+    doc = parse(_DOC)
+    assert (section := doc.find("section")) is not None
+    assert len(doc.find_all("p")) == 3
+    assert [element.text for element in section.find_all("p", limit=1)] == ["a"]

@@ -90,6 +90,9 @@ TABLES: Final[dict[str, str | Combined]] = {
     "text-content": "text-content",
     "tokenizing": "tokenize",
     "tree-navigation": "navigate",
+    "xslt": "transform",
+    "xslt-compile": "transform-compile",
+    "xslt-reuse": "transform-reuse",
     "unescaping": "unescape",
     "url-cleaning": "urls-clean",
     "markdown": Combined(
@@ -214,14 +217,115 @@ def emit_docs_feeds(feeds_dir: Path, out_dir: Path) -> list[str]:
     return missing
 
 
+def _read_feed(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_feed(path: Path, feed: dict) -> None:
+    path.write_text(json.dumps(feed, indent=2, ensure_ascii=False) + "\n", "utf-8")
+
+
+def _party_position(feed: dict, party: str) -> int:
+    if party in feed["parties"]:
+        return feed["parties"].index(party)
+    feed["parties"].append(party)
+    return len(feed["parties"]) - 1
+
+
+def _spread(feed: dict) -> list[list[float | None]]:
+    return feed.get("spread") or [[None] * len(row) for row in feed["rows"]]
+
+
+def _merge_combined_party(spec: Combined, sources: dict[str, dict], target: dict, party: str) -> None:
+    target_party = _party_position(target, party)
+    spread = _spread(target)
+    for position, (case, operation) in enumerate(spec.rows):
+        value: float | str = _NO_EQUIVALENT
+        noise: float | None = None
+        if (source := sources.get(operation)) is not None and party in source["parties"]:
+            if (measured := _cell(source, party, case)) is not None:
+                value = measured
+            if isinstance(variation := _cell(source, party, case, key="spread"), (int, float)):
+                noise = variation
+        target["rows"][position][1 + target_party : 2 + target_party] = [value]
+        spread[position][1 + target_party : 2 + target_party] = [noise]
+    target["spread"] = spread
+
+
+def _merge_combined_path(feeds_dir: Path, target_path: Path, spec: Combined, party: str) -> bool | None:
+    operations = dict.fromkeys(operation for _, operation in spec.rows)
+    sources = {
+        operation: _read_feed(path) for operation in operations if (path := feeds_dir / f"{operation}.json").exists()
+    }
+    if not any(party in source["parties"] for source in sources.values()):
+        return None
+    if not target_path.exists():
+        return False
+    target = _read_feed(target_path)
+    _merge_combined_party(spec, sources, target, party)
+    _write_feed(target_path, target)
+    return True
+
+
+def _copy_party_rows(source: dict, target: dict, party: str, source_rows: dict[str, int]) -> None:
+    width = 2 if source["metrics"] == ["size", "time"] else 1
+    source_start = 1 + source["parties"].index(party) * width
+    target_start = 1 + _party_position(target, party) * width
+    source_spread = source.get("spread") or []
+    target_spread = _spread(target)
+    for position, row in enumerate(target["rows"]):
+        source_position = source_rows[row[0]]
+        row[target_start : target_start + width] = source["rows"][source_position][source_start : source_start + width]
+        noise = (
+            source_spread[source_position][source_start : source_start + width]
+            if source_position < len(source_spread)
+            else [None] * width
+        )
+        target_spread[position][target_start : target_start + width] = noise
+    target["spread"] = target_spread
+    if note := source.get("notes", {}).get(party):
+        target.setdefault("notes", {})[party] = note
+
+
+def _merge_single_path(source_path: Path, target_path: Path, party: str) -> bool | None:
+    if not source_path.exists() or party not in (source := _read_feed(source_path))["parties"]:
+        return None
+    if not target_path.exists() or source["metrics"] != (target := _read_feed(target_path))["metrics"]:
+        return False
+    source_rows = {row[0]: position for position, row in enumerate(source["rows"])}
+    if any(row[0] not in source_rows for row in target["rows"]):
+        return False
+    _copy_party_rows(source, target, party, source_rows)
+    _write_feed(target_path, target)
+    return True
+
+
+def merge_party_feeds(feeds_dir: Path, out_dir: Path, party: str) -> list[str]:
+    """Merge one competitor's fresh measurements into existing guide feeds."""
+    missing: list[str] = []
+    for name, spec in TABLES.items():
+        target_path = out_dir / f"{name}.json"
+        merged = (
+            _merge_combined_path(feeds_dir, target_path, spec, party)
+            if isinstance(spec, Combined)
+            else _merge_single_path(feeds_dir / f"{spec}.json", target_path, party)
+        )
+        if merged is False:
+            missing.append(name)
+    return missing
+
+
 def main() -> None:
-    """Regenerate the guide's feeds. Args: FEEDS_DIR OUT_DIR, where FEEDS_DIR holds the ``--table-json`` output."""
+    """Regenerate feeds, or merge PARTY when supplied. Args: FEEDS_DIR OUT_DIR [PARTY]."""
     feeds_dir, out_dir = (Path(argument) for argument in sys.argv[1:3])
-    if missing := emit_docs_feeds(feeds_dir, out_dir):
+    missing = (
+        merge_party_feeds(feeds_dir, out_dir, sys.argv[3]) if len(sys.argv) > 3 else emit_docs_feeds(feeds_dir, out_dir)
+    )
+    if missing:
         print(f"tables with no fresh measurement, left as committed: {sorted(set(missing))}")
 
 
-__all__ = ["TABLES", "Combined", "emit_docs_feeds"]
+__all__ = ["TABLES", "Combined", "emit_docs_feeds", "merge_party_feeds"]
 
 
 if __name__ == "__main__":

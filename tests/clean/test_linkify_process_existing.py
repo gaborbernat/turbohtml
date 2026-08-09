@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from turbohtml.clean import LinkCandidate, Linkify, linkify, nofollow, target_blank
 
 if TYPE_CHECKING:
@@ -72,6 +74,11 @@ def test_process_existing_flattens_valueless_attr() -> None:
     assert out == '<a download="">x</a>'
 
 
+def test_process_existing_preserves_empty_text_and_four_character_attr() -> None:
+    html = '<a href="http://x.com" data="x"></a>'
+    assert linkify(html, Linkify(callbacks=_no_callbacks(), process_existing=True)) == html
+
+
 def test_process_existing_anchor_without_href_stays_bare() -> None:
     html = "<a>plain</a>"
     assert linkify(html, Linkify(callbacks=[nofollow], process_existing=True)) == "<a>plain</a>"
@@ -86,6 +93,40 @@ def test_existing_flag_distinguishes_existing_from_detected() -> None:
     out = linkify(html, Linkify(callbacks=[mark], process_existing=True))
     assert '<a href="http://x.com" data-kind="existing">x</a>' in out
     assert 'data-kind="new"' in out
+
+
+def test_callbacks_follow_document_order_across_existing_and_detected_links() -> None:
+    seen: list[tuple[str, bool]] = []
+
+    def record(link: LinkCandidate) -> LinkCandidate:
+        seen.append((link.url, link.existing))
+        return link
+
+    linkify(
+        'first.com <a href="https://second.example">second</a> third.com',
+        Linkify(callbacks=[record], process_existing=True),
+    )
+    assert seen == [
+        ("http://first.com", False),
+        ("https://second.example", True),
+        ("http://third.com", False),
+    ]
+
+
+def test_process_existing_propagates_text_comparison_error() -> None:
+    class BrokenEquality:
+        __hash__ = object.__hash__
+
+        def __eq__(self, _other: object) -> bool:
+            msg = "comparison failed"
+            raise RuntimeError(msg)
+
+    def replace_text(link: LinkCandidate) -> LinkCandidate:
+        link.text = BrokenEquality()  # ty: ignore[invalid-assignment]
+        return link
+
+    with pytest.raises(RuntimeError, match="comparison failed"):
+        linkify('<a href="http://x.com">x</a>', Linkify(callbacks=[replace_text], process_existing=True))
 
 
 def test_process_existing_still_detects_links_in_other_tags() -> None:

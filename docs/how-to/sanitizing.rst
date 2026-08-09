@@ -71,12 +71,12 @@ with ``user-content-``, moving it out of the property namespace so no value can 
  Restrict inline styles to known-good values
 *********************************************
 
-``css_properties`` allowlists property *names*; ``allowed_styles`` narrows further by *value*, the way sanitize-html's
+``css_properties`` allowlists property *names*; ``allowed_styles`` narrows values, the way sanitize-html's
 ``allowedStyles`` does. Key it ``{tag: {property: [pattern, ...]}}``, with ``"*"`` as a tag matching every element. A
-declaration survives only when its property is listed for the element's tag or ``"*"`` and its value matches one of the
-patterns (an unanchored :func:`re.search`). This runs on top of ``css_properties`` and the dangerous-value baseline: a
-property must still be in ``css_properties``, and ``expression()`` or a ``url()`` with a disallowed scheme is dropped
-even if a pattern would admit it.
+declaration survives when the element or wildcard rule lists its property and one pattern matches its value through an
+unanchored :func:`re.search`. ``css_properties`` and the dangerous-value baseline still apply. The sanitizer decodes CSS
+escapes before checking ``expression()`` and ``url()`` schemes, so ``u\72l(jav\61script:x)`` is subject to the same rule
+as ``url(javascript:x)``. It always drops ``behavior`` and ``-moz-binding``; listing either property cannot enable it.
 
 .. testcode::
 
@@ -156,7 +156,9 @@ is="x-fancy">``).
 
 ``allow_html``, ``allow_svg``, and ``allow_mathml`` gate each content language independently, DOMPurify's
 ``USE_PROFILES``. They default on, so an allowlist governs each namespace as before; turn one off to drop that whole
-namespace even when its tags are in ``tags``. Here SVG is kept and MathML dropped:
+namespace even when its tags are in ``tags``. The baseline blocks ``animate``, ``animateColor``, ``animateMotion``,
+``animateTransform``, and ``set`` because these SVG elements can assign a URL or event attribute at runtime. Here SVG is
+kept and MathML dropped:
 
 .. testcode::
 

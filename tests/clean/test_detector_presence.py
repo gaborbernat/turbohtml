@@ -8,7 +8,9 @@ from turbohtml.clean import LinkDetector
 @pytest.mark.parametrize(
     "text",
     [
-        pytest.param("see http://example.com", id="scheme-url"),
+        pytest.param("http://example.com followed by " + "tail " * 40_000, id="start-with-large-tail"),
+        pytest.param("prefix " * 20 + "http://example.com" + " suffix " * 20, id="middle"),
+        pytest.param("prefix " * 40 + "http://example.com", id="end"),
         pytest.param("bare example.com here", id="bare-domain"),
         pytest.param("mail bob@example.com", id="email"),
     ],
@@ -22,6 +24,7 @@ def test_has_link_detects_a_link(text: str) -> None:
     [
         pytest.param("nothing here at all", id="no-link"),
         pytest.param("", id="empty"),
+        pytest.param("hppt://example.invalid bob@localhost example.invalid", id="rejected-candidates"),
     ],
 )
 def test_has_link_is_false_without_a_link(text: str) -> None:

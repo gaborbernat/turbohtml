@@ -25,6 +25,26 @@ def _linkify_find(
     url_schemes: tuple[str, ...] = ...,
     /,
 ) -> list[tuple[int, int, int]]: ...
+def _linkify_has(
+    text: str,
+    emails: bool,
+    bare_domains: bool,
+    extra_tlds: tuple[str, ...],
+    schemes: tuple[str, ...],
+    url_schemes: tuple[str, ...] = ...,
+    /,
+) -> bool: ...
+def _linkify_apply(
+    root: Element,
+    callbacks: tuple[Callable[..., object], ...],
+    parse_email: bool,
+    extra_tlds: tuple[str, ...],
+    url_schemes: tuple[str, ...],
+    process_existing: bool,
+    skip_tags: tuple[str, ...],
+    candidate_type: type,
+    /,
+) -> Element: ...
 def _registrable_domain(host: str, /) -> str: ...
 def _date_scan(text: str, current_year: int, /) -> tuple[int, int, int] | None: ...
 def _date_scan_all(text: str, current_year: int, /) -> list[tuple[int, int, int]]: ...
@@ -97,6 +117,6 @@ def _sanitize(
     allow_svg: bool,
     allow_mathml: bool,
     /,
-) -> None: ...
+) -> Element: ...
 def annotation_surface(text: str, spans: Iterable[tuple[int, int, str]], /) -> dict[str, list[str]]: ...
 def annotation_tags(text: str, spans: Iterable[tuple[int, int, str]], /) -> str: ...

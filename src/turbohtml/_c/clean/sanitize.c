@@ -2,22 +2,23 @@
 
    turbohtml/sanitizer.py parses the input into a tree and serializes the result; this file is the middle, the part that
    runs once per node: keep an allowed element, drop a disallowed attribute, normalize a URL scheme, escape or unwrap or
-   remove a tag the policy rejects. It mutates the parsed tree in place with the treebuilder's edit primitives, so the
-   Python layer only compiles the policy into the frozensets passed here and reads back the serialized result. The
-   safety baseline (scripting/framing elements, on* handlers, non-allowlisted URL schemes) is enforced here, not in
-   Python, so a policy cannot route around it. */
+   remove a tag the policy rejects. It snapshots the input under its tree lock, then mutates that private copy so policy
+   callbacks never run while a shared tree is locked. The safety baseline (scripting/framing elements, on* handlers,
+   non-allowlisted URL schemes) is enforced here, not in Python, so a policy cannot route around it. */
 
 #include "core/ascii.h"
 #include "core/common.h"
+#include "core/vec.h"
 #include "url/url.h"
 
-#include "dom/tree.h"
+#include "dom/nodes.h"
+#include "tokenizer/binding.h"
 
 #include <string.h>
 
 enum on_disallowed { ON_ESCAPE = 0, ON_STRIP = 1, ON_REMOVE = 2 };
 
-/* The compiled policy and the tree being walked, threaded through the recursion. */
+/* The compiled policy and the tree being walked. */
 typedef struct {
     th_tree *tree;
     PyObject *tags;             /* frozenset[str]: allowed element names */
@@ -101,6 +102,27 @@ static int is_unsafe_tag(uint16_t atom) {
     default:
         return 0;
     }
+}
+
+static int is_unsafe_svg_animation(const th_node *element) {
+    if (element->ns != TH_NS_SVG) {
+        return 0;
+    }
+    static const char *const names[] = {"animate", "animateColor", "animateMotion", "animateTransform", "set"};
+    for (size_t index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+        size_t len = strlen(names[index]);
+        if (element->text_len != (Py_ssize_t)len) {
+            continue;
+        }
+        size_t position = 0;
+        while (position < len && element->text[position] == (Py_UCS4)names[index][position]) {
+            position++;
+        }
+        if (position == len) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* Attributes whose value is a URL, so its scheme is checked against the allowlist. Matched on the interned name bytes.
@@ -399,7 +421,23 @@ static int has_attr(sanitizer *s, th_node *element, const char *name, Py_ssize_t
     return 0;
 }
 
-/* Apply the optional attribute filter, replacing the attribute's value or deleting it. Returns 0, or -1 on error. */
+/* Return an ASCII-lowercased copy of an HTML tag or attribute name. Non-ASCII UTF-8 bytes are left intact. */
+static char *html_name_lower(const char *name, Py_ssize_t len) {
+    char *lowered = PyMem_Malloc((size_t)len + 1);
+    if (lowered == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory();  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;       /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        unsigned char c = (unsigned char)name[index];
+        lowered[index] = (char)(c >= 'A' && c <= 'Z' ? c | 0x20 : c);
+    }
+    lowered[len] = '\0';
+    return lowered;
+}
+
+/* Apply the optional attribute filter, replacing the attribute's value or deleting it. Returns 1 when it wrote a new
+   value, 0 when it left no late-written value, or -1 on error. */
 static int run_attribute_filter(sanitizer *s, th_node *element, PyObject *tag, const char *name, Py_ssize_t name_len,
                                 const Py_UCS4 *value, Py_ssize_t value_len) {
     PyObject *attr = PyUnicode_FromStringAndSize(name, name_len);
@@ -426,7 +464,8 @@ static int run_attribute_filter(sanitizer *s, th_node *element, PyObject *tag, c
             Py_DECREF(text);   /* GCOVR_EXCL_LINE */
             return -1;         /* GCOVR_EXCL_LINE */
         }
-        status = th_node_attr_set(s->tree, element, name, name_len, points, PyUnicode_GET_LENGTH(result), 1);
+        status =
+            th_node_attr_set(s->tree, element, name, name_len, points, PyUnicode_GET_LENGTH(result), 1) < 0 ? -1 : 1;
         PyMem_Free(points);
     }
     Py_XDECREF(result);
@@ -435,9 +474,10 @@ static int run_attribute_filter(sanitizer *s, th_node *element, PyObject *tag, c
     return status;
 }
 
-/* Strip every attribute the policy rejects from an allowed element, then add the configured link rel. */
 /* Force-set the policy's per-tag attribute values on a kept element, adding the attribute if absent and overwriting it
-   if present (what attribute_filter cannot do, since it only sees attributes already there). */
+   if present (what attribute_filter cannot do, since it only sees attributes already there). HTML attribute names are
+   ASCII case-insensitive, so policy-created names are canonicalized before interning. Returns 1 when any value was
+   written, 0 when this tag has no values to set, or -1 on error. */
 static int apply_set_attributes(sanitizer *s, th_node *element, PyObject *tag) {
     PyObject *per_tag = PyDict_GetItemWithError(s->set_attributes, tag);
     if (per_tag == NULL) {
@@ -448,24 +488,39 @@ static int apply_set_attributes(sanitizer *s, th_node *element, PyObject *tag) {
     }
     PyObject *name, *value;
     Py_ssize_t pos = 0;
+    int mutated = 0;
     while (PyDict_Next(per_tag, &pos, &name, &value)) {
         Py_ssize_t name_len = 0;
         const char *name_bytes = PyUnicode_AsUTF8AndSize(name, &name_len);
         if (name_bytes == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;            /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        Py_UCS4 *points = PyUnicode_AsUCS4Copy(value);
-        if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        char *canonical_name = NULL;
+        const char *write_name = name_bytes;
+        if (element->ns == TH_NS_HTML) {
+            canonical_name = html_name_lower(name_bytes, name_len);
+            if (canonical_name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return -1;                /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            write_name = canonical_name;
         }
-        int status = th_node_attr_set(s->tree, element, name_bytes, name_len, points, PyUnicode_GET_LENGTH(value), 1);
+        Py_UCS4 *points = PyUnicode_AsUCS4Copy(value);
+        if (points == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(canonical_name); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;                  /* GCOVR_EXCL_LINE */
+        }
+        int status = th_node_attr_set(s->tree, element, write_name, name_len, points, PyUnicode_GET_LENGTH(value), 1);
+        PyMem_Free(canonical_name);
         PyMem_Free(points);
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+        mutated = 1;
     }
-    return 0;
+    return mutated;
 }
+
+static int css_decode_escape(const Py_UCS4 *value, Py_ssize_t *pos, Py_ssize_t end, Py_UCS4 *decoded);
 
 /* A CSS property name is ASCII letters, digits, and '-', so an ASCII lowercase key is enough to look it up. Callers
    guarantee 0 < len < 64 (a real property name), so the fixed buffer never overflows. Returns a new str, or NULL on
@@ -478,9 +533,32 @@ static PyObject *css_property_key(const Py_UCS4 *name, Py_ssize_t len) {
     return PyUnicode_FromStringAndSize(lowered, len);
 }
 
+/* Legacy engines execute these properties independently of their values. Decode escapes before comparing so an
+   allowlist cannot admit an obfuscated spelling. */
+static int css_property_blocked(const Py_UCS4 *name, Py_ssize_t len) {
+    char decoded[64];
+    Py_ssize_t decoded_len = 0;
+    for (Py_ssize_t pos = 0; pos < len;) {
+        Py_UCS4 c = name[pos];
+        if (c == '\\') {
+            if (!css_decode_escape(name, &pos, len, &c)) {
+                return 1;
+            }
+        } else {
+            pos++;
+        }
+        if (c > 0x7F) {
+            return 1;
+        }
+        decoded[decoded_len++] = (char)lower_ascii(c);
+    }
+    return (decoded_len == 8 && memcmp(decoded, "behavior", 8) == 0) ||
+           (decoded_len == 12 && memcmp(decoded, "-moz-binding", 12) == 0);
+}
+
 /* Is the CSS property `name[0:len]` in the name allowlist? Returns 1 allow, 0 drop, -1 error. */
 static int css_property_allowed(sanitizer *s, const Py_UCS4 *name, Py_ssize_t len) {
-    if (len == 0 || len >= 64) {
+    if (len == 0 || len >= 64 || css_property_blocked(name, len)) {
         return 0; /* empty, or longer than any real property name */
     }
     PyObject *key = css_property_key(name, len);
@@ -551,19 +629,58 @@ static int css_style_declaration_allowed(sanitizer *s, const style_allowlist *st
    (`background:curl(x)` is not a `url()`). */
 static int is_css_ident_char(Py_UCS4 c) {
     Py_UCS4 lower = c | 0x20;
-    return (lower >= 'a' && lower <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    return (lower >= 'a' && lower <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c >= 0x80;
 }
 
-/* Does the lowercase ASCII `keyword` sit at value[pos:]? Returns the index just past it, or -1. */
-static Py_ssize_t css_match_keyword(const Py_UCS4 *value, Py_ssize_t pos, Py_ssize_t end, const char *keyword) {
-    Py_ssize_t index = 0;
-    while (keyword[index] != '\0') {
-        if (pos + index >= end || (value[pos + index] | 0x20) != (Py_UCS4)keyword[index]) {
-            return -1;
-        }
-        index++;
+static int is_css_hex(Py_UCS4 c) {
+    Py_UCS4 lower = c | 0x20;
+    return (c >= '0' && c <= '9') || (lower >= 'a' && lower <= 'f');
+}
+
+static int is_css_newline(Py_UCS4 c) {
+    switch (c) {
+    case '\n':
+    case '\r':
+    case '\f':
+        return 1;
+    default:
+        return 0;
     }
-    return pos + index;
+}
+
+/* Decode one CSS escape at `*pos`, which points at its backslash. CSS consumes one to six hexadecimal digits and one
+   optional whitespace terminator, or one escaped code point. Returns 1 and advances `*pos`, or 0 for a trailing
+   backslash or escaped newline. */
+static int css_decode_escape(const Py_UCS4 *value, Py_ssize_t *pos, Py_ssize_t end, Py_UCS4 *decoded) {
+    Py_ssize_t index = *pos + 1;
+    if (index >= end || is_css_newline(value[index])) {
+        return 0;
+    }
+    if (!is_css_hex(value[index])) {
+        *decoded = value[index];
+        *pos = index + 1;
+        return 1;
+    }
+    Py_UCS4 point = 0;
+    int digits = 0;
+    while (index < end && digits < 6 && is_css_hex(value[index])) {
+        Py_UCS4 c = value[index++] | 0x20;
+        point = (point << 4) + (c <= '9' ? c - '0' : c - 'a' + 10);
+        digits++;
+    }
+    if (index < end && is_space(value[index])) {
+        if (value[index] == '\r') {
+            index++;
+            if (index < end && value[index] == '\n') {
+                index++;
+            }
+        } else {
+            index++;
+        }
+    }
+    *decoded = point == 0 || point > 0x10FFFF || (point >= 0xD800 && point <= 0xDFFF) ? 0xFFFD : point;
+    *pos = index;
+    return 1;
 }
 
 /* Skip the whitespace and CSS comments a browser ignores between a function name and its opening paren, so a comment
@@ -594,36 +711,150 @@ static int css_url_scheme_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t
     if (pos < end && (value[pos] == '"' || value[pos] == '\'')) {
         quote = value[pos++];
     }
-    Py_ssize_t url_start = pos;
+    char scheme[40];
+    Py_ssize_t scheme_len = 0;
+    int scheme_started = 0;
+    int allowed = -2;
     while (pos < end && value[pos] != ')' && (quote ? value[pos] != quote : !is_space(value[pos]))) {
+        Py_UCS4 c = value[pos];
+        if (c == '\\') {
+            if (!css_decode_escape(value, &pos, end, &c)) {
+                return 0;
+            }
+        } else {
+            if (!quote && (c == '"' || c == '\'' || c == '(' || c < 0x20 || c == 0x7F)) {
+                return 0;
+            }
+            if (quote && is_css_newline(c)) {
+                return 0;
+            }
+            pos++;
+        }
+        if (allowed != -2 || is_url_ignorable(c)) {
+            continue;
+        }
+        if (c == ':' && scheme_started) {
+            PyObject *name = PyUnicode_FromStringAndSize(scheme, scheme_len);
+            if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            allowed = PySet_Contains(s->url_schemes, name);
+            Py_DECREF(name);
+            continue;
+        }
+        int letter = th_scheme_start(c);
+        if (scheme_started ? !th_scheme_char(c) : !letter) {
+            allowed = s->allow_relative;
+            continue;
+        }
+        if (scheme_len < (Py_ssize_t)sizeof(scheme)) {
+            scheme[scheme_len++] = (char)(letter ? (c | 0x20) : c);
+        }
+        scheme_started = 1;
+    }
+    if (quote) {
+        if (pos >= end) { /* GCOVR_EXCL_BR_LINE: the declaration splitter rejects an unterminated quoted URL */
+            return 0;     /* GCOVR_EXCL_LINE: rejected-declaration path */
+        }
+        if (value[pos] != quote) {
+            return 0;
+        }
         pos++;
     }
-    return scheme_allowed(s, value + url_start, pos - url_start);
+    pos = css_skip_ws_comments(value, pos, end);
+    if (pos >= end || value[pos] != ')') {
+        return 0;
+    }
+    return allowed == -2 ? s->allow_relative : allowed;
+}
+
+/* Consume one identifier token, decoding escapes and classifying the exact token as url, expression, or neither.
+   Matching the whole token avoids treating an escaped space inside `safe\\ url(...)` as a token boundary. */
+static int css_identifier_kind(const Py_UCS4 *value, Py_ssize_t *pos, Py_ssize_t end) {
+    char token[11];
+    Py_ssize_t length = 0;
+    int overflow = 0;
+    while (*pos < end && (is_css_ident_char(value[*pos]) || value[*pos] == '\\')) {
+        Py_UCS4 c = value[*pos];
+        if (c == '\\') {
+            if (!css_decode_escape(value, pos, end, &c)) {
+                return -1;
+            }
+        } else {
+            (*pos)++;
+        }
+        if (length < (Py_ssize_t)sizeof(token)) {
+            token[length++] = c <= 0x7F ? (char)lower_ascii(c) : '\0';
+        } else {
+            overflow = 1;
+        }
+    }
+    if (overflow) {
+        return 0;
+    }
+    if (length == 3 && memcmp(token, "url", 3) == 0) {
+        return 1;
+    }
+    return length == 10 && memcmp(token, "expression", 10) == 0 ? 2 : 0;
+}
+
+/* Skip a quoted CSS string. Function-like text inside it is data, not a token. */
+static Py_ssize_t css_skip_string(const Py_UCS4 *value, Py_ssize_t pos, Py_ssize_t end) {
+    Py_UCS4 quote = value[pos++];
+    while (pos < end) {
+        if (value[pos] == quote) {
+            return pos + 1;
+        }
+        if (value[pos] != '\\') {
+            pos++;
+            continue;
+        }
+        pos++;
+        if (pos >= end) { /* GCOVR_EXCL_BR_LINE: the declaration splitter rejects a terminal string escape */
+            continue;     /* GCOVR_EXCL_LINE: rejected-declaration path */
+        }
+        if (value[pos] == '\r') {
+            pos++;
+            if (pos < end && value[pos] == '\n') { /* GCOVR_EXCL_BR_LINE: a terminal CR is rejected upstream */
+                pos++;
+            }
+        } else {
+            pos++;
+        }
+    }
+    return end;
 }
 
 /* A declaration whose property name is allowlisted can still carry a dangerous value: IE's `expression(...)` runs
-   script, and `url(javascript:...)` a disallowed scheme. Reject the whole declaration in either case. Returns 1 allow,
-   0 drop, -1 error. */
+   script, and `url(javascript:...)` a disallowed scheme. Scan CSS tokens so inert strings, comments, and longer
+   identifiers do not trigger the executable-function checks. Returns 1 allow, 0 drop, -1 error. */
 static int css_value_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end) {
-    for (Py_ssize_t pos = start; pos < end; pos++) {
-        if (pos > start && is_css_ident_char(value[pos - 1])) {
-            continue; /* mid-identifier: not a function-name boundary */
+    Py_ssize_t pos = start;
+    while (pos < end) {
+        if (value[pos] == '/' && pos + 1 < end && value[pos + 1] == '*') {
+            pos = css_skip_ws_comments(value, pos, end);
+            continue;
         }
-        Py_ssize_t after_expr = css_match_keyword(value, pos, end, "expression");
-        if (after_expr >= 0) {
-            Py_ssize_t paren = css_skip_ws_comments(value, after_expr, end);
-            if (paren < end && value[paren] == '(') {
-                return 0;
-            }
+        if (value[pos] == '\'' || value[pos] == '"') {
+            pos = css_skip_string(value, pos, end);
+            continue;
         }
-        Py_ssize_t after_url = css_match_keyword(value, pos, end, "url");
-        if (after_url >= 0) {
-            Py_ssize_t paren = css_skip_ws_comments(value, after_url, end);
-            if (paren < end && value[paren] == '(') {
-                int ok = css_url_scheme_allowed(s, value, paren + 1, end);
-                if (ok <= 0) {
-                    return ok;
-                }
+        if (!is_css_ident_char(value[pos]) && value[pos] != '\\') {
+            pos++;
+            continue;
+        }
+        int kind = css_identifier_kind(value, &pos, end);
+        if (kind < 0) {
+            return 0;
+        }
+        Py_ssize_t paren = css_skip_ws_comments(value, pos, end);
+        if (kind == 2 && paren < end && value[paren] == '(') {
+            return 0;
+        }
+        if (kind == 1 && paren < end && value[paren] == '(') {
+            int ok = css_url_scheme_allowed(s, value, paren + 1, end);
+            if (ok <= 0) {
+                return ok;
             }
         }
     }
@@ -1155,8 +1386,83 @@ static int custom_element_kept(sanitizer *s, PyObject *tag) {
     return predicate_true(s->custom_element_check, tag);
 }
 
+/* Re-check the values that will reach the serializer after callbacks and forced attributes have written them. This
+   pass contains every safety rule a policy can narrow but cannot bypass. */
+static int apply_attribute_safety(sanitizer *s, th_node *element, PyObject *tag) {
+    Py_ssize_t index = 0;
+    while (index < element->attr_count) {
+        th_node_attr *attr = &element->attrs[index];
+        Py_ssize_t name_len = 0;
+        const char *name = th_attr_name(s->tree, attr->name_atom, &name_len);
+        int drop = name_len >= 2 && name[0] == 'o' && name[1] == 'n';
+        if (!drop && s->strip_templates && strip_attr_templates(s, element, attr) < 0) { /* GCOVR_EXCL_BR_LINE */
+            return -1;                                                                   /* GCOVR_EXCL_LINE */
+        }
+        attr = &element->attrs[index];
+        if (!drop && PyDict_GET_SIZE(s->attribute_values) > 0) {
+            int keep = value_allowed(s, tag, name, name_len, attr->value, attr->value_len);
+            if (keep < 0) { /* GCOVR_EXCL_BR_LINE: value_allowed only fails on allocation failure */
+                return -1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            drop = !keep;
+        }
+        int url_disallowed = 0;
+        if (!drop && is_url_attr(name, name_len)) {
+            int keep = scheme_allowed(s, attr->value, attr->value_len);
+            if (keep < 0) { /* GCOVR_EXCL_BR_LINE: scheme_allowed only fails on allocation failure */
+                return -1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            url_disallowed = !keep;
+        }
+        if (!drop && is_srcset_attr(name, name_len)) {
+            int keep = srcset_allowed(s, attr->value, attr->value_len);
+            if (keep < 0) { /* GCOVR_EXCL_BR_LINE: srcset_allowed only fails on allocation failure */
+                return -1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            url_disallowed = !keep;
+        }
+        if (!drop && !url_disallowed && PySet_GET_SIZE(s->media_hosts) > 0 && is_media_host_tag(element->atom) &&
+            name_len == 3 && memcmp(name, "src", 3) == 0) {
+            int keep = host_allowed(s, attr->value, attr->value_len);
+            if (keep < 0) { /* GCOVR_EXCL_BR_LINE: host_allowed only fails on allocation failure */
+                return -1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            url_disallowed = !keep;
+        }
+        if (drop || url_disallowed) {
+            if (record_removed(s, tag, name, name_len) < 0) { /* GCOVR_EXCL_BR_LINE: record only fails on alloc */
+                return -1;                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            if (url_disallowed) {
+                while (th_node_attr_del(s->tree, element, name, name_len)) {
+                }
+                index = 0;
+            } else {
+                th_node_attr_del(s->tree, element, name, name_len);
+            }
+            continue;
+        }
+        if (name_len == 5 && memcmp(name, "style", 5) == 0) {
+            Py_ssize_t before = element->attr_count;
+            if (sanitize_style(s, element, attr, tag) < 0) { /* GCOVR_EXCL_BR_LINE: only on allocation failure */
+                return -1;                                   /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            if (element->attr_count < before) {
+                continue;
+            }
+        }
+        if (s->isolate_named_props && /* GCOVR_EXCL_BR_LINE: prefix_named_prop only fails on allocation */
+            prefix_named_prop(s, element, &element->attrs[index]) < 0) { /* GCOVR_EXCL_BR_LINE: only allocation fails */
+            return -1; /* GCOVR_EXCL_LINE: allocation failure cannot be forced from a test */
+        }
+        index++;
+    }
+    return 0;
+}
+
 static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag, int custom) {
     Py_ssize_t index = 0;
+    int late_written = 0;
     while (index < element->attr_count) {
         th_node_attr *attr = &element->attrs[index];
         Py_ssize_t name_len = 0;
@@ -1266,9 +1572,11 @@ static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag, in
         }
         if (s->attribute_filter != Py_None) {
             Py_ssize_t before = element->attr_count;
-            if (run_attribute_filter(s, element, tag, name, name_len, attr->value, attr->value_len) < 0) {
+            int filtered = run_attribute_filter(s, element, tag, name, name_len, attr->value, attr->value_len);
+            if (filtered < 0) {
                 return -1;
             }
+            late_written |= filtered;
             if (element->attr_count < before) {
                 continue; /* the filter deleted it */
             }
@@ -1293,13 +1601,16 @@ static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag, in
             return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    if (apply_set_attributes(s, element, tag) < 0) { /* GCOVR_EXCL_BR_LINE: only on allocation failure */
-        return -1;                                   /* GCOVR_EXCL_LINE: allocation-failure path */
+    int forced = apply_set_attributes(s, element, tag);
+    if (forced < 0) { /* GCOVR_EXCL_BR_LINE: only on allocation failure */
+        return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    return 0;
+    late_written |= forced;
+    if (!late_written) {
+        return 0; /* no value changed after its first safety pass */
+    }
+    return apply_attribute_safety(s, element, tag);
 }
-
-static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept);
 
 /* Make a Text node owning a copy of `text` in the walked tree. */
 static th_node *make_text(sanitizer *s, PyObject *text) {
@@ -1372,13 +1683,8 @@ static void hoist_children(th_node *element) {
     }
 }
 
-/* Replace a disallowed element with its escaped start tag, its sanitized children, and its escaped end tag. */
+/* Replace a disallowed element with its escaped start tag, its already-sanitized children, and its escaped end tag. */
 static int escape_element(sanitizer *s, th_node *element) {
-    /* the element is being escaped to text, so its children lose this element as a
-       kept ancestor (parent_kept = 0): a foreign child must not survive into HTML */
-    if (sanitize_children(s, element, 0) < 0) {
-        return -1;
-    }
     PyObject *opening = open_tag(s, element);
     if (opening == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1494,37 +1800,61 @@ static int apply_transform(sanitizer *s, th_node *element, PyObject **tag) {
     if (target_utf8 == NULL) { /* GCOVR_EXCL_BR_LINE: the target is a non-empty str validated at setup */
         return -1;             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    Py_UCS4 *points = PyUnicode_AsUCS4Copy(target);
-    if (points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    char *canonical_target = html_name_lower(target_utf8, target_utf8_len);
+    if (canonical_target == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                  /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    int renamed = th_node_set_data(s->tree, element, points, PyUnicode_GET_LENGTH(target));
+    PyObject *target_name = PyUnicode_FromStringAndSize(canonical_target, target_utf8_len);
+    if (target_name == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(canonical_target); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                    /* GCOVR_EXCL_LINE */
+    }
+    Py_UCS4 *points = PyUnicode_AsUCS4Copy(target_name);
+    if (points == NULL) {             /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(target_name);       /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(canonical_target); /* GCOVR_EXCL_LINE */
+        return -1;                    /* GCOVR_EXCL_LINE */
+    }
+    int renamed = th_node_set_data(s->tree, element, points, PyUnicode_GET_LENGTH(target_name));
     PyMem_Free(points);
-    if (renamed < 0) { /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on allocation failure */
-        return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (renamed < 0) {                /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on allocation failure */
+        Py_DECREF(target_name);       /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(canonical_target); /* GCOVR_EXCL_LINE */
+        return -1;                    /* GCOVR_EXCL_LINE */
     }
-    element->atom = th_tag_lookup(target_utf8, target_utf8_len);
+    element->atom = th_tag_lookup(canonical_target, target_utf8_len);
+    PyMem_Free(canonical_target);
     element->tag_flags = (uint8_t)(th_tag_flags(element->atom) | (element->tag_flags & TH_ELEM_CLOSED_BY_END_TAG));
     PyObject *added_name, *added_value;
     Py_ssize_t pos = 0;
     while (PyDict_Next(PyTuple_GET_ITEM(entry, 1), &pos, &added_name, &added_value)) {
         Py_ssize_t name_len = 0;
         const char *name_bytes = PyUnicode_AsUTF8AndSize(added_name, &name_len);
-        if (name_bytes == NULL) { /* GCOVR_EXCL_BR_LINE: attribute names are str validated at setup */
-            return -1;            /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        Py_UCS4 *value_points = PyUnicode_AsUCS4Copy(added_value);
-        if (value_points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        if (name_bytes == NULL) {   /* GCOVR_EXCL_BR_LINE: attribute names are str validated at setup */
+            Py_DECREF(target_name); /* GCOVR_EXCL_LINE: allocation-failure path */
             return -1;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        int status = th_node_attr_set(s->tree, element, name_bytes, name_len, value_points,
+        char *canonical_name = html_name_lower(name_bytes, name_len);
+        if (canonical_name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(target_name);   /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;                /* GCOVR_EXCL_LINE */
+        }
+        Py_UCS4 *value_points = PyUnicode_AsUCS4Copy(added_value);
+        if (value_points == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(canonical_name); /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_DECREF(target_name);     /* GCOVR_EXCL_LINE */
+            return -1;                  /* GCOVR_EXCL_LINE */
+        }
+        int status = th_node_attr_set(s->tree, element, canonical_name, name_len, value_points,
                                       PyUnicode_GET_LENGTH(added_value), 1);
+        PyMem_Free(canonical_name);
         PyMem_Free(value_points);
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (status < 0) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(target_name); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    Py_SETREF(*tag, Py_NewRef(target));
+    Py_SETREF(*tag, target_name);
     return 1;
 }
 
@@ -1532,7 +1862,9 @@ static int apply_transform(sanitizer *s, th_node *element, PyObject **tag) {
    1 when the element's parent is itself being kept; an allowlisted foreign (SVG/MathML)
    element is kept only then, so it never outlives its namespace context (e.g. an svg
    <a> must not survive into HTML as a live anchor when its <svg> is escaped). */
-static int sanitize_element(sanitizer *s, th_node *element, int parent_kept) {
+enum sanitize_action { SANITIZE_DONE, SANITIZE_KEEP_CHILDREN, SANITIZE_STRIP_CHILDREN, SANITIZE_ESCAPE_CHILDREN };
+
+static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enum sanitize_action *action) {
     int is_html = element->ns == TH_NS_HTML;
     PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, element->text, element->text_len);
     if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1551,7 +1883,9 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept) {
        the unsafe-tag block: a policy that allowlists it keeps it with its body scrubbed
        against css_properties (like a `style` attribute), rather than dropping its CSS. */
     int style_element = element->atom == TH_TAG_STYLE && is_html;
-    int allowed = (is_unsafe_tag(element->atom) && !style_element) ? 0 : PySet_Contains(s->tags, tag);
+    int allowed = ((is_unsafe_tag(element->atom) && !style_element) || is_unsafe_svg_animation(element))
+                      ? 0
+                      : PySet_Contains(s->tags, tag);
     /* USE_PROFILES: a policy enables the HTML, SVG, and MathML namespaces independently, so a whole namespace can be
        dropped regardless of the tag allowlist (an SVG-only policy keeps <svg> and drops <math>, or the reverse) */
     int ns_allowed = element->ns == TH_NS_HTML  ? s->allow_html
@@ -1590,24 +1924,26 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept) {
         return -1;                                             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int status = 0;
+    *action = SANITIZE_DONE;
     if (allowed < 0 || remove_content < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains never fails on a str key */
         status = -1;                         /* GCOVR_EXCL_LINE */
     } else if (allowed && style_element) {
         /* a kept <style> holds raw CSS, not child elements, so scrub its stylesheet body instead of walking children */
         status = sanitize_attributes(s, element, tag, custom) < 0 ? -1 : sanitize_style_body(s, element);
     } else if (allowed) {
-        status = sanitize_attributes(s, element, tag, custom) < 0 ? -1 : sanitize_children(s, element, 1);
+        if (sanitize_attributes(s, element, tag, custom) < 0) {
+            status = -1;
+        } else {
+            *action = SANITIZE_KEEP_CHILDREN;
+        }
     } else if (remove_content || s->on_disallowed == ON_REMOVE || (s->on_disallowed == ON_STRIP && !is_html)) {
         /* drop the whole subtree: a content-removal tag (e.g. script/style, so its text never leaks), REMOVE mode, or
            foreign content under STRIP (unwrapping it would invite namespace confusion) */
         th_node_remove(element);
     } else if (s->on_disallowed == ON_STRIP) {
-        if ((status = sanitize_children(s, element, 0)) == 0) {
-            hoist_children(element);
-            th_node_remove(element);
-        }
+        *action = SANITIZE_STRIP_CHILDREN;
     } else {
-        status = escape_element(s, element);
+        *action = SANITIZE_ESCAPE_CHILDREN;
     }
     Py_DECREF(tag);
     return status;
@@ -1637,14 +1973,70 @@ static int strip_text_templates(sanitizer *s, th_node *node) {
     return status;
 }
 
-/* Walk an element's children, applying the policy; capturing the next sibling keeps the loop safe across edits. */
+typedef struct {
+    th_node *element;
+    th_node *next;
+    enum sanitize_action action;
+    int parent_kept;
+} sanitize_frame;
+
+/* Walk descendants iteratively. A frame keeps the post-order strip/escape action and the sibling that follows the
+   element, so mutations cannot invalidate traversal state. */
 static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
+    sanitize_frame *frames = NULL;
+    Py_ssize_t depth = 0;
+    Py_ssize_t capacity = 0;
     th_node *child = parent->first_child;
-    while (child != NULL) {
+    for (;;) {
+        if (child == NULL) {
+            if (depth == 0) {
+                PyMem_Free(frames);
+                return 0;
+            }
+            sanitize_frame frame = frames[--depth];
+            if (frame.action == SANITIZE_STRIP_CHILDREN) {
+                hoist_children(frame.element);
+                th_node_remove(frame.element);
+            } else if (frame.action == SANITIZE_ESCAPE_CHILDREN && /* GCOVR_EXCL_BR_LINE: escape only fails on alloc */
+                       escape_element(s, frame.element) < 0) {     /* GCOVR_EXCL_BR_LINE: only allocation can fail */
+                PyMem_Free(frames);                                /* GCOVR_EXCL_LINE: allocation-failure cleanup */
+                return -1;                                         /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            parent_kept = frame.parent_kept;
+            child = frame.next;
+            continue;
+        }
         th_node *next = child->next_sibling;
         if (child->type == TH_NODE_ELEMENT) {
-            if (sanitize_element(s, child, parent_kept) < 0) {
+            enum sanitize_action action;
+            if (sanitize_element(s, child, parent_kept, &action) < 0) {
+                PyMem_Free(frames);
                 return -1;
+            }
+            if (action != SANITIZE_DONE) {
+                if (depth == capacity) {
+                    size_t grown;
+                    size_t bytes;
+                    int fits =
+                        th_grow_cap((size_t)depth + 1, (size_t)capacity, 16, sizeof(sanitize_frame), &grown, &bytes);
+                    if (!fits) {            /* GCOVR_EXCL_BR_LINE: no representable tree can overflow size_t here */
+                        PyMem_Free(frames); /* GCOVR_EXCL_LINE: size-overflow path */
+                        PyErr_NoMemory();   /* GCOVR_EXCL_LINE: size-overflow path */
+                        return -1;          /* GCOVR_EXCL_LINE: size-overflow path */
+                    }
+                    sanitize_frame *resized = PyMem_Realloc(frames, bytes);
+                    if (resized == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                        PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure path */
+                        PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation-failure path */
+                        return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+                    }
+                    frames = resized;
+                    capacity = (Py_ssize_t)grown;
+                }
+                frames[depth++] = (sanitize_frame){child, next, action, parent_kept};
+                parent_kept = action == SANITIZE_KEEP_CHILDREN;
+                child = child->first_child;
+                continue;
             }
         } else if (child->type == TH_NODE_COMMENT) {
             if (s->strip_comments) {
@@ -1653,6 +2045,7 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
         } else if (child->type == TH_NODE_TEXT) {
             /* strip_text_templates only fails on allocation, which no test can force */
             if (s->strip_templates && strip_text_templates(s, child) < 0) { /* GCOVR_EXCL_BR_LINE */
+                PyMem_Free(frames);                                         /* GCOVR_EXCL_LINE */
                 return -1;                                                  /* GCOVR_EXCL_LINE */
             }
         } else {
@@ -1660,7 +2053,6 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
         }
         child = next;
     }
-    return 0;
 }
 
 /* The set-typed policy fields reach a PySet_Contains in the walk, which raises a bare SystemError on a non-set. Reject
@@ -1705,9 +2097,9 @@ static int require_prefixes(PyObject *prefixes) {
 /* _sanitize(element, tags, attributes, url_schemes, allow_relative, on_disallowed, strip_comments, add_link_rel,
    attribute_filter, set_attributes, remove_with_content, css_properties, attribute_prefixes, attribute_values,
    media_hosts, strip_templates, removed, allowed_styles, transform_tags, isolate_named_props, custom_element_check,
-   custom_attribute_check, allow_customized_builtins, allow_html, allow_svg, allow_mathml) -> None. Filters the fragment
-   in place; sanitizer.py serializes it. `removed` is a list the walk appends (tag, attr_or_None) records to, or None to
-   skip the audit. */
+   custom_attribute_check, allow_customized_builtins, allow_html, allow_svg, allow_mathml) -> Element. Returns a
+   sanitized snapshot; sanitizer.py serializes it. `removed` is a list the walk appends (tag, attr_or_None) records to,
+   or None to skip the audit. */
 PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
     PyObject *element;
     PyObject *removed = NULL;
@@ -1729,27 +2121,53 @@ PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
         require_anyset(s.media_hosts, "media_hosts") < 0 || require_prefixes(s.attribute_prefixes) < 0) {
         return NULL;
     }
-    th_node *root;
-    if (turbohtml_node_borrow(module, element, &s.tree, &root) < 0) {
+    th_tree *source_tree;
+    th_node *source_root;
+    if (turbohtml_node_borrow(module, element, &source_tree, &source_root) < 0) { /* GCOVR_EXCL_BR_LINE: the public
+                                                                                  facade passes a parsed Element */
+        return NULL; /* GCOVR_EXCL_LINE: private-call type error */
+    }
+    if (source_root->type != TH_NODE_ELEMENT) {
+        PyErr_SetString(PyExc_TypeError, "_sanitize() requires an Element");
         return NULL;
     }
+    s.tree = th_tree_new();
+    if (s.tree == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_tree_set_xml(s.tree, th_tree_is_xml(source_tree));
+    th_node *root;
+    Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(element));
+    root = th_tree_copy_node(s.tree, source_tree, source_root);
+    Py_END_CRITICAL_SECTION();
+    if (root == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(s.tree);    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+    }
     s.star = PyUnicode_InternFromString("*");
-    if (s.star == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (s.star == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(s.tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;          /* GCOVR_EXCL_LINE */
     }
     s.re_search = PyUnicode_InternFromString("search"); /* interned once; the style scrubber calls Pattern.search */
     if (s.re_search == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_DECREF(s.star);     /* GCOVR_EXCL_LINE */
+        th_tree_free(s.tree);  /* GCOVR_EXCL_LINE */
         return NULL;           /* GCOVR_EXCL_LINE */
     }
     s.wildcard_attrs = PyDict_GetItemWithError(s.attributes, s.star);
     if (s.wildcard_attrs == NULL && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: the "*" lookup cannot itself error */
         Py_DECREF(s.star);                              /* GCOVR_EXCL_LINE */
         Py_DECREF(s.re_search);                         /* GCOVR_EXCL_LINE */
+        th_tree_free(s.tree);                           /* GCOVR_EXCL_LINE */
         return NULL;                                    /* GCOVR_EXCL_LINE */
     }
     int failed = sanitize_children(&s, root, 1) < 0; /* the fragment root is kept context */
     Py_DECREF(s.star);
     Py_DECREF(s.re_search);
-    return failed ? NULL : Py_NewRef(Py_None);
+    if (failed) {
+        th_tree_free(s.tree);
+        return NULL;
+    }
+    return wrap_fresh_tree_node(PyModule_GetState(module), s.tree, root);
 }

@@ -108,6 +108,9 @@ allowlist of explicit URL schemes:
 
     <a href="https://docs.example" data-seen="author">docs</a>, ping <a href="http://app.internal" data-seen="auto">app.internal</a>, skip ftp://x.example
 
+The native walk snapshots eligible nodes before it calls Python. Callbacks run in document order without holding the
+tree lock, so one :class:`~turbohtml.clean.Linker` can serve concurrent calls.
+
 **************************
  Find links in plain text
 **************************

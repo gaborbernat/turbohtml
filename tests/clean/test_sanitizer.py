@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from turbohtml import Element, parse, parse_fragment
 from turbohtml.clean import (
     DEFAULT_ATTRIBUTES,
     DEFAULT_CSS_PROPERTIES,
@@ -66,6 +67,27 @@ def test_default_escapes_unknown_tags() -> None:
 
 def test_default_keeps_allowlisted() -> None:
     assert sanitize('<a href="http://x.com" title="t">hi</a>') == '<a href="http://x.com" title="t">hi</a>'
+
+
+def test_deep_input_is_sanitized_without_using_the_c_stack() -> None:
+    markup = "<div>" * 1_200 + "bottom" + "</div>" * 1_200
+    output = sanitize(markup, Policy(tags=frozenset({"div"})))
+    assert output.count("<div>") == 1_200
+    assert "bottom" in output
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_open_count"),
+    [
+        pytest.param(OnDisallowed.STRIP, 0, id="strip"),
+        pytest.param(OnDisallowed.ESCAPE, 1_200, id="escape"),
+    ],
+)
+def test_deep_disallowed_input_completes_postorder_actions(mode: OnDisallowed, expected_open_count: int) -> None:
+    markup = "<x>" * 1_200 + "bottom" + "</x>" * 1_200
+    output = sanitize(markup, Policy(on_disallowed_tag=mode))
+    assert output.count("&lt;x&gt;") == expected_open_count
+    assert "bottom" in output
 
 
 def test_disallowed_attribute_dropped() -> None:
@@ -157,6 +179,32 @@ def test_allowlisted_foreign_script_is_still_escaped() -> None:
     assert "<script>" not in out
 
 
+@pytest.mark.parametrize(
+    "tag",
+    [
+        pytest.param("animate", id="animate"),
+        pytest.param("animateColor", id="animate-color"),
+        pytest.param("animateMotion", id="animate-motion"),
+        pytest.param("animateTransform", id="animate-transform"),
+        pytest.param("set", id="set"),
+    ],
+)
+def test_svg_animation_never_survives_an_allowlist(tag: str) -> None:
+    policy = Policy(tags=frozenset({"svg", tag}), attributes={"*": frozenset({"*"})})
+    assert f"<{tag}" not in sanitize(f'<svg><{tag} attributeName="xlink:href" to="javascript:x"></{tag}></svg>', policy)
+
+
+def test_svg_animation_name_matching_is_case_adjusted() -> None:
+    policy = Policy(tags=frozenset({"svg", "animate"}), attributes={"*": frozenset({"*"})})
+    assert "<animate" not in sanitize(
+        '<svg><ANIMATE ATTRIBUTENAME="xlink:href" TO="javascript:x"></ANIMATE></svg>', policy
+    )
+
+
+def test_html_element_named_animate_is_not_svg_animation() -> None:
+    assert sanitize("<animate>text</animate>", Policy(tags=frozenset({"animate"}))) == "<animate>text</animate>"
+
+
 def test_set_attributes_adds_absent_attributes() -> None:
     # set_attributes forces attributes onto kept elements even when the allowlist would not admit them
     policy = Policy(
@@ -189,10 +237,81 @@ def test_set_attributes_only_touches_named_tag() -> None:
     assert out.count("rel=") == 1
 
 
+def test_empty_set_attributes_rule_leaves_element_unchanged() -> None:
+    policy = Policy(tags=frozenset({"a"}), set_attributes={"a": {}})
+    assert sanitize("<a>x</a>", policy) == "<a>x</a>"
+
+
 def test_set_attributes_skips_disallowed_elements() -> None:
     # a disallowed tag is escaped, so its set_attributes entry is never applied
     policy = Policy(tags=frozenset({"a"}), set_attributes={"script": {"rel": "x"}})
     assert "rel=" not in sanitize("<a>t</a><script>z</script>", policy)
+
+
+def test_set_attributes_pass_through_final_safety_checks() -> None:
+    policy = Policy(
+        tags=frozenset({"a"}),
+        attribute_values={"a": {"title": frozenset({"safe"})}},
+        css_properties=frozenset({"color"}),
+        strip_template_markers=True,
+        isolate_named_props=True,
+        set_attributes={
+            "a": {
+                "href": "javascript:alert(1)",
+                "onclick": "alert(2)",
+                "style": "color: url(javascript:alert(3))",
+                "srcset": "safe.png 1x, javascript:alert(4) 2x",
+                "title": "unsafe",
+                "data-note": "{{secret}}",
+                "id": "location",
+                "x": "safe",
+            }
+        },
+    )
+    element = parse_fragment(sanitize("<a>x</a>", policy)).find("a")
+    assert isinstance(element, Element)
+    assert dict(element.attrs) == {"data-note": " ", "id": "user-content-location", "x": "safe"}
+
+
+def test_set_attributes_canonicalizes_html_names_before_safety_checks() -> None:
+    policy = Policy(
+        tags=frozenset({"a"}),
+        css_properties=frozenset({"color"}),
+        set_attributes={
+            "a": {
+                "HREF": "javascript:alert(1)",
+                "OnClick": "alert(2)",
+                "STYLE": "color:url(javascript:alert(3))",
+                "TITLE": "safe",
+            }
+        },
+    )
+    element = parse_fragment(sanitize("<a>x</a>", policy)).find("a")
+    assert isinstance(element, Element)
+    assert dict(element.attrs) == {"title": "safe"}
+
+
+def test_set_attributes_preserves_foreign_attribute_case() -> None:
+    policy = Policy(tags=frozenset({"svg"}), set_attributes={"svg": {"viewBox": "0 0 10 10"}})
+    assert sanitize("<svg></svg>", policy) == '<svg viewBox="0 0 10 10"></svg>'
+
+
+def test_set_attributes_pass_through_media_host_check() -> None:
+    policy = Policy(
+        tags=frozenset({"p", "video"}),
+        media_hosts=frozenset({"media.example"}),
+        set_attributes={
+            "p": {"title": "text"},
+            "video": {"alt": "clip", "src": "https://attacker.example/movie.mp4", "title": "movie"},
+        },
+    )
+    root = parse_fragment(sanitize("<p></p><video></video>", policy))
+    paragraph = root.find("p")
+    video = root.find("video")
+    assert isinstance(paragraph, Element)
+    assert isinstance(video, Element)
+    assert dict(paragraph.attrs) == {"title": "text"}
+    assert dict(video.attrs) == {"alt": "clip", "title": "movie"}
 
 
 def test_script_text_leaks_without_remove_with_content() -> None:
@@ -256,6 +375,7 @@ def test_style_dropped_when_not_allowed() -> None:
         pytest.param(";;; color: red ;;;", 'style="color: red"', id="extra-semicolons"),
         pytest.param("position: fixed; z-index: 9", None, id="all-dropped-removes-attribute"),
         pytest.param(("a" * 70) + ": red; color: blue", 'style="color: blue"', id="property-name-too-long"),
+        pytest.param("é: red", None, id="non-ascii-property-name"),
     ],
 )
 def test_style_scrubbing(style: str, expected: str | None) -> None:
@@ -328,7 +448,7 @@ def test_style_double_quoted_css_string() -> None:
         pytest.param("color: url( javascript:x )", False, id="url-javascript-spaced"),
         pytest.param("color: url/* c */(javascript:x)", False, id="url-comment-before-paren"),
         pytest.param("color: url(http://x/a.png)", True, id="url-http-allowed"),
-        pytest.param("color: url(http://x y)", True, id="url-allowed-then-space"),
+        pytest.param("color: url(http://x y)", False, id="url-unquoted-whitespace"),
         pytest.param("color: url/* c */(http://x)", True, id="url-comment-then-allowed"),
         pytest.param("color: url(/rel.png)", True, id="url-relative-allowed"),
         pytest.param("color: url()", True, id="url-empty"),
@@ -340,18 +460,115 @@ def test_style_double_quoted_css_string() -> None:
         pytest.param("cursor: curl(x)", True, id="url-mid-identifier"),
         pytest.param("color: url/x", True, id="url-slash-not-comment"),
         pytest.param("color: url/", True, id="url-trailing-slash"),
-        pytest.param("color: url(", True, id="url-open-paren-at-end"),
-        pytest.param("color: url(http://x", True, id="url-unterminated-allowed"),
+        pytest.param("color: url(", False, id="url-open-paren-at-end"),
+        pytest.param("color: url(http://x", False, id="url-unterminated"),
         pytest.param("color: url/* unterminated", True, id="url-unterminated-comment"),
         pytest.param("color: url/* x*", True, id="url-comment-trailing-asterisk"),
         pytest.param("color: url/* a*b */(http://x)", True, id="url-comment-lone-asterisk-then-allowed"),
         pytest.param("color: a-b_1c", True, id="value-identifier-punctuation"),
+        pytest.param("cursor: identifierlong(javascript:alert(1))", True, id="long-identifier"),
+        pytest.param("cursor: url(#fragment)", True, id="fragment-url"),
+        pytest.param("cursor: url(java\u200bscript:alert(1))", False, id="ignorable-format-character"),
+        pytest.param("cursor: url(:relative)", True, id="colon-before-scheme"),
+        pytest.param("cursor: url(h1:opaque)", False, id="scheme-with-digit"),
+        pytest.param(f"cursor: url({'h' * 41}:opaque)", False, id="overlong-scheme"),
+        pytest.param("cursor: url(https://example.com/(x)", False, id="open-paren-in-unquoted-url"),
+        pytest.param("cursor: url(https://example.com/'x)", False, id="single-quote-in-unquoted-url"),
+        pytest.param("cursor: url(https://example.com/\x7fx)", False, id="delete-in-unquoted-url"),
+        pytest.param("cursor: url(https://example.com/\x01x)", False, id="control-in-unquoted-url"),
+        pytest.param('cursor: url("https://example.com/\fpath")', False, id="form-feed-in-quoted-url"),
     ],
 )
 def test_style_value_rejects_expression_and_bad_url_scheme(style: str, kept: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]
     # a kept property still has its value scrubbed: expression() and url(disallowed-scheme) drop the whole declaration
     out = sanitize(f'<p style="{style}">x</p>', _style_policy())
     assert ("style=" in out) is kept
+
+
+@pytest.mark.parametrize(
+    ("style", "kept"),
+    [
+        pytest.param(r"cursor: u\72l(javascript:alert(1))", False, id="escaped-function-hex"),
+        pytest.param(r"cursor: u\72 l(javascript:alert(1))", False, id="escaped-function-hex-terminator"),
+        pytest.param(r"cursor: u\rl(javascript:alert(1))", False, id="escaped-function-simple"),
+        pytest.param(r"cursor: U\000052L(JaVaScRiPt:alert(1))", False, id="escaped-function-mixed-case"),
+        pytest.param(r"cursor: url(jav\61script:alert(1))", False, id="escaped-scheme"),
+        pytest.param(r'cursor: u\72l("jav\61script:alert(1)")', False, id="escaped-quoted-url"),
+        pytest.param("cursor: u\\\nrl(javascript:alert(1))", False, id="escaped-newline"),
+        pytest.param("cursor: \\", False, id="trailing-escape"),
+        pytest.param(r"width: expr\65ssion(alert(1))", False, id="escaped-expression"),
+        pytest.param(r"cursor: url(https://example.com/a), u\72l(jav\61script:alert(1))", False, id="multiple-urls"),
+        pytest.param(r"cursor: url(jav\110000-script:x)", True, id="invalid-code-point-is-not-script"),
+        pytest.param(r"cursor: url(jav\0 -script:x)", True, id="null-escape-is-not-script"),
+        pytest.param(r"cursor: url(jav\d800 -script:x)", True, id="surrogate-escape-is-not-script"),
+        pytest.param(r"cursor: url(jav\1f642 -script:x)", True, id="non-bmp-code-point-is-not-script"),
+        pytest.param(r"cursor: abcdefghijk\0000612", True, id="six-digit-escape-before-hex"),
+        pytest.param("cursor: url(jav\\\nascript:alert(1))", False, id="escaped-newline-in-url"),
+        pytest.param(r'cursor: url("https://example.com" trailing)', False, id="garbage-after-quoted-url"),
+        pytest.param(r'cursor: url("https://example.com)', False, id="unterminated-quoted-url"),
+        pytest.param('cursor: url("https://example.com\npath")', False, id="newline-in-quoted-url"),
+        pytest.param(r'cursor: url(https://example.com/"x)', False, id="quote-in-unquoted-url"),
+    ],
+)
+def test_style_value_decodes_css_escapes(style: str, kept: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]
+    assert ("style=" in sanitize(f'<p style="{style}">x</p>', _style_policy())) is kept
+
+
+@pytest.mark.parametrize(
+    ("style", "kept"),
+    [
+        pytest.param("content: 'a\\\rb'", True, id="carriage-return"),
+        pytest.param("content: 'a\\\r\nb'", True, id="crlf"),
+        pytest.param("content: 'a\\", False, id="trailing-string-escape"),
+        pytest.param("content: 'a\\zb'", True, id="simple-string-escape"),
+        pytest.param("content: \\61", True, id="hex-escape-at-end"),
+        pytest.param("content: \\61\r", True, id="hex-escape-carriage-return-at-end"),
+        pytest.param("content: \\61\rblue", True, id="hex-escape-carriage-return-terminator"),
+        pytest.param("content: \\61\r\nblue", True, id="hex-escape-crlf-terminator"),
+        pytest.param('cursor: url("https://example.com)', False, id="unterminated-quoted-url"),
+        pytest.param('cursor: url("https://example.com/\fpath")', False, id="quoted-url-form-feed"),
+        pytest.param('cursor: url(https://example.com/"x)', False, id="double-quote-in-unquoted-url"),
+    ],
+)
+def test_set_style_scanner_handles_escape_boundaries(style: str, kept: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]
+    policy = Policy(
+        tags=frozenset({"p"}),
+        css_properties=frozenset({"content", "cursor"}),
+        set_attributes={"p": {"style": style}},
+    )
+    assert ("style=" in sanitize("<p>x</p>", policy)) is kept
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        pytest.param("behavior: url(#x)", id="behavior"),
+        pytest.param("BEHAVIOR: url(#x)", id="behavior-case"),
+        pytest.param(r"beha\76ior: url(#x)", id="behavior-escape"),
+        pytest.param("beha\\\nvior: url(#x)", id="invalid-property-escape"),
+        pytest.param("-moz-binding: url(#x)", id="moz-binding"),
+        pytest.param(r"-moz-b\69nding: url(#x)", id="moz-binding-escape"),
+    ],
+)
+def test_legacy_executable_css_properties_are_never_allowlisted(style: str) -> None:
+    policy = _style_policy(
+        css_properties=frozenset({"behavior", "BEHAVIOR", r"beha\76ior", "-moz-binding", r"-moz-b\69nding"})
+    )
+    assert "style=" not in sanitize(f'<p style="{style}">x</p>', policy)
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        pytest.param("content: 'url(javascript:alert(1))'", id="string"),
+        pytest.param("color: /* url(javascript:alert(1)) */ red", id="comment"),
+        pytest.param(r"cursor: safe\ url(javascript:alert(1))", id="escaped-identifier-space"),
+        pytest.param("cursor: urlish(javascript:alert(1))", id="longer-identifier"),
+    ],
+)
+def test_css_safety_scanner_ignores_inert_tokens(style: str) -> None:
+    policy = _style_policy(css_properties=frozenset({"color", "content", "cursor"}))
+    assert "style=" in sanitize(f'<p style="{style}">x</p>', policy)
 
 
 def test_style_double_quoted_url_scheme_is_stripped() -> None:
@@ -498,6 +715,19 @@ def _style_element_policy(*, css_properties: frozenset[str] = DEFAULT_CSS_PROPER
 def test_style_element_body_scrubbed(css: str, expected_body: str) -> None:
     # an allowlisted <style> keeps its element and structure; each declaration is vetted like a style attribute
     assert sanitize(f"<style>{css}</style>", _style_element_policy()) == f"<style>{expected_body}</style>"
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        pytest.param(r"cursor:u\72l(javascript:alert(1))", id="escaped-function"),
+        pytest.param(r"cursor:url(jav\61script:alert(1))", id="escaped-scheme"),
+    ],
+)
+def test_style_element_body_decodes_css_escapes(style: str) -> None:
+    policy = _style_element_policy(css_properties=frozenset({"cursor"}))
+    once = sanitize(f"<style>p{{{style}}}</style>", policy)
+    assert (once, sanitize(once, policy)) == ("<style>p{}</style>", once)
 
 
 def test_allowed_styles_does_not_narrow_style_element_body() -> None:
@@ -704,6 +934,94 @@ def test_attribute_filter_rewrites_value() -> None:
     assert sanitize('<a href="http://x">y</a>', policy) == '<a href="HTTP://X">y</a>'
 
 
+@pytest.mark.parametrize(
+    ("tag", "html", "policy"),
+    [
+        pytest.param(
+            "a",
+            '<a href="/safe">x</a>',
+            Policy(
+                tags=frozenset({"a"}),
+                attributes={"a": frozenset({"href"})},
+                attribute_filter=lambda _tag, _name, _value: "javascript:alert(1)",
+            ),
+            id="url",
+        ),
+        pytest.param(
+            "img",
+            '<img srcset="safe.png 1x">',
+            Policy(
+                tags=frozenset({"img"}),
+                attributes={"img": frozenset({"srcset"})},
+                attribute_filter=lambda _tag, _name, _value: "safe.png 1x, javascript:alert(1) 2x",
+            ),
+            id="srcset",
+        ),
+        pytest.param(
+            "p",
+            '<p style="color: red">x</p>',
+            Policy(
+                tags=frozenset({"p"}),
+                attributes={"p": frozenset({"style"})},
+                css_properties=frozenset({"color"}),
+                attribute_filter=lambda _tag, _name, _value: "color: url(javascript:alert(1))",
+            ),
+            id="style",
+        ),
+        pytest.param(
+            "p",
+            '<p style="cursor: auto">x</p>',
+            Policy(
+                tags=frozenset({"p"}),
+                attributes={"p": frozenset({"style"})},
+                css_properties=frozenset({"cursor"}),
+                attribute_filter=lambda _tag, _name, _value: "cursor: u\\72\r\nl(javascript:alert(1))",
+            ),
+            id="style-escaped-crlf-terminator",
+        ),
+        pytest.param(
+            "a",
+            '<a title="safe">x</a>',
+            Policy(
+                tags=frozenset({"a"}),
+                attributes={"a": frozenset({"title"})},
+                attribute_values={"a": {"title": frozenset({"safe"})}},
+                attribute_filter=lambda _tag, _name, _value: "unsafe",
+            ),
+            id="configured-value",
+        ),
+        pytest.param(
+            "video",
+            '<video src="https://media.example/movie.mp4"></video>',
+            Policy(
+                tags=frozenset({"video"}),
+                attributes={"video": frozenset({"src"})},
+                media_hosts=frozenset({"media.example"}),
+                attribute_filter=lambda _tag, _name, _value: "https://attacker.example/movie.mp4",
+            ),
+            id="media-host",
+        ),
+    ],
+)
+def test_attribute_filter_replacement_passes_through_final_safety_checks(tag: str, html: str, policy: Policy) -> None:
+    element = parse_fragment(sanitize(html, policy)).find(tag)
+    assert isinstance(element, Element)
+    assert dict(element.attrs) == {}
+
+
+def test_attribute_filter_replacement_passes_through_final_rewrites() -> None:
+    policy = Policy(
+        tags=frozenset({"a"}),
+        attributes={"a": frozenset({"id", "title"})},
+        strip_template_markers=True,
+        isolate_named_props=True,
+        attribute_filter=lambda _tag, name, _value: "location" if name == "id" else "{{secret}}",
+    )
+    element = parse_fragment(sanitize('<a id="safe" title="safe">x</a>', policy)).find("a")
+    assert isinstance(element, Element)
+    assert dict(element.attrs) == {"id": "user-content-location", "title": " "}
+
+
 def test_attribute_filter_drops_with_none() -> None:
     policy = Policy(tags=frozenset({"a"}), attributes={"a": frozenset({"href", "title"})},
                     attribute_filter=lambda _t, n, v: None if n == "title" else v)  # fmt: skip
@@ -851,8 +1169,8 @@ def test_sanitize_rejects_non_element() -> None:
         frozenset(), {}, frozenset(), True, 0, True, None, None, {}, frozenset(), frozenset(), frozenset(), {},
         frozenset(), False, None, {}, {}, False, None, None, False, True, True, True,
     )  # fmt: skip
-    with pytest.raises(TypeError):
-        _sanitize("not an element", *policy_args)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="requires an Element"):
+        _sanitize(parse("<p>x</p>"), *policy_args)  # ty: ignore[invalid-argument-type]
 
 
 def test_sanitize_rejects_wrong_arguments() -> None:

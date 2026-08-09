@@ -52,11 +52,16 @@ the caller's tree is a read-only participant that survives the call unchanged --
 concurrently. A strip/preserve conflict on one element is resolved by import precedence then NameTest specificity, and
 ``xml:space="preserve"`` on an ancestor overrides both.
 
-``xsl:import`` (`section 2.6.2 <https://www.w3.org/TR/xslt-10/#import>`_) does load other files, so the thin Python shim
-resolves each ``href`` against the stylesheet's ``base_url`` and parses the imported sheets; the C engine then
-deep-copies every sheet -- principal and imported -- into one private tree so all their declarations share a single atom
-table, and walks them lowest import precedence first. Import precedence becomes the first key of the section 5.5
-conflict resolution above. ``document()`` still loads nothing, to stay free of an arbitrary-URL fetch surface.
+``xsl:import`` (`section 2.6.2 <https://www.w3.org/TR/xslt-10/#import>`_) does load other files. The native compiler
+resolves each ``href`` against the stylesheet's ``base_url``, applies ``allow_imports`` and ``import_root`` before the
+read, and parses the imported sheets. It deep-copies every sheet -- principal and imported -- into one private tree so
+all declarations share a single atom table, then walks them from lowest import precedence to highest. Import precedence
+becomes the first key of the section 5.5 conflict resolution above. ``document()`` still loads nothing, avoiding an
+arbitrary-URL fetch surface.
+
+Compilation owns immutable template, expression, namespace, and import state. An application makes compact rule and key
+records only for source-specific match and key indexes; variable scopes, output trees, and whitespace-strip records are
+also per call. Concurrent calls therefore read the compiled state and write to separate execution state.
 
 ****************
  Where it stops

@@ -29,8 +29,10 @@ comments, processing instructions) followed by the single root element:
     catalog b1
     title One
 
-XML elements carry no HTML tag identity, so navigate the tree structurally through :attr:`~turbohtml.Node.children`,
-:attr:`~turbohtml.Node.parent`, and the sibling links, and read each :attr:`~turbohtml.Element.tag` verbatim.
+Plain-string :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all` filters compare XML tag names verbatim,
+including names such as ``div`` that the HTML parser interns. ``find_all("div")`` excludes a case-distinct ``<DIV>``
+sibling. Structural navigation through :attr:`~turbohtml.Node.children`, :attr:`~turbohtml.Node.parent`, and the sibling
+links follows the same case-sensitive tree.
 
 *********************************
  Read namespaces, CDATA, and PIs

@@ -98,11 +98,35 @@ precedence, so the importer's own rules win a conflict.
             encoding="utf-8",
         )
         source = parse_xml("<r><a>x</a></r>")
-        print(transform(parse_xml(main.read_text(encoding="utf-8")), source, base_url=str(main)))
+        print(
+            transform(
+                parse_xml(main.read_text(encoding="utf-8")),
+                source,
+                base_url=str(main),
+                import_root=Path(folder),
+            )
+        )
 
 .. testoutput::
 
     [x]
+
+Treat a stylesheet as code. When it comes from outside the application, reject file loading even if the caller happens
+to pass a ``base_url``:
+
+.. testcode::
+
+    untrusted = parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:template match="/">safe</xsl:template></xsl:stylesheet>'
+    )
+    convert = Transform(untrusted, allow_imports=False)
+    print(convert(parse_xml("<r/>")))
+
+.. testoutput::
+
+    <?xml version="1.0"?>
+    safe
 
 The only features out of reach are locale-aware ``xsl:sort`` collation, ``id()`` over DTD-declared IDs, ``xsl:include``,
 and ``document()``. For the design, see :doc:`/explanation/xslt`; for a port from lxml, see :doc:`/migration/lxml`.

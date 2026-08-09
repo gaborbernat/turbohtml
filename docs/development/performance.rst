@@ -83,14 +83,17 @@ prose row (0.6x), though that row is not a like-for-like comparison: ``autolink`
 markup and never linkifies an email address, so on plain prose it produces no links at all where turbohtml produces
 thirty. Its figure there is the cost of finding nothing.
 
+Linker traversal stays in C and creates wrappers for eligible text and anchor nodes, not every visited node. The target
+snapshot completes under the tree lock; callbacks follow in document order. The ``linkify-traversal`` benchmark covers
+text-heavy trees, many small siblings, skipped subtrees, existing anchors, and nodes without text.
+
 .. bench-table::
     :file: bench/linkify.json
 
 The detection primitive on its own, :meth:`turbohtml.clean.LinkDetector.find` against ``LinkifyIt().match`` and
-:meth:`~turbohtml.clean.LinkDetector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the
-spans or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. It runs
-51 to 103 times faster, except on the ``has_link`` prose row (2.8x), where ``test`` short-circuits on the first link
-near the start.
+:meth:`~turbohtml.clean.LinkDetector.has_link` against ``LinkifyIt().test``, scans a run of plain text without rewriting
+HTML. The boolean paths stop on the first valid match and allocate no span list. The large-tail row places a link before
+220 KiB of prose to catch a return to full-input scanning.
 
 .. bench-table::
     :file: bench/linkify-2.json
@@ -295,6 +298,10 @@ string built and no matcher dispatch. It stays ahead of resiliparse's lexbor pas
 widening to 22 times on the spec, leads lxml's C XPath engine by 14 to 24 times, and runs 12 to over 1,400 times ahead
 of pyquery, selectolax, parsel, BeautifulSoup, and soupsieve.
 
+A first-result query walks until its match when the document has no tag index. An uncapped ``find_all`` builds the
+whole-document index for later queries; ``find`` and ``find_all(..., limit=1)`` reuse it after that point. The cold-tree
+benchmark records early and late hits, a miss, the uncapped build, and the limited walk with peak resident memory.
+
 .. bench-table::
     :file: bench/querying.json
 
@@ -380,6 +387,27 @@ pays, and turbohtml's compiled program stays ahead per evaluation.
 
 .. bench-table::
     :file: bench/querying-5.json
+
+******
+ XSLT
+******
+
+:class:`turbohtml.transform.Transform` compiles a stylesheet once and keeps its template rules, XPath programs, keys,
+namespaces, and imported stylesheets in immutable C state. Each application allocates only the source-specific match,
+key, variable, and output state, so one compiled transform can serve different documents and parameters concurrently.
+The three tables separate construction, one catalog application, and ten applications of a 300-template stylesheet whose
+unused templates make static analysis dominate compilation. Its used template also carries static ``xsl:number``
+patterns, so the repeated case catches stylesheet analysis, XPath compilation, or pattern compilation returning to each
+call.
+
+.. bench-table::
+    :file: bench/xslt-compile.json
+
+.. bench-table::
+    :file: bench/xslt.json
+
+.. bench-table::
+    :file: bench/xslt-reuse.json
 
 ************
  Node paths

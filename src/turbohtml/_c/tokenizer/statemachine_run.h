@@ -508,10 +508,10 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
                 continue;
             }
             if (ch == '?') {
-                tok_error(self, "unexpected-question-mark-instead-of-tag-name");
-                init_markup(self, TH_COMMENT);
-                self->tok.is_pi = 1; /* a `<?` bogus comment the SAX walk reports as a processing instruction */
-                self->state = ST_BOGUS_COMMENT;
+                buf_reset(&self->temp);
+                self->eof_code = "eof-in-processing-instruction";
+                CONSUME();
+                self->state = ST_PI_OPEN;
                 continue;
             }
             tok_error(self, "invalid-first-character-of-tag-name");
@@ -1274,6 +1274,94 @@ static enum run_result TH_NAME(run)(th_tokenizer *self) {
             }
             tok_error(self, "unexpected-solidus-in-tag");
             self->state = ST_BEFORE_ATTR_NAME;
+            continue;
+
+        case ST_PI_OPEN:
+            if (at_eof) {
+                self->building = 0;
+                self->eof_code = NULL;
+                EOF_FLUSH();
+            }
+            if (is_ascii_alpha(ch) || ch == '_') {
+                self->state = ST_PI_TARGET;
+                continue;
+            }
+            tok_error(self, "invalid-first-character-of-processing-instruction-target");
+            pi_temp_to_comment(self);
+            self->state = ST_BOGUS_COMMENT;
+            continue;
+
+        case ST_PI_TARGET:
+            if (at_eof) {
+                self->building = 0;
+                self->eof_code = NULL;
+                EOF_FLUSH();
+            }
+            if (is_space(ch) || ch == '?' || ch == '>') {
+                if (buf_ascii_iequals(&self->temp, "xml", 3) || buf_ascii_iequals(&self->temp, "xml-stylesheet", 14)) {
+                    tok_error(self, "disallowed-processing-instruction-target");
+                    pi_temp_to_comment(self);
+                    self->state = ST_BOGUS_COMMENT;
+                    continue;
+                }
+                pi_from_temp(self);
+                self->state = ST_AFTER_PI_TARGET;
+                continue;
+            }
+            if (is_ascii_alpha(ch) || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+                push(self, &self->temp, ch);
+                CONSUME();
+                continue;
+            }
+            tok_error(self, "invalid-processing-instruction-target");
+            pi_temp_to_comment(self);
+            self->state = ST_BOGUS_COMMENT;
+            continue;
+
+        case ST_AFTER_PI_TARGET:
+            if (at_eof) {
+                self->building = 0;
+                self->eof_code = NULL;
+                EOF_FLUSH();
+            }
+            if (is_space(ch)) {
+                CONSUME();
+                continue;
+            }
+            self->state = ST_PI_DATA;
+            continue;
+
+        case ST_PI_DATA:
+            if (at_eof) {
+                self->building = 0;
+                self->eof_code = NULL;
+                EOF_FLUSH();
+            }
+            if (ch == '?') {
+                CONSUME();
+                self->state = ST_PI_QUESTIONABLE;
+                continue;
+            }
+            if (ch == '>') {
+                CONSUME();
+                EMIT_MARKUP();
+            }
+            push(self, &self->tok.text, ch);
+            CONSUME();
+            continue;
+
+        case ST_PI_QUESTIONABLE:
+            if (at_eof) {
+                self->building = 0;
+                self->eof_code = NULL;
+                EOF_FLUSH();
+            }
+            if (ch == '>') {
+                CONSUME();
+                EMIT_MARKUP();
+            }
+            push(self, &self->tok.text, '?');
+            self->state = ST_PI_DATA;
             continue;
 
         case ST_BOGUS_COMMENT:
