@@ -16,6 +16,8 @@ from __future__ import annotations
 import threading
 from typing import cast
 
+import pytest
+
 import turbohtml
 from turbohtml.query import Query
 
@@ -432,9 +434,18 @@ def test_concurrent_link_enumeration_and_resolve_is_memory_safe() -> None:
     assert isinstance(doc.links(), list)  # the tree is still walkable after the concurrent churn
 
 
-def test_concurrent_structured_data_and_extract_is_memory_safe() -> None:
+@pytest.mark.parametrize(
+    ("method", "result_type"),
+    [
+        pytest.param("microdata", list, id="microdata"),
+        pytest.param("rdfa", list, id="rdfa"),
+        pytest.param("structured_data", turbohtml.StructuredData, id="aggregate"),
+    ],
+)
+def test_concurrent_nested_structured_data_and_extract_is_memory_safe(method: str, result_type: type[object]) -> None:
     items = "".join(
-        f'<div itemscope itemtype="https://schema.org/Thing"><meta itemprop="name" content="n{index}">'
+        f'<div itemscope itemtype="https://schema.org/Thing" typeof="schema:Thing">'
+        f'<meta itemprop="name" property="schema:name" content="n{index}">'
         f'<script type="application/ld+json">{{"@type": "Thing", "id": {index}}}</script></div>'
         for index in range(300)
     )
@@ -447,7 +458,7 @@ def test_concurrent_structured_data_and_extract_is_memory_safe() -> None:
     def reader() -> None:
         start.wait()
         for _ in range(200):
-            doc.structured_data()  # gathers json-ld/microdata/opengraph while the tree is rewired
+            getattr(doc, method)()
 
     def extractor() -> None:
         start.wait()
@@ -455,8 +466,7 @@ def test_concurrent_structured_data_and_extract_is_memory_safe() -> None:
             child.extract()
 
     _run(reader, extractor)
-    # the tree is still walkable after the concurrent churn
-    assert isinstance(doc.structured_data(), turbohtml.StructuredData)
+    assert isinstance(getattr(doc, method)(), result_type)
 
 
 def test_concurrent_table_reads_and_mutation_are_memory_safe() -> None:

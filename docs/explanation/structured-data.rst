@@ -13,22 +13,24 @@ hold no reference back into the tree, so they outlive the document they came fro
 
 Nested Microdata and RDFa resources become nested Python records. Documents nested 400 levels or deeper, and cyclic
 Microdata ``itemref`` graphs that nest 400 resources, raise :exc:`RecursionError` without returning partial records. The
-flat JSON-LD, OpenGraph, and Dublin Core helpers remain iterative.
+flat JSON-LD, OpenGraph, and Dublin Core helpers remain iterative. The nested helpers copy the native tree once under
+its critical section before building records, so another thread may mutate the caller's tree without invalidating a
+traversal pointer.
 
 *********************
  Where the work runs
 *********************
 
 The division of labor is the same one the rest of the read path follows: the *locating* runs in C and the only genuinely
-Python step stays in Python. A pure-C pass under the per-tree critical section walks the document once per format,
-gathering the ``itemscope``/``itemprop``/``itemtype`` structure into nested :class:`~turbohtml.MicrodataItem` records
-and the OpenGraph and Twitter ``<meta>`` pairs into a flat mapping, all holding no reference back into the tree. JSON-LD
-is the one exception: the C walk gathers the verbatim text of each ``<script type="application/ld+json">`` block into a
-list of strings, then the critical section is released and a thin facade parses them with the standard library
-:mod:`json`. The JSON grammar is not reinvented in C, and the parse never touches the tree, so it cannot race a
-concurrent mutation -- the snapshot-then-parse split is what keeps the Python call off the live structure. A block that
-is not valid JSON is skipped rather than raising, the safe default for scraping a page whose markup the author did not
-validate.
+Python step stays in Python. A pure-C pass over the locked tree or its private native snapshot walks the document once
+per format, gathering the ``itemscope``/``itemprop``/``itemtype`` structure into nested
+:class:`~turbohtml.MicrodataItem` records and the OpenGraph and Twitter ``<meta>`` pairs into a flat mapping, all
+holding no reference back into the tree. JSON-LD is the one exception: the C walk gathers the verbatim text of each
+``<script type="application/ld+json">`` block into a list of strings, then the critical section is released and a thin
+facade parses them with the standard library :mod:`json`. The JSON grammar is not reinvented in C, and the parse never
+touches the tree, so it cannot race a concurrent mutation -- the snapshot-then-parse split is what keeps the Python call
+off the live structure. A block that is not valid JSON is skipped rather than raising, the safe default for scraping a
+page whose markup the author did not validate.
 
 *******************************
  Microdata, OpenGraph, Twitter

@@ -593,6 +593,9 @@ th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
     if (root == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    if (src_node->type == TH_NODE_DOCUMENT) {
+        dest->document = root;
+    }
     th_node *from = src_node;
     th_node *copy = root;
     for (;;) {
