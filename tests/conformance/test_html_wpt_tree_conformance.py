@@ -53,7 +53,10 @@ def _build(case: _Case) -> str:
 
 
 def test_wpt_corpus_source_and_counts_are_pinned() -> None:
-    assert _CORPUS["source"] == "https://github.com/web-platform-tests/wpt/tree/master/html/syntax/parsing/resources"
+    assert _CORPUS["source"] == (
+        "https://github.com/web-platform-tests/wpt/tree/4830edb033cb486fd0cd6f85b5e937cfc718704d/"
+        "html/syntax/parsing/resources"
+    )
     assert _CORPUS["revision"] == "4830edb033cb486fd0cd6f85b5e937cfc718704d"
     assert len(_CORPUS["files"]) == 61
     assert len(_CORPUS["cases"]) == 1920

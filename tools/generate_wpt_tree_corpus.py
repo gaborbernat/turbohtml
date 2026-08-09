@@ -153,7 +153,7 @@ def generate(checkout: Path, out_path: Path) -> None:
     out_path.write_text(
         json.dumps(
             {
-                "source": "https://github.com/web-platform-tests/wpt/tree/master/html/syntax/parsing/resources",
+                "source": f"https://github.com/web-platform-tests/wpt/tree/{revision}/html/syntax/parsing/resources",
                 "revision": revision,
                 "files": [path.name for path in files],
                 "fixture_counts": {path.name: sum(case["file"] == path.name for case in cases) for path in files},

@@ -1,5 +1,5 @@
 {
- "source": "https://github.com/web-platform-tests/wpt/tree/master/html/syntax/parsing/resources",
+ "source": "https://github.com/web-platform-tests/wpt/tree/4830edb033cb486fd0cd6f85b5e937cfc718704d/html/syntax/parsing/resources",
  "revision": "4830edb033cb486fd0cd6f85b5e937cfc718704d",
  "files": [
   "adoption01.dat",
