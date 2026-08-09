@@ -24,8 +24,6 @@
 #include <string.h>
 
 #define STRUCTURED_DATA_MAX_RECURSIVE_DEPTH ((Py_ssize_t)400)
-#define STRUCTURED_DATA_MICRODATA 1U
-#define STRUCTURED_DATA_RDFA 2U
 
 /* The HTML script type that flags a JSON-LD block, matched case-insensitively after trimming. */
 static const char JSON_LD_TYPE[] = "application/ld+json";
@@ -172,7 +170,7 @@ typedef struct {
     micro_id_index ids;
 } micro_ctx;
 
-static PyObject *build_item(micro_ctx *ctx, th_node *element);
+static PyObject *build_item_data(micro_ctx *ctx, th_node *element);
 
 /* A URL-valued attribute's value with leading and trailing ASCII whitespace stripped (the URL parser trims it), or the
    empty string when the attribute is absent or valueless. NULL only on the excluded allocation-failure path. */
@@ -214,7 +212,7 @@ static PyObject *microdata_value(micro_ctx *ctx, th_node *element) {
             return NULL;
         }
         ctx->item_depth++;
-        PyObject *item = build_item(ctx, element);
+        PyObject *item = build_item_data(ctx, element);
         ctx->item_depth--;
         return item;
     }
@@ -598,38 +596,20 @@ static PyObject *snapshot_node(PyObject *self) {
     return wrap_fresh_tree_node(state_of(self), tree, root);
 }
 
-/* Find formats whose nested records call Python constructors. The Microdata check replaces gather_microdata's empty
-   walk; RDFa's dynamic attribute atom lets documents without typeof skip that check. */
-static unsigned int nested_formats(PyObject *self, unsigned int requested) {
+/* A parsed tree interns the dynamic typeof atom only when RDFa is present. Read the immutable table under the handle
+   lock because mutation may intern the name after parsing. */
+static int has_rdfa(PyObject *self) {
     th_tree *tree = tree_of(self);
-    unsigned int formats = 0;
+    int result;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    int check_rdfa = (requested & STRUCTURED_DATA_RDFA) != 0 && th_attr_lookup(tree, "typeof", 6) != UINT32_MAX;
-    if ((requested & STRUCTURED_DATA_MICRODATA) != 0 || check_rdfa) {
-        th_node *root = ((NodeObject *)self)->node;
-        for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
-            if (node->type != TH_NODE_ELEMENT) {
-                continue;
-            }
-            if ((requested & STRUCTURED_DATA_MICRODATA) != 0 && find_node_attr(node, TH_ATTR_ITEMSCOPE) != NULL) {
-                formats |= STRUCTURED_DATA_MICRODATA;
-            }
-            if (check_rdfa && th_node_attr_find(tree, node, "typeof", 6) >= 0) {
-                formats |= STRUCTURED_DATA_RDFA;
-            }
-            if (formats == requested) {
-                break;
-            }
-        }
-    }
+    result = th_attr_lookup(tree, "typeof", 6) != UINT32_MAX;
     Py_END_CRITICAL_SECTION();
-    return formats;
+    return result;
 }
 
-/* Build one MicrodataItem(type, id, properties): the verbatim itemtype / itemid attribute (or None when absent or
-   valueless) and a properties mapping of each itemprop name to its list of values, each value a str or a nested
-   MicrodataItem. NULL on the recursion limit or allocation failure. */
-static PyObject *build_item(micro_ctx *ctx, th_node *element) {
+/* Gather one item's type, id, and properties into a tuple. Nested items remain tuples until the locked tree walk ends,
+   so no Python constructor can suspend the critical section while native traversal pointers are live. */
+static PyObject *build_item_data(micro_ctx *ctx, th_node *element) {
     PyObject *properties = PyDict_New();
     if (properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -650,11 +630,35 @@ static PyObject *build_item(micro_ctx *ctx, th_node *element) {
         Py_DECREF(properties); /* GCOVR_EXCL_LINE */
         return NULL;           /* GCOVR_EXCL_LINE */
     }
-    PyObject *item = PyObject_CallFunctionObjArgs(ctx->state->microdata_item_type, type_obj, id_obj, properties, NULL);
+    PyObject *item = PyTuple_Pack(3, type_obj, id_obj, properties);
     Py_DECREF(type_obj);
     Py_DECREF(id_obj);
     Py_DECREF(properties);
     return item;
+}
+
+/* Replace nested item-data tuples in properties and construct one MicrodataItem after the tree walk has released its
+   critical section. The trusted registered record constructor can no longer invalidate a native pointer. */
+static PyObject *materialize_microdata_item(module_state *state, PyObject *data) {
+    PyObject *properties = PyTuple_GET_ITEM(data, 2);
+    Py_ssize_t position = 0;
+    PyObject *values;
+    while (PyDict_Next(properties, &position, NULL, &values)) {
+        for (Py_ssize_t index = 0; index < PyList_GET_SIZE(values); index++) {
+            PyObject *value = PyList_GET_ITEM(values, index);
+            if (!PyTuple_CheckExact(value)) {
+                continue;
+            }
+            PyObject *item = materialize_microdata_item(state, value);
+            if (item == NULL) { /* GCOVR_EXCL_BR_LINE: the trusted constructor fails only on allocation */
+                return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            PyList_SET_ITEM(values, index, item);
+            Py_DECREF(value);
+        }
+    }
+    return PyObject_CallFunctionObjArgs(state->microdata_item_type, PyTuple_GET_ITEM(data, 0),
+                                        PyTuple_GET_ITEM(data, 1), properties, NULL);
 }
 
 /* Gather the verbatim text of every <script type="application/ld+json"> under the document into a list of str, leaving
@@ -805,7 +809,7 @@ static PyObject *gather_microdata(PyObject *self, PyObject *base, const char *op
     while (!failed && node != NULL) {
         if (node->type == TH_NODE_ELEMENT && find_node_attr(node, TH_ATTR_ITEMSCOPE) != NULL &&
             find_node_attr(node, TH_ATTR_ITEMPROP) == NULL) {
-            PyObject *item = build_item(&ctx, node);
+            PyObject *item = build_item_data(&ctx, node);
             if (item == NULL) {
                 failed = 1;
                 break;
@@ -825,6 +829,16 @@ static PyObject *gather_microdata(PyObject *self, PyObject *base, const char *op
     if (failed) {
         Py_DECREF(items);
         return NULL;
+    }
+    for (Py_ssize_t index = 0; index < PyList_GET_SIZE(items); index++) {
+        PyObject *data = PyList_GET_ITEM(items, index);
+        PyObject *item = materialize_microdata_item(ctx.state, data);
+        if (item == NULL) {   /* GCOVR_EXCL_BR_LINE: the trusted constructor fails only on allocation */
+            Py_DECREF(items); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;      /* GCOVR_EXCL_LINE */
+        }
+        PyList_SET_ITEM(items, index, item);
+        Py_DECREF(data);
     }
     return items;
 }
@@ -1596,26 +1610,19 @@ PyObject *turbohtml_document_opengraph(PyObject *self, PyObject *args, PyObject 
 
 /* Document.microdata(base_url=None) -> list[MicrodataItem]. */
 PyObject *turbohtml_document_microdata(PyObject *self, PyObject *args, PyObject *kwargs) {
-    unsigned int formats = nested_formats(self, STRUCTURED_DATA_MICRODATA);
-    PyObject *source = formats != 0 ? snapshot_node(self) : Py_NewRef(self);
-    if (source == NULL) { /* GCOVR_EXCL_BR_LINE: snapshot fails only on allocation */
-        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
     PyObject *base = NULL;
-    if (parse_base_url(source, args, kwargs, "|O:microdata", &base) < 0) {
-        Py_DECREF(source);
+    if (parse_base_url(self, args, kwargs, "|O:microdata", &base) < 0) {
         return NULL;
     }
-    PyObject *result = formats != 0 ? gather_microdata(source, base, "microdata()") : PyList_New(0);
-    Py_DECREF(source);
+    PyObject *result = gather_microdata(self, base, "microdata()");
     Py_XDECREF(base);
     return result;
 }
 
 /* Document.rdfa(base_url=None) -> list[RdfaItem]. */
 PyObject *turbohtml_document_rdfa(PyObject *self, PyObject *args, PyObject *kwargs) {
-    unsigned int formats = nested_formats(self, STRUCTURED_DATA_RDFA);
-    PyObject *source = formats != 0 ? snapshot_node(self) : Py_NewRef(self);
+    int present = has_rdfa(self);
+    PyObject *source = present ? snapshot_node(self) : Py_NewRef(self);
     if (source == NULL) { /* GCOVR_EXCL_BR_LINE: snapshot fails only on allocation */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -1624,7 +1631,7 @@ PyObject *turbohtml_document_rdfa(PyObject *self, PyObject *args, PyObject *kwar
         Py_DECREF(source);
         return NULL;
     }
-    PyObject *result = formats != 0 ? gather_rdfa(source, base, "rdfa()") : PyList_New(0);
+    PyObject *result = present ? gather_rdfa(source, base, "rdfa()") : PyList_New(0);
     Py_DECREF(source);
     Py_XDECREF(base);
     return result;
@@ -1641,8 +1648,8 @@ PyObject *turbohtml_document_dublin_core(PyObject *self, PyObject *Py_UNUSED(ign
    typed URLs). microformats is still a later phase, present as an empty list so the record's shape is stable. NULL only
    on the excluded allocation-failure path (or with an exception set on a bad base_url). */
 PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyObject *kwargs) {
-    unsigned int formats = nested_formats(self, STRUCTURED_DATA_MICRODATA | STRUCTURED_DATA_RDFA);
-    PyObject *source = formats != 0 ? snapshot_node(self) : Py_NewRef(self);
+    int rdfa_present = has_rdfa(self);
+    PyObject *source = rdfa_present ? snapshot_node(self) : Py_NewRef(self);
     if (source == NULL) { /* GCOVR_EXCL_BR_LINE: snapshot fails only on allocation */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -1659,18 +1666,13 @@ PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyO
     }
     /* A section fails only after an allocation failure. */
     /* GCOVR_EXCL_BR_START */
-    int failed =
-        tuple_set_or_fail(sections, 0, turbohtml_document_json_ld(source, NULL)) < 0 ||
-        tuple_set_or_fail(sections, 1,
-                          (formats & STRUCTURED_DATA_MICRODATA) != 0
-                              ? gather_microdata(source, base, "structured_data()")
-                              : PyList_New(0)) < 0 ||
-        tuple_set_or_fail(sections, 2, gather_opengraph(source, base)) < 0 ||
-        tuple_set_or_fail(sections, 3, PyList_New(0)) < 0 ||
-        tuple_set_or_fail(sections, 4,
-                          (formats & STRUCTURED_DATA_RDFA) != 0 ? gather_rdfa(source, base, "structured_data()")
-                                                                : PyList_New(0)) < 0 ||
-        tuple_set_or_fail(sections, 5, gather_dublin_core(source)) < 0;
+    int failed = tuple_set_or_fail(sections, 0, turbohtml_document_json_ld(source, NULL)) < 0 ||
+                 tuple_set_or_fail(sections, 1, gather_microdata(source, base, "structured_data()")) < 0 ||
+                 tuple_set_or_fail(sections, 2, gather_opengraph(source, base)) < 0 ||
+                 tuple_set_or_fail(sections, 3, PyList_New(0)) < 0 ||
+                 tuple_set_or_fail(sections, 4,
+                                   rdfa_present ? gather_rdfa(source, base, "structured_data()") : PyList_New(0)) < 0 ||
+                 tuple_set_or_fail(sections, 5, gather_dublin_core(source)) < 0;
     /* GCOVR_EXCL_BR_STOP */
     Py_XDECREF(base);
     Py_DECREF(source);

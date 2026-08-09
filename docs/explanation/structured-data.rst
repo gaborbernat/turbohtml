@@ -13,9 +13,9 @@ hold no reference back into the tree, so they outlive the document they came fro
 
 Nested Microdata and RDFa resources become nested Python records. Documents nested 400 levels or deeper, and cyclic
 Microdata ``itemref`` graphs that nest 400 resources, raise :exc:`RecursionError` without returning partial records. The
-flat JSON-LD, OpenGraph, and Dublin Core helpers remain iterative. The nested helpers copy the native tree once under
-its critical section before building records, so another thread may mutate the caller's tree without invalidating a
-traversal pointer.
+flat JSON-LD, OpenGraph, and Dublin Core helpers remain iterative. Microdata stages pointer-free record fields under the
+tree's critical section, then constructs the Python records after releasing it. RDFa copies the native tree once before
+building records. Another thread may therefore mutate the caller's tree without invalidating a traversal pointer.
 
 *********************
  Where the work runs
