@@ -13,6 +13,7 @@
 #include "core/ascii.h"
 #include "core/common.h"
 #include "dom/tree.h"
+#include "tokenizer/binding.h"
 #include "url/url.h"
 
 #include "data/tld_table.h"
