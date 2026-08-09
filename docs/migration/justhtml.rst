@@ -83,9 +83,9 @@ The cases follow `JustHTML's correctness harness
 .. bench-table::
     :file: bench/justhtml.json
 
-****************
+***********
  Migration
-****************
+***********
 
 Choose the turbohtml entry point from the trust boundary, not from the old constructor spelling:
 
@@ -163,16 +163,16 @@ Behavioral differences
   and distinct typed classes for text, comments, doctypes, processing instructions, documents, and fragments.
 - JustHTML enables scripting in the tree builder by default. turbohtml's fragment and document parsers default to
   ``scripting=False``; pass ``scripting=True`` when ``noscript`` must follow browser behavior with scripting enabled.
-- A JustHTML fragment context is a ``FragmentContext`` object; turbohtml accepts the HTML tag name
-  directly as the second :func:`turbohtml.parse_fragment` argument. Both context APIs affect table foster parenting,
-  raw-text elements, and the initial insertion mode, so omitting the context can change the tree.
+- A JustHTML fragment context is a ``FragmentContext`` object; turbohtml accepts the HTML tag name directly as the
+  second :func:`turbohtml.parse_fragment` argument. Both context APIs affect table foster parenting, raw-text elements,
+  and the initial insertion mode, so omitting the context can change the tree.
 - For ``<?foo bar?>``, JustHTML 3.11 keeps ``"foo bar"`` in the node's ``data`` and serializes the closing ``?>``.
   turbohtml exposes ``target == "foo"`` and ``data == "bar"`` separately. HTML serialization follows the living HTML
   syntax and emits ``<?foo bar>``; XML serialization emits ``<?foo bar?>``. The reserved ``xml`` and ``xml-stylesheet``
   targets remain comments in the HTML parser.
 - JustHTML's general ``Node`` API exposes ``name``, ``data``, ``attrs``, and ``children`` according to node kind.
-  turbohtml uses typed node classes, so type narrowing determines whether ``tag``, ``data``, ``target``, or ``attrs``
-  is available. Static type checkers catch element-only access once code narrows to :class:`turbohtml.Element`.
+  turbohtml uses typed node classes, so type narrowing determines whether ``tag``, ``data``, ``target``, or ``attrs`` is
+  available. Static type checkers catch element-only access once code narrows to :class:`turbohtml.Element`.
 - ``to_text`` can insert separators and strip each text node in one call. Use :attr:`~turbohtml.Node.text` for DOM
   ``textContent`` semantics, :attr:`~turbohtml.Node.stripped_strings` with ``join`` for custom separators, or
   :meth:`~turbohtml.Node.to_text` for layout-aware rendering.
