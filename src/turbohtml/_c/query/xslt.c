@@ -1410,7 +1410,7 @@ static xp_program *expression_lookup(const engine *eng, const Py_UCS4 *source, P
 static int expression_grow(engine *eng) {
     size_t new_cap = eng->expression_cap == 0 ? 16 : eng->expression_cap * 2;
     /* A stylesheet cannot exhaust size_t. */
-    /* GCOVR_EXCL_BR_START */
+    /* GCOVR_EXCL_BR_START: parse_xml rejects imported documents without a root */
     if (new_cap < eng->expression_cap || new_cap > SIZE_MAX / sizeof(xslt_expr)) {
         return -1; /* GCOVR_EXCL_LINE */
     }
@@ -4869,9 +4869,10 @@ static PyObject *stylesheet_node_import_hrefs(PyObject *module, PyObject *styles
     PyObject *hrefs;
     Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(stylesheet));
     th_node *root = stylesheet_root(node);
-    hrefs = root == NULL        /* GCOVR_EXCL_BR_LINE: parse_xml rejects imported documents without a root */
-                ? PyList_New(0) /* GCOVR_EXCL_LINE */
-                : stylesheet_import_hrefs(tree, root, base, allow_imports);
+    /* GCOVR_EXCL_BR_START */
+    hrefs = root == NULL ? PyList_New(0) /* GCOVR_EXCL_LINE: parse_xml rejects imported documents without a root */
+                         : stylesheet_import_hrefs(tree, root, base, allow_imports);
+    /* GCOVR_EXCL_BR_STOP */
     Py_END_CRITICAL_SECTION();
     return hrefs;
 }

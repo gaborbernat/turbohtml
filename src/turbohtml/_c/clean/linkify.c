@@ -838,17 +838,17 @@ static int process_existing(th_tree *tree, th_node *anchor, PyObject *callbacks,
 static PyObject *matched_url(PyObject *matched, int kind) {
     if (kind == TH_LINK_EMAIL) {
         PyObject *prefix = PyUnicode_FromString("mailto:");
-        PyObject *url = prefix == NULL /* GCOVR_EXCL_BR_LINE: allocation failure */
-                            ? NULL
-                            : PyUnicode_Concat(prefix, matched);
+        /* GCOVR_EXCL_BR_START: prefix allocation failure cannot be forced */
+        PyObject *url = prefix == NULL ? NULL : PyUnicode_Concat(prefix, matched);
+        /* GCOVR_EXCL_BR_STOP */
         Py_XDECREF(prefix);
         return url;
     }
     if (kind == TH_LINK_URL) {
         PyObject *prefix = PyUnicode_FromString("http://");
-        PyObject *url = prefix == NULL /* GCOVR_EXCL_BR_LINE: allocation failure */
-                            ? NULL
-                            : PyUnicode_Concat(prefix, matched);
+        /* GCOVR_EXCL_BR_START: prefix allocation failure cannot be forced */
+        PyObject *url = prefix == NULL ? NULL : PyUnicode_Concat(prefix, matched);
+        /* GCOVR_EXCL_BR_STOP */
         Py_XDECREF(prefix);
         return url;
     }
@@ -904,9 +904,9 @@ static int append_link(th_tree *tree, th_node *fragment, PyObject *matched, int 
     th_node *anchor = th_tree_make_element(tree, anchor_tag, 1, TH_TAG_A, 0);
     int invalid =
         new_url == NULL || new_text == NULL || new_attrs == NULL; /* GCOVR_EXCL_BR_LINE: malformed callback result */
-    int status = anchor == NULL || invalid                        /* GCOVR_EXCL_BR_LINE: anchor allocation failure */
-                     ? -1
-                     : set_candidate_attrs(tree, anchor, new_url, new_attrs, 1);
+    /* GCOVR_EXCL_BR_START: anchor allocation and malformed callback results cannot be forced */
+    int status = anchor == NULL || invalid ? -1 : set_candidate_attrs(tree, anchor, new_url, new_attrs, 1);
+    /* GCOVR_EXCL_BR_STOP */
     if (status == 0) {
         status = replace_anchor_text(tree, anchor, new_text);
     }
@@ -923,9 +923,9 @@ static int append_link(th_tree *tree, th_node *fragment, PyObject *matched, int 
 static int process_text(th_tree *tree, th_node *node, int parse_email, PyObject *extra_tlds, PyObject *url_schemes,
                         PyObject *callbacks, PyObject *candidate_type) {
     const Py_UCS4 *points = th_node_realize_text(tree, node);
-    PyObject *text = points == NULL /* GCOVR_EXCL_BR_LINE: allocation failure */
-                         ? NULL
-                         : PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, points, node->text_len);
+    /* GCOVR_EXCL_BR_START: text realization and Unicode allocation failures cannot be forced */
+    PyObject *text = points == NULL ? NULL : PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, points, node->text_len);
+    /* GCOVR_EXCL_BR_STOP */
     if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE */
     }

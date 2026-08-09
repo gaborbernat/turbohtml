@@ -2712,13 +2712,37 @@ def test_transform_import_rejects_remote_href(tmp_path: Path) -> None:
         transform(sheet, turbohtml.parse_xml("<r/>"), base_url=str(main))
 
 
-def test_transform_import_rejects_remote_file_url() -> None:
+@pytest.mark.parametrize(
+    ("base_url", "message"),
+    [
+        pytest.param("file://example.com/main.xsl", "file URL must point to a local path", id="remote-file-host"),
+        pytest.param("//example.com/main.xsl", "must be a local path or file URL", id="network-path"),
+        pytest.param("C:main.xsl", "must be a local path or file URL", id="drive-relative-path"),
+    ],
+)
+def test_transform_import_rejects_remote_url_forms(base_url: str, message: str) -> None:
     sheet = turbohtml.parse_xml(
         '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
         '<xsl:import href="base.xsl"/></xsl:stylesheet>'
     )
-    with pytest.raises(ValueError, match="base_url file URL must point to a local path"):
-        transform(sheet, turbohtml.parse_xml("<r/>"), base_url="file://example.com/main.xsl")
+    with pytest.raises(ValueError, match=message):
+        transform(sheet, turbohtml.parse_xml("<r/>"), base_url=base_url)
+
+
+@pytest.mark.parametrize(
+    ("base_url", "href"),
+    [
+        pytest.param("main.xsl", "x", id="short-href"),
+        pytest.param("file://localhost/main.xsl", "missing.xsl", id="localhost-file-url"),
+    ],
+)
+def test_transform_import_local_url_forms_reach_filesystem(base_url: str, href: str) -> None:
+    sheet = turbohtml.parse_xml(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        f'<xsl:import href="{href}"/></xsl:stylesheet>'
+    )
+    with pytest.raises(FileNotFoundError):
+        Transform(sheet, base_url=base_url)
 
 
 def test_transform_import_precedence_importer_wins(tmp_path: Path) -> None:

@@ -571,6 +571,18 @@ def test_css_safety_scanner_ignores_inert_tokens(style: str) -> None:
     assert "style=" in sanitize(f'<p style="{style}">x</p>', policy)
 
 
+def test_css_safety_scanner_keeps_url_text_inside_non_ascii_identifier() -> None:
+    policy = _style_policy(css_properties=frozenset({"cursor"}))
+    assert 'style="cursor: \u00e9url(javascript:alert(1))"' in sanitize(
+        '<p style="cursor: \u00e9url(javascript:alert(1))">x</p>', policy
+    )
+
+
+def test_final_safety_pass_keeps_non_event_o_attribute() -> None:
+    policy = Policy(tags=frozenset({"details"}), set_attributes={"details": {"open": ""}})
+    assert sanitize("<details>x</details>", policy) == '<details open="">x</details>'
+
+
 def test_style_double_quoted_url_scheme_is_stripped() -> None:
     # a double-quoted url() (in a single-quoted attribute) cannot smuggle a disallowed scheme past the value scan
     assert "style=" not in sanitize("""<p style='color: url("javascript:x")'>y</p>""", _style_policy())

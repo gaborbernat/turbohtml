@@ -1331,8 +1331,8 @@ static th_node *copy_node_in_tree(th_tree *tree, th_node *source) {
     if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
         copy->text = need_text(tree, source);
         copy->text_len = source->text_len;
-        if (source->type == TH_NODE_PI || /* GCOVR_EXCL_BR_LINE: HTML cannot nest a doctype in selected content */
-            source->type == TH_NODE_DOCTYPE) {
+        if (source->type == TH_NODE_PI ||
+            source->type == TH_NODE_DOCTYPE) { /* GCOVR_EXCL_BR_LINE: HTML cannot nest a doctype in selected content */
             copy->attr_count = source->attr_count;
         }
     }

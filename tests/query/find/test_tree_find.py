@@ -232,6 +232,7 @@ def test_axis_preceding_excludes_ancestors() -> None:
     ("limit", "count"),
     [
         pytest.param(None, 2, id="none"),
+        pytest.param(9, 2, id="larger-than-walk-threshold"),
         pytest.param(1, 1, id="one"),
         pytest.param(0, 0, id="zero"),
     ],

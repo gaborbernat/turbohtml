@@ -464,8 +464,10 @@ static int run_attribute_filter(sanitizer *s, th_node *element, PyObject *tag, c
             Py_DECREF(text);   /* GCOVR_EXCL_LINE */
             return -1;         /* GCOVR_EXCL_LINE */
         }
+        /* GCOVR_EXCL_BR_START: attribute storage allocation failure cannot be forced */
         status =
             th_node_attr_set(s->tree, element, name, name_len, points, PyUnicode_GET_LENGTH(result), 1) < 0 ? -1 : 1;
+        /* GCOVR_EXCL_BR_STOP */
         PyMem_Free(points);
     }
     Py_XDECREF(result);
