@@ -2094,23 +2094,23 @@ static int require_prefixes(PyObject *prefixes) {
     return status;
 }
 
-/* _sanitize(element, tags, attributes, url_schemes, allow_relative, on_disallowed, strip_comments, add_link_rel,
+/* _sanitize(source, tags, attributes, url_schemes, allow_relative, on_disallowed, strip_comments, add_link_rel,
    attribute_filter, set_attributes, remove_with_content, css_properties, attribute_prefixes, attribute_values,
    media_hosts, strip_templates, removed, allowed_styles, transform_tags, isolate_named_props, custom_element_check,
    custom_attribute_check, allow_customized_builtins, allow_html, allow_svg, allow_mathml) -> Element. Returns a
-   sanitized snapshot; sanitizer.py serializes it. `removed` is a list the walk appends (tag, attr_or_None) records to,
+   sanitized snapshot; sanitizer.py serializes it. A str is parsed directly into the private output tree; an Element is
+   copied under its tree lock before callbacks run. `removed` is a list the walk appends (tag, attr_or_None) records to,
    or None to skip the audit. */
 PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
-    PyObject *element;
+    PyObject *source;
     PyObject *removed = NULL;
     sanitizer s = {0};
-    if (!PyArg_ParseTuple(args, "OOOOpipOOOOOOOOpOOOpOOpppp:_sanitize", &element, &s.tags, &s.attributes,
-                          &s.url_schemes, &s.allow_relative, &s.on_disallowed, &s.strip_comments, &s.add_link_rel,
-                          &s.attribute_filter, &s.set_attributes, &s.remove_with_content, &s.css_properties,
-                          &s.attribute_prefixes, &s.attribute_values, &s.media_hosts, &s.strip_templates, &removed,
-                          &s.allowed_styles, &s.transform_tags, &s.isolate_named_props, &s.custom_element_check,
-                          &s.custom_attribute_check, &s.allow_customized_builtins, &s.allow_html, &s.allow_svg,
-                          &s.allow_mathml)) {
+    if (!PyArg_ParseTuple(args, "OOOOpipOOOOOOOOpOOOpOOpppp:_sanitize", &source, &s.tags, &s.attributes, &s.url_schemes,
+                          &s.allow_relative, &s.on_disallowed, &s.strip_comments, &s.add_link_rel, &s.attribute_filter,
+                          &s.set_attributes, &s.remove_with_content, &s.css_properties, &s.attribute_prefixes,
+                          &s.attribute_values, &s.media_hosts, &s.strip_templates, &removed, &s.allowed_styles,
+                          &s.transform_tags, &s.isolate_named_props, &s.custom_element_check, &s.custom_attribute_check,
+                          &s.allow_customized_builtins, &s.allow_html, &s.allow_svg, &s.allow_mathml)) {
         return NULL;
     }
     s.removed = removed == Py_None ? NULL : removed;
@@ -2121,25 +2121,36 @@ PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
         require_anyset(s.media_hosts, "media_hosts") < 0 || require_prefixes(s.attribute_prefixes) < 0) {
         return NULL;
     }
-    th_tree *source_tree;
-    th_node *source_root;
-    if (turbohtml_node_borrow(module, element, &source_tree, &source_root) < 0) { /* GCOVR_EXCL_BR_LINE: the public
-                                                                                  facade passes a parsed Element */
-        return NULL; /* GCOVR_EXCL_LINE: private-call type error */
-    }
-    if (source_root->type != TH_NODE_ELEMENT) {
-        PyErr_SetString(PyExc_TypeError, "_sanitize() requires an Element");
-        return NULL;
-    }
-    s.tree = th_tree_new();
-    if (s.tree == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    th_tree_set_xml(s.tree, th_tree_is_xml(source_tree));
     th_node *root;
-    Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(element));
-    root = th_tree_copy_node(s.tree, source_tree, source_root);
-    Py_END_CRITICAL_SECTION();
+    PyObject *retained_source = NULL;
+    if (PyUnicode_Check(source)) {
+        s.tree = th_tree_parse_fragment(PyUnicode_KIND(source), PyUnicode_DATA(source), PyUnicode_GET_LENGTH(source),
+                                        "div", 3, 0, 0, 0, 0);
+        if (s.tree == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        root = th_tree_document(s.tree);
+        retained_source = source;
+    } else {
+        th_tree *source_tree;
+        th_node *source_root;
+        if (turbohtml_node_borrow(module, source, &source_tree, &source_root) < 0) { /* GCOVR_EXCL_BR_LINE: the typed
+                                                                                     facade passes str or Element */
+            return NULL; /* GCOVR_EXCL_LINE: private-call type error */
+        }
+        if (source_root->type != TH_NODE_ELEMENT) {
+            PyErr_SetString(PyExc_TypeError, "_sanitize() requires HTML text or an Element");
+            return NULL;
+        }
+        s.tree = th_tree_new();
+        if (s.tree == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        th_tree_set_xml(s.tree, th_tree_is_xml(source_tree));
+        Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(source));
+        root = th_tree_copy_node(s.tree, source_tree, source_root);
+        Py_END_CRITICAL_SECTION();
+    }
     if (root == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(s.tree);    /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
@@ -2169,5 +2180,16 @@ PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
         th_tree_free(s.tree);
         return NULL;
     }
-    return wrap_fresh_tree_node(PyModule_GetState(module), s.tree, root);
+    if (retained_source == NULL) {
+        return wrap_fresh_tree_node(PyModule_GetState(module), s.tree, root);
+    }
+    module_state *state = PyModule_GetState(module);
+    PyObject *handle = handle_new(state, s.tree, retained_source, Py_None, 0);
+    if (handle == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(s.tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;          /* GCOVR_EXCL_LINE */
+    }
+    PyObject *wrapped = node_wrap(state, handle, root);
+    Py_DECREF(handle);
+    return wrapped;
 }

@@ -21,7 +21,7 @@ from itertools import starmap
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
-from turbohtml._html import _sanitize, parse_fragment
+from turbohtml._html import _sanitize
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -350,9 +350,8 @@ class Sanitizer:
     def _filter(self, html: str, removed: list[tuple[str, str | None]] | None) -> Element:
         """Run the C walk over a freshly parsed fragment, appending drops to ``removed`` when it is not None."""
         policy = self.policy
-        root = parse_fragment(html)
         return _sanitize(
-            root,
+            html,
             policy.tags,
             self._attributes,
             policy.url_schemes,

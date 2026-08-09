@@ -10,7 +10,8 @@ per-format helpers :meth:`Document.json_ld`, :meth:`Document.opengraph`, :meth:`
 result records below are handed back from it.
 
 The nested-record methods :meth:`Document.microdata`, :meth:`Document.rdfa`, and :meth:`Document.structured_data` raise
-:exc:`RecursionError` for documents nested 400 levels or deeper, before returning a partial result.
+:exc:`RecursionError` for documents nested 400 levels or deeper. Microdata also rejects cyclic ``itemref`` graphs after
+400 nested resources. Neither case returns a partial result.
 
 .. autoclass:: StructuredData
     :members:

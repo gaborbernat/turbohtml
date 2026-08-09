@@ -11,9 +11,9 @@ record with a stable six-field shape -- ``json_ld``, ``microdata``, ``opengraph`
 ``microformats`` reserved for a later phase -- so code that reads it does not break when that format lands. The records
 hold no reference back into the tree, so they outlive the document they came from.
 
-Nested Microdata and RDFa resources become nested Python records. Documents nested 400 levels or deeper raise
-:exc:`RecursionError` before those records are built; the flat JSON-LD, OpenGraph, and Dublin Core helpers remain
-iterative.
+Nested Microdata and RDFa resources become nested Python records. Documents nested 400 levels or deeper, and cyclic
+Microdata ``itemref`` graphs that nest 400 resources, raise :exc:`RecursionError` without returning partial records. The
+flat JSON-LD, OpenGraph, and Dublin Core helpers remain iterative.
 
 *********************
  Where the work runs

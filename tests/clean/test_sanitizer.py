@@ -1169,7 +1169,7 @@ def test_sanitize_rejects_non_element() -> None:
         frozenset(), {}, frozenset(), True, 0, True, None, None, {}, frozenset(), frozenset(), frozenset(), {},
         frozenset(), False, None, {}, {}, False, None, None, False, True, True, True,
     )  # fmt: skip
-    with pytest.raises(TypeError, match="requires an Element"):
+    with pytest.raises(TypeError, match="requires HTML text or an Element"):
         _sanitize(parse("<p>x</p>"), *policy_args)  # ty: ignore[invalid-argument-type]
 
 

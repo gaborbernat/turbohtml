@@ -150,9 +150,9 @@ PyObject *turbohtml_url_to_ascii(PyObject *module, PyObject *arg);
    tables, the site boundary behind extract_links(external_only=True). METH_O. */
 PyObject *turbohtml_registrable_domain(PyObject *module, PyObject *arg);
 
-/* Implemented in sanitize.c. _sanitize filters a parsed fragment in place against
-   a policy; signature matches METH_VARARGS. turbohtml_node_borrow is implemented
-   in dom/node.c and lends sanitize.c the tree+node a Python element wraps. */
+/* Implemented in sanitize.c. _sanitize parses text into a private tree or snapshots an existing Element, then filters
+   that owned tree against a policy; signature matches METH_VARARGS. turbohtml_node_borrow is implemented in dom/node.c
+   and lends sanitize.c the tree+node a Python element wraps. */
 struct th_tree;
 struct th_node;
 int turbohtml_node_borrow(PyObject *module, PyObject *obj, struct th_tree **tree, struct th_node **node);

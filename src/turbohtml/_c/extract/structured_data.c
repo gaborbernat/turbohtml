@@ -165,6 +165,8 @@ typedef struct {
     module_state *state;
     th_tree *tree;
     PyObject *base;
+    Py_ssize_t item_depth;
+    const char *operation;
     micro_id_index ids;
 } micro_ctx;
 
@@ -201,10 +203,18 @@ static PyObject *attr_value_or_none(const th_node_attr *attr) {
 /* One Microdata property element's value: a nested MicrodataItem when it carries itemscope, otherwise the HTML
    Microdata value algorithm (a URL attribute for the link/media tags, datetime or text for <time>, content for <meta>,
    else the element's text content). A URL-valued attribute is absolutized against `base` when the caller passed one
-   (base is NULL otherwise, leaving values verbatim). NULL only on the excluded allocation-failure path. */
+   (base is NULL otherwise, leaving values verbatim). NULL on the recursion limit or allocation failure. */
 static PyObject *microdata_value(micro_ctx *ctx, th_node *element) {
     if (find_node_attr(element, TH_ATTR_ITEMSCOPE) != NULL) {
-        return build_item(ctx, element);
+        if (ctx->item_depth >= STRUCTURED_DATA_MAX_RECURSIVE_DEPTH) {
+            PyErr_Format(PyExc_RecursionError, "%s does not support nested items %zd levels or deeper", ctx->operation,
+                         STRUCTURED_DATA_MAX_RECURSIVE_DEPTH);
+            return NULL;
+        }
+        ctx->item_depth++;
+        PyObject *item = build_item(ctx, element);
+        ctx->item_depth--;
+        return item;
     }
     if (element->atom == TH_TAG_TIME) {
         Py_ssize_t datetime = th_node_attr_find(ctx->tree, element, "datetime", 8);
@@ -559,8 +569,8 @@ done:
 
 /* Steal `value` into slot `index` of `tuple`, returning -1 when its section builder failed. */
 static int tuple_set_or_fail(PyObject *tuple, Py_ssize_t index, PyObject *value) {
-    if (value == NULL) { /* GCOVR_EXCL_BR_LINE: only allocation failure or a mutation timed between locked passes */
-        return -1;       /* GCOVR_EXCL_LINE: unforceable failure timing */
+    if (value == NULL) {
+        return -1;
     }
     PyTuple_SET_ITEM(tuple, index, value);
     return 0;
@@ -568,15 +578,15 @@ static int tuple_set_or_fail(PyObject *tuple, Py_ssize_t index, PyObject *value)
 
 /* Build one MicrodataItem(type, id, properties): the verbatim itemtype / itemid attribute (or None when absent or
    valueless) and a properties mapping of each itemprop name to its list of values, each value a str or a nested
-   MicrodataItem. NULL only on the excluded allocation-failure path. */
+   MicrodataItem. NULL on the recursion limit or allocation failure. */
 static PyObject *build_item(micro_ctx *ctx, th_node *element) {
     PyObject *properties = PyDict_New();
     if (properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (collect_properties(ctx, element, properties) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        Py_DECREF(properties);                              /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;                                        /* GCOVR_EXCL_LINE */
+    if (collect_properties(ctx, element, properties) < 0) {
+        Py_DECREF(properties);
+        return NULL;
     }
     PyObject *type_obj = attr_value_or_none(find_node_attr(element, TH_ATTR_ITEMTYPE));
     if (type_obj == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation-failure path */
@@ -712,28 +722,43 @@ static PyObject *gather_opengraph(PyObject *self, PyObject *base) {
 
 /* Build one MicrodataItem for every top-level Microdata item (an element with itemscope and no itemprop, so it is not a
    property of another item). URL-valued properties are absolutized against `base` when the caller passed one (base is
-   NULL otherwise, leaving values verbatim). NULL only on the excluded allocation-failure path. */
-static PyObject *gather_microdata(PyObject *self, PyObject *base) {
+   NULL otherwise, leaving values verbatim). NULL on the recursion limit or allocation failure. */
+static th_node *bounded_preorder_next(th_node *node, th_node *root, Py_ssize_t *depth, const char *operation) {
+    if (node->first_child != NULL) {
+        (*depth)++;
+        if (*depth >= STRUCTURED_DATA_MAX_RECURSIVE_DEPTH) {
+            PyErr_Format(PyExc_RecursionError, "%s does not support trees nested %zd levels or deeper", operation,
+                         STRUCTURED_DATA_MAX_RECURSIVE_DEPTH);
+            return NULL;
+        }
+        return node->first_child;
+    }
+    while (node != root && node->next_sibling == NULL) {
+        node = node->parent;
+        (*depth)--;
+    }
+    return node == root ? NULL : node->next_sibling;
+}
+
+static PyObject *gather_microdata(PyObject *self, PyObject *base, const char *operation) {
     PyObject *items = PyList_New(0);
     if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_tree *tree = tree_of(self);
     th_node *root = ((NodeObject *)self)->node;
-    micro_ctx ctx = {state_of(self), tree, base, {NULL, 0, 0}};
+    micro_ctx ctx = {state_of(self), tree, base, 0, operation, {NULL, 0, 0}};
     int failed = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    failed = th_node_check_max_depth(root, STRUCTURED_DATA_MAX_RECURSIVE_DEPTH, "microdata()") < 0;
-    if (!failed) {
-        for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
-            if (node->type != TH_NODE_ELEMENT || find_node_attr(node, TH_ATTR_ITEMSCOPE) == NULL ||
-                find_node_attr(node, TH_ATTR_ITEMPROP) != NULL) {
-                continue;
-            }
+    Py_ssize_t depth = 1;
+    th_node *node = root->first_child;
+    while (!failed && node != NULL) {
+        if (node->type == TH_NODE_ELEMENT && find_node_attr(node, TH_ATTR_ITEMSCOPE) != NULL &&
+            find_node_attr(node, TH_ATTR_ITEMPROP) == NULL) {
             PyObject *item = build_item(&ctx, node);
-            if (item == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                failed = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
-                break;          /* GCOVR_EXCL_LINE */
+            if (item == NULL) {
+                failed = 1;
+                break;
             }
             int append_failed = PyList_Append(items, item) < 0;
             Py_DECREF(item);
@@ -742,12 +767,14 @@ static PyObject *gather_microdata(PyObject *self, PyObject *base) {
                 break;           /* GCOVR_EXCL_LINE */
             }
         }
+        node = bounded_preorder_next(node, root, &depth, operation);
+        failed = node == NULL && PyErr_Occurred() != NULL;
     }
     Py_END_CRITICAL_SECTION();
     PyMem_Free(ctx.ids.slots);
-    if (failed) {         /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        Py_DECREF(items); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;      /* GCOVR_EXCL_LINE */
+    if (failed) {
+        Py_DECREF(items);
+        return NULL;
     }
     return items;
 }
@@ -1023,9 +1050,10 @@ static PyObject *rdfa_subject(th_tree *tree, th_node *element, PyObject *base) {
     return Py_NewRef(Py_None);
 }
 
-static PyObject *build_rdfa_item(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx);
+static PyObject *build_rdfa_item(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx, Py_ssize_t depth,
+                                 const char *operation);
 static int collect_rdfa_properties(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx,
-                                   PyObject *properties);
+                                   PyObject *properties, Py_ssize_t depth, const char *operation);
 
 /* The expanded @typeof IRIs of an element as a list, empty for a valueless typeof. The caller only reaches here for an
    element carrying typeof, so the attribute is present. NULL only on the excluded allocation-failure path. */
@@ -1067,7 +1095,8 @@ static PyObject *expand_typeof(th_tree *tree, th_node *element, rdfa_ctx ctx) {
 /* One RDFa property element's object: the @content literal, else a nested RdfaItem when the element carries @typeof,
    else the @resource/@href/@src IRI (absolutized against base when set), else a <time> @datetime literal, else the
    element's text content. NULL only on the excluded allocation-failure path. */
-static PyObject *rdfa_value(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx) {
+static PyObject *rdfa_value(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx, Py_ssize_t depth,
+                            const char *operation) {
     Py_ssize_t content = th_node_attr_find(tree, element, "content", 7);
     if (content >= 0) {
         const th_node_attr *attr = &element->attrs[content];
@@ -1077,7 +1106,7 @@ static PyObject *rdfa_value(th_tree *tree, module_state *state, th_node *element
         return ucs4_to_str(attr->value, attr->value_len);
     }
     if (th_node_attr_find(tree, element, "typeof", 6) >= 0) {
-        return build_rdfa_item(tree, state, element, ctx);
+        return build_rdfa_item(tree, state, element, ctx, depth, operation);
     }
     static const char *const iri_names[] = {"resource", "href", "src"};
     static const Py_ssize_t iri_lens[] = {8, 4, 3};
@@ -1107,16 +1136,17 @@ static PyObject *rdfa_value(th_tree *tree, module_state *state, th_node *element
 }
 
 /* Build one RdfaItem(vocab, type, resource, properties) for the typeof element rooted at `element`, its properties
-   collected from the subtree under the element's own evaluation context. NULL only on the excluded allocation-failure
-   path. */
-static PyObject *build_rdfa_item(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx) {
+   collected from the subtree under the element's own evaluation context. NULL on the recursion limit or allocation
+   failure. */
+static PyObject *build_rdfa_item(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx, Py_ssize_t depth,
+                                 const char *operation) {
     PyObject *properties = PyDict_New();
     if (properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (collect_rdfa_properties(tree, state, element, ctx, properties) < 0) { /* GCOVR_EXCL_BR_LINE: alloc-failure */
-        Py_DECREF(properties);                                                /* GCOVR_EXCL_LINE: allocation-failure */
-        return NULL;                                                          /* GCOVR_EXCL_LINE */
+    if (collect_rdfa_properties(tree, state, element, ctx, properties, depth, operation) < 0) {
+        Py_DECREF(properties);
+        return NULL;
     }
     PyObject *type_list = expand_typeof(tree, element, ctx);
     if (type_list == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation-failure path */
@@ -1188,10 +1218,11 @@ done:
 /* Process one child of an item's subtree: record its @property value(s), then descend unless it is itself a @typeof
    (whose own subtree belongs to the nested item, mirroring microdata's nested itemscope). -1 only on the excluded
    allocation-failure path. */
-static int collect_rdfa_child(th_tree *tree, module_state *state, th_node *child, rdfa_ctx ctx, PyObject *properties) {
+static int collect_rdfa_child(th_tree *tree, module_state *state, th_node *child, rdfa_ctx ctx, PyObject *properties,
+                              Py_ssize_t depth, const char *operation) {
     Py_ssize_t property = th_node_attr_find(tree, child, "property", 8);
     if (property >= 0 && child->attrs[property].value != NULL) {
-        PyObject *value = rdfa_value(tree, state, child, ctx);
+        PyObject *value = rdfa_value(tree, state, child, ctx, depth, operation);
         if (value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -1205,13 +1236,18 @@ static int collect_rdfa_child(th_tree *tree, module_state *state, th_node *child
     if (th_node_attr_find(tree, child, "typeof", 6) >= 0) {
         return 0;
     }
-    return collect_rdfa_properties(tree, state, child, ctx, properties);
+    return collect_rdfa_properties(tree, state, child, ctx, properties, depth, operation);
 }
 
 /* Crawl the descendants of the item rooted at `element`, gathering their @property values under `properties` and
    threading each child's @vocab/@prefix context. -1 only on the excluded allocation-failure path. */
 static int collect_rdfa_properties(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx,
-                                   PyObject *properties) {
+                                   PyObject *properties, Py_ssize_t depth, const char *operation) {
+    if (depth >= STRUCTURED_DATA_MAX_RECURSIVE_DEPTH) {
+        PyErr_Format(PyExc_RecursionError, "%s does not support trees nested %zd levels or deeper", operation,
+                     STRUCTURED_DATA_MAX_RECURSIVE_DEPTH);
+        return -1;
+    }
     for (th_node *child = element->first_child; child != NULL; child = child->next_sibling) {
         if (child->type != TH_NODE_ELEMENT) {
             continue;
@@ -1223,7 +1259,7 @@ static int collect_rdfa_properties(th_tree *tree, module_state *state, th_node *
                                                                                         allocation-failure path */
             return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        int status = collect_rdfa_child(tree, state, child, child_ctx, properties);
+        int status = collect_rdfa_child(tree, state, child, child_ctx, properties, depth + 1, operation);
         release_child_ctx(&child_ctx, vocab_owned, prefixes_owned);
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: a child fails only on unforceable allocation */
             return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1233,9 +1269,15 @@ static int collect_rdfa_properties(th_tree *tree, module_state *state, th_node *
 }
 
 /* Walk `element`'s subtree for the outermost @typeof elements, building one top-level RdfaItem each (its own subtree is
-   consumed by build_rdfa_item, so the walk does not descend into it) and threading @vocab/@prefix down. -1 only on the
-   excluded allocation-failure path. */
-static int walk_rdfa(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx, PyObject *items) {
+   consumed by build_rdfa_item, so the walk does not descend into it) and threading @vocab/@prefix down. -1 on the
+   recursion limit or allocation failure. */
+static int walk_rdfa(th_tree *tree, module_state *state, th_node *element, rdfa_ctx ctx, PyObject *items,
+                     Py_ssize_t depth, const char *operation) {
+    if (depth >= STRUCTURED_DATA_MAX_RECURSIVE_DEPTH) {
+        PyErr_Format(PyExc_RecursionError, "%s does not support trees nested %zd levels or deeper", operation,
+                     STRUCTURED_DATA_MAX_RECURSIVE_DEPTH);
+        return -1;
+    }
     for (th_node *child = element->first_child; child != NULL; child = child->next_sibling) {
         if (child->type != TH_NODE_ELEMENT) {
             continue;
@@ -1249,27 +1291,27 @@ static int walk_rdfa(th_tree *tree, module_state *state, th_node *element, rdfa_
         }
         int status;
         if (th_node_attr_find(tree, child, "typeof", 6) >= 0) {
-            PyObject *item = build_rdfa_item(tree, state, child, child_ctx);
-            if (item == NULL) { /* GCOVR_EXCL_BR_LINE: build fails only on unforceable allocation */
-                release_child_ctx(&child_ctx, vocab_owned, prefixes_owned); /* GCOVR_EXCL_LINE: alloc-failure path */
-                return -1;                                                  /* GCOVR_EXCL_LINE */
+            PyObject *item = build_rdfa_item(tree, state, child, child_ctx, depth + 1, operation);
+            if (item == NULL) {
+                release_child_ctx(&child_ctx, vocab_owned, prefixes_owned);
+                return -1;
             }
             status = PyList_Append(items, item);
             Py_DECREF(item);
         } else {
-            status = walk_rdfa(tree, state, child, child_ctx, items);
+            status = walk_rdfa(tree, state, child, child_ctx, items, depth + 1, operation);
         }
         release_child_ctx(&child_ctx, vocab_owned, prefixes_owned);
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: append/recursion fails only on unforceable allocation */
-            return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (status < 0) {
+            return -1;
         }
     }
     return 0;
 }
 
 /* Build one RdfaItem for every top-level RDFa resource, absolutizing IRIs against `base` when the caller passed one.
-   NULL only on the excluded allocation-failure path. */
-static PyObject *gather_rdfa(PyObject *self, PyObject *base) {
+   NULL on the recursion limit or allocation failure. */
+static PyObject *gather_rdfa(PyObject *self, PyObject *base, const char *operation) {
     PyObject *items = PyList_New(0);
     if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1279,22 +1321,21 @@ static PyObject *gather_rdfa(PyObject *self, PyObject *base) {
     th_node *root = ((NodeObject *)self)->node;
     int failed = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    failed = th_node_check_max_depth(root, STRUCTURED_DATA_MAX_RECURSIVE_DEPTH, "rdfa()") < 0;
     /* A document that never interns a typeof attribute carries no RDFa resource, so skip the walk and the prefix map it
        would need -- this is the whole cost of the RDFa pass on the pages (most of them) that use no RDFa. */
-    if (!failed && th_attr_lookup(tree, "typeof", 6) != UINT32_MAX) {
+    if (th_attr_lookup(tree, "typeof", 6) != UINT32_MAX) {
         PyObject *prefixes = build_default_prefixes();
         failed = prefixes == NULL; /* the build fails only on unforceable allocation */
         if (prefixes != NULL) {    /* GCOVR_EXCL_BR_LINE: the build fails only on unforceable allocation */
             rdfa_ctx ctx = {NULL, prefixes, base};
-            failed = walk_rdfa(tree, state, root, ctx, items) < 0;
+            failed = walk_rdfa(tree, state, root, ctx, items, 0, operation) < 0;
             Py_DECREF(prefixes);
         }
     }
     Py_END_CRITICAL_SECTION();
-    if (failed) {         /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        Py_DECREF(items); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;      /* GCOVR_EXCL_LINE */
+    if (failed) {
+        Py_DECREF(items);
+        return NULL;
     }
     return items;
 }
@@ -1513,7 +1554,7 @@ PyObject *turbohtml_document_microdata(PyObject *self, PyObject *args, PyObject 
     if (parse_base_url(self, args, kwargs, "|O:microdata", &base) < 0) {
         return NULL;
     }
-    PyObject *result = gather_microdata(self, base);
+    PyObject *result = gather_microdata(self, base, "microdata()");
     Py_XDECREF(base);
     return result;
 }
@@ -1524,7 +1565,7 @@ PyObject *turbohtml_document_rdfa(PyObject *self, PyObject *args, PyObject *kwar
     if (parse_base_url(self, args, kwargs, "|O:rdfa", &base) < 0) {
         return NULL;
     }
-    PyObject *result = gather_rdfa(self, base);
+    PyObject *result = gather_rdfa(self, base, "rdfa()");
     Py_XDECREF(base);
     return result;
 }
@@ -1544,31 +1585,24 @@ PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyO
     if (parse_base_url(self, args, kwargs, "|O:structured_data", &base) < 0) {
         return NULL;
     }
-    int safe;
-    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    safe =
-        th_node_check_max_depth(((NodeObject *)self)->node, STRUCTURED_DATA_MAX_RECURSIVE_DEPTH, "structured_data()");
-    Py_END_CRITICAL_SECTION();
-    if (safe < 0) {
-        Py_XDECREF(base);
-        return NULL;
-    }
     PyObject *sections = PyTuple_New(6);
     if (sections == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_XDECREF(base);   /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;        /* GCOVR_EXCL_LINE */
     }
     /* A section fails only after an allocation failure or a mutation between separately locked passes. */
-    int failed = tuple_set_or_fail(sections, 0, turbohtml_document_json_ld(self, NULL)) < 0 || /* GCOVR_EXCL_BR_LINE */
-                 tuple_set_or_fail(sections, 1, gather_microdata(self, base)) < 0 ||           /* GCOVR_EXCL_BR_LINE */
-                 tuple_set_or_fail(sections, 2, gather_opengraph(self, base)) < 0 ||           /* GCOVR_EXCL_BR_LINE */
-                 tuple_set_or_fail(sections, 3, PyList_New(0)) < 0 ||                          /* GCOVR_EXCL_BR_LINE */
-                 tuple_set_or_fail(sections, 4, gather_rdfa(self, base)) < 0 ||                /* GCOVR_EXCL_BR_LINE */
+    /* GCOVR_EXCL_BR_START */
+    int failed = tuple_set_or_fail(sections, 0, turbohtml_document_json_ld(self, NULL)) < 0 ||
+                 tuple_set_or_fail(sections, 1, gather_microdata(self, base, "structured_data()")) < 0 ||
+                 tuple_set_or_fail(sections, 2, gather_opengraph(self, base)) < 0 ||
+                 tuple_set_or_fail(sections, 3, PyList_New(0)) < 0 ||
+                 tuple_set_or_fail(sections, 4, gather_rdfa(self, base, "structured_data()")) < 0 ||
                  tuple_set_or_fail(sections, 5, gather_dublin_core(self)) < 0;
+    /* GCOVR_EXCL_BR_STOP */
     Py_XDECREF(base);
-    if (failed) {            /* GCOVR_EXCL_BR_LINE: only allocation failure or concurrent mutation between passes */
-        Py_DECREF(sections); /* GCOVR_EXCL_LINE: unforceable failure timing */
-        return NULL;         /* GCOVR_EXCL_LINE */
+    if (failed) {
+        Py_DECREF(sections);
+        return NULL;
     }
     PyObject *result = PyObject_Call(state_of(self)->structured_data_type, sections, NULL);
     Py_DECREF(sections);

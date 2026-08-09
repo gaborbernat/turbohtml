@@ -77,8 +77,9 @@ SVG animation needs an element rule in addition to direct attribute checks. ``an
 The policy walk uses an explicit checked stack rather than C recursion. Deep input therefore reaches the same final
 safety pass as shallow input; nesting cannot truncate the sanitized result or skip a descendant's checks.
 
-The native walk snapshots its input under the tree's critical section, then releases the shared tree before invoking a
-policy callback. Callback code may retain or mutate the original tree without racing the sanitizer's private copy.
+The string API parses directly into the private tree that the native walk mutates. The internal Element entrypoint
+instead snapshots its input under the tree's critical section, then releases the shared tree before invoking a policy
+callback. Callback code may retain or mutate the original tree without racing the sanitizer's private copy.
 
 The ``allow_html``/``allow_svg``/``allow_mathml`` profiles are the coarsest subtractive layer of all: each drops a whole
 content language above the allowlist, so a namespace a policy disables is gone no matter which of its tags appear in

@@ -183,6 +183,24 @@ def test_structured_data_rejects_deep_xml_before_building_results(method: str) -
         getattr(document, method)()
 
 
+@pytest.mark.parametrize("method", ["rdfa", "structured_data"])
+def test_rdfa_rejects_deep_resource_properties(method: str) -> None:
+    document = parse_xml("<item typeof='Thing'>" + "<x>" * _DEEP + "value" + "</x>" * _DEEP + "</item>")
+    with pytest.raises(RecursionError, match=rf"{method}\(\).*400"):
+        getattr(document, method)()
+
+
+@pytest.mark.parametrize("method", ["microdata", "structured_data"])
+def test_microdata_rejects_recursive_itemref_graph(method: str) -> None:
+    document = parse(
+        "<div itemscope itemref=a></div>"
+        "<div id=a itemscope itemprop=x itemref=b></div>"
+        "<div id=b itemscope itemprop=y itemref=a></div>"
+    )
+    with pytest.raises(RecursionError, match=rf"{method}\(\).*400"):
+        getattr(document, method)()
+
+
 def test_deep_operations_fit_a_small_thread_stack() -> None:
     roots = [
         parse_xml("<x>" * _DEEP + "bottom" + "</x>" * _DEEP).root,
