@@ -87,10 +87,9 @@ thirty. Its figure there is the cost of finding nothing.
     :file: bench/linkify.json
 
 The detection primitive on its own, :meth:`turbohtml.clean.LinkDetector.find` against ``LinkifyIt().match`` and
-:meth:`~turbohtml.clean.LinkDetector.has_link` against ``LinkifyIt().test``, scans a run of plain text and returns the
-spans or a boolean without rewriting any HTML, so this isolates the C scan from the full linkify rewrite above. It runs
-51 to 103 times faster, except on the ``has_link`` prose row (2.8x), where ``test`` short-circuits on the first link
-near the start.
+:meth:`~turbohtml.clean.LinkDetector.has_link` against ``LinkifyIt().test``, scans a run of plain text without rewriting
+HTML. Both libraries stop on the first valid match; turbohtml allocates no span list. The large-tail case starts with a
+link followed by 220 KiB of prose to catch a return to full-input scanning.
 
 .. bench-table::
     :file: bench/linkify-2.json
@@ -380,6 +379,27 @@ pays, and turbohtml's compiled program stays ahead per evaluation.
 
 .. bench-table::
     :file: bench/querying-5.json
+
+******
+ XSLT
+******
+
+:class:`turbohtml.transform.Transform` compiles one stylesheet into a native model with reusable XPath programs. Each
+application allocates source-specific indexes and output state. Callers can use one ``Transform`` instance with
+different documents and parameters across threads.
+
+The first table measures construction. The other two measure a 120-row catalog and ten calls to a 300-template
+stylesheet. That stylesheet has 299 unused templates and 24 static ``xsl:number`` patterns in its used template; the
+repeated result includes any stylesheet analysis or XPath compilation left in the application path.
+
+.. bench-table::
+    :file: bench/xslt-compile.json
+
+.. bench-table::
+    :file: bench/xslt.json
+
+.. bench-table::
+    :file: bench/xslt-reuse.json
 
 ************
  Node paths

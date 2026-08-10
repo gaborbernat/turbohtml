@@ -123,6 +123,9 @@ from ._stubs.features import (
     _linkify_find as _linkify_find,
 )
 from ._stubs.features import (
+    _linkify_has as _linkify_has,
+)
+from ._stubs.features import (
     _linkify_scan as _linkify_scan,
 )
 from ._stubs.features import (
@@ -223,6 +226,9 @@ from ._stubs.query import (
 )
 from ._stubs.query import (
     _xpath_parse as _xpath_parse,
+)
+from ._stubs.query import (
+    _xslt_compile as _xslt_compile,
 )
 from ._stubs.query import (
     _xslt_resolve_imports as _xslt_resolve_imports,
