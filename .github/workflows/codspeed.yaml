@@ -26,8 +26,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # meson project() derives the version from git history
-          submodules: true # the benchmarks read the vendored html5lib-python and War-and-Peace corpora
           persist-credentials: false
+      - name: ⬇️ Install benchmark data
+        run: git submodule update --init --depth 1 tools/html5lib-python tools/bench-data/war-and-peace
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -49,7 +50,7 @@ jobs:
         env:
           UV_PYTHON_PREFERENCE: only-managed
       - name: 🚀 Run benchmarks
-        uses: CodSpeedHQ/action@88472375d0a4572cf70a9f1fe3a4e0ab8da1b924 # v5.0.1
+        uses: CodSpeedHQ/action@0ca9cbbf4623b599a6c3ed4fc8a922942705d9f1 # v5.0.2
         env:
           # GitHub hands each run a different physical CPU (Intel Xeon with AVX-512, or AMD EPYC without), and glibc
           # dispatches a different SIMD memcpy/memmove per CPU, so Callgrind counts different instructions for the same
@@ -60,5 +61,7 @@ jobs:
           # the arena count reaches the measurement. One arena is the same arena on every runner.
           GLIBC_TUNABLES: "glibc.cpu.hwcaps=-AVX512F,-AVX512VL,-AVX512BW,-AVX512DQ,-AVX512CD,-AVX2,-AVX,-ERMS,-FSRM:glibc.malloc.arena_max=1"
         with:
+          # Allocator instruction counts still vary across GitHub CPU models after pinning glibc's dispatch and arenas.
+          exclude-allocations: true
           mode: simulation
           run: .tox/codspeed/bin/python -m pytest tests/benchmarks --codspeed

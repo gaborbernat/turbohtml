@@ -94,6 +94,22 @@ parse5). The convention is deliberate:
 The vendored ``html5lib-tests`` conformance data is separate: it lives under ``tests/dom``, ``tests/tokenizer``, and
 ``tests/encoding`` (not ``tests/conformance``) and runs in the ordinary matrix, so it is unaffected by the above.
 
+The committed ``tests/conformance/data/wpt_html_tree.json`` tracks the living WPT tree-construction corpus as a source
+apart from the frozen ``html5lib-tests`` data. Refresh it every three months and before releases or after WHATWG parsing
+changes. Check out the desired WPT revision before running the one command that updates the pin and prints the tree and
+parse-error results:
+
+::
+
+    python tools/generate_wpt_tree_corpus.py /path/to/wpt tests/conformance/data/wpt_html_tree.json
+
+The pin at ``4830edb`` contains 1920 cases. Four fixtures require the `script processing model
+<https://html.spec.whatwg.org/multipage/scripting.html#script-processing-model>`_ and therefore a JavaScript runtime;
+the parser denominator is 1916. TurboHTML matches all 1916 applicable fixture trees. Each JavaScript exclusion and each
+error adjustment for a processing instruction carries its specification and fixture links in the committed JSON. The
+exact comparison covers the 283 document cases that publish ``#new-errors`` data because the public fragment API does
+not expose parse errors.
+
 *********
  Fuzzing
 *********

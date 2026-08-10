@@ -14,6 +14,7 @@ static int stack_push(th_tree *tree, th_node *node);
 static void stack_pop(th_tree *tree);
 static th_node *insert_element(th_tree *tree, const th_token *token);
 static void insert_comment(th_tree *tree, const th_token *token, th_node *parent);
+static void insert_comment_or_pi(th_tree *tree, const th_token *token, th_node *parent);
 static void insert_text(th_tree *tree, Py_UCS4 *text, Py_ssize_t len);
 static Py_UCS4 *token_text(th_tree *tree, const th_token *token, Py_ssize_t *out_len);
 static uint16_t tok_atom(const th_token *tok);
@@ -264,7 +265,8 @@ static int is_foreign_breakout(uint16_t atom) {
 
 /* Insert an element into a foreign (SVG/MathML) namespace, adjusting an SVG
    element's name to its mixed-case spelling. */
-static th_node *insert_foreign(th_tree *tree, const th_token *token, uint8_t ns) {
+static th_node *insert_foreign(th_tree *tree, th_token *token, uint8_t ns) {
+    token->self_closing_acknowledged = 1;
     th_node *node = insert_element(tree, token);
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
@@ -325,6 +327,17 @@ static int token_has_attr(const th_token *token, const char *name) {
     return 0;
 }
 
+static void pop_foreign_elements(th_tree *tree) {
+    while (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE: the html root keeps the stack nonempty */
+        th_node *cur = current_node(tree);
+        if (cur->ns == TH_NS_HTML || is_mathml_text_integration(cur) || is_html_integration(cur) ||
+            cur == tree->fragment_root) {
+            return;
+        }
+        stack_pop(tree);
+    }
+}
+
 /* Whether the token is processed by foreign-content rules rather than the
    current HTML insertion mode (the tree-construction dispatcher). */
 static int use_foreign_rules(th_tree *tree, const th_token *token) {
@@ -358,7 +371,7 @@ static int use_foreign_rules(th_tree *tree, const th_token *token) {
 
 /* Process a token under foreign-content rules. Returns 1 when handled, 0 when an
    HTML breakout/end-tag match means the caller should run the HTML rules. */
-static int foreign_step(th_tree *tree, const th_token *token) {
+static int foreign_step(th_tree *tree, th_token *token) {
     if (token->kind == TH_TEXT) {
         Py_ssize_t len;
         Py_UCS4 *text = token_text(tree, token, &len);
@@ -376,8 +389,8 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         insert_text(tree, text, len);
         return 1;
     }
-    if (token->kind == TH_COMMENT) {
-        insert_comment(tree, token, NULL);
+    if (token->kind == TH_COMMENT || token->kind == TH_PI) {
+        insert_comment_or_pi(tree, token, NULL);
         return 1;
     }
     if (token->kind == TH_DOCTYPE) {
@@ -389,15 +402,7 @@ static int foreign_step(th_tree *tree, const th_token *token) {
                        (atom == TH_TAG_FONT && (token_has_attr(token, "color") || token_has_attr(token, "face") ||
                                                 token_has_attr(token, "size")));
         if (breakout) {
-            /* html is never foreign, so the breakout loop never empties the stack */
-            while (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE */
-                th_node *cur = current_node(tree);
-                if (cur->ns == TH_NS_HTML || is_mathml_text_integration(cur) || is_html_integration(cur) ||
-                    cur == tree->fragment_root) {
-                    break; /* never pop the fragment's context root */
-                }
-                stack_pop(tree);
-            }
+            pop_foreign_elements(tree);
             return 0; /* reprocess under HTML rules */
         }
         uint8_t ns = current_node(tree)->ns;
@@ -408,11 +413,13 @@ static int foreign_step(th_tree *tree, const th_token *token) {
         }
         return 1;
     }
-    /* "any other end tag", which includes </br> and </p>: walk up the stack, stop at
-       the first HTML element and run the HTML rules there (the token is reprocessed
-       with the foreign element still current, so a synthesized <br>/<p> lands inside
-       the foreign root rather than as a sibling), or match a foreign element by
-       (case-insensitive) name and pop to it; never pop the fragment context root */
+    if (token->atom == TH_TAG_BR || token->atom == TH_TAG_P) {
+        pop_foreign_elements(tree);
+        return 0;
+    }
+    /* "any other end tag": walk up the stack, stop at the first HTML element and
+       run the HTML rules there, or match a foreign element by case-insensitive name
+       and pop to it; never pop the fragment context root */
     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) { /* GCOVR_EXCL_BR_LINE */
         th_node *node = tree->open[index];
         if (node->ns == TH_NS_HTML) {
