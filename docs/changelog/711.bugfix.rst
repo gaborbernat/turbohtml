@@ -1,1 +1,0 @@
-Stop :meth:`~turbohtml.clean.LinkDetector.has_link` after the first match without allocating a span list.

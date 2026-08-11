@@ -1,1 +1,0 @@
-Make XML tag-name queries case-sensitive, including names shared with known HTML tags.

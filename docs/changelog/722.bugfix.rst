@@ -1,3 +1,0 @@
-Complete deep XML and programmatic-tree operations without silent truncation or C stack exhaustion. Bound recursive
-Microdata and RDFa records at 400 levels, reject cyclic Microdata ``itemref`` graphs, and read combined metadata from
-one tree snapshot.

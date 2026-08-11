@@ -1,1 +1,0 @@
-Compile reusable XSLT stylesheet state during :class:`~turbohtml.transform.Transform` construction.

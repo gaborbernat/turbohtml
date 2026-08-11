@@ -1,1 +1,0 @@
-Keep repeated ``nobr`` elements as siblings across table formatting scope.

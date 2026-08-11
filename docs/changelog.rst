@@ -7,6 +7,40 @@
 .. towncrier release notes start
 
 *********************
+ v1.6.0 (2026-08-11)
+*********************
+
+Features - 1.6.0
+================
+
+- Compile reusable XSLT stylesheet state during :class:`~turbohtml.transform.Transform` construction. (:issue:`713`)
+- Add ``allow_imports`` and ``import_root`` controls for XSLT import filesystem access. (:issue:`714`)
+
+Bug fixes - 1.6.0
+=================
+
+- Process ``</p>`` and ``</br>`` as foreign-content breakout tokens so the resulting HTML elements follow the foreign
+  root, matching the HTML standard and WPT. (:issue:`32`)
+- Recheck sanitizer callback and forced-attribute rewrites against the mandatory baseline safety rules. (:issue:`708`)
+- Reject SVG animation elements that can assign event handlers or script URLs at runtime. (:issue:`709`)
+- Make XML tag-name queries case-sensitive, including names shared with known HTML tags. (:issue:`710`)
+- Stop :meth:`~turbohtml.clean.LinkDetector.has_link` after the first match without allocating a span list.
+  (:issue:`711`)
+- Avoid building a whole-tree tag index for first-result and small-limit queries. (:issue:`712`)
+- Move HTML-aware linkifier traversal and mutation into one native operation. (:issue:`715`)
+- Parse living-standard HTML processing instructions as typed nodes and events while keeping reserved XML targets as
+  comments. (:issue:`716`)
+- Apply the living-standard ``keygen`` rules inside ``select`` elements. (:issue:`717`)
+- Keep repeated ``nobr`` elements as siblings across table formatting scope. (:issue:`718`)
+- Decode CSS escapes when checking sanitizer function names and URL schemes. (:issue:`721`)
+- Complete deep XML and programmatic-tree operations without silent truncation or C stack exhaustion. Bound recursive
+  Microdata and RDFa records at 400 levels, reject cyclic Microdata ``itemref`` graphs, and read combined metadata from
+  one tree snapshot. (:issue:`722`)
+- Remove a redundant :class:`list` cast from :meth:`turbohtml.query.Matcher.filter` under current ``ty`` releases.
+  (:issue:`738`)
+- Report unacknowledged self-closing start tags as HTML parse errors. (:issue:`743`)
+
+*********************
  v1.5.1 (2026-07-27)
 *********************
 
