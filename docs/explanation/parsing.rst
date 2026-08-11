@@ -107,9 +107,10 @@ times faster.
 
 :func:`turbohtml.parse` runs the full `WHATWG tree-construction algorithm
 <https://html.spec.whatwg.org/multipage/parsing.html#tree-construction>`_ on top of the tokenizer (the insertion modes,
-the adoption agency, foreign content, and the error recovery a browser performs); WPT's living `HTML parsing data
-<https://github.com/web-platform-tests/wpt/tree/master/html/syntax/parsing/resources>`_ validates it. The result is the
-tree a browser builds for the same bytes.
+the adoption agency, foreign content, and the error recovery a browser performs); the pinned revision of WPT's `HTML
+parsing data
+<https://github.com/web-platform-tests/wpt/tree/4830edb033cb486fd0cd6f85b5e937cfc718704d/html/syntax/parsing/resources>`_
+validates it. The result is the tree a browser builds for the same bytes.
 
 turbohtml builds the tree in C as a pointer-linked node graph in a single bump-allocated arena, the layout `lexbor
 <https://lexbor.com>`_, Go's ``x/net/html``, and html5ever all converge on. It holds **no Python objects**. Element

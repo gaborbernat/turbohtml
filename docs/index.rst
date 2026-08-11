@@ -94,9 +94,9 @@ These rules shape every part of turbohtml, from the C core to the typed surface 
    toolchains alike, before a change lands.
 4. **WHATWG conformance first.** The tokenizer and tree builder follow the `WHATWG HTML standard
    <https://html.spec.whatwg.org/>`_ state by state. The tokenizer uses `html5lib-tests
-   <https://github.com/html5lib/html5lib-tests>`_; the tree builder uses WPT's living `HTML parsing data
-   <https://github.com/web-platform-tests/wpt/tree/master/html/syntax/parsing/resources>`_. turbohtml matches a
-   competitor's behavior only where the spec leaves it open.
+   <https://github.com/html5lib/html5lib-tests>`_; the tree builder uses the pinned revision of WPT's `HTML parsing data
+   <https://github.com/web-platform-tests/wpt/tree/4830edb033cb486fd0cd6f85b5e937cfc718704d/html/syntax/parsing/resources>`_.
+   turbohtml matches a competitor's behavior only where the spec leaves it open.
 5. **Free-threading ready.** The extension holds no shared mutable state and declares free-threading support, and every
    tree edit and string read runs under a per-tree critical section. A read snapshots the arena before any Python
    callback runs, so a concurrent mutation can never tear a walk.
