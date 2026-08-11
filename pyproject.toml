@@ -267,45 +267,45 @@ lint.select = [
   "ALL",
 ]
 lint.ignore = [
-  "COM812",  # conflicts with the formatter
+  "missing-trailing-comma",  # conflicts with the formatter
   "CPY",     # no copyright statements
-  "D203",    # incompatible with D211
-  "D212",    # incompatible with D213
+  "incorrect-blank-line-before-class",    # incompatible with D211
+  "multi-line-summary-first-line",    # incompatible with D213
   "DOC",     # no support yet
-  "ISC001",  # conflicts with the formatter
-  "PLR2004", # comparing against literal numbers is clear enough on its own
+  "single-line-implicit-string-concatenation",  # conflicts with the formatter
+  "magic-value-comparison", # comparing against literal numbers is clear enough on its own
 ]
 lint.per-file-ignores."docs/conf.py" = [
-  "ANN401",  # the autodoc-engine wrappers forward Sphinx's arbitrary *args/**kwargs
-  "INP001",  # Sphinx config is not part of a package
-  "PLC0415", # Sphinx internals are imported lazily inside setup(), only when the build runs
-  "PLC2701", # patching the Sphinx 9 functional autodoc engine requires its private _dynamic modules
-  "SLF001",  # ... and replacing their private signature/property builders for the C extension
+  "any-type",  # the autodoc-engine wrappers forward Sphinx's arbitrary *args/**kwargs
+  "implicit-namespace-package",  # Sphinx config is not part of a package
+  "import-outside-top-level", # Sphinx internals are imported lazily inside setup(), only when the build runs
+  "import-private-name", # patching the Sphinx 9 functional autodoc engine requires its private _dynamic modules
+  "private-member-access",  # ... and replacing their private signature/property builders for the C extension
 ]
 lint.per-file-ignores."src/turbohtml/{clean,extract,query}/__init__.py" = [
-  "RUF067", # the public module's implementation lives in its package __init__, re-exported unchanged
+  "non-empty-init-module", # the public module's implementation lives in its package __init__, re-exported unchanged
 ]
 lint.per-file-ignores."tasks/**/*.py" = [
-  "INP001", # no implicit namespace
-  "S404",   # subprocess is required to drive git, gh and towncrier
-  "S603",   # the release script runs fixed git/gh subcommands, not external input
-  "S607",   # git and gh are resolved from PATH
-  "T201",   # progress output to the console is intentional
+  "implicit-namespace-package", # no implicit namespace
+  "suspicious-subprocess-import",   # subprocess is required to drive git, gh and towncrier
+  "subprocess-without-shell-equals-true",   # the release script runs fixed git/gh subcommands, not external input
+  "start-process-with-partial-path",   # git and gh are resolved from PATH
+  "print",   # progress output to the console is intentional
 ]
 lint.per-file-ignores."tests/**/*.py" = [
   "D",       # don't document tests
-  "INP001",  # no implicit namespace
-  "PLC2701", # the conformance harness drives the private _html._tokenize_states hook
-  "S101",    # asserts allowed in tests
-  "SLF001",  # same private hook
+  "implicit-namespace-package",  # no implicit namespace
+  "import-private-name", # the conformance harness drives the private _html._tokenize_states hook
+  "assert",    # asserts allowed in tests
+  "private-member-access",  # same private hook
 ]
 lint.per-file-ignores."tools/**/*.py" = [
-  "INP001", # no implicit namespace
-  "S311",   # benchmark data is pseudo-random on purpose, nothing cryptographic
-  "S404",   # generate_version.py shells out to git to derive the version
-  "S603",   # fixed git subcommands, not external input
-  "S607",   # git is resolved from PATH
-  "T201",   # print allowed in scripts
+  "implicit-namespace-package", # no implicit namespace
+  "suspicious-non-cryptographic-random-usage",   # benchmark data is pseudo-random on purpose, nothing cryptographic
+  "suspicious-subprocess-import",   # generate_version.py shells out to git to derive the version
+  "subprocess-without-shell-equals-true",   # fixed git subcommands, not external input
+  "start-process-with-partial-path",   # git is resolved from PATH
+  "print",   # print allowed in scripts
 ]
 lint.isort = { known-first-party = [
   "turbohtml",
