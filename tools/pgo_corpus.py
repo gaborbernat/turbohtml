@@ -10,7 +10,7 @@ the profiled wheel on held-out pages the profile never trained on.
 Representativeness is code-path coverage, not input volume: the compiler lays out blocks and inlines from the branches a
 run takes, so each operation trains over a *set* spanning its branch classes rather than one clean document. The read
 path, the tokenizer, and the tree builder see clean markup (the whatwg spec and the wpt fixtures), deliberate tag soup
-(the html5lib-tests tree-construction fragments, which fire the adoption-agency, foster-parenting, and
+(the WPT tree-construction cases, which fire the adoption-agency, foster-parenting, and
 foreign-content-breakout recovery the clean spec never reaches), and real saved pages (the vendored mozilla/readability
 corpus). Encoding detection sees legacy multi-byte streams (Shift-JIS, GBK, EUC-KR, windows-1251/1252, UTF-16 with and
 without a BOM, plus the real Japanese and Big5 html5lib samples). The extractors see structured-data markup in all four
@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # the bench package si
 from bench import corpus
 from bench.core import OPERATIONS
 from bench.operations import INPUTS
+from wpt_tree_corpus import load_wpt_html_tree
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -37,9 +38,7 @@ if TYPE_CHECKING:
 _TOOLS: Final = Path(__file__).resolve().parent
 _ROOT: Final = _TOOLS.parent
 _BENCH_DATA: Final = _TOOLS / "bench-data"
-_TREE_CONSTRUCTION: Final = _ROOT / "tests" / "html5lib-tests" / "tree-construction"
 _ENCODING_SAMPLES: Final = _ROOT / "tests" / "html5lib-tests" / "encoding"
-
 _SLICE: Final = 1 << 16  # 64 kB of book text: enough work per call without a multi-megabyte parse in the profile
 
 
@@ -57,33 +56,15 @@ def _clean_documents() -> tuple[str, ...]:
     return tuple(corpus.corpus_text(relative, encoding) for _name, relative, encoding in corpus.CORPUS_FILES)
 
 
-def _data_fragments(dat: Path) -> Iterator[str]:
-    """Yield each ``#data`` payload from an html5lib-tests ``.dat`` file (the deliberate tag-soup fragment)."""
-    collecting = False
-    payload: list[str] = []
-    for line in dat.read_text(encoding="utf-8").splitlines():
-        if line == "#data":
-            collecting, payload = True, []
-        elif line == "#errors":
-            if collecting:
-                yield "\n".join(payload)
-            collecting = False
-        elif collecting:
-            payload.append(line)
-
-
 _SOUP_BUCKETS: Final = 4
 
 
 @cache
 def _tag_soup() -> tuple[str, ...]:
     """Return the tree-construction fragments concatenated into a few documents that drive the recovery paths."""
-    fragments = [fragment for dat in sorted(_TREE_CONSTRUCTION.glob("*.dat")) for fragment in _data_fragments(dat)]
-    if not fragments:
-        return ()  # the html5lib-tests submodule is not checked out
     buckets = [""] * _SOUP_BUCKETS
-    for index, fragment in enumerate(fragments):
-        buckets[index % _SOUP_BUCKETS] += f"{fragment}\n"
+    for index, case in enumerate(load_wpt_html_tree()["cases"]):
+        buckets[index % _SOUP_BUCKETS] += f"{case['data']}\n"
     return tuple(buckets)
 
 

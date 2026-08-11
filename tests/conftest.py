@@ -6,9 +6,14 @@ from __future__ import annotations
 
 import sys
 import sysconfig
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+
+from wpt_tree_corpus import WptHtmlTreeCorpus, load_wpt_html_tree
 
 from turbohtml import Element, Node, parse
 
@@ -19,6 +24,12 @@ _N = TypeVar("_N", bound=Node)
 
 _FREE_THREADED = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
 _gil_enabled_at_start = sys._is_gil_enabled() if _FREE_THREADED else True
+
+
+@pytest.fixture(scope="session")
+def wpt_html_tree_corpus() -> WptHtmlTreeCorpus:
+    """Return the pinned WPT tree-construction corpus."""
+    return load_wpt_html_tree()
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:

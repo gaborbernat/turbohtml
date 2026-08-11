@@ -1,1 +1,2 @@
-Track the pinned living WPT tree-construction corpus with fixture and parse-error results.
+Use the pinned living WPT tree-construction corpus in the ordinary parser, serializer, and PGO suites. Compare
+foreign-content ``</p>`` and ``</br>`` trees directly with WPT's fixture expectations.

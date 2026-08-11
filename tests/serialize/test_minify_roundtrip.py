@@ -1,8 +1,8 @@
 """Round-trip safety of serialize(layout=Minify(...)) over an adversarial corpus.
 
 Minification is only correct if the minified bytes reparse to the same tree. This
-suite enforces that property at scale against the html5lib-tests tree-construction
-suite -- 1.7k adversarial snippets from the vendored html5lib-tests corpus, already
+suite enforces that property at scale against WPT's tree-construction
+suite -- 1.9k adversarial snippets from the committed WPT corpus, already
 in place for the conformance harness.
 
 The check is idempotence under reparse: ``minify(parse(minify(parse(src))))`` must
@@ -15,35 +15,15 @@ the plain serializer itself round-trips.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from turbohtml import Html, Minify, parse
 from turbohtml.clean import CSSMinify
 
-_TREE_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
-
-# CI always checks out the submodule (actions/checkout submodules: true); this guard fires only locally
-if not _TREE_DIR.is_dir() or not any(_TREE_DIR.glob("*.dat")):  # pragma: no cover
-    msg = "submodule tests/html5lib-tests not checked out; run: git submodule update --init tests/html5lib-tests"
-    raise RuntimeError(msg)
-
-_MINIFY = Minify()
-# the CSS pass rewrites every <style> body and style="" value the corpus carries; the
-# value-safe engine is itself idempotent, so enabling it must keep the reparse a fixpoint
-_MINIFY_CSS = Minify(minify_css=CSSMinify())
-
-
-def _iter_dat(path: Path) -> list[str]:
-    cases: list[str] = []
-    for raw in path.read_text(encoding="utf-8").split("\n#data\n"):
-        block = raw.removeprefix("#data\n")
-        data, _, rest = block.partition("\n#errors")
-        if "#document-fragment\n" in rest or "#script-on" in rest or "\n#document\n" not in rest:
-            continue
-        cases.append(data)
-    return cases
+if TYPE_CHECKING:
+    from wpt_tree_corpus import WptHtmlTreeCorpus
 
 
 def _plain_roundtrips(source: str) -> bool:
@@ -56,18 +36,22 @@ def _minify_idempotent(source: str, layout: Minify) -> bool:
     return once == parse(once).serialize(Html(layout=layout))
 
 
-@pytest.mark.parametrize("layout", [pytest.param(_MINIFY, id="default"), pytest.param(_MINIFY_CSS, id="minify-css")])
-@pytest.mark.parametrize("filename", sorted(p.name for p in _TREE_DIR.glob("*.dat")))
-def test_minify_idempotent_over_tree_construction(filename: str, layout: Minify) -> None:
+@pytest.mark.parametrize(
+    "layout",
+    [pytest.param(Minify(), id="default"), pytest.param(Minify(minify_css=CSSMinify()), id="minify-css")],
+)
+def test_minify_idempotent_over_tree_construction(wpt_html_tree_corpus: WptHtmlTreeCorpus, layout: Minify) -> None:
     # only the subset the plain serializer round-trips can be asked of the minifier;
     # the rest are inherently non-idempotent adoption-agency reconstructions
     failures = [
-        f"{data!r}\n  once:    {parse(data).serialize(Html(layout=layout))!r}\n"
+        f"{case['file']}: {data!r}\n  once:    {parse(data).serialize(Html(layout=layout))!r}\n"
         f"  reparse: {parse(parse(data).serialize(Html(layout=layout))).serialize(Html(layout=layout))!r}"
-        for data in _iter_dat(_TREE_DIR / filename)
+        for case in wpt_html_tree_corpus["cases"]
+        if case["context"] is None and case["scripting"] is not True
+        for data in [case["data"]]
         if _plain_roundtrips(data) and not _minify_idempotent(data, layout)
     ]
-    assert not failures, f"{filename}: {len(failures)} non-idempotent\n\n" + "\n\n".join(failures[:5])
+    assert not failures, f"{len(failures)} non-idempotent\n\n" + "\n\n".join(failures[:5])
 
 
 def test_minify_idempotent_over_large_document() -> None:
@@ -88,6 +72,7 @@ def test_minify_idempotent_over_large_document() -> None:
         + "".join(section.format(i=index) for index in range(500))
         + "</body></html>"
     )
-    once = parse(big).serialize(Html(layout=_MINIFY))
-    assert once == parse(once).serialize(Html(layout=_MINIFY))
+    layout = Minify()
+    once = parse(big).serialize(Html(layout=layout))
+    assert once == parse(once).serialize(Html(layout=layout))
     assert len(once) < len(parse(big).serialize())  # minification actually shrinks the document

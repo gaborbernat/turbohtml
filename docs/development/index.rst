@@ -34,13 +34,13 @@ turbohtml uses `tox <https://tox.wiki>`_ with `tox-uv <https://github.com/tox-de
 
     $ git clone https://github.com/tox-dev/turbohtml
     $ cd turbohtml
-    $ git submodule update --init tests/html5lib-tests   # conformance data for the test suite
+    $ git submodule update --init tests/html5lib-tests   # tokenizer and encoding conformance data
     $ uvx --with tox-uv tox r -e 3.14   # build, test, and check coverage
 
-The ``tests/html5lib-tests`` submodule holds the conformance suite that one of the tests runs against. Do not initialize
-every submodule: the ``tools/bench-data`` submodules reference multi-MiB real documents (pinned upstream commits,
-nothing copied into this repository) that ``tox r -e bench`` reads and nothing else; fetch them on demand with ``git
-submodule update --init --depth 1 tools/bench-data/whatwg-html tools/bench-data/war-and-peace``.
+The ``tests/html5lib-tests`` submodule holds the tokenizer and encoding conformance data. Do not initialize every
+submodule: the ``tools/bench-data`` submodules reference multi-MiB real documents (pinned upstream commits, nothing
+copied into this repository) that ``tox r -e bench`` reads and nothing else; fetch them on demand with ``git submodule
+update --init --depth 1 tools/bench-data/whatwg-html tools/bench-data/war-and-peace``.
 
 ``tox r -e 3.14`` builds the extension, runs the test suite, and **fails unless both Python and C coverage are 100%**
 (line and branch). Other environments: ``type`` (`ty <https://github.com/astral-sh/ty>`_), ``docs`` (Sphinx), ``fix``
@@ -91,13 +91,13 @@ parse5). The convention is deliberate:
     $ git submodule update --init tests/conformance/parse5   # fetch one oracle
     $ tox r -e conformance                                    # run the suites against their oracles
 
-The vendored ``html5lib-tests`` conformance data is separate: it lives under ``tests/dom``, ``tests/tokenizer``, and
-``tests/encoding`` (not ``tests/conformance``) and runs in the ordinary matrix, so it is unaffected by the above.
+The vendored ``html5lib-tests`` tokenizer and encoding data runs in the ordinary matrix, so it is unaffected by the
+above.
 
-The committed ``tests/conformance/data/wpt_html_tree.json`` tracks the living WPT tree-construction corpus as a source
-apart from the frozen ``html5lib-tests`` data. Refresh it every three months and before releases or after WHATWG parsing
-changes. Check out the desired WPT revision before running the one command that updates the pin and prints the tree and
-parse-error results:
+The committed ``tests/conformance/data/wpt_html_tree.json`` supplies the living WPT tree-construction corpus to the
+ordinary parser, serializer, and PGO suites as well as the dedicated conformance job. Refresh it every three months and
+before releases or after WHATWG parsing changes. Check out the desired WPT revision before running the command that
+updates the pin and prints the tree and parse-error results:
 
 ::
 
