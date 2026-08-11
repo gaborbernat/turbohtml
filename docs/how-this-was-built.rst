@@ -13,6 +13,6 @@ None of this would exist without that prior work. turbohtml stands on the should
 those ecosystems and on the specifications for HTML, CSS, and JavaScript and the people who wrote them. My thanks to all
 of them.
 
-Some engines owe a specific debt. The html5lib-tests conformance suite and lexbor shaped the parser and tree builder;
-the encoding and language detectors follow the models chardetng and whatlang published. Where I reused another project's
-code or data, its license requires attribution, which lives in the ``LICENSE`` file at the repository root.
+Some engines owe a specific debt. The html5lib-tests and WPT conformance data and lexbor shaped the parser and tree
+builder; the encoding and language detectors follow the models chardetng and whatlang published. Where I reused another
+project's code or data, its license requires attribution, which lives in the ``LICENSE`` file at the repository root.

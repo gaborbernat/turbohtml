@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,6 +11,8 @@ from turbohtml import Comment, Doctype, Html, Indent, Markdown, Minify, Namespac
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from wpt_tree_corpus import WptHtmlTreeCorpus
 
     from turbohtml import Element, Node
 
@@ -268,37 +269,19 @@ def test_serialize_iter_propagates_a_raising_truthiness() -> None:
         parse("<p>x</p>").serialize_iter(Html(sort_attributes=_Boom()))  # ty: ignore[invalid-argument-type]  # a raising __bool__ on purpose
 
 
-_TREE_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
-
-# CI always checks out the submodule (actions/checkout submodules: true); this guard fires only locally
-if not _TREE_DIR.is_dir() or not any(_TREE_DIR.glob("*.dat")):  # pragma: no cover
-    msg = "submodule tests/html5lib-tests not checked out; run: git submodule update --init tests/html5lib-tests"
-    raise RuntimeError(msg)
-
-
-def _corpus_sources(path: Path) -> list[str]:
-    sources: list[str] = []
-    for raw in path.read_text(encoding="utf-8").split("\n#data\n"):
-        block = raw.removeprefix("#data\n")
-        data, _, rest = block.partition("\n#errors")
-        if "#document-fragment\n" in rest or "#script-on" in rest or "\n#document\n" not in rest:
-            continue
-        sources.append(data)
-    return sources
-
-
 @pytest.mark.parametrize("layout", [pytest.param(None, id="compact"), pytest.param(Indent(2), id="indent")])
-@pytest.mark.parametrize("filename", sorted(path.name for path in _TREE_DIR.glob("*.dat")))
-def test_serialize_iter_joins_to_serialize_over_corpus(filename: str, layout: Indent | None) -> None:
+def test_serialize_iter_joins_to_serialize_over_corpus(
+    wpt_html_tree_corpus: WptHtmlTreeCorpus, layout: Indent | None
+) -> None:
     options = Html(layout=layout)
     mismatches = [
-        data
-        for data in _corpus_sources(_TREE_DIR / filename)
+        f"{case['file']}: {data!r}"
+        for case in wpt_html_tree_corpus["cases"]
+        if case["context"] is None and case["scripting"] is not True
+        for data in [case["data"]]
         if "".join((root := parse(data)).serialize_iter(options)) != root.serialize(options)
     ]
-    assert not mismatches, f"{filename}: {len(mismatches)} chunked outputs differ\n\n" + "\n\n".join(
-        repr(source) for source in mismatches[:5]
-    )
+    assert not mismatches, f"{len(mismatches)} chunked outputs differ\n\n" + "\n\n".join(mismatches[:5])
 
 
 @pytest.mark.parametrize(

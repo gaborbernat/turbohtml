@@ -1,81 +1,37 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Final, TypedDict, cast
-
-import pytest
+from typing import TYPE_CHECKING, cast
 
 from turbohtml import _html, parse  # public serializers cannot reproduce WPT's namespace dump
 
-
-class _Error(TypedDict):
-    code: str
-    line: int
-    col: int
-    end_line: int | None
-    end_col: int | None
-
-
-class _Input(TypedDict):
-    file: str
-    data: str
-    context: str | None
-    scripting: bool | None
+if TYPE_CHECKING:
+    from wpt_tree_corpus import (
+        WptHtmlTreeCase,
+        WptHtmlTreeCorpus,
+        WptHtmlTreeError,
+        WptHtmlTreeExclusion,
+        WptHtmlTreeInput,
+    )
 
 
-class _Case(_Input):
-    document: str
-    spec_errors: list[_Error] | None
+def _applicable(corpus: WptHtmlTreeCorpus) -> list[WptHtmlTreeCase]:
+    exclusions = {(item["file"], item["data"], item["context"], item["scripting"]) for item in corpus["exclusions"]}
+    return [
+        case
+        for case in corpus["cases"]
+        if (case["file"], case["data"], case["context"], case["scripting"]) not in exclusions
+    ]
 
 
-class _Decision(_Input):
-    reason: str
-    spec: str
-    fixture: str
-
-
-class _Exclusion(_Decision):
-    document: str
-
-
-class _Corpus(TypedDict):
-    source: str
-    revision: str
-    files: list[str]
-    fixture_counts: dict[str, int]
-    applicable_fixture_counts: dict[str, int]
-    error_adjustments: list[_Decision]
-    exclusions: list[_Exclusion]
-    cases: list[_Case]
-
-
-_CORPUS: Final[_Corpus] = cast(
-    "_Corpus",
-    json.loads((Path(__file__).parent / "data" / "wpt_html_tree.json").read_text(encoding="utf-8")),
-)
-_EXCLUSION_KEYS: Final[frozenset[tuple[str, str, str | None, bool | None]]] = frozenset(
-    (item["file"], item["data"], item["context"], item["scripting"]) for item in _CORPUS["exclusions"]
-)
-_APPLICABLE: Final[tuple[_Case, ...]] = tuple(
-    case
-    for case in _CORPUS["cases"]
-    if (case["file"], case["data"], case["context"], case["scripting"]) not in _EXCLUSION_KEYS
-)
-_ERROR_CASES: Final[tuple[_Case, ...]] = tuple(
-    case for case in _APPLICABLE if case["context"] is None and case["spec_errors"] is not None
-)
-
-
-def test_wpt_corpus_provenance_and_denominators() -> None:
+def test_wpt_corpus_provenance_and_denominators(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
     assert {
-        "source": _CORPUS["source"],
-        "revision": _CORPUS["revision"],
-        "files": len(_CORPUS["files"]),
-        "source_cases": sum(_CORPUS["fixture_counts"].values()),
-        "applicable_cases": sum(_CORPUS["applicable_fixture_counts"].values()),
-        "error_adjustments": len(_CORPUS["error_adjustments"]),
-        "exclusions": len(_CORPUS["exclusions"]),
+        "source": wpt_html_tree_corpus["source"],
+        "revision": wpt_html_tree_corpus["revision"],
+        "files": len(wpt_html_tree_corpus["files"]),
+        "source_cases": sum(wpt_html_tree_corpus["fixture_counts"].values()),
+        "applicable_cases": sum(wpt_html_tree_corpus["applicable_fixture_counts"].values()),
+        "error_adjustments": len(wpt_html_tree_corpus["error_adjustments"]),
+        "exclusions": len(wpt_html_tree_corpus["exclusions"]),
     } == {
         "source": (
             "https://github.com/web-platform-tests/wpt/tree/"
@@ -90,11 +46,11 @@ def test_wpt_corpus_provenance_and_denominators() -> None:
     }
 
 
-def test_wpt_corpus_records_normative_sources() -> None:
+def test_wpt_corpus_records_normative_sources(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
     assert {
-        "error_specs": {item["spec"] for item in _CORPUS["error_adjustments"]},
-        "script_specs": {item["spec"] for item in _CORPUS["exclusions"]},
-        "script_fixtures": {item["fixture"] for item in _CORPUS["exclusions"]},
+        "error_specs": {item["spec"] for item in wpt_html_tree_corpus["error_adjustments"]},
+        "script_specs": {item["spec"] for item in wpt_html_tree_corpus["exclusions"]},
+        "script_fixtures": {item["fixture"] for item in wpt_html_tree_corpus["exclusions"]},
     } == {
         "error_specs": {"https://html.spec.whatwg.org/multipage/parsing.html#processing-instruction-open-state"},
         "script_specs": {"https://html.spec.whatwg.org/multipage/scripting.html#script-processing-model"},
@@ -123,39 +79,36 @@ def test_wpt_corpus_records_normative_sources() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    "case",
-    tuple(pytest.param(case, id=f"{case['file']}:{index}") for index, case in enumerate(_APPLICABLE)),
-)
-def test_wpt_tree(case: _Case) -> None:
-    assert _tree(case) == case["document"]
+def test_wpt_tree(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    cases = _applicable(wpt_html_tree_corpus)
+    failures = [case for case in cases if _tree(case) != case["document"]]
+    assert not failures, f"{len(failures)}/{len(cases)} tree mismatches: {failures[:5]!r}"
 
 
-def test_wpt_tree_count() -> None:
-    assert sum(_tree(case) == case["document"] for case in _APPLICABLE) == 1_916
+def test_wpt_tree_count(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    cases = _applicable(wpt_html_tree_corpus)
+    assert sum(_tree(case) == case["document"] for case in cases) == 1_916
 
 
-@pytest.mark.parametrize(
-    "case",
-    tuple(pytest.param(case, id=f"{case['file']}:{index}") for index, case in enumerate(_ERROR_CASES)),
-)
-def test_wpt_exact_document_errors(case: _Case) -> None:
-    expected = cast("list[_Error]", case["spec_errors"])
-    assert _errors_match(expected, _errors(case))
+def test_wpt_exact_document_errors(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    cases = [
+        case
+        for case in _applicable(wpt_html_tree_corpus)
+        if case["context"] is None and case["spec_errors"] is not None
+    ]
+    failures = [
+        case for case in cases if not _errors_match(cast("list[WptHtmlTreeError]", case["spec_errors"]), _errors(case))
+    ]
+    assert not failures, f"{len(failures)}/{len(cases)} error mismatches: {failures[:5]!r}"
 
 
-@pytest.mark.parametrize(
-    "exclusion",
-    tuple(
-        pytest.param(exclusion, id=f"{exclusion['file']}:{index}")
-        for index, exclusion in enumerate(_CORPUS["exclusions"])
-    ),
-)
-def test_wpt_script_exclusion_without_javascript(exclusion: _Exclusion) -> None:
-    assert _tree(exclusion) == exclusion["document"]
+def test_wpt_script_exclusion_without_javascript(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    exclusions = wpt_html_tree_corpus["exclusions"]
+    failures = [exclusion for exclusion in exclusions if _tree(exclusion) != exclusion["document"]]
+    assert not failures, f"{len(failures)}/{len(exclusions)} unexpected matches: {failures!r}"
 
 
-def _tree(case: _Input) -> str:
+def _tree(case: WptHtmlTreeInput | WptHtmlTreeExclusion) -> str:
     if (context := case["context"]) is not None:
         result = _html._parse_fragment(case["data"], context, bool(case["scripting"]))
     else:
@@ -163,14 +116,14 @@ def _tree(case: _Input) -> str:
     return result.rstrip("\n")
 
 
-def _errors(case: _Input) -> list[_Error]:
+def _errors(case: WptHtmlTreeInput) -> list[WptHtmlTreeError]:
     return [
         {"code": error.code, "line": error.line, "col": error.col + 1, "end_line": None, "end_col": None}
         for error in parse(case["data"], scripting=bool(case["scripting"])).errors
     ]
 
 
-def _errors_match(expected: list[_Error], actual: list[_Error]) -> bool:
+def _errors_match(expected: list[WptHtmlTreeError], actual: list[WptHtmlTreeError]) -> bool:
     if len(expected) != len(actual):
         return False
     for wanted, raised in zip(expected, actual, strict=True):

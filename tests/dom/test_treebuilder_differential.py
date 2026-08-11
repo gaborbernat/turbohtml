@@ -7,42 +7,28 @@ sanitizer would vet one structure while the browser renders another -- a parser-
 bypass that no memory sanitizer can see.
 
 ``test_treebuilder_conformance`` already pins turbohtml's internal ``#document`` dump against
-the html5lib-tests tree-construction corpus (the canonical spec oracle). This suite closes the
+WPT's living tree-construction corpus. This suite closes the
 remaining gap: it rebuilds the same ``#document`` dump purely from the public Element API and
 asserts it matches the spec tree for every non-scripting case, document and fragment. Agreement
 over the full corpus -- 570-odd cases carry a sanitizer-relevant element (script, style, foreign
 content, event handlers, URL attributes) -- is the evidence that the tree a sanitizer walks is
 the tree the browser resolves.
 
-Two divergence classes are documented rather than silently skipped:
-
-- Spec-lag: a handful of pinned ``.dat`` cases encode pre-errata trees for ``</p>``/``</br>`` in
-  foreign content. turbohtml follows the modern WHATWG algorithm (as do lexbor and html5lib's own
-  library); the pinned data does not. For these the public tree is
-  asserted against turbohtml's spec-validated parse, which the conformance suite pins to the
-  corrected tree. See issues #32 and #63.
-- A ``.dat`` text-format limit: the html5lib ``#document`` dump wraps doctype identifiers in unescaped
-  quotes, so it cannot represent a quote embedded in one (``taco"`` reads back as ``taco``). turbohtml
-  keeps the quote, matching html5lib-python and the WHATWG tokenizer, so the public tree is asserted
-  against turbohtml's conformance-validated parse. See issue #478.
+One representation gap is documented rather than silently skipped: the ``.dat`` text format wraps doctype identifiers
+in unescaped quotes, so it cannot represent a quote embedded in one (``taco"`` reads back as ``taco``). turbohtml keeps
+the quote, matching html5lib-python and the WHATWG tokenizer, so the public tree is asserted against turbohtml's
+conformance-validated parse. See issue #478.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import cast
-
-import pytest
+from typing import TYPE_CHECKING, cast
 
 import turbohtml
 from turbohtml import Comment, Doctype, Document, Element, Namespace, Node, ProcessingInstruction, Text, _html
 
-_TREE_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
-
-# CI always checks out the submodule (actions/checkout submodules: true); this guard fires only locally
-if not _TREE_DIR.is_dir() or not any(_TREE_DIR.glob("*.dat")):  # pragma: no cover
-    msg = "submodule tests/html5lib-tests not checked out; run: git submodule update --init tests/html5lib-tests"
-    raise RuntimeError(msg)
+if TYPE_CHECKING:
+    from wpt_tree_corpus import WptHtmlTreeCase, WptHtmlTreeCorpus
 
 # "adjust foreign attributes" (WHATWG 13.2.6.5): only these prefixed names on an SVG/MathML
 # element serialize with a namespace-separating space; any other xml:/xlink: name keeps its colon.
@@ -111,52 +97,9 @@ def _public_dump(data: str, context: str | None) -> str:
     return "\n".join(out)
 
 
-def _internal_dump(data: str, context: str | None) -> str:
-    if context is not None:
-        return _html._parse_fragment(data, context).rstrip("\n")
+def _internal_dump(data: str) -> str:
     return _html._parse_tree(data).rstrip("\n")
 
-
-def _parse_dat(path: Path) -> list[tuple[str, str, str | None]]:
-    cases: list[tuple[str, str, str | None]] = []
-    with path.open(encoding="utf-8", newline="") as handle:  # a literal \r in a case is data
-        raw_text = handle.read()
-    for raw in raw_text.split("\n#data\n"):
-        block = raw.removeprefix("#data\n")
-        data, _, rest = block.partition("\n#errors")
-        if "\n#document\n" not in rest:
-            continue
-        before, _, document = rest.partition("\n#document\n")
-        if "#script-on" in before:  # scripting-enabled cases need a script-executing host
-            continue
-        context = (
-            before.partition("#document-fragment\n")[2].splitlines()[0].strip()
-            if "#document-fragment\n" in before
-            else None
-        )
-        cases.append((data, document.rstrip("\n"), context))
-    return cases
-
-
-_CASES = [(path.name, *case) for path in sorted(_TREE_DIR.glob("*.dat")) for case in _parse_dat(path)]
-
-# The pinned .dat predates modern-spec errata for these cases; turbohtml is spec-correct (lexbor and
-# html5lib's own library agree). The public tree is checked against turbohtml's conformance-validated
-# parse, which test_treebuilder_conformance pins to the corrected tree. See issues #32 and #63.
-_SPEC_LAG: frozenset[tuple[str, str, str | None]] = frozenset({
-    ("tests26.dat", "<svg></p><foo>", None),
-    ("tests26.dat", "<math></p><foo>", None),
-    ("tests26.dat", "<svg></br><foo>", None),
-    ("tests26.dat", "<math></br><foo>", None),
-    ("foreign-fragment.dat", "<svg></p><foo>", "div"),
-    ("foreign-fragment.dat", "</p><foo>", "svg svg"),
-    ("foreign-fragment.dat", "<svg></br><foo>", "div"),
-    ("foreign-fragment.dat", "</br><foo>", "svg svg"),
-    ("html5test-com.dat", '<?import namespace="foo" implementation="#bar">', None),
-    ("tests1.dat", "<?", None),
-    ("tests1.dat", "<?COMMENT?>", None),
-    ("tests1.dat", "<?COM--MENT?>", None),
-})
 
 # The html5lib `#document` text format wraps each doctype identifier in unescaped quotes, so it cannot
 # represent a quote embedded in one: `taco"` serializes to a .dat that reads back as `taco`. turbohtml
@@ -167,30 +110,25 @@ _DAT_UNREPRESENTABLE: frozenset[tuple[str, str, str | None]] = frozenset({
 })
 
 
-def _expected(filename: str, data: str, document: str, context: str | None) -> str:
-    key = (filename, data, context)
-    if key in _SPEC_LAG or key in _DAT_UNREPRESENTABLE:
-        return _internal_dump(data, context)
-    return document
+def _expected(case: WptHtmlTreeCase) -> str:
+    if (case["file"], case["data"], case["context"]) in _DAT_UNREPRESENTABLE:
+        return _internal_dump(case["data"])
+    return case["document"]
 
 
-@pytest.mark.parametrize("filename", sorted({name for name, _, _, _ in _CASES}))
-def test_public_tree_matches_spec(filename: str) -> None:
-    cases = [(data, document, context) for name, data, document, context in _CASES if name == filename]
-    assert cases, f"no cases parsed from {filename}"
+def test_public_tree_matches_spec(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    cases = [case for case in wpt_html_tree_corpus["cases"] if case["scripting"] is not True]
     failures = [
-        f"#data {data!r} (context={context!r})\nexpected:\n{expected}\ngot:\n{got}"
-        for data, document, context in cases
-        for expected in [_expected(filename, data, document, context)]
-        for got in [_public_dump(data, context)]
+        f"{case['file']}: #data {case['data']!r} (context={case['context']!r})\nexpected:\n{expected}\ngot:\n{got}"
+        for case in cases
+        for expected in [_expected(case)]
+        for got in [_public_dump(case["data"], case["context"])]
         if got != expected
     ]
-    assert not failures, f"{filename}: {len(failures)}/{len(cases)} public/spec divergences\n\n" + "\n\n".join(
-        failures[:5]
-    )
+    assert not failures, f"{len(failures)}/{len(cases)} public/spec divergences\n\n" + "\n\n".join(failures[:5])
 
 
-def test_corpus_exercises_sanitizer_relevant_nodes() -> None:
+def test_corpus_exercises_sanitizer_relevant_nodes(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
     # a corpus edit that stops exercising the security surface (foreign content, script/style, handlers,
     # URL attributes) must fail loudly rather than let the oracle pass vacuously
     unsafe_tags = {
@@ -222,7 +160,12 @@ def test_corpus_exercises_sanitizer_relevant_nodes() -> None:
 
     relevant = sum(
         1
-        for _, data, _, context in _CASES
-        if is_relevant(turbohtml.parse_fragment(data, context) if context is not None else turbohtml.parse(data))
+        for case in wpt_html_tree_corpus["cases"]
+        if case["scripting"] is not True
+        if is_relevant(
+            turbohtml.parse_fragment(case["data"], context)
+            if (context := case["context"]) is not None
+            else turbohtml.parse(case["data"])
+        )
     )
     assert relevant >= 400

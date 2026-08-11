@@ -4,26 +4,22 @@ Two layers of validation: hand-written golden cases pin the exact output for
 every mapping and edge case, and a round-trip differential renders the output
 back to HTML with the markdown-it-py reference engine and asserts no visible
 text token was lost — the same property the competitor suites (markdownify,
-html2text) check by hand. The adversarial inputs are sampled from the vendored
-html5lib-tests corpus, so to_markdown() is exercised on malformed markup too.
+html2text) check by hand. The adversarial inputs are sampled from the committed
+WPT tree-construction corpus, so to_markdown() is exercised on malformed markup too.
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from markdown_it import MarkdownIt
 
 from turbohtml import parse
 
-_TREE_DIR = Path(__file__).parents[1] / "html5lib-tests" / "tree-construction"
-
-# CI always checks out the submodule (actions/checkout submodules: true); this guard fires only locally
-if not _TREE_DIR.is_dir() or not any(_TREE_DIR.glob("*.dat")):  # pragma: no cover
-    msg = "submodule tests/html5lib-tests not checked out; run: git submodule update --init tests/html5lib-tests"
-    raise RuntimeError(msg)
+if TYPE_CHECKING:
+    from wpt_tree_corpus import WptHtmlTreeCorpus
 
 
 def md(html: str) -> str:
@@ -487,21 +483,11 @@ def test_roundtrip_preserves_text(html: str) -> None:
     assert _tokens(rendered) == _tokens(html)
 
 
-def _corpus_inputs() -> list[str]:
-    """HTML fragments pulled from the vendored html5lib-tests tree-construction
-    .dat files: small, deliberately malformed markup that stresses the walker."""
-    inputs: list[str] = []
-    for dat in sorted(_TREE_DIR.glob("*.dat")):
-        for block in dat.read_text(encoding="utf-8").split("#data\n")[1:]:
-            data = block.split("\n#errors", 1)[0]
-            if "�" not in data and len(data) < 200:
-                inputs.append(data)
-    return inputs[:400]
-
-
-@pytest.mark.parametrize("html", _corpus_inputs())
-def test_corpus_never_crashes_and_renders(html: str) -> None:
-    result = md(html)
-    assert isinstance(result, str)
-    # whatever markup came in, the output is markdown a GFM engine can render
-    assert isinstance(_render(result), str)
+def test_corpus_never_crashes_and_renders(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    inputs = [
+        case["data"] for case in wpt_html_tree_corpus["cases"] if "�" not in case["data"] and len(case["data"]) < 200
+    ][:400]
+    for html in inputs:
+        result = md(html)
+        assert isinstance(result, str)
+        assert isinstance(_render(result), str)

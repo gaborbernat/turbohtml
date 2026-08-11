@@ -61,9 +61,8 @@ its input stream's encoding and its parser's ``documentEncoding``.
 <https://html.spec.whatwg.org/multipage/parsing.html#tokenization>`_ (the same state machine inside every browser)
 rather than a regex approximation like :class:`python:html.parser.HTMLParser`. The C implementation mirrors the spec
 state by state so the two read side by side, and the shared `html5lib-tests
-<https://github.com/html5lib/html5lib-tests>`_ conformance suite that browsers and parser libraries validate against
-checks it at all three input storage widths, once per width, because the token stream must be invariant to how CPython
-stores the string.
+<https://github.com/html5lib/html5lib-tests>`_ tokenizer suite checks it at all three input storage widths, once per
+width, because the token stream must be invariant to how CPython stores the string.
 
 Two decisions bound the tokenizer's scope:
 
@@ -108,9 +107,9 @@ times faster.
 
 :func:`turbohtml.parse` runs the full `WHATWG tree-construction algorithm
 <https://html.spec.whatwg.org/multipage/parsing.html#tree-construction>`_ on top of the tokenizer (the insertion modes,
-the adoption agency, foreign content, and the error recovery a browser performs); the same `html5lib-tests
-<https://github.com/html5lib/html5lib-tests>`_ tree-construction suite browsers use validates it. The result is the tree
-a browser builds for the same bytes.
+the adoption agency, foreign content, and the error recovery a browser performs); WPT's living `HTML parsing data
+<https://github.com/web-platform-tests/wpt/tree/master/html/syntax/parsing/resources>`_ validates it. The result is the
+tree a browser builds for the same bytes.
 
 turbohtml builds the tree in C as a pointer-linked node graph in a single bump-allocated arena, the layout `lexbor
 <https://lexbor.com>`_, Go's ``x/net/html``, and html5ever all converge on. It holds **no Python objects**. Element
