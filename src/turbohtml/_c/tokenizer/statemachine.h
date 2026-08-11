@@ -237,6 +237,9 @@ void th_tok_borrow_input(th_tokenizer *self, int kind, const void *data, Py_ssiz
 /* The storage backing slice tokens: sets *kind, returns the base pointer. */
 const void *th_tok_input_data(const th_tokenizer *self, int *kind);
 
+/* Transfer the owned input buffer to the caller after a one-shot fed parse. */
+void *th_tok_take_input(th_tokenizer *self, int *kind, Py_ssize_t *length);
+
 /* Signal end of input; the next th_tok_next calls flush remaining tokens. */
 void th_tok_close(th_tokenizer *self);
 

@@ -579,6 +579,14 @@ const void *th_tok_input_data(const th_tokenizer *self, int *kind) {
     return self->input.data;
 }
 
+void *th_tok_take_input(th_tokenizer *self, int *kind, Py_ssize_t *length) {
+    *kind = self->input.kind;
+    *length = self->input.len;
+    void *data = self->input.data;
+    buf_init(&self->input);
+    return data;
+}
+
 void th_tok_close(th_tokenizer *self) {
     self->eof = 1;
 }

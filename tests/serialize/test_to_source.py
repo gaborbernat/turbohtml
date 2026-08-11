@@ -45,6 +45,11 @@ def test_unedited_round_trip_is_byte_identical(markup: str) -> None:
     assert parse(markup, source_locations=True).to_source() == markup
 
 
+def test_carriage_returns_use_retained_normalized_source() -> None:
+    markup = _doc("<p>\r</p>" * 4096)
+    assert parse(markup, source_locations=True).to_source() == markup.replace("\r", "\n")
+
+
 def test_changing_an_attribute_rewrites_only_that_start_tag() -> None:
     markup = _doc('<p id="a">one</p><p id="b">two</p>')
     doc = parse(markup, source_locations=True)

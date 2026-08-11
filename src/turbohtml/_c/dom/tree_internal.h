@@ -93,6 +93,7 @@ struct th_tree {
     int track_locations;    /* record each element's granular source spans (implies track_positions) */
     int kind;               /* borrowed input storage */
     const void *data;
+    void *owned_data; /* normalized one-shot input retained when source spans need it */
     Py_ssize_t length;
     int failed; /* an allocation failed; abandon the parse */
     /* Dynamic intern table for attribute names outside attr_atom.h: the record

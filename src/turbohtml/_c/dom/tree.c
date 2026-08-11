@@ -3915,6 +3915,18 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
     tree->data = th_tok_input_data(sm, &tree->kind);
 }
 
+static void retain_normalized_source(th_tree *tree, th_tokenizer *sm) {
+    if (tree->can_span) {
+        return;
+    }
+    if (tree->track_locations) {
+        tree->owned_data = th_tok_take_input(sm, &tree->kind, &tree->length);
+        tree->data = tree->owned_data;
+    } else {
+        tree->data = NULL;
+    }
+}
+
 /* The first element child of parent with this atom, or NULL. */
 static th_node *child_with_atom(th_node *parent, uint16_t atom) {
     for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
@@ -4022,6 +4034,7 @@ th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length, int positi
     run_state_init(&run_state, M_INITIAL);
     run_drain(tree, sm, &run_state);
     run_close(tree);
+    retain_normalized_source(tree, sm);
     th_tok_free(sm);
     finalize_document(tree);
 
@@ -4166,6 +4179,7 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     run_state_init(&run_state, ctx_ns == TH_NS_HTML ? fragment_mode(ctx_atom) : M_IN_BODY);
     run_drain(tree, sm, &run_state);
     run_close(tree);
+    retain_normalized_source(tree, sm);
     th_tok_free(sm);
 
     /* an html-context fragment starts in "before head"; at EOF the same
@@ -4216,6 +4230,7 @@ void th_tree_free(th_tree *tree) {
     PyMem_Free(tree->attr_recs);
     PyMem_Free(tree->shadows);
     PyMem_Free(tree->meta_labels);
+    PyMem_Free(tree->owned_data);
     th_error_sink_free(&tree->errors);
     PyMem_Free(tree);
 }
