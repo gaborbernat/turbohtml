@@ -37,10 +37,10 @@ turbohtml uses `tox <https://tox.wiki>`_ with `tox-uv <https://github.com/tox-de
     $ git submodule update --init tests/html5lib-tests   # tokenizer and encoding conformance data
     $ uvx --with tox-uv tox r -e 3.14   # build, test, and check coverage
 
-The ``tests/html5lib-tests`` submodule holds the tokenizer and encoding conformance data. Do not initialize
-every submodule: the ``tools/bench-data`` submodules reference multi-MiB real documents (pinned upstream commits,
-nothing copied into this repository) that ``tox r -e bench`` reads and nothing else; fetch them on demand with ``git
-submodule update --init --depth 1 tools/bench-data/whatwg-html tools/bench-data/war-and-peace``.
+The ``tests/html5lib-tests`` submodule holds the tokenizer and encoding conformance data. Do not initialize every
+submodule: the ``tools/bench-data`` submodules reference multi-MiB real documents (pinned upstream commits, nothing
+copied into this repository) that ``tox r -e bench`` reads and nothing else; fetch them on demand with ``git submodule
+update --init --depth 1 tools/bench-data/whatwg-html tools/bench-data/war-and-peace``.
 
 ``tox r -e 3.14`` builds the extension, runs the test suite, and **fails unless both Python and C coverage are 100%**
 (line and branch). Other environments: ``type`` (`ty <https://github.com/astral-sh/ty>`_), ``docs`` (Sphinx), ``fix``
