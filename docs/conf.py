@@ -36,6 +36,7 @@ version = ".".join(release.split(".")[:2])
 doctest_global_setup = "import turbohtml\nfrom turbohtml import parse"
 
 extensions = [
+    "sphinx_llm.txt",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosectionlabel",  # reference any section by its title; prefixed by document to keep labels unique
     "sphinx.ext.doctest",  # run the testcode/testoutput examples so the docs cannot drift from the code
@@ -432,3 +433,6 @@ def setup(app: Sphinx) -> dict[str, Any]:
     app.connect("html-page-context", _add_page_description)
     app.add_directive("package-meta", _PackageMeta)
     return {"parallel_read_safe": True, "parallel_write_safe": True}
+
+
+markdown_http_base = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
