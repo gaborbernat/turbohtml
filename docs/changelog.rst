@@ -7,6 +7,17 @@
 .. towncrier release notes start
 
 *********************
+ v1.6.1 (2026-08-15)
+*********************
+
+Bug fixes - 1.6.1
+=================
+
+- Parse a document, or feed a first stream chunk, that opens with a carriage return without touching the not yet
+  allocated input buffer; UndefinedBehaviorSanitizer reported the empty append as a zero offset applied to a null
+  pointer. (:issue:`752`)
+
+*********************
  v1.6.0 (2026-08-11)
 *********************
 
