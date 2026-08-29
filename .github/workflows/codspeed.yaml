@@ -20,7 +20,9 @@ jobs:
     name: 🚀 CodSpeed
     # OIDC only authenticates the repository registered with CodSpeed, so a fork's push runs fail with 401 Unauthorized
     if: github.repository == 'tox-dev/turbohtml'
-    runs-on: codspeed-macro
+    # The tox-dev org has no plan for CodSpeed's macro runners; the pins on the run step below hold the instruction
+    # stream steady across GitHub's mixed Intel and AMD fleet instead.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write # OIDC lets the CodSpeed GitHub App authenticate this public repo without a token secret
@@ -35,6 +37,10 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: false
+          # CodSpeed diffs this run against the base commit's run, measured whenever that commit landed, so an
+          # interpreter patch released in between changes the instruction counts of untouched benchmarks. Pin the
+          # exact build and bump it by hand.
+          python-version: "3.14.7"
       # Build outside instrumentation so setup is not measured. Use LTO because fresh PGO profiles produce different
       # binaries; release wheels retain PGO+LTO.
       - name: 🏗️ Build the deterministic LTO extension and install benchmark deps
@@ -46,8 +52,34 @@ jobs:
             --config-settings=setup-args=-Db_lto=true
         env:
           UV_PYTHON_PREFERENCE: only-managed
+      # Callgrind counts every instruction glibc runs, and glibc picks its memcpy, memset, str*, and lazy-binding code
+      # per CPU. GitHub hands each run an Intel Xeon or an AMD EPYC whose feature and preference bits select different
+      # variants, so identical code counts differently between a base run and a head run. Turning every selector off
+      # lands each runner on the same SSE2 baseline; the copy thresholds glibc derives from the runner's cache sizes
+      # and the malloc arena count it derives from the core count are pinned for the same reason. The gate measures
+      # instruction counts, so the slower baseline path costs nothing.
+      - name: 📌 Pin glibc's per-CPU code paths
+        run: |
+          hwcaps=$(printf -- '-%s,' \
+            SSSE3 SSE4_1 SSE4_2 AVX AVX2 AVX512F AVX512VL AVX512BW AVX512DQ AVX512CD FMA FMA4 \
+            BMI1 BMI2 LZCNT POPCNT MOVBE ERMS RTM XSAVEC \
+            Fast_Unaligned_Load Fast_Unaligned_Copy Fast_Copy_Backward Fast_Rep_String Slow_BSF Slow_SSE4_2 \
+            Prefer_ERMS Prefer_FSRM Prefer_No_VZEROUPPER Prefer_No_AVX512)
+          tunables=$(printf '%s:' \
+            "glibc.cpu.hwcaps=${hwcaps%,}" \
+            glibc.cpu.x86_data_cache_size=32768 \
+            glibc.cpu.x86_shared_cache_size=1048576 \
+            glibc.cpu.x86_non_temporal_threshold=786432 \
+            glibc.cpu.x86_rep_movsb_threshold=2048 \
+            glibc.cpu.x86_rep_stosb_threshold=2048 \
+            glibc.malloc.arena_max=1)
+          echo "GLIBC_TUNABLES=${tunables%:}" >> "$GITHUB_ENV"
       - name: 🚀 Run benchmarks
         uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        env:
+          # str hashes seed the dict and set probes the benchmarks walk; a fresh seed per run is a small run-to-run
+          # term the CPU pins above do not cover.
+          PYTHONHASHSEED: "0"
         with:
           exclude-allocations: true
           mode: simulation
