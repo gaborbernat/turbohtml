@@ -7,6 +7,16 @@
 .. towncrier release notes start
 
 *********************
+ v1.7.0 (2026-08-29)
+*********************
+
+Features - 1.7.0
+================
+
+- Link phone numbers as ``tel:`` anchors with a :class:`~turbohtml.clean.PhoneNumbers` setting; each match carries a
+  :class:`~turbohtml.clean.PhoneNumber`, the class that parses and formats numbers. (:issue:`758`)
+
+*********************
  v1.6.1 (2026-08-15)
 *********************
 

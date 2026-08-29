@@ -1,2 +1,0 @@
-Link phone numbers as ``tel:`` anchors with a :class:`~turbohtml.clean.PhoneNumbers` setting; each match carries a
-:class:`~turbohtml.clean.PhoneNumber`, the class that parses and formats numbers.
