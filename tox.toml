@@ -308,6 +308,8 @@ commands_pre = [
     "--config-settings=build-dir={env_dir}{/}cbuild",
     "--config-settings=setup-args=-Dbuildtype=release",
   ],
+  # the phone oracle is the vendored python-phonenumbers checkout, so the suite compares against the pinned release
+  [ "uv", "pip", "install", "--no-deps", "{tox_root}{/}tests{/}conformance{/}python-phonenumbers{/}python" ],
 ]
 # Each tests/conformance/test_*.py validates one feature against a competitor's or standards body's OWN suite,
 # vendored as a pinned submodule under tests/conformance/<oracle> (libxml2, unicodetools, qt3tests, parse5,
@@ -421,6 +423,7 @@ commands = [
   [ "python", "{tox_root}{/}tools{/}generate_tags.py", "{tox_root}{/}src{/}turbohtml{/}_c{/}data{/}tag_atom.h" ],
   [ "python", "{tox_root}{/}tools{/}generate_attrs.py", "{tox_root}{/}src{/}turbohtml{/}_c{/}data{/}attr_atom.h" ],
   [ "python", "{tox_root}{/}tools{/}generate_tlds.py", "{tox_root}{/}src{/}turbohtml{/}_c{/}data{/}tld_table.h" ],
+  [ "python", "{tox_root}{/}tools{/}generate_phone.py", "{tox_root}{/}src{/}turbohtml{/}_c{/}data{/}phone_table.h" ],
   [ "python", "{tox_root}{/}tools{/}generate_psl.py", "{tox_root}{/}src{/}turbohtml{/}_c{/}data{/}psl_table.h" ],
   [ "python", "{tox_root}{/}tools{/}generate_idna.py", "{tox_root}{/}src{/}turbohtml{/}_c{/}data{/}idna_table.h" ],
   [

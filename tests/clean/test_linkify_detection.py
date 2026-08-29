@@ -8,6 +8,8 @@ from turbohtml._html import _linkify_scan
 from turbohtml.clean import Linkify, linkify
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from turbohtml.clean import Callback
 
 
@@ -86,8 +88,9 @@ def test_scanner_extra_tlds(
     parse_email: bool,  # ruff:ignore[boolean-type-hint-positional-argument]  # a pytest parametrize value, not a boolean-trap call site
     extra_tlds: tuple[str, ...],
     spans: list[tuple[int, int, int]],
+    with_hrefs: Callable[[str, list[tuple[int, int, int]]], list[tuple[int, int, int, str, None]]],
 ) -> None:
-    assert _linkify_scan(text, parse_email, True, extra_tlds) == spans  # ruff:ignore[boolean-positional-value-in-call]  # positional-only C binding under test
+    assert _linkify_scan(text, parse_email, True, extra_tlds) == with_hrefs(text, spans)  # ruff:ignore[boolean-positional-value-in-call]  # positional-only C binding under test
 
 
 def test_scanner_extra_tlds_defaults_to_none() -> None:

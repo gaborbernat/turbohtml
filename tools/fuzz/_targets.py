@@ -18,6 +18,8 @@ call the current input is written to the repro file, so an abort names its own c
 from __future__ import annotations
 
 import argparse
+import contextlib
+import dataclasses
 import random
 import sys
 import time
@@ -92,6 +94,31 @@ def _idna(data: bytes) -> None:
     _url_to_ascii(_decode(data))
 
 
+_PHONES: Final = clean.PhoneNumbers(regions=("US", "GB", "DE", "IN"))
+_PHONE_DETECTOR: Final = clean.LinkDetector(phones=_PHONES)
+_PHONE_LINKER: Final = clean.Linker(clean.Linkify(phones=_PHONES, parse_email=True))
+_PHONE_POSSIBLE: Final = clean.LinkDetector(phones=clean.PhoneNumbers(regions=("US",), require_valid=False))
+_PHONE_EXACT: Final = clean.LinkDetector(
+    phones=clean.PhoneNumbers(regions=("US", "DE"), grouping=clean.PhoneGrouping.EXACT)
+)
+
+
+def _phone(data: bytes) -> None:
+    text = _decode(data)
+    for span in _PHONE_DETECTOR.find(text):
+        if span.phone is not None:
+            clean.PhoneNumber(*dataclasses.astuple(span.phone))
+            for style in clean.PhoneFormat:
+                span.phone.format(style)
+    _PHONE_POSSIBLE.find(text)
+    _PHONE_EXACT.find(text)
+    _PHONE_LINKER.linkify(text)
+    for held in (text, "tel:" + text):
+        for require_valid in (True, False):
+            with contextlib.suppress(ValueError):
+                clean.PhoneNumber.parse(held, regions=("US", "DE"), require_valid=require_valid)
+
+
 def _minify_css(data: bytes) -> None:
     clean.minify_css(_decode(data))
 
@@ -101,6 +128,7 @@ def _minify_html(data: bytes) -> None:
 
 
 TARGETS: Final[dict[str, Callable[[bytes], None]]] = {
+    "phone": _phone,
     "parse": _parse,
     "serialize": _serialize,
     "roundtrip": _roundtrip,

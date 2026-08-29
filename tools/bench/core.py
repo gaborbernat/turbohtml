@@ -108,6 +108,13 @@ _STRIP = "code, a, q"  # a bulk set of tags to drop or unwrap
 _SET_HTML = "<p>Updated <a href='/x'>link</a> and <b>bold</b>.</p><ul><li>one</li><li>two</li></ul>"
 _SET_TEXT = "Replacement text, escaped & verbatim."
 _DETECTOR = _LinkDetector()
+_PHONE_DETECTORS: Final[dict[str, _LinkDetector]] = {
+    "valid": _LinkDetector(phones=_clean.PhoneNumbers(regions=("US",))),
+    "possible": _LinkDetector(phones=_clean.PhoneNumbers(regions=("US",), require_valid=False)),
+    "regions-8": _LinkDetector(phones=_clean.PhoneNumbers(regions=("US", "GB", "DE", "IN", "BR", "JP", "FR", "AU"))),
+}
+_PHONE_STYLES: Final[dict[str, _clean.PhoneFormat]] = {style.value: style for style in _clean.PhoneFormat}
+_PHONE_PARSED: Final[dict[tuple[str, str], _clean.PhoneNumber]] = {}  # the format op times formatting, not the parse
 _LINKER: Final[_clean.Linker] = _clean.Linker()
 _LINKER_SKIP: Final[_clean.Linker] = _clean.Linker(_clean.Linkify(skip_tags=("code",)))
 _LINKER_CALLBACKS: Final[_clean.Linker] = _clean.Linker(
@@ -559,6 +566,31 @@ def detect(case: tuple[str, str]) -> None:
         _DETECTOR.find(text)
     else:
         _DETECTOR.has_link(text)
+
+
+def phone(case: tuple[str, str]) -> None:
+    """Scan plain text for phone numbers with turbohtml's LinkDetector: one mode per case, or the presence test."""
+    mode, text = case
+    if mode == "has":
+        _PHONE_DETECTORS["valid"].has_link(text)
+    else:
+        _PHONE_DETECTORS[mode].find(text)
+
+
+def phone_parse(case: tuple[str, tuple[tuple[str, str], ...]]) -> None:
+    """Read each held string as one number with turbohtml's PhoneNumber.parse, at the case's leniency."""
+    mode, held = case
+    for region, text in held:
+        _clean.PhoneNumber.parse(text, regions=(region,), require_valid=mode == "valid")
+
+
+def phone_format(case: tuple[str, tuple[tuple[str, str], ...]]) -> None:
+    """Write each number in the case's layout with turbohtml's PhoneNumber.format."""
+    style, held = case
+    for region, text in held:
+        if (number := _PHONE_PARSED.get((region, text))) is None:
+            number = _PHONE_PARSED[region, text] = _clean.PhoneNumber.parse(text, regions=(region,))
+        number.format(_PHONE_STYLES[style])
 
 
 def markdown(case: tuple[str, str]) -> None:
@@ -1014,6 +1046,9 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "linkify": (linkify, "turbohtml"),
     "linkify-traversal": (linkify_traversal, "turbohtml"),
     "detect": (detect, "turbohtml"),
+    "phone": (phone, "turbohtml"),
+    "phone-parse": (phone_parse, "turbohtml"),
+    "phone-format": (phone_format, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
     "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),
