@@ -291,6 +291,14 @@ uint32_t th_tree_attr_generation(const th_tree *tree) {
     return tree->attr_rec_count;
 }
 
+uint64_t th_tree_attr_version(const th_tree *tree) {
+    return tree->attr_version;
+}
+
+uint64_t th_tree_id_version(const th_tree *tree) {
+    return tree->id_version;
+}
+
 int th_tree_quirks(const th_tree *tree) {
     return tree->quirks;
 }

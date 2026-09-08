@@ -311,6 +311,12 @@ static Py_ssize_t node_depth(struct th_node *node) {
 /* Negative when x precedes y in document (pre-order); positive otherwise. Never
    called with x == y. */
 static int node_before(struct th_node *left, struct th_node *right) {
+    if (left->next_sibling == right || left->first_child == right) {
+        return -1;
+    }
+    if (right->next_sibling == left || right->first_child == left) {
+        return 1;
+    }
     Py_ssize_t dx = node_depth(left);
     Py_ssize_t dy = node_depth(right);
     struct th_node *walk_left = left;
@@ -363,7 +369,13 @@ static void sort_unique(xp_nodeset *ns) {
     if (ns->len < 2) {
         return;
     }
-    qsort(ns->items, (size_t)ns->len, sizeof(xp_item), item_cmp);
+    /* Forward axes already produce tree order; preserve it without sorting again. */
+    for (Py_ssize_t index = 1; index < ns->len; index++) {
+        if (item_cmp(&ns->items[index - 1], &ns->items[index]) > 0) {
+            qsort(ns->items, (size_t)ns->len, sizeof(xp_item), item_cmp);
+            break;
+        }
+    }
     Py_ssize_t write_pos = 1;
     for (Py_ssize_t read_pos = 1; read_pos < ns->len; read_pos++) {
         if (ns->items[read_pos].node != ns->items[write_pos - 1].node ||
@@ -890,15 +902,32 @@ static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *se
     return 0;
 }
 
-/* Merge b'text items into arg_node (taking ownership of b'text storage on success). */
 static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
-    for (Py_ssize_t index = 0; index < source->len; index++) {
-        if (ns_push(target, source->items[index].node, source->items[index].attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                                                   /* GCOVR_EXCL_LINE */
+    /* Extension functions can return unordered nodes and duplicates. */
+    sort_unique(target);
+    sort_unique(source);
+    xp_nodeset merged = {0};
+    Py_ssize_t left = 0;
+    Py_ssize_t right = 0;
+    while (left < target->len || right < source->len) {
+        const xp_item *item;
+        if (left == target->len) {
+            item = &source->items[right++];
+        } else if (right == source->len) {
+            item = &target->items[left++];
+        } else {
+            const int order = item_cmp(&target->items[left], &source->items[right]);
+            item = order <= 0 ? &target->items[left++] : &source->items[right];
+            right += order >= 0;
+        }
+        if (ns_push(&merged, item->node, item->attr) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            xp_nodeset_free(&merged);                       /* GCOVR_EXCL_LINE: allocation failure */
+            return -1;                                      /* GCOVR_EXCL_LINE: allocation failure */
         }
     }
+    xp_nodeset_free(target);
     xp_nodeset_free(source);
-    sort_unique(target);
+    *target = merged;
     return 0;
 }
 
@@ -1010,6 +1039,7 @@ static int eval_expr_inner(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_
         }
         if (nodeset_union(&left.nodes, &right.nodes) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             xp_result_free(&left);                          /* GCOVR_EXCL_LINE */
+            xp_result_free(&right);                         /* GCOVR_EXCL_LINE: allocation failure */
             return -1;                                      /* GCOVR_EXCL_LINE */
         }
         *out = left;

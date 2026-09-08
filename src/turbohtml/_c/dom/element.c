@@ -2,6 +2,7 @@
    find/select/xpath/regex query plus structural-mutation bindings. */
 
 #include "dom/nodes.h"
+#include "core/node_map.h"
 
 #include "core/vec.h" /* th_grow_cap overflow-safe buffer growth */
 
@@ -1072,6 +1073,8 @@ void handle_drop_index(PyObject *handle_obj) {
     handle->index_built = 0;
     path_id_map_free(handle->path_ids);
     handle->path_ids = NULL;
+    path_positions_free(handle->path_positions);
+    handle->path_positions = NULL;
 }
 
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.\n\n"
@@ -1452,7 +1455,7 @@ static uint64_t path_id_hash(const Py_UCS4 *value, Py_ssize_t len, int ci) {
    many elements carry it, so the anchor test is an O(id-length) probe instead of a
    whole-document scan. ci folds id case the way the quirks-mode id selector does.
    Returns the map (the caller caches it) or NULL on allocation failure. */
-static path_id_map *path_id_map_build(th_node *document, int ci) {
+static path_id_map *path_id_map_build(th_tree *tree, th_node *document) {
     Py_ssize_t id_count = 0;
     for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
         const th_node_attr *id = node->type == TH_NODE_ELEMENT ? find_node_attr(node, TH_ATTR_ID) : NULL;
@@ -1474,6 +1477,8 @@ static path_id_map *path_id_map_build(th_node *document, int ci) {
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     map->mask = capacity - 1;
+    map->id_version = th_tree_id_version(tree);
+    const int ci = th_tree_quirks(tree);
     map->ci = ci;
     for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
         const th_node_attr *id = node->type == TH_NODE_ELEMENT ? find_node_attr(node, TH_ATTR_ID) : NULL;
@@ -1508,19 +1513,44 @@ static int path_id_unique(const path_id_map *map, const Py_UCS4 *value, Py_ssize
     return map->slots[slot].count == 1;
 }
 
-/* The 1-based position of node among its same-type element siblings, setting
-   *needs_index when more than one such sibling exists so the position disambiguates
-   it. Scans preceding siblings once (their count is the position), and only scans
-   following siblings when node is the first, mirroring libxml2's xmlGetNodePath. */
-static int path_step_index(th_node *node, int *needs_index) {
-    int index = 1;
-    for (th_node *sibling = node->prev_sibling; sibling != NULL; sibling = sibling->prev_sibling) {
-        if (sibling->type == TH_NODE_ELEMENT && sel_same_type(node, sibling)) {
-            index++;
+void path_positions_free(void *positions) {
+    th_node_map *const map = positions;
+    if (map != NULL) {
+        PyMem_Free(map->entries);
+        PyMem_Free(map);
+    }
+}
+
+static int path_step_index(HandleObject *handle, th_node *node, int *needs_index) {
+    th_node_map *map = handle->path_positions;
+    if (map == NULL) {
+        map = PyMem_Calloc(1, sizeof(*map));
+        if (map == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;     /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        handle->path_positions = map;
+    }
+    Py_ssize_t value = th_node_map_find(map, node);
+    if (value == 0) {
+        th_node *previous = node->prev_sibling;
+        while (previous != NULL && (previous->type != TH_NODE_ELEMENT || !sel_same_type(node, previous))) {
+            previous = previous->prev_sibling;
+        }
+        value = previous == NULL ? 1 : th_node_map_find(map, previous) + 1;
+        if (previous != NULL && value == 1) {
+            value = 2;
+            for (th_node *sibling = previous->prev_sibling; sibling != NULL; sibling = sibling->prev_sibling) {
+                if (sibling->type == TH_NODE_ELEMENT && sel_same_type(node, sibling)) {
+                    value++;
+                }
+            }
+        }
+        if (th_node_map_insert(map, node, value) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                  /* GCOVR_EXCL_LINE: allocation failure */
         }
     }
-    *needs_index = index > 1 ? 1 : !sel_no_sibling(node, 1, 1);
-    return index;
+    *needs_index = value > 1 || !sel_no_sibling(node, 1, 1);
+    return (int)value;
 }
 
 /* Snapshot the element ancestor chain, node first up to the topmost element
@@ -1562,8 +1592,12 @@ static PyObject *element_css_path(PyObject *self, PyObject *Py_UNUSED(ignored)) 
     th_tree *tree = handle_obj->tree;
     th_node *document = th_tree_document(tree);
     Py_ssize_t count = path_collect_chain(node, &chain);
+    if (handle_obj->path_ids != NULL && handle_obj->path_ids->id_version != th_tree_id_version(tree)) {
+        path_id_map_free(handle_obj->path_ids);
+        handle_obj->path_ids = NULL;
+    }
     if (document != NULL && handle_obj->path_ids == NULL) {
-        handle_obj->path_ids = path_id_map_build(document, th_tree_quirks(tree));
+        handle_obj->path_ids = path_id_map_build(tree, document);
     }
     if (count < 0 || (document != NULL && handle_obj->path_ids == NULL)) { /* GCOVR_EXCL_BR_LINE: alloc failure */
         error = 1;                                                         /* GCOVR_EXCL_LINE: alloc-failure */
@@ -1592,7 +1626,11 @@ static PyObject *element_css_path(PyObject *self, PyObject *Py_UNUSED(ignored)) 
             } else {
                 path_put_ucs4(&buf, element->text, element->text_len);
                 int needs_index;
-                int sibling_index = path_step_index(element, &needs_index);
+                int sibling_index = path_step_index(handle_obj, element, &needs_index);
+                if (sibling_index < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    error = 1;           /* GCOVR_EXCL_LINE: allocation failure */
+                    break;               /* GCOVR_EXCL_LINE: allocation failure */
+                }
                 if (needs_index) {
                     path_puts(&buf, ":nth-of-type(");
                     path_put_int(&buf, sibling_index);
@@ -1634,7 +1672,11 @@ static PyObject *element_xpath_path(PyObject *self, PyObject *Py_UNUSED(ignored)
             path_puts(&buf, "/");
             path_put_ucs4(&buf, element->text, element->text_len);
             int needs_index;
-            int sibling_index = path_step_index(element, &needs_index);
+            int sibling_index = path_step_index((HandleObject *)((NodeObject *)self)->handle, element, &needs_index);
+            if (sibling_index < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                error = 1;           /* GCOVR_EXCL_LINE: allocation failure */
+                break;               /* GCOVR_EXCL_LINE: allocation failure */
+            }
             if (needs_index) {
                 path_puts(&buf, "[");
                 path_put_int(&buf, sibling_index);

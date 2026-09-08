@@ -127,10 +127,18 @@ typedef struct {
    has_memo is the per-query :has() subtree memo, or NULL when the selector has no
    :has() (the common path) so nothing is allocated or probed. */
 typedef struct {
+    th_node *node;
+    th_node *scope;
+    const sel_simple *simple;
+    int index;
+} sel_nth_memo;
+
+typedef struct {
     th_tree *tree;
     th_node *scope;
     int quirks;
     sel_has_memo *has_memo;
+    sel_nth_memo *nth_memo;
 } sel_ctx;
 
 typedef struct {

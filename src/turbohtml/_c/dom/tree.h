@@ -390,6 +390,8 @@ th_node *th_tree_document(th_tree *tree);
    resolved as absent may now exist: a monotonic generation for invalidating a
    cached compiled selector whose attribute atoms were resolved against the tree. */
 uint32_t th_tree_attr_generation(const th_tree *tree);
+uint64_t th_tree_attr_version(const th_tree *tree);
+uint64_t th_tree_id_version(const th_tree *tree);
 
 /* The WHATWG parse errors collected during the parse, in document order, and
    their count via *out_count. The array (and its static code strings) lives as

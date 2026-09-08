@@ -1031,6 +1031,37 @@ typedef struct {
     sel_compiled **compiled;
 } css_sheet;
 
+typedef struct {
+    th_node *node;
+    css_value values[NUM_PROPS];
+} css_computed_entry;
+
+/* Two entries retain a parent while successive child styles replace the other entry. */
+typedef struct {
+    uint64_t attr_version;
+    css_computed_entry entries[2];
+} css_computed_cache;
+
+static void css_free_computed(HandleObject *handle) {
+    css_computed_cache *cache = handle->css_computed;
+    if (cache != NULL) {
+        css_free_map(cache->entries[0].values);
+        css_free_map(cache->entries[1].values);
+        PyMem_Free(cache);
+        handle->css_computed = NULL;
+    }
+}
+
+static int css_copy_map(css_value *dest, const css_value *source) {
+    for (int index = 0; index < NUM_PROPS; index++) {
+        const int copied = css_value_set_slice(&dest[index], source[index].data, source[index].len);
+        if (copied < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;    /* GCOVR_EXCL_LINE: allocation failure */
+        }
+    }
+    return 0;
+}
+
 static void css_free_sheets(css_sheet *sheets, Py_ssize_t count) {
     for (Py_ssize_t index = 0; index < count; index++) {
         for (Py_ssize_t rule = 0; rule < sheets[index].rule_count; rule++) {
@@ -1046,6 +1077,7 @@ static void css_free_sheets(css_sheet *sheets, Py_ssize_t count) {
 }
 
 void handle_clear_css_cache(HandleObject *handle) {
+    css_free_computed(handle);
     css_free_sheets(handle->css_sheets, handle->css_sheet_count);
     handle->css_sheets = NULL;
     handle->css_sheet_count = 0;
@@ -1156,7 +1188,7 @@ static css_sheet *css_cached_sheets(module_state *state, HandleObject *handle, P
 static int css_cascade_element(th_node *element, const css_sheet *sheets, Py_ssize_t sheet_count, th_tree *tree,
                                int quirks, const css_value *parent, css_value *out) {
     css_slot slots[NUM_PROPS] = {0};
-    sel_ctx ctx = {tree, element, quirks, NULL};
+    sel_ctx ctx = {tree, element, quirks, NULL, NULL};
     long order = 0;
     for (Py_ssize_t sheet = 0; sheet < sheet_count; sheet++) {
         const css_sheet *current = &sheets[sheet];
@@ -1250,6 +1282,70 @@ static Py_ssize_t css_ancestor_chain(th_node *element, th_node ***out_chain) {
     return depth;
 }
 
+static int css_compute_map(module_state *state, HandleObject *handle, th_node *element, css_value *out) {
+    Py_ssize_t sheet_count = 0;
+    const css_sheet *const sheets = css_cached_sheets(state, handle, &sheet_count);
+    if (sheet_count < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;         /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    const uint64_t version = th_tree_attr_version(handle->tree);
+    css_computed_cache *cache = handle->css_computed;
+    if (cache != NULL && cache->attr_version != version) {
+        css_free_computed(handle);
+        cache = NULL;
+    }
+    if (cache == NULL) {
+        cache = PyMem_Calloc(1, sizeof(*cache));
+        if (cache == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;       /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        cache->attr_version = version;
+        handle->css_computed = cache;
+    }
+    int parent_slot = -1;
+    for (int slot = 0; slot < 2; slot++) {
+        if (cache->entries[slot].node == element) {
+            return css_copy_map(out, cache->entries[slot].values);
+        }
+        if (cache->entries[slot].node != NULL && cache->entries[slot].node == element->parent) {
+            parent_slot = slot;
+        }
+    }
+    const int quirks = th_tree_quirks(handle->tree);
+    if (parent_slot >= 0) {
+        if (css_cascade_element(element, sheets, sheet_count, handle->tree, quirks, cache->entries[parent_slot].values,
+                                out) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                      /* GCOVR_EXCL_LINE: allocation failure */
+        }
+    } else {
+        th_node **chain = NULL;
+        const Py_ssize_t chain_len = css_ancestor_chain(element, &chain);
+        if (chain_len < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;       /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        for (Py_ssize_t index = 0; index < chain_len; index++) {
+            css_value current[NUM_PROPS] = {0};
+            const int resolved =
+                css_cascade_element(chain[index], sheets, sheet_count, handle->tree, quirks, out, current);
+            css_free_map(out);
+            memcpy(out, current, sizeof(current));
+            if (resolved < 0) {    /* GCOVR_EXCL_BR_LINE: allocation failure */
+                PyMem_Free(chain); /* GCOVR_EXCL_LINE: allocation failure */
+                return -1;         /* GCOVR_EXCL_LINE: allocation failure */
+            }
+        }
+        PyMem_Free(chain);
+    }
+    css_computed_entry *const entry = &cache->entries[parent_slot == 0 ? 1 : 0];
+    css_free_map(entry->values);
+    memset(entry, 0, sizeof(*entry));
+    if (css_copy_map(entry->values, out) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                              /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    entry->node = element;
+    return 0;
+}
+
 PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg) {
     module_state *state = PyModule_GetState(module);
     if (!is_node(arg, state) || ((NodeObject *)arg)->node->type != TH_NODE_ELEMENT) {
@@ -1259,36 +1355,10 @@ PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg) {
     PyObject *handle_obj = ((NodeObject *)arg)->handle;
     HandleObject *handle = (HandleObject *)handle_obj;
     th_node *element = ((NodeObject *)arg)->node;
-    th_tree *tree = handle->tree;
     css_value final_map[NUM_PROPS] = {0};
     int failed = 0;
     Py_BEGIN_CRITICAL_SECTION(handle_obj); /* per-tree lock: sheet collection and matching read the tree */
-    th_node **chain = NULL;
-    Py_ssize_t chain_len = css_ancestor_chain(element, &chain);
-    if (chain_len < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        failed = 1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    } else {             /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
-        Py_ssize_t sheet_count = 0;
-        css_sheet *sheets = css_cached_sheets(state, handle, &sheet_count);
-        if (sheet_count < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            failed = 1;        /* GCOVR_EXCL_LINE: allocation-failure path */
-        } else {               /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
-            int quirks = th_tree_quirks(tree);
-            css_value parent[NUM_PROPS] = {0};
-            for (Py_ssize_t index = 0; index < chain_len; index++) {
-                css_value current[NUM_PROPS] = {0};
-                int rc = css_cascade_element(chain[index], sheets, sheet_count, tree, quirks, parent, current);
-                css_free_map(parent);
-                memcpy(parent, current, sizeof(parent));
-                if (rc < 0) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                    failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-                    break;      /* GCOVR_EXCL_LINE: allocation-failure path */
-                }
-            }
-            memcpy(final_map, parent, sizeof(final_map)); /* the last element resolved is the target */
-        }
-    }
-    PyMem_Free(chain);
+    failed = css_compute_map(state, handle, element, final_map) < 0;
     Py_END_CRITICAL_SECTION();
     if (failed) {                /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         css_free_map(final_map); /* GCOVR_EXCL_LINE: allocation-failure path */

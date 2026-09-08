@@ -117,11 +117,13 @@ PyObject *turbohtml_register_selector_error(PyObject *module, PyObject *type) {
 static int append_selected(PyObject *out, module_state *state, PyObject *handle, th_node *origin,
                            sel_compiled *compiled, Py_ssize_t limit) {
     int error = 0;
+    sel_nth_memo nth_memo = {0};
     sel_has_memo has_memo = {0};
     const sel_simple *single = sel_single_simple(compiled);
     uint16_t subject = selector_subject_atom(compiled);
     HandleObject *handle_obj = (HandleObject *)handle;
-    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL};
+    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL,
+                   &nth_memo};
     if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
         Py_ssize_t end = handle_obj->index_offsets[subject + 1];
         for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
@@ -417,6 +419,7 @@ PyObject *node_select_one(PyObject *self, PyObject *arg) {
     th_node *origin = ((NodeObject *)self)->node;
     th_node *found = NULL;
     int error = 0;
+    sel_nth_memo nth_memo = {0};
     sel_has_memo has_memo = {0};       /* shared across the walk so :has() memoizes its subtree scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock around the walk */
     HandleObject *handle_obj = (HandleObject *)handle;
@@ -426,7 +429,8 @@ PyObject *node_select_one(PyObject *self, PyObject *arg) {
     } else {
         const sel_simple *single = sel_single_simple(compiled);
         uint16_t subject = selector_subject_atom(compiled);
-        sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL};
+        sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL,
+                       &nth_memo};
         if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
             Py_ssize_t end = handle_obj->index_offsets[subject + 1];
             for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
@@ -1672,6 +1676,7 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
     Py_ssize_t count = 0;
     Py_ssize_t capacity = 0;
     int error = 0;
+    sel_nth_memo nth_memo = {0};
     sel_has_memo has_memo = {0};       /* shared across the walk so :has() memoizes its subtree scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
@@ -1683,7 +1688,8 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
            may run here; matching alone never rewires a node, so the snapshot lets
            pass 2 edit in pure C without dereferencing a stale pointer. */
         const sel_simple *single = sel_single_simple(compiled);
-        sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL};
+        sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL,
+                       &nth_memo};
         for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
             if (node->type != TH_NODE_ELEMENT) {
                 continue;
@@ -1774,8 +1780,10 @@ static int snapshot_push(node_snapshot *snapshot, th_node *node) {
    failure. */
 static int snapshot_matches(sel_compiled *compiled, th_node *origin, node_snapshot *snapshot) {
     const sel_simple *single = sel_single_simple(compiled);
+    sel_nth_memo nth_memo = {0};
     sel_has_memo has_memo = {0}; /* shared across the walk so :has() memoizes its subtree scans */
-    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL};
+    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL,
+                   &nth_memo};
     int result = 0;
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
         if (node->type != TH_NODE_ELEMENT) {

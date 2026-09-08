@@ -104,6 +104,8 @@ struct th_tree {
     uint32_t attr_rec_count;
     uint32_t attr_rec_cap;
     uint32_t *attr_slots; /* slot -> record index + 1; 0 marks an empty slot */
+    uint64_t attr_version;
+    uint64_t id_version;
     uint32_t attr_slot_mask;
     /* Encoding declarations from <meta> elements, in document order, so a bytes parse
        can run the WHATWG "changing the encoding while parsing" step once the tree is

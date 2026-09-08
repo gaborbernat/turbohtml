@@ -230,8 +230,10 @@ static void mark_start_dirty(th_tree *tree, th_node *node) {
    Returns 0, or -1 on allocation failure. */
 int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
                      Py_ssize_t value_len, int has_value) {
+    tree->attr_version++;
     mark_start_dirty(tree, node);
     uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
+    tree->id_version += atom == TH_ATTR_ID;
     Py_UCS4 *owned = NULL;
     if (has_value) {
         owned = arena_alloc(tree, (value_len ? value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
@@ -321,6 +323,7 @@ Py_ssize_t th_node_attr_find(th_tree *tree, th_node *node, const char *name, Py_
 }
 
 int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    tree->attr_version++;
     Py_ssize_t index = th_node_attr_find(tree, node, name, name_len);
     if (index < 0) {
         return 0;
@@ -328,6 +331,7 @@ int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
     mark_start_dirty(tree, node);
     th_mo_attr_changed(tree, node, node->attrs[index].name_atom, node->attrs[index].value, node->attrs[index].value_len,
                        1);
+    tree->id_version += node->attrs[index].name_atom == TH_ATTR_ID;
     for (Py_ssize_t shift = index; shift + 1 < node->attr_count; shift++) {
         node->attrs[shift] = node->attrs[shift + 1];
     }
