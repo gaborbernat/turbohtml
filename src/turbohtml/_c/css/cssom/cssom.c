@@ -1313,9 +1313,10 @@ static int css_compute_map(module_state *state, HandleObject *handle, th_node *e
     }
     const int quirks = th_tree_quirks(handle->tree);
     if (parent_slot >= 0) {
-        if (css_cascade_element(element, sheets, sheet_count, handle->tree, quirks, cache->entries[parent_slot].values,
-                                out) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-            return -1;                      /* GCOVR_EXCL_LINE: allocation failure */
+        const int resolved = css_cascade_element(element, sheets, sheet_count, handle->tree, quirks,
+                                                 cache->entries[parent_slot].values, out);
+        if (resolved < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;      /* GCOVR_EXCL_LINE: allocation failure */
         }
     } else {
         th_node **chain = NULL;
