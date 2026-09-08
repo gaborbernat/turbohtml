@@ -10,6 +10,7 @@
    critical section, so no Python API is touched while the structure is walked. */
 
 #include "serialize/internal.h"
+#include "core/node_map.h"
 
 #include "dom/tree.h"
 #include "dom/tree_internal.h"
@@ -68,10 +69,6 @@ static const char *const read_maybe_words[] = {
     "and", "article", "body", "column", "content", "main", "shadow",
 };
 
-/* A growable map from a candidate element to its accumulated content score. The
-   candidate set is the parents and grandparents of scored paragraphs, so it stays
-   small; a linear find-or-insert is simpler to cover than a hash and fast enough
-   for a one-shot extraction. */
 typedef struct {
     th_node *node;
     double score;
@@ -82,6 +79,7 @@ typedef struct {
     read_candidate *candidates;
     Py_ssize_t count;
     Py_ssize_t cap;
+    th_node_map index;
     /* Whether the landmark tags are pruned this pass; cleared for the retry that
        rescues a body living inside a <footer>/<header>/<aside>/<nav>. */
     int strip_landmarks;
@@ -289,11 +287,10 @@ static double read_link_density(th_tree *tree, th_node *node, int strip_landmark
 /* Add `delta` to node's candidate score, seeding a fresh entry with its tag and
    class/id weight on first sight. */
 static void read_add(read_scorer *scorer, th_node *node, double delta) {
-    for (Py_ssize_t index = 0; index < scorer->count; index++) {
-        if (scorer->candidates[index].node == node) {
-            scorer->candidates[index].score += delta;
-            return;
-        }
+    const Py_ssize_t existing = th_node_map_find(&scorer->index, node);
+    if (existing != 0) {
+        scorer->candidates[existing - 1].score += delta;
+        return;
     }
     if (scorer->count == scorer->cap) {
         size_t cap;
@@ -309,6 +306,9 @@ static void read_add(read_scorer *scorer, th_node *node, double delta) {
         }
         scorer->candidates = resized;
         scorer->cap = (Py_ssize_t)cap;
+    }
+    if (th_node_map_insert(&scorer->index, node, scorer->count + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return;                                                            /* GCOVR_EXCL_LINE: allocation failure */
     }
     scorer->candidates[scorer->count].node = node;
     scorer->candidates[scorer->count].score = read_tag_base(node->atom) + read_class_weight(scorer->tree, node) + delta;
@@ -418,10 +418,12 @@ static th_node *read_semantic_fallback(read_scorer *scorer, th_node *root) {
    landmarks pruned; retry with landmarks kept when that found nothing; and finally
    surface an explicit <article>/<main> body that carries no scoring paragraph. */
 th_node *th_node_main_content(th_tree *tree, th_node *root) {
-    read_scorer scorer = {tree, NULL, 0, 0, 1};
+    read_scorer scorer = {tree, NULL, 0, 0, {0}, 1};
     read_walk(&scorer, root);
     th_node *best = read_best(&scorer);
     if (best == NULL) {
+        PyMem_Free(scorer.index.entries);
+        scorer.index = (th_node_map){0};
         scorer.count = 0;
         scorer.strip_landmarks = 0;
         read_walk(&scorer, root);
@@ -431,6 +433,7 @@ th_node *th_node_main_content(th_tree *tree, th_node *root) {
         best = read_semantic_fallback(&scorer, root);
     }
     PyMem_Free(scorer.candidates);
+    PyMem_Free(scorer.index.entries);
     return best;
 }
 

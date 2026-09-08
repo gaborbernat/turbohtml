@@ -35,6 +35,29 @@ def test_microdata_repeated_values_follow_tree_order(reference: str) -> None:
     ]
 
 
+@pytest.mark.parametrize("reference", ["outer inner", "inner outer"])
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        pytest.param(
+            "<span id=outer itemprop=name><span id=inner itemprop=name>inside</span>outside</span>",
+            ["insideoutside", "inside"],
+            id="parent-and-first-child",
+        ),
+        pytest.param(
+            "<span id=outer itemprop=name>outside</span><span id=inner itemprop=name>inside</span>",
+            ["outside", "inside"],
+            id="adjacent-siblings",
+        ),
+    ],
+)
+def test_microdata_referenced_properties_follow_tree_order(
+    reference: str, markup: str, expected: list[str | MicrodataItem]
+) -> None:
+    document: Final[Document] = parse(f'<div itemscope itemref="{reference}"></div>{markup}')
+    assert document.microdata() == [MicrodataItem(type=None, id=None, properties={"name": expected})]
+
+
 def test_microdata_nested_scope_keeps_following_properties() -> None:
     document: Final[Document] = parse(
         "<div itemscope><section itemprop=child itemscope>"
