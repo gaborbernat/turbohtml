@@ -395,13 +395,9 @@ static int micro_id_index_find(micro_id_index *index, th_node *document, const P
 
 /* Push every id in root's itemref attribute onto `pending`, resolving each token to the first element carrying it (an
    unresolved token is skipped, per the spec). -1 only on the excluded allocation-failure path. */
-static int push_itemref_targets(micro_ctx *ctx, th_node *root, node_stack *pending) {
-    Py_ssize_t itemref = th_node_attr_find(ctx->tree, root, "itemref", 7);
-    if (itemref < 0 || root->attrs[itemref].value == NULL) {
-        return 0;
-    }
-    const Py_UCS4 *value = root->attrs[itemref].value;
-    Py_ssize_t value_len = root->attrs[itemref].value_len;
+static int push_itemref_targets(micro_ctx *ctx, const th_node_attr *itemref, node_stack *pending) {
+    const Py_UCS4 *const value = itemref->value;
+    const Py_ssize_t value_len = itemref->value_len;
     th_node *document = th_tree_document(ctx->tree);
     Py_ssize_t cursor = 0;
     while (cursor < value_len) {
@@ -444,7 +440,7 @@ static int push_element_children(th_node *parent, node_stack *pending) {
    item" algorithm: crawl root's descendants plus every element its itemref names, stopping at a nested itemscope
    (whose descendants belong to that nested item) and visiting each element at most once so an itemref cycle
    terminates. -1 only on the excluded allocation-failure path. */
-static int crawl_item_properties(micro_ctx *ctx, th_node *root, node_stack *results) {
+static int crawl_item_properties(micro_ctx *ctx, th_node *root, const th_node_attr *itemref, node_stack *results) {
     node_stack memory = {NULL, 0, 0};
     node_stack pending = {NULL, 0, 0};
     int status = -1;
@@ -454,8 +450,8 @@ static int crawl_item_properties(micro_ctx *ctx, th_node *root, node_stack *resu
     if (push_element_children(root, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         goto done;                                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (push_itemref_targets(ctx, root, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        goto done;                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (push_itemref_targets(ctx, itemref, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        goto done;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     while (pending.len > 0) {
         th_node *current = pending.items[--pending.len];
@@ -527,16 +523,48 @@ static int node_ptr_before(const void *left, const void *right) {
     return node_before(*(th_node *const *)left, *(th_node *const *)right);
 }
 
+/* Without itemref, preorder visits each property once in tree order, so no visited set or sort is needed. */
+static int crawl_local_properties(th_node *root, node_stack *results) {
+    th_node *current = root->first_child;
+    while (current != NULL) {
+        if (current->type == TH_NODE_ELEMENT) {
+            const th_node_attr *const itemprop = find_node_attr(current, TH_ATTR_ITEMPROP);
+            if (itemprop != NULL && itemprop->value != NULL) {
+                if (node_stack_push(results, current) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                    return -1;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+            }
+            if (find_node_attr(current, TH_ATTR_ITEMSCOPE) == NULL && current->first_child != NULL) {
+                current = current->first_child;
+                continue;
+            }
+        }
+        while (current != root && current->next_sibling == NULL) {
+            current = current->parent;
+        }
+        current = current == root ? NULL : current->next_sibling;
+    }
+    return 0;
+}
+
 /* Crawl the properties of the item rooted at `element` into `properties`, in document (tree) order per the spec's
    final sort, each itemprop name mapping to its list of values. -1 only on the excluded allocation-failure path. */
 static int collect_properties(micro_ctx *ctx, th_node *element, PyObject *properties) {
     node_stack results = {NULL, 0, 0};
     int status = -1;
-    if (crawl_item_properties(ctx, element, &results) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        goto done;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    if (results.len > 1) {
-        qsort(results.items, (size_t)results.len, sizeof(th_node *), node_ptr_before);
+    const Py_ssize_t itemref = th_node_attr_find(ctx->tree, element, "itemref", 7);
+    if (itemref < 0 || element->attrs[itemref].value == NULL) {
+        if (crawl_local_properties(element, &results) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            goto done;                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    } else {
+        const int crawled = crawl_item_properties(ctx, element, &element->attrs[itemref], &results);
+        if (crawled < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            goto done;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (results.len > 1) {
+            qsort(results.items, (size_t)results.len, sizeof(th_node *), node_ptr_before);
+        }
     }
     for (Py_ssize_t index = 0; index < results.len; index++) {
         th_node *property = results.items[index];
