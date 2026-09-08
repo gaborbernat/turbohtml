@@ -19,6 +19,7 @@
 #include "dom/tree.h"
 #include "dom/tree_internal.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static const char C14N_SVG[] = "http://www.w3.org/2000/svg";
@@ -183,9 +184,6 @@ static c14n_attr c14n_make_ref(const char *name, Py_ssize_t name_len, const Py_U
     return ref;
 }
 
-/* Order two attributes by (namespace URI, local name). Distinct attributes never tie
-   on both, so a shared prefix falls to the length comparison; equal length there is
-   unreachable and the arbitrary 1 it would return never affects the sort. */
 static int c14n_key_cmp(const c14n_attr *left, const c14n_attr *right) {
     Py_ssize_t min_ns = left->ns_len < right->ns_len ? left->ns_len : right->ns_len;
     int order = memcmp(left->ns, right->ns, (size_t)min_ns);
@@ -200,7 +198,11 @@ static int c14n_key_cmp(const c14n_attr *left, const c14n_attr *right) {
     if (order != 0) {
         return order;
     }
-    return left->local_len < right->local_len ? -1 : 1;
+    return (left->local_len > right->local_len) - (left->local_len < right->local_len);
+}
+
+static int c14n_attr_cmp(const void *left, const void *right) {
+    return c14n_key_cmp(left, right);
 }
 
 /* A stored xmlns / xmlns:* attribute is a namespace declaration, emitted from the
@@ -308,14 +310,18 @@ static void c14n_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_node
             }
         }
     }
-    for (Py_ssize_t index = 1; index < count; index++) { /* insertion sort; attribute counts are tiny */
-        c14n_attr key = attrs[index];
-        Py_ssize_t prev = index - 1;
-        while (prev >= 0 && c14n_key_cmp(&attrs[prev], &key) > 0) {
-            attrs[prev + 1] = attrs[prev];
-            prev--;
+    if (count > 32) {
+        qsort(attrs, (size_t)count, sizeof(*attrs), c14n_attr_cmp);
+    } else {
+        for (Py_ssize_t index = 1; index < count; index++) {
+            const c14n_attr key = attrs[index];
+            Py_ssize_t prev = index - 1;
+            while (prev >= 0 && c14n_key_cmp(&attrs[prev], &key) > 0) {
+                attrs[prev + 1] = attrs[prev];
+                prev--;
+            }
+            attrs[prev + 1] = key;
         }
-        attrs[prev + 1] = key;
     }
     for (Py_ssize_t index = 0; index < count; index++) {
         sbuf_putc(out, ' ');
