@@ -305,6 +305,14 @@ def select_has(text: str) -> None:
     _parsed(text).select(_HAS)
 
 
+def _select_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).select(case[0])
+
+
+def _xpath_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).xpath(case[0])
+
+
 def computed_style(text: str) -> None:
     """Resolve the CSSOM computed style of every element in the parsed, styled document."""
     for node in _parsed(text).descendants:
@@ -1014,6 +1022,9 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "find-cold": (Mutating(_find_cold_setup, _find_cold), "turbohtml"),
     "select": (select, "turbohtml"),
     "select-has": (select_has, "turbohtml"),
+    "select-nth": (_select_scaling, "turbohtml"),
+    "xpath-wide": (_xpath_scaling, "turbohtml"),
+    "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
     "computed-style-dense": (computed_style, "turbohtml"),
     "match": (match, "turbohtml"),
@@ -1044,6 +1055,9 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "socialcard": (socialcard, "turbohtml"),
     "structured": (structured, "turbohtml"),
     "microdata": (microdata, "turbohtml"),
+    "microdata-wide": (microdata, "turbohtml"),
+    "microdata-empty-scope": (microdata, "turbohtml"),
+    "structured-empty": (structured, "turbohtml"),
     "microdata-itemref": (microdata, "turbohtml"),
     "syndication": (syndication, "turbohtml"),
     "sanitize": (sanitize, "turbohtml"),
@@ -1072,6 +1086,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "tables": (tables, "turbohtml"),
     "tables-wide": (tables, "turbohtml"),
     "article": (article, "turbohtml"),
+    "article-wide": (article, "turbohtml"),
     "boilerplate": (boilerplate, "turbohtml"),
     "date": (date, "turbohtml"),
     "text-render": (text_render, "turbohtml"),

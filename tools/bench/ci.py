@@ -96,8 +96,6 @@ _LOADERS["parse-scripting"] = partial(
     corpus.large_text, *corpus.REAL_PAGES[2][1:]
 )  # mozilla blog (95 kB), carries <noscript>
 _LOADERS["parse-locations"] = _spec  # the whatwg spec: many tags and attributes to stamp spans for
-# computed style re-collects every sheet and re-matches per element, so it stays on the bench's own 4 kB styled page
-# rather than the 235 kB spec the other read-path ops share
 _LOADERS["computed-style"] = lambda: INPUTS["computed-style"]()[0][1]
 
 
@@ -160,6 +158,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "select-nth-filtered": ("select-nth", 4),
+    "xpath-wide-union": ("xpath-wide", 4),
     "idna-varied": ("idna", 1),
     "linkify-traversal-small-nodes": ("linkify-traversal", 1),
     "linkify-traversal-skipped": ("linkify-traversal", 2),
@@ -185,6 +185,20 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
 def _inline(operation: str, case_index: int = 0) -> object:
     """Return one case the bench already defines inline for ``operation`` (no corpus needed)."""
     return INPUTS[operation]()[case_index][1]
+
+
+_LOADERS.update({
+    name: partial(_inline, name, 1)
+    for name in (
+        "select-nth",
+        "xpath-wide",
+        "computed-style-deep",
+        "microdata-wide",
+        "microdata-empty-scope",
+        "structured-empty",
+        "article-wide",
+    )
+})
 
 
 def loader_for(operation: str) -> Callable[[], object]:

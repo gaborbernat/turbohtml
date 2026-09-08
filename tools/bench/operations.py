@@ -291,6 +291,13 @@ OPERATIONS: dict[str, Operation] = {
     "find-cold": Operation("query a cold 10,000-element tree", "us"),
     "select": Operation("select div a[href]", "us"),
     "select-has": Operation("select div:has(a)", "us"),
+    "select-nth": Operation("select sibling positions in wide trees", "ms"),
+    "xpath-wide": Operation("order XPath results in wide trees", "ms"),
+    "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
+    "microdata-wide": Operation("extract properties from one wide item", "ms"),
+    "microdata-empty-scope": Operation("traverse an item without properties", "ms"),
+    "structured-empty": Operation("extract metadata from an unannotated tree", "ms"),
+    "article-wide": Operation("score many article candidates", "ms"),
     "computed-style": Operation("computed style for every element", "us"),
     "computed-style-dense": Operation("computed style over a property-dense sheet", "us"),
     "match": Operation("match each anchor against div a[href]", "us"),
@@ -1000,6 +1007,39 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "find-cold": lambda: _FIND_COLD_CASES,
     "select": _readpath_cases,
     "select-has": _readpath_cases,
+    "select-nth": lambda: tuple(
+        (f"{selector} ({size:,} siblings)", (selector, f"<ul>{'<li class=x>value</li>' * size}</ul>"))
+        for selector in ("li:nth-child(odd)", "li:nth-child(odd of .x)")
+        for size in (100, 1_000, 10_000)
+    ),
+    "xpath-wide": lambda: tuple(
+        (f"{expression} ({size:,} siblings)", (expression, f"<ul>{'<li>value</li>' * size}</ul>"))
+        for expression in ("//li", "//li | //ul")
+        for size in (100, 1_000, 10_000)
+    ),
+    "computed-style-deep": lambda: tuple(
+        (f"{depth} ancestors", f"<style>div {{ color:red }}</style>{'<div>' * depth}x{'</div>' * depth}")
+        for depth in (10, 100, 500)
+    ),
+    "microdata-wide": lambda: tuple(
+        (f"{size:,} properties", "<div itemscope>" + "<span itemprop=name>x</span>" * size + "</div>")
+        for size in (100, 1_000, 10_000)
+    ),
+    "microdata-empty-scope": lambda: tuple(
+        (f"{size:,} elements", f"<div itemscope>{'<span>x</span>' * size}</div>") for size in (100, 1_000, 10_000)
+    ),
+    "structured-empty": lambda: tuple(
+        (f"{size:,} elements", f"<div>{'<span>x</span>' * size}</div>") for size in (100, 1_000, 10_000)
+    ),
+    "article-wide": lambda: tuple(
+        (
+            f"{size:,} candidates",
+            "<div>"
+            + ("<section><p>" + "A sentence with enough text to score. " * 3 + "</p></section>") * size
+            + "</div>",
+        )
+        for size in (100, 1_000, 10_000)
+    ),
     "computed-style": lambda: (("styled page (3 kB)", _styled_page(8)), ("styled page (11 kB)", _styled_page(40))),
     "computed-style-dense": lambda: (("dense sheet (9 kB)", _dense_styled_page(20)),),
     "match": _readpath_cases,
