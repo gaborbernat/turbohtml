@@ -109,9 +109,12 @@ PGO off, and LTO off. The extension builds use Apple Clang 21.0.0; CPython's own
 The published performance tables use a separate PGO/LTO build; their numbers are not interchangeable with the
 plain-release audit comparisons.
 
-The release-table refresh remains incomplete because the machine lacks CPU headroom. The first four publication windows
-averaged 11.7% to 15.1% idle and failed the acceptance gate. The committed comparison tables retain their earlier
-measurements.
+The September 8 release-table refresh covers 34 operations, producing 33 performance tables and refreshing 142 rows
+across 15 migration tables. Unmeasured migration rows retain their earlier values. The publication runs use nice ``-10``
+with three workers, five values, and two warmups. I accepted a run only with at least two interval samples, mean CPU
+idle of at least 20%, and at most 10% of samples below 5% idle. I discarded overloaded runs and retried them; the
+download includes accepted and rejected CPU windows. Cells with more than 5% spread retain their noise warnings and are
+not a basis for precise comparisons.
 
 Each comparison uses isolated pyperf workers, warmups, and repeated values. I logged CPU idle throughout the timed
 windows and excluded saturated runs from performance claims. No audit test suite, compilation, or other benchmark ran

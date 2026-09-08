@@ -1,0 +1,36 @@
+{
+  "label": "detect a text's natural language",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "english book (64 KiB)",
+      0.0009561749788190354
+    ],
+    [
+      "cyrillic prose (4 KiB)",
+      4.089246015534324e-05
+    ],
+    [
+      "hangul prose (4 KiB)",
+      8.966868485913438e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.32631582420616667
+    ],
+    [
+      null,
+      0.052645100397907214
+    ],
+    [
+      null,
+      0.09300861854505464
+    ]
+  ],
+  "notes": {}
+}

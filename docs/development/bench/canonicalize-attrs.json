@@ -1,0 +1,36 @@
+{
+  "label": "canonicalize an element with many attributes",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 attributes",
+      7.644203523682336e-06
+    ],
+    [
+      "1,000 attributes",
+      8.233449442135073e-05
+    ],
+    [
+      "10,000 attributes",
+      0.0007225333542010048
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.18808400147606652
+    ],
+    [
+      null,
+      0.11487560072504366
+    ],
+    [
+      null,
+      0.0680848535209655
+    ]
+  ],
+  "notes": {}
+}

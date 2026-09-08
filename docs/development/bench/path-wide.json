@@ -1,0 +1,36 @@
+{
+  "label": "build CSS paths for wide sibling lists",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 siblings",
+      1.5216478847908851e-05
+    ],
+    [
+      "1,000 siblings",
+      0.00014196902122118142
+    ],
+    [
+      "10,000 siblings",
+      0.0014293862843866615
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.08564628028482156
+    ],
+    [
+      null,
+      0.12065622198728267
+    ],
+    [
+      null,
+      0.13424894744712837
+    ]
+  ],
+  "notes": {}
+}

@@ -1,5 +1,5 @@
 {
-  "label": "operation",
+  "label": "Microdata item extraction",
   "parties": [
     "turbohtml",
     "microdata"
@@ -29,5 +29,5 @@
       0.2262896377972683
     ]
   ],
-  "row_notes": {}
+  "notes": {}
 }

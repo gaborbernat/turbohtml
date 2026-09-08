@@ -1,0 +1,36 @@
+{
+  "label": "build one CSS path on a fresh tree",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 siblings",
+      1.04378487624975e-06
+    ],
+    [
+      "1,000 siblings",
+      1.0163398860640882e-05
+    ],
+    [
+      "10,000 siblings",
+      0.0001031711487788319
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.09725573010043885
+    ],
+    [
+      null,
+      0.09356662005800216
+    ],
+    [
+      null,
+      0.06788477418946426
+    ]
+  ],
+  "notes": {}
+}

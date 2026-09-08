@@ -1,0 +1,20 @@
+{
+  "label": "computed style over a property-dense sheet",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "dense sheet (9 kB)",
+      0.0030171624993575582
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.0678883812741462
+    ]
+  ],
+  "notes": {}
+}

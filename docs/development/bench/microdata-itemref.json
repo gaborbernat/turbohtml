@@ -1,0 +1,36 @@
+{
+  "label": "resolve 1,000 Microdata item references",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "references after 4,000 nodes",
+      0.0004684298847981457
+    ],
+    [
+      "reversed references",
+      0.0004932896260773608
+    ],
+    [
+      "interleaved references",
+      0.0027420368018889955
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.07076786692939324
+    ],
+    [
+      null,
+      0.07651626159233209
+    ],
+    [
+      null,
+      0.0916039641352358
+    ]
+  ],
+  "notes": {}
+}

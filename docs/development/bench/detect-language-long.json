@@ -1,0 +1,36 @@
+{
+  "label": "count trigrams in long prose",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "english book (1 KiB)",
+      4.399388828157195e-05
+    ],
+    [
+      "english book (64 KiB)",
+      0.0006208285802131285
+    ],
+    [
+      "english book (1024 KiB)",
+      0.010148723266320303
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.05159978605372189
+    ],
+    [
+      null,
+      0.14193224121074421
+    ],
+    [
+      null,
+      0.07618881627320799
+    ]
+  ],
+  "notes": {}
+}

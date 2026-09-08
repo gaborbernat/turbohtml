@@ -1,0 +1,60 @@
+{
+  "label": "select sibling positions in wide trees",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "li:nth-child(odd) (100 siblings)",
+      1.5191597840432298e-06
+    ],
+    [
+      "li:nth-child(odd) (1,000 siblings)",
+      1.286904091936473e-05
+    ],
+    [
+      "li:nth-child(odd) (10,000 siblings)",
+      0.00019599071186651902
+    ],
+    [
+      "li:nth-child(odd of .x) (100 siblings)",
+      2.789364453311312e-06
+    ],
+    [
+      "li:nth-child(odd of .x) (1,000 siblings)",
+      3.4697216797970516e-05
+    ],
+    [
+      "li:nth-child(odd of .x) (10,000 siblings)",
+      0.0003876347437653749
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.10471345422941922
+    ],
+    [
+      null,
+      0.09721209799211271
+    ],
+    [
+      null,
+      0.18523843321643907
+    ],
+    [
+      null,
+      0.13742978797217073
+    ],
+    [
+      null,
+      0.06217931489689532
+    ],
+    [
+      null,
+      0.08581945347981859
+    ]
+  ],
+  "notes": {}
+}

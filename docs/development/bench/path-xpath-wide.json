@@ -1,0 +1,36 @@
+{
+  "label": "build XPath paths for wide sibling lists",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 siblings",
+      1.6121024547525546e-05
+    ],
+    [
+      "1,000 siblings",
+      0.00014082855885438523
+    ],
+    [
+      "10,000 siblings",
+      0.001223259460554497
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.03855829948088316
+    ],
+    [
+      null,
+      0.10126254619986187
+    ],
+    [
+      null,
+      0.08163197002315321
+    ]
+  ],
+  "notes": {}
+}
