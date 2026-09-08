@@ -13,6 +13,7 @@ the rest of the docs link into, and :doc:`cpyext` covers what running the C core
     :hidden:
 
     performance
+    performance-audit
     cpyext
 
 ***************************
