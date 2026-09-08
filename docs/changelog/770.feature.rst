@@ -1,2 +1,0 @@
-Add ``unique=True`` to :meth:`LinkDetector.find <turbohtml.clean.LinkDetector.find>`, which keeps the first span of each
-distinct URL.

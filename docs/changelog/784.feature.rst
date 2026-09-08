@@ -1,3 +1,0 @@
-Move the encoding and language detectors' last decisions into the C core: which label a ``whatwg-*`` codec name resolves
-to, when a byte-order mark settles an :class:`~turbohtml.detect.EncodingDetector`, the no-match answer, and the language
-confidence floor. Results are unchanged.

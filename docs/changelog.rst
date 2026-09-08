@@ -7,6 +7,100 @@
 .. towncrier release notes start
 
 *********************
+ v1.8.0 (2026-09-08)
+*********************
+
+Features - 1.8.0
+================
+
+- ``PhoneNumbers(collapse_whitespace=True)`` reads a run of HTML whitespace between the parts of a number as the one
+  space it renders as, so a number a source formatter or a template broke across a line still links. (:issue:`758`)
+- Detect a URL whose authority is a single-label host or an IP literal when its scheme is written, so
+  ``http://localhost:8000/path``, ``http://intranet/`` and ``http://[::1]:8080/`` link. A bare domain still needs a dot
+  and a known top-level domain to be told apart from an ordinary word.
+
+  Recognize an internationalized top-level domain written as its Unicode label, so ``президент.рф`` links the way
+  ``президент.xn--p1ai`` already did. (:issue:`768`)
+
+- Add ``unique=True`` to :meth:`LinkDetector.find <turbohtml.clean.LinkDetector.find>`, which keeps the first span of
+  each distinct URL. (:issue:`770`)
+- Move the work behind the shipped link callbacks :func:`~turbohtml.clean.nofollow` and
+  :func:`~turbohtml.clean.target_blank` into the C core. They keep their names, their signatures and their behavior,
+  with one correction: the web-scheme test now matches the whole scheme, so ``ht:`` and ``httpx:`` no longer count as
+  web links. (:issue:`774`)
+- Move the :class:`~turbohtml.query.Query` facade's set algebra into the C core: deduplicating by node identity,
+  collecting siblings, the combined ``text``, the joined attribute read, and the four class operations. Behavior is
+  unchanged. (:issue:`775`)
+- Move the encoding detector's candidate ranking into the C core: deduplicating the scored candidates, normalizing each
+  score to its share, promoting the detector's own winner, and applying the :class:`~turbohtml.detect.Detection`
+  allowlist, exclusions, language preference and confidence floor. Results are unchanged. (:issue:`776`)
+- Move the boilerplate classifier into the C core: segmenting a page into paragraph units, collapsing each unit's text,
+  and deciding which units are article content against the :class:`~turbohtml.extract.Extraction` thresholds. Results
+  are unchanged. (:issue:`777`)
+- Move the structured-data shaping into the C core: which JSON-LD blocks carry data, and rendering a
+  :class:`~turbohtml.MicrodataItem` as nested plain dicts. Decoding each block stays with the standard library's JSON
+  parser. Results are unchanged. (:issue:`778`)
+- Move the publication-date stages into the C core: the canonical-URL, ``<meta>``, JSON-LD, ``<time>`` and visible-text
+  signals :func:`~turbohtml.extract.dates` reads now run in one walk each. Results are unchanged. (:issue:`779`)
+- Move the URL cleaning pipeline into the C core: :func:`~turbohtml.extract.normalize_url`,
+  :func:`~turbohtml.extract.clean_url` and :func:`~turbohtml.extract.extract_links` now run their normalization, gates
+  and anchor walk in one C call each. Results are unchanged. (:issue:`780`)
+- Move the conformance verdict and the severity views into the C core: :func:`~turbohtml.conformance.check` reads
+  ``valid`` from the walk, and ``errors``/``warnings``/``infos`` filter there. Results are unchanged. (:issue:`781`)
+- Move the query facade's traversal into the C core: :meth:`~turbohtml.query.Query.parent`,
+  :meth:`~turbohtml.query.Query.children` and :meth:`~turbohtml.query.Query.closest` walk there, and a
+  :class:`~turbohtml.query.Matcher` applies its ``limit`` and filters a node's children inside the walk. Results are
+  unchanged. (:issue:`782`)
+- Move :class:`~turbohtml.cssom.StyleDeclaration`'s accessors into the C core: which declaration wins a repeated
+  property and the ``text`` serialization are computed there. Results are unchanged. (:issue:`783`)
+- Move the encoding and language detectors' last decisions into the C core: which label a ``whatwg-*`` codec name
+  resolves to, when a byte-order mark settles an :class:`~turbohtml.detect.EncodingDetector`, the no-match answer, and
+  the language confidence floor. Results are unchanged. (:issue:`784`)
+- Move the sanitizer's policy compilation into the C core: the ``rel`` value, the value allowlists, the style patterns
+  and the transform rules a :class:`~turbohtml.clean.Sanitizer` indexes are built there. Results are unchanged.
+  (:issue:`785`)
+- Move the bleach shim's ``attributes`` translation into the C core: the flat, per-tag and callable shapes of
+  :func:`turbohtml.migration.bleach.clean` compile there, and the per-tag predicates run through a C-bound filter.
+  Results are unchanged. (:issue:`786`)
+- Move the link and phone detectors' configuration folding into the C core: tag, top-level-domain, scheme and word
+  lists, region codes, the phone type mask and the E.164 check of :class:`~turbohtml.clean.PhoneNumber` are computed
+  there. Results are unchanged. (:issue:`787`)
+- Move the whitespace fold of :meth:`turbohtml.migration.markupsafe.Markup.striptags` into the C core. Results are
+  unchanged. (:issue:`789`)
+- Move :mod:`turbohtml.build`'s argument sorting into the C core: a leading mapping becomes the attributes and a string
+  becomes a text node there, for :data:`~turbohtml.build.E` and :func:`~turbohtml.build.document` alike. Results are
+  unchanged. (:issue:`790`)
+- Add :func:`~turbohtml.clean.sanitize_node` and :func:`~turbohtml.clean.sanitize_report_node`, the tree-to-tree
+  sanitizer for a pipeline that parses once and serializes once; :func:`~turbohtml.clean.sanitize` and
+  :func:`~turbohtml.clean.sanitize_report` also accept a parsed node. (:issue:`793`)
+- Add :func:`~turbohtml.clean.linkify_node`, which links URLs, email addresses and phone numbers in an already parsed
+  tree in place; :func:`~turbohtml.clean.linkify` also accepts a parsed node. (:issue:`794`)
+
+Bug fixes - 1.8.0
+=================
+
+- Escape a ``|`` where turbohtml writes a Markdown table cell's content rather than over the finished cell, so a nested
+  table no longer adds a backslash per level; a table, list or ``<br>`` in a cell keeps its HTML unless
+  ``Markdown.Tables(cell_blocks="text")``. (:issue:`764`)
+- Leave a URL whose scheme syntax is malformed entirely plain instead of linking its host on its own, so
+  ``https:/nonsense.com`` no longer renders as ``https:/<a href="http://nonsense.com">nonsense.com</a>``. Link a written
+  ``mailto:`` URI as one anchor covering its own scheme. (:issue:`766`)
+- End a host before a trailing hyphen rather than dropping the whole link, so ``http://example.com-`` links
+  ``http://example.com``. Treat a port outside 0-65535 as text, and stop reading an underscore in a host's last two
+  labels as a bare domain, so ``_example.com`` stays plain while the ``_dmarc.example.com`` of a DNS record still links.
+  (:issue:`767`)
+- A ``<script type="application/ld+json">`` block that the decoder cannot process for a reason other than malformed
+  JSON, such as nesting past the interpreter's recursion budget, now raises from :meth:`~turbohtml.Document.json_ld` and
+  :func:`~turbohtml.extract.dates` instead of being skipped. (:issue:`788`)
+
+Improved documentation - 1.8.0
+==============================
+
+- Add a :doc:`migration guide from urlextract <migration/urlextract>`, which maps its ``find_urls``/``has_urls`` surface
+  onto :class:`~turbohtml.clean.LinkDetector` and states what turbohtml does not do: no DNS check, no bare IP addresses,
+  no tunable stop characters, and no runtime download of the top-level-domain list. (:issue:`772`)
+
+*********************
  v1.7.0 (2026-08-29)
 *********************
 
