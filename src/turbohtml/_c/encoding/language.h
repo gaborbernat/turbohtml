@@ -117,44 +117,77 @@ static int th_lang_cmp_ranked(const void *left, const void *right) {
     return (a->key < b->key) - (a->key > b->key);
 }
 
+static size_t th_lang_trigram_slot(const th_lang_ranked_trigram *table, size_t capacity, uint64_t key) {
+    uint64_t hash = (key ^ (key >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    hash = (hash ^ (hash >> 27)) * UINT64_C(0x94d049bb133111eb);
+    size_t slot = (hash ^ (hash >> 31)) & (capacity - 1);
+    /* Stop characters become spaces, so zero cannot be a trigram key. */
+    while (table[slot].key != 0 && table[slot].key != key) {
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return slot;
+}
+
+static int th_lang_trigram_grow(th_lang_ranked_trigram **table, size_t *capacity) {
+    size_t grown_capacity;
+    size_t bytes;
+    const int grew =
+        th_grow_cap(*capacity + 1, *capacity, 128, sizeof(th_lang_ranked_trigram), &grown_capacity, &bytes);
+    if (!grew) {   /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+        return -1; /* GCOVR_EXCL_LINE: allocation size overflow */
+    }
+    th_lang_ranked_trigram *const grown = PyMem_Calloc(1, bytes);
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;       /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    for (size_t index = 0; index < *capacity; index++) {
+        if ((*table)[index].key != 0) {
+            grown[th_lang_trigram_slot(grown, grown_capacity, (*table)[index].key)] = (*table)[index];
+        }
+    }
+    PyMem_Free(*table);
+    *table = grown;
+    *capacity = grown_capacity;
+    return 0;
+}
+
 /* Extract the text's ranked trigrams. Returns the number kept (the 600 most
    frequent, or fewer), writing them sorted by key into out for a linear merge
    with each profile; out[i].count doubles as the trigram's rank. Returns -1 on
    allocation failure. */
 static Py_ssize_t th_lang_text_trigrams(int kind, const void *data, Py_ssize_t len, th_lang_ranked_trigram **out) {
-    uint64_t *keys = PyMem_Malloc(sizeof(uint64_t) * (size_t)(len + 1));
-    if (keys == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    Py_ssize_t total = 0;
+    th_lang_ranked_trigram *ranked = NULL;
+    size_t capacity = 0;
+    Py_ssize_t unique = 0;
     uint32_t c1 = ' ';
     /* the caller only scores trigrams once a script was found, so len is at least 1 */
     uint32_t c2 = th_lang_to_trigram_char(PyUnicode_READ(kind, data, 0));
     for (Py_ssize_t index = 1; index <= len; index++) {
         uint32_t c3 = index < len ? th_lang_to_trigram_char(PyUnicode_READ(kind, data, index)) : (uint32_t)' ';
         if (!(c2 == ' ' && (c1 == ' ' || c3 == ' '))) {
-            keys[total++] = th_lang_pack(c1, c2, c3);
+            if ((size_t)unique == capacity / 2) {
+                if (th_lang_trigram_grow(&ranked, &capacity) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    PyMem_Free(ranked);                             /* GCOVR_EXCL_LINE: allocation failure */
+                    return -1;                                      /* GCOVR_EXCL_LINE: allocation failure */
+                }
+            }
+            const uint64_t key = th_lang_pack(c1, c2, c3);
+            const size_t slot = th_lang_trigram_slot(ranked, capacity, key);
+            if (ranked[slot].key == 0) {
+                ranked[slot].key = key;
+                unique++;
+            }
+            ranked[slot].count++;
         }
         c1 = c2;
         c2 = c3;
     }
-    qsort(keys, (size_t)total, sizeof(uint64_t), th_lang_cmp_u64);
-    th_lang_ranked_trigram *ranked = PyMem_Malloc(sizeof(th_lang_ranked_trigram) * (size_t)(total + 1));
-    if (ranked == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(keys); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    Py_ssize_t unique = 0;
-    for (Py_ssize_t index = 0; index < total; index++) {
-        if (unique > 0 && ranked[unique - 1].key == keys[index]) {
-            ranked[unique - 1].count++;
-        } else {
-            ranked[unique].key = keys[index];
-            ranked[unique].count = 1;
-            unique++;
+    Py_ssize_t position = 0;
+    for (size_t index = 0; index < capacity; index++) {
+        if (ranked[index].key != 0) {
+            ranked[position++] = ranked[index];
         }
     }
-    PyMem_Free(keys);
     qsort(ranked, (size_t)unique, sizeof(th_lang_ranked_trigram), th_lang_cmp_ranked);
     Py_ssize_t kept = unique < (Py_ssize_t)TH_LANG_TEXT_TRIGRAMS_SIZE ? unique : (Py_ssize_t)TH_LANG_TEXT_TRIGRAMS_SIZE;
     for (Py_ssize_t index = 0; index < kept; index++) {
