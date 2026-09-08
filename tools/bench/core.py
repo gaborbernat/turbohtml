@@ -815,17 +815,35 @@ _REWRITE_ATTR_NAMES: Final[tuple[str, ...]] = tuple(f"a{index}" for index in ran
 
 
 def css_path(text: str) -> None:
-    """Generate the unique CSS selector that re-finds every element with turbohtml's css_path."""
-    for node in _parsed(text).descendants:
+    """Exclude parsing from CSS path timing."""
+    _css_paths(_parsed(text))
+
+
+def _css_paths(document: turbohtml.Document) -> None:
+    for node in document.descendants:
         if isinstance(node, turbohtml.Element):
             node.css_path()
 
 
 def xpath_path(text: str) -> None:
-    """Generate the positional XPath that re-finds every element with turbohtml's xpath_path."""
-    for node in _parsed(text).descendants:
+    """Exclude parsing from XPath path timing."""
+    _xpath_paths(_parsed(text))
+
+
+def _xpath_paths(document: turbohtml.Document) -> None:
+    for node in document.descendants:
         if isinstance(node, turbohtml.Element):
             node.xpath_path()
+
+
+def _last_path_element(text: str) -> turbohtml.Element:
+    return turbohtml.parse(text).select("li")[-1]
+
+
+def _css_paths_after_class_edits(document: turbohtml.Document) -> None:
+    for node in document.select("li"):
+        node.attrs["class"] = "marked"
+        node.css_path()
 
 
 @functools.cache
@@ -1035,6 +1053,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "conformance": (conformance, "turbohtml"),
     "serialize-xml": (serialize_xml, "turbohtml"),
     "canonicalize": (canonicalize, "turbohtml"),
+    "canonicalize-attrs": (canonicalize, "turbohtml"),
     "canonicalize-deep": (canonicalize, "turbohtml"),
     "lossless-serialize": (Mutating(_parse_source_locations, lossless_serialize), "turbohtml"),
     "minify": (minify, "turbohtml"),
@@ -1079,6 +1098,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "phone-parse": (phone_parse, "turbohtml"),
     "phone-format": (phone_format, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
+    "normalize-marks": (normalize, "turbohtml"),
     "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),
     "markdown": (markdown, "turbohtml"),
@@ -1103,6 +1123,13 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "rewrite-attributes": (rewrite_attributes, "turbohtml"),
     "path": (css_path, "turbohtml"),
     "path-xpath": (xpath_path, "turbohtml"),
+    "path-wide": (css_path, "turbohtml"),
+    "path-xpath-wide": (xpath_path, "turbohtml"),
+    "path-cold": (Mutating(turbohtml.parse, _css_paths), "turbohtml"),
+    "path-xpath-cold": (Mutating(turbohtml.parse, _xpath_paths), "turbohtml"),
+    "path-one-cold": (Mutating(_last_path_element, turbohtml.Element.css_path), "turbohtml"),
+    "path-xpath-one-cold": (Mutating(_last_path_element, turbohtml.Element.xpath_path), "turbohtml"),
+    "path-class-edit": (Mutating(turbohtml.parse, _css_paths_after_class_edits), "turbohtml"),
     "translate": (translate, "turbohtml"),
     "specificity": (specificity, "turbohtml"),
     "xpath": (xpath, "turbohtml"),
@@ -1118,6 +1145,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "encoding": (encoding, "turbohtml"),
     "decode": (decode, "turbohtml"),
     "detect-language": (detect_language, "turbohtml"),
+    "detect-language-long": (detect_language, "turbohtml"),
     "urls-clean": (urls_clean, "turbohtml"),
     "links-filter": (links_filter, "turbohtml"),
     "links-external": (links_external, "turbohtml"),

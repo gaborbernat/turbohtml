@@ -10,13 +10,13 @@ are integer row counts; the rest are HTML strings or corpus documents.
 
 from __future__ import annotations
 
+import importlib
 import unicodedata
 from dataclasses import dataclass
 from textwrap import dedent
 from typing import TYPE_CHECKING, Final
 
 from bench import corpus
-from turbohtml import parse_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,9 +56,10 @@ _STRUCTURED_PAGE = dedent("""\
       </div>
     </body>""")
 
+_MICRODATA_REFS: Final[str] = " ".join(f"r{index}" for index in range(1_000))
 _MICRODATA_ITEMREF: Final = (
     '<div itemscope itemref="'
-    + " ".join(f"r{index}" for index in range(1_000))
+    + _MICRODATA_REFS
     + '"></div>'
     + "<i></i>" * 4_000
     + "".join(f"<meta id=r{index} itemprop=p content=x>" for index in range(1_000))
@@ -298,6 +299,13 @@ OPERATIONS: dict[str, Operation] = {
     "microdata-empty-scope": Operation("traverse an item without properties", "ms"),
     "structured-empty": Operation("extract metadata from an unannotated tree", "ms"),
     "article-wide": Operation("score many article candidates", "ms"),
+    "path-wide": Operation("build CSS paths for wide sibling lists", "ms"),
+    "path-xpath-wide": Operation("build XPath paths for wide sibling lists", "ms"),
+    "path-cold": Operation("build CSS paths on a fresh tree", "ms"),
+    "path-xpath-cold": Operation("build XPath paths on a fresh tree", "ms"),
+    "path-one-cold": Operation("build one CSS path on a fresh tree", "us"),
+    "path-xpath-one-cold": Operation("build one XPath path on a fresh tree", "us"),
+    "path-class-edit": Operation("build CSS paths after class edits", "ms"),
     "computed-style": Operation("computed style for every element", "us"),
     "computed-style-dense": Operation("computed style over a property-dense sheet", "us"),
     "match": Operation("match each anchor against div a[href]", "us"),
@@ -308,6 +316,7 @@ OPERATIONS: dict[str, Operation] = {
     "conformance": Operation("check HTML5 authoring conformance", "us"),
     "serialize-xml": Operation("serialize a parsed tree to XML", "us"),
     "canonicalize": Operation("canonicalize a parsed tree (c14n)", "us"),
+    "canonicalize-attrs": Operation("canonicalize an element with many attributes", "ms"),
     "canonicalize-deep": Operation("canonicalize a deep xlink-free tree (c14n)", "us"),
     "lossless-serialize": Operation("edit then re-emit untouched bytes (to_source)", "us"),
     "minify": Operation("minify a document", "us"),
@@ -384,7 +393,9 @@ OPERATIONS: dict[str, Operation] = {
     "encoding": Operation("detect a byte stream's encoding", "us"),
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
+    "normalize-marks": Operation("normalize long combining-mark runs", "ms"),
     "detect-language": Operation("detect a text's natural language", "us"),
+    "detect-language-long": Operation("count trigrams in long prose", "ms"),
     "escape-identifier": Operation("escape 1,000 raw CSS identifiers", "us"),
     "idna": Operation("normalize 4,100 URLs with Unicode hosts", "ms"),
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
@@ -961,6 +972,10 @@ def _language_cases() -> tuple[tuple[str, object], ...]:
     )
 
 
+def _wide_path_cases() -> tuple[tuple[str, str], ...]:
+    return tuple((f"{size:,} siblings", f"<ul>{'<li>value</li>' * size}</ul>") for size in (100, 1_000, 10_000))
+
+
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "build": lambda: _ROWS,
     "build-e": lambda: _ROWS,
@@ -1021,6 +1036,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         (f"{depth} ancestors", f"<style>div {{ color:red }}</style>{'<div>' * depth}x{'</div>' * depth}")
         for depth in (10, 100, 500)
     ),
+    "path-wide": _wide_path_cases,
+    "path-xpath-wide": _wide_path_cases,
+    "path-cold": _wide_path_cases,
+    "path-xpath-cold": _wide_path_cases,
+    "path-one-cold": _wide_path_cases,
+    "path-xpath-one-cold": _wide_path_cases,
+    "path-class-edit": _wide_path_cases,
     "microdata-wide": lambda: tuple(
         (f"{size:,} properties", "<div itemscope>" + "<span itemprop=name>x</span>" * size + "</div>")
         for size in (100, 1_000, 10_000)
@@ -1050,6 +1072,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "conformance": _readpath_cases,
     "serialize-xml": _readpath_cases,
     "canonicalize": _readpath_cases,
+    "canonicalize-attrs": lambda: tuple(
+        (
+            f"{size:,} attributes",
+            "<div " + " ".join(f'data-{index:05d}="x"' for index in range(size, 0, -1)) + "></div>",
+        )
+        for size in (100, 1_000, 10_000)
+    ),
     "canonicalize-deep": lambda: (("deep tree (150 deep)", _deep_tree(150, 3)),),
     "lossless-serialize": _readpath_cases,
     "minify": _readpath_cases,
@@ -1059,7 +1088,19 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "structured": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
     "microdata": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
-    "microdata-itemref": lambda: (("references after 4,000 nodes", _MICRODATA_ITEMREF),),
+    "microdata-itemref": lambda: (
+        ("references after 4,000 nodes", _MICRODATA_ITEMREF),
+        (
+            "reversed references",
+            _MICRODATA_ITEMREF.replace(_MICRODATA_REFS, " ".join(f"r{index}" for index in range(999, -1, -1)), 1),
+        ),
+        (
+            "interleaved references",
+            _MICRODATA_ITEMREF.replace(
+                _MICRODATA_REFS, " ".join(f"r{index}" for offset in (0, 1) for index in range(offset, 1_000, 2)), 1
+            ),
+        ),
+    ),
     "syndication": lambda: (("rss 30 items", _FEED_XML),),
     "sanitize": lambda: (
         ("comment", "<p>Thanks for the <a href='http://example.com'>link</a>! <script>evil()</script></p>"),
@@ -1068,7 +1109,9 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "sanitize-templates": lambda: (("templated 4 KiB", _SANITIZE_TEMPLATES * 20),),
     "sanitize-named-props": lambda: (("clobbering 4 KiB", _SANITIZE_NAMED * 11),),
     "sanitize-report": lambda: (("post 4 KiB", _SANITIZE_POST * 20),),
-    "sanitize-node": lambda: (("post 4 KiB", parse_fragment(_SANITIZE_POST * 20)),),
+    "sanitize-node": lambda: (
+        ("post 4 KiB", importlib.import_module("turbohtml").parse_fragment(_SANITIZE_POST * 20)),
+    ),
     "sanitize-styles": lambda: (("styled 4 KiB", _SANITIZE_STYLES * 20),),
     "sanitize-transform": lambda: (("legacy 4 KiB", _SANITIZE_LEGACY * 13),),
     "sanitize-custom-elements": lambda: (("custom 4 KiB", _SANITIZE_CUSTOM * 11),),
@@ -1081,7 +1124,9 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("join (escapes operands)", ("join", _MARKUP_JOIN_PARTS)),
     ),
     "linkify": lambda: _LINKIFY_CASES,
-    "linkify-node": lambda: (("markup (4 KiB)", parse_fragment(_LINKIFY_CASES[2][1])),),
+    "linkify-node": lambda: (
+        ("markup (4 KiB)", importlib.import_module("turbohtml").parse_fragment(_LINKIFY_CASES[2][1])),
+    ),
     "linkify-traversal": lambda: _LINKIFY_TRAVERSAL_CASES,
     "detect": lambda: (
         ("find comment (1 link, 1 email)", ("find", _LINKIFY_CASES[0][1])),
@@ -1159,7 +1204,14 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "encoding": _encoding_cases,
     "decode": _decode_cases,
     "normalize": _normalize_cases,
+    "normalize-marks": lambda: tuple(
+        (f"{size:,} combining marks", "a" + "\u0315" * (size // 2) + "\u0300" * (size // 2))
+        for size in (100, 1_000, 10_000)
+    ),
     "detect-language": _language_cases,
+    "detect-language-long": lambda: tuple(
+        (f"english book ({size} KiB)", corpus.corpus("war-and-peace/2600.txt", size << 10)) for size in (1, 64, 1_024)
+    ),
     "escape-identifier": lambda: (
         (
             "mixed shapes (1,000)",

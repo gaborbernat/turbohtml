@@ -160,6 +160,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "select-nth-filtered": ("select-nth", 4),
     "xpath-wide-union": ("xpath-wide", 4),
+    "microdata-itemref-interleaved": ("microdata-itemref", 2),
     "idna-varied": ("idna", 1),
     "linkify-traversal-small-nodes": ("linkify-traversal", 1),
     "linkify-traversal-skipped": ("linkify-traversal", 2),
@@ -197,6 +198,16 @@ _LOADERS.update({
         "microdata-empty-scope",
         "structured-empty",
         "article-wide",
+        "normalize-marks",
+        "canonicalize-attrs",
+        "path-wide",
+        "path-xpath-wide",
+        "detect-language-long",
+        "path-cold",
+        "path-xpath-cold",
+        "path-one-cold",
+        "path-xpath-one-cold",
+        "path-class-edit",
     )
 })
 
