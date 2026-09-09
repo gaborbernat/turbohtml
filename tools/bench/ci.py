@@ -158,6 +158,12 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "xpath-distinct-unique": ("xpath-distinct", 5),
+    "xpath-distinct-empty": ("xpath-distinct", 9),
+    "xpath-distinct-singleton": ("xpath-distinct", 10),
+    "shadow-slot-empty": ("shadow-slot", 4),
+    "shadow-slot-comments": ("shadow-slot", 7),
+    "shadow-slot-nonmatching": ("shadow-slot", 10),
     "select-nth-filtered": ("select-nth", 4),
     "xpath-wide-union": ("xpath-wide", 4),
     "microdata-itemref-interleaved": ("microdata-itemref", 2),
@@ -208,6 +214,8 @@ _LOADERS.update({
         "path-one-cold",
         "path-xpath-one-cold",
         "path-class-edit",
+        "validate-pattern",
+        "shadow-slot",
     )
 })
 

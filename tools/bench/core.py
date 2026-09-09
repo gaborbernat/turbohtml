@@ -183,6 +183,19 @@ def shadow(count: int) -> None:
     _ = list(host.flattened_children)
 
 
+def _shadow_slot(case: tuple[int, str]) -> None:
+    _slotted(case).assigned_nodes()
+
+
+@functools.cache
+def _slotted(case: tuple[int, str]) -> turbohtml.Element:
+    host: Final[turbohtml.Element] = turbohtml.Element("div")
+    host.set_inner_html(case[1])
+    root: Final[turbohtml.ShadowRoot] = host.attach_shadow("open")
+    root.set_inner_html('<slot name="unused"></slot>' * case[0] + '<slot name="target"></slot>')
+    return root.select('slot[name="target"]')[0]
+
+
 def parse(text: str) -> None:
     """Parse a whole document into a navigable tree through turbohtml.parse()."""
     turbohtml.parse(text)
@@ -1022,12 +1035,14 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "construct": (construct, "turbohtml"),
     "emit": (emit, "turbohtml"),
     "shadow": (shadow, "turbohtml"),
+    "shadow-slot": (_shadow_slot, "turbohtml"),
     "parse": (parse, "turbohtml"),
     "parse-dense": (parse, "turbohtml"),
     "parse-xml": (parse_xml, "turbohtml"),
     "parse-xml-names": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
+    "validate-pattern": (validate, "turbohtml"),
     "compile-rng": (compile_rng, "turbohtml"),
     "parse-scripting": (parse_scripting, "turbohtml"),
     "parse-locations": (parse_locations, "turbohtml"),
@@ -1042,6 +1057,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "select-has": (select_has, "turbohtml"),
     "select-nth": (_select_scaling, "turbohtml"),
     "xpath-wide": (_xpath_scaling, "turbohtml"),
+    "xpath-distinct": (_xpath_scaling, "turbohtml"),
     "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
     "computed-style-dense": (computed_style, "turbohtml"),

@@ -51,6 +51,15 @@ def validate(case: tuple[str, str]) -> None:
     validator.validate(etree.fromstring(document.encode()))
 
 
+def _validate_rng(case: tuple[str, str]) -> None:
+    _rng_schema(case[0]).validate(lxml_etree.fromstring(case[1].encode()))
+
+
+@functools.cache
+def _rng_schema(schema: str) -> lxml_etree.RelaxNG:
+    return lxml_etree.RelaxNG(lxml_etree.fromstring(schema.encode()))
+
+
 def build(count: int) -> None:
     """Build a ``<ul>`` of rows with lxml's Element factory and ``.text``, then serialize (the aggregate workload)."""
     ul = lxml_html.Element("ul")
@@ -306,6 +315,10 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
 }
 
 
+def _xpath_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).xpath(case[0], namespaces=_EXSLT_NS)
+
+
 def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with lxml's libxml2 engine, by case kind."""
     kind, text = case
@@ -384,6 +397,8 @@ OPERATIONS = {
     "parse": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),
+    "validate-pattern": (validate, "lxml.etree.XMLSchema"),
+    "validate-rng": (_validate_rng, "lxml.etree.RelaxNG"),
     "fragment": (fragment, "lxml"),
     "build": (build, "lxml"),
     "build-e": (build_e, "lxml.builder"),
@@ -417,6 +432,7 @@ OPERATIONS = {
     "path": (getpath, "lxml getpath"),
     "path-xpath": (getpath, "lxml getpath"),
     "xpath": (xpath, "lxml"),
+    "xpath-distinct": (_xpath_scaling, "lxml"),
     "transform": (transform, "lxml.etree"),
     "transform-compile": (transform_compile, "lxml.etree"),
     "transform-reuse": (transform_reuse, "lxml.etree"),

@@ -151,6 +151,10 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
 }
 
 
+def _xpath_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).xpath(case[0])
+
+
 def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with parsel's lxml-backed engine, by case kind."""
     kind, text = case
@@ -177,4 +181,5 @@ OPERATIONS = {
     "path-xpath": (path_xpath, "parsel"),
     "translate": (translate, "parsel"),
     "xpath": (xpath, "parsel"),
+    "xpath-distinct": (_xpath_scaling, "parsel"),
 }

@@ -274,12 +274,14 @@ OPERATIONS: dict[str, Operation] = {
     "construct": Operation("construct N elements (no serialize)", "us"),
     "emit": Operation("emit a built tree", "us"),
     "shadow": Operation("attach a shadow tree with slots and flatten", "us"),
+    "shadow-slot": Operation("collect children assigned to a late shadow slot", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
+    "validate-pattern": Operation("validate growing regex character classes", "us"),
     "compile-rng": Operation("compile a RELAX NG schema", "us"),
     "parse-scripting": Operation("parse to a tree (scripting on)", "us"),
     "parse-locations": Operation("parse to a tree (source locations)", "us"),
@@ -294,6 +296,7 @@ OPERATIONS: dict[str, Operation] = {
     "select-has": Operation("select div:has(a)", "us"),
     "select-nth": Operation("select sibling positions in wide trees", "ms"),
     "xpath-wide": Operation("order XPath results in wide trees", "ms"),
+    "xpath-distinct": Operation("deduplicate XPath string values", "us"),
     "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
     "microdata-wide": Operation("extract properties from one wide item", "ms"),
     "microdata-empty-scope": Operation("traverse an item without properties", "ms"),
@@ -982,6 +985,21 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "construct": lambda: _ROWS,
     "emit": lambda: _ROWS,
     "shadow": lambda: _ROWS,
+    "shadow-slot": lambda: (
+        *(
+            (f"{size:,} preceding slots, {size if markup else 0:,} {kind}", (size, markup * size))
+            for kind, markup in (
+                ("children", '<span slot="target">value</span>'),
+                ("children", ""),
+                ("comments", "<!--value-->"),
+            )
+            for size in (100, 1_000, 10_000)
+        ),
+        *(
+            (f"{size:,} preceding slots, 1 nonmatching child", (size, '<span slot="unused">value</span>'))
+            for size in (100, 1_000, 10_000)
+        ),
+    ),
     "parse": _parse_cases,
     "parse-dense": lambda: (("2.6 MB / 200k nodes", "<div><span>x</span></div>" * 100_000),),
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
@@ -996,6 +1014,19 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
     ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
+    "validate-pattern": lambda: tuple(
+        (
+            f"{size:,} character alternatives",
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="value">'
+                '<xs:simpleType><xs:restriction base="xs:string"><xs:pattern value="['
+                + "".join(chr(0x400 + index) for index in range(size))
+                + ']"/></xs:restriction></xs:simpleType></xs:element></xs:schema>',
+                f"<value>{chr(0x400 + size - 1)}</value>",
+            ),
+        )
+        for size in (32, 256, 2_048)
+    ),
     "compile-rng": lambda: (("catalog grammar", _VALIDATE_RNG), ("1,024 definitions", _COMPILE_RNG)),
     "parse-scripting": _readpath_cases,  # the real pages carry <noscript>, so the scripting rawtext path runs
     "parse-locations": _readpath_cases,  # real attribute-dense pages exercise the per-attribute span stamping
@@ -1031,6 +1062,21 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         (f"{expression} ({size:,} siblings)", (expression, f"<ul>{'<li>value</li>' * size}</ul>"))
         for expression in ("//li", "//li | //ul")
         for size in (100, 1_000, 10_000)
+    ),
+    "xpath-distinct": lambda: (
+        *(
+            (
+                f"{size:,} nodes, {unique} values",
+                (
+                    "set:distinct(//li)",
+                    "<ul>" + "".join(f"<li>value-{index % unique}</li>" for index in range(size)) + "</ul>",
+                ),
+            )
+            for size in (100, 1_000, 10_000)
+            for unique in (1, 10, size)
+        ),
+        ("0 nodes, 0 values", ("set:distinct(//li)", "<ul></ul>")),
+        ("1 node, 1 value", ("set:distinct(//li)", "<ul><li>value</li></ul>")),
     ),
     "computed-style-deep": lambda: tuple(
         (f"{depth} ancestors", f"<style>div {{ color:red }}</style>{'<div>' * depth}x{'</div>' * depth}")
