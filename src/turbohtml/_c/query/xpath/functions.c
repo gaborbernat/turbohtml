@@ -794,16 +794,49 @@ static int fn_replace(struct th_tree *tree, xp_result *args, int argc, xp_result
     return 0;
 }
 
-/* The EXSLT set functions (set:). */
-/* The node-set arguments arrive in document order and duplicate-free (every
-   node-set the engine builds is sorted_unique), so the results below preserve that
-   order by copying in place and never need a re-sort. */
+typedef struct {
+    const xp_nodeset *nodes;
+    xp_item *slots;
+    size_t mask;
+} xp_membership;
 
-/* Whether the same node-set member -- the identical node pointer and attribute
-   index -- appears anywhere in `other`. */
-static int item_in_nodeset(const xp_nodeset *other, xp_item probe) {
-    for (Py_ssize_t index = 0; index < other->len; index++) {
-        if (other->items[index].node == probe.node && other->items[index].attr == probe.attr) {
+static size_t membership_slot(const xp_membership *table, xp_item item) {
+    const uintptr_t address = (uintptr_t)item.node;
+    size_t slot = ((address >> 4) ^ (address >> 13) ^ (size_t)item.attr) & table->mask;
+    while (table->slots[slot].node != NULL &&
+           (table->slots[slot].node != item.node || table->slots[slot].attr != item.attr)) {
+        slot = (slot + 1) & table->mask;
+    }
+    return slot;
+}
+
+static int membership_build(xp_membership *table, Py_ssize_t probes) {
+    if (probes < 16 || table->nodes->len < 16) {
+        return 0;
+    }
+    size_t capacity, bytes;
+    const int fits = th_grow_cap((size_t)table->nodes->len * 2, 0, 32, sizeof(xp_item), &capacity, &bytes);
+    if (!fits) {   /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+        return -1; /* GCOVR_EXCL_LINE: allocation size overflow */
+    }
+    table->slots = PyMem_Calloc(1, bytes);
+    if (table->slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;              /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    table->mask = capacity - 1;
+    for (Py_ssize_t index = 0; index < table->nodes->len; index++) {
+        const xp_item item = table->nodes->items[index];
+        table->slots[membership_slot(table, item)] = item;
+    }
+    return 0;
+}
+
+static int item_in_nodeset(const xp_membership *table, xp_item probe) {
+    if (table->slots != NULL) {
+        return table->slots[membership_slot(table, probe)].node != NULL;
+    }
+    for (Py_ssize_t index = 0; index < table->nodes->len; index++) {
+        if (table->nodes->items[index].node == probe.node && table->nodes->items[index].attr == probe.attr) {
             return 1;
         }
     }
@@ -817,16 +850,20 @@ static int set_filter(const xp_result *args, int want_present, xp_result *out) {
     memset(out, 0, sizeof(*out));
     out->kind = XP_NODESET;
     const xp_nodeset *first = &args[0].nodes;
-    const xp_nodeset *second = &args[1].nodes;
+    xp_membership table = {&args[1].nodes, NULL, 0};
+    if (membership_build(&table, first->len) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                  /* GCOVR_EXCL_LINE: allocation failure */
+    }
     int rc = 0;
     for (Py_ssize_t index = 0; index < first->len; index++) {
         xp_item member = first->items[index];
-        if (item_in_nodeset(second, member) == want_present) {
+        if (item_in_nodeset(&table, member) == want_present) {
             if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 rc = -1;                                              /* GCOVR_EXCL_LINE */
             } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         }
     }
+    PyMem_Free(table.slots);
     if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
         xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
     } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
@@ -835,16 +872,26 @@ static int set_filter(const xp_result *args, int want_present, xp_result *out) {
 
 /* set:has-same-node: true when any member of the first node-set is also a member of
    the second. */
-static void set_has_same_node(const xp_result *args, xp_result *out) {
+static int set_has_same_node(const xp_result *args, xp_result *out) {
     const xp_nodeset *first = &args[0].nodes;
-    const xp_nodeset *second = &args[1].nodes;
-    for (Py_ssize_t index = 0; index < first->len; index++) {
-        if (item_in_nodeset(second, first->items[index])) {
+    xp_membership table = {&args[1].nodes, NULL, 0};
+    if (first->len > 0 && item_in_nodeset(&table, first->items[0])) {
+        result_bool(out, 1);
+        return 0;
+    }
+    if (membership_build(&table, first->len) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                  /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    for (Py_ssize_t index = 1; index < first->len; index++) {
+        if (item_in_nodeset(&table, first->items[index])) {
+            PyMem_Free(table.slots);
             result_bool(out, 1);
-            return;
+            return 0;
         }
     }
+    PyMem_Free(table.slots);
     result_bool(out, 0);
+    return 0;
 }
 
 /* set:distinct: the first member, in document order, of every distinct string-value. */
@@ -1522,7 +1569,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
         } else if (func_is(fn, "set:intersection")) {
             rc = set_filter(args, 1, out);
         } else if (func_is(fn, "set:has-same-node")) {
-            set_has_same_node(args, out);
+            rc = set_has_same_node(args, out);
         } else {
             rc = set_split(args, func_is(fn, "set:leading"), out);
         }
