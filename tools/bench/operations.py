@@ -298,6 +298,14 @@ OPERATIONS: dict[str, Operation] = {
     "find-text-overlap": Operation("find by overlapping literal regex", "us"),
     "text-content": Operation("collect visible text", "us"),
     "serialize-inner": Operation("serialize body children", "us"),
+    "serialize-inner-indent": Operation("serialize indented body children", "us"),
+    "serialize-inner-minify": Operation("serialize minified body children", "us"),
+    "encode-inner": Operation("encode body children as UTF-8", "us"),
+    "encode-inner-indent": Operation("encode indented body children as UTF-8", "us"),
+    "encode-inner-minify": Operation("encode minified body children as UTF-8", "us"),
+    "iterate-inner": Operation("consume body children chunks", "us"),
+    "iterate-inner-indent": Operation("consume indented body children chunks", "us"),
+    "transform-dispatch": Operation("compose identity callbacks", "ns"),
     "collapse-whitespace": Operation("collapse DOM text whitespace", "us"),
     "strip-comments": Operation("remove DOM comments", "us"),
     "transform-tree": Operation("remove comments then collapse whitespace", "us"),
@@ -396,6 +404,10 @@ def _parse_cases() -> tuple[tuple[str, object], ...]:
         *((name, corpus.corpus_text(relative, encoding)) for name, relative, encoding in corpus.CORPUS_FILES),
         ("common tags (13 kB)", "<div><span>x</span></div>" * 500),
     )
+
+
+def _dispatch_cases() -> tuple[tuple[str, object], ...]:
+    return tuple((f"{count} stages", count) for count in (0, 1, 4, 16))
 
 
 def _collapse_cases() -> tuple[tuple[str, object], ...]:
@@ -1020,6 +1032,14 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "text-content": _readpath_cases,
     "serialize": _readpath_cases,
     "serialize-inner": _readpath_cases,
+    "serialize-inner-indent": _readpath_cases,
+    "serialize-inner-minify": _readpath_cases,
+    "encode-inner": _readpath_cases,
+    "encode-inner-indent": _readpath_cases,
+    "encode-inner-minify": _readpath_cases,
+    "iterate-inner": _readpath_cases,
+    "iterate-inner-indent": _readpath_cases,
+    "transform-dispatch": _dispatch_cases,
     "collapse-whitespace": _collapse_cases,
     "strip-comments": _readpath_cases,
     "transform-tree": _readpath_cases,

@@ -8,6 +8,25 @@ Pass ``inner=True`` to :meth:`Node.serialize`, :meth:`Node.encode`, or :meth:`No
 node's children without its own tags. Existing calls retain outer serialization. The flag is keyword-only and works with
 the existing ``Html`` configuration.
 
+.. list-table:: Child serialization with ``inner=True``
+    :header-rows: 1
+
+    - - Method
+      - Result
+      - Supported layouts
+    - - ``serialize``
+      - ``str``
+      - Compact, ``Indent``, ``Minify``
+    - - ``encode``
+      - ``bytes`` in the requested encoding
+      - Compact, ``Indent``, ``Minify``
+    - - ``serialize_iter``
+      - Iterator of ``str`` chunks
+      - Compact, ``Indent``
+
+See :doc:`/how-to/transforming-trees` for child encoding and streaming recipes, and
+:doc:`/explanation/tree-transformations` for the distinction between tree cleanup and output formatting.
+
 .. testcode::
 
     from typing import Final

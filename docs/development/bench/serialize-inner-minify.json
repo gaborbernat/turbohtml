@@ -1,0 +1,44 @@
+{
+  "label": "serialize minified body children",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      1.0463016110406897e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      4.407524958575474e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      7.964300887882321e-05
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.0005400251667614006
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.010511124267463944
+    ],
+    [
+      null,
+      0.005891484691167187
+    ],
+    [
+      null,
+      0.011388804066983683
+    ],
+    [
+      null,
+      0.010365992018052756
+    ]
+  ],
+  "notes": {}
+}

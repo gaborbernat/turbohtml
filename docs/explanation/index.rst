@@ -40,6 +40,7 @@ It is the wrong tool in a few honest cases:
     detect
     query
     sanitizing
+    tree-transformations
     phone-detection
     xslt
     extract

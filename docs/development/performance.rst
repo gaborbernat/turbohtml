@@ -848,3 +848,37 @@ checks passed during collection; each cell contains twelve timing values across 
 
 .. bench-table::
     :file: bench/serialize-inner.json
+
+The following tables cover indented and minified child serialization, UTF-8 encoding, and full consumption of compact
+and indented chunk iterators on the same four pages. Iterator timings discard chunks as they arrive; they exclude I/O
+and do not join the output. Encoding includes Unicode serialization and conversion to UTF-8. Minified streaming is not
+supported.
+
+.. bench-table::
+    :file: bench/serialize-inner-indent.json
+
+.. bench-table::
+    :file: bench/serialize-inner-minify.json
+
+.. bench-table::
+    :file: bench/encode-inner.json
+
+.. bench-table::
+    :file: bench/encode-inner-indent.json
+
+.. bench-table::
+    :file: bench/encode-inner-minify.json
+
+.. bench-table::
+    :file: bench/iterate-inner.json
+
+.. bench-table::
+    :file: bench/iterate-inner-indent.json
+
+Dispatcher cases reuse a tiny tree and a bound pipeline with zero, one, four, or sixteen identity callbacks. They
+include the benchmark's cached-pipeline lookup and callback execution, but exclude parsing and binding. These are
+absolute composition costs; they do not establish a speedup over calling application functions directly. CodSpeed tracks
+each stage count, the serializer variants, and the existing mutation cases through the shared operation registry.
+
+.. bench-table::
+    :file: bench/transform-dispatch.json

@@ -54,6 +54,13 @@ _DOCUMENT_OPS = (
     "text-content",
     "serialize",
     "serialize-inner",
+    "serialize-inner-indent",
+    "serialize-inner-minify",
+    "encode-inner",
+    "encode-inner-indent",
+    "encode-inner-minify",
+    "iterate-inner",
+    "iterate-inner-indent",
     "collapse-whitespace",
     "strip-comments",
     "transform-tree",
@@ -164,6 +171,9 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "transform-dispatch-1": ("transform-dispatch", 1),
+    "transform-dispatch-4": ("transform-dispatch", 2),
+    "transform-dispatch-16": ("transform-dispatch", 3),
     "collapse-whitespace-unchanged": ("collapse-whitespace", 4),
     "collapse-whitespace-dense": ("collapse-whitespace", 5),
     "idna-varied": ("idna", 1),

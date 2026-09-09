@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import functools
 import re
+from collections import deque
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final, cast
 
@@ -124,6 +125,8 @@ _LINKER_CALLBACKS: Final[_clean.Linker] = _clean.Linker(
     _clean.Linkify(callbacks=(_clean.nofollow, _clean.target_blank), process_existing=True)
 )
 _ANNOTATION_RULES = {"h1": ["heading"], "b": ["emphasis"], "a": ["link"]}
+_INNER_INDENT: Final = turbohtml.Html(layout=turbohtml.Indent())
+_INNER_MINIFY: Final = turbohtml.Html(layout=turbohtml.Minify())
 _XML = turbohtml.Html(xml=True)  # the XML/XHTML serialization config, reused across the timed calls
 
 
@@ -341,6 +344,47 @@ def serialize(text: str) -> None:
 
 def _serialize_inner(text: str) -> None:
     _parsed_body(text).serialize(inner=True)
+
+
+def _serialize_inner_indent(text: str) -> None:
+    _parsed_body(text).serialize(_INNER_INDENT, inner=True)
+
+
+def _serialize_inner_minify(text: str) -> None:
+    _parsed_body(text).serialize(_INNER_MINIFY, inner=True)
+
+
+def _encode_inner(text: str) -> None:
+    _parsed_body(text).encode(inner=True)
+
+
+def _encode_inner_indent(text: str) -> None:
+    _parsed_body(text).encode(options=_INNER_INDENT, inner=True)
+
+
+def _encode_inner_minify(text: str) -> None:
+    _parsed_body(text).encode(options=_INNER_MINIFY, inner=True)
+
+
+def _iterate_inner(text: str) -> None:
+    deque(_parsed_body(text).serialize_iter(inner=True), maxlen=0)
+
+
+def _iterate_inner_indent(text: str) -> None:
+    deque(_parsed_body(text).serialize_iter(_INNER_INDENT, inner=True), maxlen=0)
+
+
+def _transform_dispatch(count: int) -> None:
+    _dispatch_pipeline(count)()
+
+
+@functools.cache
+def _dispatch_pipeline(count: int) -> Callable[[], turbohtml.Node]:
+    return functools.partial(_clean.transform_node, turbohtml.parse_fragment("<p>x</p>"), *(_identity_node,) * count)
+
+
+def _identity_node(node: turbohtml.Node) -> turbohtml.Node:
+    return node
 
 
 @functools.cache
@@ -1035,6 +1079,14 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "text-content": (text_content, "turbohtml"),
     "serialize": (serialize, "turbohtml"),
     "serialize-inner": (_serialize_inner, "turbohtml"),
+    "serialize-inner-indent": (_serialize_inner_indent, "turbohtml"),
+    "serialize-inner-minify": (_serialize_inner_minify, "turbohtml"),
+    "encode-inner": (_encode_inner, "turbohtml"),
+    "encode-inner-indent": (_encode_inner_indent, "turbohtml"),
+    "encode-inner-minify": (_encode_inner_minify, "turbohtml"),
+    "iterate-inner": (_iterate_inner, "turbohtml"),
+    "iterate-inner-indent": (_iterate_inner_indent, "turbohtml"),
+    "transform-dispatch": (_transform_dispatch, "turbohtml"),
     "collapse-whitespace": (Mutating(turbohtml.parse, _clean.collapse_whitespace_node), "turbohtml"),
     "strip-comments": (Mutating(turbohtml.parse, _clean.strip_comments_node), "turbohtml"),
     "transform-tree": (Mutating(turbohtml.parse, _transform_tree), "turbohtml"),

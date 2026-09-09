@@ -1,0 +1,44 @@
+{
+  "label": "encode body children as UTF-8",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      1.2040635842443711e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      5.184257007802747e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      0.00010718541791258455
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.000307059458217888
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.008534423987583641
+    ],
+    [
+      null,
+      0.005348066573276909
+    ],
+    [
+      null,
+      0.015278316941827123
+    ],
+    [
+      null,
+      0.011377272726045745
+    ]
+  ],
+  "notes": {}
+}

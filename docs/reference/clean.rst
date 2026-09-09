@@ -194,6 +194,9 @@ instead of enumerating a safe set from scratch.
 Use these operations when a later traversal needs to see cleaned text. They mutate the DOM, so callers can read
 normalized fragments through ``inner_xml`` without serializing and parsing again.
 
+See :doc:`/tutorials/cleaning` for a worked example, :doc:`/how-to/transforming-trees` for custom steps, and
+:doc:`/explanation/tree-transformations` for the ownership model.
+
 .. autofunction:: collapse_whitespace_node
 
 ASCII space, tab, LF, FF, and CR runs become one space. Leading and trailing runs retain one space; NBSP and other
