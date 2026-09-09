@@ -7,8 +7,7 @@
     The first two September 8 audit passes are provisional; those runs had CPU headroom checks but no memory-pressure or
     swap limits. The third pass refreshed XPath, XPath set membership, article extraction (ordinary, wide, and nested),
     and XSD, RELAX NG, and pattern validation with CPU and memory gates. The fourth pass adds value comparisons and
-    translation, and refreshes XPath and XSLT under the same gates. See :doc:`performance-audit` for the measurements
-    and limits.
+    translation, and refreshes XPath and XSLT under the same gates.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
@@ -26,8 +25,7 @@ and text length. Their results apply to those inputs and sizes.
 Reproduce a table with ``tox -e bench -- --pgo <operation>``. You can also select a package, ``core`` for turbohtml, or
 ``all``. Pass pyperf options such as ``--rigorous`` through the same command; CPU affinity and system tuning depend on
 platform support. Most cases time one call. The ``build`` and ``build-e`` cases construct and serialize a tree;
-``construct`` and ``emit`` measure those steps apart. See :doc:`performance-audit` for source coverage, matched
-before/after measurements, and CPU headroom.
+``construct`` and ``emit`` measure those steps apart.
 
 To refresh these tables, run the sweep into a scratch directory and let the generators rewrite the committed feeds; the
 harness names its output for the operation, which is not what this guide calls its tables, so never copy the files
