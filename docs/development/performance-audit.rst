@@ -10,10 +10,8 @@
 
 This audit started from ``6bd00f3d90159537cce3bfe2406dce8a7d4906ec`` on September 8, 2026. The inventory covers 172
 runtime source, header, stub, and generated-data files, plus 125 Python tooling files. Vendored dependency sources
-remain at their pinned revisions. The accompanying measurement data records the source inventory, build settings,
-samples, and CPU headroom used for each comparison. Download the :download:`measurement data <performance-audit.json>`
-for the source inventory, worker values, and timestamped CPU-idle samples. The data omits local paths and the machine's
-hostname.
+remain at their pinned revisions. This report records the audit scope, build settings, and validation limits; the
+performance guide renders the benchmark table feeds.
 
 I researched compiler optimization and traversal techniques before changing production code. LLVM's `vectorization
 documentation <https://llvm.org/docs/Vectorizers.html>`_ describes widening loops and diagnosing missed opportunities.
@@ -109,8 +107,8 @@ duplicate nodes. Canonical combining-mark sorting remains stable for equal combi
 The saved second-pass logs include swap activity. The seven selected comparison windows recorded between 12 and 324
 swap-in pages each; one recorded 56 swap-out pages. The seven publication windows recorded between 4 and 560 swap-in
 pages each and no swap-out pages. Pages are 16 KiB on this machine. These system-wide counts cannot identify the process
-responsible or establish that the machine had sufficient memory headroom. The second-pass download retains these
-observations; neither pass had a memory-pressure acceptance gate.
+responsible or establish that the machine had sufficient memory headroom. Neither pass had a memory-pressure acceptance
+gate.
 
 All before/after comparisons use the existing ``bench.worker`` and the current shared workload registry. The original
 local-Microdata experiment alternated original and optimized source twice. The continuation compares an isolated wheel
@@ -122,9 +120,8 @@ plain-release audit comparisons.
 The September 8 release-table refresh covers 34 operations, producing 33 performance tables and refreshing 142 rows
 across 15 migration tables. Unmeasured migration rows retain their earlier values. The publication runs use nice ``-10``
 with three workers, five values, and two warmups. I accepted a run only with at least two interval samples, mean CPU
-idle of at least 20%, and at most 10% of samples below 5% idle. I discarded overloaded runs and retried them; the
-download includes accepted and rejected CPU windows. Cells with more than 5% spread retain their noise warnings and are
-not a basis for precise comparisons.
+idle of at least 20%, and at most 10% of samples below 5% idle. I discarded overloaded runs and retried them. Cells with
+more than 5% spread retain their noise warnings and are not a basis for precise comparisons.
 
 Each comparison uses isolated pyperf workers, warmups, and repeated values. I logged CPU idle throughout the timed
 windows and excluded saturated runs from performance claims. No audit test suite, compilation, or other benchmark ran
@@ -253,9 +250,8 @@ I retained the existing SIMD scanners, PGO/LTO settings, compiled schemas and ex
 The audit did not establish an improvement from replacing them. I also retained the structured-data snapshot because
 removing it changes callback-visible consistency. None of those proposed rewrites appears in this PR.
 
-Several early runs overlapped heavy external CPU load. Their timings do not support the reported improvements. The
-measurement data keeps those control series distinguishable from the selected scaling comparisons. Higher priority
-applies to both compared builds, and the load logs remain necessary after changing priority.
+Several early runs overlapped heavy external CPU load. Their timings do not support the reported improvements. Higher
+priority applies to both compared builds, and the load logs remain necessary after changing priority.
 
 ************************************
  Correctness and benchmark coverage
@@ -328,8 +324,7 @@ XPath cases vary node count and value cardinality. The ordinary ``xpath``, ``val
 duplicate-heavy and unique-value XPath inputs, empty results, and nonmatching slot assignments.
 
 I retained the three optimizations after comparing matched plain-release runs. Values below are means with relative
-standard deviations; the ratios are approximate. Download the :download:`second-pass measurements
-<performance-audit-second.json>` for worker samples, CPU headroom, and superseded candidate versions.
+standard deviations; the ratios are approximate.
 
 .. list-table::
     :header-rows: 1
@@ -400,8 +395,7 @@ accepted feeds and verifies that unmeasured migration rows retain their values.
 ******************************
 
 The third pass compares against ``b4d3be06`` and covers schema-validation allocation lifetimes, XPath set membership,
-and nested article candidates. Download the :download:`third-pass measurements <performance-audit-third.json>` for
-worker samples and resource observations. These runs have memory gates; the earlier measurements retain their warning.
+and nested article candidates. These runs have memory gates; the earlier measurements retain their warning.
 
 Validation allocated temporary patterns and matching buffers in the compiled schema's arena. Reusing a schema retained
 those allocations until schema destruction. Each validation now owns and frees its temporary arena. RELAX NG definition
@@ -456,7 +450,7 @@ most 10% of intervals below 5% idle. Preflight requires two intervals with at le
 The process-group guard stops a benchmark above 512 MiB sampled RSS, on non-normal macOS memory pressure, on swap growth
 above 32 MiB, or after 180 seconds. Accepted comparison runs stayed at normal pressure with unchanged swap usage. The
 largest sampled process-group RSS was 318.1 MiB. Sampling occurs about every quarter second and cannot establish the
-peak between samples. Rejected CPU windows remain in the measurement data and do not contribute to the comparisons.
+peak between samples. I excluded rejected CPU windows from the comparisons.
 
 The PGO publication build uses the same offline corpus with eight calls per input and one operation per process. The
 standard training run exceeded the 1.5 GiB process-group limit and stopped; isolated training completed at 100.3 MiB
