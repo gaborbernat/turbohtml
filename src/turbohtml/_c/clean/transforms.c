@@ -123,22 +123,20 @@ static int preserve_whitespace(th_tree *tree, const th_node *node) {
 }
 
 static int collapse_text(th_tree *tree, th_node *node, int *last_space) {
+    int kind = PyUnicode_4BYTE_KIND;
+    const void *data = node->text;
     if (text_is_span(node)) {
-        Py_UCS4 *text = copy_input_span(tree, text_span_offset(node), node->text_len);
-        if (text == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure */
-            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: retain the source span on allocation failure */
-            return -1;        /* GCOVR_EXCL_LINE: allocation failure */
-        }
-        node->text = text;
+        kind = tree->kind;
+        data = (const char *)tree->data + text_span_offset(node) * kind;
     }
-    const Py_UCS4 *text = node->text;
     Py_ssize_t length = 0;
     int previous = *last_space;
     int changed = 0;
     for (Py_ssize_t index = 0; index < node->text_len; index++) {
-        int space = is_space(text[index]);
+        Py_UCS4 character = PyUnicode_READ(kind, data, index);
+        int space = is_space(character);
         length += !space || !previous;
-        changed |= space && (previous || text[index] != ' ');
+        changed |= space && (previous || character != ' ');
         previous = space;
     }
     if (!changed) {
@@ -154,26 +152,25 @@ static int collapse_text(th_tree *tree, th_node *node, int *last_space) {
         }
     }
     Py_ssize_t written = 0;
-    for (Py_ssize_t index = 0; index < node->text_len;) {
-        if (is_space(text[index])) {
-            if (!*last_space) {
-                output[written++] = ' ';
-            }
-            *last_space = 1;
-            do {
-                index++;
-            } while (index < node->text_len && is_space(text[index]));
-        } else {
-            Py_ssize_t start = index++;
-            while (index < node->text_len && !is_space(text[index])) {
-                index++;
-            }
-            memcpy(output + written, text + start, (size_t)(index - start) * sizeof(Py_UCS4));
-            written += index - start;
-            *last_space = 0;
+    for (Py_ssize_t index = 0; index < node->text_len; index++) {
+        Py_UCS4 character = PyUnicode_READ(kind, data, index);
+        int space = is_space(character);
+        if (!space || !*last_space) {
+            output[written++] = space ? ' ' : character;
         }
+        *last_space = space;
     }
-    th_mo_char_data_changed(tree, node, text, node->text_len);
+    if (th_tree_has_observers(tree)) {
+        const Py_UCS4 *old = node->text;
+        if (text_is_span(node)) {
+            old = copy_input_span(tree, text_span_offset(node), node->text_len);
+            if (old == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure */
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation failure */
+                return -1;        /* GCOVR_EXCL_LINE: allocation failure */
+            }
+        }
+        th_mo_char_data_changed(tree, node, old, node->text_len);
+    }
     node->text = output;
     node->text_len = length;
     return 0;

@@ -31,7 +31,8 @@ isolation. Numbers vary with input and hardware.
 The ``collapse-whitespace``, ``strip-comments``, and ``transform-tree`` operations time DOM transformations with fresh
 input trees prepared outside each measurement. ``serialize-inner`` measures configured child serialization. These
 operations also have CodSpeed cases in the shared registry. Use the same release build and corpus for comparisons;
-report composition overhead separately from changes in the transformed workflow.
+report composition overhead separately from changes in the transformed workflow. Whitespace collapse also covers 1 MiB
+unchanged text and whitespace-heavy text in the benchmark suite and CodSpeed.
 
 To refresh these tables, run the sweep into a scratch directory and let the generators rewrite the committed feeds; the
 harness names its output for the operation, which is not what this guide calls its tables, so never copy the files

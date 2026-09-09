@@ -199,6 +199,8 @@ normalized fragments through ``inner_xml`` without serializing and parsing again
 ASCII space, tab, LF, FF, and CR runs become one space. Leading and trailing runs retain one space; NBSP and other
 Unicode spaces remain unchanged. Adjacent text nodes share collapse state, while element boundaries and comments reset
 it. Empty text nodes remain. Use :meth:`~turbohtml.Element.normalize` to merge adjacent text nodes or remove empty ones.
+Unchanged text retains its source representation, so a no-op collapse preserves lossless source spelling and avoids a
+text-sized allocation.
 
 The operation preserves ``pre``, ``textarea``, ``listing``, ``title``, and raw-text contexts such as ``script`` and
 ``style``. It checks ancestor context for subtree calls, skips foreign subtrees, and visits template content. It does

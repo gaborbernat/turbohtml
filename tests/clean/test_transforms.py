@@ -70,6 +70,35 @@ def test_collapse_observer_and_idempotence() -> None:
     assert observer.take_records() == []
 
 
+@pytest.mark.parametrize(
+    "text",
+    [pytest.param("a  b", id="ascii"), pytest.param("中  文", id="ucs2"), pytest.param("😀  🎉", id="ucs4")],
+)
+def test_collapse_source_observer(text: str) -> None:
+    root: Final = parse_fragment(f"<p>{text}</p>")
+    observer: Final = MutationObserver()
+    observer.observe(root, subtree=True, character_data=True, character_data_old_value=True)
+    collapse_whitespace_node(root)
+    assert [(record.old_value, record.target.text) for record in observer.take_records()] == [
+        (text, text.replace("  ", " "))
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("a>b", id="ascii"),
+        pytest.param("a\u00a0b", id="nbsp"),
+        pytest.param("中>文", id="ucs2"),
+        pytest.param("😀>🎉", id="ucs4"),
+    ],
+)
+def test_collapse_preserves_unchanged_source(text: str) -> None:
+    root: Final = parse_fragment(f"<p>{text}</p>", source_locations=True)
+    collapse_whitespace_node(root)
+    assert root.to_source() == f"<div><p>{text}</p></div>"
+
+
 def test_collapse_xml_rejected() -> None:
     root: Final = parse_xml("<p>  a  </p>")
     with pytest.raises(ValueError, match="HTML tree"):

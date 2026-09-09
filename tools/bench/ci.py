@@ -164,6 +164,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "collapse-whitespace-unchanged": ("collapse-whitespace", 4),
+    "collapse-whitespace-dense": ("collapse-whitespace", 5),
     "idna-varied": ("idna", 1),
     "linkify-traversal-small-nodes": ("linkify-traversal", 1),
     "linkify-traversal-skipped": ("linkify-traversal", 2),

@@ -398,6 +398,14 @@ def _parse_cases() -> tuple[tuple[str, object], ...]:
     )
 
 
+def _collapse_cases() -> tuple[tuple[str, object], ...]:
+    return (
+        *_readpath_cases(),
+        ("unchanged text (1 MiB)", "<p>" + "x" * 1_048_576 + "</p>"),
+        ("whitespace runs (1 MiB)", "<p>" + "x  " * 349_525 + "</p>"),
+    )
+
+
 def _readpath_cases() -> tuple[tuple[str, object], ...]:
     """
     Return the pages the read-path operations parse once then query.
@@ -1012,7 +1020,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "text-content": _readpath_cases,
     "serialize": _readpath_cases,
     "serialize-inner": _readpath_cases,
-    "collapse-whitespace": _readpath_cases,
+    "collapse-whitespace": _collapse_cases,
     "strip-comments": _readpath_cases,
     "transform-tree": _readpath_cases,
     "conformance": _readpath_cases,
