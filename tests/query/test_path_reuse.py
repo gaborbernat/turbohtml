@@ -10,8 +10,10 @@ if TYPE_CHECKING:
     from turbohtml import Document
 
 
-@pytest.mark.parametrize("kind", ["css", "xpath"])
-@pytest.mark.parametrize("size", [1, 2, 100], ids=["single", "pair", "wide"])
+@pytest.mark.parametrize("kind", [pytest.param("css", id="css"), pytest.param("xpath", id="xpath")])
+@pytest.mark.parametrize(
+    "size", [pytest.param(1, id="single"), pytest.param(2, id="pair"), pytest.param(100, id="wide")]
+)
 def test_paths_after_sibling_removal(kind: str, size: int) -> None:
     document: Final[Document] = parse("<ul>" + "<li>x</li><span>y</span>" * size + "</ul>")
     nodes: Final[list[Element]] = document.select("li")
@@ -23,11 +25,10 @@ def test_paths_after_sibling_removal(kind: str, size: int) -> None:
     )
 
 
-@pytest.mark.parametrize("kind", ["css", "xpath"])
+@pytest.mark.parametrize("kind", [pytest.param("css", id="css"), pytest.param("xpath", id="xpath")])
 def test_paths_after_sibling_append(kind: str) -> None:
     document: Final[Document] = parse("<ul><li>first</li></ul>")
-    first: Final[Element] = document.select("li")[0]
-    before: Final[str] = _path(first, kind)
+    before: Final[str] = _path(document.select("li")[0], kind)
     document.select("ul")[0].append(Element("li"))
     assert (before, [_path(node, kind) for node in document.select("li")]) == (
         _expected(kind, 1, 1),
@@ -54,7 +55,7 @@ def test_css_path_after_id_change(target: int, value: str | None, expected: str)
     assert (before, nodes[0].css_path()) == ("#first", expected)
 
 
-@pytest.mark.parametrize("kind", ["css", "xpath"])
+@pytest.mark.parametrize("kind", [pytest.param("css", id="css"), pytest.param("xpath", id="xpath")])
 def test_path_for_last_sibling_before_any_other_path(kind: str) -> None:
     document: Final[Document] = parse("<ul><li>a</li><span>b</span>text<li>c</li><li>d</li></ul>")
     assert _path(document.select("li")[-1], kind) == _expected(kind, 3, 3)

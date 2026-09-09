@@ -35,7 +35,9 @@ def test_microdata_repeated_values_follow_tree_order(reference: str) -> None:
     ]
 
 
-@pytest.mark.parametrize("reference", ["outer inner", "inner outer"])
+@pytest.mark.parametrize(
+    "reference", [pytest.param("outer inner", id="parent-first"), pytest.param("inner outer", id="child-first")]
+)
 @pytest.mark.parametrize(
     ("markup", "expected"),
     [
