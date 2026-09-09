@@ -2,6 +2,11 @@
  Performance
 #############
 
+.. warning::
+
+    The September 8 audit refresh is provisional. Those runs had CPU headroom checks but no memory-pressure or swap
+    limits. See :doc:`performance-audit` for the recorded swap activity and validation limits.
+
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
 deviation as ``±N%``. Compare gaps against that spread. The published turbohtml measurements use PGO/LTO release builds;

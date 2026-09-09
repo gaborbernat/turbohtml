@@ -39780,5 +39780,7 @@
         "idle_samples_below_5_percent": 0
       }
     ]
-  }
+  },
+  "memory_pressure_gated": false,
+  "measurement_status": "Provisional wall-clock measurements: CPU headroom gates did not enforce memory-pressure or swap limits."
 }

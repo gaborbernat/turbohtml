@@ -2,6 +2,12 @@
  Performance audit
 ###################
 
+.. warning::
+
+    Memory validation is incomplete. I checked CPU idle during timing but did not enforce memory-pressure or swap
+    limits. Treat the wall-clock comparisons and refreshed tables as provisional pending runs with memory checks. The
+    correctness and coverage results do not depend on these timings.
+
 This audit started from ``6bd00f3d90159537cce3bfe2406dce8a7d4906ec`` on September 8, 2026. The inventory covers 172
 runtime source, header, stub, and generated-data files, plus 125 Python tooling files. Vendored dependency sources
 remain at their pinned revisions. The accompanying measurement data records the source inventory, build settings,
@@ -99,6 +105,12 @@ duplicate nodes. Canonical combining-mark sorting remains stable for equal combi
 ********************
  Measurement method
 ********************
+
+The saved second-pass logs include swap activity. The seven selected comparison windows recorded between 12 and 324
+swap-in pages each; one recorded 56 swap-out pages. The seven publication windows recorded between 4 and 560 swap-in
+pages each and no swap-out pages. Pages are 16 KiB on this machine. These system-wide counts cannot identify the process
+responsible or establish that the machine had sufficient memory headroom. The second-pass download retains these
+observations; neither pass had a memory-pressure acceptance gate.
 
 All before/after comparisons use the existing ``bench.worker`` and the current shared workload registry. The original
 local-Microdata experiment alternated original and optimized source twice. The continuation compares an isolated wheel
