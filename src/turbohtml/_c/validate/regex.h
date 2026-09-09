@@ -26,7 +26,7 @@ typedef struct {
 
 typedef struct {
     rrange *ranges;
-    int range_count;
+    Py_ssize_t range_count, range_cap;
     int builtins;
     int negate;
 } rclass;
@@ -74,17 +74,27 @@ static rnode *rx_node(rparser *parser, int type) {
 static rnode *rx_parse_alt(rparser *parser);
 
 static int rx_range_push(rparser *parser, rclass *cls, Py_UCS4 lo, Py_UCS4 hi) {
-    rrange *grown = arena_alloc(parser->mem, (size_t)(cls->range_count + 1) * sizeof(rrange));
-    if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-        parser->failed = 1; /* GCOVR_EXCL_LINE */
-        return -1;          /* GCOVR_EXCL_LINE */
+    if (cls->range_count == cls->range_cap) {
+        size_t cap, bytes;
+        const int fits =
+            th_grow_cap((size_t)cls->range_count + 1, (size_t)cls->range_cap, 8, sizeof(rrange), &cap, &bytes);
+        if (!fits) {            /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+            parser->failed = 1; /* GCOVR_EXCL_LINE: allocation size overflow */
+            return -1;          /* GCOVR_EXCL_LINE: allocation size overflow */
+        }
+        rrange *grown = arena_alloc(parser->mem, bytes);
+        if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            parser->failed = 1; /* GCOVR_EXCL_LINE */
+            return -1;          /* GCOVR_EXCL_LINE */
+        }
+        if (cls->range_count > 0) {
+            memcpy(grown, cls->ranges, (size_t)cls->range_count * sizeof(rrange));
+        }
+        cls->ranges = grown;
+        cls->range_cap = (Py_ssize_t)cap;
     }
-    if (cls->range_count > 0) {
-        memcpy(grown, cls->ranges, (size_t)cls->range_count * sizeof(rrange));
-    }
-    grown[cls->range_count].lo = lo;
-    grown[cls->range_count].hi = hi;
-    cls->ranges = grown;
+    cls->ranges[cls->range_count].lo = lo;
+    cls->ranges[cls->range_count].hi = hi;
     cls->range_count++;
     return 0;
 }
@@ -437,7 +447,7 @@ static rstate *rx_compile(arena *mem, rnode *node, rstate *out) {
 
 static int rx_class_match(const rclass *cls, Py_UCS4 codepoint) {
     int inside = 0;
-    for (int index = 0; index < cls->range_count; index++) {
+    for (Py_ssize_t index = 0; index < cls->range_count; index++) {
         if (codepoint >= cls->ranges[index].lo && codepoint <= cls->ranges[index].hi) {
             inside = 1;
         }
