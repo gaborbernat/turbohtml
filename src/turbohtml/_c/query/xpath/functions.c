@@ -852,6 +852,16 @@ static int set_distinct(struct th_tree *tree, const xp_result *arg, xp_result *o
     memset(out, 0, sizeof(*out));
     out->kind = XP_NODESET;
     const xp_nodeset *nodes = &arg->nodes;
+    if (nodes->len == 0) {
+        return 0;
+    }
+    if (nodes->len == 1) {
+        return ns_push(&out->nodes, nodes->items[0].node, nodes->items[0].attr);
+    }
+    PyObject *seen = PySet_New(NULL);
+    if (seen == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;      /* GCOVR_EXCL_LINE: allocation failure */
+    }
     int rc = 0;
     for (Py_ssize_t index = 0; index < nodes->len; index++) {
         Py_ssize_t candidate_len;
@@ -860,34 +870,27 @@ static int set_distinct(struct th_tree *tree, const xp_result *arg, xp_result *o
             rc = -1;             /* GCOVR_EXCL_LINE */
             break;               /* GCOVR_EXCL_LINE */
         }
-        int duplicate = 0;
-        for (Py_ssize_t earlier = 0; earlier < index; earlier++) {
-            Py_ssize_t earlier_len;
-            Py_UCS4 *earlier_text = item_string(tree, nodes->items[earlier], &earlier_len);
-            if (earlier_text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
-                rc = -1;                /* GCOVR_EXCL_LINE */
-                break;                  /* GCOVR_EXCL_LINE */
-            }
-            if (earlier_len == candidate_len &&
-                memcmp(earlier_text, candidate, (size_t)candidate_len * sizeof(Py_UCS4)) == 0) {
-                duplicate = 1;
-            }
-            PyMem_Free(earlier_text);
-            if (duplicate) {
-                break;
-            }
-        }
+        PyObject *text = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, candidate, candidate_len);
         PyMem_Free(candidate);
+        if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = -1;        /* GCOVR_EXCL_LINE: allocation failure */
+            break;          /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        const Py_ssize_t previous = PySet_GET_SIZE(seen);
+        rc = PySet_Add(seen, text);
+        Py_DECREF(text);
         if (rc < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             break;    /* GCOVR_EXCL_LINE */
         }
-        if (!duplicate) {
+        if (PySet_GET_SIZE(seen) != previous) {
             xp_item member = nodes->items[index];
             if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 rc = -1;                                              /* GCOVR_EXCL_LINE */
+                break;                                                /* GCOVR_EXCL_LINE: allocation failure */
             } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         }
     }
+    Py_DECREF(seen);
     if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
         xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
     } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
