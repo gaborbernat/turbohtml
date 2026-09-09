@@ -183,4 +183,7 @@ OPERATIONS = {
     "xpath": (xpath, "parsel"),
     "xpath-distinct": (_xpath_scaling, "parsel"),
     "xpath-set": (_xpath_scaling, "parsel"),
+    "xpath-compare": (_xpath_scaling, "parsel"),
+    "xpath-order": (_xpath_scaling, "parsel"),
+    "xpath-translate": (_xpath_scaling, "parsel"),
 }

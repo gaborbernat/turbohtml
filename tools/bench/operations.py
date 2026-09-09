@@ -298,6 +298,9 @@ OPERATIONS: dict[str, Operation] = {
     "xpath-wide": Operation("order XPath results in wide trees", "ms"),
     "xpath-distinct": Operation("deduplicate XPath string values", "us"),
     "xpath-set": Operation("compare XPath node-set membership", "us"),
+    "xpath-compare": Operation("compare XPath values", "us"),
+    "xpath-translate": Operation("translate XPath characters", "us"),
+    "xpath-order": Operation("compare numeric XPath node sets", "us"),
     "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
     "microdata-wide": Operation("extract properties from one wide item", "ms"),
     "microdata-empty-scope": Operation("traverse an item without properties", "ms"),
@@ -1080,6 +1083,71 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("0 nodes, 0 values", ("set:distinct(//li)", "<ul></ul>")),
         ("1 node, 1 value", ("set:distinct(//li)", "<ul><li>value</li></ul>")),
     ),
+    "xpath-compare": lambda: (
+        tuple(
+            (
+                f"{operation}, {size:,} nodes per set",
+                (
+                    f"//li {operation} //b",
+                    "<main><ul>"
+                    + "<li>a</li>" * size
+                    + "</ul><section>"
+                    + f"<b>{'b' if operation == '=' else 'a'}</b>" * size
+                    + "</section></main>",
+                ),
+            )
+            for operation in ("=", "!=")
+            for size in (10, 100, 1_000, 2_000)
+        )
+        + tuple(
+            (
+                f"scalar equality, {size:,} characters",
+                ("string(//li) = string(//b)", "<ul><li>" + "a" * size + "</li></ul><b>" + "a" * size + "</b>"),
+            )
+            for size in (32, 32_768)
+        )
+        + (("first-node equality, 1,000 nodes", ("//li = //li", "<ul>" + "<li>a</li>" * 1_000 + "</ul>")),)
+    ),
+    "xpath-order": lambda: ((
+        *tuple(
+            (
+                f"{operation}, {size:,} nodes per set",
+                (
+                    f"//li {operation} //b",
+                    "<main><ul>"
+                    + f"<li>{2 if operation.startswith('<') else 1}</li>" * size
+                    + "</ul><section>"
+                    + f"<b>{1 if operation.startswith('<') else 2}</b>" * size
+                    + "</section></main>",
+                ),
+            )
+            for operation in ("<", "<=", ">", ">=")
+            for size in (10, 100, 1000)
+        ),
+        (
+            "first-pair match, 1,000 nodes",
+            ("//li < //b", "<ul>" + "<li>1</li>" * 1000 + "</ul><section>" + "<b>2</b>" * 1000 + "</section>"),
+        ),
+    )),
+    "xpath-translate": lambda: ((
+        *tuple(
+            (
+                f"{size:,} map characters, 32 KiB text",
+                (
+                    "translate(string(//p), '" + "".join(chr(256 + index) for index in range(size)) + "', '')",
+                    "<p>" + "z" * 32768 + "</p>",
+                ),
+            )
+            for size in (32, 128, 512)
+        ),
+        (
+            "ASCII case folding, short text",
+            (
+                "translate(string(//p), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')",
+                "<p>A Short TITLE</p>",
+            ),
+        ),
+    )),
     "xpath-set": lambda: (
         tuple(
             (

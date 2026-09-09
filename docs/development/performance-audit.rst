@@ -465,3 +465,77 @@ All 168 CodSpeed cases passed a bounded functional run. The five additions cover
 intersection, difference, disjoint sets, and immediate overlap. The full-PR coverage check covers 856 changed executable
 lines at 100%, including the competitor adapters. Type checking and the Sphinx HTML build with warnings as errors pass.
 The affected operation feeds refresh eight performance tables and measured rows in eight migration tables.
+
+********************************
+ XPath value and character work
+********************************
+
+The retention threshold is at least a 5% reduction in elapsed time on an optimization's target workload. Small changes
+in control cases do not count toward that threshold. All four changes below exceed it; scalar comparison has the
+smallest measured reduction at about 35%. Earlier retained changes also report target gains above 5%, subject to the CPU
+and memory qualifications recorded in their sections.
+
+This comparison starts from ``665baf71``. XPath node-set comparisons rebuilt right-hand strings for each left-hand node,
+and scalar string comparison copied both operands before comparing them. ``translate()`` scanned its character map for
+each input character.
+
+Equality now hashes string values for larger sets. Inequality checks whether the nonempty sets contain differing values;
+it is not the negation of equality. Numeric comparisons use the corresponding minimum and maximum values, retaining the
+first-pair shortcut and NaN behavior. These choices preserve the existential comparison rules in `XPath 1.0 section 3.4
+<https://www.w3.org/TR/1999/REC-xpath-19991116/#booleans>`_. Scalar string comparison reads its owned buffers without
+copying them. Translation indexes larger maps and retains the first mapping for duplicate characters, as required by the
+`translate specification <https://www.w3.org/TR/1999/REC-xpath-19991116/#function-translate>`_. Short inputs keep the
+scan.
+
+.. list-table:: Plain release comparisons
+    :header-rows: 1
+
+    - - Workload
+      - Before (µs)
+      - After (µs)
+      - Ratio
+    - - Equality, 2,000 disjoint nodes per set
+      - 206,916.71
+      - 197.02
+      - 1,050×
+    - - Inequality, 2,000 equal-valued nodes per set
+      - 212,519.12
+      - 174.87
+      - 1,215×
+    - - Numeric less-than, 1,000 disjoint nodes per set
+      - 52,658.28
+      - 100.86
+      - 522×
+    - - Translation, 512-character map and 32 KiB text
+      - 4,557.50
+      - 30.66
+      - 149×
+    - - Scalar equality, 32 KiB strings, longer repeat
+      - 12.3
+      - 8.01
+      - 1.54×
+
+The node equality and inequality cases have relative standard deviations of 3.1% and 7.8% before, and 1.6% and 4.0%
+after. Numeric less-than has 1.4% and 2.4%; translation has 0.6% and 1.1%. These are workload-specific gains. The
+first-node equality control measured 12.45 µs before and 12.52 µs after. A longer numeric first-pair control measured
+20.7 µs before and 21.0 µs after, within its measured spread. Short ASCII translation remained about 0.46 µs.
+
+Both builds use CPython 3.14.7 with plain release settings, PGO and LTO disabled, and nice 0. The main comparisons use
+three processes, five values, one warmup, and eight fixed loops. Longer repeats for scalar equality and the numeric
+first-pair control use six processes, ten values, two warmups, and 1,024 fixed loops. They call the same shared
+benchmark registry entries. The CPU and memory gates match the third pass. I excluded one scalar run that overlapped the
+tail of a test process, and retried CPU windows that failed the headroom checks. Raw run files stay outside version
+control.
+
+The new semantic cases cover empty sets, Unicode values, attributes and descendant text, plus NaNs and translation-map
+collisions. All 97 cases pass on the unchanged baseline. The changed build passes the full CPython 3.13 suite with
+65,420 tests and 184 skips, 100% Python coverage, and 100% C line and branch coverage across 34,374 branches. The
+process group reached 1,090.5 MiB sampled RSS under a 1.5 GiB limit. The PGO/LTO build passes 1,414 XPath and XSLT
+tests; its training runs eight calls per offline input in one process per operation. All 177 CodSpeed cases pass,
+including nine new entries. The full-PR coverage check covers 1,008 changed executable lines at 100%, including the
+competitor adapters. Six performance tables and measured rows in two migration tables use the new PGO/LTO publication
+run. The tables retain measured variability; short timing windows remain noisy.
+
+Further review covered table-grid growth and schema regex reuse. Table grids already grow geometrically. Regex matching
+recompiles patterns per call, but its compiled states contain mutable visitation markers; sharing them would require
+separate per-call state. This pass establishes no performance claim for schema-pattern caching.

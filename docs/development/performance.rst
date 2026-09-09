@@ -6,8 +6,9 @@
 
     The first two September 8 audit passes are provisional; those runs had CPU headroom checks but no memory-pressure or
     swap limits. The third pass refreshed XPath, XPath set membership, article extraction (ordinary, wide, and nested),
-    and XSD, RELAX NG, and pattern validation with CPU and memory gates. See :doc:`performance-audit` for the
-    measurements and limits.
+    and XSD, RELAX NG, and pattern validation with CPU and memory gates. The fourth pass adds value comparisons and
+    translation, and refreshes XPath and XSLT under the same gates. See :doc:`performance-audit` for the measurements
+    and limits.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
@@ -834,6 +835,21 @@ overlap case matches the first node, where scanning can finish before building a
 
 .. bench-table::
     :file: bench/xpath-set.json
+
+Value comparisons distinguish equality from existential inequality: two sets can contain both equal and unequal pairs.
+The numeric cases use disjoint ranges and include a first-pair match as a control. Parsing runs before timing.
+
+.. bench-table::
+    :file: bench/xpath-compare.json
+
+.. bench-table::
+    :file: bench/xpath-order.json
+
+The translation cases keep text length fixed while increasing the character map. A short ASCII case-folding input checks
+the cost of small maps and short text.
+
+.. bench-table::
+    :file: bench/xpath-translate.json
 
 Shadow slots
 ============
