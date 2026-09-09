@@ -1,0 +1,44 @@
+{
+  "label": "remove DOM comments",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      5.232281807820982e-07
+    ],
+    [
+      "ars technica (56 kB)",
+      3.3958714595883066e-06
+    ],
+    [
+      "mozilla blog (95 kB)",
+      5.025167164755355e-06
+    ],
+    [
+      "whatwg spec (235 kB)",
+      1.4771271291162217e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.026164665447729676
+    ],
+    [
+      null,
+      0.06579447253914733
+    ],
+    [
+      null,
+      0.021716969400334202
+    ],
+    [
+      null,
+      0.0173297050787449
+    ]
+  ],
+  "notes": {}
+}

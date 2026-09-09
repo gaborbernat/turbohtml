@@ -339,6 +339,19 @@ def serialize(text: str) -> None:
     _ = _parsed(text).html
 
 
+def _serialize_inner(text: str) -> None:
+    _parsed_body(text).serialize(inner=True)
+
+
+@functools.cache
+def _parsed_body(text: str) -> turbohtml.Element:
+    return _parsed(text).find_all("body")[0]
+
+
+def _transform_tree(document: turbohtml.Document) -> None:
+    _clean.transform_node(document, _clean.strip_comments_node, _clean.collapse_whitespace_node)
+
+
 def conformance(text: str) -> None:
     """Run the HTML5 authoring-conformance checks over a parsed document."""
     _check_conformance(_parsed(text))
@@ -1021,6 +1034,10 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "find-text-overlap": (find_text_overlap, "turbohtml"),
     "text-content": (text_content, "turbohtml"),
     "serialize": (serialize, "turbohtml"),
+    "serialize-inner": (_serialize_inner, "turbohtml"),
+    "collapse-whitespace": (Mutating(turbohtml.parse, _clean.collapse_whitespace_node), "turbohtml"),
+    "strip-comments": (Mutating(turbohtml.parse, _clean.strip_comments_node), "turbohtml"),
+    "transform-tree": (Mutating(turbohtml.parse, _transform_tree), "turbohtml"),
     "conformance": (conformance, "turbohtml"),
     "serialize-xml": (serialize_xml, "turbohtml"),
     "canonicalize": (canonicalize, "turbohtml"),

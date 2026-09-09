@@ -187,6 +187,60 @@ instead of enumerating a safe set from scratch.
     The CSS properties the default policy keeps when scrubbing a ``style`` attribute: the CSS 2.1 safe set plus the SVG
     paint properties.
 
+**********************
+ Tree transformations
+**********************
+
+Use these operations when a later traversal needs to see cleaned text. They mutate the DOM, so callers can read
+normalized fragments through ``inner_xml`` without serializing and parsing again.
+
+.. autofunction:: collapse_whitespace_node
+
+ASCII space, tab, LF, FF, and CR runs become one space. Leading and trailing runs retain one space; NBSP and other
+Unicode spaces remain unchanged. Adjacent text nodes share collapse state, while element boundaries and comments reset
+it. Empty text nodes remain. Use :meth:`~turbohtml.Element.normalize` to merge adjacent text nodes or remove empty ones.
+
+The operation preserves ``pre``, ``textarea``, ``listing``, ``title``, and raw-text contexts such as ``script`` and
+``style``. It checks ancestor context for subtree calls, skips foreign subtrees, and visits template content. It does
+not enter attached shadow trees. XML-mode trees raise ``ValueError``. CSS whitespace rules, including inline styles, are
+outside this policy; use a custom transformation when those rules govern the content.
+
+.. autofunction:: strip_comments_node
+
+Remove descendant comments without changing tags, attributes, or text. This works on HTML and XML trees and includes
+template content. The context root remains, even when it is a comment. References to removed comments stay valid and
+observe detached nodes. Attached shadow trees remain outside the traversal.
+
+.. autofunction:: transform_node
+
+Pass synchronous callables in execution order. Each receives the current root. Returning a ``Node`` selects the root for
+the next stage; returning ``None`` keeps it, supporting existing mutators. Other result types raise ``TypeError``. A
+call with no stages returns its input. Functions, bound methods, and callable objects need no registration.
+
+.. testcode::
+
+    from typing import Final
+
+    from turbohtml import parse_fragment
+    from turbohtml.clean import collapse_whitespace_node, sanitize_node, transform_node
+
+    original: Final = parse_fragment("<b>  one  </b><!--note-->")
+    print(transform_node(original, sanitize_node, collapse_whitespace_node).inner_xml)
+    print(original.inner_html)
+
+.. testoutput::
+
+    <b> one </b>
+    <b>  one  </b><!--note-->
+
+``sanitize_node`` returns a copy. ``linkify_node``, ``collapse_whitespace_node``, and ``strip_comments_node`` mutate and
+return the same root. Composition does not copy or detach results. Keep the returned root when a stage may replace it.
+Custom stages can use existing traversal objects or materialized query results for application-specific edits.
+
+Exceptions stop composition and propagate to the caller; earlier mutations remain. Native operations lock their own
+tree. Composition holds no lock across callbacks and provides no transaction across stages. Callers sharing a tree must
+coordinate access when a sequence needs isolation. Later stages can change an earlier sanitizer's result.
+
 ************
  Linkifying
 ************

@@ -1,0 +1,44 @@
+{
+  "label": "collapse DOM text whitespace",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      3.916368389885368e-06
+    ],
+    [
+      "ars technica (56 kB)",
+      3.134141328094605e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      5.8594667962097446e-05
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.00033032035889846156
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.009311844372312009
+    ],
+    [
+      null,
+      0.004232931324456501
+    ],
+    [
+      null,
+      0.005232084533426062
+    ],
+    [
+      null,
+      0.014243551975297652
+    ]
+  ],
+  "notes": {}
+}

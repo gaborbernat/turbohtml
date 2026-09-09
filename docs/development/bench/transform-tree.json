@@ -1,0 +1,44 @@
+{
+  "label": "remove comments then collapse whitespace",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      4.369312743316793e-06
+    ],
+    [
+      "ars technica (56 kB)",
+      3.467672127044352e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      6.31053033733527e-05
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.00034629258455728024
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.0032447794692397184
+    ],
+    [
+      null,
+      0.012672132007277116
+    ],
+    [
+      null,
+      0.006463539923607827
+    ],
+    [
+      null,
+      0.009726503981708236
+    ]
+  ],
+  "notes": {}
+}

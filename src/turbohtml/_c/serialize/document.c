@@ -196,6 +196,15 @@ Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
 static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, th_node *root,
                                        const th_serialize_opts *opts) {
     th_node *descend = NULL;
+    if (opts->inner && node == root) {
+        if (!opts->xml && node->type == TH_NODE_ELEMENT) {
+            if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
+                return NULL;
+            }
+            ser_inject_head_meta(out, tree, node, opts);
+        }
+        return node->first_child;
+    }
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT:
         ser_open_tag(out, tree, node, opts);
@@ -233,7 +242,10 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         }
         break;
     case TH_NODE_TEXT:
-        if (opts->xml) {
+        if (opts->inner && !opts->xml && root->type == TH_NODE_ELEMENT && is_rawtext_element(root, tree->scripting) &&
+            node->parent == root) {
+            sbuf_put_ucs4(out, need_text(tree, node), node->text_len);
+        } else if (opts->xml) {
             sbuf_put_xml_text(out, need_text(tree, node), node->text_len, 0, opts->well_formed);
         } else {
             sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
@@ -279,7 +291,7 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
             return node->next_sibling;
         }
         node = node->parent;
-        if (node->type == TH_NODE_ELEMENT) {
+        if (node->type == TH_NODE_ELEMENT && !(opts->inner && node == root)) {
             ser_close_tag(out, node);
         }
     }
@@ -319,6 +331,20 @@ static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
 static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, th_node *root, const ser_opts *opts,
                                       int *depth) {
     th_node *descend = NULL;
+    if (opts->out->inner && node == root) {
+        if (!opts->out->xml && node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML) {
+            if (is_serialize_void_atom(node->atom)) {
+                return NULL;
+            }
+            if (opts->out->inject_meta && node->atom == TH_TAG_HEAD && !ser_head_has_charset_meta(tree, node)) {
+                ser_emit_meta_charset(out, opts->out);
+                if (node->first_child != NULL) {
+                    ser_newline_indent(out, opts, *depth);
+                }
+            }
+        }
+        return node->first_child;
+    }
     switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
     case TH_NODE_ELEMENT: {
         ser_open_tag(out, tree, node, opts->out);
@@ -349,11 +375,13 @@ static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, t
             if (ser_needs_leading_newline(tree, node)) {
                 sbuf_putc(out, '\n');
             }
+            th_serialize_opts child_opts = *opts->out;
+            child_opts.inner = 0;
             for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
                 if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
                     sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
                 } else {
-                    serialize_compact(out, tree, child, opts->out);
+                    serialize_compact(out, tree, child, &child_opts);
                 }
             }
             ser_close_tag(out, node);
@@ -430,7 +458,7 @@ static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, t
             return node->next_sibling;
         }
         th_node *parent = node->parent;
-        if (parent->type == TH_NODE_ELEMENT) {
+        if (parent->type == TH_NODE_ELEMENT && !(opts->out->inner && parent == root)) {
             *depth -= 1;
             ser_newline_indent(out, opts, *depth);
             ser_close_tag(out, parent);
@@ -539,7 +567,7 @@ void th_node_collect_text(th_tree *tree, th_node *node, Py_UCS4 *buf) {
 
 /* The WHATWG-conformant defaults the html/inner_html accessors serialize under:
    minimal escaping, source attribute order, no charset injection. */
-static const th_serialize_opts ser_default_opts = {TH_FMT_WHATWG, 0, 0, NULL, 0, 0, 0};
+static const th_serialize_opts ser_default_opts = {TH_FMT_WHATWG, 0, 0, NULL, 0, 0, 0, 0};
 
 Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
@@ -561,7 +589,7 @@ Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
    carry their namespace declarations, and comments plus character data plus attribute
    names are made well-formed. This is the sanitizer's serialization; Node.serialize's
    own Html(xml=True) stays on the raw XML path with well_formed off. */
-static const th_serialize_opts ser_xml_opts = {TH_FMT_WHATWG, 0, 0, NULL, 0, 1, 1};
+static const th_serialize_opts ser_xml_opts = {TH_FMT_WHATWG, 0, 0, NULL, 0, 1, 1, 0};
 
 Py_UCS4 *th_node_inner_xml(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
@@ -571,11 +599,17 @@ Py_UCS4 *th_node_inner_xml(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     return sbuf_finish(&out, out_len);
 }
 
+static int inner_preserves_text(th_tree *tree, th_node *root, const th_serialize_opts *opts) {
+    return opts->inner && !opts->xml && root->type == TH_NODE_ELEMENT && root->ns == TH_NS_HTML &&
+           (is_rawtext_element(root, tree->scripting) || root->atom == TH_TAG_PRE || root->atom == TH_TAG_TEXTAREA ||
+            root->atom == TH_TAG_LISTING);
+}
+
 Py_UCS4 *th_node_serialize(th_tree *tree, th_node *node, const th_serialize_opts *opts, const Py_UCS4 *indent,
                            Py_ssize_t indent_len, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     sbuf_presize_for_root(&out, tree, node);
-    if (indent == NULL) {
+    if (indent == NULL || inner_preserves_text(tree, node, opts)) {
         serialize_compact(&out, tree, node, opts);
     } else {
         ser_opts pretty = {opts, indent, indent_len};
@@ -597,7 +631,7 @@ Py_UCS4 *th_node_serialize_chunk(th_tree *tree, th_node *root, const th_serializ
        buffer to that up front rather than let the doubling reserve walk 256 -> 8192 on
        every chunk (a node straddling the limit still forces at most one more grow) */
     sbuf_reserve(&out, TH_SERIALIZE_CHUNK);
-    if (indent == NULL) {
+    if (indent == NULL || inner_preserves_text(tree, root, opts)) {
         while (cursor->node != NULL && out.len < TH_SERIALIZE_CHUNK) {
             cursor->node = serialize_compact_step(&out, tree, cursor->node, root, opts);
         }

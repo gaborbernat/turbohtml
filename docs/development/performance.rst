@@ -28,6 +28,11 @@ much more time. Most operations are a single call; a few aggregate workloads (``
 the ``construct`` and ``emit`` breakdowns decompose that write path into the constructor and the serializer in
 isolation. Numbers vary with input and hardware.
 
+The ``collapse-whitespace``, ``strip-comments``, and ``transform-tree`` operations time DOM transformations with fresh
+input trees prepared outside each measurement. ``serialize-inner`` measures configured child serialization. These
+operations also have CodSpeed cases in the shared registry. Use the same release build and corpus for comparisons;
+report composition overhead separately from changes in the transformed workflow.
+
 To refresh these tables, run the sweep into a scratch directory and let the generators rewrite the committed feeds; the
 harness names its output for the operation, which is not what this guide calls its tables, so never copy the files
 across by hand:
@@ -822,3 +827,23 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 
 .. bench-table::
     :file: bench/link-filtering.json
+
+**************************
+ DOM transformation costs
+**************************
+
+These cases use a plain release build without PGO or LTO. Each mutation receives a freshly parsed tree outside the
+measurement. The tables report absolute costs, not a speedup over another library. CPU-headroom and memory-pressure
+checks passed during collection; each cell contains twelve timing values across three worker processes.
+
+.. bench-table::
+    :file: bench/collapse-whitespace.json
+
+.. bench-table::
+    :file: bench/strip-comments.json
+
+.. bench-table::
+    :file: bench/transform-tree.json
+
+.. bench-table::
+    :file: bench/serialize-inner.json

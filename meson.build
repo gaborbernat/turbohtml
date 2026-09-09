@@ -89,6 +89,7 @@ py.extension_module(
         'src/turbohtml/_c/query/facade.c',
         'src/turbohtml/_c/clean/sanitize.c',
         'src/turbohtml/_c/clean/linkify.c',
+        'src/turbohtml/_c/clean/transforms.c',
         'src/turbohtml/_c/clean/phone.c',
         'src/turbohtml/_c/clean/phone_binding.c',
         'src/turbohtml/_c/extract/links.c',
