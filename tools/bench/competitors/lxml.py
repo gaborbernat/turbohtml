@@ -433,6 +433,7 @@ OPERATIONS = {
     "path-xpath": (getpath, "lxml getpath"),
     "xpath": (xpath, "lxml"),
     "xpath-distinct": (_xpath_scaling, "lxml"),
+    "xpath-set": (_xpath_scaling, "lxml"),
     "transform": (transform, "lxml.etree"),
     "transform-compile": (transform_compile, "lxml.etree"),
     "transform-reuse": (transform_reuse, "lxml.etree"),

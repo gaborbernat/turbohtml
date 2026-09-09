@@ -4,8 +4,10 @@
 
 .. warning::
 
-    The September 8 audit refresh is provisional. Those runs had CPU headroom checks but no memory-pressure or swap
-    limits. See :doc:`performance-audit` for the recorded swap activity and validation limits.
+    The first two September 8 audit passes are provisional; those runs had CPU headroom checks but no memory-pressure or
+    swap limits. The third pass refreshed XPath, XPath set membership, article extraction (ordinary, wide, and nested),
+    and XSD, RELAX NG, and pattern validation with CPU and memory gates. See :doc:`performance-audit` for the
+    measurements and limits.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
@@ -827,6 +829,12 @@ measure membership overhead; the unique cases expose repeated comparisons agains
 .. bench-table::
     :file: bench/xpath-distinct.json
 
+The set membership cases compare disjoint node sets for intersection, difference, and overlap detection. A separate
+overlap case matches the first node, where scanning can finish before building a membership table.
+
+.. bench-table::
+    :file: bench/xpath-set.json
+
 Shadow slots
 ============
 
@@ -895,6 +903,12 @@ the number of candidate containers.
 
 .. bench-table::
     :file: bench/article-wide.json
+
+Nested article candidates share descendant text. The depth cases measure the cost of scoring these overlapping subtrees,
+with parsing outside the timed interval.
+
+.. bench-table::
+    :file: bench/article-deep.json
 
 Path caching
 ============

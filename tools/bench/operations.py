@@ -297,11 +297,13 @@ OPERATIONS: dict[str, Operation] = {
     "select-nth": Operation("select sibling positions in wide trees", "ms"),
     "xpath-wide": Operation("order XPath results in wide trees", "ms"),
     "xpath-distinct": Operation("deduplicate XPath string values", "us"),
+    "xpath-set": Operation("compare XPath node-set membership", "us"),
     "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
     "microdata-wide": Operation("extract properties from one wide item", "ms"),
     "microdata-empty-scope": Operation("traverse an item without properties", "ms"),
     "structured-empty": Operation("extract metadata from an unannotated tree", "ms"),
     "article-wide": Operation("score many article candidates", "ms"),
+    "article-deep": Operation("score nested article candidates", "us"),
     "path-wide": Operation("build CSS paths for wide sibling lists", "ms"),
     "path-xpath-wide": Operation("build XPath paths for wide sibling lists", "ms"),
     "path-cold": Operation("build CSS paths on a fresh tree", "ms"),
@@ -1078,6 +1080,26 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("0 nodes, 0 values", ("set:distinct(//li)", "<ul></ul>")),
         ("1 node, 1 value", ("set:distinct(//li)", "<ul><li>value</li></ul>")),
     ),
+    "xpath-set": lambda: (
+        tuple(
+            (
+                f"{operation}, {size:,} nodes per set",
+                (
+                    f"set:{operation}(//li, //b)",
+                    "<main><ul>" + "<li></li>" * size + "</ul><section>" + "<b></b>" * size + "</section></main>",
+                ),
+            )
+            for operation in ("intersection", "difference", "has-same-node")
+            for size in (10, 100, 1_000, 10_000)
+        )
+        + tuple(
+            (
+                f"first-node overlap, {size:,} nodes",
+                ("set:has-same-node(//li, //li)", "<ul>" + "<li></li>" * size + "</ul>"),
+            )
+            for size in (10, 100, 1_000, 10_000)
+        )
+    ),
     "computed-style-deep": lambda: tuple(
         (f"{depth} ancestors", f"<style>div {{ color:red }}</style>{'<div>' * depth}x{'</div>' * depth}")
         for depth in (10, 100, 500)
@@ -1107,6 +1129,14 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             + "</div>",
         )
         for size in (100, 1_000, 10_000)
+    ),
+    "article-deep": lambda: tuple(
+        (
+            f"{depth} nested candidates",
+            ("<div><p>" + "A sentence with enough prose, and a clause, to score. " * 3 + "</p>") * depth
+            + "</div>" * depth,
+        )
+        for depth in (10, 100, 500)
     ),
     "computed-style": lambda: (("styled page (3 kB)", _styled_page(8)), ("styled page (11 kB)", _styled_page(40))),
     "computed-style-dense": lambda: (("dense sheet (9 kB)", _dense_styled_page(20)),),

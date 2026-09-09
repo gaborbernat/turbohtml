@@ -182,4 +182,5 @@ OPERATIONS = {
     "translate": (translate, "parsel"),
     "xpath": (xpath, "parsel"),
     "xpath-distinct": (_xpath_scaling, "parsel"),
+    "xpath-set": (_xpath_scaling, "parsel"),
 }

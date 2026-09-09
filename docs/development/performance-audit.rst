@@ -4,9 +4,9 @@
 
 .. warning::
 
-    Memory validation is incomplete. I checked CPU idle during timing but did not enforce memory-pressure or swap
-    limits. Treat the wall-clock comparisons and refreshed tables as provisional pending runs with memory checks. The
-    correctness and coverage results do not depend on these timings.
+    The first two passes lack memory validation. I checked CPU idle during timing but did not enforce memory-pressure or
+    swap limits. Treat those wall-clock comparisons and tables as provisional. The third pass below includes memory
+    gates. The correctness and coverage results do not depend on these timings.
 
 This audit started from ``6bd00f3d90159537cce3bfe2406dce8a7d4906ec`` on September 8, 2026. The inventory covers 172
 runtime source, header, stub, and generated-data files, plus 125 Python tooling files. Vendored dependency sources
@@ -394,3 +394,80 @@ The second publication refresh covers seven operations, including the ordinary X
 six performance tables and refreshes 68 rows across the lxml and parsel migration tables. Together, both passes refresh
 39 performance tables and measured rows in 15 migration tables. The generation check compares the committed tables with
 accepted feeds and verifies that unmeasured migration rows retain their values.
+
+******************************
+ Third pass with memory gates
+******************************
+
+The third pass compares against ``b4d3be06`` and covers schema-validation allocation lifetimes, XPath set membership,
+and nested article candidates. Download the :download:`third-pass measurements <performance-audit-third.json>` for
+worker samples and resource observations. These runs have memory gates; the earlier measurements retain their warning.
+
+Validation allocated temporary patterns and matching buffers in the compiled schema's arena. Reusing a schema retained
+those allocations until schema destruction. Each validation now owns and frees its temporary arena. RELAX NG definition
+state also belongs to the call, so validation of distinct documents does not mutate the shared schema. Six tests cover
+valid and invalid XSD patterns, RELAX NG patterns, and named RELAX NG definitions. The previous build failed all six
+retained-allocation limits; the changed build passes them.
+
+XPath intersection, difference, and overlap detection use a node-and-attribute membership table for larger sets. Small
+sets keep the scan, and overlap detection checks the first node before allocating. Article extraction accumulates text
+and link totals in one postorder traversal when at least 32 candidates need scoring. Its temporary stack grows with
+nesting depth.
+
+.. list-table:: Plain release comparisons
+    :header-rows: 1
+
+    - - Workload
+      - Before (µs)
+      - After (µs)
+      - Ratio
+    - - Intersection, 10,000 disjoint nodes per set
+      - 25,824.6
+      - 165.4
+      - 156.1×
+    - - Difference, 10,000 disjoint nodes per set
+      - 25,934.5
+      - 343.7
+      - 75.5×
+    - - Overlap detection, 10,000 disjoint nodes per set
+      - 25,906.3
+      - 168.9
+      - 153.4×
+    - - Article candidates, depth 100
+      - 250.6
+      - 82.4
+      - 3.04×
+    - - Article candidates, depth 500
+      - 4,939.1
+      - 702.5
+      - 7.03×
+
+The 10,000-node XPath results have relative standard deviations of 0.2% to 0.7% before and 9.4% to 12.5% after. The
+depth-100 and 500 article results range from 1.5% to 3.5%. Ordinary and wide article extraction remain close to
+baseline; this pass makes no general speed claim for them. Validation-pattern timings improved, but noisy RELAX NG
+timings do not support a precise speed claim. The memory-retention tests establish the validation fix's benefit.
+
+Both comparison builds use CPython 3.14.7, plain release settings without PGO or LTO, and nice 0 on the same Apple M4.
+Each case uses three worker processes, five values, one warmup, and eight fixed loops; the single-case RELAX NG
+operation uses six processes to obtain enough resource intervals. Fixed loops bound repeated validation on the leaking
+baseline. Workers run in sequence. Timing windows require at least two CPU intervals, mean idle of at least 20%, and at
+most 10% of intervals below 5% idle. Preflight requires two intervals with at least 20% idle and a mean of at least 30%.
+
+The process-group guard stops a benchmark above 512 MiB sampled RSS, on non-normal macOS memory pressure, on swap growth
+above 32 MiB, or after 180 seconds. Accepted comparison runs stayed at normal pressure with unchanged swap usage. The
+largest sampled process-group RSS was 318.1 MiB. Sampling occurs about every quarter second and cannot establish the
+peak between samples. Rejected CPU windows remain in the measurement data and do not contribute to the comparisons.
+
+The PGO publication build uses the same offline corpus with eight calls per input and one operation per process. The
+standard training run exceeded the 1.5 GiB process-group limit and stopped; isolated training completed at 100.3 MiB
+sampled peak RSS. Compilation used two jobs. The held-out correctness run passed 1,469 validation, XPath, and article
+cases against that PGO/LTO build.
+
+The full CPython 3.13 run passed 65,314 tests with 175 skips, 100% Python coverage, and 100% C line and branch coverage
+(34,304 branches). Its process group reached 1,116.0 MiB sampled RSS under a 1.5 GiB limit, with normal memory pressure
+and unchanged swap usage.
+
+All 168 CodSpeed cases passed a bounded functional run. The five additions cover nested article extraction and XPath
+intersection, difference, disjoint sets, and immediate overlap. The full-PR coverage check covers 856 changed executable
+lines at 100%, including the competitor adapters. Type checking and the Sphinx HTML build with warnings as errors pass.
+The affected operation feeds refresh eight performance tables and measured rows in eight migration tables.

@@ -42,6 +42,7 @@ class Combined:
 TABLES: Final[dict[str, str | Combined]] = {
     "article-extraction": "article",
     "article-wide": "article-wide",
+    "article-deep": "article-deep",
     "canonicalize": "canonicalize",
     "canonicalize-attrs": "canonicalize-attrs",
     "computed-style": "computed-style",
@@ -71,6 +72,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "validate-pattern": "validate-pattern",
     "xpath-wide": "xpath-wide",
     "xpath-distinct": "xpath-distinct",
+    "xpath-set": "xpath-set",
     "boilerplate-classification": "boilerplate",
     "building": "build",
     "building-2": "construct",
