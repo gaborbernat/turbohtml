@@ -18,7 +18,7 @@ PyObject *turbohtml_transform_node(PyObject *module, PyObject *const *args, Py_s
         PyErr_SetString(PyExc_TypeError, "node must be a Node");
         return NULL;
     }
-    Py_INCREF(root);
+    root = Py_NewRef(root);
     for (Py_ssize_t index = 1; index < count; index++) {
         PyObject *result = PyObject_CallOneArg(args[index], root);
         if (result == NULL) {
