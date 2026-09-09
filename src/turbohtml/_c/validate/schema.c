@@ -852,7 +852,19 @@ PyObject *turbohtml_schema_validate(PyObject *module, PyObject *args) {
     if (errors == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE */
     }
-    valctx ctx = {errors, tree, schema, {NULL, 0, 0}, 0};
+    /* Validation buffers and lazy RELAX NG definitions must not outlive this call or mutate a shared schema. */
+    th_schema local = *schema;
+    local.mem = (arena){0};
+    if (local.defines.len > 0) {
+        const size_t bytes = (size_t)local.defines.len * sizeof(def_entry);
+        local.defines.items = arena_alloc(&local.mem, bytes);
+        if (local.defines.items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(errors);             /* GCOVR_EXCL_LINE: allocation failure */
+            return PyErr_NoMemory();       /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        memcpy(local.defines.items, schema->defines.items, bytes);
+    }
+    valctx ctx = {errors, tree, &local, {NULL, 0, 0}, 0};
     th_node *root = node->type == TH_NODE_DOCUMENT ? document_root(tree) : node;
     Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(node_obj));
     if (root == NULL) { /* GCOVR_EXCL_BR_LINE: parse_xml rejects a rootless document, so the shim never passes one */
@@ -866,6 +878,7 @@ PyObject *turbohtml_schema_validate(PyObject *module, PyObject *args) {
     }
     Py_END_CRITICAL_SECTION();
     PyMem_Free(ctx.path.data);
+    arena_free(&local.mem);
     if (ctx.failed) {
         Py_DECREF(errors);
         return NULL;
