@@ -72,6 +72,7 @@ static const char *const read_maybe_words[] = {
 typedef struct {
     th_node *node;
     double score;
+    double density;
 } read_candidate;
 
 typedef struct {
@@ -312,6 +313,7 @@ static void read_add(read_scorer *scorer, th_node *node, double delta) {
     }
     scorer->candidates[scorer->count].node = node;
     scorer->candidates[scorer->count].score = read_tag_base(node->atom) + read_class_weight(scorer->tree, node) + delta;
+    scorer->candidates[scorer->count].density = -1;
     scorer->count++;
 }
 
@@ -352,13 +354,25 @@ static void read_walk(read_scorer *scorer, th_node *root) {
     }
 }
 
-/* The candidate with the highest score after each is discounted by its link
-   density, or NULL when nothing scores positively. */
-static th_node *read_best(read_scorer *scorer) {
+typedef struct {
+    th_node *node;
+    Py_ssize_t chars;
+    Py_ssize_t links;
+} read_frame;
+
+static void read_cache_densities(read_scorer *scorer, th_node *root);
+
+static th_node *read_best(read_scorer *scorer, th_node *root) {
+    if (scorer->count >= 32) {
+        read_cache_densities(scorer, root);
+    }
     th_node *best = NULL;
     double best_score = 0;
     for (Py_ssize_t index = 0; index < scorer->count; index++) {
-        double density = read_link_density(scorer->tree, scorer->candidates[index].node, scorer->strip_landmarks);
+        const double density =
+            scorer->candidates[index].density >= 0
+                ? scorer->candidates[index].density
+                : read_link_density(scorer->tree, scorer->candidates[index].node, scorer->strip_landmarks);
         double score = scorer->candidates[index].score * (1.0 - density);
         if (score > best_score) {
             best_score = score;
@@ -366,6 +380,59 @@ static th_node *read_best(read_scorer *scorer) {
         }
     }
     return best;
+}
+
+/* Postorder totals avoid rescanning nested candidates; temporary storage grows with depth. */
+static void read_cache_densities(read_scorer *scorer, th_node *root) {
+    size_t capacity = 16;
+    read_frame *frames = PyMem_Malloc(capacity * sizeof(*frames));
+    if (frames == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure falls back to individual scans */
+        return;           /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    size_t depth = 1;
+    frames[0] = (read_frame){root, 0, 0};
+    th_node *node = root->first_child;
+    for (;;) {
+        if (node != NULL) {
+            if (node->type == TH_NODE_TEXT) {
+                frames[depth - 1].chars += node->text_len;
+            }
+            if (node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML &&
+                !read_is_skip_tag(node->atom, scorer->strip_landmarks) && node->first_child != NULL) {
+                if (depth == capacity) {
+                    size_t bytes;
+                    const int fits = th_grow_cap(depth + 1, capacity, 16, sizeof(*frames), &capacity, &bytes);
+                    if (!fits) {            /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                        PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation size overflow */
+                        return;             /* GCOVR_EXCL_LINE: allocation size overflow */
+                    }
+                    read_frame *grown = PyMem_Realloc(frames, bytes);
+                    if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure */
+                        PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation failure */
+                        return;             /* GCOVR_EXCL_LINE: allocation failure */
+                    }
+                    frames = grown;
+                }
+                frames[depth++] = (read_frame){node, 0, 0};
+                node = node->first_child;
+            } else {
+                node = node->next_sibling;
+            }
+        } else {
+            const read_frame frame = frames[--depth];
+            const Py_ssize_t candidate = th_node_map_find(&scorer->index, frame.node);
+            if (candidate != 0) {
+                scorer->candidates[candidate - 1].density = (double)frame.links / (double)frame.chars;
+            }
+            if (depth == 0) {
+                break;
+            }
+            frames[depth - 1].chars += frame.chars;
+            frames[depth - 1].links += frame.node->atom == TH_TAG_A ? frame.chars : frame.links;
+            node = frame.node->next_sibling;
+        }
+    }
+    PyMem_Free(frames);
 }
 
 /* The <article>/<main> element under root that holds the most visible text, tracked
@@ -420,14 +487,14 @@ static th_node *read_semantic_fallback(read_scorer *scorer, th_node *root) {
 th_node *th_node_main_content(th_tree *tree, th_node *root) {
     read_scorer scorer = {tree, NULL, 0, 0, {0}, 1};
     read_walk(&scorer, root);
-    th_node *best = read_best(&scorer);
+    th_node *best = read_best(&scorer, root);
     if (best == NULL) {
         PyMem_Free(scorer.index.entries);
         scorer.index = (th_node_map){0};
         scorer.count = 0;
         scorer.strip_landmarks = 0;
         read_walk(&scorer, root);
-        best = read_best(&scorer);
+        best = read_best(&scorer, root);
     }
     if (best == NULL) {
         best = read_semantic_fallback(&scorer, root);
