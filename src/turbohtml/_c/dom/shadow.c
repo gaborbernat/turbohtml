@@ -84,11 +84,9 @@ static int runs_equal(const Py_UCS4 *left, Py_ssize_t left_len, const Py_UCS4 *r
     return 1;
 }
 
-/* Find the slot a slotable is assigned to: the first <slot> in the host's shadow tree
-   (in tree order) whose name matches the slotable's slot name. NULL when the slotable's
-   parent is not a shadow host, or -- with open_flag -- when that host's shadow is
-   closed, or when no slot name matches. (DOM: find a slot.) */
-static th_node *find_slot(th_tree *tree, th_node *slottable, int open_flag) {
+static th_node *find_named_slot(th_node *shadow, const Py_UCS4 *want, Py_ssize_t want_len);
+
+static th_node *find_slot(th_tree *tree, th_node *slottable) {
     th_node *parent = slottable->parent;
     if (parent == NULL) {
         return NULL;
@@ -97,7 +95,7 @@ static th_node *find_slot(th_tree *tree, th_node *slottable, int open_flag) {
     if (shadow == NULL) {
         return NULL;
     }
-    if (open_flag && th_shadow_mode(shadow) != 0) {
+    if (th_shadow_mode(shadow) != 0) {
         return NULL;
     }
     const Py_UCS4 *want = NULL;
@@ -105,6 +103,10 @@ static th_node *find_slot(th_tree *tree, th_node *slottable, int open_flag) {
     if (slottable->type == TH_NODE_ELEMENT) {
         named_value(slottable, TH_ATTR_SLOT, &want, &want_len);
     }
+    return find_named_slot(shadow, want, want_len);
+}
+
+static th_node *find_named_slot(th_node *shadow, const Py_UCS4 *want, Py_ssize_t want_len) {
     for (th_node *node = shadow->first_child; node != NULL; node = preorder_next(node, shadow)) {
         if (is_slot(node)) {
             const Py_UCS4 *name = NULL;
@@ -125,9 +127,33 @@ static void collect_slotables(th_tree *tree, th_node *slot, nodevec *vec) {
     if (!th_node_is_shadow_root(root)) {
         return;
     }
-    th_node *host = th_shadow_host(tree, root);
-    for (th_node *child = host->first_child; child != NULL; child = child->next_sibling) {
-        if (is_slottable(child) && find_slot(tree, child, 0) == slot) {
+    th_node *first_slottable = th_shadow_host(tree, root)->first_child;
+    while (first_slottable != NULL && !is_slottable(first_slottable)) {
+        first_slottable = first_slottable->next_sibling;
+    }
+    if (first_slottable == NULL) {
+        return;
+    }
+    const Py_UCS4 *name = NULL;
+    Py_ssize_t name_len = 0;
+    named_value(slot, TH_ATTR_NAME, &name, &name_len);
+    int checked_slot = 0;
+    for (th_node *child = first_slottable; child != NULL; child = child->next_sibling) {
+        if (!is_slottable(child)) {
+            continue;
+        }
+        const Py_UCS4 *want = NULL;
+        Py_ssize_t want_len = 0;
+        if (child->type == TH_NODE_ELEMENT) {
+            named_value(child, TH_ATTR_SLOT, &want, &want_len);
+        }
+        if (runs_equal(name, name_len, want, want_len)) {
+            if (!checked_slot) {
+                if (find_named_slot(root, name, name_len) != slot) {
+                    return;
+                }
+                checked_slot = 1;
+            }
             nodevec_push(vec, child);
         }
     }
@@ -328,7 +354,7 @@ PyObject *node_get_assigned_slot(PyObject *self, void *Py_UNUSED(closure)) {
     th_node *slot = NULL;
     Py_BEGIN_CRITICAL_SECTION(node->handle);
     if (is_slottable(node->node)) {
-        slot = find_slot(tree, node->node, 1);
+        slot = find_slot(tree, node->node);
     }
     Py_END_CRITICAL_SECTION();
     return node_wrap(state_of(self), node->handle, slot);
