@@ -2,33 +2,24 @@
  Performance
 #############
 
-These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 release builds on an Apple M4 running macOS 26.
-Tables refreshed for the September 8, 2026 performance audit use CPython 3.14.7; older tables use 3.14.6. pyperf runs
-each case in isolated worker processes and reports the mean; the harness prints the run-to-run standard deviation beside
-it as ``±N%`` so a real gap reads apart from noise, and these tables quote the mean. For the lowest-noise figures, tune
-the machine with ``pyperf system tune`` first (and ``sudo pyperf system reset`` after); pyperf options like
-``--rigorous`` or ``--affinity`` pass straight through after the ``tox -e bench`` command. Operations that mutate the
-tree they are handed -- the edits, the content setters, link absolutization -- are timed on a fresh parse rebuilt before
-each iteration (the rebuild itself untimed), so the figure is the repeatable cost of the mutation alone rather than a
-tree a prior iteration already changed; read-path operations reuse one cached parse and time only the query. The corpora
-are real documents: `Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/2600>`_, the `WHATWG HTML
-specification source <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification
-<https://github.com/tc39/ecma262>`_, a size-weighted sample of `web-platform-tests
-<https://github.com/web-platform-tests/wpt>`_ pages for the parse and tokenize suites, and, for the read-path suites,
-real saved web pages -- a blog, a news article, and a product blog from the `mozilla/readability
-<https://github.com/mozilla/readability>`_ test corpus -- so the selector, link, and edit operations run against genuine
-nested structure rather than the layout fixtures, which carry none. The harness benchmarks each competitor in its own
-isolated ``uv`` venv -- turbohtml in a venv of its own as the shared baseline -- so one library's dependency pins never
-perturb another's. Every table below is one harness operation, so each is reproducible with ``tox -e bench <command>``,
-where the command is ``core`` (turbohtml's own baseline for every operation), an operation name (the cross-competitor
-table), a package name (that competitor's own report), or ``all``. The numbers in these tables come from the ``--pgo``
-baseline: turbohtml built with the shipped profile-guided, link-time-optimized release recipe (``tox -e bench -- --pgo
-all``), so each figure reads as what a release ships rather than a plain build. The default baseline is a plain wheel,
-which builds quickly for iterating; the ``--pgo`` build costs much more time. Most operations are a single call; a few
-aggregate workloads (``build``, ``build-e``) sweep a size, and the ``construct`` and ``emit`` breakdowns decompose that
-write path into the constructor and the serializer in isolation. Numbers vary with input and hardware. The synthetic
-scaling cases isolate sibling count, tree depth, and text length. See the :doc:`performance-audit` for the September
-2026 source audit and matched before/after measurements.
+These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
+8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
+deviation as ``±N%``. Compare gaps against that spread. The published turbohtml measurements use PGO/LTO release builds;
+the default benchmark command builds a plain wheel for development.
+
+The harness creates an isolated ``uv`` environment for each library. Mutation cases rebuild their input before each
+timed iteration, with setup excluded from the measurement. Read operations reuse a parsed tree. The corpora include
+`Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/2600>`_, the `WHATWG HTML specification source
+<https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification <https://github.com/tc39/ecma262>`_,
+`web-platform-tests <https://github.com/web-platform-tests/wpt>`_ pages, and saved blog, news, and product pages from
+`mozilla/readability <https://github.com/mozilla/readability>`_. Synthetic scaling cases vary sibling count, tree depth,
+and text length. Their results apply to those inputs and sizes.
+
+Reproduce a table with ``tox -e bench -- --pgo <operation>``. You can also select a package, ``core`` for turbohtml, or
+``all``. Pass pyperf options such as ``--rigorous`` through the same command; CPU affinity and system tuning depend on
+platform support. Most cases time one call. The ``build`` and ``build-e`` cases construct and serialize a tree;
+``construct`` and ``emit`` measure those steps apart. See :doc:`performance-audit` for source coverage, matched
+before/after measurements, and CPU headroom.
 
 To refresh these tables, run the sweep into a scratch directory and let the generators rewrite the committed feeds; the
 harness names its output for the operation, which is not what this guide calls its tables, so never copy the files
@@ -178,12 +169,11 @@ The ``google_doc`` row reads the inline-CSS styling a Google Docs export carries
  Structured data
 *****************
 
-:meth:`turbohtml.Document.structured_data` against `extruct <https://github.com/scrapinghub/extruct>`_, the scraper
-toolkit it succeeds, extracting JSON-LD, Microdata, and OpenGraph from a product page that carries all three. Both start
-from the raw HTML string, so each parses first; extruct builds an lxml tree and runs a separate extractor per syntax,
-where turbohtml parses to the WHATWG tree and runs the extractors in C, handing back the typed
-:class:`~turbohtml.StructuredData` record. turbohtml snapshots the tree before extraction to preserve consistent results
-when Python constructors call back into the document.
+Compare :meth:`turbohtml.Document.structured_data` with `extruct <https://github.com/scrapinghub/extruct>`_ on a product
+page containing JSON-LD, Microdata, and OpenGraph. Both operations include parsing. extruct uses lxml and a separate
+extractor per syntax; turbohtml uses its WHATWG parser and C extractors, returning a :class:`~turbohtml.StructuredData`
+record. turbohtml snapshots the tree before extraction to preserve consistent results when Python constructors call back
+into the document.
 
 .. bench-table::
     :file: bench/structured-data.json
@@ -208,15 +198,13 @@ hundred and sixty on the ten-row table, where pandas pays its fixed per-frame co
  Article extraction
 ********************
 
-:meth:`turbohtml.Node.article` against `trafilatura <https://trafilatura.readthedocs.io>`_, `readability-lxml
+Compare :meth:`turbohtml.Node.article` with `trafilatura <https://trafilatura.readthedocs.io>`_, `readability-lxml
 <https://github.com/buriy/python-readability>`_, `newspaper3k <https://newspaper.readthedocs.io>`_, `goose3
 <https://goose3.readthedocs.io>`_, `readabilipy <https://readabilipy.readthedocs.io>`_, and `news-please
-<https://github.com/fhamborg/news-please>`_, the article extractors it succeeds. Each scores the dominant content body
-and (trafilatura, newspaper3k, goose3, and news-please) harvests the page metadata beside it; the lxml-backed four build
-their tree in Python first, readabilipy's Python mode parses with html5lib into BeautifulSoup and cleans without
-scoring, news-please merges the votes of several such extractors, and turbohtml scores candidates and extracts their
-content in C. The inputs are full pages -- navigation, a scored article, and a footer -- so the boilerplate the
-heuristic discounts is part of the measured cost.
+<https://github.com/fhamborg/news-please>`_. turbohtml scores candidates and extracts their content in C. trafilatura,
+newspaper3k, goose3, and news-please collect page metadata as well. readabilipy's Python mode uses html5lib and
+BeautifulSoup to clean content without scoring; news-please combines several extractors. The inputs include navigation
+and a footer around the article, so the measured cost includes processing boilerplate.
 
 .. bench-table::
     :file: bench/article-extraction.json
@@ -391,23 +379,17 @@ complex, and grouped selectors below; cssselect parses in Python and builds a tr
 .. bench-table::
     :file: bench/css-specificity.json
 
-XPath 1.0 evaluation runs through :meth:`~turbohtml.Node.xpath`, raced against lxml's libxml2 engine and parsel's
-wrapper of it (selectolax and BeautifulSoup have no XPath). One expression per feature class (name tests, the ``//``
-abbreviation, attribute, positional, and arithmetic predicates, string and aggregate functions, a reverse axis, a union,
-and a computed name test) runs over the 9.6 kB wpt page below; ``tox -e bench xpath`` repeats the sweep across every
-page size. turbohtml compiles each expression against the tree once, resolves name tests to interned atoms, and folds
-``//`` to a single ``descendant`` walk. A predicate that references ``position()`` (``[1]`` or ``position() <= 3``) pins
-the result to proximity order and disables the ``//`` collapse. Ordered result sets avoid another sort, and unions merge
-their sorted inputs. Five rows exercise XPath 2.0 functions -- ``ends-with``, ``matches``, ``replace``, ``lower-case``,
-and ``string-join`` -- that turbohtml answers but libxml2 does not implement, so lxml and parsel show a gap there.
-Further rows are the lxml/parsel options the parity work added: a ``$variable`` binding, an EXSLT ``re:test`` predicate
-(turbohtml's Python :mod:`re` against lxml's C libexslt), an EXSLT ``set:distinct`` node-set reduction (built-in C
-dispatch on both sides, so it races C against C), a ``smart_strings`` attribute read, a custom ``extensions=`` function,
-an ``extensions=`` function whose return becomes a node-set feeding a later ``/@href`` step, a ``namespaces=`` prefix
-binding that resolves ``//svg:rect`` against ``{"svg": ".../2000/svg"}`` over a page carrying an SVG block, and a
-node-set ``$variable`` bound from a prior result (``$rows/div``, with ``rows`` reused from an earlier ``//div`` query)
-fed into a later path step. The last row precompiles the expression once with :class:`~turbohtml.XPath` and re-evaluates
-it, lxml's ``etree.XPath`` doing the same: both skip the per-call parse :meth:`~turbohtml.Node.xpath` pays.
+The XPath table compares :meth:`~turbohtml.Node.xpath` with lxml and parsel on one 9.6 kB web-platform-tests page. Run
+``tox -e bench -- --pgo xpath`` to reproduce it. Cases cover axes and predicates, string and aggregate functions,
+ordered unions, and computed name tests. turbohtml resolves name tests to interned atoms and can collapse ``//`` to a
+single descendant walk. Positional predicates preserve proximity order. Ordered result sets avoid another sort, and
+unions merge their sorted inputs.
+
+The remaining cases cover variable bindings, namespaces, EXSLT functions, extension callbacks, and precompiled
+expressions. Node-set variables and extension results feed later path steps. The namespace case adds an SVG fragment to
+the page. For ``re:test``, turbohtml uses Python's :mod:`re` and lxml uses libexslt. ``set:distinct`` retains the first
+node for each string value. Five XPath 2.0 string-function rows have no libxml2 equivalent. The precompiled case reuses
+:class:`~turbohtml.XPath` or lxml's ``etree.XPath`` to exclude expression parsing from the timed call.
 
 .. bench-table::
     :file: bench/querying-5.json
@@ -437,13 +419,11 @@ repeated result includes any stylesheet analysis or XPath compilation left in th
  Node paths
 ************
 
-:meth:`turbohtml.Element.css_path` and :meth:`~turbohtml.Element.xpath_path` return the unique locator that re-finds an
-element from the document root -- a CSS selector and a positional XPath -- against lxml's ``getroottree().getpath()``,
-the libxml2 path builder devtools' "copy selector" mirrors, and (for the positional path) parsel's wrapper of it. Each
-timed call walks every element in a pre-parsed page and serializes its path. Both methods reuse sibling positions across
-calls, avoiding repeated scans when generating paths in document order. Structural mutations clear those positions. CSS
-paths also use a per-tree ID-occurrence map to choose unique anchors; attribute edits invalidate that map before the
-next lookup when they change an ID. The fresh-tree cases below measure cache setup costs separately.
+Use :meth:`turbohtml.Element.css_path` or :meth:`~turbohtml.Element.xpath_path` to generate a locator from the document
+root. The comparison uses lxml's ``getroottree().getpath()`` and parsel's wrapper for positional XPath paths. Each timed
+call generates paths for the elements in a pre-parsed page. Both turbohtml methods reuse sibling positions across calls;
+structural mutations clear those positions. CSS paths use a per-tree ID-occurrence map to choose unique anchors, which
+ID edits invalidate. The fresh-tree cases below measure cache setup costs.
 
 .. bench-table::
     :file: bench/node-paths.json
@@ -835,6 +815,41 @@ union of list items and their containers.
 
 .. bench-table::
     :file: bench/xpath-wide.json
+
+The ``set:distinct`` cases vary both node count and the number of distinct string values. The duplicate-heavy cases
+measure membership overhead; the unique cases expose repeated comparisons against earlier nodes.
+
+.. bench-table::
+    :file: bench/xpath-distinct.json
+
+Shadow slots
+============
+
+The scaling cases read assignments for a named slot after a growing sequence of other slots. Empty hosts, comment-only
+hosts, and a child assigned to another slot check the cost of returning no assignments. Setup runs before timing. The
+ordinary shadow operation includes constructing the host and flattening its children.
+
+.. bench-table::
+    :file: bench/shadow-slot.json
+
+.. bench-table::
+    :file: bench/shadow.json
+
+Schema patterns
+===============
+
+The pattern case grows an XML Schema regex character class and validates its last matching character. The catalog cases
+measure ordinary XSD and RELAX NG validation. These operations reuse a compiled schema and include parsing the document
+to validate.
+
+.. bench-table::
+    :file: bench/validate-pattern.json
+
+.. bench-table::
+    :file: bench/validate.json
+
+.. bench-table::
+    :file: bench/validate-rng.json
 
 Computed styles
 ===============

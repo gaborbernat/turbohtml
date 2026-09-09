@@ -82,10 +82,9 @@ preserve tree order, stop at nested item scopes, and handle duplicate references
  Implementation constraints
 ****************************
 
-The pointer maps add storage proportional to the number of visited nodes, candidates, or requested positions. They trade
-memory for repeated lookup cost; they do not make those workloads constant-memory. The language table instead scales
-with distinct trigrams, rather than allocating records for every occurrence. Computed-style caching holds two owned
-property maps, and each returned result owns its values.
+The pointer maps add storage proportional to the number of visited nodes, candidates, or requested positions. The
+language table allocates records for distinct trigrams. Computed-style caching holds two owned property maps, and each
+returned result owns its values.
 
 Query position caches last for one query. Path caches last for the tree handle and clear on structural changes. Backward
 selector matching and changes of scope can still require sibling scans; the positional scaling results describe forward
@@ -93,10 +92,9 @@ query traversal. Computed styles also invalidate after attribute edits. CSS path
 edits because a stale map can miss a new ID and hang during lookup. Public tests cover replacement, collisions, removal,
 and a duplicate ID becoming unique.
 
-The optimization does not remove the structured-data snapshot. Python value constructors can call back into application
-code, so removing that copy would change consistency during extraction. Ordered XPath unions normalize both operands
-because extension functions can return reversed lists and duplicate nodes. Canonical combining-mark sorting remains
-stable for equal combining classes.
+I retained the structured-data snapshot because Python value constructors can call back into application code during
+extraction. Ordered XPath unions normalize both operands because extension functions can return reversed lists and
+duplicate nodes. Canonical combining-mark sorting remains stable for equal combining classes.
 
 ********************
  Measurement method
@@ -251,25 +249,136 @@ applies to both compared builds, and the load logs remain necessary after changi
  Correctness and benchmark coverage
 ************************************
 
-The full suite passed 65,224 tests with 157 skips. Additional public-API cases exercise XPath extension results with
-duplicates and reversed order, selector backtracking, computed-style result ownership and mutation, path invalidation,
-Microdata tree order, stable combining classes, and canonical attribute ordering. After the added edge cases, Python
-coverage and all 34,252 C branches reached 100% under the project's existing exclusion policy. Diff coverage reached
-100% over 540 changed executable lines, including the benchmark call paths.
+The first pass passed 65,224 tests with 157 skips on Python 3.14. The second pass passed 65,269 tests with 170 skips on
+Python 3.13, with 100% Python coverage and 100% coverage of 34,260 C branches under the project's existing exclusion
+policy. The PGO/LTO build passed 333 targeted XPath, schema, and shadow-tree tests.
+
+The final diff-coverage check covers 683 executable lines against the original PR base, with no missing lines. Type
+checking and the full-PR pre-commit checks pass. The documentation build checks doctests and HTML with warnings as
+errors.
+
+Public-API cases exercise XPath extension ordering and distinct values, selector backtracking, computed-style result
+ownership, path invalidation, and Microdata tree order. Text cases check stable combining classes and canonical
+attribute ordering. The second pass adds growing regex classes and shadow-slot mutation cases.
 
 The selected normalization, canonicalization, CSSOM, XPath and XSLT conformance suites produced the same results on both
 builds: 479 passed, 2,340 skipped, 119 expected failures and 49 unexpected passes. Those exclusions reflect the existing
 conformance configuration and supported feature set; they do not establish complete standards conformance.
 
-The local CodSpeed suite passed all 154 cases. This PR adds 20 cases across 17 workload families through the existing
-registry, including cold paths and interleaved references. Local CodSpeed execution validates the cases; the pyperf
-comparisons above supply the wall-clock evidence. CI supplies CodSpeed's instruction-count comparisons.
+The local CodSpeed suite passed all 163 cases. This PR adds 29 cases across 20 workload families through the existing
+registry, including cold paths, interleaved references, and distinct-value cardinality. The final local run used short
+wall-time rounds under Python coverage to validate the benchmark call paths. The gated pyperf comparisons supply the
+performance evidence; CI supplies CodSpeed's instruction-count comparisons.
 
-The competitor refresh exposed an eager ``turbohtml`` import in the shared workload registry. The two core-only node
-inputs now import it when their loaders run, so isolated competitor environments can load the registry. Their input
-values and timed operations remain the same. The two affected CodSpeed cases passed again after this fix.
+The shared workload registry imports turbohtml in its node-input loaders, so isolated competitor environments can load
+the registry without installing turbohtml.
 
-The path audit also found a correctness bug: changing an ID after generating a CSS path could leave lookup probing a
-stale ID map forever. A bounded baseline reproduction exceeded two seconds; the optimized build returned the old path
-before the edit and the new path after it. ID edits now invalidate ID anchors, while unrelated attribute edits keep that
-map. Computed styles invalidate for either kind of attribute edit.
+Changing an ID after generating a CSS path could leave lookup probing a stale ID map forever. A bounded baseline
+reproduction exceeded two seconds; the optimized build returned the old path before the edit and the new path after it.
+ID edits now invalidate ID anchors, while unrelated attribute edits keep that map. Computed styles invalidate for either
+kind of attribute edit.
+
+**************
+ Second audit
+**************
+
+The second pass starts from ``cd429483921f8f65adc1fb303662b3671384c107`` and revisits the runtime inventory above. I
+checked allocation growth and nested scans in the tokenizer, DOM and shadow trees, XPath set functions, schema
+validation, extraction, URL processing, and CSS/JS minification. The first-pass measurements above describe their
+original source revisions.
+
+Three candidates remove repeated work. EXSLT ``set:distinct`` rebuilt earlier node string values for each candidate. A
+Python set can retain membership while preserving the first node for each value, as required by the `EXSLT specification
+<https://exslt.github.io/set/functions/distinct/index.html>`_. The implementation uses the `Python set C API
+<https://docs.python.org/3/c-api/set.html>`_ and owns one string per distinct value until the call returns.
+Duplicate-heavy inputs measure the cost of that storage and hashing.
+
+The regex parser allocated a replacement range array for each character-class entry. Its arena retained the previous
+arrays until validation ended. Geometric capacity growth bounds the accumulated allocations and copies. This changes
+character-class construction; the regex matching algorithm remains the same. Russ Cox describes these compilation and
+execution stages in his `regular-expression implementation <https://swtch.com/~rsc/regexp/regexp1.html>`_.
+
+Shadow-slot collection searched the shadow tree once per light-tree child. The `DOM slot-assignment algorithms
+<https://dom.spec.whatwg.org/#find-slotables>`_ permit finding the first matching slot once, then comparing child slot
+names. The implementation defers that search until a light child has the matching name and keeps the result within that
+call. Renaming a slot or changing a child's slot attribute requires no persistent cache invalidation. Public tests check
+duplicate slot names, assignment order, and mutation in open and closed shadow roots.
+
+I retained the tokenizer's SIMD scanning, JavaScript binding maps, table-grid capacity growth, and indexed schema-name
+lookup. Markdown reference creation appends entries without a duplicate scan. Article traversal and URL buffer ownership
+need further workload and lifetime evidence before another change; this pass establishes no gain for a rewrite. XPath
+intersection and difference still use nested membership checks. The distinct-value optimization does not establish a
+gain for those operations.
+
+The new ``xpath-distinct``, ``validate-pattern``, and ``shadow-slot`` workloads extend the shared benchmark registry.
+XPath cases vary node count and value cardinality. The ordinary ``xpath``, ``validate``, ``validate-rng``, and
+``shadow`` operations provide controls. Nine added CodSpeed entries cover the three workloads, including separate
+duplicate-heavy and unique-value XPath inputs, empty results, and nonmatching slot assignments.
+
+I retained the three optimizations after comparing matched plain-release runs. Values below are means with relative
+standard deviations; the ratios are approximate. Download the :download:`second-pass measurements
+<performance-audit-second.json>` for worker samples, CPU headroom, and superseded candidate versions.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40 22 22 16
+
+    - - Workload
+      - Before
+      - After
+      - Ratio
+    - - XPath, 1,000 distinct values
+      - 18.13 ms ±2.8%
+      - 80.91 us ±5.3%
+      - 224x
+    - - XPath, 10,000 distinct values
+      - 1.850 s ±10.6%
+      - 0.927 ms ±8.0%
+      - 2,000x
+    - - XPath, 10,000 nodes with one value
+      - 781.4 us ±4.5%
+      - 623.5 us ±3.4%
+      - 1.25x
+    - - Regex class, 32 entries
+      - 2.830 us ±4.2%
+      - 1.184 us ±4.8%
+      - 2.39x
+    - - Regex class, 2,048 entries
+      - 2.459 ms ±23.9%
+      - 13.19 us ±18.3%
+      - 186x
+    - - 1,000 children, 1,000 preceding slots
+      - 1.633 ms ±4.2%
+      - 15.74 us ±1.4%
+      - 104x
+    - - 10,000 children, 10,000 preceding slots
+      - 200.9 ms ±15.3%
+      - 277.2 us ±13.7%
+      - 725x
+
+The controls exposed two regressions during implementation. The first hash-set version allocated a set for an empty
+result and made the ordinary ``set:distinct`` control about 12% slower. Empty and singleton inputs now skip string
+conversion and hashing. The accepted final control measured 724 ns against a 754 ns baseline. The singleton scaling case
+measured 271 ns against 322 ns.
+
+The first slot implementation searched the shadow tree before inspecting light children. With 10,000 preceding slots and
+no light children, it took 20.27 us against a 0.083 us baseline. I discarded that form. The retained implementation
+skips the search for empty hosts, comments, and children with another slot name. At that size, two accepted empty-host
+runs measured 0.115 us and 0.071 us against a 0.080 us baseline; the higher mean had 34% spread. The comment case
+measured 16.52 us and 15.37 us against 15.71 us. A nonmatching-child repeat also had high spread, so these controls do
+not establish a precise small-input gain.
+
+The final XSD catalog control measured 1.285 ms before and 1.330 ms after, with 2.3% and 12.3% spread. pyperf found no
+significant difference for either ordinary XSD case. I make no general XPath speedup claim from the ordinary controls,
+which varied across operations whose implementations did not change.
+
+The ordinary shadow operation includes constructing the host and flattening it. Two short final runs measured its
+10,000-row case 10% and 21% slower. I repeated both builds with six workers, ten values, three warmups, and a 0.1-second
+minimum sample time. That comparison measured 7.73 ms before and 7.02 ms after, with 42% and 15% spread; pyperf found no
+significant difference for either the 1,000- or 10,000-row case. The 100-row case measured 73.9 us before and 77.4 us
+after, a 5% slowdown. The slot-assignment gains above do not imply faster host construction and flattening.
+
+The second publication refresh covers seven operations, including the ordinary XPath table from the first pass. It adds
+six performance tables and refreshes 68 rows across the lxml and parsel migration tables. Together, both passes refresh
+39 performance tables and measured rows in 15 migration tables. The generation check compares the committed tables with
+accepted feeds and verifies that unmeasured migration rows retain their values.

@@ -1,0 +1,36 @@
+{
+  "label": "attach a shadow tree with slots and flatten",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 rows",
+      6.8848399481188e-05
+    ],
+    [
+      "1k rows",
+      0.0007765531037269587
+    ],
+    [
+      "10k rows",
+      0.006244949658866972
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.048251677748507436
+    ],
+    [
+      null,
+      0.20666328325814787
+    ],
+    [
+      null,
+      0.024056032790148365
+    ]
+  ],
+  "notes": {}
+}

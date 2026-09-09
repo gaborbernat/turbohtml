@@ -1,0 +1,33 @@
+{
+  "label": "validate a document against an XSD schema",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "catalog XSD + doc",
+      0.001128871785113006,
+      0.0007203958985580054
+    ],
+    [
+      "1,024 global declarations",
+      8.755104919562958e-07,
+      1.7733515846884984e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.05035562285422524,
+      0.44252306645634654
+    ],
+    [
+      null,
+      0.05862559043358566,
+      0.4620138429887787
+    ]
+  ],
+  "notes": {}
+}
