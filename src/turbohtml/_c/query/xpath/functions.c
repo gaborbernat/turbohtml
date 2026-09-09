@@ -172,17 +172,50 @@ static int normalize_space(const Py_UCS4 *text, Py_ssize_t len, xp_result *out) 
     return 0;
 }
 
+typedef struct {
+    Py_UCS4 character;
+    Py_ssize_t position;
+} translate_entry;
+
+static size_t translate_slot(const translate_entry *entries, size_t mask, Py_UCS4 character);
+
 static int translate(const Py_UCS4 *text, Py_ssize_t slen, const Py_UCS4 *from, Py_ssize_t flen, const Py_UCS4 *to,
                      Py_ssize_t tlen, xp_result *out) {
     Py_UCS4 *buf = PyMem_Malloc((size_t)slen * sizeof(Py_UCS4));
     if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;     /* GCOVR_EXCL_LINE */
     }
+    translate_entry *entries = NULL;
+    size_t capacity = 0;
+    if (slen >= 64 && flen >= 16) {
+        size_t bytes;
+        const int fits = th_grow_cap((size_t)flen * 2, 0, 32, sizeof(*entries), &capacity, &bytes);
+        if (!fits) {         /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+            PyMem_Free(buf); /* GCOVR_EXCL_LINE: allocation size overflow */
+            return -1;       /* GCOVR_EXCL_LINE: allocation size overflow */
+        }
+        entries = PyMem_Calloc(1, bytes);
+        if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyMem_Free(buf);   /* GCOVR_EXCL_LINE: allocation failure */
+            return -1;         /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        for (Py_ssize_t index = 0; index < flen; index++) {
+            const size_t slot = translate_slot(entries, capacity - 1, from[index]);
+            if (entries[slot].position == 0) {
+                entries[slot] = (translate_entry){from[index], index + 1};
+            }
+        }
+    }
     Py_ssize_t write_pos = 0;
     for (Py_ssize_t index = 0; index < slen; index++) {
         Py_ssize_t from_index = 0;
-        while (from_index < flen && from[from_index] != text[index]) {
-            from_index++;
+        if (entries != NULL) {
+            const Py_ssize_t position = entries[translate_slot(entries, capacity - 1, text[index])].position;
+            from_index = position == 0 ? flen : position - 1;
+        } else {
+            while (from_index < flen && from[from_index] != text[index]) {
+                from_index++;
+            }
         }
         if (from_index >= flen) {
             buf[write_pos++] = text[index];
@@ -191,8 +224,17 @@ static int translate(const Py_UCS4 *text, Py_ssize_t slen, const Py_UCS4 *from, 
         }
         /* else: in `from` but past the end of `to`, so the character is removed */
     }
+    PyMem_Free(entries);
     result_string(out, buf, write_pos);
     return 0;
+}
+
+static size_t translate_slot(const translate_entry *entries, size_t mask, Py_UCS4 character) {
+    size_t slot = ((size_t)character * 2654435761u) & mask;
+    while (entries[slot].position != 0 && entries[slot].character != character) {
+        slot = (slot + 1) & mask;
+    }
+    return slot;
 }
 
 static int substring(struct th_tree *tree, xp_result *args, int argc, xp_result *out) {
