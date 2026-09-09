@@ -7,9 +7,10 @@ import re
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Comment, UnicodeDammit
-from bs4.element import AttributeValueList
+from bs4.element import AttributeValueList, NavigableString, Tag
 
 from bench.timing import Mutating
+from bench.tree_text import PRESERVE_TAGS, SPACE_RUN
 
 # UnicodeDammit only sniffs when an optional detector backend is installed. Without one it answers windows-1252 for
 # every high-byte stream and utf-8 for Shift_JIS, which is fast and wrong; chardet is the backend bs4 documents first.
@@ -234,7 +235,59 @@ def links_absolutize(soup: BeautifulSoup) -> None:
             anchor["href"] = urljoin(_LINKS_BASE, href)
 
 
+def _serialize_inner(text: str) -> str:
+    return _body(text).decode_contents()
+
+
+@functools.cache
+def _body(text: str) -> Tag:
+    return _parsed(text).find_all("body")[0]
+
+
+def _encode_inner(text: str) -> bytes:
+    return _body(text).encode_contents()
+
+
+def _serialize_inner_indent(text: str) -> str:
+    return _body(text).decode_contents(indent_level=0)
+
+
+def _encode_inner_indent(text: str) -> bytes:
+    return _body(text).encode_contents(indent_level=0)
+
+
+def _collapse_whitespace(soup: BeautifulSoup) -> None:
+    for node in list(soup.find_all(string=True)):
+        if isinstance(node, Comment) or any(parent.name in PRESERVE_TAGS for parent in node.parents):
+            continue
+        collapsed = SPACE_RUN.sub(" ", str(node))
+        previous = node.previous_sibling
+        while isinstance(previous, NavigableString) and not isinstance(previous, Comment) and not previous:
+            previous = previous.previous_sibling
+        if isinstance(previous, NavigableString) and not isinstance(previous, Comment) and previous.endswith(" "):
+            collapsed = collapsed.removeprefix(" ")
+        if collapsed != node:
+            node.replace_with(collapsed)
+
+
+def _transform_tree(soup: BeautifulSoup) -> None:
+    _strip_comments(soup)
+    _collapse_whitespace(soup)
+
+
+def _strip_comments(soup: BeautifulSoup) -> None:
+    for comment in soup.find_all(string=lambda node: isinstance(node, Comment)):
+        comment.extract()
+
+
 OPERATIONS = {
+    "collapse-whitespace": (Mutating(_fresh, _collapse_whitespace), "BeautifulSoup (html.parser)"),
+    "transform-tree": (Mutating(_fresh, _transform_tree), "BeautifulSoup (html.parser)"),
+    "serialize-inner": (_serialize_inner, "BeautifulSoup (html.parser)"),
+    "encode-inner": (_encode_inner, "BeautifulSoup (html.parser)"),
+    "serialize-inner-indent": (_serialize_inner_indent, "BeautifulSoup (html.parser)"),
+    "encode-inner-indent": (_encode_inner_indent, "BeautifulSoup (html.parser)"),
+    "strip-comments": (Mutating(_fresh, _strip_comments), "BeautifulSoup (html.parser)"),
     "parse": (parse, "BeautifulSoup (html.parser)"),
     "build": (build, "BeautifulSoup (html.parser)"),
     "construct": (construct, "BeautifulSoup (html.parser)"),

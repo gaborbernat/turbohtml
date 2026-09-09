@@ -7,7 +7,6 @@ maps each operation to ``(timing function, label)``; the function takes the same
 
 from __future__ import annotations
 
-import copy
 import functools
 import re
 from collections import deque
@@ -342,6 +341,14 @@ def serialize(text: str) -> None:
     _ = _parsed(text).html
 
 
+def _parse_inner(text: str) -> str:
+    return turbohtml.parse(text).find_all("body")[0].serialize(inner=True)
+
+
+def _parse_inner_encode(text: str) -> bytes:
+    return turbohtml.parse(text).find_all("body")[0].encode(inner=True)
+
+
 def _serialize_inner(text: str) -> None:
     _parsed_body(text).serialize(inner=True)
 
@@ -390,6 +397,11 @@ def _identity_node(node: turbohtml.Node) -> turbohtml.Node:
 @functools.cache
 def _parsed_body(text: str) -> turbohtml.Element:
     return _parsed(text).find_all("body")[0]
+
+
+def _whitespace_roundtrip(document: turbohtml.Document) -> str:
+    _clean.collapse_whitespace_node(document)
+    return document.serialize()
 
 
 def _transform_tree(document: turbohtml.Document) -> None:
@@ -555,9 +567,9 @@ def sanitize_report(text: str) -> None:
     _SANITIZER.sanitize_report(text)
 
 
-def sanitize_node(node: Node) -> None:
+def sanitize_node(node: Node) -> Node:
     """Sanitize an already parsed subtree with the relaxed policy, the parse-once pipeline's step."""
-    _SANITIZER.sanitize_node(node)
+    return _SANITIZER.sanitize_node(node)
 
 
 def sanitize_styles(text: str) -> None:
@@ -613,9 +625,9 @@ def linkify(text: str) -> None:
     _linkify(text)
 
 
-def linkify_node(node: Node) -> None:
-    """Linkify an already parsed subtree in place; each call links a fresh copy, since a linked tree offers nothing."""
-    _LINKER.linkify_node(copy.deepcopy(node))
+def linkify_node(node: Node) -> Node:
+    """Fresh-tree setup keeps previously linked input out of later iterations."""
+    return _LINKER.linkify_node(node)
 
 
 def linkify_traversal(case: tuple[str, str]) -> None:
@@ -1078,6 +1090,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "find-text-overlap": (find_text_overlap, "turbohtml"),
     "text-content": (text_content, "turbohtml"),
     "serialize": (serialize, "turbohtml"),
+    "parse-inner": (_parse_inner, "turbohtml"),
+    "parse-inner-encode": (_parse_inner_encode, "turbohtml"),
     "serialize-inner": (_serialize_inner, "turbohtml"),
     "serialize-inner-indent": (_serialize_inner_indent, "turbohtml"),
     "serialize-inner-minify": (_serialize_inner_minify, "turbohtml"),
@@ -1089,6 +1103,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "transform-dispatch": (_transform_dispatch, "turbohtml"),
     "collapse-whitespace": (Mutating(turbohtml.parse, _clean.collapse_whitespace_node), "turbohtml"),
     "strip-comments": (Mutating(turbohtml.parse, _clean.strip_comments_node), "turbohtml"),
+    "whitespace-roundtrip": (Mutating(turbohtml.parse, _whitespace_roundtrip), "turbohtml"),
     "transform-tree": (Mutating(turbohtml.parse, _transform_tree), "turbohtml"),
     "conformance": (conformance, "turbohtml"),
     "serialize-xml": (serialize_xml, "turbohtml"),
@@ -1119,7 +1134,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "sanitize-templates": (sanitize_templates, "turbohtml"),
     "sanitize-named-props": (sanitize_named_props, "turbohtml"),
     "sanitize-report": (sanitize_report, "turbohtml"),
-    "sanitize-node": (sanitize_node, "turbohtml"),
+    "sanitize-node": (Mutating(turbohtml.parse_fragment, sanitize_node), "turbohtml"),
     "sanitize-styles": (sanitize_styles, "turbohtml"),
     "sanitize-transform": (sanitize_transform, "turbohtml"),
     "sanitize-custom-elements": (sanitize_custom_elements, "turbohtml"),
@@ -1127,7 +1142,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "markup": (markup, "turbohtml"),
     "markup-op": (markup_op, "turbohtml"),
     "linkify": (linkify, "turbohtml"),
-    "linkify-node": (linkify_node, "turbohtml"),
+    "linkify-node": (Mutating(turbohtml.parse_fragment, linkify_node), "turbohtml"),
     "linkify-traversal": (linkify_traversal, "turbohtml"),
     "detect": (detect, "turbohtml"),
     "phone": (phone, "turbohtml"),

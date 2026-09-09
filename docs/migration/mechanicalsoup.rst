@@ -178,3 +178,14 @@ The list :meth:`~turbohtml.Element.form_data` returns drops straight into :func:
   the same way you would target a form in the browser.
 - **Parse bytes, not text.** Hand :func:`turbohtml.parse` the response ``content`` (bytes) so turbohtml applies WHATWG
   encoding detection, rather than pre-decoding to ``str`` with a guessed codec.
+
+Cleanup and fragment export
+===========================
+
+MechanicalSoup uses BeautifulSoup for its page tree; follow :doc:`beautifulsoup` for comment extraction and
+``decode_contents``/``encode_contents`` migration. In a turbohtml pipeline, collapse whitespace before reading text and
+use ``serialize(inner=True)`` or ``encode(inner=True)`` to export children. Keep the HTTP session and form submission in
+your client. Cleanup does not submit or refetch the page.
+
+``collapse_whitespace_node`` and ``strip_comments_node`` mutate the tree. Retain the result of ``transform_node`` when a
+stage such as ``sanitize_node`` returns a copy. See :doc:`/how-to/transforming-trees` for stage ordering.

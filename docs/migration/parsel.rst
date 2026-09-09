@@ -171,3 +171,13 @@ their ``attr`` keyword.
   the ``None`` before reading ``.text`` or :meth:`~turbohtml.Element.attr`.
 - parsel drives libxml2's non-spec HTML parser, so tree shape on malformed markup can differ from turbohtml's
   WHATWG-conformant construction; re-check selectors that relied on libxml2's tolerant fixups.
+
+Tree cleanup and child output
+=============================
+
+Selecting ``//body/node()`` and joining ``get()`` results requires escaping text-node results before concatenation.
+``body.serialize(inner=True)`` handles that context in turbohtml. parsel exposes an lxml root for mutation; its selector
+API does not add a separate whitespace transformer.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.

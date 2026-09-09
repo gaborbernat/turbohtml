@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Final
 
 REQUIREMENTS = ()
 
@@ -22,4 +23,23 @@ def parse_locations(text: str) -> str:
     return subprocess.run(["node", _RUNNER], input=text, capture_output=True, text=True, check=True).stdout
 
 
-OPERATIONS = {"parse-locations": (parse_locations, "parse5")}
+_INNER_RUNNER: Final = str(Path(__file__).resolve().parent.parent / "node" / "inner_runner.js")
+
+
+def _parse_inner(text: str) -> str:
+    return subprocess.run(
+        ["node", _INNER_RUNNER, "parse5"], input=text, capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _parse_inner_encode(text: str) -> bytes:
+    return subprocess.run(
+        ["node", _INNER_RUNNER, "parse5"], input=text.encode(), capture_output=True, check=True
+    ).stdout
+
+
+OPERATIONS = {
+    "parse-inner": (_parse_inner, "parse5"),
+    "parse-inner-encode": (_parse_inner_encode, "parse5"),
+    "parse-locations": (parse_locations, "parse5"),
+}

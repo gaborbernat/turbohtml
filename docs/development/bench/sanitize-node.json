@@ -1,0 +1,25 @@
+{
+  "label": "sanitize a parsed tree",
+  "parties": [
+    "turbohtml",
+    "lxml-html-clean"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "post 4 KiB",
+      2.301309897726848e-05,
+      0.0004433374422205816
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.010954823311116607,
+      0.007235349936476951
+    ]
+  ],
+  "notes": {
+    "lxml-html-clean": "blocklist policy rather than turbohtml's allowlist; not security equivalence"
+  }
+}

@@ -85,12 +85,13 @@ What html5lib has that turbohtml does not
   omission. Workaround: if you need an ``ElementTree`` or ``lxml`` tree specifically, keep html5lib for that call.
 - **Treewalkers.** html5lib converts one tree representation into another through ``html5lib.getTreeWalker``. turbohtml
   has a single representation, so there is nothing to walk between. No equivalent, and none needed.
-- **Serializer filters.** html5lib's serializer chains filters for optional-tag omission, alphabetical attribute order,
-  meta-charset injection, and whitespace. turbohtml serializes WHATWG-conformant output selected by
-  :class:`~turbohtml.Formatter`; it does not expose that filter registry. Workaround: pick the closest ``Formatter`` and
-  layout; for optional-tag omission there is no equivalent.
-- **A (deprecated) sanitizer.** html5lib ships ``html5lib.filters.sanitizer``, deprecated since 1.1. turbohtml has no
-  sanitizer. Workaround: use a dedicated sanitizer such as ``nh3`` or ``bleach`` (see :doc:`nh3` and :doc:`bleach`).
+- **Serializer filter registry.** html5lib chains token filters. turbohtml configures output with ``Html`` instead of
+  exposing that registry. Use ``Html(layout=Minify(omit_optional_tags=True))`` for optional-tag omission,
+  ``Html(sort_attributes=True)`` for attribute ordering, and ``collapse_whitespace_node`` for text changes that later
+  traversal must read. Implement other tree edits as callables passed to ``transform_node``.
+- **A deprecated token sanitizer.** html5lib ships ``html5lib.filters.sanitizer``, deprecated since 1.1. Use
+  :func:`~turbohtml.clean.sanitize` for string input or :func:`~turbohtml.clean.sanitize_node` for a copied tree. Review
+  the allowlist when migrating; the policies differ.
 - **Statistical encoding detection is opt-in, not automatic.** With ``chardet`` installed, html5lib's input stream
   guesses an encoding from byte frequency whenever there is no BOM or ``<meta charset>``. turbohtml runs the WHATWG
   algorithm and falls back to ``windows-1252`` unless you ask for the guess. Workaround: pass ``parse(data,
@@ -197,6 +198,19 @@ Because turbohtml returns a queryable tree, the walk-the-etree step after parsin
 - **Encoding sniffing stops at the markup.** ``parse`` runs the WHATWG byte path — BOM, then a ``<meta charset>``
   prescan, then a ``windows-1252`` fallback. html5lib with ``chardet`` installed can additionally guess from byte
   frequency; where that matters, detect the encoding first and hand turbohtml the decoded ``str``.
-- **No serializer object or filter chain.** html5lib builds a serializer and threads filters through it; turbohtml
-  serializes directly with :meth:`~turbohtml.Node.serialize` and a :class:`~turbohtml.Formatter`, and does not offer
-  optional-tag omission or attribute reordering.
+- **Separate tree and output stages.** Use ``transform_node`` for edits that later traversal must read, then
+  :meth:`~turbohtml.Node.serialize` with ``Html`` for output formatting. Its ``layout`` accepts ``Indent`` or
+  ``Minify``; a minifying serializer does not change the stored text.
+
+Tree cleanup and child output
+=============================
+
+The whitespace ``Filter`` changes treewalker tokens. Serialize and reparse its output when later DOM traversal needs the
+normalized text. In turbohtml, call ``collapse_whitespace_node`` before traversal and read ``inner_xml`` for XML
+fragments. Preservation differs for ``listing``, ``title``, and foreign content. Filtering comments can also leave two
+spaces at a token boundary; stripping comments before native DOM collapse combines that run. ``transform_node`` composes
+node operations; it does not consume or return html5lib tokens. Child serialization can instead omit the body start and
+end tokens before feeding the serializer.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.

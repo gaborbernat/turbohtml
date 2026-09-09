@@ -9,6 +9,7 @@ is imported, which is what keeps each venv isolated. Plain operations are measur
 
 from __future__ import annotations
 
+import gc
 import importlib
 import json
 import os
@@ -33,10 +34,13 @@ def _timed(mutating: Mutating, arg: object) -> Callable[[int], float]:
         setup, run = mutating.setup, mutating.run
         elapsed = 0.0
         for _ in range(loops):
+            # pyperf can disable automatic GC; fresh cyclic trees must not accumulate between iterations.
+            gc.collect()
             tree = setup(arg)
             start = pyperf.perf_counter()
             run(tree)
             elapsed += pyperf.perf_counter() - start
+            del tree
         return elapsed
 
     return inner

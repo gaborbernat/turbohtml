@@ -176,3 +176,16 @@ The default call minifies with every HTML fold engaged:
   in the same call and turbohtml leaves them verbatim unless asked.
 - ``minify`` parses the input as a full document, so a bare fragment gains the ``<html>``/``<body>`` structure the
   WHATWG algorithm infers; call it on whole pages, not detached fragments.
+
+Cleanup before tree traversal
+=============================
+
+The existing comparison above measures string cleanup. For an application that needs normalized text in a parsed tree,
+use ``collapse_whitespace_node`` before traversal; use ``strip_comments_node`` to remove comments. Both mutate and
+return the same root. ``sanitize_node`` returns a copy, so retain the return value when composing stages with
+``transform_node``. Whitespace cleanup does not replace sanitization.
+
+``serialize(inner=True)`` and ``encode(inner=True)`` omit an element's wrapper with the selected output options.
+``serialize_iter(inner=True)`` streams compact or indented output; use ``inner_xml`` for XML fragments. See
+:doc:`/how-to/transforming-trees` for the pipeline and :doc:`/development/performance` for DOM timings. Those timings
+measure different work from this page's string-based comparison.

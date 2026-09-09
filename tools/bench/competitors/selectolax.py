@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import functools
+from typing import Final, cast
 from urllib.parse import urljoin
 
-from selectolax.lexbor import LexborHTMLParser
+from selectolax.lexbor import LexborHTMLParser, LexborNode
 
 from bench.timing import Mutating
+from bench.tree_text import PRESERVE_TAGS, SPACE_RUN
 
 REQUIREMENTS = ("selectolax>=0.4.10",)
 
@@ -160,7 +162,64 @@ def match(text: str) -> None:
         anchor.css_matches("div a[href]")
 
 
+def _serialize_inner(text: str) -> str:
+    return cast("str", _body(text).inner_html)
+
+
+@functools.cache
+def _body(text: str) -> LexborNode:
+    return cast("LexborNode", _parsed(text).body)
+
+
+def _encode_inner(text: str) -> bytes:
+    return _serialize_inner(text).encode()
+
+
+def _fresh_transform(text: str) -> LexborHTMLParser:
+    tree: Final = _fresh(text)
+    if tree.css("template"):
+        message: Final = "selectolax does not expose template contents for mutation"
+        raise ValueError(message)
+    return tree
+
+
+def _collapse_whitespace(tree: LexborHTMLParser) -> None:
+    for node in list(cast("LexborNode", tree.root).traverse(include_text=True)):
+        if not node.is_text_node:
+            continue
+        parent = node.parent
+        while parent is not None and parent.tag not in PRESERVE_TAGS:
+            parent = parent.parent
+        if parent is not None:
+            continue
+        text: Final = cast("str", node.text_content)
+        collapsed = SPACE_RUN.sub(" ", text)
+        previous = node.prev
+        while previous is not None and previous.is_text_node and not previous.text_content:
+            previous = previous.prev
+        if previous is not None and previous.is_text_node and cast("str", previous.text_content).endswith(" "):
+            collapsed = collapsed.removeprefix(" ")
+        if collapsed != text:
+            node.replace_with(collapsed)
+
+
+def _transform_tree(tree: LexborHTMLParser) -> None:
+    _strip_comments(tree)
+    _collapse_whitespace(tree)
+
+
+def _strip_comments(tree: LexborHTMLParser) -> None:
+    for node in list(cast("LexborNode", tree.root).traverse(include_text=True)):
+        if node.is_comment_node:
+            node.remove()
+
+
 OPERATIONS = {
+    "collapse-whitespace": (Mutating(_fresh_transform, _collapse_whitespace), "selectolax"),
+    "transform-tree": (Mutating(_fresh_transform, _transform_tree), "selectolax"),
+    "serialize-inner": (_serialize_inner, "selectolax"),
+    "encode-inner": (_encode_inner, "selectolax"),
+    "strip-comments": (Mutating(_fresh_transform, _strip_comments), "selectolax"),
     "parse": (parse, "selectolax"),
     "find": (find, "selectolax"),
     "select": (select, "selectolax"),

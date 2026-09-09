@@ -220,6 +220,26 @@
       "decode a legacy byte stream — iso-2022-jp japanese (8 kB)",
       8.971891394556527e-06,
       1.5153486876566072e-05
+    ],
+    [
+      "compose identity callbacks — 0 stages",
+      4.584224683190641e-08,
+      6.074103710747754e-08
+    ],
+    [
+      "compose identity callbacks — 1 stages",
+      5.780728665194523e-08,
+      7.483846606315403e-08
+    ],
+    [
+      "compose identity callbacks — 4 stages",
+      9.485040768549465e-08,
+      1.1485255090500542e-07
+    ],
+    [
+      "compose identity callbacks — 16 stages",
+      2.5158933465256145e-07,
+      2.666084170192355e-07
     ]
   ],
   "spread": [
@@ -437,6 +457,26 @@
       null,
       0.05283026645031361,
       0.02023617070051036
+    ],
+    [
+      null,
+      0.010720810043524313,
+      0.02441690679969383
+    ],
+    [
+      null,
+      0.012425753930160665,
+      0.026430335700613747
+    ],
+    [
+      null,
+      0.0061144513497111055,
+      0.02680222837376089
+    ],
+    [
+      null,
+      0.008355739373666616,
+      0.05228936353381281
     ]
   ],
   "row_notes": {
@@ -444,6 +484,10 @@
     "39": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
     "40": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
     "41": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
-    "42": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error"
+    "42": "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that label: the two disagree on both the mapping tables and where decoding resumes after an error",
+    "43": "plain Python identity loop; omits Node validation, None results, and replacement ownership",
+    "44": "plain Python identity loop; omits Node validation, None results, and replacement ownership",
+    "45": "plain Python identity loop; omits Node validation, None results, and replacement ownership",
+    "46": "plain Python identity loop; omits Node validation, None results, and replacement ownership"
   }
 }

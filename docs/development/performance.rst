@@ -833,9 +833,10 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
  DOM transformation costs
 **************************
 
-These cases use a plain release build without PGO or LTO. Each mutation receives a freshly parsed tree outside the
-measurement. The tables report absolute costs, not a speedup over another library. CPU-headroom and memory-pressure
-checks passed during collection; each cell contains twelve timing values across three worker processes.
+These cases use a plain release build without PGO or LTO. Each mutation receives a fresh parse outside the measurement.
+The pyperf worker collects cyclic garbage between mutations outside the timer, preventing old parsed trees from
+accumulating. Competitor columns compare the operations described below. CPU-headroom and memory-pressure checks passed
+during collection; each cell contains twelve timing values across three worker processes.
 
 .. bench-table::
     :file: bench/collapse-whitespace.json
@@ -877,8 +878,76 @@ supported.
 
 Dispatcher cases reuse a tiny tree and a bound pipeline with zero, one, four, or sixteen identity callbacks. They
 include the benchmark's cached-pipeline lookup and callback execution, but exclude parsing and binding. These are
-absolute composition costs; they do not establish a speedup over calling application functions directly. CodSpeed tracks
-each stage count, the serializer variants, and the existing mutation cases through the shared operation registry.
+absolute composition costs; they do not establish a speedup over calling application functions. CodSpeed tracks each
+stage count, the serializer variants, and the existing mutation cases through the shared operation registry.
 
 .. bench-table::
     :file: bench/transform-dispatch.json
+
+Competitor transformation paths
+===============================
+
+The lxml, BeautifulSoup, and selectolax whitespace adapters walk text and apply an ASCII-space regular expression,
+preserving preformatted, raw-text, and foreign contexts. They are application code built on those libraries, not native
+whitespace APIs. BeautifulSoup and selectolax replace text nodes; turbohtml preserves existing Text objects. lxml
+removes comments through ``strip_elements(..., with_tail=False)``; BeautifulSoup extracts ``Comment`` objects;
+selectolax removes comment nodes. Its adapters reject trees containing templates because traversal does not expose their
+contents; error cells have no timing ratio. Its pretty serializer produces diagnostic output, so it has no pretty-HTML
+comparison column. The combined operation removes comments before collapsing text. Parsing stays outside mutation
+timings. Parser recovery and text-node representations differ on malformed documents; these measurements do not
+establish parser or policy equivalence beyond the differential cases.
+
+Compact child output uses BeautifulSoup's ``decode_contents``/``encode_contents``, selectolax's ``inner_html``,
+pyquery's ``html``, and an html5lib treewalker with the body wrapper omitted. lxml and parsel require concatenating
+child serializations while preserving and escaping direct body text. Pretty-printer indentation and whitespace policies
+vary; their columns price each library's own pretty output rather than identical bytes. html5lib streams serializer
+tokens, while turbohtml streams bounded chunks. Both iterator benchmarks consume their output without joining it.
+
+html5lib minification folds whitespace and omits optional tags and attribute quotes; the adapter filters comments. Its
+preservation rules differ for ``listing``, ``title``, and foreign content, and removing a comment can leave two spaces
+across separate tokens. Do not treat its minified output as a replacement for DOM mutation or as a guarantee of the same
+policy. The migration guide describes these limits.
+
+The Python callable-loop baseline omits turbohtml's root and result validation, ``None`` handling, and ownership checks.
+It measures iteration and callback cost with an identity value; it is not a replacement implementation of the API.
+
+Whitespace available to later traversal
+=======================================
+
+The html5lib workflow serializes a parsed tree through its whitespace filter, reparses it, then serializes the resulting
+tree. turbohtml collapses the parsed DOM and serializes it. The final serialization makes the changed tree observable on
+both sides. These costs include html5lib's required reparse and exclude the initial parse. They retain the policy
+differences described above.
+
+.. bench-table::
+    :file: bench/whitespace-roundtrip.json
+
+JavaScript child-output workflows
+=================================
+
+parse5 and jsdom expose child serialization. Their Python adapters start a Node process, parse the supplied HTML, and
+return the body's children through stdout. The following tables include process startup, parsing, serialization, and
+pipe I/O; turbohtml parses and serializes in the Python process. These are integration costs for a Python caller, not
+in-process JavaScript engine timings. The string workflow decodes stdout; the byte workflow retains UTF-8 bytes.
+
+.. bench-table::
+    :file: bench/parse-inner.json
+
+.. bench-table::
+    :file: bench/parse-inner-encode.json
+
+Copying and mutating cleanup stages
+===================================
+
+``sanitize_node`` and lxml-html-clean's ``clean_html`` return copies of parsed trees. The policies differ: turbohtml
+uses an allowlist and lxml-html-clean uses a blocklist. These timings do not establish security equivalence.
+``linkify_node`` and lxml-html-clean's ``autolink`` mutate a fresh tree supplied outside the timer; lxml-html-clean
+links URLs but not bare email addresses. The adapter disables its example-domain exclusions so the shared input produces
+links rather than timing a no-op. Rebuilding inputs outside the measurement prevents later iterations from timing an
+already-linked tree. These operations can be stages in an application's cleanup pipeline.
+
+.. bench-table::
+    :file: bench/sanitize-node.json
+
+.. bench-table::
+    :file: bench/linkify-node.json

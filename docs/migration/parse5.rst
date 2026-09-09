@@ -79,7 +79,8 @@ Performance
 ===========
 
 turbohtml records the same spans in its C engine and stays in-process, while parse5 runs in a Node subprocess whose
-startup dominates each call, so parsing the same document with locations on lands 146x to 2100x faster:
+startup dominates each call. The location rows measure source spans; the child-output rows include parsing and
+serialization. These are Python integration costs, not in-process JavaScript engine comparisons:
 
 .. bench-table::
     :file: bench/parse5.json
@@ -216,3 +217,17 @@ with plain offsets:
   shadowrootmode>`` during a whole-document :func:`~turbohtml.parse`, so such templates leave the light tree. Pass
   ``allow_declarative_shadow_roots=False`` to keep parse5's plain-template behavior, or opt a fragment in with
   ``parse_fragment(..., allow_declarative_shadow_roots=True)``.
+
+Child output and tree cleanup
+=============================
+
+``parse5.serialize(node)`` serializes children; ``serializeOuter(node)`` includes the node. In turbohtml, use
+``node.serialize(inner=True)`` for children and ``node.serialize()`` for outer output. ``encode(inner=True)`` produces
+bytes and ``serialize_iter(inner=True)`` produces chunks.
+
+parse5 exposes an AST through a tree adapter. Application code must walk and edit text or comment nodes for DOM cleanup.
+``collapse_whitespace_node`` and ``strip_comments_node`` provide native passes in turbohtml. Compose them with
+``transform_node`` and retain the returned root if a stage can return a copy. See :doc:`/how-to/transforming-trees`.
+
+The Python-to-Node workflow in the performance table includes process startup, parsing, serialization, and pipe I/O. It
+does not measure in-process JavaScript engine speed.
