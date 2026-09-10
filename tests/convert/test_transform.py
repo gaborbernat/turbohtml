@@ -889,13 +889,11 @@ def test_transform_number_alternating_same_length_names() -> None:
 
 
 def test_transform_number_multiple_levels_numbers_each_depth() -> None:
-    # level="multiple" numbers every ancestor in the chain, so consecutive counts land on nodes at different depths
-    # rather than on one run of siblings
     body = (
         '<xsl:template match="/"><xsl:for-each select="//c">'
         '<xsl:number level="multiple" count="a|b|c"/>,</xsl:for-each></xsl:template>'
     )
-    assert _run("<r><a><b><c/><c/></b><b><c/></b></a><a><b><c/></b></a></r>", body) == "111,112,121,211,"
+    assert _run("<r><a><b><c/><c/></b><b><c/></b></a><a><b><c/></b></a></r>", body) == "1.1.1,1.1.2,1.2.1,2.1.1,"
 
 
 def test_transform_number_count_pattern_over_mixed_siblings() -> None:
@@ -3175,7 +3173,7 @@ def test_transform_number_multiple_with_empty_format() -> None:
         '<xsl:template match="/"><xsl:apply-templates select="//s"/></xsl:template>'
         '<xsl:template match="s">[<xsl:number level="multiple" count="s" format=""/>]</xsl:template>'
     )
-    assert _run("<d><s><s/></s></d>", body) == "[1][11]"
+    assert _run("<d><s><s/></s></d>", body) == "[1][1.1]"
 
 
 def test_transform_html_auto_select_with_five_char_attribute() -> None:

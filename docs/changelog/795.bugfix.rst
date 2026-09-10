@@ -2,3 +2,5 @@ Fix crashes when annotation exporters consume generators with temporary labels, 
 boilerplate extraction.
 
 Check the magnitude of XPath numbers before converting them to integers, avoiding undefined behavior for large values.
+
+Use periods between multiple XSLT numbers when the format has no separator token, preserving its prefix and suffix.

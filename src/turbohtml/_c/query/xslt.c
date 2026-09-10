@@ -2424,8 +2424,8 @@ static int format_multi(xb *out, const Py_UCS4 *format, Py_ssize_t format_len, c
     }
     for (Py_ssize_t index = 0; index < nvalues; index++) {
         Py_ssize_t pick = index < ntok ? index : ntok - 1;
-        if (index > 0 && ntok > 0) {
-            int sep = xb_add(out, format + sep_start[pick], sep_len[pick]);
+        if (index > 0) {
+            int sep = ntok > 1 ? xb_add(out, format + sep_start[pick], sep_len[pick]) : xb_add_char(out, '.');
             if (sep < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                 return -1; /* GCOVR_EXCL_LINE */
             }
