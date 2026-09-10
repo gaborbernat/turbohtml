@@ -190,14 +190,13 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec) {
     if (assigned.failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         pending.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
     } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
-    PyMem_Free(assigned.items);
     while (pending.len > 0) {
         if (pending.failed || vec->failed) { /* GCOVR_EXCL_BR_LINE: nodevec fails only on allocation failure */
             break;                           /* GCOVR_EXCL_LINE: allocation-failure path */
         } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
         th_node *node = pending.items[--pending.len];
         if (is_slot(node) && th_node_is_shadow_root(node_root(node))) {
-            assigned = (nodevec){0};
+            assigned.len = 0;
             collect_flattened_candidates(tree, node, &assigned);
             for (Py_ssize_t index = assigned.len; index > 0; index--) {
                 nodevec_push(&pending, assigned.items[index - 1]);
@@ -205,7 +204,6 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec) {
             if (assigned.failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 pending.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
-            PyMem_Free(assigned.items);
         } else {
             nodevec_push(vec, node);
         }
@@ -213,6 +211,7 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec) {
     if (pending.failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         vec->failed = 1;  /* GCOVR_EXCL_LINE: allocation-failure path */
     } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
+    PyMem_Free(assigned.items);
     PyMem_Free(pending.items);
 }
 

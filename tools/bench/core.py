@@ -1224,7 +1224,20 @@ def _observe_registrations_setup(case: tuple[int, str]) -> Callable[[], None]:
     return run
 
 
+def _shadow_fallback_setup(case: tuple[int, str]) -> Callable[[], None]:
+    host: Final = turbohtml.Element("div")
+    shadow: Final = host.attach_shadow("open")
+    shadow.set_inner_html("<slot>" + "<slot>fallback</slot>" * case[0] + "</slot>")
+    first: Final = shadow.select("slot")[0]
+
+    def run() -> None:
+        first.assigned_nodes(flatten=True)
+
+    return run
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "shadow-fallback": (Mutating(_shadow_fallback_setup, _run_prepared), "turbohtml"),
     "observe-registrations": (Mutating(_observe_registrations_setup, _run_prepared), "turbohtml"),
     "range-boundary": (Mutating(_range_boundary_setup, _run_prepared), "turbohtml"),
     "range-contained": (Mutating(_range_contained_setup, _run_prepared), "turbohtml"),

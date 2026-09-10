@@ -75,6 +75,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "structured-empty": "structured-empty",
     "shadow": "shadow",
     "shadow-slot": "shadow-slot",
+    "shadow-fallback": "shadow-fallback",
     "validate": "validate",
     "validate-rng": "validate-rng",
     "validate-pattern": "validate-pattern",

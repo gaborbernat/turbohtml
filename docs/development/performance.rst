@@ -1021,6 +1021,17 @@ ordinary shadow operation includes constructing the host and flattening its chil
 .. bench-table::
     :file: bench/shadow-slot.json
 
+Flattening nested fallback slots reuses one scratch buffer for their assigned or fallback children. These cases place
+1,000 sibling slots or one slot inside an outer slot, with fallback text in each. Tree construction happens outside the
+timer; timing covers ``assigned_nodes(flatten=True)`` on the outer slot. CodSpeed tracks both cases.
+
+On CPython 3.14.7 with a release build without PGO or LTO, the 1,000-slot comparison fell from 29.504 to 23.858 µs
+(19.14% faster). The single-slot means were 0.532 and 0.524 µs (1.52% faster), within sample noise and per-call timer
+overhead. We ran both comparisons under CPU-headroom and memory-pressure guards.
+
+.. bench-table::
+    :file: bench/shadow-fallback.json
+
 .. bench-table::
     :file: bench/shadow.json
 
