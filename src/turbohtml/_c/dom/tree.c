@@ -4046,7 +4046,7 @@ static void run_close(th_tree *tree) {
 
 /* Feed the input to the tokenizer (borrowing when there is no CR to normalize)
    and point tree->data at the tokenizer's authoritative input base. */
-static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *data, Py_ssize_t length) {
+static int setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *data, Py_ssize_t length) {
     /* hoist the width check out of the per-character loop: a 1-byte buffer uses
        libc's vectorized memchr, the wide buffers a tight typed scan */
     int has_cr = 0;
@@ -4072,21 +4072,17 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
         /* borrowed input is not copied and outlives the tree (the caller holds
            the string for the whole parse), so text nodes can be zero-copy spans */
         th_tok_borrow_input(sm, kind, data, length);
-        tree->can_span = 1;
     }
+    tree->can_span = 1;
     th_tok_close(sm);
     tree->data = th_tok_input_data(sm, &tree->kind);
+    return has_cr;
 }
 
-static void retain_normalized_source(th_tree *tree, th_tokenizer *sm) {
-    if (tree->can_span) {
-        return;
-    }
-    if (tree->track_locations) {
+static void retain_normalized_source(th_tree *tree, th_tokenizer *sm, int normalized) {
+    if (normalized) {
         tree->owned_data = th_tok_take_input(sm, &tree->kind, &tree->length);
         tree->data = tree->owned_data;
-    } else {
-        tree->data = NULL;
     }
 }
 
@@ -4192,12 +4188,12 @@ th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length, int positi
     }
     th_tok_set_error_sink(sm, &tree->errors);
     th_tok_capture_locations(sm, locations);
-    setup_input(tree, sm, kind, data, length);
+    int normalized = setup_input(tree, sm, kind, data, length);
     th_run_state run_state;
     run_state_init(&run_state, M_INITIAL);
     run_drain(tree, sm, &run_state);
     run_close(tree);
-    retain_normalized_source(tree, sm);
+    retain_normalized_source(tree, sm, normalized);
     th_tok_free(sm);
     finalize_document(tree);
 
@@ -4337,12 +4333,12 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     if (model >= 0) {
         th_tok_set_initial(sm, (enum th_initial_state)model, NULL, 0);
     }
-    setup_input(tree, sm, kind, data, length);
+    int normalized = setup_input(tree, sm, kind, data, length);
     th_run_state run_state;
     run_state_init(&run_state, ctx_ns == TH_NS_HTML ? fragment_mode(ctx_atom) : M_IN_BODY);
     run_drain(tree, sm, &run_state);
     run_close(tree);
-    retain_normalized_source(tree, sm);
+    retain_normalized_source(tree, sm, normalized);
     th_tok_free(sm);
 
     /* an html-context fragment starts in "before head"; at EOF the same

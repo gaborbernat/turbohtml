@@ -178,6 +178,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "shadow-fallback-single": ("shadow-fallback", 1),
     "observe-registrations-unrelated": ("observe-registrations", 1),
     "parse-foster-single": ("parse-foster", 1),
+    "parse-crlf-lf": ("parse-crlf", 1),
     "parse-nul-clean": ("parse-nul", 1),
     "parse-afe-identical": ("parse-afe", 1),
     "parse-formatting-shallow": ("parse-formatting", 1),

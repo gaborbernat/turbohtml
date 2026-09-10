@@ -223,6 +223,7 @@ OPERATIONS = {
     "parse": (parse, "selectolax"),
     "parse-formatting": (parse, "selectolax"),
     "parse-foster": (parse, "selectolax"),
+    "parse-crlf": (parse, "selectolax"),
     "parse-nul": (parse, "selectolax"),
     "parse-afe": (parse, "selectolax"),
     "parse-scope": (parse, "selectolax"),

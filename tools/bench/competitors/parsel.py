@@ -188,6 +188,7 @@ OPERATIONS = {
     "parse": (parse, "parsel"),
     "parse-formatting": (parse, "parsel"),
     "parse-foster": (parse, "parsel"),
+    "parse-crlf": (parse, "parsel"),
     "parse-nul": (parse, "parsel"),
     "parse-afe": (parse, "parsel"),
     "parse-scope": (parse, "parsel"),

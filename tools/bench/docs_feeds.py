@@ -130,6 +130,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "parsing": "parse",
     "parse-formatting": "parse-formatting",
     "parse-foster": "parse-foster",
+    "parse-crlf": "parse-crlf",
     "parse-nul": "parse-nul",
     "parse-afe": "parse-afe",
     "parse-scope": "parse-scope",

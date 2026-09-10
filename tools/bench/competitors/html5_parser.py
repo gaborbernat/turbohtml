@@ -19,6 +19,7 @@ OPERATIONS = {
     "parse": (parse, "html5-parser"),
     "parse-formatting": (parse, "html5-parser"),
     "parse-foster": (parse, "html5-parser"),
+    "parse-crlf": (parse, "html5-parser"),
     "parse-nul": (parse, "html5-parser"),
     "parse-afe": (parse, "html5-parser"),
     "parse-scope": (parse, "html5-parser"),

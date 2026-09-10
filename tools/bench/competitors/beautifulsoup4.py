@@ -323,6 +323,7 @@ OPERATIONS = {
     "parse": (parse, "BeautifulSoup (html.parser)"),
     "parse-formatting": (parse, "BeautifulSoup (html.parser)"),
     "parse-foster": (parse, "BeautifulSoup (html.parser)"),
+    "parse-crlf": (parse, "BeautifulSoup (html.parser)"),
     "parse-nul": (parse, "BeautifulSoup (html.parser)"),
     "parse-afe": (parse, "BeautifulSoup (html.parser)"),
     "parse-scope": (parse, "BeautifulSoup (html.parser)"),

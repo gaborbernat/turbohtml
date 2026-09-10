@@ -1289,6 +1289,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse": (parse, "turbohtml"),
     "parse-formatting": (parse, "turbohtml"),
     "parse-foster": (parse, "turbohtml"),
+    "parse-crlf": (parse, "turbohtml"),
     "parse-nul": (parse, "turbohtml"),
     "parse-afe": (parse, "turbohtml"),
     "parse-scope": (parse, "turbohtml"),

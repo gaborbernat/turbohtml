@@ -407,6 +407,19 @@ allocator overhead; they are not RSS measurements. The parser arena retains old 
 .. bench-table::
     :file: bench/parse-foster.json
 
+The newline cases parse 1,000 paragraphs with CRLF or LF line endings. After normalizing CRLF, the document takes
+ownership of the tokenizer buffer so clean text can retain source spans. Matched local runs reduced full-parse time by
+6.02% for CRLF; the LF control changed by less than 1%. Both cases use ASCII input with source locations disabled and
+include document cleanup. CodSpeed tracks both.
+
+On this CRLF input, source-derived allocation totals replace 324,000 bytes of copied text with 131,072 bytes of retained
+normalized-input capacity. These figures exclude arena alignment, allocator overhead, and other parser allocations.
+Markup-heavy inputs can retain more memory because the document now keeps the whole normalized buffer even when source
+locations are disabled. LF-only input keeps the existing borrowed-source path.
+
+.. bench-table::
+    :file: bench/parse-crlf.json
+
 ******************
  Fragment parsing
 ******************

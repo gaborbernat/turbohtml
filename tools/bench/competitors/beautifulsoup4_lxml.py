@@ -252,6 +252,7 @@ OPERATIONS = {
     "parse": (parse, "BeautifulSoup (lxml)"),
     "parse-formatting": (parse, "BeautifulSoup (lxml)"),
     "parse-foster": (parse, "BeautifulSoup (lxml)"),
+    "parse-crlf": (parse, "BeautifulSoup (lxml)"),
     "parse-nul": (parse, "BeautifulSoup (lxml)"),
     "parse-afe": (parse, "BeautifulSoup (lxml)"),
     "parse-scope": (parse, "BeautifulSoup (lxml)"),

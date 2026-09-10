@@ -121,6 +121,7 @@ OPERATIONS = {
     "parse": (parse, "html5lib"),
     "parse-formatting": (parse, "html5lib"),
     "parse-foster": (parse, "html5lib"),
+    "parse-crlf": (parse, "html5lib"),
     "parse-nul": (parse, "html5lib"),
     "parse-afe": (parse, "html5lib"),
     "parse-scope": (parse, "html5lib"),

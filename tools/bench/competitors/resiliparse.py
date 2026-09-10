@@ -154,6 +154,7 @@ OPERATIONS = {
     "parse": (parse, "resiliparse"),
     "parse-formatting": (parse, "resiliparse"),
     "parse-foster": (parse, "resiliparse"),
+    "parse-crlf": (parse, "resiliparse"),
     "parse-nul": (parse, "resiliparse"),
     "parse-afe": (parse, "resiliparse"),
     "parse-scope": (parse, "resiliparse"),

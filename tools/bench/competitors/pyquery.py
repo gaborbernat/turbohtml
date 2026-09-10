@@ -196,6 +196,7 @@ OPERATIONS = {
     "parse": (parse, "pyquery"),
     "parse-formatting": (parse, "pyquery"),
     "parse-foster": (parse, "pyquery"),
+    "parse-crlf": (parse, "pyquery"),
     "parse-nul": (parse, "pyquery"),
     "parse-afe": (parse, "pyquery"),
     "parse-scope": (parse, "pyquery"),
