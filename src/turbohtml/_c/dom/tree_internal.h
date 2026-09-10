@@ -61,6 +61,9 @@ struct th_tree {
     th_node *document;
     th_node **open; /* stack of open elements */
     Py_ssize_t open_len;
+    uint64_t stack_version, scope_version;
+    uint16_t scope_atom;
+    int scope_result;
     Py_ssize_t open_cap;
     Py_ssize_t max_depth; /* peak open-element nesting seen while parsing; a cheap O(1)
                              lower bound on element depth that gates the :has() subtree memo */

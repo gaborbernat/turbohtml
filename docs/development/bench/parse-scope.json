@@ -1,0 +1,20 @@
+{
+  "label": "parse ignored block end tags",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 spans / 1,000 ignored address end tags",
+      7.620852594527605e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.022101797675473427
+    ]
+  ],
+  "notes": {}
+}

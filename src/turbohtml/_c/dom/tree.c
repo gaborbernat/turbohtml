@@ -427,6 +427,7 @@ static int stack_push(th_tree *tree, th_node *node) {
         tree->open_cap = (Py_ssize_t)cap;
     }
     tree->open[tree->open_len++] = node;
+    tree->stack_version++;
     if (tree->open_len > tree->max_depth) {
         tree->max_depth = tree->open_len;
     }
@@ -439,6 +440,7 @@ static int name_matches(const th_node *node, const th_token *token, int fold);
 static void stack_pop(th_tree *tree) {
     if (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE: only reached with a non-empty stack */
         tree->open_len--;
+        tree->stack_version++;
         th_node *popped = tree->open[tree->open_len];
         /* record that an end tag named this element (as opposed to an implied or
            EOF close) so escape-mode sanitizing reproduces the author's `</tag>` */
@@ -491,7 +493,7 @@ static int is_scope_boundary(const th_node *node) {
     return node->atom == TH_TAG_FOREIGNOBJECT || node->atom == TH_TAG_DESC || node->atom == TH_TAG_TITLE;
 }
 
-static int has_in_scope(th_tree *tree, uint16_t atom) {
+static int find_in_scope(th_tree *tree, uint16_t atom) {
     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) {
         th_node *node = tree->open[index];
         if (node->ns == TH_NS_HTML && node->atom == atom) {
@@ -502,6 +504,15 @@ static int has_in_scope(th_tree *tree, uint16_t atom) {
         }
     }
     return 0;
+}
+
+static int has_in_scope(th_tree *tree, uint16_t atom) {
+    if (tree->scope_version != tree->stack_version || tree->scope_atom != atom) {
+        tree->scope_result = find_in_scope(tree, atom);
+        tree->scope_atom = atom;
+        tree->scope_version = tree->stack_version;
+    }
+    return tree->scope_result;
 }
 
 /* List-item scope: the default boundaries plus ol and ul. */
@@ -1421,6 +1432,7 @@ static void afe_remove_at(th_tree *tree, Py_ssize_t index) {
 static void stack_remove_at(th_tree *tree, Py_ssize_t index) {
     memmove(&tree->open[index], &tree->open[index + 1], (size_t)(tree->open_len - index - 1) * sizeof(th_node *));
     tree->open_len--;
+    tree->stack_version++;
 }
 
 static int afe_push(th_tree *tree, th_node *node) {
@@ -1684,6 +1696,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
             }
             tree->afe[node_afe] = clone;
             tree->open[node_idx] = clone;
+            tree->stack_version++;
             node = clone;
             if (last == furthest) {
                 bookmark = node_afe + 1;
@@ -1760,6 +1773,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         memmove(&tree->open[furthest_now + 2], &tree->open[furthest_now + 1],
                 (size_t)(tree->open_len - furthest_now - 2) * sizeof(th_node *));
         tree->open[furthest_now + 1] = fmt_clone;
+        tree->stack_version++;
     }
     return 1;
 }
@@ -2473,6 +2487,7 @@ static enum th_drain drain_after_head(th_tree *tree, th_token *tok, th_insert *d
                     /* the head is removed from under the template on the
                        stack; the template itself stays open */
                     tree->open[tree->open_len - 1] = node;
+                    tree->stack_version++;
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         afe_push_marker(tree);
                         tmpl_push(tree, M_IN_TEMPLATE);

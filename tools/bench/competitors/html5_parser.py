@@ -15,4 +15,8 @@ def parse(text: str) -> None:
     html5_parser.parse(text)
 
 
-OPERATIONS = {"parse": (parse, "html5-parser"), "parse-formatting": (parse, "html5-parser")}
+OPERATIONS = {
+    "parse": (parse, "html5-parser"),
+    "parse-formatting": (parse, "html5-parser"),
+    "parse-scope": (parse, "html5-parser"),
+}

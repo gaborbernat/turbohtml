@@ -43,7 +43,7 @@
     ],
     [
       "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
-      0.0002999122285928024,
+      0.00030204172362573444,
       "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ],
     [
@@ -90,7 +90,7 @@
     ],
     [
       null,
-      0.007230163073014763,
+      0.007107456068145223,
       null
     ],
     [

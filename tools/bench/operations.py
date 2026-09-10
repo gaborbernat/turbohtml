@@ -283,6 +283,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow-slot": Operation("collect children assigned to a late shadow slot", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-formatting": Operation("parse under a formatting ancestor", "us"),
+    "parse-scope": Operation("parse ignored block end tags", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
     "parse-xml-attrs": Operation("parse XML with growing attribute counts", "us"),
@@ -1197,6 +1198,12 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ),
     ),
     "parse": _parse_cases,
+    "parse-scope": lambda: (
+        (
+            "256 spans / 1,000 ignored address end tags",
+            "<div>" + "<span>" * 256 + "a" + "</address>" * 1000 + "a" + "</span>" * 256 + "</div>",
+        ),
+    ),
     "parse-formatting": lambda: tuple(
         (
             f"{depth} spans / 1,000 samp elements",

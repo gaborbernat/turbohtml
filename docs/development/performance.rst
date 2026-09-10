@@ -312,13 +312,21 @@ elements or none. A validated stack-position hint avoids searching the open-elem
 ancestor on each token. Matched local runs reduced full-parse time by 37% at depth 256; the shallow control changed by
 1.4%. Both cases use ASCII input with source locations disabled and include document cleanup. CodSpeed tracks both.
 
-Parsel takes 225.1 µs on the deep input, compared with turbohtml's 299.9 µs. Resiliparse takes 267.1 µs on the deep
+Parsel takes 225.1 µs on the deep input, compared with turbohtml's 302.0 µs. Resiliparse takes 267.1 µs on the deep
 input and 79.2 µs on the shallow input, ahead of turbohtml's 87.4 µs. The default lxml and pyquery parsers truncate the
 deep input, dropping all 1,000 ``samp`` elements; those cells have no timing. Other measured parsers preserve the
 complete tree. The html5-parser environment could not import because its libxml2 version differs from lxml's.
 
 .. bench-table::
     :file: bench/parse-formatting.json
+
+The ignored-end-tag case places 1,000 ``</address>`` tokens beneath 256 open ``span`` elements, with text before and
+after the sequence. Default-scope queries reuse their result until the open stack changes. Matched local runs reduced
+full-parse time by 68.9%; the ordinary nested-formatting control took 1.1% longer. The case parses ASCII input with
+source locations disabled and includes document cleanup. CodSpeed tracks the same input.
+
+.. bench-table::
+    :file: bench/parse-scope.json
 
 ******************
  Fragment parsing
