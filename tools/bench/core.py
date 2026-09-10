@@ -946,11 +946,11 @@ def _xslt_compiled(sheet: str, source: str) -> tuple[_Transform, turbohtml.Docum
     return _Transform(turbohtml.parse_xml(sheet)), turbohtml.parse_xml(source)
 
 
-def transform(case: tuple[str, str]) -> None:
+def transform(case: tuple[str, str]) -> str:
     """Apply a compiled XSLT 1.0 stylesheet to a parsed source document with turbohtml.transform."""
     sheet, source = case
     compiled, document = _xslt_compiled(sheet, source)
-    compiled(document)
+    return compiled(document)
 
 
 def transform_reuse(case: tuple[str, str]) -> None:
@@ -1305,6 +1305,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "transform-reuse": (transform_reuse, "turbohtml"),
     "transform-sort": (transform, "turbohtml"),
     "transform-dense": (transform, "turbohtml"),
+    "transform-number": (transform, "turbohtml"),
     "minify-css": (minify_css, "turbohtml"),
     "minify-js": (minify_js, "turbohtml"),
     "stream": (stream, "turbohtml"),

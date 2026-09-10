@@ -151,6 +151,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "tree-navigation": "navigate",
     "xslt": "transform",
     "xslt-compile": "transform-compile",
+    "xslt-dense": "transform-dense",
+    "xslt-number": "transform-number",
     "xslt-reuse": "transform-reuse",
     "unescaping": "unescape",
     "url-cleaning": "urls-clean",

@@ -7,8 +7,8 @@
     The September 8 audit measurements remain provisional. The first two passes checked CPU headroom without enforcing
     memory-pressure or swap limits. The third and fourth passes enforced those limits, but some before/after comparisons
     used different interpreter builds. Those comparisons need repeats with one interpreter before they establish a speed
-    improvement. The normalization, attribute, equality, and translation tables below use matched interpreter and binary
-    configurations.
+    improvement. The normalization, attribute, equality, translation, and numbering tables below use matched interpreter
+    and binary configurations.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
@@ -415,7 +415,7 @@ node for each string value. Five XPath 2.0 string-function rows have no libxml2 
 application allocates source-specific indexes and output state. Callers can use one ``Transform`` instance with
 different documents and parameters across threads.
 
-The first table measures construction. The other two measure a 120-row catalog and ten calls to a 300-template
+The first table measures construction. The next two measure a 120-row catalog and ten calls to a 300-template
 stylesheet. That stylesheet has 299 unused templates and 24 static ``xsl:number`` patterns in its used template; the
 repeated result includes any stylesheet analysis or XPath compilation left in the application path.
 
@@ -427,6 +427,21 @@ repeated result includes any stylesheet analysis or XPath compilation left in th
 
 .. bench-table::
     :file: bench/xslt-reuse.json
+
+The numbering cases use one or eight default ``xsl:number`` instructions per node. Forward traversal can reuse the
+preceding sibling's count; repeated instructions can reuse the current node's count. Reverse traversal still needs
+preceding-sibling scans for each newly visited node. The one-node and zero-instruction cases measure fixed overhead.
+
+.. bench-table::
+    :file: bench/xslt-number.json
+
+The instruction-dense stylesheet combines numbering with variable bindings, comments, copied subtrees, and messages.
+These tables time application of a compiled stylesheet to a parsed document. turbohtml returns a Python string; lxml
+returns its result-tree object, with conversion to a Python string outside timing. The numbering and instruction-dense
+measurements use CPython 3.14.7 and a release build without PGO or LTO.
+
+.. bench-table::
+    :file: bench/xslt-dense.json
 
 ************
  Node paths

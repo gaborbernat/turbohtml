@@ -29,6 +29,12 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "transform-number": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-dense": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
     "sanitize-node": {
         "lxml-html-clean": "blocklist policy rather than turbohtml's allowlist; not security equivalence"
     },

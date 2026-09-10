@@ -1225,6 +1225,46 @@
       "translate XPath characters — Unicode cycling",
       2.9246365155207362e-05,
       0.004010018491923498
+    ],
+    [
+      "XSLT transform an instruction-dense sheet — instruction-dense (200 nodes)",
+      0.0009152616967791498,
+      0.0019541417978568157
+    ],
+    [
+      "XSLT number sibling nodes — 200 siblings / 1 instruction / forward",
+      3.998534947792602e-05,
+      4.9151791733947904e-05
+    ],
+    [
+      "XSLT number sibling nodes — 200 siblings / 8 instructions / forward",
+      0.00026645614134395145,
+      0.0003236210286407489
+    ],
+    [
+      "XSLT number sibling nodes — 2,000 siblings / 1 instruction / forward",
+      0.00040221174026555673,
+      0.004650969971165372
+    ],
+    [
+      "XSLT number sibling nodes — 2,000 siblings / 8 instructions / forward",
+      0.002675096268770479,
+      0.03659461043425836
+    ],
+    [
+      "XSLT number sibling nodes — 1 sibling / 8 instructions / forward",
+      1.7354888081892265e-06,
+      5.425464290453874e-06
+    ],
+    [
+      "XSLT number sibling nodes — 200 siblings / 8 instructions / reverse",
+      0.00030554077755671946,
+      0.000343318131444903
+    ],
+    [
+      "XSLT number sibling nodes — 200 siblings / 0 instructions / forward",
+      7.318307824751476e-06,
+      8.684453666774061e-06
     ]
   ],
   "spread": [
@@ -2447,6 +2487,46 @@
       null,
       0.018635071948143022,
       0.07931615112332191
+    ],
+    [
+      null,
+      0.014432022694641278,
+      0.012409694696614303
+    ],
+    [
+      null,
+      0.017797055218265447,
+      0.010499656657595512
+    ],
+    [
+      null,
+      0.01624569410109749,
+      0.026162676229692892
+    ],
+    [
+      null,
+      0.014238926685552288,
+      0.06219813949031078
+    ],
+    [
+      null,
+      0.013726970598360994,
+      0.034051602406389346
+    ],
+    [
+      null,
+      0.011181801500320908,
+      0.012301550456354548
+    ],
+    [
+      null,
+      0.015093951347780948,
+      0.013080831190753893
+    ],
+    [
+      null,
+      0.008964290089540675,
+      0.015571039474896882
     ]
   ],
   "row_notes": {

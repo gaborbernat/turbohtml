@@ -418,6 +418,7 @@ OPERATIONS: dict[str, Operation] = {
     "transform-reuse": Operation("apply one compiled 300-template stylesheet ten times", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
+    "transform-number": Operation("XSLT number sibling nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
     "stream": Operation("push-parse a page in chunks", "us"),
@@ -874,6 +875,34 @@ _XSLT_DENSE_SOURCE = (
 def _transform_dense_cases() -> tuple[tuple[str, object], ...]:
     """Return the instruction-dense XSLT case: a template of 56 xsl:* instructions applied over 200 nodes."""
     return (("instruction-dense (200 nodes)", (_XSLT_DENSE_SHEET, _XSLT_DENSE_SOURCE)),)
+
+
+def _transform_number_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            (
+                f"{rows:,} {'sibling' if rows == 1 else 'siblings'} / "
+                f"{instructions} {'instruction' if instructions == 1 else 'instructions'} / {order}"
+            ),
+            (
+                '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root/n">'
+                + ('<xsl:sort select="@id" data-type="number" order="descending"/>' if order == "reverse" else "")
+                + "<xsl:number/><xsl:text>:</xsl:text>" * instructions
+                + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
+                "<root>" + "".join(f'<n id="{index}"/>' for index in range(1, rows + 1)) + "</root>",
+            ),
+        )
+        for rows, instructions, order in (
+            (200, 1, "forward"),
+            (200, 8, "forward"),
+            (2_000, 1, "forward"),
+            (2_000, 8, "forward"),
+            (1, 8, "forward"),
+            (200, 8, "reverse"),
+            (200, 0, "forward"),
+        )
+    )
 
 
 def _tokenize_cases() -> tuple[tuple[str, object], ...]:
@@ -1431,6 +1460,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-reuse": _transform_compile_cases,
     "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,
+    "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
     "minify-js": _minify_js_cases,
     "stream": _readpath_cases,

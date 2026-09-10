@@ -351,11 +351,11 @@ def _xslt_compiled(sheet: str, source: str):  # ruff:ignore[missing-return-type-
     return transform, lxml_etree.fromstring(source.encode())
 
 
-def transform(case: tuple[str, str]) -> None:
+def transform(case: tuple[str, str]) -> lxml_etree._XSLTResultTree:
     """Apply a compiled XSLT 1.0 stylesheet to a parsed source with lxml's libxslt engine."""
     sheet, source = case
     compiled, document = _xslt_compiled(sheet, source)
-    compiled(document)
+    return compiled(document)
 
 
 def transform_reuse(case: tuple[str, str]) -> None:
@@ -494,6 +494,8 @@ OPERATIONS = {
     "xpath-order": (_xpath_scaling, "lxml"),
     "xpath-translate": (_xpath_scaling, "lxml"),
     "transform": (transform, "lxml.etree"),
+    "transform-number": (transform, "lxml.etree"),
+    "transform-dense": (transform, "lxml.etree"),
     "transform-compile": (transform_compile, "lxml.etree"),
     "transform-reuse": (transform_reuse, "lxml.etree"),
 }

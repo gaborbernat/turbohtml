@@ -228,9 +228,14 @@ the imported declarations enter conflict resolution at lower import precedence.
 
 Two limits to plan for. Only ``xsl:import`` loads other files (pass ``base_url``); ``xsl:include`` and ``document()``
 load nothing, and locale-aware ``xsl:sort`` collation and ``id()`` over DTD-declared IDs are out of reach for want of a
-collation and DTD layer. On transform throughput turbohtml runs about 1.3 times faster than libxslt's decade-tuned C
-engine on the ``XSLT transform`` row, and ships its stylesheet processor in the same pure, dependency-free wheel as the
-parser, over one typed node API. A pipeline that lives inside libxslt's wider XSLT/EXSLT surface stays with lxml.
+collation and DTD layer. A pipeline that depends on those features needs lxml.
+
+Default ``xsl:number`` instructions share sibling counts when their node type and element name match. The repeated
+numbering case applies eight instructions to each of 2,000 siblings: September 10 plain-release measurements take 2.68
+ms for turbohtml and 36.6 ms for lxml. The table also covers single instructions, reverse order, one node, and
+no-numbering controls. Both libraries reuse a compiled stylesheet and parsed source. turbohtml returns a Python string;
+lxml returns an XSLT result tree, with string conversion outside timing. See :doc:`/development/performance` for the
+build configuration and per-cell spread.
 
 ****************
  How to migrate

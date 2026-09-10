@@ -1,0 +1,25 @@
+{
+  "label": "XSLT transform an instruction-dense sheet",
+  "parties": [
+    "turbohtml",
+    "lxml.etree"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "instruction-dense (200 nodes)",
+      0.0009152616967791498,
+      0.0019541417978568157
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.014432022694641278,
+      0.012409694696614303
+    ]
+  ],
+  "notes": {
+    "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing"
+  }
+}
