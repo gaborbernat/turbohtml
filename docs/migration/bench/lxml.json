@@ -1405,6 +1405,16 @@
       "parse ignored block end tags — 256 spans / 1,000 ignored address end tags",
       7.620852594527605e-05,
       "truncated output: 253/256 spans and no text instead of two characters"
+    ],
+    [
+      "resolve XPath ID argument nodes — 10,000 ID argument nodes",
+      0.000716319585050466,
+      0.0012077913197572343
+    ],
+    [
+      "resolve XPath ID argument nodes — 10 long ID argument nodes",
+      0.0003118277181935506,
+      0.0007009104708534627
     ]
   ],
   "spread": [
@@ -2807,6 +2817,16 @@
       null,
       0.022101797675473427,
       null
+    ],
+    [
+      null,
+      0.013314958653646793,
+      0.036871245988245115
+    ],
+    [
+      null,
+      0.03117250869723997,
+      0.018915180445898853
     ]
   ],
   "row_notes": {
