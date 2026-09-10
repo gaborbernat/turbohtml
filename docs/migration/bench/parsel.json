@@ -785,6 +785,16 @@
       "parse nested formatting attributes — 256 b elements / identical attributes",
       4.9689298612065615e-05,
       7.331802164192899e-05
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / early NUL",
+      7.107561307672465e-05,
+      0.00025515722113595985
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / no NUL",
+      7.09768120600529e-05,
+      0.00024864267005189806
     ]
   ],
   "spread": [
@@ -1567,6 +1577,16 @@
       null,
       0.020709800396554418,
       0.020336491526098937
+    ],
+    [
+      null,
+      0.016635002923066876,
+      0.027130805023105102
+    ],
+    [
+      null,
+      0.016115265561391097,
+      0.008099227544467104
     ]
   ],
   "row_notes": {

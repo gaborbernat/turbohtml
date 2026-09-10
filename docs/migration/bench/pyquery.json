@@ -525,6 +525,16 @@
       "parse nested formatting attributes — 256 b elements / identical attributes",
       4.9689298612065615e-05,
       "truncated output: 254/256 b elements and no text"
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / early NUL",
+      7.107561307672465e-05,
+      "different text: replaces U+0000 with U+FFFD instead of dropping it"
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / no NUL",
+      7.09768120600529e-05,
+      0.000245551090574736
     ]
   ],
   "spread": [
@@ -1047,6 +1057,16 @@
       null,
       0.020709800396554418,
       null
+    ],
+    [
+      null,
+      0.016635002923066876,
+      null
+    ],
+    [
+      null,
+      0.016115265561391097,
+      0.060711043535211826
     ]
   ],
   "row_notes": {}

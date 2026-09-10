@@ -948,6 +948,18 @@
       4.9689298612065615e-05,
       0.0012027731573349834,
       0.0008085998917219209
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / early NUL",
+      7.107561307672465e-05,
+      "different text: retains U+0000 instead of dropping it",
+      "different text: replaces U+0000 with U+FFFD instead of dropping it"
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / no NUL",
+      7.09768120600529e-05,
+      0.005463147310365457,
+      0.003938554341099613
     ]
   ],
   "spread": [
@@ -1892,6 +1904,18 @@
       0.020709800396554418,
       0.018517693224278715,
       0.015057170842072275
+    ],
+    [
+      null,
+      0.016635002923066876,
+      null,
+      null
+    ],
+    [
+      null,
+      0.016115265561391097,
+      0.02594096349960786,
+      0.05678782186302336
     ]
   ],
   "row_notes": {

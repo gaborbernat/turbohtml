@@ -1450,6 +1450,16 @@
       "compile XSLT declaration indexes — 256 unused declarations per kind, 256 calls",
       0.0001833218756170633,
       0.0007046583603369072
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / early NUL",
+      7.107561307672465e-05,
+      "different text: replaces U+0000 with U+FFFD instead of dropping it"
+    ],
+    [
+      "parse text beside a NUL — 1,000 paragraphs / no NUL",
+      7.09768120600529e-05,
+      0.00023572905808274907
     ]
   ],
   "spread": [
@@ -2897,6 +2907,16 @@
       null,
       0.03661882064329688,
       0.055409295388563325
+    ],
+    [
+      null,
+      0.016635002923066876,
+      null
+    ],
+    [
+      null,
+      0.016115265561391097,
+      0.01939248896374532
     ]
   ],
   "row_notes": {

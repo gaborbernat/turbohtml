@@ -372,6 +372,11 @@ runs can retain source spans even when another token contains a NUL. Matched loc
 on the early-NUL input; the clean control changed by less than 1%. Both inputs use ASCII, disable source locations, and
 include document cleanup. CodSpeed tracks both.
 
+Turbohtml leads the measured parsers on both inputs. On the early-NUL input, BeautifulSoup's ``html.parser`` backend
+retains U+0000; its lxml backend, lxml, and pyquery replace it with U+FFFD. Those results differ from turbohtml's NUL
+removal and have no timing. The clean-input BeautifulSoup lxml and pyquery measurements have 6% spread and do not
+support precise comparisons. The html5-parser environment has the libxml2 import mismatch described above.
+
 .. bench-table::
     :file: bench/parse-nul.json
 
