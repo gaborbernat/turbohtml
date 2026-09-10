@@ -33,6 +33,7 @@ def minify(text: str) -> str:
 
 
 OPERATIONS = {
+    "minify-js-sequences": (minify_js, "tdewolff"),
     "minify-js": (minify_js, "tdewolff"),
     "minify-css": (minify_css, "tdewolff"),
     "minify": (minify, "tdewolff"),

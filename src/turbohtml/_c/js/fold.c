@@ -859,8 +859,16 @@ static void merge_sequences(F *folder, int32_t first) {
                 continue;  /* GCOVR_EXCL_LINE */
             }
             prog->nodes[idx].a = seq;
+            int32_t tail = prog->nodes[seq].a;
+            while (prog->nodes[tail].next >= 0) {
+                tail = prog->nodes[tail].next;
+            }
             while ((next = prog->nodes[idx].next) >= 0 && mergeable_expr(prog, next)) {
-                seq_append(prog, seq, prog->nodes[next].a);
+                int32_t expr = prog->nodes[next].a;
+                prog->nodes[tail].next = prog->nodes[expr].kind == JN_SEQ ? prog->nodes[expr].a : expr;
+                while (prog->nodes[tail].next >= 0) {
+                    tail = prog->nodes[tail].next;
+                }
                 prog->nodes[idx].next = prog->nodes[next].next;
                 folder->changed = 1;
             }

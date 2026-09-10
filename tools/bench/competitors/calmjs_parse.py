@@ -13,4 +13,4 @@ def minify_js(source: str) -> str:
     return minify_print(es5(source), obfuscate=True)
 
 
-OPERATIONS = {"minify-js": (minify_js, "calmjs.parse")}
+OPERATIONS = {"minify-js-sequences": (minify_js, "calmjs.parse"), "minify-js": (minify_js, "calmjs.parse")}

@@ -263,7 +263,7 @@ class Operation:
 
 # The minify operations shrink their input, so their tables carry an output-size column alongside time. Their
 # functions return the minified text; the worker records its byte length once (deterministic) beside the timing.
-SIZE_OPS: Final[frozenset[str]] = frozenset({"minify", "minify-css", "minify-js"})
+SIZE_OPS: Final[frozenset[str]] = frozenset({"minify", "minify-css", "minify-js", "minify-js-sequences"})
 
 # Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
 MEMORY_OPS: Final[frozenset[str]] = frozenset({
@@ -443,6 +443,7 @@ OPERATIONS: dict[str, Operation] = {
     "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
+    "minify-js-sequences": Operation("minify expression sequences", "us"),
     "stream": Operation("push-parse a page in chunks", "us"),
     "encoding": Operation("detect a byte stream's encoding", "us"),
     "decode": Operation("decode a legacy byte stream", "us"),
@@ -1744,6 +1745,9 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
     "minify-js": _minify_js_cases,
+    "minify-js-sequences": lambda: tuple(
+        (f"{count} expression statements", ";".join(f"f({index})" for index in range(count))) for count in (1000, 2)
+    ),
     "stream": _readpath_cases,
     "encoding": _encoding_cases,
     "decode": _decode_cases,

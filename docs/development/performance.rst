@@ -1025,6 +1025,16 @@ with the time to produce it; both ratios are against turbohtml.
 .. bench-table::
     :file: bench/js-minification.json
 
+The expression-sequence cases merge 1,000 or two consecutive function calls. Retaining the tail during folding avoids
+rescanning the accumulated sequence before each append. Matched release builds reduced the 1,000-statement case from
+692.917 to 334.477 µs (51.73% less time). The longer two-statement control comparison measured 1.188 versus 1.167 µs,
+within its measured spread. Candidate spread is 13.59% for the large input and 2.65% for the control; the table retains
+that warning. Both builds produce the same output size and preserve call order. The shared suite and CodSpeed include
+both cases.
+
+.. bench-table::
+    :file: bench/js-sequences.json
+
 ********************
  Encoding detection
 ********************

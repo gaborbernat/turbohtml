@@ -114,6 +114,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "fragment-parsing": "fragment",
     "html-parser-adapter": "htmlparser",
     "js-minification": "minify-js",
+    "js-sequences": "minify-js-sequences",
     "legacy-decoding": "decode",
     "link-filtering": "links-filter",
     "linkify": "linkify",

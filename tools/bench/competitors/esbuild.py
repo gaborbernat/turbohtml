@@ -22,4 +22,8 @@ def minify_css(css: str) -> str:
     return _run(["--minify", "--loader=css"], css)
 
 
-OPERATIONS = {"minify-js": (minify_js, "esbuild"), "minify-css": (minify_css, "esbuild")}
+OPERATIONS = {
+    "minify-js-sequences": (minify_js, "esbuild"),
+    "minify-js": (minify_js, "esbuild"),
+    "minify-css": (minify_css, "esbuild"),
+}

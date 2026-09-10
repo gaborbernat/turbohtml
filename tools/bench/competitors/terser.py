@@ -14,4 +14,4 @@ def minify_js(source: str) -> str:
     ).stdout
 
 
-OPERATIONS = {"minify-js": (minify_js, "terser")}
+OPERATIONS = {"minify-js-sequences": (minify_js, "terser"), "minify-js": (minify_js, "terser")}

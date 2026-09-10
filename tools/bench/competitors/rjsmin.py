@@ -12,4 +12,4 @@ def minify_js(source: str) -> str:
     return rjsmin.jsmin(source)
 
 
-OPERATIONS = {"minify-js": (minify_js, "rjsmin")}
+OPERATIONS = {"minify-js-sequences": (minify_js, "rjsmin"), "minify-js": (minify_js, "rjsmin")}
