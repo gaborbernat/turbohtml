@@ -463,6 +463,7 @@ OPERATIONS = {
     "strip-comments": (Mutating(lxml_html.document_fromstring, _strip_comments), "lxml"),
     "parse": (parse, "lxml"),
     "parse-formatting": (parse, "lxml"),
+    "parse-afe": (parse, "lxml"),
     "parse-scope": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
     "parse-xml-attrs": (parse_xml, "lxml.etree"),

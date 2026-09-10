@@ -1,0 +1,28 @@
+{
+  "label": "parse nested formatting attributes",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 b elements / distinct attributes",
+      4.9955719771332954e-05
+    ],
+    [
+      "256 b elements / identical attributes",
+      4.9689298612065615e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.009435383797476665
+    ],
+    [
+      null,
+      0.020709800396554418
+    ]
+  ],
+  "notes": {}
+}

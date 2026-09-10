@@ -153,6 +153,7 @@ def links_absolutize(tree: HTMLTree) -> None:
 OPERATIONS = {
     "parse": (parse, "resiliparse"),
     "parse-formatting": (parse, "resiliparse"),
+    "parse-afe": (parse, "resiliparse"),
     "parse-scope": (parse, "resiliparse"),
     "text-render": (text_render, "resiliparse"),
     "text-main": (text_main, "resiliparse"),

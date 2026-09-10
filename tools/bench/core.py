@@ -1266,6 +1266,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "shadow-slot": (_shadow_slot, "turbohtml"),
     "parse": (parse, "turbohtml"),
     "parse-formatting": (parse, "turbohtml"),
+    "parse-afe": (parse, "turbohtml"),
     "parse-scope": (parse, "turbohtml"),
     "parse-dense": (parse, "turbohtml"),
     "parse-xml": (parse_xml, "turbohtml"),

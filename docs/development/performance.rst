@@ -328,6 +328,16 @@ source locations disabled and includes document cleanup. CodSpeed tracks the sam
 .. bench-table::
     :file: bench/parse-scope.json
 
+The formatting-attribute cases nest 256 ``b`` elements with either distinct ``title`` values or one repeated value. An
+unseen attribute fingerprint skips the active-formatting duplicate scan; previously seen fingerprints retain the full
+comparison and the three-entry limit. Matched local runs reduced full-parse time by 52.5% for distinct values; identical
+values took 2.1% longer. Both cases use ASCII input with source locations disabled and include document cleanup.
+CodSpeed tracks both. The capacity rules allocate 4 KiB for the distinct case and 256 bytes for the repeated case.
+Removed formatting entries leave fingerprints until a scope reset; allocated capacity remains until document teardown.
+
+.. bench-table::
+    :file: bench/parse-afe.json
+
 ******************
  Fragment parsing
 ******************

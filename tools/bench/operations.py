@@ -285,6 +285,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow-fallback": Operation("flatten nested fallback slots", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-formatting": Operation("parse under a formatting ancestor", "us"),
+    "parse-afe": Operation("parse nested formatting attributes", "us"),
     "parse-scope": Operation("parse ignored block end tags", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
@@ -1201,6 +1202,15 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ),
     ),
     "parse": _parse_cases,
+    "parse-afe": lambda: tuple(
+        (
+            f"256 b elements / {variant} attributes",
+            "".join(f'<b title="{index if variant == "distinct" else "same"}">' for index in range(256))
+            + "a"
+            + "</b>" * 256,
+        )
+        for variant in ("distinct", "identical")
+    ),
     "parse-scope": lambda: (
         (
             "256 spans / 1,000 ignored address end tags",

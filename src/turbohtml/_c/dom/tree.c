@@ -1426,6 +1426,9 @@ static void maybe_clone_option(th_tree *tree, th_node *option) {
 static void afe_remove_at(th_tree *tree, Py_ssize_t index) {
     memmove(&tree->afe[index], &tree->afe[index + 1], (size_t)(tree->afe_len - index - 1) * sizeof(th_node *));
     tree->afe_len--;
+    if (tree->afe_len == 0) {
+        tree->afe_hash_valid = 0;
+    }
 }
 
 /* Remove the open-elements-stack entry at index, shifting the tail down. */
@@ -1435,34 +1438,113 @@ static void stack_remove_at(th_tree *tree, Py_ssize_t index) {
     tree->stack_version++;
 }
 
-static int afe_push(th_tree *tree, th_node *node) {
-    /* Noah's Ark: at most three earlier entries with the same name+attributes
-       may precede a new one before the oldest is dropped. */
-    int matches = 0;
-    Py_ssize_t earliest = -1;
-    for (Py_ssize_t index = tree->afe_len - 1; index >= 0; index--) {
-        th_node *entry = tree->afe[index];
-        if (entry == NULL) {
-            break; /* stop at the marker */
-        }
-        if (entry->atom == node->atom && entry->attr_count == node->attr_count) {
-            int same = 1;
-            for (Py_ssize_t aidx = 0; aidx < node->attr_count && same; aidx++) {
-                if (entry->attrs[aidx].name_atom != node->attrs[aidx].name_atom ||
-                    entry->attrs[aidx].value_len != node->attrs[aidx].value_len ||
-                    memcmp(entry->attrs[aidx].value, node->attrs[aidx].value,
-                           (size_t)node->attrs[aidx].value_len * sizeof(Py_UCS4)) != 0) {
-                    same = 0;
-                }
-            }
-            if (same) {
-                matches++;
-                earliest = index;
-            }
+static uint64_t afe_hash(const th_node *node) {
+    uint64_t hash = UINT64_C(14695981039346656037) ^ node->atom;
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        const th_node_attr *attr = &node->attrs[index];
+        hash = (hash ^ attr->name_atom) * UINT64_C(1099511628211);
+        hash = (hash ^ (uint64_t)attr->value_len) * UINT64_C(1099511628211);
+        for (Py_ssize_t offset = 0; offset < attr->value_len; offset++) {
+            hash = (hash ^ attr->value[offset]) * UINT64_C(1099511628211);
         }
     }
-    if (matches >= 3) {
-        afe_remove_at(tree, earliest);
+    return hash | 1;
+}
+
+static int afe_hash_add(th_tree *tree, const th_node *node) {
+    if (tree->afe_hash_count >= tree->afe_hash_capacity / 2) {
+        size_t capacity;
+        size_t bytes;
+        /* GCOVR_EXCL_BR_START: allocation-size overflow */
+        if (!th_grow_cap(tree->afe_hash_capacity + 1, tree->afe_hash_capacity, 32, sizeof(uint64_t), &capacity,
+                         &bytes)) {
+            tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-size overflow */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-size overflow */
+        }
+        /* GCOVR_EXCL_BR_STOP */
+        uint64_t *hashes = PyMem_Calloc(capacity, sizeof(uint64_t));
+        if (hashes == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (size_t index = 0; index < tree->afe_hash_capacity; index++) {
+            uint64_t hash = tree->afe_hashes[index];
+            if (hash != 0) {
+                size_t slot = (size_t)hash & (capacity - 1);
+                while (hashes[slot] != 0) {
+                    slot = (slot + 1) & (capacity - 1);
+                }
+                hashes[slot] = hash;
+            }
+        }
+        PyMem_Free(tree->afe_hashes);
+        tree->afe_hashes = hashes;
+        tree->afe_hash_capacity = capacity;
+    }
+    uint64_t hash = afe_hash(node);
+    size_t slot = (size_t)hash & (tree->afe_hash_capacity - 1);
+    while (tree->afe_hashes[slot] != 0) {
+        if (tree->afe_hashes[slot] == hash) {
+            return 1;
+        }
+        slot = (slot + 1) & (tree->afe_hash_capacity - 1);
+    }
+    tree->afe_hashes[slot] = hash;
+    tree->afe_hash_count++;
+    return 0;
+}
+
+static int afe_push(th_tree *tree, th_node *node) {
+    if (!tree->afe_hash_valid) {
+        if (tree->afe_hash_capacity > 0) {
+            memset(tree->afe_hashes, 0, tree->afe_hash_capacity * sizeof(uint64_t));
+        }
+        tree->afe_hash_count = 0;
+        for (Py_ssize_t index = 0; index < tree->afe_len; index++) {
+            if (tree->afe[index] != NULL) {
+                /* GCOVR_EXCL_BR_START: allocation failure */
+                if (afe_hash_add(tree, tree->afe[index]) < 0) {
+                    return 0; /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                /* GCOVR_EXCL_BR_STOP */
+            }
+        }
+        tree->afe_hash_valid = 1;
+    }
+    int seen = afe_hash_add(tree, node);
+    if (seen < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return 0;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    /* Hash collisions retain the full duplicate comparison. */
+    if (seen) {
+        /* Noah's Ark: at most three earlier entries with the same name+attributes
+           may precede a new one before the oldest is dropped. */
+        int matches = 0;
+        Py_ssize_t earliest = -1;
+        for (Py_ssize_t index = tree->afe_len - 1; index >= 0; index--) {
+            th_node *entry = tree->afe[index];
+            if (entry == NULL) {
+                break; /* stop at the marker */
+            }
+            if (entry->atom == node->atom && entry->attr_count == node->attr_count) {
+                int same = 1;
+                for (Py_ssize_t aidx = 0; aidx < node->attr_count && same; aidx++) {
+                    if (entry->attrs[aidx].name_atom != node->attrs[aidx].name_atom ||
+                        entry->attrs[aidx].value_len != node->attrs[aidx].value_len ||
+                        memcmp(entry->attrs[aidx].value, node->attrs[aidx].value,
+                               (size_t)node->attrs[aidx].value_len * sizeof(Py_UCS4)) != 0) {
+                        same = 0;
+                    }
+                }
+                if (same) {
+                    matches++;
+                    earliest = index;
+                }
+            }
+        }
+        if (matches >= 3) {
+            afe_remove_at(tree, earliest);
+        }
     }
     if (tree->afe_len == tree->afe_cap) {
         size_t cap;
@@ -1505,6 +1587,7 @@ static void afe_push_marker(th_tree *tree) {
 }
 
 static void afe_clear_to_marker(th_tree *tree) {
+    tree->afe_hash_valid = 0;
     /* afe_clear_to_marker always runs with a marker on the list */
     while (tree->afe_len > 0 /* GCOVR_EXCL_BR_LINE */) {
         th_node *entry = tree->afe[--tree->afe_len];
@@ -4258,6 +4341,7 @@ void th_tree_free(th_tree *tree) {
     }
     PyMem_Free(tree->open);
     PyMem_Free(tree->afe);
+    PyMem_Free(tree->afe_hashes);
     PyMem_Free(tree->tmpl);
     PyMem_Free(tree->attr_slots);
     PyMem_Free(tree->attr_recs);

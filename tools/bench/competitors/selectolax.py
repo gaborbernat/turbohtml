@@ -222,6 +222,7 @@ OPERATIONS = {
     "strip-comments": (Mutating(_fresh_transform, _strip_comments), "selectolax"),
     "parse": (parse, "selectolax"),
     "parse-formatting": (parse, "selectolax"),
+    "parse-afe": (parse, "selectolax"),
     "parse-scope": (parse, "selectolax"),
     "find": (find, "selectolax"),
     "select": (select, "selectolax"),

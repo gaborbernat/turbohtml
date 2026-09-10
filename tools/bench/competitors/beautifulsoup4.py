@@ -322,6 +322,7 @@ OPERATIONS = {
     "strip-comments": (Mutating(_fresh, _strip_comments), "BeautifulSoup (html.parser)"),
     "parse": (parse, "BeautifulSoup (html.parser)"),
     "parse-formatting": (parse, "BeautifulSoup (html.parser)"),
+    "parse-afe": (parse, "BeautifulSoup (html.parser)"),
     "parse-scope": (parse, "BeautifulSoup (html.parser)"),
     "build": (build, "BeautifulSoup (html.parser)"),
     "construct": (construct, "BeautifulSoup (html.parser)"),
