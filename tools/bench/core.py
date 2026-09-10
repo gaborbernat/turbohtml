@@ -713,6 +713,18 @@ def markdown(case: tuple[str, str]) -> None:
         _whole(text).to_markdown()
 
 
+def markdown_wrap(case: tuple[int, str]) -> None:
+    """Reuse the tree and options to exclude their construction from wrapping measurements."""
+    config, document = _markdown_wrap_case(case)
+    document.to_markdown(config)
+
+
+@functools.cache
+def _markdown_wrap_case(case: tuple[int, str]) -> tuple[_Markdown, turbohtml.Document]:
+    width, source = case
+    return _Markdown(wrapping=_Markdown.Wrapping(width=width)), _whole(source)
+
+
 def markdown_google(text: str) -> None:
     """Convert a Google Docs export to Markdown with turbohtml's google_doc mode."""
     _whole(text).to_markdown(_Markdown.google_doc())
@@ -1374,6 +1386,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),
     "markdown": (markdown, "turbohtml"),
+    "markdown-wrap": (markdown_wrap, "turbohtml"),
     "markdown-google": (markdown_google, "turbohtml"),
     "tables": (tables, "turbohtml"),
     "tables-wide": (tables, "turbohtml"),

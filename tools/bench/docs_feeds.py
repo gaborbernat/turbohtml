@@ -171,6 +171,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "xslt-reuse": "transform-reuse",
     "unescaping": "unescape",
     "url-cleaning": "urls-clean",
+    "markdown-wrap": "markdown-wrap",
     "markdown-runs": Combined(
         label="Markdown escaping and plain text",
         parties=("turbohtml", "markdownify", "html2text"),

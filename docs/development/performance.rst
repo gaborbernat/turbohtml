@@ -189,6 +189,19 @@ reuse the parsed turbohtml document; markdownify and html2text parse and convert
 .. bench-table::
     :file: bench/markdown-runs.json
 
+The wrapping cases reuse a parsed document containing 10,000 short words, with widths of 8,192 and 80 code points. The
+converter tracks the last checked output position so a wrapping decision scans only the newly appended text. Converter
+callbacks save and restore that position when they render children into a temporary buffer.
+
+Matched CPython 3.14.7 release builds without PGO or LTO reduced the wide case from 9,803.964 to 125.627 µs (98.72%
+faster). The 80-column control fell from 267.743 to 129.001 µs (51.82% faster). Candidate spread was 5.31% for wide
+wrapping and 3.07% at 80 columns. All eight comparisons passed CPU-headroom and memory-pressure guards. CodSpeed tracks
+both widths; document parsing and option construction happen outside the timer. The table uses separate measurements of
+the shared adapter, including its cached-setup lookup.
+
+.. bench-table::
+    :file: bench/markdown-wrap.json
+
 *****************
  Structured data
 *****************

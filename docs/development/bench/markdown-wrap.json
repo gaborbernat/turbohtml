@@ -1,0 +1,28 @@
+{
+  "label": "wrap short Markdown words",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "10000 words, width8192",
+      0.00012020998225731697
+    ],
+    [
+      "10000 words, width80",
+      0.0001263455701670561
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.026446000693298815
+    ],
+    [
+      null,
+      0.025438462490749086
+    ]
+  ],
+  "notes": {}
+}

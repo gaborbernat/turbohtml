@@ -400,6 +400,7 @@ OPERATIONS: dict[str, Operation] = {
     "phone": Operation("detect phone numbers in text", "us"),
     "phone-parse": Operation("parse held phone numbers", "us"),
     "phone-format": Operation("format phone numbers", "us"),
+    "markdown-wrap": Operation("wrap short Markdown words", "us"),
     "markdown": Operation("HTML to Markdown", "us"),
     "markdown-google": Operation("Google Docs export to Markdown", "us"),
     "tables": Operation("extract table grids", "us"),
@@ -1639,6 +1640,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("configured (4 KiB)", ("configured", _MARKDOWN_CONFIGURED)),
         ("8192 asterisks", ("escaped", "<p>" + "*" * 8192 + "</p>")),
         ("8192 letters", ("escaped", "<p>" + "a" * 8192 + "</p>")),
+    ),
+    "markdown-wrap": lambda: (
+        ("10000 words, width8192", (8192, "<p>" + "aa " * 10_000 + "</p>")),
+        ("10000 words, width80", (80, "<p>" + "aa " * 10_000 + "</p>")),
     ),
     "markdown-google": lambda: (("google_doc (4 KiB)", _MARKDOWN_GOOGLE),),
     "tables": lambda: (
