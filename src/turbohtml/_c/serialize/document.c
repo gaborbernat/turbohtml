@@ -314,10 +314,29 @@ typedef struct {
 } ser_opts;
 
 static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
-    sbuf_putc(out, '\n');
-    for (int level = 0; level < depth; level++) {
-        sbuf_put_ucs4(out, opts->indent, opts->indent_len);
+    if (depth == 0 || opts->indent_len == 0) {
+        sbuf_putc(out, '\n');
+        return;
     }
+    if (depth > (PY_SSIZE_T_MAX - out->len - 1) / opts->indent_len) { /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+        out->failed = 1;                                              /* GCOVR_EXCL_LINE: allocation size overflow */
+        return;                                                       /* GCOVR_EXCL_LINE: allocation size overflow */
+    }
+    Py_ssize_t length = depth * opts->indent_len;
+    sbuf_reserve(out, length + 1);
+    if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return;        /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    out->data[out->len++] = '\n';
+    Py_UCS4 *indent = out->data + out->len;
+    memcpy(indent, opts->indent, (size_t)opts->indent_len * sizeof(Py_UCS4));
+    /* Doubling the copied prefix avoids one capacity check and small copy per level. */
+    for (Py_ssize_t written = opts->indent_len; written < length;) {
+        Py_ssize_t chunk = written < length - written ? written : length - written;
+        memcpy(indent + written, indent, (size_t)chunk * sizeof(Py_UCS4));
+        written += chunk;
+    }
+    out->len += length;
 }
 
 /* Emit one node under the pretty layout and return the next node the walk rooted at

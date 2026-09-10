@@ -836,7 +836,7 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 These cases use a plain release build without PGO or LTO. Each mutation receives a fresh parse outside the measurement.
 The pyperf worker collects cyclic garbage between mutations outside the timer, preventing old parsed trees from
 accumulating. Competitor columns compare the operations described below. CPU-headroom and memory-pressure checks passed
-during collection; each cell contains twelve timing values across three worker processes.
+during collection; each cell contains at least twelve timing values across at least three worker processes.
 
 .. bench-table::
     :file: bench/collapse-whitespace.json
@@ -908,8 +908,10 @@ preservation rules differ for ``listing``, ``title``, and foreign content, and r
 across separate tokens. Do not treat its minified output as a replacement for DOM mutation or as a guarantee of the same
 policy. The migration guide describes these limits.
 
-The Python callable-loop baseline omits turbohtml's root and result validation, ``None`` handling, and ownership checks.
-It measures iteration and callback cost with an identity value; it is not a replacement implementation of the API.
+The ``Python (validated)`` baseline uses turbohtml Nodes and checks the same root, result, and ``None`` contract as the
+native dispatcher. Both implementations retain replacement roots and propagate stage errors. The ``stdlib`` baseline
+omits these checks and measures iteration and callback cost with an identity value. Use the validated column to compare
+implementations of the dispatch contract; the plain loop shows the cost without that contract.
 
 Whitespace available to later traversal
 =======================================

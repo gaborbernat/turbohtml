@@ -72,6 +72,7 @@ NOTES: Final[dict[str, dict[str, str]]] = {
     },
     "transform-dispatch": {
         "stdlib": "plain Python identity loop; omits Node validation, None results, and replacement ownership",
+        "Python (validated)": "Python loop with native Nodes, root/result checks, None handling, and replacement",
     },
     "whitespace-roundtrip": {
         "html5lib": "filter/reparse/serialize; different listing, title, and foreign-text policy",
