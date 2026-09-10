@@ -57,6 +57,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "microdata-itemref": "microdata-itemref",
     "normalize": "normalize",
     "normalize-dom": "normalize-dom",
+    "range-boundary": "range-boundary",
     "node-equals": "node-equals",
     "normalize-marks": "normalize-marks",
     "parse-xml-attrs": "parse-xml-attrs",

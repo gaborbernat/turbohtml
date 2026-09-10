@@ -653,6 +653,17 @@ controls include per-call timer overhead. CodSpeed tracks both the 1,000-node ca
 .. bench-table::
     :file: bench/normalize-dom.json
 
+Constructing a :class:`~turbohtml.Range` validates its offset against the container's children. Validation stops once it
+reaches the requested offset. These cases construct and discard a collapsed range at offset 0 or 1,000 in an element
+with 1,000 children. Each iteration builds a fresh tree outside the timer. CodSpeed tracks both offsets.
+
+On CPython 3.14.7 with a release build without PGO or LTO, the offset-zero comparison fell from 2.083 to 0.676 µs
+(67.55% faster). The end-offset control rose from 2.110 to 2.202 µs (4.38% slower). Each measurement times one call and
+includes timer overhead; the samples were noisy. CPU-headroom and memory-pressure guards accepted both comparisons.
+
+.. bench-table::
+    :file: bench/range-boundary.json
+
 Adding attributes through ``element.attrs`` reserves space for later insertions, reducing array copies and retained
 arena buffers on elements with many attributes. Replacement cases exercise existing names; they do not benefit from
 extra capacity. The insertion benchmarks construct their input outside the timer.

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final, cast
 import turbohtml
 from bench.timing import Mutating
 from turbohtml import Markdown as _Markdown
+from turbohtml import Range as _Range
 from turbohtml import clean as _clean
 from turbohtml import query as _query
 from turbohtml.build import E
@@ -1155,7 +1156,24 @@ def _equality_pair(count: int, variant: str) -> tuple[turbohtml.Element, turboht
     return left, right
 
 
+def _range_boundary_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.extend(turbohtml.Element("i") for _ in range(count))
+    offset: Final = count if variant == "end" else 0
+
+    def run() -> None:
+        _Range(root, offset)
+
+    return run
+
+
+def _range_boundary(run: Callable[[], None]) -> None:
+    run()
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "range-boundary": (Mutating(_range_boundary_setup, _range_boundary), "turbohtml"),
     "node-equals": (_node_equals, "turbohtml"),
     "build": (build, "turbohtml"),
     "build-e": (build_e, "turbohtml"),

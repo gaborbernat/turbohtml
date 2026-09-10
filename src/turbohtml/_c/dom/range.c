@@ -433,7 +433,15 @@ static int validate_boundary(th_node *node, Py_ssize_t offset) {
         PyErr_SetString(PyExc_ValueError, "a boundary point cannot be inside a doctype");
         return -1;
     }
-    if (offset < 0 || offset > node_length(node)) {
+    Py_ssize_t remaining = offset;
+    if (is_char_data(node)) {
+        remaining = offset > node->text_len;
+    } else {
+        for (th_node *child = node->first_child; child != NULL && remaining > 0; child = child->next_sibling) {
+            remaining--;
+        }
+    }
+    if (offset < 0 || remaining > 0) {
         PyErr_SetString(PyExc_IndexError, "offset is out of range for the node");
         return -1;
     }
