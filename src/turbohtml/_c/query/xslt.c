@@ -548,6 +548,14 @@ struct strip_entry {
 
 enum output_method { OUT_XML, OUT_HTML, OUT_TEXT };
 
+typedef struct {
+    const th_node *node;
+    Py_ssize_t attr;
+    const Py_UCS4 *mode;
+    Py_ssize_t mode_len;
+    xslt_rule *rule;
+} xslt_dispatch_entry;
+
 typedef struct engine {
     PyObject *module;
     th_tree *src_tree;
@@ -559,6 +567,9 @@ typedef struct engine {
     xslt_rule *rules;
     Py_ssize_t nrules;
     Py_ssize_t rules_cap;
+    xslt_dispatch_entry *dispatch;
+    size_t dispatch_capacity;
+    size_t dispatch_count;
     xslt_named *named;
     Py_ssize_t nnamed;
     Py_ssize_t named_cap;
@@ -1388,10 +1399,66 @@ static int build_rule(engine *eng, xslt_rule *rule) {
     return 0;
 }
 
+static size_t dispatch_slot(const xslt_dispatch_entry *entries, size_t capacity, const th_node *node, Py_ssize_t attr,
+                            const Py_UCS4 *mode, Py_ssize_t mode_len) {
+    const size_t mode_hash = mode == NULL ? 0 : str_hash(mode, mode_len);
+    size_t slot = (ptr_hash(node, attr) ^ mode_hash) & (capacity - 1);
+    while (entries[slot].node != NULL &&
+           (entries[slot].node != node || entries[slot].attr != attr ||
+            (entries[slot].mode == NULL) != (mode == NULL) ||
+            (mode != NULL && !str_eq(entries[slot].mode, entries[slot].mode_len, mode, mode_len)))) {
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return slot;
+}
+
+static int dispatch_grow(engine *eng) {
+    size_t capacity;
+    size_t bytes;
+    /* GCOVR_EXCL_BR_START: alloc */
+    if (!th_grow_cap(eng->dispatch_capacity + 1, eng->dispatch_capacity, 32, sizeof(*eng->dispatch), &capacity,
+                     &bytes)) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    xslt_dispatch_entry *entries = PyMem_Calloc(1, bytes);
+    if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;         /* GCOVR_EXCL_LINE */
+    }
+    for (size_t index = 0; index < eng->dispatch_capacity; index++) {
+        const xslt_dispatch_entry *entry = &eng->dispatch[index];
+        if (entry->node != NULL) {
+            entries[dispatch_slot(entries, capacity, entry->node, entry->attr, entry->mode, entry->mode_len)] = *entry;
+        }
+    }
+    PyMem_Free(eng->dispatch);
+    eng->dispatch = entries;
+    eng->dispatch_capacity = capacity;
+    return 0;
+}
+
 /* The best-matching rule for (node, attr) in the given mode, or NULL for none. The
    rule array is pre-sorted by descending (priority, position), so the
    first match wins the section 5.5 conflict resolution. */
 static xslt_rule *best_rule(engine *eng, th_node *node, Py_ssize_t attr, const Py_UCS4 *mode, Py_ssize_t mode_len) {
+    size_t slot = 0;
+    const int cache = eng->nrules >= 16;
+    if (cache) {
+        if (eng->dispatch_count == eng->dispatch_capacity / 2) {
+            /* GCOVR_EXCL_BR_START: alloc */
+            if (dispatch_grow(eng) < 0) {
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+                fail_py(eng);     /* GCOVR_EXCL_LINE */
+                return NULL;      /* GCOVR_EXCL_LINE */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+        }
+        slot = dispatch_slot(eng->dispatch, eng->dispatch_capacity, node, attr, mode, mode_len);
+        if (eng->dispatch[slot].node != NULL) {
+            return eng->dispatch[slot].rule;
+        }
+    }
+    xslt_rule *winner = NULL;
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
         xslt_rule *rule = &eng->rules[index];
         int rule_default = rule->mode == NULL;
@@ -1406,10 +1473,15 @@ static xslt_rule *best_rule(engine *eng, th_node *node, Py_ssize_t attr, const P
             return NULL;
         }
         if (match_set_has(&rule->matched, node, attr)) {
-            return rule;
+            winner = rule;
+            break;
         }
     }
-    return NULL;
+    if (cache) {
+        eng->dispatch[slot] = (xslt_dispatch_entry){node, attr, mode, mode_len, winner};
+        eng->dispatch_count++;
+    }
+    return winner;
 }
 
 /* ---- instruction instantiation -------------------------------------------- */
@@ -4397,6 +4469,7 @@ static PyObject *serialize_markup(engine *eng, th_node *root) {
 /* ---- engine lifecycle ----------------------------------------------------- */
 
 static void engine_clear(engine *eng) {
+    PyMem_Free(eng->dispatch);
     match_set_free(&eng->number_count_match.matched);
     match_set_free(&eng->number_from_match.matched);
     PyMem_Free(eng->explicit_any.positions.entries);
@@ -4449,6 +4522,9 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree)
     eng->src_tree = src_tree;
     eng->src_root = th_tree_document(src_tree);
     eng->out_tree = NULL;
+    eng->dispatch = NULL;
+    eng->dispatch_capacity = 0;
+    eng->dispatch_count = 0;
     eng->rules = NULL;
     eng->nrules = 0;
     eng->rules_cap = 0;

@@ -1,0 +1,27 @@
+{
+  "label": "dispatch XSLT template rules",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "128 unmatched templates, 1,024 nodes, 8 passes",
+      0.0012978832243485763
+    ],
+    [
+      "128 unmatched templates, 1,024 nodes, 1 passes",
+      0.0004945451773589109
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.019930316434353015
+    ],
+    [
+      null,
+      0.006992427603400365
+    ]
+  ]
+}

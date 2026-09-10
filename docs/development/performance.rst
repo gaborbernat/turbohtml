@@ -459,6 +459,14 @@ repeated result includes any stylesheet analysis or XPath compilation left in th
 .. bench-table::
     :file: bench/xslt-reuse.json
 
+The template-rule cases visit 1,024 nodes once or eight times, with 128 unmatched templates before the winning rule.
+Caching the winning rule for each node, attribute, and mode reduced elapsed time by 35.94% for eight passes and
+increased it by 3.69% for one pass in the matched release-build comparison. Each application frees its cache when it
+finishes; the compiled stylesheet retains no source nodes.
+
+.. bench-table::
+    :file: bench/xslt-rules.json
+
 The sibling-numbering cases use one or eight default ``xsl:number`` instructions per node. Forward traversal can reuse
 the preceding sibling's count; repeated instructions can reuse the current node's count. Reverse sibling traversal still
 needs preceding-sibling scans for each newly visited node. The one-node and zero-instruction cases measure fixed

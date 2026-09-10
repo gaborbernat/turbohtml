@@ -429,6 +429,7 @@ OPERATIONS: dict[str, Operation] = {
     "transform-reuse": Operation("apply one compiled 300-template stylesheet ten times", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
+    "transform-rules": Operation("dispatch XSLT template rules", "us"),
     "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
@@ -1643,6 +1644,22 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-reuse": _transform_compile_cases,
     "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,
+    "transform-rules": lambda: tuple(
+        (
+            f"128 unmatched templates, 1,024 nodes, {passes} passes",
+            (
+                '<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">'
+                '<xsl:output method="text"/>'
+                + "".join(f'<xsl:template match="unused{index}" priority="0"/>' for index in range(128))
+                + '<xsl:template match="/">'
+                + '<xsl:apply-templates select="root/p"/>' * passes
+                + '</xsl:template><xsl:template match="p" priority="-1">'
+                '<xsl:value-of select="@id"/><xsl:text>|</xsl:text></xsl:template></xsl:stylesheet>',
+                "<root>" + "".join(f'<p id="{index}"/>' for index in range(1, 1_025)) + "</root>",
+            ),
+        )
+        for passes in (8, 1)
+    ),
     "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
     "minify-js": _minify_js_cases,

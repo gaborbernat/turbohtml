@@ -179,6 +179,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "range-boundary-end": ("range-boundary", 1),
     "range-contained-single": ("range-contained", 1),
     "range-partial-single": ("range-partial", 1),
+    "transform-rules-single": ("transform-rules", 1),
     "transform-number-single": ("transform-number", 2),
     "transform-number-any": ("transform-number", 8),
     "transform-number-any-reversed": ("transform-number", 9),
@@ -251,6 +252,7 @@ def _inline(operation: str, case_index: int = 0) -> object:
 _LOADERS["xpath-id-nodes"] = partial(_inline, "xpath-id-nodes")
 _LOADERS["xpath-concat"] = partial(_inline, "xpath-concat")
 _LOADERS["node-equals"] = partial(_inline, "node-equals", 5)
+_LOADERS["transform-rules"] = partial(_inline, "transform-rules")
 _LOADERS["transform-number"] = partial(_inline, "transform-number", 3)
 _LOADERS["normalize-dom"] = partial(_inline, "normalize-dom", 4)
 _LOADERS.update({name: partial(_inline, name, 3) for name in ("attribute-grow", "parse-xml-attrs")})

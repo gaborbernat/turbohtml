@@ -164,6 +164,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "xslt-compile": "transform-compile",
     "xslt-dense": "transform-dense",
     "xslt-number": "transform-number",
+    "xslt-rules": "transform-rules",
     "xslt-reuse": "transform-reuse",
     "unescaping": "unescape",
     "url-cleaning": "urls-clean",

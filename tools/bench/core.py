@@ -1412,6 +1412,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "transform-sort": (transform, "turbohtml"),
     "transform-dense": (transform, "turbohtml"),
     "transform-number": (transform, "turbohtml"),
+    "transform-rules": (transform, "turbohtml"),
     "minify-css": (minify_css, "turbohtml"),
     "minify-js": (minify_js, "turbohtml"),
     "stream": (stream, "turbohtml"),
