@@ -436,8 +436,9 @@ static int attrs_equal(th_tree *left_tree, th_node *left, th_tree *right_tree, t
         return 0;
     }
     int can_index = left->attr_count >= 32 &&
-                    (size_t)left->attr_count <=
-                        SIZE_MAX / (4 * sizeof(Py_ssize_t)); /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                    /* GCOVR_EXCL_BR_START: allocation size overflow */
+                    (size_t)left->attr_count <= SIZE_MAX / (4 * sizeof(Py_ssize_t));
+    /* GCOVR_EXCL_BR_STOP */
     Py_ssize_t comparisons = 0;
     for (Py_ssize_t index = 0; index < left->attr_count; index++) {
         const th_node_attr *want = &left->attrs[index];
