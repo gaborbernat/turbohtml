@@ -1415,6 +1415,16 @@
       "resolve XPath ID argument nodes — 10 long ID argument nodes",
       0.0003118277181935506,
       0.0007009104708534627
+    ],
+    [
+      "parse nested formatting attributes — 256 b elements / distinct attributes",
+      4.9955719771332954e-05,
+      "truncated output: 254/256 b elements and no text"
+    ],
+    [
+      "parse nested formatting attributes — 256 b elements / identical attributes",
+      4.9689298612065615e-05,
+      "truncated output: 254/256 b elements and no text"
     ]
   ],
   "spread": [
@@ -2827,6 +2837,16 @@
       null,
       0.03117250869723997,
       0.018915180445898853
+    ],
+    [
+      null,
+      0.009435383797476665,
+      null
+    ],
+    [
+      null,
+      0.020709800396554418,
+      null
     ]
   ],
   "row_notes": {

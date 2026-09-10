@@ -525,6 +525,16 @@
       "parse ignored block end tags — 256 spans / 1,000 ignored address end tags",
       7.620852594527605e-05,
       0.0007742270286447213
+    ],
+    [
+      "parse nested formatting attributes — 256 b elements / distinct attributes",
+      4.9955719771332954e-05,
+      0.00041892634514321497
+    ],
+    [
+      "parse nested formatting attributes — 256 b elements / identical attributes",
+      4.9689298612065615e-05,
+      0.00011045548496137295
     ]
   ],
   "spread": [
@@ -1047,6 +1057,16 @@
       null,
       0.022101797675473427,
       0.004344171734276748
+    ],
+    [
+      null,
+      0.009435383797476665,
+      0.01071052705057197
+    ],
+    [
+      null,
+      0.020709800396554418,
+      0.09608469905157205
     ]
   ],
   "row_notes": {

@@ -335,6 +335,11 @@ values took 2.1% longer. Both cases use ASCII input with source locations disabl
 CodSpeed tracks both. The capacity rules allocate 4 KiB for the distinct case and 256 bytes for the repeated case.
 Removed formatting entries leave fingerprints until a scope reset; allocated capacity remains until document teardown.
 
+Turbohtml leads the measured parsers on distinct attributes. Resiliparse takes 29.9 µs on identical attributes, compared
+with turbohtml's 49.7 µs. The selectolax identical-attribute result has 10% spread and does not support a precise
+comparison. Default lxml and pyquery truncate both inputs to 254 ``b`` elements and discard the text; those cells have
+no timing. The html5-parser environment has the libxml2 import mismatch described above.
+
 .. bench-table::
     :file: bench/parse-afe.json
 

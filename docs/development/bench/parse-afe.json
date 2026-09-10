@@ -1,27 +1,72 @@
 {
   "label": "parse nested formatting attributes",
   "parties": [
-    "turbohtml"
+    "turbohtml",
+    "BeautifulSoup (html.parser)",
+    "BeautifulSoup (lxml)",
+    "selectolax",
+    "parsel",
+    "resiliparse",
+    "lxml",
+    "pyquery",
+    "html5lib",
+    "html5-parser"
   ],
   "metrics": [],
   "rows": [
     [
       "256 b elements / distinct attributes",
-      4.9955719771332954e-05
+      4.9955719771332954e-05,
+      0.0011774630853930528,
+      0.0008008530602334455,
+      0.00041892634514321497,
+      7.356498883837048e-05,
+      0.0001786654621279619,
+      "truncated output: 254/256 b elements and no text",
+      "truncated output: 254/256 b elements and no text",
+      0.009815156417122732,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ],
     [
       "256 b elements / identical attributes",
-      4.9689298612065615e-05
+      4.9689298612065615e-05,
+      0.0012027731573349834,
+      0.0008085998917219209,
+      0.00011045548496137295,
+      7.331802164192899e-05,
+      2.993795976635738e-05,
+      "truncated output: 254/256 b elements and no text",
+      "truncated output: 254/256 b elements and no text",
+      0.002044059200125048,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
     [
       null,
-      0.009435383797476665
+      0.009435383797476665,
+      0.017396579574062137,
+      0.021942769850247443,
+      0.01071052705057197,
+      0.019382343631278335,
+      0.006329491165733286,
+      null,
+      null,
+      0.018618036333151802,
+      null
     ],
     [
       null,
-      0.020709800396554418
+      0.020709800396554418,
+      0.018517693224278715,
+      0.015057170842072275,
+      0.09608469905157205,
+      0.020336491526098937,
+      0.020796912994668303,
+      null,
+      null,
+      0.024993306349924582,
+      null
     ]
   ],
   "notes": {}
