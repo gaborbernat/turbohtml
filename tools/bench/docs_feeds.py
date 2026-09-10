@@ -86,6 +86,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "xpath-compare": "xpath-compare",
     "xpath-order": "xpath-order",
     "xpath-translate": "xpath-translate",
+    "xpath-replace": "xpath-replace",
     "xpath-concat": "xpath-concat",
     "xpath-id-nodes": "xpath-id-nodes",
     "boilerplate-classification": "boilerplate",

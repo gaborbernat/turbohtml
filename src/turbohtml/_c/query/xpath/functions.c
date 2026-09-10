@@ -1154,17 +1154,30 @@ static int str_replace(struct th_tree *tree, const xp_result *args, xp_result *o
     }
     Py_ssize_t count = 0;
     Py_ssize_t scan = 0;
-    while (search_len > 0 && scan + search_len <= src_len) {
-        if (memcmp(src + scan, search, (size_t)search_len * sizeof(Py_UCS4)) == 0) {
-            count++;
-            scan += search_len;
-        } else {
-            scan++;
-        }
+    Py_ssize_t found;
+    while (search_len > 0 && (found = ucs4_find(src + scan, src_len - scan, search, search_len)) >= 0) {
+        count++;
+        scan += found + search_len;
     }
-    Py_ssize_t out_len = src_len + count * (repl_len - search_len);
-    Py_UCS4 *buf = PyMem_Malloc((size_t)out_len * sizeof(Py_UCS4));
-    if (buf == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+    if (count == 0) {
+        PyMem_Free(search);
+        PyMem_Free(repl);
+        result_string(out, src, src_len);
+        return 0;
+    }
+    const size_t retained = (size_t)(src_len - count * search_len);
+    const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
+    /* GCOVR_EXCL_BR_START: allocation-size overflow */
+    if (retained > limit || (size_t)repl_len > (limit - retained) / (size_t)count) {
+        /* GCOVR_EXCL_BR_STOP */
+        PyMem_Free(src);    /* GCOVR_EXCL_LINE: allocation size overflow */
+        PyMem_Free(search); /* GCOVR_EXCL_LINE: allocation size overflow */
+        PyMem_Free(repl);   /* GCOVR_EXCL_LINE: allocation size overflow */
+        return -1;          /* GCOVR_EXCL_LINE: allocation size overflow */
+    }
+    const Py_ssize_t out_len = (Py_ssize_t)(retained + (size_t)count * (size_t)repl_len);
+    Py_UCS4 *buf = PyMem_Malloc((size_t)(out_len > 0 ? out_len : 1) * sizeof(Py_UCS4));
+    if (buf == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
         PyMem_Free(src);    /* GCOVR_EXCL_LINE */
         PyMem_Free(search); /* GCOVR_EXCL_LINE */
         PyMem_Free(repl);   /* GCOVR_EXCL_LINE */
@@ -1172,16 +1185,15 @@ static int str_replace(struct th_tree *tree, const xp_result *args, xp_result *o
     }
     Py_ssize_t read = 0;
     Py_ssize_t write = 0;
-    while (read < src_len) {
-        if (search_len > 0 && read + search_len <= src_len &&
-            memcmp(src + read, search, (size_t)search_len * sizeof(Py_UCS4)) == 0) {
-            memcpy(buf + write, repl, (size_t)repl_len * sizeof(Py_UCS4));
-            write += repl_len;
-            read += search_len;
-        } else {
-            buf[write++] = src[read++];
-        }
+    while ((found = ucs4_find(src + read, src_len - read, search, search_len)) >= 0) {
+        memcpy(buf + write, src + read, (size_t)found * sizeof(Py_UCS4));
+        write += found;
+        memcpy(buf + write, repl, (size_t)repl_len * sizeof(Py_UCS4));
+        write += repl_len;
+        read += found + search_len;
     }
+    memcpy(buf + write, src + read, (size_t)(src_len - read) * sizeof(Py_UCS4));
+    write += src_len - read;
     PyMem_Free(src);
     PyMem_Free(search);
     PyMem_Free(repl);

@@ -1089,6 +1089,15 @@ short-text case retains a direct scan. Competitor cells with high spread retain 
 .. bench-table::
     :file: bench/xpath-translate.json
 
+The ``str:replace`` cases bind strings on a parsed document. The sparse case replaces eight matches of a 129-character
+needle whose repeated prefix otherwise forces repeated comparisons. The short ASCII control includes binding and result
+conversion. Reusing the substring search reduced elapsed time by 80.96% for sparse matches and 2.79% for the control in
+the matched release-build comparison, without PGO or LTO. The installed lxml and parsel XPath engines reject
+``str:replace`` as an unregistered function, so this table has no competitor timings.
+
+.. bench-table::
+    :file: bench/xpath-replace.json
+
 The ``str:concat`` cases join about 320,000 characters from either 10,000 short nodes or ten long nodes. Parsing runs
 before timing. The short-node case measures buffer growth; the long-node control checks the cost of copying text.
 

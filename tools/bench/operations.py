@@ -314,6 +314,7 @@ OPERATIONS: dict[str, Operation] = {
     "xpath-compare": Operation("compare XPath values", "us"),
     "node-equals": Operation("compare element attributes", "us"),
     "xpath-id-nodes": Operation("resolve XPath ID argument nodes", "us"),
+    "xpath-replace": Operation("replace XPath string literals", "us"),
     "xpath-concat": Operation("concatenate XPath node strings", "us"),
     "xpath-translate": Operation("translate XPath characters", "us"),
     "xpath-order": Operation("compare numeric XPath node sets", "us"),
@@ -1431,6 +1432,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             (10_000, 1, "10,000 ID argument nodes"),
             (10, 1_000, "10 long ID argument nodes"),
         )
+    ),
+    "xpath-replace": lambda: (
+        (
+            "KMP sparse matches",
+            (("a" * 4096 + "b" + "a" * 64 + "x") * 8, "a" * 64 + "b" + "a" * 64, "X", ("a" * 4032 + "Xx") * 8),
+        ),
+        ("short ASCII", ("A short paragraph", "a", "A", "A short pArAgrAph")),
     ),
     "xpath-concat": lambda: tuple(
         (

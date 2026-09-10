@@ -325,6 +325,16 @@ def _select_scaling(case: tuple[str, str]) -> None:
     _parsed(case[1]).select(case[0])
 
 
+_XPATH_REPLACE_DOCUMENT: Final = turbohtml.parse("<p></p>")
+
+
+def _xpath_replace(case: tuple[str, str, str, str]) -> str | list[turbohtml.Element | str]:
+    text, search, replacement, _expected = case
+    return _XPATH_REPLACE_DOCUMENT.xpath(
+        "str:replace($text, $search, $replacement)", text=text, search=search, replacement=replacement
+    )
+
+
 def _xpath_scaling(case: tuple[str, str]) -> None:
     _parsed(case[1]).xpath(case[0])
 
@@ -1306,6 +1316,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "xpath-set": (_xpath_scaling, "turbohtml"),
     "xpath-compare": (_xpath_scaling, "turbohtml"),
     "xpath-translate": (_xpath_scaling, "turbohtml"),
+    "xpath-replace": (_xpath_replace, "turbohtml"),
     "xpath-concat": (_xpath_scaling, "turbohtml"),
     "xpath-id-nodes": (_xpath_scaling, "turbohtml"),
     "xpath-order": (_xpath_scaling, "turbohtml"),
