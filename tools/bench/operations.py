@@ -370,6 +370,7 @@ OPERATIONS: dict[str, Operation] = {
     "set-html": Operation("replace body inner HTML", "us"),
     "set-text": Operation("replace body text", "us"),
     "observe": Operation("observe a subtree through many edits", "us"),
+    "prune-shared": Operation("prune shared ancestors", "us"),
     "observe-registrations": Operation("reject unrelated observer registrations", "us"),
     "navigate": Operation("walk every descendant", "us"),
     "treewalk": Operation("walk every element (TreeWalker)", "us"),
@@ -1329,6 +1330,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "shadow-assignment": lambda: (("1000 unique", (1_000, "unique")), ("1 unique", (1, "unique"))),
     "shadow-fallback": lambda: (("1000 wide", (1_000, "wide")), ("1 wide", (1, "wide"))),
     "observe": _readpath_cases,
+    "prune-shared": lambda: (("depth128,1024matches", (128, 1024)), ("depth128,1match", (128, 1))),
     "observe-registrations": lambda: (
         ("1000 wrong-kind", (1_000, "wrong-kind")),
         ("1000 unrelated", (1_000, "unrelated")),

@@ -1272,7 +1272,19 @@ def _shadow_assignment_setup(case: tuple[int, str]) -> Callable[[], None]:
     return run
 
 
+def _prune_shared_setup(case: tuple[int, int]) -> turbohtml.Element:
+    depth, matches = case
+    root: Final = turbohtml.Element("main")
+    root.set_inner_html("<section>" * depth + "<b>keep</b><i>drop</i>" * matches + "</section>" * depth)
+    return root
+
+
+def _prune_shared(root: turbohtml.Element) -> None:
+    root.prune("b")
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "prune-shared": (Mutating(_prune_shared_setup, _prune_shared), "turbohtml"),
     "shadow-assignment": (Mutating(_shadow_assignment_setup, _run_prepared), "turbohtml"),
     "shadow-fallback": (Mutating(_shadow_fallback_setup, _run_prepared), "turbohtml"),
     "observe-registrations": (Mutating(_observe_registrations_setup, _run_prepared), "turbohtml"),

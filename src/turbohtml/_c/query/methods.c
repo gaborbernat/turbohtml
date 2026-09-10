@@ -4,6 +4,7 @@
    the query surface lives under query/ beside the engines it drives; the DOM
    element and mutation bindings stay in element.c. */
 
+#include "core/node_map.h"
 #include "core/vec.h"
 #include "dom/nodes.h"
 #include "css/select/selector.h"
@@ -1641,11 +1642,18 @@ static int prune_kept(const prune_keep *keep, Py_ssize_t count, th_node *node, i
 /* Record a match and its ancestor chain up to (but excluding) origin in the keep
    set. Returns 0, or -1 on allocation failure. */
 static int prune_keep_match(prune_keep **buffer, Py_ssize_t *count, Py_ssize_t *capacity, th_node *node,
-                            th_node *origin) {
+                            th_node *origin, th_node_map *ancestors) {
     if (prune_push(buffer, count, capacity, node, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         return -1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (th_node *ancestor = node->parent; ancestor != origin; ancestor = ancestor->parent) {
+        if (th_node_map_find(ancestors, ancestor) != 0) {
+            break;
+        }
+        if (th_node_map_insert(ancestors, ancestor, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyErr_NoMemory();                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
         if (prune_push(buffer, count, capacity, ancestor, 0) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             return -1;                                              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -1673,6 +1681,7 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
     PyObject *handle = ((NodeObject *)self)->handle;
     th_node *origin = ((NodeObject *)self)->node;
     prune_keep *keep = NULL;
+    th_node_map ancestors = {0};
     Py_ssize_t count = 0;
     Py_ssize_t capacity = 0;
     int error = 0;
@@ -1697,9 +1706,11 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
             if (!(single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx))) {
                 continue;
             }
-            if (prune_keep_match(&keep, &count, &capacity, node, origin) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
-                error = 1;                                                      /* GCOVR_EXCL_LINE: allocation path */
-                break;                                                          /* GCOVR_EXCL_LINE: allocation path */
+            /* GCOVR_EXCL_BR_START: allocation failure */
+            if (prune_keep_match(&keep, &count, &capacity, node, origin, &ancestors) < 0) {
+                /* GCOVR_EXCL_BR_STOP */
+                error = 1; /* GCOVR_EXCL_LINE: allocation path */
+                break;     /* GCOVR_EXCL_LINE: allocation path */
             }
         }
         if (!error) { /* GCOVR_EXCL_BR_LINE: the false arm is the pass-1 allocation-failure bail, unforceable */
@@ -1738,6 +1749,7 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
     Py_END_CRITICAL_SECTION();
     sel_has_memo_free(&has_memo);
     PyMem_Free(keep);
+    PyMem_Free(ancestors.entries);
     if (error) {
         return NULL;
     }

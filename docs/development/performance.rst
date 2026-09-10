@@ -783,6 +783,19 @@ does.
 .. bench-table::
     :file: bench/editing-6.json
 
+:meth:`~turbohtml.Node.prune` keeps selected subtrees and the ancestor paths leading to them. It records each shared
+ancestor once per operation; a selected ancestor still keeps its whole subtree. These cases nest 128 sections around
+1,024 selected leaves or one selected leaf, each with an unselected sibling to remove. Every iteration starts from a
+fresh tree outside the timer; the timed call includes matching, building the keep set, and pruning. CodSpeed tracks both
+cases.
+
+Matched CPython 3.14.7 release builds without PGO or LTO reduced the 1,024-leaf case from 2,256.473 to 70.182 µs (96.89%
+faster). The single-leaf control increased from 5.459 to 5.653 µs (3.56% slower, a 0.194 µs cost). Candidate spread was
+2.79% and 5.51%, respectively. All eight comparisons passed CPU-headroom and memory-pressure guards.
+
+.. bench-table::
+    :file: bench/prune-shared.json
+
 Use :meth:`~turbohtml.Element.normalize` after edits leave adjacent text nodes. It sizes each run before copying the
 merged text, limiting repeated work and arena growth. The first nonempty text node survives; references to removed nodes
 remain valid as detached nodes. It removes empty text nodes.

@@ -1,0 +1,28 @@
+{
+  "label": "prune shared ancestors",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "depth128,1024matches",
+      7.018209140975765e-05
+    ],
+    [
+      "depth128,1match",
+      5.653349558087939e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.027866669733920144
+    ],
+    [
+      null,
+      0.0551061862494969
+    ]
+  ],
+  "notes": {}
+}
