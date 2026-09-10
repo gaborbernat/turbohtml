@@ -265,7 +265,13 @@ class Operation:
 SIZE_OPS: Final[frozenset[str]] = frozenset({"minify", "minify-css", "minify-js"})
 
 # Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
-MEMORY_OPS: Final[frozenset[str]] = frozenset({"find-cold", "parse-dense", "rewrite"})
+MEMORY_OPS: Final[frozenset[str]] = frozenset({
+    "attribute-grow",
+    "find-cold",
+    "parse-dense",
+    "parse-xml-attrs",
+    "rewrite",
+})
 
 
 OPERATIONS: dict[str, Operation] = {
@@ -278,6 +284,7 @@ OPERATIONS: dict[str, Operation] = {
     "parse": Operation("parse to a tree", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
+    "parse-xml-attrs": Operation("parse XML with growing attribute counts", "us"),
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
@@ -402,6 +409,7 @@ OPERATIONS: dict[str, Operation] = {
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
     "normalize-dom": Operation("merge adjacent text nodes", "ns"),
+    "attribute-grow": Operation("set element attributes", "us"),
     "normalize-marks": Operation("normalize long combining-mark runs", "ms"),
     "detect-language": Operation("detect a text's natural language", "us"),
     "detect-language-long": Operation("count trigrams in long prose", "ms"),
@@ -1009,6 +1017,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "parse": _parse_cases,
     "parse-dense": lambda: (("2.6 MB / 200k nodes", "<div><span>x</span></div>" * 100_000),),
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
+    "parse-xml-attrs": lambda: tuple(
+        (f"{count} attributes", "<root " + " ".join(f'a{index}="value"' for index in range(count)) + "/>")
+        for count in (1, 10, 100, 1_000)
+    ),
     "parse-xml-names": lambda: (
         (
             "1k growing attributes",
@@ -1352,6 +1364,11 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "normalize-dom": lambda: tuple(
         (f"{count} adjacent text nodes / {len(text)} characters", (count, text))
         for count, text in ((1, "text"), (2, "text"), (10, "text"), (100, "text"), (1_000, "text"), (100, "text" * 64))
+    ),
+    "attribute-grow": lambda: tuple(
+        (f"{count} {'existing' if existing else 'new'} attributes", (count, existing))
+        for existing in (False, True)
+        for count in (1, 10, 100, 1_000)
     ),
     "normalize-marks": lambda: tuple(
         (f"{size:,} combining marks", "a" + "\u0315" * (size // 2) + "\u0300" * (size // 2))

@@ -98,10 +98,11 @@ enum th_ns {
 };
 
 struct th_node {
-    enum th_node_type type;
-    uint16_t atom;     /* TH_TAG_* for elements, else TH_TAG_UNKNOWN */
-    uint8_t tag_flags; /* category bitmask from the atom table */
-    uint8_t ns;        /* enum th_ns: HTML / SVG / MathML */
+    uint8_t type;
+    uint8_t attr_capacity_shift; /* zero for exact-sized or shared arrays */
+    uint16_t atom;               /* TH_TAG_* for elements, else TH_TAG_UNKNOWN */
+    uint8_t tag_flags;           /* category bitmask from the atom table */
+    uint8_t ns;                  /* enum th_ns: HTML / SVG / MathML */
     th_node *parent;
     th_node *first_child;
     th_node *last_child;

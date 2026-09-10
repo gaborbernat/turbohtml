@@ -936,6 +936,7 @@ static void merge_attrs(th_tree *tree, th_node *node, const th_token *token) {
         }
     }
     node->attrs = merged;
+    node->attr_capacity_shift = 0;
     node->attr_count += add;
 }
 

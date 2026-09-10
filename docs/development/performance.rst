@@ -7,7 +7,7 @@
     The September 8 audit measurements remain provisional. The first two passes checked CPU headroom without enforcing
     memory-pressure or swap limits. The third and fourth passes enforced those limits, but some before/after comparisons
     used different interpreter builds. Those comparisons need repeats with one interpreter before they establish a speed
-    improvement. The normalization table below uses a matched interpreter and binary configuration.
+    improvement. The normalization and attribute tables below use a matched interpreter and binary configuration.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
@@ -613,6 +613,21 @@ controls include per-call timer overhead. CodSpeed tracks both the 1,000-node ca
 
 .. bench-table::
     :file: bench/normalize-dom.json
+
+Adding attributes through ``element.attrs`` reserves space for later insertions, reducing array copies and retained
+arena buffers on elements with many attributes. Replacement cases exercise existing names; they do not benefit from
+extra capacity. The insertion benchmarks construct their input outside the timer.
+
+These attribute tables use CPython 3.14.7 and a release build without PGO or LTO. Memory columns include imports and one
+operation in a fresh process, so import-time memory can hide differences on small inputs. The XML cases include parsing
+and check attribute-growth costs alongside name and namespace validation. CodSpeed covers 1,000 insertions,
+replacements, and XML attributes.
+
+.. bench-table::
+    :file: bench/attribute-grow.json
+
+.. bench-table::
+    :file: bench/parse-xml-attrs.json
 
 *******
  Links

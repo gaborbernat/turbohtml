@@ -158,6 +158,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "attribute-replace": ("attribute-grow", 7),
     "normalize-dom-long-text": ("normalize-dom", 5),
     "xpath-compare-unequal": ("xpath-compare", 6),
     "xpath-compare-scalar": ("xpath-compare", 9),
@@ -205,6 +206,7 @@ def _inline(operation: str, case_index: int = 0) -> object:
 
 
 _LOADERS["normalize-dom"] = partial(_inline, "normalize-dom", 4)
+_LOADERS.update({name: partial(_inline, name, 3) for name in ("attribute-grow", "parse-xml-attrs")})
 
 
 _LOADERS.update({

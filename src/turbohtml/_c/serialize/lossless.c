@@ -99,7 +99,7 @@ static void lossless_close_tag(sbuf *out, th_tree *tree, th_node *node, const th
    level, the same shape serialize_compact_step uses. */
 static th_node *lossless_step(sbuf *out, th_tree *tree, th_node *node, th_node *root) {
     th_node *descend = NULL;
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT: {
         const th_src_loc *loc = th_node_source_location(tree, node);
         lossless_open_tag(out, tree, node, loc);

@@ -396,6 +396,7 @@ def htmlparser(text: str) -> None:
 OPERATIONS = {
     "parse": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
+    "parse-xml-attrs": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),
     "validate-pattern": (validate, "lxml.etree.XMLSchema"),
     "validate-rng": (_validate_rng, "lxml.etree.RelaxNG"),

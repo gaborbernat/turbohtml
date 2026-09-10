@@ -270,7 +270,7 @@ static inline th_node *node_new(th_tree *tree, enum th_node_type type) {
     if (located) {
         *node_loc(node) = NULL; /* filled by insert_element when the element has a source tag */
     }
-    node->type = type;
+    node->type = (uint8_t)type;
     node->atom = TH_TAG_UNKNOWN;
     return node;
 }

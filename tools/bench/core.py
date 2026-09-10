@@ -984,6 +984,21 @@ def detect_language(text: str) -> None:
     _detect_language(text)
 
 
+def _set_attributes(case: tuple[turbohtml.Element, tuple[str, ...]]) -> None:
+    attrs: Final = case[0].attrs
+    for name in case[1]:
+        attrs[name] = "after"
+
+
+def _attribute_tree(case: tuple[int, bool]) -> tuple[turbohtml.Element, tuple[str, ...]]:
+    root: Final = turbohtml.Element("div")
+    names: Final = tuple(f"data-{index}" for index in range(case[0]))
+    if case[1]:
+        for name in names:
+            root.attrs[name] = "before"
+    return root, names
+
+
 def _normalization_tree(case: tuple[int, str]) -> turbohtml.Element:
     root: Final = turbohtml.Element("p")
     root.extend(turbohtml.Text(case[1]) for _ in range(case[0]))
@@ -1045,6 +1060,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse": (parse, "turbohtml"),
     "parse-dense": (parse, "turbohtml"),
     "parse-xml": (parse_xml, "turbohtml"),
+    "parse-xml-attrs": (parse_xml, "turbohtml"),
     "parse-xml-names": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
@@ -1125,6 +1141,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "phone-format": (phone_format, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
     "normalize-dom": (Mutating(_normalization_tree, turbohtml.Element.normalize), "turbohtml"),
+    "attribute-grow": (Mutating(_attribute_tree, _set_attributes), "turbohtml"),
     "normalize-marks": (normalize, "turbohtml"),
     "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),

@@ -360,7 +360,7 @@ static void c14n_put_pi(sbuf *out, const th_node *node) {
    tree serializes without one C stack frame per level. */
 static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node *apex, const th_c14n_opts *opts) {
     th_node *descend = NULL;
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT:
         c14n_open_tag(out, tree, node, apex, opts);
         if (node->first_child != NULL) {

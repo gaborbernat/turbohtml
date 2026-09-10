@@ -573,7 +573,7 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
         0; /* whether the last byte emitted is a folded space, so a space across a stripped comment is dropped */
     while (1) {
         th_node *descend = NULL;
-        switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+        switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
         case TH_NODE_ELEMENT:
             last_was_space = 0;
             /* the serialization root is what the caller asked to serialize, so its own tags

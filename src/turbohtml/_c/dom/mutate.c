@@ -224,10 +224,6 @@ static void mark_start_dirty(th_tree *tree, th_node *node) {
     }
 }
 
-/* Upsert an attribute by name: replace the value of the existing attribute with
-   that atom, or append a new slot (growing the arena array by one). has_value 0
-   stores a valueless attribute; an empty value stays distinct from valueless.
-   Returns 0, or -1 on allocation failure. */
 int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
                      Py_ssize_t value_len, int has_value) {
     tree->attr_version++;
@@ -253,17 +249,30 @@ int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
         node->attrs[existing].value_len = has_value ? value_len : 0;
         return 0;
     }
-    th_node_attr *grown = arena_alloc(tree, (node->attr_count + 1) * (Py_ssize_t)sizeof(th_node_attr));
-    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    size_t capacity = node->attr_capacity_shift ? (size_t)1 << node->attr_capacity_shift : 0;
+    if ((size_t)node->attr_count >= capacity) {
+        size_t bytes;
+        int fits = th_grow_cap((size_t)node->attr_count + 1, capacity, 2, sizeof(th_node_attr), &capacity, &bytes);
+        if (!fits || bytes > PY_SSIZE_T_MAX) { /* GCOVR_EXCL_BR_LINE: allocation-size overflow */
+            PyErr_NoMemory();                  /* GCOVR_EXCL_LINE: allocation-size overflow */
+            return -1;                         /* GCOVR_EXCL_LINE: allocation-size overflow */
+        }
+        th_node_attr *grown = arena_alloc(tree, (Py_ssize_t)bytes);
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (node->attr_count > 0) {
+            memcpy(grown, node->attrs, (size_t)node->attr_count * sizeof(th_node_attr));
+        }
+        node->attrs = grown;
+        node->attr_capacity_shift = 0;
+        for (size_t slots = capacity; slots > 1; slots >>= 1) {
+            node->attr_capacity_shift++;
+        }
     }
-    if (node->attr_count > 0) {
-        memcpy(grown, node->attrs, (size_t)node->attr_count * sizeof(th_node_attr));
-    }
-    grown[node->attr_count].name_atom = atom;
-    grown[node->attr_count].value = owned;
-    grown[node->attr_count].value_len = has_value ? value_len : 0;
-    node->attrs = grown;
+    node->attrs[node->attr_count].name_atom = atom;
+    node->attrs[node->attr_count].value = owned;
+    node->attrs[node->attr_count].value_len = has_value ? value_len : 0;
     node->attr_count++;
     return 0;
 }
@@ -459,7 +468,7 @@ static int node_data_equals(th_tree *left_tree, th_node *left, th_tree *right_tr
     if (left->type != right->type) {
         return 0;
     }
-    switch (left->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)left->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT:
         if (left->ns != right->ns) {
             return 0;

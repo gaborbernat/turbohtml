@@ -253,7 +253,7 @@ static inline PyObject *str_from_accessor(Py_UCS4 *(*accessor)(th_tree *, th_nod
 }
 
 static inline PyObject *type_for_node(module_state *state, const th_node *node) {
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_DOCUMENT:
         return state->document_type;
     case TH_NODE_ELEMENT:

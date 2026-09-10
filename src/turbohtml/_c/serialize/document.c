@@ -41,7 +41,7 @@ static void serialize_node_line(sbuf *out, th_tree *tree, th_node *node, int dep
     for (int index = 0; index < depth; index++) {
         sbuf_puts(out, "  ");
     }
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_DOCTYPE:
         sbuf_puts(out, "<!DOCTYPE ");
         sbuf_put_ucs4(out, node->text, node->text_len);
@@ -196,7 +196,7 @@ Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
 static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, th_node *root,
                                        const th_serialize_opts *opts) {
     th_node *descend = NULL;
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT:
         ser_open_tag(out, tree, node, opts);
         if (opts->xml) {
@@ -319,7 +319,7 @@ static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
 static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, th_node *root, const ser_opts *opts,
                                       int *depth) {
     th_node *descend = NULL;
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT: {
         ser_open_tag(out, tree, node, opts->out);
         if (opts->out->xml) {
