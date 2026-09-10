@@ -1333,12 +1333,12 @@
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-predicate",
-      0.0383031878756204,
+      0.0002526848744234182,
       0.43983193618866306
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-current",
-      0.20198773470862458,
+      0.19381008609586087,
       "XSLT 1.0 forbids current() in patterns; libxslt numbering differs from turbohtml"
     ],
     [

@@ -40,6 +40,7 @@ def test_number_benchmark_output(library: str, case: int, rows: int, instruction
         pytest.param("transform-number-any", 1, 1_024, 1, id="any-forward"),
         pytest.param("transform-number-any-reversed", 1, 1_024, -1, id="any-reverse"),
         pytest.param("transform-number-count", 1, 1_024, 1, id="any-count"),
+        pytest.param("transform-number-predicate", 1, 1_024, 1, id="any-predicate"),
     ],
 )
 def test_codspeed_number_benchmark_output(name: str, instructions: int, rows: int, step: int) -> None:

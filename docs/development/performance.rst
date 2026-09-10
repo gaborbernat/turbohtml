@@ -446,16 +446,20 @@ counts, including for reverse visits. The first call and repeated calls for the 
 calls for different nodes retain only matching nodes until the application finishes. Cases with one final-node visit,
 alternating names, intervening text/comments, and an explicit ``count`` pattern cover different reuse opportunities.
 
-Explicit ``count`` and ``from`` patterns reuse their match sets within one application when the pattern is an unprefixed
-element name, ``*``, or the document-root pattern ``/``. Instructions with identical pattern text share those sets.
-Different pattern text replaces the retained set; predicates and other patterns retain per-call evaluation. The pattern
-cases include single calls, section resets, reverse visits, repeated instructions, wildcards, and empty match sets. The
-``count-current`` row checks turbohtml compatibility only: XSLT 1.0 `forbids current() in patterns
+Explicit ``count`` and ``from`` patterns reuse their match sets within one application when their expressions depend
+only on the source tree. This includes unprefixed names, wildcards, the document root, static predicates, and unions.
+Instructions with identical pattern text share those sets. Different pattern text replaces the retained set; variables,
+namespace-prefixed steps, and extension calls retain per-call evaluation. The pattern cases include single calls,
+section resets, reverse visits, repeated instructions, wildcards, and empty match sets. The ``count-current`` row checks
+turbohtml compatibility only: XSLT 1.0 `forbids current() in patterns
 <https://www.w3.org/TR/xslt-10/#function-current>`_, and lxml gives different results.
 
 Static explicit ``level="any"`` numbering retains prefix counts, including zero counts and ``from`` resets. A single
 visit and repeated visits to the same node avoid index allocation; a second distinct visit builds the index. The
 last-node-only cases measure that boundary, and alternating names exercise changes to the default count criteria.
+
+The 1,024-node static-predicate case fell from 38.214 to 0.253 ms in matched release runs (99.34% less time). The
+dynamic ``current()`` control changed from 195.407 to 193.810 ms. CodSpeed tracks the static-predicate case separately.
 
 .. bench-table::
     :file: bench/xslt-number.json

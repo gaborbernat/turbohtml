@@ -178,6 +178,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "transform-number-any": ("transform-number", 8),
     "transform-number-any-reversed": ("transform-number", 9),
     "transform-number-count": ("transform-number", 14),
+    "transform-number-predicate": ("transform-number", 20),
     "transform-number-count-from": ("transform-number", 22),
     "transform-number-count-last": ("transform-number", 27),
     "transform-number-from-alternating": ("transform-number", 29),

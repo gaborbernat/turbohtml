@@ -2498,9 +2498,9 @@ static int build_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, ma
         const char *feature = NULL;
         int status =
             xp_eval_at(prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, xslt_extension, eng, &matched, &feature);
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: the pattern compiled, so it evaluates */
-            PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error"); /* GCOVR_EXCL_LINE */
-            return fail_py(eng);                                              /* GCOVR_EXCL_LINE */
+        if (status < 0) {
+            PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error");
+            return fail_py(eng);
         }
         for (Py_ssize_t slot = 0; slot < matched.nodes.len; slot++) {
             xp_item item = matched.nodes.items[slot];
@@ -2524,29 +2524,20 @@ static int get_number_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t le
     }
     Py_ssize_t starts[64];
     Py_ssize_t lengths[64];
-    if (split_union(pattern, len, starts, lengths, 64) != 1) {
-        return build_matcher(eng, pattern, len, local);
-    }
-    const xp_program *prog = compile_pattern(eng, pattern + starts[0], lengths[0]);
-    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation validates stylesheet patterns */
-        return -1;      /* GCOVR_EXCL_LINE */
-    }
-    const xn *root = &prog->nodes[prog->root];
-    if (root->kind != XN_PATH || !root->absolute) {
-        return build_matcher(eng, pattern, len, local);
-    }
-    if (root->first >= 0) {
-        const xn *step = &prog->nodes[root->first];
-        /* Predicates and extension calls may depend on the current XSLT node. */
-        if (step->axis != AX_DESCENDANT || step->first >= 0 || step->next >= 0 || step->prefix_len != 0 ||
-            (step->test != NT_NAME && step->test != NT_STAR)) {
+    int alternatives = split_union(pattern, len, starts, lengths, 64);
+    for (int index = 0; index < alternatives; index++) {
+        const xp_program *prog = compile_pattern(eng, pattern + starts[index], lengths[index]);
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation validates stylesheet patterns */
+            return -1;      /* GCOVR_EXCL_LINE */
+        }
+        if (!xp_pattern_is_static(prog)) {
             return build_matcher(eng, pattern, len, local);
         }
     }
     match_set_free(&cache->matched);
     cache->source = NULL;
-    if (build_matcher(eng, pattern, len, &cache->matched) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
-        return -1;                                               /* GCOVR_EXCL_LINE */
+    if (build_matcher(eng, pattern, len, &cache->matched) < 0) {
+        return -1;
     }
     cache->source = pattern;
     cache->length = len;
@@ -2773,22 +2764,18 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         /* Compilation validates the count and from patterns before a run. */
         if (count != NULL) {
             have_count = 1;
-            /* GCOVR_EXCL_BR_START */
             if (get_number_matcher(eng, count, count_len, &eng->number_count_match, &count_set, &count_matches) < 0) {
-                match_set_free(&count_set); /* GCOVR_EXCL_LINE */
-                return -1;                  /* GCOVR_EXCL_LINE */
+                match_set_free(&count_set);
+                return -1;
             }
-            /* GCOVR_EXCL_BR_STOP */
         }
         if (from != NULL) {
             have_from = 1;
-            /* GCOVR_EXCL_BR_START */
             if (get_number_matcher(eng, from, from_len, &eng->number_from_match, &from_set, &from_matches) < 0) {
-                match_set_free(&count_set); /* GCOVR_EXCL_LINE */
-                match_set_free(&from_set);  /* GCOVR_EXCL_LINE */
-                return -1;                  /* GCOVR_EXCL_LINE */
+                match_set_free(&count_set);
+                match_set_free(&from_set);
+                return -1;
             }
-            /* GCOVR_EXCL_BR_STOP */
         }
         Py_ssize_t level_len = 0;
         const Py_UCS4 *level = attr_lookup(eng->sheet_tree, instruction, "level", &level_len);

@@ -1479,6 +1479,18 @@ static const xp_func_sig *func_signature(const xn *fn) {
     return NULL;
 }
 
+/* Numbering uses a fixed source root. Builtins that read external state must remain uncached. */
+int xp_pattern_is_static(const xp_program *prog) {
+    for (int32_t index = 0; index < prog->count; index++) {
+        const xn *node = &prog->nodes[index];
+        if (node->kind == XN_VAR || (node->kind == XN_STEP && node->prefix_len != 0) ||
+            (node->kind == XN_FUNC && func_signature(node) == NULL)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* A fresh Python str of the called function's name, for an error message. */
 static PyObject *function_name(const xn *fn) {
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, fn->str, fn->str_len);
