@@ -80,6 +80,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "shadow-fallback": "shadow-fallback",
     "validate": "validate",
     "validate-rng": "validate-rng",
+    "validate-pattern-reuse": "validate-pattern-reuse",
+    "compile-pattern": "compile-pattern",
     "validate-pattern": "validate-pattern",
     "xpath-wide": "xpath-wide",
     "xpath-distinct": "xpath-distinct",

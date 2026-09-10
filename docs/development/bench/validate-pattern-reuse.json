@@ -1,0 +1,32 @@
+{
+  "label": "validate repeated pattern facets",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 values, two patterns",
+      0.0016095579860727109,
+      0.00016170441625339057
+    ],
+    [
+      "1000 values, no patterns",
+      0.001446028482435698,
+      0.00011761938518854247
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.022440613322752108,
+      0.013000059553525772
+    ],
+    [
+      null,
+      0.03161147064641208,
+      0.01031740551224763
+    ]
+  ]
+}

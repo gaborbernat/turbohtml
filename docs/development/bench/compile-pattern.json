@@ -1,0 +1,22 @@
+{
+  "label": "compile pattern facets",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "two pattern facets",
+      2.2616282349119388e-06,
+      9.316100398374752e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.021040309418590145,
+      0.02619593540997075
+    ]
+  ]
+}

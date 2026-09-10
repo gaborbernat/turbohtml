@@ -1231,6 +1231,20 @@ to validate.
 .. bench-table::
     :file: bench/validate-pattern.json
 
+The repeated-pattern case validates 1,000 sibling values against two pattern facets; its control omits the facets. Both
+cases reuse a compiled schema and include document parsing. Compiling the patterns once reduced elapsed time from
+1,753.826 µs to 1,609.558 µs (8.23%). The no-pattern control increased from 1,420.645 µs to 1,446.028 µs (1.79%).
+
+Schema construction increased from 2.058 µs to 2.262 µs (9.89%). The first validation of the target document saves more
+than that 0.203 µs construction cost. Compiled schemas retain immutable pattern graphs; each validation allocates and
+frees its own active-state lists and visitation markers, so concurrent calls share no mutable matching state.
+
+.. bench-table::
+    :file: bench/validate-pattern-reuse.json
+
+.. bench-table::
+    :file: bench/compile-pattern.json
+
 .. bench-table::
     :file: bench/validate.json
 

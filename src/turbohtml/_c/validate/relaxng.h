@@ -621,7 +621,7 @@ static int rng_datatype_ok(th_schema *schema, int datatype_id, facetset *facets,
         return 0;
     }
     for (Py_ssize_t index = 0; index < facets->pattern_count; index++) {
-        if (!regex_full_match(&schema->mem, facets->patterns[index].ptr, facets->patterns[index].len, norm, norm_len)) {
+        if (!regex_full_match(schema, facets->patterns[index].ptr, facets->patterns[index].len, norm, norm_len)) {
             return 0;
         }
     }

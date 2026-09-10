@@ -480,6 +480,7 @@ typedef struct th_schema {
     /* every schema element node's resolved qname, sorted by node pointer for is_schema_el */
     sqname_entry *sqnames;
     Py_ssize_t sqname_count;
+    struct rpattern *regex_patterns;
 } th_schema;
 
 /* Look up a schema element node's precomputed qname. schema_build_qname_cache enters every
@@ -825,6 +826,10 @@ PyObject *turbohtml_schema_compile(PyObject *module, PyObject *args) {
     if (!ok) {
         schema_free(schema);
         return NULL;
+    }
+    if (regex_cache_schema(schema, schema->root) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        schema_free(schema);                            /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory();                        /* GCOVR_EXCL_LINE */
     }
     PyObject *capsule = PyCapsule_New(schema, CAPSULE_NAME, capsule_destructor);
     if (capsule == NULL) {   /* GCOVR_EXCL_BR_LINE: capsule creation failure is unforceable */

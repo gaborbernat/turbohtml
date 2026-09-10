@@ -53,6 +53,10 @@ def validate(case: tuple[str, str]) -> None:
     validator.validate(etree.fromstring(document.encode()))
 
 
+def _compile_pattern(schema: str) -> lxml_etree.XMLSchema:
+    return lxml_etree.XMLSchema(lxml_etree.fromstring(schema.encode()))
+
+
 def _validate_rng(case: tuple[str, str]) -> None:
     _rng_schema(case[0]).validate(lxml_etree.fromstring(case[1].encode()))
 
@@ -471,6 +475,8 @@ OPERATIONS = {
     "parse-xml": (parse_xml, "lxml.etree"),
     "parse-xml-attrs": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),
+    "validate-pattern-reuse": (validate, "lxml.etree.XMLSchema"),
+    "compile-pattern": (_compile_pattern, "lxml.etree.XMLSchema"),
     "validate-pattern": (validate, "lxml.etree.XMLSchema"),
     "validate-rng": (_validate_rng, "lxml.etree.RelaxNG"),
     "fragment": (fragment, "lxml"),

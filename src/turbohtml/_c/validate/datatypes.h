@@ -869,8 +869,7 @@ static int facet_check(valctx *ctx, th_node *node, const facetset *facets, const
         }
     }
     for (Py_ssize_t index = 0; index < facets->pattern_count; index++) {
-        if (!regex_full_match(&ctx->schema->mem, facets->patterns[index].ptr, facets->patterns[index].len, value,
-                              len)) {
+        if (!regex_full_match(ctx->schema, facets->patterns[index].ptr, facets->patterns[index].len, value, len)) {
             report(ctx, node, "facet", "value does not match the required pattern");
             ok = 0;
         }
