@@ -523,6 +523,7 @@ typedef struct {
 
 typedef struct {
     const Py_UCS4 *source;
+    Py_ssize_t length;
     match_set matched;
 } xslt_number_match;
 
@@ -2504,7 +2505,8 @@ static int build_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, ma
 
 static int get_number_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, xslt_number_match *cache,
                               match_set *local, const match_set **matched) {
-    if (cache->source == pattern) {
+    if (cache->source == pattern || (cache->source != NULL && cache->length == len &&
+                                     memcmp(cache->source, pattern, (size_t)len * sizeof(Py_UCS4)) == 0)) {
         *matched = &cache->matched;
         return 0;
     }
@@ -2518,14 +2520,16 @@ static int get_number_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t le
         return -1;      /* GCOVR_EXCL_LINE */
     }
     const xn *root = &prog->nodes[prog->root];
-    if (root->kind != XN_PATH || !root->absolute || root->first < 0) {
+    if (root->kind != XN_PATH || !root->absolute) {
         return build_matcher(eng, pattern, len, local);
     }
-    const xn *step = &prog->nodes[root->first];
-    /* Predicates and extension calls may depend on the current XSLT node. */
-    if (step->axis != AX_DESCENDANT || step->first >= 0 || step->next >= 0 || step->prefix_len != 0 ||
-        (step->test != NT_NAME && step->test != NT_STAR)) {
-        return build_matcher(eng, pattern, len, local);
+    if (root->first >= 0) {
+        const xn *step = &prog->nodes[root->first];
+        /* Predicates and extension calls may depend on the current XSLT node. */
+        if (step->axis != AX_DESCENDANT || step->first >= 0 || step->next >= 0 || step->prefix_len != 0 ||
+            (step->test != NT_NAME && step->test != NT_STAR)) {
+            return build_matcher(eng, pattern, len, local);
+        }
     }
     match_set_free(&cache->matched);
     cache->source = NULL;
@@ -2533,6 +2537,7 @@ static int get_number_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t le
         return -1;                                               /* GCOVR_EXCL_LINE */
     }
     cache->source = pattern;
+    cache->length = len;
     *matched = &cache->matched;
     return 0;
 }

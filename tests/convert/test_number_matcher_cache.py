@@ -16,6 +16,37 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize(
     ("source", "select", "instructions", "expected"),
     [
+        pytest.param(
+            "<root/>",
+            "/|root",
+            '<xsl:number count="root" from="/"/>' * 24,
+            "|" + "1" * 24 + "|",
+            id="single-document-boundary-separate-instructions",
+        ),
+        pytest.param(
+            "<root><p/><q/><p/></root>",
+            "root/*",
+            '<xsl:number count="p"/>' * 8,
+            "11111111||22222222|",
+            id="single-eight-instructions",
+        ),
+        pytest.param(
+            "<root><p/><q/><p/></root>",
+            "root/*",
+            '<xsl:number count="p"/><xsl:text>/</xsl:text>'
+            '<xsl:number count="q"/><xsl:text>/</xsl:text><xsl:number count="p"/>',
+            "1//1|/1/|2//2|",
+            id="single-count-slot-replacement",
+        ),
+        pytest.param(
+            "<root><p/><p/></root>",
+            "root/p",
+            '<xsl:number count="p" from="p"/><xsl:text>/</xsl:text>'
+            '<xsl:number count="p" from="root"/><xsl:text>/</xsl:text>'
+            '<xsl:number count="p" from="p"/>',
+            "/1/|/2/|",
+            id="single-from-slot-replacement",
+        ),
         pytest.param("<root><p/><q/><p/></root>", "root/*", '<xsl:number level="any" count="p"/>', "1|1|2|", id="name"),
         pytest.param(
             "<root><p/><q/><p/></root>", "root/*", '<xsl:number level="any" count="*"/>', "2|3|4|", id="wildcard"
@@ -167,15 +198,41 @@ def test_number_matcher_contexts(
     assert [transform(parse_xml(source)) for _ in range(2)] == [expected, expected]
 
 
-def test_number_matcher_reused_documents(matcher_transform: Callable[[str, str, str], Transform]) -> None:
-    transform: Final = matcher_transform("root/*", '<xsl:number level="any" count="p"/>', "")
-    assert [
-        transform(parse_xml(source)) for source in ("<root><p/><p/></root>", "<root><q/></root>", "<root><p/></root>")
-    ] == [
-        "1|2|",
-        "0|",
-        "1|",
+@pytest.mark.parametrize("level", ["single", "any"])
+def test_number_matcher_reused_documents(level: str, matcher_transform: Callable[[str, str, str], Transform]) -> None:
+    transform: Final = matcher_transform("root/*", f'<xsl:number level="{level}" count="p"/>' * 2, "")
+    documents: Final = [
+        parse_xml(source) for source in ("<root><p/><p/></root>", "<root><q/></root>", "<root><p/></root>")
     ]
+    assert [transform(document) for document in (*documents, documents[0])] == [
+        "11|22|",
+        "|" if level == "single" else "00|",
+        "11|",
+        "11|22|",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("instructions", "expected"),
+    [
+        pytest.param(
+            '<xsl:number level="any" count="/"/><xsl:number level="any" count="/"/>',
+            ["11|11|", "11|", "11|11|11|", "11|11|"],
+            id="count-document",
+        ),
+        pytest.param(
+            '<xsl:number count="/" from="/"/><xsl:text>:</xsl:text><xsl:number count="p" from="/"/>',
+            [":1|:2|", ":1|", ":1|:2|:3|", ":1|:2|"],
+            id="from-document",
+        ),
+    ],
+)
+def test_number_matcher_document_pattern_reuse(
+    instructions: str, expected: list[str], matcher_transform: Callable[[str, str, str], Transform]
+) -> None:
+    transform: Final = matcher_transform("root/p", instructions, "")
+    documents: Final = [parse_xml("<root>" + "<p/>" * count + "</root>") for count in (2, 1, 3)]
+    assert [transform(document) for document in (*documents, documents[0])] == expected
 
 
 def test_number_matcher_whitespace_restore(matcher_transform: Callable[[str, str, str], Transform]) -> None:

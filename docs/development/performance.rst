@@ -439,10 +439,11 @@ calls for different nodes retain only matching nodes until the application finis
 alternating names, intervening text/comments, and an explicit ``count`` pattern cover different reuse opportunities.
 
 Explicit ``count`` and ``from`` patterns reuse their match sets within one application when the pattern is an unprefixed
-element name or ``*``. Changing patterns replaces the retained set; predicates and other patterns retain per-call
-evaluation. The pattern cases include single calls, section resets, reverse visits, repeated instructions, wildcards,
-and empty match sets. The ``count-current`` row checks turbohtml compatibility only: XSLT 1.0 `forbids current() in
-patterns <https://www.w3.org/TR/xslt-10/#function-current>`_, and lxml gives different results.
+element name, ``*``, or the document-root pattern ``/``. Instructions with identical pattern text share those sets.
+Different pattern text replaces the retained set; predicates and other patterns retain per-call evaluation. The pattern
+cases include single calls, section resets, reverse visits, repeated instructions, wildcards, and empty match sets. The
+``count-current`` row checks turbohtml compatibility only: XSLT 1.0 `forbids current() in patterns
+<https://www.w3.org/TR/xslt-10/#function-current>`_, and lxml gives different results.
 
 .. bench-table::
     :file: bench/xslt-number.json

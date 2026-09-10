@@ -237,10 +237,11 @@ no-numbering controls. Both libraries reuse a compiled stylesheet and parsed sou
 lxml returns an XSLT result tree, with string conversion outside timing. See :doc:`/development/performance` for the
 build configuration and per-cell spread.
 
-Repeated default ``level="any"`` numbering reuses document-order counts. Explicit unprefixed name and wildcard patterns
-reuse their match sets within one application. The 1,024-node explicit-count case takes 1.10 ms with turbohtml and 3.88
-ms with lxml. Eight distinct instructions still rebuild identical match sets, taking 130.3 ms with turbohtml and 31.4 ms
-with lxml. The larger default-any and section-reset lxml cells retain high-spread warnings in the table.
+Repeated default ``level="any"`` numbering reuses document-order counts. Explicit unprefixed name, wildcard, and
+document-root patterns share their match sets across instructions with identical pattern text within one application.
+The 1,024-node explicit-count case takes 1.10 ms with turbohtml and 3.88 ms with lxml. Eight distinct instructions with
+the same pattern take 10.9 ms with turbohtml and 31.4 ms with lxml. The larger default-any and section-reset lxml cells
+retain high-spread warnings in the table.
 
 XSLT 1.0 forbids ``current()`` in patterns. The ``count-current`` case checks existing turbohtml behavior; its lxml cell
 has no timing because the libraries produce different output.
