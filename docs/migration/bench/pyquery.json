@@ -555,6 +555,11 @@
       "parse normalized newlines — 1,000 paragraphs / LF",
       6.902340084025127e-05,
       "different tree: adds a div wrapper around paragraph siblings"
+    ],
+    [
+      "collect selected nodes' siblings — 1024 siblings, one selected",
+      3.32605689701874e-05,
+      4.766030679851004e-05
     ]
   ],
   "spread": [
@@ -1107,6 +1112,11 @@
       null,
       0.016147480479929033,
       null
+    ],
+    [
+      null,
+      0.00867315348940588,
+      0.013889415118836674
     ]
   ],
   "row_notes": {}

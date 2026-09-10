@@ -493,6 +493,23 @@ per-character Python loop, so it runs 16 times faster.
 .. bench-table::
     :file: bench/querying-6.json
 
+``Query.siblings()`` visits each selected element's sibling group once on builds with the GIL. Later selected elements
+from the same group can add the first element omitted from that group's initial visit, preserving first-encounter order.
+Free-threaded builds retain the existing traversal while per-tree locking remains separate work.
+
+These cases reuse a selection from 1,024 siblings, selecting either all of them or just the first. Parsing and selection
+happen outside the timer; timing includes the cached-input lookup and result construction. Matched CPython 3.14.7
+release builds without PGO or LTO reduced the all-selected case from 35,528.207 to 71.255 µs (99.80% faster). The
+single-selected control measured 33.243 and 33.261 µs, effectively unchanged. Candidate spread was 2.06% and 0.87%. All
+eight comparisons passed CPU-headroom and memory-pressure guards. CodSpeed tracks both cases.
+
+The single-selected case also compares pyquery, with parsing and selection cached for both libraries. pyquery measured
+47.660 µs (1.39% spread), versus 33.261 µs for turbohtml. Its multi-selected result retains duplicates and uses a
+different order, so that cell is unsupported rather than timed.
+
+.. bench-table::
+    :file: bench/query-siblings.json
+
 A text-content search runs through :meth:`~turbohtml.Node.find_all` with ``text=`` (a regex matched against each
 element's collected subtree text), raced against ``BeautifulSoup.find_all(string=...)`` and the equivalent text filters
 on lxml, parsel, and pyquery. When the ``text=`` filter is a plain string or a literal (no regex metacharacters,

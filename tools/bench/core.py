@@ -1283,7 +1283,19 @@ def _prune_shared(root: turbohtml.Element) -> None:
     root.prune("b")
 
 
+def _query_siblings(case: tuple[int, bool]) -> None:
+    _query_siblings_case(case).siblings()
+
+
+@functools.cache
+def _query_siblings_case(case: tuple[int, bool]) -> _Query:
+    count, all_selected = case
+    selected: Final = _Query("<main>" + "<p>x</p>" * count + "</main>")("p")
+    return selected if all_selected else selected.eq(0)
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "query-siblings": (_query_siblings, "turbohtml"),
     "prune-shared": (Mutating(_prune_shared_setup, _prune_shared), "turbohtml"),
     "shadow-assignment": (Mutating(_shadow_assignment_setup, _run_prepared), "turbohtml"),
     "shadow-fallback": (Mutating(_shadow_fallback_setup, _run_prepared), "turbohtml"),

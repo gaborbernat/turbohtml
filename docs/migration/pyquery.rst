@@ -185,6 +185,11 @@ one verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` spli
  Gotchas and pitfalls
 **********************
 
+- ``Query.siblings()`` deduplicates results in first-encounter order. For siblings ``a, b, c``, selecting all three
+  gives ``b, c, a``; pyquery returns ``a, b, a, b, c, c``. The benchmark compares only selecting the first of 1,024
+  siblings, where both return the remaining 1,023 in order. Cached parsing and selection stay outside the timer:
+  turbohtml measured 33.261 µs and pyquery 47.660 µs, with 0.87% and 1.39% spread. The multi-selected case is not a
+  comparable operation.
 - ``.wrap_all`` over an **arbitrary, non-contiguous** set of nodes has no single node-method counterpart (the set has no
   shared anchor to place the wrapper at); wrap the contiguous run, or :meth:`~turbohtml.Element.append` the scattered
   nodes into one new element and place it yourself.

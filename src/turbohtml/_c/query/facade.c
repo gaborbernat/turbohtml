@@ -7,6 +7,7 @@
    Python layer holds and borrows each one's node, so the traversal walks the arena rather than the object graph. */
 
 #include "core/common.h"
+#include "core/node_map.h"
 #include "dom/nodes.h"
 #include "dom/tree.h"
 
@@ -90,6 +91,9 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
         return NULL;      /* GCOVR_EXCL_LINE */
     }
     /* GCOVR_EXCL_BR_STOP */
+#ifndef Py_GIL_DISABLED
+    th_node_map parents = {0};
+#endif
     int status = 0;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(nodes); index++) {
         PyObject *owner = PyList_GET_ITEM(nodes, index);
@@ -102,6 +106,26 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
         if (node->parent == NULL || node->parent->type != TH_NODE_ELEMENT) {
             continue;
         }
+#ifndef Py_GIL_DISABLED
+        /* The memo must not outlive exclusive traversal access to the tree. */
+        Py_ssize_t first = th_node_map_find(&parents, node->parent);
+        if (first != 0) {
+            PyObject *previous = PyList_GET_ITEM(nodes, first - 1);
+            th_node *omitted = ((NodeObject *)previous)->node;
+            PyObject *wrapper = turbohtml_node_wrap_in(previous, omitted);
+            status = wrapper == NULL ? -1 : facade_keep_new(out, seen, wrapper, omitted); /* GCOVR_EXCL_BR_LINE */
+            Py_XDECREF(wrapper);                                                          /* GCOVR_EXCL_BR_LINE */
+            if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                break;        /* GCOVR_EXCL_LINE */
+            } /* GCOVR_EXCL_LINE */
+            continue;
+        }
+        if (th_node_map_insert(&parents, node->parent, index + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyErr_NoMemory();                                            /* GCOVR_EXCL_LINE */
+            status = -1;                                                 /* GCOVR_EXCL_LINE */
+            break;                                                       /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE */
+#endif
         for (th_node *sibling = node->parent->first_child; sibling != NULL; sibling = sibling->next_sibling) {
             if (sibling->type != TH_NODE_ELEMENT || sibling == node) {
                 continue;
@@ -123,6 +147,9 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
             break;        /* GCOVR_EXCL_LINE */
         }
     }
+#ifndef Py_GIL_DISABLED
+    PyMem_Free(parents.entries);
+#endif
     Py_DECREF(seen);
     if (status < 0) {
         Py_DECREF(out);

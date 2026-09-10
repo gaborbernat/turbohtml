@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from typing import Final
 from urllib.parse import urljoin
 
 from pyquery import PyQuery
@@ -190,7 +191,21 @@ def _encode_inner(text: str) -> bytes:
     return _serialize_inner(text).encode()
 
 
+def _query_siblings(case: tuple[int, bool]) -> PyQuery:
+    return _query_siblings_case(case).siblings()
+
+
+@functools.cache
+def _query_siblings_case(case: tuple[int, bool]) -> PyQuery:
+    count, all_selected = case
+    if all_selected:
+        unsupported: Final = "Pyquery siblings retains duplicates and uses a different result order for multiple roots"
+        raise NotImplementedError(unsupported)
+    return PyQuery("<main>" + "<p>x</p>" * count + "</main>", parser="html")("p").eq(0)
+
+
 OPERATIONS = {
+    "query-siblings": (_query_siblings, "pyquery"),
     "serialize-inner": (_serialize_inner, "pyquery"),
     "encode-inner": (_encode_inner, "pyquery"),
     "parse": (parse, "pyquery"),

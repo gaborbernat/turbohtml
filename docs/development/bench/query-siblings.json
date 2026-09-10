@@ -1,0 +1,33 @@
+{
+  "label": "collect selected nodes' siblings",
+  "parties": [
+    "turbohtml",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1024 siblings, all selected",
+      7.12547770187181e-05,
+      "Pyquery siblings retains duplicates and uses a different result order for multiple roots"
+    ],
+    [
+      "1024 siblings, one selected",
+      3.32605689701874e-05,
+      4.766030679851004e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.02058901025192514,
+      null
+    ],
+    [
+      null,
+      0.00867315348940588,
+      0.013889415118836674
+    ]
+  ],
+  "notes": {}
+}

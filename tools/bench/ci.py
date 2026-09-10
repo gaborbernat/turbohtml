@@ -171,6 +171,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "query-siblings-single": ("query-siblings", 1),
     "prune-shared-single": ("prune-shared", 1),
     "minify-js-sequences-small": ("minify-js-sequences", 1),
     "markdown-wrap-ordinary": ("markdown-wrap", 1),
