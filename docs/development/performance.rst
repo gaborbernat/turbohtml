@@ -691,6 +691,15 @@ memory-pressure guards.
 .. bench-table::
     :file: bench/range-contained.json
 
+Cloning a partial element copies its tag and attributes without copying descendants outside the range. These cases
+select the first three characters of an element's text, excluding 1,000 sibling elements or one sibling. Construction
+runs outside the timer; CodSpeed tracks both cases. Under the same release configuration and resource guards, the
+1,000-sibling comparison fell from 13.999 to 3.723 µs (73.41% faster). The single-sibling mean fell from 0.441 to 0.374
+µs (15.18% faster); those samples include per-call timer overhead and have 12% relative standard deviation.
+
+.. bench-table::
+    :file: bench/range-partial.json
+
 Adding attributes through ``element.attrs`` reserves space for later insertions, reducing array copies and retained
 arena buffers on elements with many attributes. Replacement cases exercise existing names; they do not benefit from
 extra capacity. The insertion benchmarks construct their input outside the timer.

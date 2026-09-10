@@ -1,0 +1,28 @@
+{
+  "label": "clone a Range with a partial element",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 clone",
+      3.7227127298441093e-06
+    ],
+    [
+      "1 clone",
+      3.7391412964401147e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.027466239783854374
+    ],
+    [
+      null,
+      0.1196616263261445
+    ]
+  ],
+  "notes": {}
+}

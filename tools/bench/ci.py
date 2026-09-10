@@ -174,6 +174,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "parse-formatting-shallow": ("parse-formatting", 1),
     "range-boundary-end": ("range-boundary", 1),
     "range-contained-single": ("range-contained", 1),
+    "range-partial-single": ("range-partial", 1),
     "transform-number-single": ("transform-number", 2),
     "transform-number-any": ("transform-number", 8),
     "transform-number-any-reversed": ("transform-number", 9),

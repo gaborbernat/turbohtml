@@ -610,7 +610,7 @@ int th_node_equals(th_tree *left_tree, th_node *left, th_tree *right_tree, th_no
 }
 
 /* Copy one node without its children, materializing borrowed text and re-interning per-tree attribute atoms. */
-static th_node *copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node) {
+th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node) {
     th_node *node = node_new(dest, src_node->type);
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -663,7 +663,7 @@ static th_node *copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node
 }
 
 static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_node) {
-    th_node *root = copy_node_shallow(dest, src, src_node);
+    th_node *root = th_tree_copy_node_shallow(dest, src, src_node);
     if (root == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -672,7 +672,7 @@ static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_no
     for (;;) {
         if (from->first_child != NULL) {
             from = from->first_child;
-            th_node *child = copy_node_shallow(dest, src, from);
+            th_node *child = th_tree_copy_node_shallow(dest, src, from);
             if (child == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
             }
@@ -688,7 +688,7 @@ static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_no
             return root;
         }
         from = from->next_sibling;
-        th_node *sibling = copy_node_shallow(dest, src, from);
+        th_node *sibling = th_tree_copy_node_shallow(dest, src, from);
         if (sibling == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -703,7 +703,7 @@ static th_node *copy_node_at(th_tree *dest, th_tree *src, th_node *src_node, int
     if (depth == TH_COPY_RECURSION_LIMIT) {
         return copy_node_iterative(dest, src, src_node);
     }
-    th_node *node = copy_node_shallow(dest, src, src_node);
+    th_node *node = th_tree_copy_node_shallow(dest, src, src_node);
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }

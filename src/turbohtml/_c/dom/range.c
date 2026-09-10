@@ -111,19 +111,6 @@ static th_node *split_data_node(th_tree *tree, th_node *node, Py_ssize_t offset)
     return tail;
 }
 
-/* A childless copy of an element (same tag, namespace, and attributes) in the same tree: deep-copy
-   then drop the children, reusing the tested copy primitive. NULL on allocation failure. */
-static th_node *shallow_clone(th_tree *tree, th_node *node) {
-    th_node *copy = th_tree_copy_node(tree, tree, node);
-    if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    while (copy->first_child != NULL) {
-        th_node_remove(copy->first_child);
-    }
-    return copy;
-}
-
 /* A node straddling exactly one boundary (an inclusive ancestor of one endpoint but not the other). */
 static int is_partially_contained(th_node *node, th_node *start_node, th_node *end_node) {
     return is_inclusive_ancestor(node, start_node) != is_inclusive_ancestor(node, end_node);
@@ -293,7 +280,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
             return NULL;                                                                     /* GCOVR_EXCL_LINE: OOM */
         }
     } else if (first != NULL) {
-        th_node *clone = shallow_clone(tree, first);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, first);
         if (clone == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -322,7 +309,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
             return NULL;                                              /* GCOVR_EXCL_LINE: OOM path */
         }
     } else if (last != NULL) {
-        th_node *clone = shallow_clone(tree, last);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, last);
         if (clone == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -377,7 +364,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         }
         th_node_append_child(fragment, piece);
     } else if (first != NULL) {
-        th_node *clone = shallow_clone(tree, first);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, first);
         if (clone == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -407,7 +394,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         }
         th_node_append_child(fragment, piece);
     } else if (last != NULL) {
-        th_node *clone = shallow_clone(tree, last);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, last);
         if (clone == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
