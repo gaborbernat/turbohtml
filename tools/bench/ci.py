@@ -176,6 +176,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "shadow-assignment-single": ("shadow-assignment", 1),
     "shadow-fallback-single": ("shadow-fallback", 1),
     "observe-registrations-unrelated": ("observe-registrations", 1),
+    "parse-nul-clean": ("parse-nul", 1),
     "parse-afe-identical": ("parse-afe", 1),
     "parse-formatting-shallow": ("parse-formatting", 1),
     "range-boundary-end": ("range-boundary", 1),

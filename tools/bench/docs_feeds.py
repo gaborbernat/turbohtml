@@ -127,6 +127,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "minifying": "minify",
     "parsing": "parse",
     "parse-formatting": "parse-formatting",
+    "parse-nul": "parse-nul",
     "parse-afe": "parse-afe",
     "parse-scope": "parse-scope",
     "querying": "find",

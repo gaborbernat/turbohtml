@@ -285,6 +285,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow-fallback": Operation("flatten nested fallback slots", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-formatting": Operation("parse under a formatting ancestor", "us"),
+    "parse-nul": Operation("parse text beside a NUL", "us"),
     "parse-afe": Operation("parse nested formatting attributes", "us"),
     "parse-scope": Operation("parse ignored block end tags", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
@@ -1203,6 +1204,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ),
     ),
     "parse": _parse_cases,
+    "parse-nul": lambda: tuple(
+        (
+            f"1,000 paragraphs / {label}",
+            f"<p>{first}</p>" + f"<p>{'a' * 80}</p>" * 999,
+        )
+        for label, first in (("early NUL", "first\0a"), ("no NUL", "a" * 80))
+    ),
     "parse-afe": lambda: tuple(
         (
             f"256 b elements / {variant} attributes",

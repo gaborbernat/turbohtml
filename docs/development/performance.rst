@@ -354,6 +354,14 @@ no timing. The html5-parser environment has the libxml2 import mismatch describe
 .. bench-table::
     :file: bench/parse-afe.json
 
+The NUL cases parse 1,000 paragraphs with either one NUL in the first paragraph or clean text throughout. Clean text
+runs can retain source spans even when another token contains a NUL. Matched local runs reduced full-parse time by 24.6%
+on the early-NUL input; the clean control changed by less than 1%. Both inputs use ASCII, disable source locations, and
+include document cleanup. CodSpeed tracks both.
+
+.. bench-table::
+    :file: bench/parse-nul.json
+
 ******************
  Fragment parsing
 ******************

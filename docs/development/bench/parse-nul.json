@@ -1,0 +1,28 @@
+{
+  "label": "parse text beside a NUL",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1,000 paragraphs / early NUL",
+      7.107561307672465e-05
+    ],
+    [
+      "1,000 paragraphs / no NUL",
+      7.09768120600529e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.016635002923066876
+    ],
+    [
+      null,
+      0.016115265561391097
+    ]
+  ],
+  "notes": {}
+}

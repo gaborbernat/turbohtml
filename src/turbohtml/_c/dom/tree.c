@@ -1192,7 +1192,7 @@ static void insert_text(th_tree *tree, Py_UCS4 *text, Py_ssize_t len) {
 }
 
 /* Insert a text run as a zero-copy span into input[off .. off+len). The caller
-   guarantees the run has no NUL (tree->has_nul is false) and the input outlives
+   guarantees the run has no NUL and the input outlives
    the tree (tree->can_span). An adjacent text node is the rare case: realize the
    span and fall back to the merging insert_text. */
 static void insert_text_span(th_tree *tree, Py_ssize_t off, Py_ssize_t len) {
@@ -2753,9 +2753,37 @@ static enum th_drain drain_after_frameset(th_tree *tree, th_token *tok, th_inser
     return TH_DRAIN_NEXT;
 }
 
+static int chunk_has_nul(int kind, const void *data, Py_ssize_t length) {
+    if (kind == PyUnicode_1BYTE_KIND) {
+        return memchr(data, '\0', (size_t)length) != NULL;
+    }
+    if (kind == PyUnicode_2BYTE_KIND) {
+        const uint16_t *units = data;
+        for (Py_ssize_t index = 0; index < length; index++) {
+            if (units[index] == 0) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    const uint32_t *units = data;
+    for (Py_ssize_t index = 0; index < length; index++) {
+        if (units[index] == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int slice_can_span(const th_tree *tree, const th_token *token) {
+    return token->is_slice && tree->can_span &&
+           (!tree->has_nul ||
+            !chunk_has_nul(tree->kind, (const uint8_t *)tree->data + token->src_start * tree->kind, token->src_len));
+}
+
 static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) {
     if (tok->kind == TH_TEXT) {
-        if (tok->is_slice && tree->can_span && !tree->has_nul) {
+        if (slice_can_span(tree, tok)) {
             /* zero-copy: scan the input span directly for the frameset
                and leading-newline rules, then store a span node */
             Py_ssize_t off = tok->src_start + tree->text_offset;
@@ -3285,8 +3313,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
 
 static enum th_drain drain_text(th_tree *tree, th_token *tok, th_insert *dc) {
     if (tok->kind == TH_TEXT) {
-        /* a nul anywhere in the input disables span sharing */
-        if (tok->is_slice && tree->can_span && !tree->has_nul /* GCOVR_EXCL_BR_LINE */) {
+        if (slice_can_span(tree, tok)) {
             Py_ssize_t off = tok->src_start + tree->text_offset;
             Py_ssize_t len = tok->src_len - tree->text_offset;
             /* a text token always has a positive length */
@@ -4391,31 +4418,6 @@ th_stream *th_stream_new(int positions, int locations) {
    the drain that follows resolve against this base before the next th_tok_next. */
 static void stream_sync_input(th_stream *stream) {
     stream->tree->data = th_tok_input_data(stream->sm, &stream->tree->kind);
-}
-
-/* Whether a fed chunk holds a U+0000. The whole-input scan setup_input does has no
-   place in a streaming parse, so each chunk is scanned and the result folded into
-   the tree's has_nul flag, which gates the text builder's NUL dropping. */
-static int chunk_has_nul(int kind, const void *data, Py_ssize_t length) {
-    if (kind == PyUnicode_1BYTE_KIND) {
-        return memchr(data, '\0', (size_t)length) != NULL;
-    }
-    if (kind == PyUnicode_2BYTE_KIND) {
-        const uint16_t *units = data;
-        for (Py_ssize_t index = 0; index < length; index++) {
-            if (units[index] == 0) {
-                return 1;
-            }
-        }
-        return 0;
-    }
-    const uint32_t *units = data;
-    for (Py_ssize_t index = 0; index < length; index++) {
-        if (units[index] == 0) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 int th_stream_feed(th_stream *stream, int kind, const void *data, Py_ssize_t length) {

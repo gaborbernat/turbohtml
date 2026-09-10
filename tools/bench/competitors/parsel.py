@@ -187,6 +187,7 @@ OPERATIONS = {
     "encode-inner": (_encode_inner, "parsel"),
     "parse": (parse, "parsel"),
     "parse-formatting": (parse, "parsel"),
+    "parse-nul": (parse, "parsel"),
     "parse-afe": (parse, "parsel"),
     "parse-scope": (parse, "parsel"),
     "find": (find, "parsel"),
