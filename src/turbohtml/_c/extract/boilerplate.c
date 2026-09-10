@@ -65,11 +65,19 @@ static Py_ssize_t boilerplate_linked_length(th_tree *tree, th_node *node) {
         }
         if (child->atom == TH_TAG_A) {
             Py_ssize_t length = 0;
-            th_node_text(tree, child, &length);
+            Py_UCS4 *text = th_node_text(tree, child, &length);
+            if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            PyMem_Free(text);
             linked += length;
             continue;
         }
-        linked += boilerplate_linked_length(tree, child);
+        Py_ssize_t child_length = boilerplate_linked_length(tree, child);
+        if (child_length < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        linked += child_length;
     }
     return linked;
 }
@@ -119,8 +127,15 @@ static int boilerplate_classify(th_tree *tree, th_node *unit, const th_node *con
         return 1;
     }
     Py_ssize_t length = 0;
-    th_node_text(tree, unit, &length);
+    Py_UCS4 *text = th_node_text(tree, unit, &length);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyMem_Free(text);
     Py_ssize_t linked = boilerplate_linked_length(tree, unit);
+    if (linked < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (linked > 0 && (double)linked / (double)length > max_link_density) {
         return 1;
     }
@@ -146,11 +161,12 @@ static int boilerplate_walk(th_tree *tree, th_node *node, const th_node *content
             continue;
         }
         Py_ssize_t length = 0;
-        const Py_UCS4 *text = th_node_text(tree, child, &length);
+        Py_UCS4 *text = th_node_text(tree, child, &length);
         if (text == NULL) { /* GCOVR_EXCL_BR_LINE: text realization cannot be forced to fail */
             return -1;      /* GCOVR_EXCL_LINE */
         }
         PyObject *collapsed = boilerplate_collapse(text, length);
+        PyMem_Free(text);
         if (collapsed == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced to fail */
             return -1;           /* GCOVR_EXCL_LINE */
         }
@@ -161,6 +177,10 @@ static int boilerplate_walk(th_tree *tree, th_node *node, const th_node *content
         }
         int boiler =
             boilerplate_classify(tree, child, content, collapsed_length, min_length, max_link_density, keep_headings);
+        if (boiler < 0) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            Py_DECREF(collapsed); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;            /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
         PyObject *row =
             PyTuple_Pack(3, collapsed, boiler ? Py_True : Py_False, boilerplate_is_heading(child) ? Py_True : Py_False);
         Py_DECREF(collapsed);

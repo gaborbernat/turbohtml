@@ -1,0 +1,2 @@
+Fix crashes when annotation exporters consume generators with temporary labels, and release temporary text buffers after
+boilerplate extraction.
