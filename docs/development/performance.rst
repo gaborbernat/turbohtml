@@ -11,8 +11,8 @@
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
-deviation as ``±N%``. Compare gaps against that spread. The published turbohtml measurements use PGO/LTO release builds;
-the default benchmark command builds a plain wheel for development.
+deviation as ``±N%``. Compare gaps against that spread. The published turbohtml measurements use PGO/LTO release builds
+unless a section states otherwise; the default benchmark command builds a plain wheel for development.
 
 The harness creates an isolated ``uv`` environment for each library. Mutation cases rebuild their input before each
 timed iteration, with setup excluded from the measurement. Read operations reuse a parsed tree. The corpora include
@@ -602,6 +602,17 @@ does.
 
 .. bench-table::
     :file: bench/editing-6.json
+
+Use :meth:`~turbohtml.Element.normalize` after edits leave adjacent text nodes. It sizes each run before copying the
+merged text, limiting repeated work and arena growth. The first nonempty text node survives; references to removed nodes
+remain valid as detached nodes. It removes empty text nodes.
+
+These cases vary the number and length of text nodes, with construction outside the timer. The measurements use CPython
+3.14.7 and a release build without PGO or LTO, with CPU-headroom and memory-pressure guards. The one- and two-node
+controls include per-call timer overhead. CodSpeed tracks both the 1,000-node case and the longer-text case.
+
+.. bench-table::
+    :file: bench/normalize-dom.json
 
 *******
  Links

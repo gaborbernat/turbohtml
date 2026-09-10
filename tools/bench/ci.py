@@ -158,6 +158,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "normalize-dom-long-text": ("normalize-dom", 5),
     "xpath-compare-unequal": ("xpath-compare", 6),
     "xpath-compare-scalar": ("xpath-compare", 9),
     "xpath-order-le": ("xpath-order", 5),
@@ -201,6 +202,9 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
 def _inline(operation: str, case_index: int = 0) -> object:
     """Return one case the bench already defines inline for ``operation`` (no corpus needed)."""
     return INPUTS[operation]()[case_index][1]
+
+
+_LOADERS["normalize-dom"] = partial(_inline, "normalize-dom", 4)
 
 
 _LOADERS.update({

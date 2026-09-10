@@ -984,6 +984,12 @@ def detect_language(text: str) -> None:
     _detect_language(text)
 
 
+def _normalization_tree(case: tuple[int, str]) -> turbohtml.Element:
+    root: Final = turbohtml.Element("p")
+    root.extend(turbohtml.Text(case[1]) for _ in range(case[0]))
+    return root
+
+
 def normalize(text: str) -> None:
     """Normalize text to Unicode NFC with turbohtml's C engine (quick-checked, then decompose/reorder/compose)."""
     _normalize("NFC", text)
@@ -1118,6 +1124,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "phone-parse": (phone_parse, "turbohtml"),
     "phone-format": (phone_format, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
+    "normalize-dom": (Mutating(_normalization_tree, turbohtml.Element.normalize), "turbohtml"),
     "normalize-marks": (normalize, "turbohtml"),
     "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),

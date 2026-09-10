@@ -401,6 +401,7 @@ OPERATIONS: dict[str, Operation] = {
     "encoding": Operation("detect a byte stream's encoding", "us"),
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
+    "normalize-dom": Operation("merge adjacent text nodes", "ns"),
     "normalize-marks": Operation("normalize long combining-mark runs", "ms"),
     "detect-language": Operation("detect a text's natural language", "us"),
     "detect-language-long": Operation("count trigrams in long prose", "ms"),
@@ -1348,6 +1349,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "encoding": _encoding_cases,
     "decode": _decode_cases,
     "normalize": _normalize_cases,
+    "normalize-dom": lambda: tuple(
+        (f"{count} adjacent text nodes / {len(text)} characters", (count, text))
+        for count, text in ((1, "text"), (2, "text"), (10, "text"), (100, "text"), (1_000, "text"), (100, "text" * 64))
+    ),
     "normalize-marks": lambda: tuple(
         (f"{size:,} combining marks", "a" + "\u0315" * (size // 2) + "\u0300" * (size // 2))
         for size in (100, 1_000, 10_000)
