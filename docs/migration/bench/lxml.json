@@ -1425,6 +1425,16 @@
       "parse nested formatting attributes — 256 b elements / identical attributes",
       4.9689298612065615e-05,
       "truncated output: 254/256 b elements and no text"
+    ],
+    [
+      "dispatch XSLT template rules — 128 unmatched templates, 1,024 nodes, 8 passes",
+      0.0012978832243485763,
+      0.001210212217665685
+    ],
+    [
+      "dispatch XSLT template rules — 128 unmatched templates, 1,024 nodes, 1 passes",
+      0.0004945451773589109,
+      0.00015998851189730583
     ]
   ],
   "spread": [
@@ -2847,6 +2857,16 @@
       null,
       0.020709800396554418,
       null
+    ],
+    [
+      null,
+      0.019930316434353015,
+      0.015376549375169996
+    ],
+    [
+      null,
+      0.006992427603400365,
+      0.03957862421933693
     ]
   ],
   "row_notes": {
