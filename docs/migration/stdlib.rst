@@ -271,3 +271,11 @@ is identical, because turbohtml runs the four forms in C over tables generated f
   legacy ``html.parser`` run on the same broken input; the turbohtml result is the conformant one.
 - If your code imports the reference tables from :mod:`python:html.entities` directly, keep that import: turbohtml does
   not re-export ``name2codepoint``/``codepoint2name``/``html5``.
+
+Compose node transformations
+============================
+
+A Python loop can pass a root through callables. ``clean.transform_node`` adds root/result validation, retains the root
+when a step returns ``None``, and handles replacement ownership in C. Functions, bound methods, and callable objects
+need no registration. The callable-loop benchmark measures identity callbacks without those checks; its numbers are call
+overhead, not equivalent validation work. See :doc:`/how-to/transforming-trees` for copying and mutating stages.

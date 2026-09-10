@@ -462,6 +462,7 @@ typedef struct {
     int xml;         /* XML/XHTML syntax: self-close empty elements, XML escaping, foreign namespace decls */
     int well_formed; /* implies xml: also drop non-XML characters, neutralize comments, and skip an attribute
                         whose name or duplicate xmlns XML cannot hold, for the sanitizer's inner_xml */
+    int inner;       /* omit the context root while retaining its serialization rules */
 } th_serialize_opts;
 
 /* Serialize node and its subtree under opts. When indent is non-NULL it is the

@@ -170,3 +170,13 @@ root element:
   separate fallback slot.
 - **Namespaces.** Without ``maybe_xhtml``/``namespace_elements`` there is nothing to port; with them, expect the
   turbohtml tree to be plain WHATWG HTML rather than namespace-prefixed libxml2 nodes.
+
+Cleanup after parsing
+=====================
+
+html5-parser delegates mutation and output to the chosen treebuilder. Follow :doc:`lxml`, :doc:`beautifulsoup`, or
+:doc:`html5lib` for that backend's cleanup and child-output path. After migrating to turbohtml, call
+``collapse_whitespace_node`` before traversal and ``strip_comments_node`` to remove descendant comments.
+``transform_node`` composes these with custom steps; retain its return value because a sanitizer step returns a copy.
+Use ``serialize(inner=True)`` or ``encode(inner=True)`` to omit the wrapper. See :doc:`/how-to/transforming-trees`. The
+parsing benchmark above measures tree construction; cleanup comparisons belong to the selected backend.

@@ -1,0 +1,44 @@
+{
+  "label": "consume indented body children chunks",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      1.2965451560376096e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      5.99613985286851e-05
+    ],
+    [
+      "mozilla blog (95 kB)",
+      0.00014085591396906239
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.0003738968096361835
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01260505518523136
+    ],
+    [
+      null,
+      0.009786910336290998
+    ],
+    [
+      null,
+      0.010323369596221576
+    ],
+    [
+      null,
+      0.007386916357763461
+    ]
+  ],
+  "notes": {}
+}

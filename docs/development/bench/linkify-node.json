@@ -1,0 +1,25 @@
+{
+  "label": "linkify a parsed tree",
+  "parties": [
+    "turbohtml",
+    "lxml-html-clean"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "markup (4 KiB)",
+      3.8318818117962415e-05,
+      0.0001288206666837747
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.027549034962003238,
+      0.011040248017480233
+    ]
+  ],
+  "notes": {
+    "lxml-html-clean": "host exclusions disabled; URL/mailto linking but no bare email addresses"
+  }
+}

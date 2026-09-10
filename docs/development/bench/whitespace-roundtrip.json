@@ -1,0 +1,55 @@
+{
+  "label": "normalize DOM whitespace then serialize",
+  "parties": [
+    "turbohtml",
+    "html5lib"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      1.374736310329657e-05,
+      0.0022080789785832167
+    ],
+    [
+      "ars technica (56 kB)",
+      7.295035114414834e-05,
+      0.009158846332866233
+    ],
+    [
+      "mozilla blog (95 kB)",
+      0.00013858721392049725,
+      0.018798845521814656
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.0005360802263112419,
+      0.0616665277921129
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.016522625511651557,
+      0.05155279767412484
+    ],
+    [
+      null,
+      0.009237563093023114,
+      0.02457910485747136
+    ],
+    [
+      null,
+      0.006486440692172346,
+      0.008749684049967938
+    ],
+    [
+      null,
+      0.006592477968083736,
+      0.03450614309511681
+    ]
+  ],
+  "notes": {
+    "html5lib": "filter/reparse/serialize; different listing, title, and foreign-text policy"
+  }
+}

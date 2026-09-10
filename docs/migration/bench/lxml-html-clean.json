@@ -30,6 +30,16 @@
       "linkify HTML — markup (4 KiB)",
       0.00011087927229406584,
       0.0001395619845349453
+    ],
+    [
+      "sanitize a parsed tree — post 4 KiB",
+      2.301309897726848e-05,
+      0.0004433374422205816
+    ],
+    [
+      "linkify a parsed tree — markup (4 KiB)",
+      3.8318818117962415e-05,
+      0.0001288206666837747
     ]
   ],
   "spread": [
@@ -57,11 +67,23 @@
       null,
       0.01391027709579616,
       0.011463713324468537
+    ],
+    [
+      null,
+      0.010954823311116607,
+      0.007235349936476951
+    ],
+    [
+      null,
+      0.027549034962003238,
+      0.011040248017480233
     ]
   ],
   "row_notes": {
     "2": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
     "3": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
-    "4": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing"
+    "4": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
+    "5": "blocklist policy rather than turbohtml's allowlist; not security equivalence",
+    "6": "host exclusions disabled; URL/mailto linking but no bare email addresses"
   }
 }

@@ -165,3 +165,14 @@ Replace ``LexborHTMLParser(html)`` (or ``HTMLParser(html)``) with :func:`turboht
   :meth:`~turbohtml.Element.attr`.
 - selectolax's lexbor-specific knobs, its Modest-vs-lexbor backend choice, and its raw C-level node handles are not
   exposed by turbohtml; the public surface is the typed Python tree, not the underlying engine's C API.
+
+Tree cleanup and child output
+=============================
+
+``inner_html`` maps to ``serialize(inner=True)``. The tested ``inner_html_pretty`` output contains quoted text and
+document-fragment markers; it is a diagnostic tree rendering, so it is not a substitute for ``Indent`` HTML output. Node
+text replacement and comment removal require traversal in application code; turbohtml performs these passes in C.
+selectolax does not expose template contents to these traversal APIs; the mutation benchmark rejects such inputs.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.

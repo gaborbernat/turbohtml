@@ -11,7 +11,7 @@ thread-safe config object (:class:`Policy`, :class:`Linkify`, :class:`Minify`, :
 
 from __future__ import annotations
 
-from turbohtml._html import Minify
+from turbohtml._html import Minify, collapse_whitespace_node, strip_comments_node, transform_node
 from turbohtml._internal._cssmin import CSSMinify, minify_css, minify_css_inline
 from turbohtml._internal._minify import JSMinify, minify, minify_js
 
@@ -76,6 +76,7 @@ __all__ = [
     "Removed",
     "Sanitizer",
     "Transform",
+    "collapse_whitespace_node",
     "linkify",
     "linkify_node",
     "minify",
@@ -87,5 +88,7 @@ __all__ = [
     "sanitize_node",
     "sanitize_report",
     "sanitize_report_node",
+    "strip_comments_node",
     "target_blank",
+    "transform_node",
 ]

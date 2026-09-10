@@ -257,6 +257,15 @@ from ._stubs.features import (
 from ._stubs.features import (
     annotation_tags as annotation_tags,
 )
+from ._stubs.features import (
+    collapse_whitespace_node as collapse_whitespace_node,
+)
+from ._stubs.features import (
+    strip_comments_node as strip_comments_node,
+)
+from ._stubs.features import (
+    transform_node as transform_node,
+)
 from ._stubs.query import (
     XPath as XPath,
 )

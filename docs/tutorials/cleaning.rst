@@ -70,4 +70,54 @@ shortening colors, and (for JS) renaming local bindings:
     a{color:#fff;margin:0}
     function f(b){var a=b/2;return a*a}
 
-Sanitized for safety, minified for size. Next, :doc:`pipelines` transforms markup without ever building a full tree.
+********************************
+ Clean a tree before reading it
+********************************
+
+Suppose you need to emit the contents of each paragraph into an XML-based format. Start with an HTML fragment that
+contains extra whitespace and an editor comment:
+
+.. testcode::
+
+    from typing import Final
+
+    from turbohtml import parse_fragment
+    from turbohtml.clean import collapse_whitespace_node, strip_comments_node, transform_node
+
+    fragment: Final = parse_fragment("<p>Hello   <b>world</b>!</p><!--editor--><p>Next  item</p>")
+    cleaned: Final = transform_node(fragment, strip_comments_node, collapse_whitespace_node)
+    print(cleaned is fragment)
+    print(cleaned.inner_html)
+
+.. testoutput::
+
+    True
+    <p>Hello <b>world</b>!</p><p>Next item</p>
+
+Both steps edit the existing tree. Read each paragraph's children as XML without serializing and reparsing the document:
+
+.. testcode::
+
+    for paragraph in cleaned.find_all("p"):
+        print(paragraph.inner_xml)
+
+.. testoutput::
+
+    Hello <b>world</b>!
+    Next item
+
+For HTML output with options, serialize a paragraph with ``inner=True`` to omit its ``<p>`` wrapper:
+
+.. testcode::
+
+    from turbohtml import Html, Minify
+
+    print(cleaned.find_all("p")[0].serialize(Html(layout=Minify()), inner=True))
+
+.. testoutput::
+
+    Hello <b>world</b>!
+
+Use ``inner_xml`` for XML consumers. HTML minification changes serialization syntax; tree whitespace collapse changes
+what subsequent traversals read. Neither whitespace collapse nor comment removal sanitizes untrusted markup. See
+:doc:`/how-to/transforming-trees` to add sanitization or application-specific steps.

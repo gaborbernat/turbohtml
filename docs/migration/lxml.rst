@@ -397,3 +397,13 @@ and takes the same ``exclusive``, ``with_comments``, and ``inclusive_ns_prefixes
 - EXSLT is built in but not exhaustive. The node-synthesizing ``str:tokenize``/``str:split`` and the implicit
   current-date ``date:`` forms stay out of scope; every other ``re:``/``set:``/``str:``/``math:``/``date:`` form ports
   straight through with no registration.
+
+Tree cleanup and child output
+=============================
+
+Use ``etree.strip_elements(root, etree.Comment, with_tail=False)`` to retain text following removed comments. Whitespace
+cleanup needs a text/tail walk. Child output needs escaped leading text plus child serialization;
+``serialize(inner=True)`` retains that context in turbohtml.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.

@@ -7,24 +7,64 @@
   "metrics": [],
   "rows": [
     [
-      "daring fireball (10 kB)",
+      "parse to a tree (source locations) — daring fireball (10 kB)",
       2.025454331426128e-05,
       0.04197148439076651
     ],
     [
-      "ars technica (56 kB)",
+      "parse to a tree (source locations) — ars technica (56 kB)",
       9.428895060163238e-05,
       0.04654109466840358
     ],
     [
-      "mozilla blog (95 kB)",
+      "parse to a tree (source locations) — mozilla blog (95 kB)",
       0.0002104670880574607,
       0.05016612238008141
     ],
     [
-      "whatwg spec (235 kB)",
+      "parse to a tree (source locations) — whatwg spec (235 kB)",
       0.0004435116646845927,
       0.06394568400961968
+    ],
+    [
+      "parse and serialize body children — daring fireball (10 kB)",
+      3.320708522854451e-05,
+      0.03687687159011451
+    ],
+    [
+      "parse and serialize body children — ars technica (56 kB)",
+      0.00015991935424608528,
+      0.04181500709576843
+    ],
+    [
+      "parse and serialize body children — mozilla blog (95 kB)",
+      0.00034569805355507316,
+      0.044799937517382205
+    ],
+    [
+      "parse and serialize body children — whatwg spec (235 kB)",
+      0.0008555719141440932,
+      0.05519439578832438
+    ],
+    [
+      "parse and encode body children — daring fireball (10 kB)",
+      3.578863023297648e-05,
+      0.036922076338669285
+    ],
+    [
+      "parse and encode body children — ars technica (56 kB)",
+      0.0001789036732589011,
+      0.041529701508504026
+    ],
+    [
+      "parse and encode body children — mozilla blog (95 kB)",
+      0.00036971291812430235,
+      0.04444826742595372
+    ],
+    [
+      "parse and encode body children — whatwg spec (235 kB)",
+      0.0009113009726509821,
+      0.05529916317512592
     ]
   ],
   "spread": [
@@ -47,7 +87,56 @@
       null,
       0.009930714309383505,
       0.0114561109118128
+    ],
+    [
+      null,
+      0.0050933834799636495,
+      0.018843811823378326
+    ],
+    [
+      null,
+      0.01134288257939863,
+      0.029326351606376682
+    ],
+    [
+      null,
+      0.010029676242603265,
+      0.01906707696900966
+    ],
+    [
+      null,
+      0.004601207467636349,
+      0.017461798327733424
+    ],
+    [
+      null,
+      0.004472366623403746,
+      0.020464218589003217
+    ],
+    [
+      null,
+      0.007185591446388618,
+      0.022845628169143702
+    ],
+    [
+      null,
+      0.010491871230291529,
+      0.01637710885686726
+    ],
+    [
+      null,
+      0.005412670481526325,
+      0.015720795985360022
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "4": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "5": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "6": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "7": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "8": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "9": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "10": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "11": "includes Node startup and pipe I/O; not in-process JavaScript engine timing"
+  }
 }

@@ -1,0 +1,102 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "jsdom"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "parse and serialize body children — daring fireball (10 kB)",
+      3.320708522854451e-05,
+      0.2520458958946013
+    ],
+    [
+      "parse and serialize body children — ars technica (56 kB)",
+      0.00015991935424608528,
+      0.2671330313314684
+    ],
+    [
+      "parse and serialize body children — mozilla blog (95 kB)",
+      0.00034569805355507316,
+      0.27117520817167434
+    ],
+    [
+      "parse and serialize body children — whatwg spec (235 kB)",
+      0.0008555719141440932,
+      0.32565665267369087
+    ],
+    [
+      "parse and encode body children — daring fireball (10 kB)",
+      3.578863023297648e-05,
+      0.25412948258842033
+    ],
+    [
+      "parse and encode body children — ars technica (56 kB)",
+      0.0001789036732589011,
+      0.27393038908485323
+    ],
+    [
+      "parse and encode body children — mozilla blog (95 kB)",
+      0.00036971291812430235,
+      0.2715109894925263
+    ],
+    [
+      "parse and encode body children — whatwg spec (235 kB)",
+      0.0009113009726509821,
+      0.3269496144882093
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.0050933834799636495,
+      0.032766800915216436
+    ],
+    [
+      null,
+      0.01134288257939863,
+      0.014585894694335444
+    ],
+    [
+      null,
+      0.010029676242603265,
+      0.019275767963438127
+    ],
+    [
+      null,
+      0.004601207467636349,
+      0.007394963276888675
+    ],
+    [
+      null,
+      0.004472366623403746,
+      0.03992050219013708
+    ],
+    [
+      null,
+      0.007185591446388618,
+      0.022738524475104223
+    ],
+    [
+      null,
+      0.010491871230291529,
+      0.023451983611536182
+    ],
+    [
+      null,
+      0.005412670481526325,
+      0.009789086434922175
+    ]
+  ],
+  "row_notes": {
+    "0": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "1": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "2": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "3": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "4": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "5": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "6": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    "7": "includes Node startup and pipe I/O; not in-process JavaScript engine timing"
+  }
+}

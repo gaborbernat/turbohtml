@@ -745,6 +745,156 @@
       "extract filtered page links — whatwg spec (235 kB)",
       0.0010619639210744936,
       0.002192290147074042
+    ],
+    [
+      "serialize body children — daring fireball (10 kB)",
+      9.359944669995457e-06,
+      3.40913892766063e-05
+    ],
+    [
+      "serialize body children — ars technica (56 kB)",
+      4.2464491040542875e-05,
+      0.00017161043236531745
+    ],
+    [
+      "serialize body children — mozilla blog (95 kB)",
+      8.87867843175627e-05,
+      0.0003442482649613036
+    ],
+    [
+      "serialize body children — whatwg spec (235 kB)",
+      0.0002502627500386249,
+      0.0010012064343906484
+    ],
+    [
+      "serialize indented body children — daring fireball (10 kB)",
+      1.3427094184711071e-05,
+      3.558658787975825e-05
+    ],
+    [
+      "serialize indented body children — ars technica (56 kB)",
+      6.027894429886753e-05,
+      0.00017682638880008503
+    ],
+    [
+      "serialize indented body children — mozilla blog (95 kB)",
+      0.00014089633784048297,
+      0.0003604485949987672
+    ],
+    [
+      "serialize indented body children — whatwg spec (235 kB)",
+      0.0003530077632300769,
+      0.0010478625229855727
+    ],
+    [
+      "encode body children as UTF-8 — daring fireball (10 kB)",
+      1.2011069808674316e-05,
+      3.680834902297647e-05
+    ],
+    [
+      "encode body children as UTF-8 — ars technica (56 kB)",
+      5.41490344403428e-05,
+      0.00018490611538860927
+    ],
+    [
+      "encode body children as UTF-8 — mozilla blog (95 kB)",
+      0.00010932817895081826,
+      0.00036485682365613076
+    ],
+    [
+      "encode body children as UTF-8 — whatwg spec (235 kB)",
+      0.0003043837621892938,
+      0.001059862901759819
+    ],
+    [
+      "encode indented body children as UTF-8 — daring fireball (10 kB)",
+      1.7604953442666252e-05,
+      3.8543050929244295e-05
+    ],
+    [
+      "encode indented body children as UTF-8 — ars technica (56 kB)",
+      7.532393659251586e-05,
+      0.00018876850087205335
+    ],
+    [
+      "encode indented body children as UTF-8 — mozilla blog (95 kB)",
+      0.00017654151429269405,
+      0.0003766984594525032
+    ],
+    [
+      "encode indented body children as UTF-8 — whatwg spec (235 kB)",
+      0.0004371711860737074,
+      0.0011110995813699749
+    ],
+    [
+      "collapse DOM text whitespace — daring fireball (10 kB)",
+      3.7942158238971993e-06,
+      0.00023271760308792486
+    ],
+    [
+      "collapse DOM text whitespace — ars technica (56 kB)",
+      2.9330841319582152e-05,
+      0.0010483959958188886
+    ],
+    [
+      "collapse DOM text whitespace — mozilla blog (95 kB)",
+      5.532939750689062e-05,
+      0.00261704786385053
+    ],
+    [
+      "collapse DOM text whitespace — whatwg spec (235 kB)",
+      0.00026638981247136445,
+      0.008773847903664015
+    ],
+    [
+      "collapse DOM text whitespace — unchanged text (1 MiB)",
+      0.000636448973637016,
+      0.006019752442625759
+    ],
+    [
+      "collapse DOM text whitespace — whitespace runs (1 MiB)",
+      0.0010200365876850508,
+      0.01645333778166484
+    ],
+    [
+      "remove DOM comments — daring fireball (10 kB)",
+      7.836686866842987e-07,
+      1.4691387756708234e-06
+    ],
+    [
+      "remove DOM comments — ars technica (56 kB)",
+      3.740509631218932e-06,
+      5.344602186596603e-06
+    ],
+    [
+      "remove DOM comments — mozilla blog (95 kB)",
+      6.107953974302897e-06,
+      1.1354948204219303e-05
+    ],
+    [
+      "remove DOM comments — whatwg spec (235 kB)",
+      1.9096269094613188e-05,
+      4.047451557198656e-05
+    ],
+    [
+      "remove comments then collapse whitespace — daring fireball (10 kB)",
+      4.591630613504094e-06,
+      0.00022849073949752588
+    ],
+    [
+      "remove comments then collapse whitespace — ars technica (56 kB)",
+      3.3016244969985564e-05,
+      0.001022820793423307
+    ],
+    [
+      "remove comments then collapse whitespace — mozilla blog (95 kB)",
+      6.142306354680234e-05,
+      0.0026051117760440925
+    ],
+    [
+      "remove comments then collapse whitespace — whatwg spec (235 kB)",
+      0.00028451702776995563,
+      0.008713146560997606
     ]
   ],
   "spread": [
@@ -1487,7 +1637,184 @@
       null,
       0.1209415112126743,
       0.0443077820770914
+    ],
+    [
+      null,
+      0.04900239483383481,
+      0.009844098904304724
+    ],
+    [
+      null,
+      0.02085759777073082,
+      0.009618776697146612
+    ],
+    [
+      null,
+      0.021612543940447097,
+      0.011747578731343357
+    ],
+    [
+      null,
+      0.02304510266877739,
+      0.013360942478704639
+    ],
+    [
+      null,
+      0.009020195795098697,
+      0.008337541963749223
+    ],
+    [
+      null,
+      0.04563381983240829,
+      0.015029693002591929
+    ],
+    [
+      null,
+      0.01862198937308882,
+      0.006903150142919422
+    ],
+    [
+      null,
+      0.008240278605065602,
+      0.007710091377307485
+    ],
+    [
+      null,
+      0.011500230389031871,
+      0.011274940141325128
+    ],
+    [
+      null,
+      0.014436976112573876,
+      0.00832634193772904
+    ],
+    [
+      null,
+      0.009369529991274703,
+      0.0076648389749101814
+    ],
+    [
+      null,
+      0.008444578746948619,
+      0.012302610272722985
+    ],
+    [
+      null,
+      0.09398984483438041,
+      0.006077523613944388
+    ],
+    [
+      null,
+      0.021846168131316568,
+      0.010236597669741151
+    ],
+    [
+      null,
+      0.023122713950249157,
+      0.011754810141965772
+    ],
+    [
+      null,
+      0.04152935537309717,
+      0.007825481408113743
+    ],
+    [
+      null,
+      0.013449464826156577,
+      0.006131083593930987
+    ],
+    [
+      null,
+      0.011097004813720538,
+      0.005597104191128281
+    ],
+    [
+      null,
+      0.006681385641553546,
+      0.013618790206419356
+    ],
+    [
+      null,
+      0.007787575131436823,
+      0.004918089205537523
+    ],
+    [
+      null,
+      0.0016774407883850412,
+      0.002333777063210272
+    ],
+    [
+      null,
+      0.017239136292334985,
+      0.02202292402294205
+    ],
+    [
+      null,
+      0.08232661867359091,
+      0.06679857162562491
+    ],
+    [
+      null,
+      0.04523686370299188,
+      0.04814342994145605
+    ],
+    [
+      null,
+      0.021690814745820994,
+      0.05498948123081124
+    ],
+    [
+      null,
+      0.039054187956103985,
+      0.07180471746201678
+    ],
+    [
+      null,
+      0.037957003629964244,
+      0.028560742512944538
+    ],
+    [
+      null,
+      0.010357148042320826,
+      0.012695327575612593
+    ],
+    [
+      null,
+      0.008327535273151634,
+      0.022999700975610243
+    ],
+    [
+      null,
+      0.011228490949197806,
+      0.0090878492425477
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "148": "joins child serializations and escaped leading text",
+    "149": "joins child serializations and escaped leading text",
+    "150": "joins child serializations and escaped leading text",
+    "151": "joins child serializations and escaped leading text",
+    "152": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "153": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "154": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "155": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "156": "joins Unicode child output then encodes UTF-8",
+    "157": "joins Unicode child output then encodes UTF-8",
+    "158": "joins Unicode child output then encodes UTF-8",
+    "159": "joins Unicode child output then encodes UTF-8",
+    "160": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "161": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "162": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "163": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "164": "Python text/regex walk; parser recovery and text storage differ",
+    "165": "Python text/regex walk; parser recovery and text storage differ",
+    "166": "Python text/regex walk; parser recovery and text storage differ",
+    "167": "Python text/regex walk; parser recovery and text storage differ",
+    "168": "Python text/regex walk; parser recovery and text storage differ",
+    "169": "Python text/regex walk; parser recovery and text storage differ",
+    "174": "Python text/regex walk; parser recovery and text storage differ",
+    "175": "Python text/regex walk; parser recovery and text storage differ",
+    "176": "Python text/regex walk; parser recovery and text storage differ",
+    "177": "Python text/regex walk; parser recovery and text storage differ"
+  }
 }

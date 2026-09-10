@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING, Any
+from html import escape
+from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urljoin
 
 import lxml.etree as lxml_etree  # ty: ignore[unresolved-import]  # C extension, ships no type stubs
@@ -11,6 +12,7 @@ from lxml import html as lxml_html
 from lxml.builder import E
 
 from bench.timing import Mutating
+from bench.tree_text import PRESERVE_TAGS, SPACE_RUN
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -380,7 +382,60 @@ def htmlparser(text: str) -> None:
     parser.close()
 
 
+def _serialize_inner(text: str) -> str:
+    body: Final = _body(text)
+    return escape(body.text or "", quote=False) + "".join(
+        lxml_html.tostring(child, encoding="unicode") for child in body
+    )
+
+
+@functools.cache
+def _body(text: str) -> HtmlElement:
+    return _parsed(text).find("body")
+
+
+def _encode_inner(text: str) -> bytes:
+    return _serialize_inner(text).encode()
+
+
+def _serialize_inner_indent(text: str) -> str:
+    body: Final = _body(text)
+    return escape(body.text or "", quote=False) + "".join(
+        lxml_html.tostring(child, encoding="unicode", pretty_print=True) for child in body
+    )
+
+
+def _encode_inner_indent(text: str) -> bytes:
+    return _serialize_inner_indent(text).encode()
+
+
+def _collapse_whitespace(tree: HtmlElement) -> None:
+    for node in tree.iter():
+        if any(parent.tag in PRESERVE_TAGS for parent in node.iterancestors()):
+            continue
+        if isinstance(node.tag, str) and node.tag not in PRESERVE_TAGS and node.text:
+            node.text = SPACE_RUN.sub(" ", node.text)
+        if node.tail:
+            node.tail = SPACE_RUN.sub(" ", node.tail)
+
+
+def _transform_tree(tree: HtmlElement) -> None:
+    _strip_comments(tree)
+    _collapse_whitespace(tree)
+
+
+def _strip_comments(tree: HtmlElement) -> None:
+    lxml_etree.strip_elements(tree, lxml_etree.Comment, with_tail=False)
+
+
 OPERATIONS = {
+    "collapse-whitespace": (Mutating(lxml_html.document_fromstring, _collapse_whitespace), "lxml"),
+    "transform-tree": (Mutating(lxml_html.document_fromstring, _transform_tree), "lxml"),
+    "serialize-inner": (_serialize_inner, "lxml"),
+    "encode-inner": (_encode_inner, "lxml"),
+    "serialize-inner-indent": (_serialize_inner_indent, "lxml"),
+    "encode-inner-indent": (_encode_inner_indent, "lxml"),
+    "strip-comments": (Mutating(lxml_html.document_fromstring, _strip_comments), "lxml"),
     "parse": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),
