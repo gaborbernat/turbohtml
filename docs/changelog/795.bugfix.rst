@@ -1,2 +1,4 @@
 Fix crashes when annotation exporters consume generators with temporary labels, and release temporary text buffers after
 boilerplate extraction.
+
+Check the magnitude of XPath numbers before converting them to integers, avoiding undefined behavior for large values.

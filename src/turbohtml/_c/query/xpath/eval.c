@@ -563,7 +563,7 @@ static int format_number(double value, Py_UCS4 **out, Py_ssize_t *out_len) {
         len = snprintf(buf, sizeof(buf), "NaN");
     } else if (isinf(value)) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isinf macro */
         len = snprintf(buf, sizeof(buf), "%s", value < 0 ? "-Infinity" : "Infinity");
-    } else if (value == (double)(long long)value && fabs(value) < 1e15) {
+    } else if (fabs(value) < 1e15 && value == (double)(long long)value) {
         len = snprintf(buf, sizeof(buf), "%lld", (long long)value);
     } else {
         len = decimal_expand(value, buf);
