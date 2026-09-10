@@ -1025,6 +1025,11 @@ overlap case matches the first node, where scanning can finish before building a
 Value comparisons distinguish equality from existential inequality: two sets can contain both equal and unequal pairs.
 The numeric cases use disjoint ranges and include a first-pair match as a control. Parsing runs before timing.
 
+The 10-node equality and both scalar-equality turbohtml cells use matched CPython 3.14.7 release builds without PGO or
+LTO. Long scalar equality fell from 10.070 to 6.961 µs (30.88% less time); the 32-character control fell from 0.356 to
+0.328 µs (7.79% less). All twelve measurement runs passed CPU and memory guards. The 10-node candidate retains its 6.33%
+spread warning. Other rows and competitor measurements retain their earlier builds.
+
 .. bench-table::
     :file: bench/xpath-compare.json
 
