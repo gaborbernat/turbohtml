@@ -1119,7 +1119,44 @@ def links_external(text: str) -> None:
     _extract_links(text, "https://www.example.co.uk/", external_only=True)
 
 
+def _node_equals(case: tuple[int, str]) -> bool:
+    left, right = _equality_pair(*case)
+    return left.equals(right)
+
+
+@functools.cache
+def _equality_pair(count: int, variant: str) -> tuple[turbohtml.Element, turbohtml.Element]:
+    if variant == "duplicates":
+        duplicates: Final = {
+            "".join(
+                letter.upper() if mask & (1 << index) else letter for index, letter in enumerate("abcdefghij")
+            ): "same"
+            for mask in range(count - 3)
+        }
+        anchors: Final = {"first": "1", "second": "2", "third": "3"}
+        return turbohtml.Element("div", anchors | duplicates), turbohtml.Element("div", duplicates | anchors)
+    left: Final = turbohtml.Element("div")
+    right: Final = turbohtml.Element("div")
+    right.attrs["data-seed"] = ""
+    del right.attrs["data-seed"]
+    names: Final = [f"data-{index}" for index in range(count)]
+    for name in names:
+        left.attrs[name] = "é水😀"
+    order: Final = names[count // 2 :] + names[: count // 2] if variant == "rotated" else names
+    for name in reversed(order) if variant == "reversed" else order:
+        right.attrs[name] = "é水😀"
+    if variant == "early-value":
+        right.attrs[names[0]] = "different"
+    elif variant == "late-value":
+        right.attrs[names[-1]] = "different"
+    elif variant == "disjoint":
+        del right.attrs[names[-1]]
+        right.attrs["data-missing"] = "é水😀"
+    return left, right
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "node-equals": (_node_equals, "turbohtml"),
     "build": (build, "turbohtml"),
     "build-e": (build_e, "turbohtml"),
     "construct": (construct, "turbohtml"),

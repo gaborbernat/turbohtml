@@ -306,6 +306,7 @@ OPERATIONS: dict[str, Operation] = {
     "xpath-distinct": Operation("deduplicate XPath string values", "us"),
     "xpath-set": Operation("compare XPath node-set membership", "us"),
     "xpath-compare": Operation("compare XPath values", "us"),
+    "node-equals": Operation("compare element attributes", "us"),
     "xpath-translate": Operation("translate XPath characters", "us"),
     "xpath-order": Operation("compare numeric XPath node sets", "us"),
     "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
@@ -1169,6 +1170,24 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             ("//li < //b", "<ul>" + "<li>1</li>" * 1000 + "</ul><section>" + "<b>2</b>" * 1000 + "</section>"),
         ),
     )),
+    "node-equals": lambda: tuple(
+        (f"{count:,} attribute{'s' if count != 1 else ''}, {variant}", (count, variant))
+        for count, variant in (
+            (1, "aligned"),
+            (10, "aligned"),
+            (31, "aligned"),
+            (32, "aligned"),
+            (100, "aligned"),
+            (1000, "aligned"),
+            (100, "reversed"),
+            (1000, "reversed"),
+            (1000, "early-value"),
+            (100, "late-value"),
+            (100, "disjoint"),
+            (100, "rotated"),
+            (1003, "duplicates"),
+        )
+    ),
     "xpath-translate": lambda: ((
         *tuple(
             (

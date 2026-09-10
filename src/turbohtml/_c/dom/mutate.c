@@ -428,30 +428,90 @@ static int attr_value_equal(const th_node_attr *left, const th_node_attr *right)
            (left->value_len == 0 || memcmp(left->value, right->value, (size_t)left->value_len * sizeof(Py_UCS4)) == 0);
 }
 
-/* Whether two elements carry the same attribute set, order-independent per the DOM.
-   An element's attribute names are unique, so a name match is the sole candidate and
-   its value settles the pair. */
+static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right,
+                               Py_ssize_t start);
+
 static int attrs_equal(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right) {
     if (left->attr_count != right->attr_count) {
         return 0;
     }
+    int can_index = left->attr_count >= 32 &&
+                    (size_t)left->attr_count <=
+                        SIZE_MAX / (4 * sizeof(Py_ssize_t)); /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+    Py_ssize_t comparisons = 0;
     for (Py_ssize_t index = 0; index < left->attr_count; index++) {
         const th_node_attr *want = &left->attrs[index];
-        int found = 0;
-        for (Py_ssize_t other = 0; other < right->attr_count; other++) {
+        Py_ssize_t other = 0;
+        for (; other < right->attr_count; other++) {
             if (attr_name_equal(left_tree, want, right_tree, &right->attrs[other])) {
                 if (!attr_value_equal(want, &right->attrs[other])) {
                     return 0;
                 }
-                found = 1;
                 break;
             }
         }
-        if (!found) {
+        if (other == right->attr_count) {
             return 0;
+        }
+        if (can_index) {
+            comparisons += other + 1;
+            if (comparisons >= left->attr_count * 2 && index + 1 < left->attr_count) {
+                can_index = 0;
+                const int indexed = attrs_equal_indexed(left_tree, left, right_tree, right, index + 1);
+                if (indexed >= 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    return indexed;
+                }
+            } /* GCOVR_EXCL_LINE: allocation failure fallback */
         }
     }
     return 1;
+}
+
+static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right,
+                               Py_ssize_t start) {
+    size_t capacity = 64;
+    while (capacity < (size_t)right->attr_count * 2) {
+        capacity *= 2;
+    }
+    Py_ssize_t *slots = PyMem_Calloc(capacity, sizeof(Py_ssize_t));
+    if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: fall back to the allocation-free comparison */
+    }
+    for (Py_ssize_t index = 0; index < right->attr_count; index++) {
+        size_t slot = ((size_t)right->attrs[index].name_atom * 2654435761U) & (capacity - 1);
+        while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != right->attrs[index].name_atom) {
+            slot = (slot + 1) & (capacity - 1);
+        }
+        /* Constructors can retain duplicate normalized names; equality uses their first value. */
+        if (slots[slot] == 0) {
+            slots[slot] = index + 1;
+        }
+    }
+    int equal = 1;
+    uint32_t previous_atom = UINT32_MAX;
+    size_t slot = 0;
+    for (Py_ssize_t index = start; index < left->attr_count; index++) {
+        const th_node_attr *want = &left->attrs[index];
+        uint32_t atom = want->name_atom;
+        if (atom != previous_atom) {
+            previous_atom = atom;
+            if (left_tree != right_tree) {
+                Py_ssize_t name_len;
+                const char *name = th_attr_name(left_tree, atom, &name_len);
+                atom = th_attr_lookup(right_tree, name, name_len);
+            }
+            slot = ((size_t)atom * 2654435761U) & (capacity - 1);
+            while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != atom) {
+                slot = (slot + 1) & (capacity - 1);
+            }
+        }
+        if (slots[slot] == 0 || !attr_value_equal(want, &right->attrs[slots[slot] - 1])) {
+            equal = 0;
+            break;
+        }
+    }
+    PyMem_Free(slots);
+    return equal;
 }
 
 /* Whether two nodes' own character data match, realizing a borrowed text span first. */

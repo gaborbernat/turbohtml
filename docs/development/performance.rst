@@ -7,7 +7,7 @@
     The September 8 audit measurements remain provisional. The first two passes checked CPU headroom without enforcing
     memory-pressure or swap limits. The third and fourth passes enforced those limits, but some before/after comparisons
     used different interpreter builds. Those comparisons need repeats with one interpreter before they establish a speed
-    improvement. The normalization, attribute, and translation tables below use matched interpreter and binary
+    improvement. The normalization, attribute, equality, and translation tables below use matched interpreter and binary
     configurations.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
@@ -635,6 +635,26 @@ replacements, and XML attributes.
 
 .. bench-table::
     :file: bench/parse-xml-attrs.json
+
+Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
+affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
+comparisons per attribute on average. Early mismatches return before allocating the index.
+
+These cases compare two detached elements with string-valued attributes, varying their count and order, with mismatches
+at either end. Tree construction happens outside the timer; both adapters include a cached pair lookup. BeautifulSoup
+uses ``Tag.__eq__`` on the same inputs, independent of its parser backend. The measurements use CPython 3.14.7 and a
+release build without PGO or LTO. CodSpeed tracks the 1,000-attribute inputs and the duplicate-name control.
+
+The duplicate-name control uses constructor keys that normalize to the same HTML attribute name. It retains the first
+matching value when comparing attributes. BeautifulSoup preserves key casing in constructor input, so that row has no
+equivalent comparison.
+
+Matched direct-call measurements of 1,000 reversed attributes fell from 1,490 to 30 microseconds after indexing, a 98%
+reduction. The table includes the adapter lookup overhead. BeautifulSoup remains faster on the large equal-attribute
+cases; its Python dictionary comparison avoids constructing a temporary index.
+
+.. bench-table::
+    :file: bench/node-equals.json
 
 *******
  Links
