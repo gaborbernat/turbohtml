@@ -672,6 +672,16 @@ includes timer overhead; the samples were noisy. CPU-headroom and memory-pressur
 .. bench-table::
     :file: bench/range-boundary.json
 
+Cloning a range of complete children resolves their interval once, avoiding repeated boundary comparisons for each
+child. These cases clone all 1,000 children or a single child, with tree and range construction outside the timer.
+CodSpeed tracks both cases. On the same release configuration, the 1,000-child comparison fell from 1,487.138 to 10.498
+µs (99.29% faster); the single-child mean fell from 0.359 to 0.331 µs (7.64% faster). The single-child samples have 10%
+relative standard deviation and include per-call timer overhead. We ran both comparisons under CPU-headroom and
+memory-pressure guards.
+
+.. bench-table::
+    :file: bench/range-contained.json
+
 Adding attributes through ``element.attrs`` reserves space for later insertions, reducing array copies and retained
 arena buffers on elements with many attributes. Replacement cases exercise existing names; they do not benefit from
 extra capacity. The insertion benchmarks construct their input outside the timer.

@@ -124,13 +124,6 @@ static th_node *shallow_clone(th_tree *tree, th_node *node) {
     return copy;
 }
 
-/* A node fully inside the range: its whole span sits strictly between the boundaries. */
-static int is_contained(th_node *node, th_node *start_node, Py_ssize_t start_offset, th_node *end_node,
-                        Py_ssize_t end_offset) {
-    return bp_compare(node, 0, start_node, start_offset) > 0 &&
-           bp_compare(node, node_length(node), end_node, end_offset) < 0;
-}
-
 /* A node straddling exactly one boundary (an inclusive ancestor of one endpoint but not the other). */
 static int is_partially_contained(th_node *node, th_node *start_node, th_node *end_node) {
     return is_inclusive_ancestor(node, start_node) != is_inclusive_ancestor(node, end_node);
@@ -151,9 +144,26 @@ static void adopt_fragment_children(th_node *parent, th_node *fragment) {
 static th_node **collect_contained(th_node *common, th_node *start_node, Py_ssize_t start_offset, th_node *end_node,
                                    Py_ssize_t end_offset, Py_ssize_t *out_count, int *error) {
     *error = 0;
+    Py_ssize_t from = start_offset;
+    if (start_node != common) {
+        th_node *child = start_node;
+        while (child->parent != common) {
+            child = child->parent;
+        }
+        from = node_index(child) + 1;
+    }
+    Py_ssize_t to = end_offset;
+    if (end_node != common) {
+        th_node *child = end_node;
+        while (child->parent != common) {
+            child = child->parent;
+        }
+        to = node_index(child);
+    }
     Py_ssize_t count = 0;
-    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling) {
-        if (is_contained(child, start_node, start_offset, end_node, end_offset)) {
+    Py_ssize_t position = 0;
+    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling, position++) {
+        if (position >= from && position < to) {
             count++;
         }
     }
@@ -168,8 +178,9 @@ static th_node **collect_contained(th_node *common, th_node *start_node, Py_ssiz
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t index = 0;
-    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling) {
-        if (is_contained(child, start_node, start_offset, end_node, end_offset)) {
+    position = 0;
+    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling, position++) {
+        if (position >= from && position < to) {
             if (child->type == TH_NODE_DOCTYPE) {
                 PyErr_SetString(PyExc_ValueError, "cannot extract a range spanning a doctype");
                 PyMem_Free(nodes);

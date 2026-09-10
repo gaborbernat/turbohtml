@@ -1168,12 +1168,29 @@ def _range_boundary_setup(case: tuple[int, str]) -> Callable[[], None]:
     return run
 
 
-def _range_boundary(run: Callable[[], None]) -> None:
+def _run_range(run: Callable[[], None]) -> None:
     run()
 
 
+def _range_contained_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.extend(turbohtml.Element("i") for _ in range(count))
+    boundary: Final = _Range(root)
+    boundary.set_end(root, count)
+
+    def run() -> None:
+        if variant == "extract":
+            boundary.extract_contents()
+        else:
+            boundary.clone_contents()
+
+    return run
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
-    "range-boundary": (Mutating(_range_boundary_setup, _range_boundary), "turbohtml"),
+    "range-boundary": (Mutating(_range_boundary_setup, _run_range), "turbohtml"),
+    "range-contained": (Mutating(_range_contained_setup, _run_range), "turbohtml"),
     "node-equals": (_node_equals, "turbohtml"),
     "build": (build, "turbohtml"),
     "build-e": (build_e, "turbohtml"),

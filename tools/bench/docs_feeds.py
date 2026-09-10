@@ -58,6 +58,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "normalize": "normalize",
     "normalize-dom": "normalize-dom",
     "range-boundary": "range-boundary",
+    "range-contained": "range-contained",
     "node-equals": "node-equals",
     "normalize-marks": "normalize-marks",
     "parse-xml-attrs": "parse-xml-attrs",
