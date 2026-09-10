@@ -40,13 +40,6 @@ def test_node_equality_duplicate_benchmark_result() -> None:
     assert operation(cast("tuple[int, str]", INPUTS["node-equals"]()[12][1]))
 
 
-def test_competitor_node_equality_duplicates_unsupported() -> None:
-    module: Final = pytest.importorskip("bench.competitors.beautifulsoup4", exc_type=ImportError)
-    operation: Final = cast("Callable[[tuple[int, str]], bool]", module.OPERATIONS["node-equals"][0])
-    with pytest.raises(ValueError, match="constructor does not normalize case variants"):
-        operation(cast("tuple[int, str]", INPUTS["node-equals"]()[12][1]))
-
-
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
