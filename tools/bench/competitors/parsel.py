@@ -23,7 +23,7 @@ _TRANSLATOR = HTMLTranslator()
 @functools.cache
 def _parsed(text: str) -> Selector:
     """Return a document parsed once, cached so the read-path operations time only the query."""
-    return Selector(text=text)
+    return Selector(text=text, namespaces={"str": "http://exslt.org/strings"})
 
 
 def parse(text: str) -> None:
@@ -206,4 +206,5 @@ OPERATIONS = {
     "xpath-compare": (_xpath_scaling, "parsel"),
     "xpath-order": (_xpath_scaling, "parsel"),
     "xpath-translate": (_xpath_scaling, "parsel"),
+    "xpath-concat": (_xpath_scaling, "parsel"),
 }

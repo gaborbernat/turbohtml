@@ -308,6 +308,7 @@ OPERATIONS: dict[str, Operation] = {
     "xpath-set": Operation("compare XPath node-set membership", "us"),
     "xpath-compare": Operation("compare XPath values", "us"),
     "node-equals": Operation("compare element attributes", "us"),
+    "xpath-concat": Operation("concatenate XPath node strings", "us"),
     "xpath-translate": Operation("translate XPath characters", "us"),
     "xpath-order": Operation("compare numeric XPath node sets", "us"),
     "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
@@ -1349,6 +1350,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             (100, "rotated"),
             (1003, "duplicates"),
         )
+    ),
+    "xpath-concat": lambda: tuple(
+        (
+            f"{count:,} nodes, {length} characters",
+            ("str:concat(//i)", "<main>" + ("<i>" + "a" * length + "</i>") * count + "</main>"),
+        )
+        for count, length in ((10_000, 32), (10, 32_768))
     ),
     "xpath-translate": lambda: ((
         *tuple(

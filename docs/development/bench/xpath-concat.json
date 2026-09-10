@@ -1,0 +1,17 @@
+{
+  "label": "concatenate XPath node strings",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "10,000 nodes, 32 characters",
+      0.0005025375868475142
+    ],
+    [
+      "10 nodes, 32768 characters",
+      0.00013009689546379378
+    ]
+  ]
+}

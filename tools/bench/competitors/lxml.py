@@ -268,7 +268,11 @@ def getpath(text: str) -> None:
             root.getpath(element)
 
 
-_EXSLT_NS = {"re": "http://exslt.org/regular-expressions", "set": "http://exslt.org/sets"}
+_EXSLT_NS = {
+    "re": "http://exslt.org/regular-expressions",
+    "set": "http://exslt.org/sets",
+    "str": "http://exslt.org/strings",
+}
 _SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
 
 
@@ -502,6 +506,7 @@ OPERATIONS = {
     "xpath-compare": (_xpath_scaling, "lxml"),
     "xpath-order": (_xpath_scaling, "lxml"),
     "xpath-translate": (_xpath_scaling, "lxml"),
+    "xpath-concat": (_xpath_scaling, "lxml"),
     "transform": (transform, "lxml.etree"),
     "transform-number": (transform, "lxml.etree"),
     "transform-dense": (transform, "lxml.etree"),

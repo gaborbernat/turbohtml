@@ -1070,6 +1070,7 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
     const xp_nodeset *nodes = &arg->nodes;
     Py_UCS4 *buf = NULL;
     Py_ssize_t total = 0;
+    size_t capacity = 0;
     for (Py_ssize_t index = 0; index < nodes->len; index++) {
         Py_ssize_t part_len;
         Py_UCS4 *part = item_string(tree, nodes->items[index], &part_len);
@@ -1077,14 +1078,33 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
             PyMem_Free(buf); /* GCOVR_EXCL_LINE */
             return -1;       /* GCOVR_EXCL_LINE */
         }
-        Py_UCS4 *grown = PyMem_Realloc(buf, (size_t)(total + part_len) * sizeof(Py_UCS4));
-        if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
-            PyMem_Free(part); /* GCOVR_EXCL_LINE */
-            PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
-            return -1;        /* GCOVR_EXCL_LINE */
+        const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
+        if ((size_t)part_len > limit - (size_t)total) { /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(part);                           /* GCOVR_EXCL_LINE */
+            PyMem_Free(buf);                            /* GCOVR_EXCL_LINE */
+            return -1;                                  /* GCOVR_EXCL_LINE */
         }
-        buf = grown;
-        memcpy(buf + total, part, (size_t)part_len * sizeof(Py_UCS4));
+        const size_t needed = (size_t)total + (size_t)part_len;
+        if (needed > capacity) {
+            size_t bytes;
+            /* GCOVR_EXCL_BR_START: allocation sizes cannot reach the overflow limit */
+            if (!th_grow_cap(needed, capacity, 64, sizeof(Py_UCS4), &capacity, &bytes)) {
+                PyMem_Free(part); /* GCOVR_EXCL_LINE */
+                PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
+                return -1;        /* GCOVR_EXCL_LINE */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+            Py_UCS4 *grown = PyMem_Realloc(buf, bytes);
+            if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(part); /* GCOVR_EXCL_LINE */
+                PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
+                return -1;        /* GCOVR_EXCL_LINE */
+            }
+            buf = grown;
+        }
+        if (part_len > 0) {
+            memcpy(buf + total, part, (size_t)part_len * sizeof(Py_UCS4));
+        }
         total += part_len;
         PyMem_Free(part);
     }

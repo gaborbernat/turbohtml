@@ -1244,6 +1244,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "xpath-set": (_xpath_scaling, "turbohtml"),
     "xpath-compare": (_xpath_scaling, "turbohtml"),
     "xpath-translate": (_xpath_scaling, "turbohtml"),
+    "xpath-concat": (_xpath_scaling, "turbohtml"),
     "xpath-order": (_xpath_scaling, "turbohtml"),
     "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),

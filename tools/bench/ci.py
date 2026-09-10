@@ -193,6 +193,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "xpath-order-le": ("xpath-order", 5),
     "xpath-order-gt": ("xpath-order", 8),
     "xpath-order-ge": ("xpath-order", 11),
+    "xpath-concat-long": ("xpath-concat", 1),
     "xpath-translate-short": ("xpath-translate", 3),
     "xpath-translate-repeated": ("xpath-translate", 7),
     "xpath-translate-long-map": ("xpath-translate", 6),
@@ -241,6 +242,7 @@ def _inline(operation: str, case_index: int = 0) -> object:
     return INPUTS[operation]()[case_index][1]
 
 
+_LOADERS["xpath-concat"] = partial(_inline, "xpath-concat")
 _LOADERS["node-equals"] = partial(_inline, "node-equals", 5)
 _LOADERS["transform-number"] = partial(_inline, "transform-number", 3)
 _LOADERS["normalize-dom"] = partial(_inline, "normalize-dom", 4)
