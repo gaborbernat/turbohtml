@@ -438,6 +438,51 @@ static void strmap_free(strmap *map) {
     map->count = 0;
 }
 
+typedef struct {
+    const Py_UCS4 *name;
+    Py_ssize_t length;
+    Py_ssize_t first;
+} xslt_name_entry;
+
+typedef struct {
+    xslt_name_entry *entries;
+    size_t capacity;
+} xslt_name_index;
+
+static size_t name_index_slot(const xslt_name_index *index, const Py_UCS4 *name, Py_ssize_t length) {
+    size_t slot = str_hash(name, length) & (index->capacity - 1);
+    while (index->entries[slot].first != 0 &&
+           !str_eq(index->entries[slot].name, index->entries[slot].length, name, length)) {
+        slot = (slot + 1) & (index->capacity - 1);
+    }
+    return slot;
+}
+
+static int name_index_reserve(xslt_name_index *index, Py_ssize_t count) {
+    if (count < 16) {
+        return 0;
+    }
+    size_t bytes;
+    /* GCOVR_EXCL_BR_START: allocation size overflow */
+    if (!th_grow_cap((size_t)count * 2, 0, 32, sizeof(*index->entries), &index->capacity, &bytes)) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    index->entries = PyMem_Calloc(1, bytes);
+    return index->entries == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+}
+
+static Py_ssize_t name_index_add(xslt_name_index *index, const Py_UCS4 *name, Py_ssize_t length, Py_ssize_t position) {
+    const size_t slot = name_index_slot(index, name, length);
+    const Py_ssize_t previous = index->entries[slot].first;
+    index->entries[slot] = (xslt_name_entry){name, length, position + 1};
+    return previous;
+}
+
+static Py_ssize_t name_index_find(const xslt_name_index *index, const Py_UCS4 *name, Py_ssize_t length) {
+    return index->entries[name_index_slot(index, name, length)].first;
+}
+
 /* ---- stylesheet model ----------------------------------------------------- */
 
 typedef struct {
@@ -582,6 +627,10 @@ typedef struct engine {
     xslt_attrset *attrsets;
     Py_ssize_t nattrsets;
     Py_ssize_t attrsets_cap;
+    xslt_name_index named_index;
+    xslt_name_index key_index;
+    xslt_name_index attrset_index;
+    Py_ssize_t *attrset_next;
     xslt_space *spaces;
     Py_ssize_t nspaces;
     Py_ssize_t spaces_cap;
@@ -650,6 +699,36 @@ typedef struct engine {
     int py_error;
     int owns_model;
 } engine;
+
+static int build_name_indexes(engine *eng) {
+    /* GCOVR_EXCL_BR_START: allocation failure */
+    if (name_index_reserve(&eng->named_index, eng->nnamed) < 0 || name_index_reserve(&eng->key_index, eng->nkeys) < 0 ||
+        name_index_reserve(&eng->attrset_index, eng->nattrsets) < 0) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    if (eng->named_index.capacity != 0) {
+        for (Py_ssize_t index = eng->nnamed - 1; index >= 0; index--) {
+            name_index_add(&eng->named_index, eng->named[index].name, eng->named[index].name_len, index);
+        }
+    }
+    if (eng->key_index.capacity != 0) {
+        for (Py_ssize_t index = eng->nkeys - 1; index >= 0; index--) {
+            name_index_add(&eng->key_index, eng->keys[index].name, eng->keys[index].name_len, index);
+        }
+    }
+    if (eng->attrset_index.capacity != 0) {
+        eng->attrset_next = PyMem_Malloc((size_t)eng->nattrsets * sizeof(*eng->attrset_next));
+        if (eng->attrset_next == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                   /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = eng->nattrsets - 1; index >= 0; index--) {
+            eng->attrset_next[index] =
+                name_index_add(&eng->attrset_index, eng->attrsets[index].name, eng->attrsets[index].name_len, index);
+        }
+    }
+    return 0;
+}
 
 /* A cap on template-instantiation nesting (recursive apply-templates / named-template
    calls, xsl:for-each and result-tree construction). The transform recurses in C, so
@@ -1131,10 +1210,15 @@ static int xslt_extension(void *vctx, th_node *context_node, const Py_UCS4 *name
             return -1;          /* GCOVR_EXCL_LINE */
         }
         xslt_key *key = NULL;
-        for (Py_ssize_t index = 0; index < eng->nkeys; index++) {
-            if (str_eq(eng->keys[index].name, eng->keys[index].name_len, key_name, key_name_len)) {
-                key = &eng->keys[index];
-                break;
+        if (eng->key_index.capacity != 0) {
+            const Py_ssize_t position = name_index_find(&eng->key_index, key_name, key_name_len);
+            key = position == 0 ? NULL : &eng->keys[position - 1];
+        } else {
+            for (Py_ssize_t index = 0; index < eng->nkeys; index++) {
+                if (str_eq(eng->keys[index].name, eng->keys[index].name_len, key_name, key_name_len)) {
+                    key = &eng->keys[index];
+                    break;
+                }
             }
         }
         PyMem_Free(key_name);
@@ -1919,9 +2003,11 @@ static int apply_attribute_sets(engine *eng, const Py_UCS4 *names, Py_ssize_t na
         if (index == start) {
             break;
         }
-        for (Py_ssize_t slot = 0; slot < eng->nattrsets; slot++) {
+        const int indexed = eng->attrset_index.capacity != 0;
+        Py_ssize_t slot = indexed ? name_index_find(&eng->attrset_index, names + start, index - start) - 1 : 0;
+        for (; slot >= 0 && slot < eng->nattrsets; slot = indexed ? eng->attrset_next[slot] - 1 : slot + 1) {
             xslt_attrset *set = &eng->attrsets[slot];
-            if (!str_eq(set->name, set->name_len, names + start, index - start)) {
+            if (!indexed && !str_eq(set->name, set->name_len, names + start, index - start)) {
                 continue;
             }
             Py_ssize_t chain_len = 0;
@@ -3099,10 +3185,15 @@ static int do_call_template(engine *eng, th_node *instruction, th_node *out_pare
         return fail(eng, "xsl:call-template requires a name attribute");
     }
     xslt_named *target = NULL;
-    for (Py_ssize_t index = 0; index < eng->nnamed; index++) {
-        if (str_eq(eng->named[index].name, eng->named[index].name_len, name, name_len)) {
-            target = &eng->named[index];
-            break;
+    if (eng->named_index.capacity != 0) {
+        const Py_ssize_t position = name_index_find(&eng->named_index, name, name_len);
+        target = position == 0 ? NULL : &eng->named[position - 1];
+    } else {
+        for (Py_ssize_t index = 0; index < eng->nnamed; index++) {
+            if (str_eq(eng->named[index].name, eng->named[index].name_len, name, name_len)) {
+                target = &eng->named[index];
+                break;
+            }
         }
     }
     if (target == NULL) {
@@ -4483,6 +4574,10 @@ static void engine_clear(engine *eng) {
     }
     PyMem_Free(eng->keys);
     if (eng->owns_model) {
+        PyMem_Free(eng->named_index.entries);
+        PyMem_Free(eng->key_index.entries);
+        PyMem_Free(eng->attrset_index.entries);
+        PyMem_Free(eng->attrset_next);
         PyMem_Free(eng->named);
         PyMem_Free(eng->globals);
         PyMem_Free(eng->attrsets);
@@ -5907,6 +6002,9 @@ PyObject *turbohtml_xslt_compile(PyObject *module, PyObject *args) {
     int status = copy_imports(module, compiled, imports_obj, &imports, &nimports);
     if (status == 0) { /* GCOVR_EXCL_BR_LINE: copy_imports fails only on allocation or an invalid parser result */
         status = analyze(&compiled->model, compiled->sheet_root, imports, nimports);
+    }
+    if (status == 0) {
+        status = build_name_indexes(&compiled->model);
     }
     for (Py_ssize_t index = 0; status == 0 && index < nimports; index++) {
         status = precompile_stylesheet(&compiled->model, imports[index]);

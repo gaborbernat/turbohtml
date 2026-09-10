@@ -1435,6 +1435,21 @@
       "dispatch XSLT template rules — 128 unmatched templates, 1,024 nodes, 1 passes",
       0.0004945451773589109,
       0.00015998851189730583
+    ],
+    [
+      "resolve XSLT declaration names — 256 unused declarations per kind, 256 calls",
+      0.0001588747638948007,
+      0.0003326757052036555
+    ],
+    [
+      "resolve XSLT declaration names — 1 unused declarations per kind, 256 calls",
+      0.00015709549293963694,
+      0.00012355011941356982
+    ],
+    [
+      "compile XSLT declaration indexes — 256 unused declarations per kind, 256 calls",
+      0.0001833218756170633,
+      0.0007046583603369072
     ]
   ],
   "spread": [
@@ -2867,6 +2882,21 @@
       null,
       0.006992427603400365,
       0.03957862421933693
+    ],
+    [
+      null,
+      0.01462071255275305,
+      0.011105530901518156
+    ],
+    [
+      null,
+      0.019210531412796186,
+      0.020899069201990715
+    ],
+    [
+      null,
+      0.03661882064329688,
+      0.055409295388563325
     ]
   ],
   "row_notes": {

@@ -491,6 +491,22 @@ finishes; the compiled stylesheet retains no source nodes.
 .. bench-table::
     :file: bench/xslt-rules.json
 
+The declaration-name cases call a named template 256 times. Each call uses an attribute set and resolves an XSLT key.
+With 256 unused declarations of each kind, name indexes reduced application time by 27.13%; the small control improved
+by 1.76%. Compilation builds the immutable name indexes once. Applications share them while keeping their own key result
+tables. The table measures application after compilation; constructor cost is separate.
+
+.. bench-table::
+    :file: bench/xslt-names.json
+
+The same large stylesheet costs 2.29% more to compile (179.21 µs to 183.32 µs). The compilation benchmark uses eight
+fixed loops to bound temporary tree allocations. On this 64-bit build, its name-index arrays and attribute-set links
+retain 75,784 bytes per compiled stylesheet, excluding allocator overhead. Index fields add 56 bytes to the model and
+each call's engine state.
+
+.. bench-table::
+    :file: bench/xslt-names-compile.json
+
 The sibling-numbering cases use one or eight default ``xsl:number`` instructions per node. Forward traversal can reuse
 the preceding sibling's count; repeated instructions can reuse the current node's count. Reverse sibling traversal still
 needs preceding-sibling scans for each newly visited node. The one-node and zero-instruction cases measure fixed

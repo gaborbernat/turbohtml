@@ -182,6 +182,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "range-boundary-end": ("range-boundary", 1),
     "range-contained-single": ("range-contained", 1),
     "range-partial-single": ("range-partial", 1),
+    "transform-names-small": ("transform-names", 1),
     "transform-rules-single": ("transform-rules", 1),
     "transform-number-single": ("transform-number", 2),
     "transform-number-any": ("transform-number", 8),
@@ -255,6 +256,8 @@ def _inline(operation: str, case_index: int = 0) -> object:
 _LOADERS["xpath-id-nodes"] = partial(_inline, "xpath-id-nodes")
 _LOADERS["xpath-concat"] = partial(_inline, "xpath-concat")
 _LOADERS["node-equals"] = partial(_inline, "node-equals", 5)
+_LOADERS["transform-names-compile"] = partial(_inline, "transform-names-compile")
+_LOADERS["transform-names"] = partial(_inline, "transform-names")
 _LOADERS["transform-rules"] = partial(_inline, "transform-rules")
 _LOADERS["transform-number"] = partial(_inline, "transform-number", 3)
 _LOADERS["normalize-dom"] = partial(_inline, "normalize-dom", 4)

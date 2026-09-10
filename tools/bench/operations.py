@@ -430,6 +430,8 @@ OPERATIONS: dict[str, Operation] = {
     "transform-reuse": Operation("apply one compiled 300-template stylesheet ten times", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
+    "transform-names-compile": Operation("compile XSLT declaration indexes", "us"),
+    "transform-names": Operation("resolve XSLT declaration names", "us"),
     "transform-rules": Operation("dispatch XSLT template rules", "us"),
     "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
@@ -888,6 +890,33 @@ _XSLT_DENSE_SOURCE = (
 def _transform_dense_cases() -> tuple[tuple[str, object], ...]:
     """Return the instruction-dense XSLT case: a template of 56 xsl:* instructions applied over 200 nodes."""
     return (("instruction-dense (200 nodes)", (_XSLT_DENSE_SHEET, _XSLT_DENSE_SOURCE)),)
+
+
+def _transform_name_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"{count} unused declarations per kind, 256 calls",
+            (
+                '<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">'
+                '<xsl:output method="xml" omit-xml-declaration="yes"/>'
+                + "".join(
+                    f'<xsl:template name="unused{index}"/>'
+                    f'<xsl:key name="unused{index}" match="unused" use="@value"/>'
+                    f'<xsl:attribute-set name="unused{index}"/>'
+                    for index in range(count)
+                )
+                + '<xsl:key name="target" match="p" use="@value"/>'
+                '<xsl:attribute-set name="target"><xsl:attribute name="marker">hit</xsl:attribute></xsl:attribute-set>'
+                '<xsl:template name="target"><item xsl:use-attribute-sets="target">'
+                "<xsl:value-of select=\"count(key('target','v'))\"/></item></xsl:template>"
+                '<xsl:template match="/"><out>'
+                + '<xsl:call-template name="target"/>' * 256
+                + "</out></xsl:template></xsl:stylesheet>",
+                '<root><p value="v"/></root>',
+            ),
+        )
+        for count in (256, 1)
+    )
 
 
 def _transform_number_cases() -> tuple[tuple[str, object], ...]:
@@ -1654,6 +1683,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-reuse": _transform_compile_cases,
     "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,
+    "transform-names": _transform_name_cases,
+    "transform-names-compile": lambda: (_transform_name_cases()[0],),
     "transform-rules": lambda: tuple(
         (
             f"128 unmatched templates, 1,024 nodes, {passes} passes",

@@ -514,7 +514,9 @@ OPERATIONS = {
     "transform": (transform, "lxml.etree"),
     "transform-number": (transform, "lxml.etree"),
     "transform-rules": (transform, "lxml.etree"),
+    "transform-names": (transform, "lxml.etree"),
     "transform-dense": (transform, "lxml.etree"),
     "transform-compile": (transform_compile, "lxml.etree"),
+    "transform-names-compile": (transform_compile, "lxml.etree"),
     "transform-reuse": (transform_reuse, "lxml.etree"),
 }
