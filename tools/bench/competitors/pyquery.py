@@ -194,6 +194,7 @@ OPERATIONS = {
     "serialize-inner": (_serialize_inner, "pyquery"),
     "encode-inner": (_encode_inner, "pyquery"),
     "parse": (parse, "pyquery"),
+    "parse-formatting": (parse, "pyquery"),
     "find": (find, "pyquery"),
     "select": (select, "pyquery"),
     "find-text": (find_text, "pyquery"),

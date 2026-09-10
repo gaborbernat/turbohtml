@@ -66,6 +66,7 @@ struct th_tree {
                              lower bound on element depth that gates the :has() subtree memo */
     th_node **afe;        /* active formatting elements; NULL entry is a scope marker */
     Py_ssize_t afe_len;
+    Py_ssize_t afe_stack_hint;
     Py_ssize_t afe_cap;
     th_node *head;          /* the <head> element once inserted */
     th_node *fragment_root; /* the html root in fragment parsing; NULL otherwise */

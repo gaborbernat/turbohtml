@@ -1,0 +1,28 @@
+{
+  "label": "parse under a formatting ancestor",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 spans / 1,000 samp elements",
+      0.0002999122285928024
+    ],
+    [
+      "0 spans / 1,000 samp elements",
+      8.741940381848204e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.007230163073014763
+    ],
+    [
+      null,
+      0.0100350789478704
+    ]
+  ],
+  "notes": {}
+}

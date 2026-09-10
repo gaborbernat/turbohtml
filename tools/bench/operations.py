@@ -282,6 +282,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow": Operation("attach a shadow tree with slots and flatten", "us"),
     "shadow-slot": Operation("collect children assigned to a late shadow slot", "us"),
     "parse": Operation("parse to a tree", "us"),
+    "parse-formatting": Operation("parse under a formatting ancestor", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
     "parse-xml-attrs": Operation("parse XML with growing attribute counts", "us"),
@@ -1192,6 +1193,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ),
     ),
     "parse": _parse_cases,
+    "parse-formatting": lambda: tuple(
+        (
+            f"{depth} spans / 1,000 samp elements",
+            "<b>" + "<span>" * depth + "<samp>a</samp>" * 1000 + "</span>" * depth + "</b>",
+        )
+        for depth in (256, 0)
+    ),
     "parse-dense": lambda: (("2.6 MB / 200k nodes", "<div><span>x</span></div>" * 100_000),),
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
     "parse-xml-attrs": lambda: tuple(

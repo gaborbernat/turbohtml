@@ -186,6 +186,7 @@ OPERATIONS = {
     "serialize-inner": (_serialize_inner, "parsel"),
     "encode-inner": (_encode_inner, "parsel"),
     "parse": (parse, "parsel"),
+    "parse-formatting": (parse, "parsel"),
     "find": (find, "parsel"),
     "select": (select, "parsel"),
     "select-has": (select_has, "parsel"),

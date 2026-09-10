@@ -307,6 +307,14 @@ lineage.
 .. bench-table::
     :file: bench/parsing.json
 
+The formatting-ancestor cases parse 1,000 ``samp`` elements inside one ``b``, with either 256 intervening ``span``
+elements or none. A validated stack-position hint avoids searching the open-element stack for the same formatting
+ancestor on each token. Matched local runs reduced full-parse time by 37% at depth 256; the shallow control changed by
+1.4%. Both cases use ASCII input with source locations disabled and include document cleanup. CodSpeed tracks both.
+
+.. bench-table::
+    :file: bench/parse-formatting.json
+
 ******************
  Fragment parsing
 ******************

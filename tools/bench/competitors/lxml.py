@@ -458,6 +458,7 @@ OPERATIONS = {
     "encode-inner-indent": (_encode_inner_indent, "lxml"),
     "strip-comments": (Mutating(lxml_html.document_fromstring, _strip_comments), "lxml"),
     "parse": (parse, "lxml"),
+    "parse-formatting": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
     "parse-xml-attrs": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),

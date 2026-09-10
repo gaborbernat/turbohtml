@@ -250,6 +250,7 @@ OPERATIONS = {
     "encode-inner-indent": (_encode_inner_indent, "BeautifulSoup (lxml)"),
     "strip-comments": (Mutating(_fresh, _strip_comments), "BeautifulSoup (lxml)"),
     "parse": (parse, "BeautifulSoup (lxml)"),
+    "parse-formatting": (parse, "BeautifulSoup (lxml)"),
     "find": (find, "BeautifulSoup (lxml)"),
     "select": (select, "BeautifulSoup (lxml)"),
     "select-has": (select_has, "BeautifulSoup (lxml)"),

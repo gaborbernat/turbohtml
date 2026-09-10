@@ -119,6 +119,7 @@ OPERATIONS = {
     "encode-inner-minify": (_encode_inner_minify, "html5lib"),
     "whitespace-roundtrip": (_whitespace_roundtrip, "html5lib"),
     "parse": (parse, "html5lib"),
+    "parse-formatting": (parse, "html5lib"),
     "fragment": (fragment, "html5lib"),
     "tokenize": (tokenize, "html5lib"),
     "serialize": (serialize, "html5lib"),

@@ -1544,6 +1544,15 @@ static th_node *afe_find_atom(th_tree *tree, uint16_t atom) {
     return NULL;
 }
 
+static int afe_on_stack(th_tree *tree, th_node *node) {
+    if (tree->afe_stack_hint >= 0 && tree->afe_stack_hint < tree->open_len &&
+        tree->open[tree->afe_stack_hint] == node) {
+        return 1;
+    }
+    tree->afe_stack_hint = stack_index_of(tree, node);
+    return tree->afe_stack_hint >= 0;
+}
+
 /* Reconstruct the active formatting elements (re-open any that fell off the
    stack of open elements) per the spec. */
 static void reconstruct_afe(th_tree *tree) {
@@ -1551,12 +1560,12 @@ static void reconstruct_afe(th_tree *tree) {
         return;
     }
     Py_ssize_t index = tree->afe_len - 1;
-    if (tree->afe[index] == NULL || stack_index_of(tree, tree->afe[index]) >= 0) {
+    if (tree->afe[index] == NULL || afe_on_stack(tree, tree->afe[index])) {
         return;
     }
     while (index > 0) {
         index--;
-        if (tree->afe[index] == NULL || stack_index_of(tree, tree->afe[index]) >= 0) {
+        if (tree->afe[index] == NULL || afe_on_stack(tree, tree->afe[index])) {
             index++;
             break;
         }

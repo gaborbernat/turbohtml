@@ -221,6 +221,7 @@ OPERATIONS = {
     "encode-inner": (_encode_inner, "selectolax"),
     "strip-comments": (Mutating(_fresh_transform, _strip_comments), "selectolax"),
     "parse": (parse, "selectolax"),
+    "parse-formatting": (parse, "selectolax"),
     "find": (find, "selectolax"),
     "select": (select, "selectolax"),
     "select-has": (select_has, "selectolax"),

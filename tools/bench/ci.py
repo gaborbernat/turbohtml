@@ -171,6 +171,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "parse-formatting-shallow": ("parse-formatting", 1),
     "range-boundary-end": ("range-boundary", 1),
     "transform-number-single": ("transform-number", 2),
     "transform-number-any": ("transform-number", 8),

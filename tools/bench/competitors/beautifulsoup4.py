@@ -321,6 +321,7 @@ OPERATIONS = {
     "encode-inner-indent": (_encode_inner_indent, "BeautifulSoup (html.parser)"),
     "strip-comments": (Mutating(_fresh, _strip_comments), "BeautifulSoup (html.parser)"),
     "parse": (parse, "BeautifulSoup (html.parser)"),
+    "parse-formatting": (parse, "BeautifulSoup (html.parser)"),
     "build": (build, "BeautifulSoup (html.parser)"),
     "construct": (construct, "BeautifulSoup (html.parser)"),
     "emit": (emit, "BeautifulSoup (html.parser)"),
