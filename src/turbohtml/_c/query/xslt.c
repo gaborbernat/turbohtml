@@ -527,6 +527,17 @@ typedef struct {
     match_set matched;
 } xslt_number_match;
 
+typedef struct {
+    th_node_map positions;
+    th_node *last;
+    long value;
+    const Py_UCS4 *count_pattern;
+    const Py_UCS4 *from_pattern;
+    int type;
+    const Py_UCS4 *name;
+    Py_ssize_t name_len;
+} xslt_number_prefix;
+
 /* A source text node detached by whitespace stripping (section 3.4), kept so the caller's
    tree is restored to its original shape after the transform returns. */
 struct strip_entry {
@@ -606,6 +617,7 @@ typedef struct engine {
 
     xslt_number_match number_count_match;
     xslt_number_match number_from_match;
+    xslt_number_prefix explicit_any;
 
     th_node_map any_positions;
     th_node *any_last;
@@ -2656,6 +2668,76 @@ static int default_any_number(engine *eng, long *out) {
     }
 }
 
+static long unindexed_any_number(const engine *eng, const match_set *count_matches, int have_count,
+                                 const match_set *from_matches, int have_from) {
+    long counter = 0;
+    for (th_node *node = eng->src_root;; node = doc_next(node)) {
+        if (have_from && match_set_has(from_matches, node, -1)) {
+            counter = 0;
+        }
+        if (number_counts(eng, count_matches, have_count, node)) {
+            counter++;
+        }
+        if (node == eng->cur_node) {
+            return counter;
+        }
+    }
+}
+
+static int explicit_any_number(engine *eng, const Py_UCS4 *count_pattern, const Py_UCS4 *from_pattern, long *out) {
+    xslt_number_prefix *cache = &eng->explicit_any;
+    int repeated = cache->last != NULL && cache->count_pattern == count_pattern &&
+                   cache->from_pattern == from_pattern &&
+                   (count_pattern != NULL ||
+                    (cache->type == (int)eng->cur_node->type &&
+                     (eng->cur_node->type != TH_NODE_ELEMENT ||
+                      (cache->name_len == eng->cur_node->text_len &&
+                       memcmp(cache->name, eng->cur_node->text, (size_t)cache->name_len * sizeof(Py_UCS4)) == 0))));
+    if (!repeated) {
+        PyMem_Free(cache->positions.entries);
+        *cache = (xslt_number_prefix){.count_pattern = count_pattern,
+                                      .from_pattern = from_pattern,
+                                      .type = (int)eng->cur_node->type,
+                                      .name = eng->cur_node->text,
+                                      .name_len = eng->cur_node->text_len};
+        cache->value = unindexed_any_number(eng, &eng->number_count_match.matched, count_pattern != NULL,
+                                            &eng->number_from_match.matched, from_pattern != NULL);
+        cache->last = eng->cur_node;
+        *out = cache->value;
+        return 0;
+    }
+    if (cache->last == eng->cur_node) {
+        *out = cache->value;
+        return 0;
+    }
+    Py_ssize_t position = th_node_map_find(&cache->positions, eng->cur_node);
+    if (position != 0) {
+        *out = (long)(position - 1);
+        return 0;
+    }
+    long counter = cache->positions.entries == NULL ? 0 : cache->value;
+    th_node *node = cache->positions.entries == NULL ? eng->src_root : doc_next(cache->last);
+    for (;; node = doc_next(node)) {
+        if (from_pattern != NULL && match_set_has(&eng->number_from_match.matched, node, -1)) {
+            counter = 0;
+        }
+        if (number_counts(eng, &eng->number_count_match.matched, count_pattern != NULL, node)) {
+            counter++;
+        }
+        /* Unmatched nodes can number zero; reserve zero for absent map entries. */
+        if (th_node_map_insert(&cache->positions, node, counter + 1) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+            PyErr_NoMemory();                                               /* GCOVR_EXCL_LINE */
+            return fail_py(eng);                                            /* GCOVR_EXCL_LINE */
+        }
+        if (node == eng->cur_node) {
+            cache->last = node;
+            cache->value = counter;
+            *out = counter;
+            return 0;
+        }
+    }
+}
+
 static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     long values[64];
     Py_ssize_t nvalues = 0;
@@ -2716,20 +2798,15 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
                 if (default_any_number(eng, &counter) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                     return -1;                               /* GCOVR_EXCL_LINE */
                 }
-            } else {
-                /* The current node is a descendant of the source root, so the walk always breaks at
-                   it before the loop condition can see a NULL. */
-                for (th_node *node = eng->src_root; node != NULL; /* GCOVR_EXCL_BR_LINE */ node = doc_next(node)) {
-                    if (have_from && match_set_has(from_matches, node, -1)) {
-                        counter = 0;
-                    }
-                    if (number_counts(eng, count_matches, have_count, node)) {
-                        counter++;
-                    }
-                    if (node == eng->cur_node) {
-                        break;
-                    }
+            } else if ((!have_count || count_matches == &eng->number_count_match.matched) &&
+                       (!have_from || from_matches == &eng->number_from_match.matched)) {
+                int status = explicit_any_number(eng, have_count ? eng->number_count_match.source : NULL,
+                                                 have_from ? eng->number_from_match.source : NULL, &counter);
+                if (status < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+                    return -1;    /* GCOVR_EXCL_LINE */
                 }
+            } else {
+                counter = unindexed_any_number(eng, count_matches, have_count, from_matches, have_from);
             }
             values[nvalues++] = counter;
         } else if (level != NULL && ucs4_ascii_eq(level, level_len, "multiple")) {
@@ -4335,6 +4412,7 @@ static PyObject *serialize_markup(engine *eng, th_node *root) {
 static void engine_clear(engine *eng) {
     match_set_free(&eng->number_count_match.matched);
     match_set_free(&eng->number_from_match.matched);
+    PyMem_Free(eng->explicit_any.positions.entries);
     PyMem_Free(eng->any_positions.entries);
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
         match_set_free(&eng->rules[index].matched);
@@ -4403,6 +4481,7 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree)
     eng->depth = 0;
     eng->number_count_match = (xslt_number_match){0};
     eng->number_from_match = (xslt_number_match){0};
+    eng->explicit_any = (xslt_number_prefix){0};
     eng->any_positions = (th_node_map){0};
     eng->any_last = NULL;
     eng->any_count = 0;

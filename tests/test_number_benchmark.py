@@ -72,6 +72,9 @@ def test_codspeed_number_benchmark_output(name: str, instructions: int, rows: in
         pytest.param(24, "".join(f"{ordinal}:" * 8 + "|" for ordinal in range(1, 1_025)), id="count-repeated"),
         pytest.param(25, "".join(f"{ordinal}:|" for ordinal in range(2, 1_026)), id="count-wildcard"),
         pytest.param(26, "0:|" * 1_024, id="count-empty"),
+        pytest.param(27, "1024:|", id="count-last-only"),
+        pytest.param(28, "64:|", id="count-from-last-only"),
+        pytest.param(29, "".join(f"{ordinal}:|" * 2 for ordinal in range(1, 33)) * 16, id="from-sections-alternating"),
     ],
 )
 def test_any_number_benchmark_output(library: str, case: int, expected: str) -> None:

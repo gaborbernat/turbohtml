@@ -1303,7 +1303,7 @@
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / explicit-count",
-      0.0010985212127404035,
+      0.0002304845947113184,
       0.0038801557282567957
     ],
     [
@@ -1338,33 +1338,48 @@
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-current",
-      0.19361352226308856,
+      0.20198773470862458,
       "XSLT 1.0 forbids current() in patterns; libxslt numbering differs from turbohtml"
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-from-sections",
-      0.0014743780391048252,
+      0.0002464617838010478,
       0.0005938703238219507
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-reverse",
-      0.0014933016704162584,
+      0.0003009451196930968,
       0.0040833550330717115
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-repeated",
-      0.010907699738648564,
+      0.0015382361979087969,
       0.03142024373325209
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-wildcard",
-      0.0014386576713150134,
+      0.0002414364204772331,
       0.003302526039624354
     ],
     [
       "XSLT number nodes — any: 1,024 nodes / count-empty",
-      0.0007592729709661702,
+      0.00021186253535840176,
       0.003032128040770961
+    ],
+    [
+      "XSLT number nodes — any: 1,024 nodes / count-last-only",
+      3.195783558756678e-05,
+      2.9591386591694876e-05
+    ],
+    [
+      "XSLT number nodes — any: 1,024 nodes / count-from-last-only",
+      3.8967509636715175e-05,
+      1.7709244784214206e-05
+    ],
+    [
+      "XSLT number nodes — any: 1,024 nodes / from-sections-alternating",
+      0.0019738947279620334,
+      0.00035900420978881203
     ]
   ],
   "spread": [
@@ -2665,7 +2680,7 @@
     ],
     [
       null,
-      0.019935860045059664,
+      0.022209215521452563,
       0.016195678152020568
     ],
     [
@@ -2700,33 +2715,48 @@
     ],
     [
       null,
-      0.012460535264965818,
+      0.014839113563762796,
       null
     ],
     [
       null,
-      0.0169114828365985,
+      0.03026441602395963,
       0.08285620075708584
     ],
     [
       null,
-      0.032922568534152964,
+      0.011538966555504399,
       0.024950495569034666
     ],
     [
       null,
-      0.03696921979883567,
+      0.26485206075672735,
       0.014675441329971829
     ],
     [
       null,
-      0.020519360333361995,
+      0.15834747438978483,
       0.027165627806934316
     ],
     [
       null,
-      0.016149373649746213,
+      0.028183475424262163,
       0.017660009884524406
+    ],
+    [
+      null,
+      0.01193612213332645,
+      0.015477200565836811
+    ],
+    [
+      null,
+      0.031553865092991865,
+      0.019197382458531087
+    ],
+    [
+      null,
+      0.06933212553033515,
+      0.014970008263026344
     ]
   ],
   "row_notes": {
@@ -2768,6 +2798,9 @@
     "268": "returns an XSLT result tree; conversion to a Python string is outside timing",
     "269": "returns an XSLT result tree; conversion to a Python string is outside timing",
     "270": "returns an XSLT result tree; conversion to a Python string is outside timing",
-    "271": "returns an XSLT result tree; conversion to a Python string is outside timing"
+    "271": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    "272": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    "273": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    "274": "returns an XSLT result tree; conversion to a Python string is outside timing"
   }
 }

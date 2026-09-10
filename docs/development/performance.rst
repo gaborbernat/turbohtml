@@ -445,6 +445,10 @@ cases include single calls, section resets, reverse visits, repeated instruction
 ``count-current`` row checks turbohtml compatibility only: XSLT 1.0 `forbids current() in patterns
 <https://www.w3.org/TR/xslt-10/#function-current>`_, and lxml gives different results.
 
+Static explicit ``level="any"`` numbering retains prefix counts, including zero counts and ``from`` resets. A single
+visit and repeated visits to the same node avoid index allocation; a second distinct visit builds the index. The
+last-node-only cases measure that boundary, and alternating names exercise changes to the default count criteria.
+
 .. bench-table::
     :file: bench/xslt-number.json
 

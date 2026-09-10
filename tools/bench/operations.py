@@ -906,6 +906,7 @@ def _transform_number_cases() -> tuple[tuple[str, object], ...]:
         )
         + _transform_any_number_cases()
         + _transform_pattern_number_cases()
+        + _transform_number_prefix_cases()
     )
 
 
@@ -990,6 +991,35 @@ def _transform_pattern_number_cases() -> tuple[tuple[str, object], ...]:
             (1_024, "p", "count-repeated"),
             (1_024, "*", "count-wildcard"),
             (1_024, "missing", "count-empty"),
+        )
+    )
+
+
+def _transform_number_prefix_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"any: 1,024 nodes / {variant}",
+            (
+                (
+                    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                    '<xsl:output method="text"/><xsl:template match="/">'
+                    f'<xsl:for-each select="{select}"><xsl:number level="any" {attributes}/>'
+                    "<xsl:text>:|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>"
+                ),
+                "<root>"
+                + "".join(
+                    ("<section>" if sections and index % 64 == 1 else "")
+                    + f'<{"q" if alternating and index % 2 == 0 else "p"} id="{index}"/>'
+                    + ("</section>" if sections and index % 64 == 0 else "")
+                    for index in range(1, 1_025)
+                )
+                + "</root>",
+            ),
+        )
+        for variant, select, attributes, sections, alternating in (
+            ("count-last-only", "root/p[last()]", 'count="p"', False, False),
+            ("count-from-last-only", "(root/section/p)[last()]", 'count="p" from="section"', True, False),
+            ("from-sections-alternating", "root/section/*", 'from="section"', True, True),
         )
     )
 
