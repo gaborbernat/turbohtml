@@ -50,6 +50,11 @@
       "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
       8.741940381848204e-05,
       "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "parse ignored block end tags — 256 spans / 1,000 ignored address end tags",
+      7.620852594527605e-05,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
@@ -96,6 +101,11 @@
     [
       null,
       0.0100350789478704,
+      null
+    ],
+    [
+      null,
+      0.022101797675473427,
       null
     ]
   ],

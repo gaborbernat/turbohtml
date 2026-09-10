@@ -1,19 +1,46 @@
 {
   "label": "parse ignored block end tags",
   "parties": [
-    "turbohtml"
+    "turbohtml",
+    "BeautifulSoup (html.parser)",
+    "BeautifulSoup (lxml)",
+    "selectolax",
+    "parsel",
+    "resiliparse",
+    "lxml",
+    "pyquery",
+    "html5lib",
+    "html5-parser"
   ],
   "metrics": [],
   "rows": [
     [
       "256 spans / 1,000 ignored address end tags",
-      7.620852594527605e-05
+      7.620852594527605e-05,
+      0.0020427103708546687,
+      0.000985986110511779,
+      0.0007742270286447213,
+      0.00037924657644907713,
+      0.0002034367999992052,
+      "truncated output: 253/256 spans and no text instead of two characters",
+      "truncated output: 253/256 spans and no text instead of two characters",
+      0.015434903492374967,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
     [
       null,
-      0.022101797675473427
+      0.022101797675473427,
+      0.014405040563735715,
+      0.01433216359021772,
+      0.004344171734276748,
+      0.006185641643847483,
+      0.008237815781375576,
+      null,
+      null,
+      0.045190725332990726,
+      null
     ]
   ],
   "notes": {}

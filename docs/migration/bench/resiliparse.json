@@ -395,6 +395,11 @@
       "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
       8.741940381848204e-05,
       7.91789971003709e-05
+    ],
+    [
+      "parse ignored block end tags — 256 spans / 1,000 ignored address end tags",
+      7.620852594527605e-05,
+      0.0002034367999992052
     ]
   ],
   "spread": [
@@ -787,6 +792,11 @@
       null,
       0.0100350789478704,
       0.022795576866792955
+    ],
+    [
+      null,
+      0.022101797675473427,
+      0.008237815781375576
     ]
   ],
   "row_notes": {

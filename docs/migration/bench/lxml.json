@@ -1400,6 +1400,11 @@
       "concatenate XPath node strings — 10 nodes, 32768 characters",
       0.00013009689546379378,
       4.980560713647719e-05
+    ],
+    [
+      "parse ignored block end tags — 256 spans / 1,000 ignored address end tags",
+      7.620852594527605e-05,
+      "truncated output: 253/256 spans and no text instead of two characters"
     ]
   ],
   "spread": [
@@ -2797,6 +2802,11 @@
       null,
       0.020504204355920024,
       0.0042079424331146476
+    ],
+    [
+      null,
+      0.022101797675473427,
+      null
     ]
   ],
   "row_notes": {
