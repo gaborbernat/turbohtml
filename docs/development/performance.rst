@@ -380,6 +380,18 @@ support precise comparisons. The html5-parser environment has the libxml2 import
 .. bench-table::
     :file: bench/parse-nul.json
 
+The foster-parenting cases place text before each table row. HTML parsing moves that text before the table and merges it
+into one node. Reusing geometric buffer capacity reduced full-parse time by 20.0% for 1,024 runs; the single-run control
+took 1.33% longer. Both cases use ASCII input, disable source locations, and include document cleanup. CodSpeed tracks
+both.
+
+For the 1,024-run input, the merge-buffer growth rules allocate 8,128 bytes across all capacities, compared with
+2,099,196 bytes for successive exact-sized buffers. These source-derived totals exclude other parser allocations and
+allocator overhead; they are not RSS measurements. The parser arena retains old buffers until document teardown.
+
+.. bench-table::
+    :file: bench/parse-foster.json
+
 ******************
  Fragment parsing
 ******************

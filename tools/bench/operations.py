@@ -285,6 +285,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow-fallback": Operation("flatten nested fallback slots", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-formatting": Operation("parse under a formatting ancestor", "us"),
+    "parse-foster": Operation("parse foster-parented text", "us"),
     "parse-nul": Operation("parse text beside a NUL", "us"),
     "parse-afe": Operation("parse nested formatting attributes", "us"),
     "parse-scope": Operation("parse ignored block end tags", "us"),
@@ -1235,6 +1236,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ),
     ),
     "parse": _parse_cases,
+    "parse-foster": lambda: tuple(
+        (
+            f"{count:,} table rows / fostered text runs",
+            "<div><table>" + "a<tr><td>cell</td></tr>" * count + "</table></div>",
+        )
+        for count in (1024, 1)
+    ),
     "parse-nul": lambda: tuple(
         (
             f"1,000 paragraphs / {label}",

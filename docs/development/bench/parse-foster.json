@@ -1,0 +1,28 @@
+{
+  "label": "parse foster-parented text",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1,024 table rows / fostered text runs",
+      0.00016239688323670028
+    ],
+    [
+      "1 table rows / fostered text runs",
+      9.250114873182724e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.04770622171924298
+    ],
+    [
+      null,
+      0.026844825446522138
+    ]
+  ],
+  "notes": {}
+}

@@ -251,6 +251,7 @@ OPERATIONS = {
     "strip-comments": (Mutating(_fresh, _strip_comments), "BeautifulSoup (lxml)"),
     "parse": (parse, "BeautifulSoup (lxml)"),
     "parse-formatting": (parse, "BeautifulSoup (lxml)"),
+    "parse-foster": (parse, "BeautifulSoup (lxml)"),
     "parse-nul": (parse, "BeautifulSoup (lxml)"),
     "parse-afe": (parse, "BeautifulSoup (lxml)"),
     "parse-scope": (parse, "BeautifulSoup (lxml)"),

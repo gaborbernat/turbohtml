@@ -1171,15 +1171,35 @@ static void insert_text(th_tree *tree, Py_UCS4 *text, Py_ssize_t len) {
     /* merge into the immediately preceding text node at the same location */
     th_node *prev = before != NULL ? before->prev_sibling : parent->last_child;
     if (prev != NULL && prev->type == TH_NODE_TEXT) {
-        Py_UCS4 *prev_text = need_text(tree, prev); /* realize prev if it was a span */
-        Py_UCS4 *merged = arena_alloc(tree, (prev->text_len + len) * (Py_ssize_t)sizeof(Py_UCS4));
-        if (merged == NULL || prev_text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-            return;                                /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_UCS4 *prev_text = need_text(tree, prev);
+        if (prev_text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        memcpy(merged, prev_text, (size_t)prev->text_len * sizeof(Py_UCS4));
-        memcpy(merged + prev->text_len, text, (size_t)len * sizeof(Py_UCS4));
-        prev->text = merged;
+        size_t capacity = tree->merged_text_node == prev ? tree->merged_text_capacity : 0;
+        if ((size_t)len > SIZE_MAX - (size_t)prev->text_len) { /* GCOVR_EXCL_BR_LINE: allocation-size overflow */
+            tree->failed = 1;                                  /* GCOVR_EXCL_LINE: allocation-size overflow */
+            return;                                            /* GCOVR_EXCL_LINE: allocation-size overflow */
+        }
+        size_t needed = (size_t)prev->text_len + (size_t)len;
+        if (needed > capacity) {
+            size_t bytes;
+            /* GCOVR_EXCL_BR_START: allocation-size overflow */
+            if (!th_grow_cap(needed, capacity, 16, sizeof(Py_UCS4), &capacity, &bytes) || bytes > PY_SSIZE_T_MAX) {
+                /* GCOVR_EXCL_BR_STOP */
+                tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-size overflow */
+                return;           /* GCOVR_EXCL_LINE: allocation-size overflow */
+            }
+            Py_UCS4 *merged = arena_alloc(tree, (Py_ssize_t)bytes);
+            if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return;           /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            memcpy(merged, prev_text, (size_t)prev->text_len * sizeof(Py_UCS4));
+            prev->text = merged;
+        }
+        memcpy(prev->text + prev->text_len, text, (size_t)len * sizeof(Py_UCS4));
         prev->text_len += len;
+        tree->merged_text_node = prev;
+        tree->merged_text_capacity = capacity;
         return;
     }
     th_node *node = node_new(tree, TH_NODE_TEXT);

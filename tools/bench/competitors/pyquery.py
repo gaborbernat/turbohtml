@@ -195,6 +195,7 @@ OPERATIONS = {
     "encode-inner": (_encode_inner, "pyquery"),
     "parse": (parse, "pyquery"),
     "parse-formatting": (parse, "pyquery"),
+    "parse-foster": (parse, "pyquery"),
     "parse-nul": (parse, "pyquery"),
     "parse-afe": (parse, "pyquery"),
     "parse-scope": (parse, "pyquery"),
