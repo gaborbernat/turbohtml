@@ -576,9 +576,10 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
         switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
         case TH_NODE_ELEMENT:
             last_was_space = 0;
-            /* the serialization root is what the caller asked to serialize, so its own tags
-               always render (matching the plain serializer); only inner tags may be omitted */
-            if (!(opts->omit_optional_tags && node != root && mini_omit_start_tag(tree, node, opts->strip_comments))) {
+            /* An outer call requests the root's tags even when HTML permits omission;
+               inner scope retains the context without emitting those tags. */
+            if (!(st->inner && node == root) &&
+                !(opts->omit_optional_tags && node != root && mini_omit_start_tag(tree, node, opts->strip_comments))) {
                 mini_open_tag(out, tree, node, st, opts->unquote_attributes, opts->minify_css,
                               opts->minify_css_baseline);
             }
@@ -586,7 +587,7 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
             if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
                 break; /* void elements have no children or end tag */
             }
-            if (ser_needs_leading_newline(tree, node)) {
+            if (!(st->inner && node == root) && ser_needs_leading_newline(tree, node)) {
                 sbuf_putc(out, '\n');
             }
             if (is_rawtext_element(node, tree->scripting)) {
@@ -602,7 +603,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                         sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
                     }
                 }
-                ser_close_tag(out, node); /* a raw-text element's end tag is never one the optional-tag rules omit */
+                if (!(st->inner && node == root)) {
+                    ser_close_tag(out, node);
+                }
                 break;
             }
             if (node->first_child != NULL) {
@@ -613,7 +616,8 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                     formatting++;
                 }
                 descend = node->first_child;
-            } else if (!(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
+            } else if (!(st->inner && node == root) &&
+                       !(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
                 ser_close_tag(out, node);
             }
             break;
@@ -675,7 +679,8 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                 if (node->tag_flags & TH_TAG_FORMATTING) {
                     formatting--;
                 }
-                if (!(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
+                if (!(st->inner && node == root) &&
+                    !(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
                     ser_close_tag(out, node);
                     last_was_space = 0;
                 }
@@ -691,6 +696,9 @@ Py_UCS4 *th_node_minify(th_tree *tree, th_node *node, const th_minify_opts *mini
                         Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     sbuf_presize_for_root(&out, tree, node);
-    serialize_minify(&out, tree, node, minify, opts);
+    if (!opts->inner || node->type == TH_NODE_ELEMENT || node->type == TH_NODE_DOCUMENT ||
+        node->type == TH_NODE_CONTENT) {
+        serialize_minify(&out, tree, node, minify, opts);
+    }
     return sbuf_finish(&out, out_len);
 }

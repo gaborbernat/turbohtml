@@ -424,3 +424,16 @@ re-enters Python, once per visited node.
     :doc:`/how-to/ranges`, :doc:`/how-to/shadow-dom`, and :doc:`/how-to/observing-mutations` for task-focused recipes,
     and :doc:`/explanation/ranges`, :doc:`/explanation/shadow-dom`, and :doc:`/explanation/mutation` for the
     boundary-point, flattened-tree, and synchronous-observation models.
+
+Tree cleanup and child output
+=============================
+
+``element.innerHTML`` corresponds to ``element.serialize(inner=True)``. Whitespace mutation in jsdom requires DOM
+traversal and text edits; turbohtml exposes a native pass. The performance guide measures Python-to-Node child-output
+workflows including startup and pipe I/O, not in-process JavaScript engine speed.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.
+
+.. bench-table::
+    :file: bench/jsdom.json

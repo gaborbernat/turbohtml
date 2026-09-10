@@ -10,3 +10,4 @@ Scrub untrusted markup, rewrite links, and shrink output.
     sanitizing
     links
     minifying
+    transforming-trees

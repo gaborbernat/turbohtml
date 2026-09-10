@@ -1,0 +1,2 @@
+Add native DOM whitespace collapse, comment removal, and ordered transformation composition. Serialize subtree children
+with ``inner=True`` on ``serialize``, ``encode``, and ``serialize_iter``.

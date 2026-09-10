@@ -670,6 +670,46 @@
       "compare numeric XPath node sets — first-pair match, 1,000 nodes",
       1.6178490477614103e-05,
       4.0575358434580265e-05
+    ],
+    [
+      "serialize body children — daring fireball (10 kB)",
+      9.359944669995457e-06,
+      4.147376762375643e-05
+    ],
+    [
+      "serialize body children — ars technica (56 kB)",
+      4.2464491040542875e-05,
+      0.0001911168901642668
+    ],
+    [
+      "serialize body children — mozilla blog (95 kB)",
+      8.87867843175627e-05,
+      0.0003350556366209882
+    ],
+    [
+      "serialize body children — whatwg spec (235 kB)",
+      0.0002502627500386249,
+      0.001619801432298118
+    ],
+    [
+      "encode body children as UTF-8 — daring fireball (10 kB)",
+      1.2011069808674316e-05,
+      4.4734809231764906e-05
+    ],
+    [
+      "encode body children as UTF-8 — ars technica (56 kB)",
+      5.41490344403428e-05,
+      0.000203173935688028
+    ],
+    [
+      "encode body children as UTF-8 — mozilla blog (95 kB)",
+      0.00010932817895081826,
+      0.00035593641534129955
+    ],
+    [
+      "encode body children as UTF-8 — whatwg spec (235 kB)",
+      0.0003043837621892938,
+      0.0016715732969411572
     ]
   ],
   "spread": [
@@ -1337,7 +1377,56 @@
       null,
       0.015750883283736555,
       0.10373842126732559
+    ],
+    [
+      null,
+      0.04900239483383481,
+      0.017711326039268668
+    ],
+    [
+      null,
+      0.02085759777073082,
+      0.014166779712615787
+    ],
+    [
+      null,
+      0.021612543940447097,
+      0.011493888282784746
+    ],
+    [
+      null,
+      0.02304510266877739,
+      0.005628496478337765
+    ],
+    [
+      null,
+      0.011500230389031871,
+      0.010083359019234676
+    ],
+    [
+      null,
+      0.014436976112573876,
+      0.0049037409823255995
+    ],
+    [
+      null,
+      0.009369529991274703,
+      0.007763316788080906
+    ],
+    [
+      null,
+      0.008444578746948619,
+      0.008746815013287229
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "133": "selects children, escapes direct text, and joins results",
+    "134": "selects children, escapes direct text, and joins results",
+    "135": "selects children, escapes direct text, and joins results",
+    "136": "selects children, escapes direct text, and joins results",
+    "137": "joins escaped child output then encodes UTF-8",
+    "138": "joins escaped child output then encodes UTF-8",
+    "139": "joins escaped child output then encodes UTF-8",
+    "140": "joins escaped child output then encodes UTF-8"
+  }
 }

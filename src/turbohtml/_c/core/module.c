@@ -248,6 +248,18 @@ static PyMethodDef html_methods[] = {
     {"_linkify_scan", turbohtml_linkify_scan, METH_VARARGS, NULL},
     {"_linkify_find", turbohtml_linkify_find, METH_VARARGS, NULL},
     {"_linkify_has", turbohtml_linkify_has, METH_VARARGS, NULL},
+    {"transform_node", (PyCFunction)(void (*)(void))turbohtml_transform_node, METH_FASTCALL,
+     "transform_node(node, /, *steps)\n--\n\n"
+     "Apply stages in order. A Node result replaces the root; None keeps it.\n"
+     "Mutations before an exception remain. No pipeline lock or implicit copy."},
+    {"collapse_whitespace_node", turbohtml_collapse_whitespace_node, METH_O,
+     "collapse_whitespace_node(node, /)\n--\n\n"
+     "Collapse HTML whitespace in text and return the same node.\n"
+     "Preserve preformatted and foreign subtrees. Reject XML trees."},
+    {"strip_comments_node", turbohtml_strip_comments_node, METH_O,
+     "strip_comments_node(node, /)\n--\n\n"
+     "Detach descendant comments and return the same context node.\n"
+     "Retained comment references stay valid. Preserve the root itself."},
     {"_linkify_apply", turbohtml_linkify_apply, METH_VARARGS, NULL},
     {"_phone_config_compile", turbohtml_phone_config_compile, METH_O, NULL},
     {"_phone_number_check", turbohtml_phone_number_check, METH_VARARGS, NULL},

@@ -1603,17 +1603,19 @@ PyDoc_STRVAR(canonicalize_doc, "canonicalize(options=None)\n--\n\n"
                                ":returns: the canonical XML, encoded as UTF-8 bytes.\n"
                                ":raises TypeError: if options is not a Canonical configuration object.");
 
-PyDoc_STRVAR(serialize_doc, "serialize(options=None)\n--\n\n"
+PyDoc_STRVAR(serialize_doc, "serialize(options=None, *, inner=False)\n--\n\n"
                             "Serialize this node and its subtree to a str.\n\n"
+                            ":param inner: emit only children, retaining the parent serialization context.\n"
                             ":param options: an Html configuration object (formatter, layout, attribute\n"
                             "    ordering, and meta-charset handling), or None for the defaults.\n"
                             ":returns: the serialized markup.\n"
                             ":raises TypeError: if options is not an Html configuration object.");
 
-PyDoc_STRVAR(serialize_iter_doc, "serialize_iter(options=None)\n--\n\n"
+PyDoc_STRVAR(serialize_iter_doc, "serialize_iter(options=None, *, inner=False)\n--\n\n"
                                  "Serialize this node and its subtree lazily, yielding the markup in bounded\n"
                                  "str chunks so a large document can stream to a socket or file without a\n"
-                                 "full-size output string. ``''.join(node.serialize_iter(options))`` equals\n"
+                                 "full-size output string. With inner=True, emit only the children. "
+                                 "``''.join(node.serialize_iter(options))`` equals\n"
                                  "``node.serialize(options)`` for every options the stream supports.\n\n"
                                  "The tree must not be mutated while the iterator is live, the same rule as\n"
                                  "the other node iterators.\n\n"
@@ -1623,7 +1625,7 @@ PyDoc_STRVAR(serialize_iter_doc, "serialize_iter(options=None)\n--\n\n"
                                  ":raises TypeError: if options is not an Html configuration object.\n"
                                  ":raises ValueError: if options selects a Minify layout, which cannot stream.");
 
-PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', options=None)\n--\n\n"
+PyDoc_STRVAR(encode_doc, "encode(encoding='utf-8', options=None, *, inner=False)\n--\n\n"
                          "Serialize this node and its subtree to bytes, with the same formatting controls\n"
                          "as serialize().\n\n"
                          ":param encoding: the codec to encode the markup with.\n"
@@ -1853,8 +1855,8 @@ static int resolve_layout(module_state *state, PyObject *layout_obj, enum th_lay
    (the str output is conceptually UTF-8 for serialize, the target encoding for
    encode); it is borrowed only for the duration of the call. */
 static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *layout_obj, int sort_attributes,
-                                    int meta_charset, int xml, const char *charset) {
-    th_serialize_opts opts = {0, sort_attributes, meta_charset, charset, (Py_ssize_t)strlen(charset), xml, 0};
+                                    int meta_charset, int xml, const char *charset, int inner) {
+    th_serialize_opts opts = {0, sort_attributes, meta_charset, charset, (Py_ssize_t)strlen(charset), xml, 0, inner};
     if (resolve_formatter(state_of(self), formatter_obj, &opts.formatter) < 0) {
         return NULL;
     }
@@ -1905,7 +1907,7 @@ static int parse_html_spec(PyObject *spec, PyObject **formatter_obj, PyObject **
     return parsed ? 0 : -1;
 }
 
-static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const char *charset) {
+static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const char *charset, int inner) {
     PyObject *formatter_obj = NULL;
     PyObject *layout_obj = NULL;
     int sort_attributes = 0;
@@ -1914,41 +1916,43 @@ static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const 
     if (parse_html_spec(spec, &formatter_obj, &layout_obj, &sort_attributes, &meta_charset, &xml) < 0) {
         return NULL;
     }
-    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, xml, charset);
+    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, xml, charset, inner);
 }
 
 /* Resolve a serialize/encode call's options object to a str rendering under charset.
    None renders the defaults; otherwise the config's _unpack() supplies its keywords. */
-static PyObject *node_serialize_options(PyObject *self, PyObject *options, const char *charset) {
+static PyObject *node_serialize_options(PyObject *self, PyObject *options, const char *charset, int inner) {
     if (options == NULL || options == Py_None) {
-        return node_serialize_str(self, NULL, NULL, 0, 0, 0, charset);
+        return node_serialize_str(self, NULL, NULL, 0, 0, 0, charset, inner);
     }
     PyObject *spec = config_unpack(options, state_of(self)->html_config_type, "Html");
     if (spec == NULL) {
         return NULL;
     }
-    PyObject *result = node_serialize_from_spec(self, spec, charset);
+    PyObject *result = node_serialize_from_spec(self, spec, charset, inner);
     Py_DECREF(spec);
     return result;
 }
 
 static PyObject *node_serialize(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"options", NULL};
+    static char *keywords[] = {"options", "inner", NULL};
     PyObject *options = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O", keywords, &options)) {
+    int inner = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O$p", keywords, &options, &inner)) {
         return NULL;
     }
-    return node_serialize_options(self, options, "utf-8");
+    return node_serialize_options(self, options, "utf-8", inner);
 }
 
 static PyObject *node_encode(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"encoding", "options", NULL};
+    static char *keywords[] = {"encoding", "options", "inner", NULL};
     const char *encoding = "utf-8";
     PyObject *options = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|sO", keywords, &encoding, &options)) {
+    int inner = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|sO$p", keywords, &encoding, &options, &inner)) {
         return NULL;
     }
-    PyObject *text = node_serialize_options(self, options, encoding);
+    PyObject *text = node_serialize_options(self, options, encoding, inner);
     if (text == NULL) {
         return NULL;
     }
@@ -2079,9 +2083,9 @@ static PyObject *node_to_source(PyObject *self, PyObject *Py_UNUSED(ignored)) {
    A Minify layout is rejected: its transforms analyze the whole tree, so there is no
    per-node stream to resume. */
 static PyObject *node_make_serialize_iter(PyObject *self, PyObject *formatter_obj, PyObject *layout_obj,
-                                          int sort_attributes, int meta_charset, int xml) {
+                                          int sort_attributes, int meta_charset, int xml, int inner) {
     module_state *state = state_of(self);
-    th_serialize_opts opts = {0, sort_attributes, meta_charset, "utf-8", (Py_ssize_t)strlen("utf-8"), xml, 0};
+    th_serialize_opts opts = {0, sort_attributes, meta_charset, "utf-8", (Py_ssize_t)strlen("utf-8"), xml, 0, inner};
     if (resolve_formatter(state, formatter_obj, &opts.formatter) < 0) {
         return NULL;
     }
@@ -2104,13 +2108,14 @@ static PyObject *node_make_serialize_iter(PyObject *self, PyObject *formatter_ob
 }
 
 static PyObject *node_serialize_iter(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *keywords[] = {"options", NULL};
+    static char *keywords[] = {"options", "inner", NULL};
     PyObject *options = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O", keywords, &options)) {
+    int inner = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O$p", keywords, &options, &inner)) {
         return NULL;
     }
     if (options == NULL || options == Py_None) {
-        return node_make_serialize_iter(self, NULL, NULL, 0, 0, 0);
+        return node_make_serialize_iter(self, NULL, NULL, 0, 0, 0, inner);
     }
     PyObject *spec = config_unpack(options, state_of(self)->html_config_type, "Html");
     if (spec == NULL) {
@@ -2126,5 +2131,5 @@ static PyObject *node_serialize_iter(PyObject *self, PyObject *args, PyObject *k
     if (parsed < 0) {
         return NULL;
     }
-    return node_make_serialize_iter(self, formatter_obj, layout_obj, sort_attributes, meta_charset, xml);
+    return node_make_serialize_iter(self, formatter_obj, layout_obj, sort_attributes, meta_charset, xml, inner);
 }

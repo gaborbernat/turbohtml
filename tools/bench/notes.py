@@ -29,6 +29,68 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "sanitize-node": {
+        "lxml-html-clean": "blocklist policy rather than turbohtml's allowlist; not security equivalence"
+    },
+    "linkify-node": {"lxml-html-clean": "host exclusions disabled; URL/mailto linking but no bare email addresses"},
+    "collapse-whitespace": {
+        "lxml": "Python text/regex walk; parser recovery and text storage differ",
+        "BeautifulSoup (html.parser)": "Python text/regex walk; parser recovery and text storage differ",
+        "BeautifulSoup (lxml)": "Python text/regex walk; parser recovery and text storage differ",
+        "selectolax": "Python text/regex walk; rejects template input; parser recovery differs",
+    },
+    "strip-comments": {
+        "selectolax": "template-containing inputs are rejected because template contents are not exposed",
+    },
+    "transform-tree": {
+        "lxml": "Python text/regex walk; parser recovery and text storage differ",
+        "BeautifulSoup (html.parser)": "Python text/regex walk; parser recovery and text storage differ",
+        "BeautifulSoup (lxml)": "Python text/regex walk; parser recovery and text storage differ",
+        "selectolax": "Python text/regex walk; rejects template input; parser recovery differs",
+    },
+    "serialize-inner-indent": {
+        "lxml": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+        "BeautifulSoup (html.parser)": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+        "BeautifulSoup (lxml)": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    },
+    "encode-inner-indent": {
+        "lxml": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+        "BeautifulSoup (html.parser)": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+        "BeautifulSoup (lxml)": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    },
+    "serialize-inner": {
+        "lxml": "joins child serializations and escaped leading text",
+        "parsel": "selects children, escapes direct text, and joins results",
+    },
+    "encode-inner": {
+        "lxml": "joins Unicode child output then encodes UTF-8",
+        "parsel": "joins escaped child output then encodes UTF-8",
+        "selectolax": "serializes to a Unicode string before UTF-8 encoding",
+    },
+    "iterate-inner": {
+        "html5lib": "consumes serializer tokens rather than bounded-size chunks",
+    },
+    "transform-dispatch": {
+        "stdlib": "plain Python identity loop; omits Node validation, None results, and replacement ownership",
+        "Python (validated)": "Python loop with native Nodes, root/result checks, None handling, and replacement",
+    },
+    "whitespace-roundtrip": {
+        "html5lib": "filter/reparse/serialize; different listing, title, and foreign-text policy",
+    },
+    "serialize-inner-minify": {
+        "html5lib": "different preservation policy; removing comments can leave two spaces across token boundaries",
+    },
+    "encode-inner-minify": {
+        "html5lib": "different preservation policy; removing comments can leave two spaces across token boundaries",
+    },
+    "parse-inner": {
+        "parse5": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+        "jsdom": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    },
+    "parse-inner-encode": {
+        "parse5": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+        "jsdom": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
+    },
     "minify-js": dict.fromkeys(("rjsmin", "jsmin", "css-html-js-minify"), _STRIPPER_JS),
     "minify-css": dict.fromkeys(("rcssmin", "cssmin", "css-html-js-minify"), _STRIPPER_CSS),
     "strip-remove": {

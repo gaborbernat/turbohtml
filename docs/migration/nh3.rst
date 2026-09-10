@@ -179,3 +179,16 @@ frozen config object plus :func:`~turbohtml.clean.sanitize`.
   matching nh3's fragment-in, fragment-out contract.
 - Reuse the compiled :class:`~turbohtml.clean.Sanitizer` when sanitizing many inputs with one policy; each bare
   :func:`~turbohtml.clean.sanitize` call recompiles the policy.
+
+Cleanup before tree traversal
+=============================
+
+The existing comparison above measures string cleanup. For an application that needs normalized text in a parsed tree,
+use ``collapse_whitespace_node`` before traversal; use ``strip_comments_node`` to remove comments. Both mutate and
+return the same root. ``sanitize_node`` returns a copy, so retain the return value when composing stages with
+``transform_node``. Whitespace cleanup does not replace sanitization.
+
+``serialize(inner=True)`` and ``encode(inner=True)`` omit an element's wrapper with the selected output options.
+``serialize_iter(inner=True)`` streams compact or indented output; use ``inner_xml`` for XML fragments. See
+:doc:`/how-to/transforming-trees` for the pipeline and :doc:`/development/performance` for DOM timings. Those timings
+measure different work from this page's string-based comparison.

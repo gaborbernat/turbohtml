@@ -177,7 +177,22 @@ def match(text: str) -> None:
         item.is_("div a[href]")
 
 
+def _serialize_inner(text: str) -> str:
+    return _body(text).html(method="html")
+
+
+@functools.cache
+def _body(text: str) -> PyQuery:
+    return _parsed(text)("body")
+
+
+def _encode_inner(text: str) -> bytes:
+    return _serialize_inner(text).encode()
+
+
 OPERATIONS = {
+    "serialize-inner": (_serialize_inner, "pyquery"),
+    "encode-inner": (_encode_inner, "pyquery"),
     "parse": (parse, "pyquery"),
     "find": (find, "pyquery"),
     "select": (select, "pyquery"),

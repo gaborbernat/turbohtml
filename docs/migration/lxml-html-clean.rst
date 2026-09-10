@@ -170,3 +170,18 @@ The ``javascript:`` URL is gone because ``http``/``https``/``mailto`` are the on
   ``comments=True``.
 - turbohtml parses per WHATWG, so malformed markup yields the tree a browser builds; ``Cleaner`` parses with libxml2 and
   can produce a different structure for the same broken input.
+
+Parsed-tree cleanup stages
+==========================
+
+``Cleaner.clean_html(element)`` and ``turbohtml.clean.sanitize_node(node)`` return copies. ``autolink(element)`` and
+``linkify_node(node)`` mutate their input. Retain ``transform_node``'s return value when composing copying and mutating
+stages. The sanitizer and link policies differ; compare the output on your own input before migrating.
+
+Use ``strip_comments_node`` to remove descendant comments while retaining following text, and
+``collapse_whitespace_node`` to normalize text before later traversal. Both return the same root. See
+:doc:`/how-to/transforming-trees` for configured callables and ownership, and :doc:`/development/performance` for
+parsed-tree measurements with setup outside the timer.
+
+The node linkifier comparator disables lxml-html-clean's host exclusions so the example-domain fixture produces links.
+It still has different bare-email and link-attribute behavior from turbohtml.

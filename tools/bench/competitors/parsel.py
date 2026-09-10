@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from html import escape
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
@@ -165,7 +166,25 @@ def xpath(case: tuple[str, str]) -> None:
     call(_parsed(text), text)
 
 
+def _serialize_inner(text: str) -> str:
+    return "".join(
+        escape(node.get(), quote=False) if isinstance(node.root, str) else node.get()
+        for node in _body(text).xpath("./node()")
+    )
+
+
+@functools.cache
+def _body(text: str) -> Selector:
+    return _parsed(text).xpath("//body")[0]
+
+
+def _encode_inner(text: str) -> bytes:
+    return _serialize_inner(text).encode()
+
+
 OPERATIONS = {
+    "serialize-inner": (_serialize_inner, "parsel"),
+    "encode-inner": (_encode_inner, "parsel"),
     "parse": (parse, "parsel"),
     "find": (find, "parsel"),
     "select": (select, "parsel"),

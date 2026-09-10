@@ -666,6 +666,186 @@
       0.0010619639210744936,
       0.04029734718399899,
       0.02999120229408921
+    ],
+    [
+      "serialize body children — daring fireball (10 kB)",
+      9.359944669995457e-06,
+      0.00035997221372478333,
+      0.00035876215042662807
+    ],
+    [
+      "serialize body children — ars technica (56 kB)",
+      4.2464491040542875e-05,
+      0.0015677970950491726,
+      0.001566033422932378
+    ],
+    [
+      "serialize body children — mozilla blog (95 kB)",
+      8.87867843175627e-05,
+      0.0036663200947562777,
+      0.0036831406299218847
+    ],
+    [
+      "serialize body children — whatwg spec (235 kB)",
+      0.0002502627500386249,
+      0.011232442271041995,
+      0.011196330301875909
+    ],
+    [
+      "serialize indented body children — daring fireball (10 kB)",
+      1.3427094184711071e-05,
+      0.0004183602328945805,
+      0.0004158459269092418
+    ],
+    [
+      "serialize indented body children — ars technica (56 kB)",
+      6.027894429886753e-05,
+      0.0017718005571320343,
+      0.0017762643183232285
+    ],
+    [
+      "serialize indented body children — mozilla blog (95 kB)",
+      0.00014089633784048297,
+      0.00418593836426832,
+      0.004172385633864906
+    ],
+    [
+      "serialize indented body children — whatwg spec (235 kB)",
+      0.0003530077632300769,
+      0.013161625427528634,
+      0.013168823135250326
+    ],
+    [
+      "encode body children as UTF-8 — daring fireball (10 kB)",
+      1.2011069808674316e-05,
+      0.0003613925776638401,
+      0.00036243054576819606
+    ],
+    [
+      "encode body children as UTF-8 — ars technica (56 kB)",
+      5.41490344403428e-05,
+      0.0015783285513559047,
+      0.001576439452643778
+    ],
+    [
+      "encode body children as UTF-8 — mozilla blog (95 kB)",
+      0.00010932817895081826,
+      0.0036919971710934383,
+      0.003710742619659868
+    ],
+    [
+      "encode body children as UTF-8 — whatwg spec (235 kB)",
+      0.0003043837621892938,
+      0.011391626301701763,
+      0.011324908416402954
+    ],
+    [
+      "encode indented body children as UTF-8 — daring fireball (10 kB)",
+      1.7604953442666252e-05,
+      0.00041682160554046277,
+      0.0004180234324545988
+    ],
+    [
+      "encode indented body children as UTF-8 — ars technica (56 kB)",
+      7.532393659251586e-05,
+      0.0017703283435063593,
+      0.0017661987870572677
+    ],
+    [
+      "encode indented body children as UTF-8 — mozilla blog (95 kB)",
+      0.00017654151429269405,
+      0.004169876521094314,
+      0.004214622605407688
+    ],
+    [
+      "encode indented body children as UTF-8 — whatwg spec (235 kB)",
+      0.0004371711860737074,
+      0.013208875657558869,
+      0.01319696528238031
+    ],
+    [
+      "collapse DOM text whitespace — daring fireball (10 kB)",
+      3.7942158238971993e-06,
+      0.00035119097143857897,
+      0.0003522430464120892
+    ],
+    [
+      "collapse DOM text whitespace — ars technica (56 kB)",
+      2.9330841319582152e-05,
+      0.0015882498288798768,
+      0.0015910898479584528
+    ],
+    [
+      "collapse DOM text whitespace — mozilla blog (95 kB)",
+      5.532939750689062e-05,
+      0.004287286623366526,
+      0.004362256309226116
+    ],
+    [
+      "collapse DOM text whitespace — whatwg spec (235 kB)",
+      0.00026638981247136445,
+      0.012573719173209005,
+      0.012496281258184657
+    ],
+    [
+      "collapse DOM text whitespace — unchanged text (1 MiB)",
+      0.000636448973637016,
+      0.0051284669722614735,
+      0.00508783074656094
+    ],
+    [
+      "collapse DOM text whitespace — whitespace runs (1 MiB)",
+      0.0010200365876850508,
+      0.015377513688993835,
+      0.015158603611174234
+    ],
+    [
+      "remove DOM comments — daring fireball (10 kB)",
+      7.836686866842987e-07,
+      6.657511949015316e-05,
+      6.390100073379774e-05
+    ],
+    [
+      "remove DOM comments — ars technica (56 kB)",
+      3.740509631218932e-06,
+      0.00024381075854762457,
+      0.00023661221348447725
+    ],
+    [
+      "remove DOM comments — mozilla blog (95 kB)",
+      6.107953974302897e-06,
+      0.0005166562308052866,
+      0.0004951119650892603
+    ],
+    [
+      "remove DOM comments — whatwg spec (235 kB)",
+      1.9096269094613188e-05,
+      0.0016986247640791892,
+      0.0016943983870684558
+    ],
+    [
+      "remove comments then collapse whitespace — daring fireball (10 kB)",
+      4.591630613504094e-06,
+      0.00041390190259941545,
+      0.0004102569540312591
+    ],
+    [
+      "remove comments then collapse whitespace — ars technica (56 kB)",
+      3.3016244969985564e-05,
+      0.0018219700286863372,
+      0.0018171872992146139
+    ],
+    [
+      "remove comments then collapse whitespace — mozilla blog (95 kB)",
+      6.142306354680234e-05,
+      0.004925694248110328,
+      0.004860179522438557
+    ],
+    [
+      "remove comments then collapse whitespace — whatwg spec (235 kB)",
+      0.00028451702776995563,
+      0.014309328766103135,
+      0.014251769283873728
     ]
   ],
   "spread": [
@@ -1328,6 +1508,186 @@
       0.1209415112126743,
       0.09622909825766862,
       0.13128710317602377
+    ],
+    [
+      null,
+      0.04900239483383481,
+      0.0077285656924984975,
+      0.011954684527662738
+    ],
+    [
+      null,
+      0.02085759777073082,
+      0.007044550444097572,
+      0.01314936674563498
+    ],
+    [
+      null,
+      0.021612543940447097,
+      0.008860295687986606,
+      0.005382669453340286
+    ],
+    [
+      null,
+      0.02304510266877739,
+      0.005806765906945536,
+      0.008430385701202144
+    ],
+    [
+      null,
+      0.009020195795098697,
+      0.007090987733288325,
+      0.00804992374189498
+    ],
+    [
+      null,
+      0.04563381983240829,
+      0.011042412094610056,
+      0.01665525737861001
+    ],
+    [
+      null,
+      0.01862198937308882,
+      0.0069182669256787595,
+      0.01021664777719804
+    ],
+    [
+      null,
+      0.008240278605065602,
+      0.007388751434118014,
+      0.006491623934911717
+    ],
+    [
+      null,
+      0.011500230389031871,
+      0.005220610069078415,
+      0.005262610613459877
+    ],
+    [
+      null,
+      0.014436976112573876,
+      0.011532062461597303,
+      0.0024154061270694554
+    ],
+    [
+      null,
+      0.009369529991274703,
+      0.005881255923733074,
+      0.004449814394503544
+    ],
+    [
+      null,
+      0.008444578746948619,
+      0.007310288088661059,
+      0.009587832473417929
+    ],
+    [
+      null,
+      0.09398984483438041,
+      0.0038381705851879134,
+      0.007866073187197979
+    ],
+    [
+      null,
+      0.021846168131316568,
+      0.012494342401831015,
+      0.005158799744877386
+    ],
+    [
+      null,
+      0.023122713950249157,
+      0.010602993485479389,
+      0.0064729741715182955
+    ],
+    [
+      null,
+      0.04152935537309717,
+      0.005490071039433546,
+      0.006144523410866503
+    ],
+    [
+      null,
+      0.013449464826156577,
+      0.004345690557747058,
+      0.007428632851460449
+    ],
+    [
+      null,
+      0.011097004813720538,
+      0.005003973534328551,
+      0.005422816679675098
+    ],
+    [
+      null,
+      0.006681385641553546,
+      0.007869469902423572,
+      0.006469242501761306
+    ],
+    [
+      null,
+      0.007787575131436823,
+      0.006546434494798167,
+      0.007059262957331915
+    ],
+    [
+      null,
+      0.0016774407883850412,
+      0.017351601937718238,
+      0.012836532489212692
+    ],
+    [
+      null,
+      0.017239136292334985,
+      0.019281588059334522,
+      0.00798869538990519
+    ],
+    [
+      null,
+      0.08232661867359091,
+      0.013886183646733632,
+      0.0095343869048824
+    ],
+    [
+      null,
+      0.04523686370299188,
+      0.009234353986429937,
+      0.045046897956727595
+    ],
+    [
+      null,
+      0.021690814745820994,
+      0.04200636173895634,
+      0.024873255588241962
+    ],
+    [
+      null,
+      0.039054187956103985,
+      0.018469773055815448,
+      0.010150256081203997
+    ],
+    [
+      null,
+      0.037957003629964244,
+      0.007814632720524012,
+      0.007999603135284052
+    ],
+    [
+      null,
+      0.010357148042320826,
+      0.006126415343983751,
+      0.004955083529024185
+    ],
+    [
+      null,
+      0.008327535273151634,
+      0.04085696008321298,
+      0.007432109062298313
+    ],
+    [
+      null,
+      0.011228490949197806,
+      0.012667371264473173,
+      0.01722754719352188
     ]
   ],
   "row_notes": {
@@ -1345,6 +1705,24 @@
     "102": "same in both configurations, so measured once",
     "103": "same in both configurations, so measured once",
     "104": "same in both configurations, so measured once",
-    "105": "same in both configurations, so measured once"
+    "105": "same in both configurations, so measured once",
+    "114": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "115": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "116": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "117": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "122": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "123": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "124": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "125": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "126": "Python text/regex walk; parser recovery and text storage differ",
+    "127": "Python text/regex walk; parser recovery and text storage differ",
+    "128": "Python text/regex walk; parser recovery and text storage differ",
+    "129": "Python text/regex walk; parser recovery and text storage differ",
+    "130": "Python text/regex walk; parser recovery and text storage differ",
+    "131": "Python text/regex walk; parser recovery and text storage differ",
+    "136": "Python text/regex walk; parser recovery and text storage differ",
+    "137": "Python text/regex walk; parser recovery and text storage differ",
+    "138": "Python text/regex walk; parser recovery and text storage differ",
+    "139": "Python text/regex walk; parser recovery and text storage differ"
   }
 }

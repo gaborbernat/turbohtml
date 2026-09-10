@@ -213,3 +213,15 @@ returned node:
   expects.
 - **The crawl toolkit stays behind.** Dropping resiliparse also drops its process guards and the FastWARC ingestion
   path. If a pipeline depends on those, keep resiliparse for that stage and hand turbohtml the HTML string.
+
+Cleanup before extraction
+=========================
+
+Choose DOM cleanup when later queries or extraction must read normalized text. In turbohtml,
+``collapse_whitespace_node`` and ``strip_comments_node`` mutate and return the same node. They preserve the root and
+preformatted text; whitespace collapse does not perform boilerplate extraction. Retain ``transform_node``'s return value
+when mixing them with a copying stage such as ``sanitize_node``.
+
+Use ``serialize(inner=True)`` or ``encode(inner=True)`` for HTML child output, and ``inner_xml`` for XML fragments.
+``serialize_iter(inner=True)`` streams compact or indented HTML. See :doc:`/how-to/transforming-trees` for the pipeline.
+The extraction timings above measure rendered text, not mutation of the input DOM.

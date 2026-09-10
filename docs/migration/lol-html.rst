@@ -184,3 +184,15 @@ tokenizer and native CSS selector engine that power :func:`turbohtml.parse` and 
 
 See :doc:`/how-to/rewriting` for the full set of recipes and :doc:`/explanation/streaming` for the memory model and the
 no-lookahead selector constraint the two rewriters share.
+
+Choose a tree when later traversal needs edits
+==============================================
+
+A streaming rewrite changes emitted output. For later queries over cleaned nodes, parse a tree and call
+``transform_node`` with ``strip_comments_node`` and ``collapse_whitespace_node``. Both mutate and return the current
+root; a ``sanitize_node`` stage returns a copy. Retain the composed result.
+
+Export children with ``serialize(inner=True)``, ``encode(inner=True)``, or ``serialize_iter(inner=True)``. The iterator
+streams output from a resident DOM; parsing still retains the tree. It does not give DOM transformations the streaming
+rewriter's memory bound. See :doc:`/how-to/transforming-trees` and :doc:`/development/performance` for DOM workflow
+costs, separate from the rewrite benchmark above.

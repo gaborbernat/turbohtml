@@ -196,3 +196,13 @@ one verbatim text node; and :meth:`~turbohtml.Element.insert_adjacent_html` spli
 - turbohtml parses to the **WHATWG spec**, so a malformed document is fixed up exactly as a browser would (implied
   ``<tbody>``, reparented ``<head>`` content); pyquery's tree follows lxml's HTML parser, which can differ on the same
   broken input.
+
+Tree cleanup and child output
+=============================
+
+``query("body").html(method="html")`` corresponds to ``body.serialize(inner=True)``. For mutation, pyquery exposes lxml
+elements: use a text/tail walk or native comment stripping with tails retained. turbohtml provides
+``collapse_whitespace_node`` and ``strip_comments_node`` on its own nodes.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.

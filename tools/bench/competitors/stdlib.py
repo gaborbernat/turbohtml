@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import functools
 from html import escape as _html_escape
 from html import unescape as _html_unescape
 from html.parser import HTMLParser
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 REQUIREMENTS = ()
 
@@ -64,7 +68,27 @@ def htmlparser(text: str) -> None:
     parser.close()
 
 
+def _transform_dispatch(count: int) -> str:
+    return _dispatch_pipeline(count)()
+
+
+@functools.cache
+def _dispatch_pipeline(count: int) -> functools.partial[str]:
+    return functools.partial(_apply_steps, "root", (_identity,) * count)
+
+
+def _apply_steps(root: str, steps: tuple[Callable[[str], str], ...]) -> str:
+    for step in steps:
+        root = step(root)
+    return root
+
+
+def _identity(node: str) -> str:
+    return node
+
+
 OPERATIONS = {
+    "transform-dispatch": (_transform_dispatch, "stdlib"),
     "decode": (decode, "stdlib"),
     "escape": (escape, "stdlib"),
     "unescape": (unescape, "stdlib"),

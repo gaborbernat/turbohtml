@@ -147,3 +147,10 @@ doctype, the ``<head>``, and the link text stay the bytes the source held. Remov
 inserted node -- which carries no source location -- serializes canonically while its untouched siblings copy theirs.
 This is the tree-based counterpart to the streaming :func:`turbohtml.rewrite.rewrite`; see
 :doc:`/explanation/serialization` for what round-trips byte for byte and what a spec-mandated normalization changes.
+
+**************************
+ Omit a subtree's wrapper
+**************************
+
+Pass ``inner=True`` to ``serialize``, ``encode``, or ``serialize_iter`` to emit children with the chosen options. See
+:doc:`transforming-trees` for encoding and streaming examples, and for cleanup before XML fragment traversal.

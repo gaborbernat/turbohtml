@@ -27,6 +27,12 @@ Reproduce a table with ``tox -e bench -- --pgo <operation>``. You can also selec
 platform support. Most cases time one call. The ``build`` and ``build-e`` cases construct and serialize a tree;
 ``construct`` and ``emit`` measure those steps apart.
 
+The ``collapse-whitespace``, ``strip-comments``, and ``transform-tree`` operations time DOM transformations with fresh
+input trees prepared outside each measurement. ``serialize-inner`` measures configured child serialization. These
+operations also have CodSpeed cases in the shared registry. Use the same release build and corpus for comparisons;
+report composition overhead separately from changes in the transformed workflow. Whitespace collapse also covers 1 MiB
+unchanged text and whitespace-heavy text in the benchmark suite and CodSpeed.
+
 To refresh these tables, run the sweep into a scratch directory and let the generators rewrite the committed feeds; the
 harness names its output for the operation, which is not what this guide calls its tables, so never copy the files
 across by hand:
@@ -1010,3 +1016,128 @@ retain the suite's multilingual inputs.
 
 .. bench-table::
     :file: bench/detect-language-long.json
+
+**************************
+ DOM transformation costs
+**************************
+
+These cases use a plain release build without PGO or LTO. Each mutation receives a fresh parse outside the measurement.
+The pyperf worker collects cyclic garbage between mutations outside the timer, preventing old parsed trees from
+accumulating. Competitor columns compare the operations described below. CPU-headroom and memory-pressure checks passed
+during collection; each cell contains at least twelve timing values across at least three worker processes.
+
+.. bench-table::
+    :file: bench/collapse-whitespace.json
+
+.. bench-table::
+    :file: bench/strip-comments.json
+
+.. bench-table::
+    :file: bench/transform-tree.json
+
+.. bench-table::
+    :file: bench/serialize-inner.json
+
+The following tables cover indented and minified child serialization, UTF-8 encoding, and full consumption of compact
+and indented chunk iterators on the same four pages. Iterator timings discard chunks as they arrive; they exclude I/O
+and do not join the output. Encoding includes Unicode serialization and conversion to UTF-8. Minified streaming is not
+supported.
+
+.. bench-table::
+    :file: bench/serialize-inner-indent.json
+
+.. bench-table::
+    :file: bench/serialize-inner-minify.json
+
+.. bench-table::
+    :file: bench/encode-inner.json
+
+.. bench-table::
+    :file: bench/encode-inner-indent.json
+
+.. bench-table::
+    :file: bench/encode-inner-minify.json
+
+.. bench-table::
+    :file: bench/iterate-inner.json
+
+.. bench-table::
+    :file: bench/iterate-inner-indent.json
+
+Dispatcher cases reuse a tiny tree and a bound pipeline with zero, one, four, or sixteen identity callbacks. They
+include the benchmark's cached-pipeline lookup and callback execution, but exclude parsing and binding. These are
+absolute composition costs; they do not establish a speedup over calling application functions. CodSpeed tracks each
+stage count, the serializer variants, and the existing mutation cases through the shared operation registry.
+
+.. bench-table::
+    :file: bench/transform-dispatch.json
+
+Competitor transformation paths
+===============================
+
+The lxml, BeautifulSoup, and selectolax whitespace adapters walk text and apply an ASCII-space regular expression,
+preserving preformatted, raw-text, and foreign contexts. They are application code built on those libraries, not native
+whitespace APIs. BeautifulSoup and selectolax replace text nodes; turbohtml preserves existing Text objects. lxml
+removes comments through ``strip_elements(..., with_tail=False)``; BeautifulSoup extracts ``Comment`` objects;
+selectolax removes comment nodes. Its adapters reject trees containing templates because traversal does not expose their
+contents; error cells have no timing ratio. Its pretty serializer produces diagnostic output, so it has no pretty-HTML
+comparison column. The combined operation removes comments before collapsing text. Parsing stays outside mutation
+timings. Parser recovery and text-node representations differ on malformed documents; these measurements do not
+establish parser or policy equivalence beyond the differential cases.
+
+Compact child output uses BeautifulSoup's ``decode_contents``/``encode_contents``, selectolax's ``inner_html``,
+pyquery's ``html``, and an html5lib treewalker with the body wrapper omitted. lxml and parsel require concatenating
+child serializations while preserving and escaping direct body text. Pretty-printer indentation and whitespace policies
+vary; their columns price each library's own pretty output rather than identical bytes. html5lib streams serializer
+tokens, while turbohtml streams bounded chunks. Both iterator benchmarks consume their output without joining it.
+
+html5lib minification folds whitespace and omits optional tags and attribute quotes; the adapter filters comments. Its
+preservation rules differ for ``listing``, ``title``, and foreign content, and removing a comment can leave two spaces
+across separate tokens. Do not treat its minified output as a replacement for DOM mutation or as a guarantee of the same
+policy. The migration guide describes these limits.
+
+The ``Python (validated)`` baseline uses turbohtml Nodes and checks the same root, result, and ``None`` contract as the
+native dispatcher. Both implementations retain replacement roots and propagate stage errors. The ``stdlib`` baseline
+omits these checks and measures iteration and callback cost with an identity value. Use the validated column to compare
+implementations of the dispatch contract; the plain loop shows the cost without that contract.
+
+Whitespace available to later traversal
+=======================================
+
+The html5lib workflow serializes a parsed tree through its whitespace filter, reparses it, then serializes the resulting
+tree. turbohtml collapses the parsed DOM and serializes it. The final serialization makes the changed tree observable on
+both sides. These costs include html5lib's required reparse and exclude the initial parse. They retain the policy
+differences described above.
+
+.. bench-table::
+    :file: bench/whitespace-roundtrip.json
+
+JavaScript child-output workflows
+=================================
+
+parse5 and jsdom expose child serialization. Their Python adapters start a Node process, parse the supplied HTML, and
+return the body's children through stdout. The following tables include process startup, parsing, serialization, and
+pipe I/O; turbohtml parses and serializes in the Python process. These are integration costs for a Python caller, not
+in-process JavaScript engine timings. The string workflow decodes stdout; the byte workflow retains UTF-8 bytes.
+
+.. bench-table::
+    :file: bench/parse-inner.json
+
+.. bench-table::
+    :file: bench/parse-inner-encode.json
+
+Copying and mutating cleanup stages
+===================================
+
+``sanitize_node`` and lxml-html-clean's ``clean_html`` return copies of parsed trees. The policies differ: turbohtml
+uses an allowlist and lxml-html-clean uses a blocklist. These timings do not establish security equivalence.
+``linkify_node`` and lxml-html-clean's ``autolink`` mutate a fresh tree supplied outside the timer; lxml-html-clean
+links URLs but not bare email addresses. The adapter disables its example-domain exclusions so the shared input produces
+links rather than timing a no-op. Rebuilding inputs outside the measurement prevents later iterations from timing an
+already-linked tree. These operations can be stages in an application's cleanup pipeline.
+
+.. bench-table::
+    :file: bench/sanitize-node.json
+
+.. bench-table::
+    :file: bench/linkify-node.json

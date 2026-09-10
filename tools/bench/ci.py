@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Final
 from bench import corpus
 from bench.core import OPERATIONS
 from bench.operations import INPUTS
-from turbohtml import parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -53,6 +52,20 @@ _DOCUMENT_OPS = (
     "find-text",
     "text-content",
     "serialize",
+    "serialize-inner",
+    "parse-inner",
+    "parse-inner-encode",
+    "serialize-inner-indent",
+    "serialize-inner-minify",
+    "encode-inner",
+    "encode-inner-indent",
+    "encode-inner-minify",
+    "iterate-inner",
+    "iterate-inner-indent",
+    "collapse-whitespace",
+    "strip-comments",
+    "transform-tree",
+    "whitespace-roundtrip",
     "conformance",
     "serialize-xml",
     "canonicalize",
@@ -137,8 +150,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "sanitize-custom-elements": ("sanitize-custom-elements-spec", _spec),
     "sanitize-xml": ("sanitize-xml-spec", _spec),
     "linkify": ("linkify-spec", _spec),
-    "sanitize-node": ("sanitize-node-spec", lambda: parse(_spec()).find("body")),
-    "linkify-node": ("linkify-node-spec", lambda: parse(_spec()).find("body")),
+    "sanitize-node": ("sanitize-node-fresh-spec", _spec),
+    "linkify-node": ("linkify-node-fresh-spec", _spec),
     "markdown-google": ("markdown-google-parse-spec", _spec),
     "article": ("article-parse-spec", _spec),
     "boilerplate": ("boilerplate-spec", _spec),
@@ -178,6 +191,11 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "select-nth-filtered": ("select-nth", 4),
     "xpath-wide-union": ("xpath-wide", 4),
     "microdata-itemref-interleaved": ("microdata-itemref", 2),
+    "transform-dispatch-1": ("transform-dispatch", 1),
+    "transform-dispatch-4": ("transform-dispatch", 2),
+    "transform-dispatch-16": ("transform-dispatch", 3),
+    "collapse-whitespace-unchanged": ("collapse-whitespace", 4),
+    "collapse-whitespace-dense": ("collapse-whitespace", 5),
     "idna-varied": ("idna", 1),
     "linkify-traversal-small-nodes": ("linkify-traversal", 1),
     "linkify-traversal-skipped": ("linkify-traversal", 2),

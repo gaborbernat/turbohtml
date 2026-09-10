@@ -196,3 +196,15 @@ The table times both libraries end-to-end; the DOMPurify figure is its Node runn
 
 .. bench-table::
     :file: bench/dompurify.json
+
+Tree cleanup and ownership
+==========================
+
+DOMPurify supports returning a DOM tree and sanitizing a DOM node in place. turbohtml's ``sanitize_node`` returns a
+copy; retain the return value when composing it with ``transform_node``. ``collapse_whitespace_node``,
+``strip_comments_node``, and ``linkify_node`` mutate and return their current root. They do not add sanitization to a
+custom stage.
+
+Use ``inner_xml`` to read normalized XML fragments after cleanup, or ``serialize(inner=True)`` for configurable HTML
+child output. See :doc:`/how-to/transforming-trees`. This page's sanitizer benchmark includes the Python-to-Node
+boundary; it does not isolate mutation of an already-resident JavaScript DOM.

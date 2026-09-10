@@ -7,9 +7,9 @@ maps each operation to ``(timing function, label)``; the function takes the same
 
 from __future__ import annotations
 
-import copy
 import functools
 import re
+from collections import deque
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final, cast
 
@@ -124,6 +124,8 @@ _LINKER_CALLBACKS: Final[_clean.Linker] = _clean.Linker(
     _clean.Linkify(callbacks=(_clean.nofollow, _clean.target_blank), process_existing=True)
 )
 _ANNOTATION_RULES = {"h1": ["heading"], "b": ["emphasis"], "a": ["link"]}
+_INNER_INDENT: Final = turbohtml.Html(layout=turbohtml.Indent())
+_INNER_MINIFY: Final = turbohtml.Html(layout=turbohtml.Minify())
 _XML = turbohtml.Html(xml=True)  # the XML/XHTML serialization config, reused across the timed calls
 
 
@@ -360,6 +362,73 @@ def serialize(text: str) -> None:
     _ = _parsed(text).html
 
 
+def _parse_inner(text: str) -> str:
+    return turbohtml.parse(text).find_all("body")[0].serialize(inner=True)
+
+
+def _parse_inner_encode(text: str) -> bytes:
+    return turbohtml.parse(text).find_all("body")[0].encode(inner=True)
+
+
+def _serialize_inner(text: str) -> None:
+    _parsed_body(text).serialize(inner=True)
+
+
+def _serialize_inner_indent(text: str) -> None:
+    _parsed_body(text).serialize(_INNER_INDENT, inner=True)
+
+
+def _serialize_inner_minify(text: str) -> None:
+    _parsed_body(text).serialize(_INNER_MINIFY, inner=True)
+
+
+def _encode_inner(text: str) -> None:
+    _parsed_body(text).encode(inner=True)
+
+
+def _encode_inner_indent(text: str) -> None:
+    _parsed_body(text).encode(options=_INNER_INDENT, inner=True)
+
+
+def _encode_inner_minify(text: str) -> None:
+    _parsed_body(text).encode(options=_INNER_MINIFY, inner=True)
+
+
+def _iterate_inner(text: str) -> None:
+    deque(_parsed_body(text).serialize_iter(inner=True), maxlen=0)
+
+
+def _iterate_inner_indent(text: str) -> None:
+    deque(_parsed_body(text).serialize_iter(_INNER_INDENT, inner=True), maxlen=0)
+
+
+def _transform_dispatch(count: int) -> None:
+    _dispatch_pipeline(count)()
+
+
+@functools.cache
+def _dispatch_pipeline(count: int) -> Callable[[], turbohtml.Node]:
+    return functools.partial(_clean.transform_node, turbohtml.parse_fragment("<p>x</p>"), *(_identity_node,) * count)
+
+
+def _identity_node(node: turbohtml.Node) -> turbohtml.Node:
+    return node
+
+
+@functools.cache
+def _parsed_body(text: str) -> turbohtml.Element:
+    return _parsed(text).find_all("body")[0]
+
+
+def _whitespace_roundtrip(document: turbohtml.Document) -> str:
+    _clean.collapse_whitespace_node(document)
+    return document.serialize()
+
+
+def _transform_tree(document: turbohtml.Document) -> None:
+    _clean.transform_node(document, _clean.strip_comments_node, _clean.collapse_whitespace_node)
+
+
 def conformance(text: str) -> None:
     """Run the HTML5 authoring-conformance checks over a parsed document."""
     _check_conformance(_parsed(text))
@@ -519,9 +588,9 @@ def sanitize_report(text: str) -> None:
     _SANITIZER.sanitize_report(text)
 
 
-def sanitize_node(node: Node) -> None:
+def sanitize_node(node: Node) -> Node:
     """Sanitize an already parsed subtree with the relaxed policy, the parse-once pipeline's step."""
-    _SANITIZER.sanitize_node(node)
+    return _SANITIZER.sanitize_node(node)
 
 
 def sanitize_styles(text: str) -> None:
@@ -577,9 +646,9 @@ def linkify(text: str) -> None:
     _linkify(text)
 
 
-def linkify_node(node: Node) -> None:
-    """Linkify an already parsed subtree in place; each call links a fresh copy, since a linked tree offers nothing."""
-    _LINKER.linkify_node(copy.deepcopy(node))
+def linkify_node(node: Node) -> Node:
+    """Fresh-tree setup keeps previously linked input out of later iterations."""
+    return _LINKER.linkify_node(node)
 
 
 def linkify_traversal(case: tuple[str, str]) -> None:
@@ -1092,6 +1161,21 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "find-text-overlap": (find_text_overlap, "turbohtml"),
     "text-content": (text_content, "turbohtml"),
     "serialize": (serialize, "turbohtml"),
+    "parse-inner": (_parse_inner, "turbohtml"),
+    "parse-inner-encode": (_parse_inner_encode, "turbohtml"),
+    "serialize-inner": (_serialize_inner, "turbohtml"),
+    "serialize-inner-indent": (_serialize_inner_indent, "turbohtml"),
+    "serialize-inner-minify": (_serialize_inner_minify, "turbohtml"),
+    "encode-inner": (_encode_inner, "turbohtml"),
+    "encode-inner-indent": (_encode_inner_indent, "turbohtml"),
+    "encode-inner-minify": (_encode_inner_minify, "turbohtml"),
+    "iterate-inner": (_iterate_inner, "turbohtml"),
+    "iterate-inner-indent": (_iterate_inner_indent, "turbohtml"),
+    "transform-dispatch": (_transform_dispatch, "turbohtml"),
+    "collapse-whitespace": (Mutating(turbohtml.parse, _clean.collapse_whitespace_node), "turbohtml"),
+    "strip-comments": (Mutating(turbohtml.parse, _clean.strip_comments_node), "turbohtml"),
+    "whitespace-roundtrip": (Mutating(turbohtml.parse, _whitespace_roundtrip), "turbohtml"),
+    "transform-tree": (Mutating(turbohtml.parse, _transform_tree), "turbohtml"),
     "conformance": (conformance, "turbohtml"),
     "serialize-xml": (serialize_xml, "turbohtml"),
     "canonicalize": (canonicalize, "turbohtml"),
@@ -1125,7 +1209,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "sanitize-templates": (sanitize_templates, "turbohtml"),
     "sanitize-named-props": (sanitize_named_props, "turbohtml"),
     "sanitize-report": (sanitize_report, "turbohtml"),
-    "sanitize-node": (sanitize_node, "turbohtml"),
+    "sanitize-node": (Mutating(turbohtml.parse_fragment, sanitize_node), "turbohtml"),
     "sanitize-styles": (sanitize_styles, "turbohtml"),
     "sanitize-transform": (sanitize_transform, "turbohtml"),
     "sanitize-custom-elements": (sanitize_custom_elements, "turbohtml"),
@@ -1133,7 +1217,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "markup": (markup, "turbohtml"),
     "markup-op": (markup_op, "turbohtml"),
     "linkify": (linkify, "turbohtml"),
-    "linkify-node": (linkify_node, "turbohtml"),
+    "linkify-node": (Mutating(turbohtml.parse_fragment, linkify_node), "turbohtml"),
     "linkify-traversal": (linkify_traversal, "turbohtml"),
     "detect": (detect, "turbohtml"),
     "phone": (phone, "turbohtml"),

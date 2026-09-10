@@ -400,6 +400,116 @@
       "extract filtered page links — whatwg spec (235 kB)",
       0.0010619639210744936,
       0.003025346355570946
+    ],
+    [
+      "serialize body children — daring fireball (10 kB)",
+      9.359944669995457e-06,
+      2.4280219501330674e-05
+    ],
+    [
+      "serialize body children — ars technica (56 kB)",
+      4.2464491040542875e-05,
+      0.00012604945360787193
+    ],
+    [
+      "serialize body children — mozilla blog (95 kB)",
+      8.87867843175627e-05,
+      0.00026253803018031857
+    ],
+    [
+      "serialize body children — whatwg spec (235 kB)",
+      0.0002502627500386249,
+      0.0007302025560420589
+    ],
+    [
+      "encode body children as UTF-8 — daring fireball (10 kB)",
+      1.2011069808674316e-05,
+      2.699557808227837e-05
+    ],
+    [
+      "encode body children as UTF-8 — ars technica (56 kB)",
+      5.41490344403428e-05,
+      0.0001378545449218412
+    ],
+    [
+      "encode body children as UTF-8 — mozilla blog (95 kB)",
+      0.00010932817895081826,
+      0.0002821494426825666
+    ],
+    [
+      "encode body children as UTF-8 — whatwg spec (235 kB)",
+      0.0003043837621892938,
+      0.0007916992733498773
+    ],
+    [
+      "collapse DOM text whitespace — daring fireball (10 kB)",
+      3.7942158238971993e-06,
+      0.00036180195737263904
+    ],
+    [
+      "collapse DOM text whitespace — ars technica (56 kB)",
+      2.9330841319582152e-05,
+      0.0018694190970715379
+    ],
+    [
+      "collapse DOM text whitespace — mozilla blog (95 kB)",
+      5.532939750689062e-05,
+      0.005086386952674123
+    ],
+    [
+      "collapse DOM text whitespace — whatwg spec (235 kB)",
+      0.00026638981247136445,
+      0.013279551478338666
+    ],
+    [
+      "collapse DOM text whitespace — unchanged text (1 MiB)",
+      0.000636448973637016,
+      0.0051364973950664234
+    ],
+    [
+      "collapse DOM text whitespace — whitespace runs (1 MiB)",
+      0.0010200365876850508,
+      0.015319300963028581
+    ],
+    [
+      "remove DOM comments — daring fireball (10 kB)",
+      7.836686866842987e-07,
+      2.406137218713411e-05
+    ],
+    [
+      "remove DOM comments — ars technica (56 kB)",
+      3.740509631218932e-06,
+      9.177682871571353e-05
+    ],
+    [
+      "remove DOM comments — mozilla blog (95 kB)",
+      6.107953974302897e-06,
+      0.00022812067656256355
+    ],
+    [
+      "remove DOM comments — whatwg spec (235 kB)",
+      1.9096269094613188e-05,
+      0.0007618298636013302
+    ],
+    [
+      "remove comments then collapse whitespace — daring fireball (10 kB)",
+      4.591630613504094e-06,
+      0.00038678129749314394
+    ],
+    [
+      "remove comments then collapse whitespace — ars technica (56 kB)",
+      3.3016244969985564e-05,
+      0.001982262102956156
+    ],
+    [
+      "remove comments then collapse whitespace — mozilla blog (95 kB)",
+      6.142306354680234e-05,
+      0.005314298631295363
+    ],
+    [
+      "remove comments then collapse whitespace — whatwg spec (235 kB)",
+      0.00028451702776995563,
+      0.014061351704261446
     ]
   ],
   "spread": [
@@ -797,7 +907,136 @@
       null,
       0.1209415112126743,
       0.05793325990372666
+    ],
+    [
+      null,
+      0.04900239483383481,
+      0.003901764318893245
+    ],
+    [
+      null,
+      0.02085759777073082,
+      0.006217256483215823
+    ],
+    [
+      null,
+      0.021612543940447097,
+      0.00733340802953693
+    ],
+    [
+      null,
+      0.02304510266877739,
+      0.010582604499819936
+    ],
+    [
+      null,
+      0.011500230389031871,
+      0.007141042905434266
+    ],
+    [
+      null,
+      0.014436976112573876,
+      0.003613305906656357
+    ],
+    [
+      null,
+      0.009369529991274703,
+      0.00680976400128553
+    ],
+    [
+      null,
+      0.008444578746948619,
+      0.003013884259049612
+    ],
+    [
+      null,
+      0.013449464826156577,
+      0.013636832908212267
+    ],
+    [
+      null,
+      0.011097004813720538,
+      0.004787437981474582
+    ],
+    [
+      null,
+      0.006681385641553546,
+      0.007723727107247184
+    ],
+    [
+      null,
+      0.007787575131436823,
+      0.008057454701710664
+    ],
+    [
+      null,
+      0.0016774407883850412,
+      0.009696942910058974
+    ],
+    [
+      null,
+      0.017239136292334985,
+      0.00469640961972467
+    ],
+    [
+      null,
+      0.08232661867359091,
+      0.0090539133703757
+    ],
+    [
+      null,
+      0.04523686370299188,
+      0.006318646105777945
+    ],
+    [
+      null,
+      0.021690814745820994,
+      0.020639713317473617
+    ],
+    [
+      null,
+      0.039054187956103985,
+      0.00858682748838969
+    ],
+    [
+      null,
+      0.037957003629964244,
+      0.025018885330674413
+    ],
+    [
+      null,
+      0.010357148042320826,
+      0.003595850052960418
+    ],
+    [
+      null,
+      0.008327535273151634,
+      0.006867677026295995
+    ],
+    [
+      null,
+      0.011228490949197806,
+      0.004901677890858499
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "83": "serializes to a Unicode string before UTF-8 encoding",
+    "84": "serializes to a Unicode string before UTF-8 encoding",
+    "85": "serializes to a Unicode string before UTF-8 encoding",
+    "86": "serializes to a Unicode string before UTF-8 encoding",
+    "87": "Python text/regex walk; rejects template input; parser recovery differs",
+    "88": "Python text/regex walk; rejects template input; parser recovery differs",
+    "89": "Python text/regex walk; rejects template input; parser recovery differs",
+    "90": "Python text/regex walk; rejects template input; parser recovery differs",
+    "91": "Python text/regex walk; rejects template input; parser recovery differs",
+    "92": "Python text/regex walk; rejects template input; parser recovery differs",
+    "93": "template-containing inputs are rejected because template contents are not exposed",
+    "94": "template-containing inputs are rejected because template contents are not exposed",
+    "95": "template-containing inputs are rejected because template contents are not exposed",
+    "96": "template-containing inputs are rejected because template contents are not exposed",
+    "97": "Python text/regex walk; rejects template input; parser recovery differs",
+    "98": "Python text/regex walk; rejects template input; parser recovery differs",
+    "99": "Python text/regex walk; rejects template input; parser recovery differs",
+    "100": "Python text/regex walk; rejects template input; parser recovery differs"
+  }
 }

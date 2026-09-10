@@ -1,0 +1,75 @@
+{
+  "label": "serialize indented body children",
+  "parties": [
+    "turbohtml",
+    "BeautifulSoup (lxml)",
+    "BeautifulSoup (html.parser)",
+    "lxml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "daring fireball (10 kB)",
+      1.3427094184711071e-05,
+      0.0004158459269092418,
+      0.0004183602328945805,
+      3.558658787975825e-05
+    ],
+    [
+      "ars technica (56 kB)",
+      6.027894429886753e-05,
+      0.0017762643183232285,
+      0.0017718005571320343,
+      0.00017682638880008503
+    ],
+    [
+      "mozilla blog (95 kB)",
+      0.00014089633784048297,
+      0.004172385633864906,
+      0.00418593836426832,
+      0.0003604485949987672
+    ],
+    [
+      "whatwg spec (235 kB)",
+      0.0003530077632300769,
+      0.013168823135250326,
+      0.013161625427528634,
+      0.0010478625229855727
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.009020195795098697,
+      0.00804992374189498,
+      0.007090987733288325,
+      0.008337541963749223
+    ],
+    [
+      null,
+      0.04563381983240829,
+      0.01665525737861001,
+      0.011042412094610056,
+      0.015029693002591929
+    ],
+    [
+      null,
+      0.01862198937308882,
+      0.01021664777719804,
+      0.0069182669256787595,
+      0.006903150142919422
+    ],
+    [
+      null,
+      0.008240278605065602,
+      0.006491623934911717,
+      0.007388751434118014,
+      0.007710091377307485
+    ]
+  ],
+  "notes": {
+    "BeautifulSoup (lxml)": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "BeautifulSoup (html.parser)": "own pretty-print whitespace policy; output bytes differ from turbohtml",
+    "lxml": "own pretty-print whitespace policy; output bytes differ from turbohtml"
+  }
+}

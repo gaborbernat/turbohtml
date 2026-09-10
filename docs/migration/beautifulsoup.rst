@@ -303,3 +303,13 @@ attribute; ``class_`` and ``attrs`` match the rest; ``axis`` replaces the direct
 - **``SoupStrainer`` has no parse-time equivalent.** turbohtml always runs the full WHATWG algorithm, then
   :meth:`~turbohtml.Node.prune` trims the parsed tree to a CSS selector in one C pass, so a large document still yields
   a small tree — but the whole document is parsed first.
+
+Tree cleanup and child output
+=============================
+
+``decode_contents`` and ``encode_contents`` map to ``serialize(inner=True)`` and ``encode(inner=True)``. Comment
+extraction and text-node replacement map to native comment removal and whitespace collapse. BeautifulSoup may replace
+whitespace-only strings during parsing; its pretty-printer also follows its own text policy.
+
+See :doc:`/how-to/transforming-trees` for copying and custom stages, and :doc:`/development/performance` for the
+comparator methods and measured costs.
