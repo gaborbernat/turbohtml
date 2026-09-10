@@ -1,0 +1,27 @@
+{
+  "label": "resolve XPath ID argument nodes",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "10,000 ID argument nodes",
+      0.000716319585050466
+    ],
+    [
+      "10 long ID argument nodes",
+      0.0003118277181935506
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.013314958653646793
+    ],
+    [
+      null,
+      0.03117250869723997
+    ]
+  ]
+}

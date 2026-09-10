@@ -208,4 +208,5 @@ OPERATIONS = {
     "xpath-order": (_xpath_scaling, "parsel"),
     "xpath-translate": (_xpath_scaling, "parsel"),
     "xpath-concat": (_xpath_scaling, "parsel"),
+    "xpath-id-nodes": (_xpath_scaling, "parsel"),
 }

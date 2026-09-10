@@ -310,6 +310,7 @@ OPERATIONS: dict[str, Operation] = {
     "xpath-set": Operation("compare XPath node-set membership", "us"),
     "xpath-compare": Operation("compare XPath values", "us"),
     "node-equals": Operation("compare element attributes", "us"),
+    "xpath-id-nodes": Operation("resolve XPath ID argument nodes", "us"),
     "xpath-concat": Operation("concatenate XPath node strings", "us"),
     "xpath-translate": Operation("translate XPath characters", "us"),
     "xpath-order": Operation("compare numeric XPath node sets", "us"),
@@ -1363,6 +1364,21 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             (100, "disjoint"),
             (100, "rotated"),
             (1003, "duplicates"),
+        )
+    ),
+    "xpath-id-nodes": lambda: tuple(
+        (
+            label,
+            (
+                "id(//i)/@id",
+                '<main><b id="first"></b><b id="second"></b>'
+                + ("<i>" + " second first second " * repetitions + "</i>") * count
+                + "</main>",
+            ),
+        )
+        for count, repetitions, label in (
+            (10_000, 1, "10,000 ID argument nodes"),
+            (10, 1_000, "10 long ID argument nodes"),
         )
     ),
     "xpath-concat": lambda: tuple(

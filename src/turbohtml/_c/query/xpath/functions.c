@@ -494,6 +494,7 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
     out->kind = XP_NODESET;
     Py_UCS4 *list = NULL;
     Py_ssize_t list_len = 0;
+    size_t capacity = 0;
     if (arg->kind == XP_NODESET) {
         for (Py_ssize_t index = 0; index < arg->nodes.len; index++) {
             Py_ssize_t each;
@@ -502,13 +503,30 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
                 PyMem_Free(list); /* GCOVR_EXCL_LINE */
                 return -1;        /* GCOVR_EXCL_LINE */
             }
-            Py_UCS4 *grown = PyMem_Realloc(list, (size_t)(list_len + each + 1) * sizeof(Py_UCS4));
-            if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
-                PyMem_Free(text); /* GCOVR_EXCL_LINE */
-                PyMem_Free(list); /* GCOVR_EXCL_LINE */
-                return -1;        /* GCOVR_EXCL_LINE */
+            const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
+            if ((size_t)each + 1 > limit - (size_t)list_len) { /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(text);                              /* GCOVR_EXCL_LINE */
+                PyMem_Free(list);                              /* GCOVR_EXCL_LINE */
+                return -1;                                     /* GCOVR_EXCL_LINE */
             }
-            list = grown;
+            const size_t needed = (size_t)list_len + (size_t)each + 1;
+            if (needed > capacity) {
+                size_t bytes;
+                /* GCOVR_EXCL_BR_START: alloc */
+                if (!th_grow_cap(needed, capacity, 64, sizeof(Py_UCS4), &capacity, &bytes)) {
+                    PyMem_Free(text); /* GCOVR_EXCL_LINE */
+                    PyMem_Free(list); /* GCOVR_EXCL_LINE */
+                    return -1;        /* GCOVR_EXCL_LINE */
+                }
+                /* GCOVR_EXCL_BR_STOP */
+                Py_UCS4 *grown = PyMem_Realloc(list, bytes);
+                if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+                    PyMem_Free(text); /* GCOVR_EXCL_LINE */
+                    PyMem_Free(list); /* GCOVR_EXCL_LINE */
+                    return -1;        /* GCOVR_EXCL_LINE */
+                }
+                list = grown;
+            }
             list[list_len++] = ' ';
             memcpy(list + list_len, text, (size_t)each * sizeof(Py_UCS4));
             list_len += each;

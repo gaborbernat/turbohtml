@@ -1011,6 +1011,13 @@ before timing. The short-node case measures buffer growth; the long-node control
 .. bench-table::
     :file: bench/xpath-concat.json
 
+The ``id()`` argument cases contain the same 30,000 ID tokens in either 10,000 short nodes or ten long nodes. Both
+return two IDs in document order, removing duplicate references. Geometric buffer growth reduced elapsed time by 18.17%
+for the short nodes and increased it by 4.72% for the long nodes in the matched release-build comparison.
+
+.. bench-table::
+    :file: bench/xpath-id-nodes.json
+
 Shadow slots
 ============
 
