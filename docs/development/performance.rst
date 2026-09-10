@@ -4,10 +4,10 @@
 
 .. warning::
 
-    The first two September 8 audit passes are provisional; those runs had CPU headroom checks but no memory-pressure or
-    swap limits. The third pass refreshed XPath, XPath set membership, article extraction (ordinary, wide, and nested),
-    and XSD, RELAX NG, and pattern validation with CPU and memory gates. The fourth pass adds value comparisons and
-    translation, and refreshes XPath and XSLT under the same gates.
+    The September 8 audit measurements remain provisional. The first two passes checked CPU headroom without enforcing
+    memory-pressure or swap limits. The third and fourth passes enforced those limits, but some before/after comparisons
+    used different interpreter builds. Those comparisons need repeats with one interpreter before they establish a speed
+    improvement. The normalization table below uses a matched interpreter and binary configuration.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
