@@ -1640,9 +1640,19 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "encoding": _encoding_cases,
     "decode": _decode_cases,
     "normalize": _normalize_cases,
-    "normalize-dom": lambda: tuple(
-        (f"{count} adjacent text nodes / {len(text)} characters", (count, text))
-        for count, text in ((1, "text"), (2, "text"), (10, "text"), (100, "text"), (1_000, "text"), (100, "text" * 64))
+    "normalize-dom": lambda: (
+        *(
+            (f"{count} adjacent text nodes / {len(text)} characters", (count, text))
+            for count, text in (
+                (1, "text"),
+                (2, "text"),
+                (10, "text"),
+                (100, "text"),
+                (1_000, "text"),
+                (100, "text" * 64),
+            )
+        ),
+        ("1000 empty tail nodes", (1_000, "")),
     ),
     "attribute-grow": lambda: tuple(
         (f"{count} {'existing' if existing else 'new'} attributes", (count, existing))

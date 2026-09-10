@@ -1071,6 +1071,8 @@ def _attribute_tree(case: tuple[int, bool]) -> tuple[turbohtml.Element, tuple[st
 
 def _normalization_tree(case: tuple[int, str]) -> turbohtml.Element:
     root: Final = turbohtml.Element("p")
+    if not case[1]:
+        root.append(turbohtml.Text("word"))
     root.extend(turbohtml.Text(case[1]) for _ in range(case[0]))
     return root
 

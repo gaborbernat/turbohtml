@@ -191,6 +191,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "node-equals-duplicates": ("node-equals", 12),
     "attribute-replace": ("attribute-grow", 7),
     "normalize-dom-long-text": ("normalize-dom", 5),
+    "normalize-dom-empty-tail": ("normalize-dom", 6),
     "xpath-compare-unequal": ("xpath-compare", 6),
     "xpath-compare-scalar": ("xpath-compare", 9),
     "xpath-order-le": ("xpath-order", 5),

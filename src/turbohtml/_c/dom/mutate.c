@@ -748,9 +748,15 @@ static void normalize_children(th_tree *tree, th_node *root) {
             th_node *end = next;
             Py_ssize_t merged_len = child->text_len;
             while (end != NULL && end->type == TH_NODE_TEXT) {
-                merged_len += end->text_len;
-                end = end->next_sibling;
+                th_node *after = end->next_sibling;
+                if (end->text_len == 0) {
+                    th_node_remove(end);
+                } else {
+                    merged_len += end->text_len;
+                }
+                end = after;
             }
+            next = child->next_sibling;
             if (merged_len > child->text_len) {
                 Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
                 if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -758,14 +764,12 @@ static void normalize_children(th_tree *tree, th_node *root) {
                 }
                 Py_ssize_t offset = 0;
                 for (th_node *part = child; part != end; part = part->next_sibling) {
-                    if (part->text_len > 0) {
-                        const Py_UCS4 *text = need_text(tree, part);
-                        if (text == NULL) { /* GCOVR_EXCL_BR_LINE: text realization fails only on allocation failure */
-                            return;         /* GCOVR_EXCL_LINE: allocation-failure path */
-                        }
-                        memcpy(merged + offset, text, (size_t)part->text_len * sizeof(Py_UCS4));
-                        offset += part->text_len;
+                    const Py_UCS4 *text = need_text(tree, part);
+                    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: text realization fails only on allocation failure */
+                        return;         /* GCOVR_EXCL_LINE: allocation-failure path */
                     }
+                    memcpy(merged + offset, text, (size_t)part->text_len * sizeof(Py_UCS4));
+                    offset += part->text_len;
                 }
                 child->text = merged;
                 child->text_len = merged_len;

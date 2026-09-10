@@ -673,7 +673,10 @@ remain valid as detached nodes. It removes empty text nodes.
 
 These cases vary the number and length of text nodes, with construction outside the timer. The measurements use CPython
 3.14.7 and a release build without PGO or LTO, with CPU-headroom and memory-pressure guards. The one- and two-node
-controls include per-call timer overhead. CodSpeed tracks both the 1,000-node case and the longer-text case.
+controls include per-call timer overhead. CodSpeed tracks the 1,000-node case, the longer-text case, and a nonempty node
+followed by 1,000 empty nodes. Removing those empty nodes during the sizing pass reduced elapsed time from 2.336 to
+1.246 µs (46.66%); the 1,000-nonempty-node control showed no regression. We reused its unchanged baseline measurements
+for the final control comparison; the table retains the sample-spread warning.
 
 .. bench-table::
     :file: bench/normalize-dom.json
