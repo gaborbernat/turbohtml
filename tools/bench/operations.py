@@ -13,6 +13,7 @@ from __future__ import annotations
 import string
 import unicodedata
 from dataclasses import dataclass
+from datetime import date, timedelta
 from textwrap import dedent
 from typing import TYPE_CHECKING, Final
 
@@ -409,6 +410,7 @@ OPERATIONS: dict[str, Operation] = {
     "tables-wide": Operation("extract a wide table grid", "us"),
     "article": Operation("article extraction", "us"),
     "boilerplate": Operation("paragraph boilerplate classification", "us"),
+    "date-tally": Operation("score visible date candidates", "us"),
     "date": Operation("publication-date extraction", "us"),
     "text-render": Operation("layout-aware text", "us"),
     "text-collapsed": Operation("collapsed word stream", "us"),
@@ -1673,6 +1675,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "tables-wide": lambda: (("10k columns", ("rows", "<table><tr>" + "<td>x</td>" * 10_000 + "</tr></table>")),),
     "article": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
     "boilerplate": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
+    "date-tally": lambda: (
+        (
+            "1000 distinct visible dates",
+            "<p>" + " ".join((date(2000, 1, 1) + timedelta(days=index)).isoformat() for index in range(1000)) + "</p>",
+        ),
+        ("1000 repeated visible dates", "<p>" + "2000-01-01 " * 1000 + "</p>"),
+    ),
     "date": lambda: (
         ("post (4 KiB)", _article_page(16)),
         ("longform (16 KiB)", _article_page(72)),

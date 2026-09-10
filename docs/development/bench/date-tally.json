@@ -1,0 +1,27 @@
+{
+  "label": "score visible date candidates",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 distinct visible dates",
+      0.00028813639870956345
+    ],
+    [
+      "1000 repeated visible dates",
+      0.0002723804200286395
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.029323840440314167
+    ],
+    [
+      null,
+      0.023545110328657404
+    ]
+  ]
+}

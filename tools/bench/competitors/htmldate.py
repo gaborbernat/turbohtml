@@ -12,4 +12,9 @@ def date(text: str) -> None:
     htmldate.find_date(text)
 
 
-OPERATIONS = {"date": (date, "htmldate")}
+def date_tally(text: str) -> str | None:
+    """Prefer the latest date to match turbohtml's default scoring policy."""
+    return htmldate.find_date(text, original_date=False)
+
+
+OPERATIONS = {"date": (date, "htmldate"), "date-tally": (date_tally, "htmldate")}

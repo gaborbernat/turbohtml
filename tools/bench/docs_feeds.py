@@ -96,6 +96,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "building-4": "build-e",
     "css-minification": "minify-css",
     "css-specificity": "specificity",
+    "date-tally": "date-tally",
     "date-extraction": "date",
     "editing": "edit",
     "editing-2": "class-edit",

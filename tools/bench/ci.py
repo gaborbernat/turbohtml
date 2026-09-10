@@ -207,6 +207,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "xpath-order-ge": ("xpath-order", 11),
     "xpath-id-nodes-long": ("xpath-id-nodes", 1),
     "xpath-replace-short": ("xpath-replace", 1),
+    "date-tally-repeated": ("date-tally", 1),
     "xpath-concat-long": ("xpath-concat", 1),
     "xpath-translate-short": ("xpath-translate", 3),
     "xpath-translate-repeated": ("xpath-translate", 7),
@@ -258,6 +259,7 @@ def _inline(operation: str, case_index: int = 0) -> object:
 
 _LOADERS["xpath-id-nodes"] = partial(_inline, "xpath-id-nodes")
 _LOADERS["xpath-replace"] = partial(_inline, "xpath-replace")
+_LOADERS["date-tally"] = partial(_inline, "date-tally")
 _LOADERS["xpath-concat"] = partial(_inline, "xpath-concat")
 _LOADERS["node-equals"] = partial(_inline, "node-equals", 5)
 _LOADERS["transform-names-compile"] = partial(_inline, "transform-names-compile")

@@ -277,6 +277,14 @@ trafilatura.
 .. bench-table::
     :file: bench/date-extraction.json
 
+The visible-date tally cases contain 1,000 distinct dates or 1,000 copies of one date. Both include parsing and score
+unstructured text with the default preference for the latest date. Hashing the tally reduced elapsed time from 421.770
+µs to 288.136 µs (31.68%) for distinct dates in the matched release-build comparison. The repeated-date control measured
+276.243 µs before and 272.380 µs after, within its measured spread.
+
+.. bench-table::
+    :file: bench/date-tally.json
+
 ************
  Unescaping
 ************

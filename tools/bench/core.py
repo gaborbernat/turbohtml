@@ -1406,6 +1406,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "article-wide": (article, "turbohtml"),
     "article-deep": (article, "turbohtml"),
     "boilerplate": (boilerplate, "turbohtml"),
+    "date-tally": (date, "turbohtml"),
     "date": (date, "turbohtml"),
     "text-render": (text_render, "turbohtml"),
     "text-collapsed": (text_collapsed, "turbohtml"),
