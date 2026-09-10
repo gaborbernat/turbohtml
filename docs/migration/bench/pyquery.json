@@ -500,6 +500,16 @@
       "encode body children as UTF-8 — whatwg spec (235 kB)",
       0.0003043837621892938,
       0.0009387204315013756
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      "truncated output: 253/256 spans, 0/1,000 samp elements and no text"
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      0.00018145343965443318
     ]
   ],
   "spread": [
@@ -997,6 +1007,16 @@
       null,
       0.008444578746948619,
       0.012543935917040349
+    ],
+    [
+      null,
+      0.007230163073014763,
+      null
+    ],
+    [
+      null,
+      0.0100350789478704,
+      0.018884751965343692
     ]
   ],
   "row_notes": {}

@@ -510,6 +510,16 @@
       "remove comments then collapse whitespace — whatwg spec (235 kB)",
       0.00028451702776995563,
       0.014061351704261446
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      0.0007016419380003451
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      0.0003292830079468937
     ]
   ],
   "spread": [
@@ -1017,6 +1027,16 @@
       null,
       0.011228490949197806,
       0.004901677890858499
+    ],
+    [
+      null,
+      0.007230163073014763,
+      0.00942437149582886
+    ],
+    [
+      null,
+      0.0100350789478704,
+      0.021295407511180194
     ]
   ],
   "row_notes": {

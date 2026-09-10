@@ -1380,6 +1380,16 @@
       "XSLT number nodes — any: 1,024 nodes / from-sections-alternating",
       0.0019738947279620334,
       0.00035900420978881203
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      "truncated output: 253/256 spans, 0/1,000 samp elements and no text"
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      0.0001801804199203616
     ]
   ],
   "spread": [
@@ -2757,6 +2767,16 @@
       null,
       0.06933212553033515,
       0.014970008263026344
+    ],
+    [
+      null,
+      0.007230163073014763,
+      null
+    ],
+    [
+      null,
+      0.0100350789478704,
+      0.039847496884005906
     ]
   ],
   "row_notes": {

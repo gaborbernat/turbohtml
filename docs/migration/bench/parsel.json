@@ -740,6 +740,16 @@
       "translate XPath characters — Unicode cycling",
       2.9246365155207362e-05,
       0.004071899472425381
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      0.00022512670924091556
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      0.00018266087240590423
     ]
   ],
   "spread": [
@@ -1477,6 +1487,16 @@
       null,
       0.018635071948143022,
       0.07387614482610204
+    ],
+    [
+      null,
+      0.007230163073014763,
+      0.011145349839548423
+    ],
+    [
+      null,
+      0.0100350789478704,
+      0.007067458740718529
     ]
   ],
   "row_notes": {

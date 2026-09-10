@@ -385,6 +385,16 @@
       "detect a byte stream's encoding — utf-8 page (95 kB)",
       9.080427233835545e-07,
       6.985357494215805e-05
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      0.00026708329504193293
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      7.91789971003709e-05
     ]
   ],
   "spread": [
@@ -767,6 +777,16 @@
       null,
       0.09984062000003383,
       0.12703643729605826
+    ],
+    [
+      null,
+      0.007230163073014763,
+      0.017021409450496128
+    ],
+    [
+      null,
+      0.0100350789478704,
+      0.022795576866792955
     ]
   ],
   "row_notes": {

@@ -40,6 +40,16 @@
       "common tags (13 kB)",
       7.847152885176456e-05,
       0.0003870872736229103
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
@@ -77,6 +87,16 @@
       null,
       0.0198834288564672,
       0.01906238222885146
+    ],
+    [
+      null,
+      0.007230163073014763,
+      null
+    ],
+    [
+      null,
+      0.0100350789478704,
+      null
     ]
   ],
   "row_notes": {}

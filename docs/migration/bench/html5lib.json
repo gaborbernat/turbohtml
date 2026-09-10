@@ -270,6 +270,16 @@
       "normalize DOM whitespace then serialize — whatwg spec (235 kB)",
       0.0005360802263112419,
       0.0616665277921129
+    ],
+    [
+      "parse under a formatting ancestor — 256 spans / 1,000 samp elements",
+      0.0002999122285928024,
+      0.007067420308400566
+    ],
+    [
+      "parse under a formatting ancestor — 0 spans / 1,000 samp elements",
+      8.741940381848204e-05,
+      0.005511174652444121
     ]
   ],
   "spread": [
@@ -537,6 +547,16 @@
       null,
       0.006592477968083736,
       0.03450614309511681
+    ],
+    [
+      null,
+      0.007230163073014763,
+      0.05518228851354549
+    ],
+    [
+      null,
+      0.0100350789478704,
+      0.04703381597032775
     ]
   ],
   "row_notes": {
