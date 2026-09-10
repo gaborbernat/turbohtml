@@ -27,7 +27,7 @@ from bench.notes import NOTES
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-_SIZE_OPS: Final = frozenset({"minify", "minify-css", "minify-js"})
+_SIZE_OPS: Final = operations.SIZE_OPS
 # a memory op leads with peak resident bytes, so its rows are two cells wide like a size op's
 _MEMORY_OPS: Final = frozenset({"find-cold", "parse-dense", "rewrite"})
 _WIDE_OPS: Final = _SIZE_OPS | _MEMORY_OPS

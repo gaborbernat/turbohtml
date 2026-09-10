@@ -795,6 +795,26 @@
       "parse text beside a NUL — 1,000 paragraphs / no NUL",
       7.09768120600529e-05,
       0.00024864267005189806
+    ],
+    [
+      "parse foster-parented text — 1,024 table rows / fostered text runs",
+      0.00016239688323670028,
+      "different tree: missing tbody and different fostered text placement"
+    ],
+    [
+      "parse foster-parented text — 1 table rows / fostered text runs",
+      9.250114873182724e-07,
+      "different tree: missing tbody and different fostered text placement"
+    ],
+    [
+      "parse normalized newlines — 1,000 paragraphs / CRLF",
+      8.024827355560168e-05,
+      0.00030054562183371065
+    ],
+    [
+      "parse normalized newlines — 1,000 paragraphs / LF",
+      6.902340084025127e-05,
+      0.00025395493697336253
     ]
   ],
   "spread": [
@@ -1587,6 +1607,26 @@
       null,
       0.016115265561391097,
       0.008099227544467104
+    ],
+    [
+      null,
+      0.04770622171924298,
+      null
+    ],
+    [
+      null,
+      0.026844825446522138,
+      null
+    ],
+    [
+      null,
+      0.029713806092820295,
+      0.01880955289809811
+    ],
+    [
+      null,
+      0.016147480479929033,
+      0.014605653616033025
     ]
   ],
   "row_notes": {

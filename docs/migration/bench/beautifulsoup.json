@@ -960,6 +960,30 @@
       7.09768120600529e-05,
       0.005463147310365457,
       0.003938554341099613
+    ],
+    [
+      "parse foster-parented text — 1,024 table rows / fostered text runs",
+      0.00016239688323670028,
+      "different tree: missing tbody and different fostered text placement",
+      "different tree: missing tbody and different fostered text placement"
+    ],
+    [
+      "parse foster-parented text — 1 table rows / fostered text runs",
+      9.250114873182724e-07,
+      "different tree: missing tbody and different fostered text placement",
+      "different tree: missing tbody and different fostered text placement"
+    ],
+    [
+      "parse normalized newlines — 1,000 paragraphs / CRLF",
+      8.024827355560168e-05,
+      "different text: retains CRLF instead of normalizing to LF",
+      0.004087061458267272
+    ],
+    [
+      "parse normalized newlines — 1,000 paragraphs / LF",
+      6.902340084025127e-05,
+      0.005559674304337629,
+      0.003884147571079666
     ]
   ],
   "spread": [
@@ -1916,6 +1940,30 @@
       0.016115265561391097,
       0.02594096349960786,
       0.05678782186302336
+    ],
+    [
+      null,
+      0.04770622171924298,
+      null,
+      null
+    ],
+    [
+      null,
+      0.026844825446522138,
+      null,
+      null
+    ],
+    [
+      null,
+      0.029713806092820295,
+      null,
+      0.049085767962284706
+    ],
+    [
+      null,
+      0.016147480479929033,
+      0.02704706986371723,
+      0.038213521926831966
     ]
   ],
   "row_notes": {

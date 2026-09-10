@@ -75,6 +75,26 @@
       "parse text beside a NUL — 1,000 paragraphs / no NUL",
       7.09768120600529e-05,
       "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "parse foster-parented text — 1,024 table rows / fostered text runs",
+      0.00016239688323670028,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "parse foster-parented text — 1 table rows / fostered text runs",
+      9.250114873182724e-07,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "parse normalized newlines — 1,000 paragraphs / CRLF",
+      8.024827355560168e-05,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "parse normalized newlines — 1,000 paragraphs / LF",
+      6.902340084025127e-05,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
@@ -146,6 +166,26 @@
     [
       null,
       0.016115265561391097,
+      null
+    ],
+    [
+      null,
+      0.04770622171924298,
+      null
+    ],
+    [
+      null,
+      0.026844825446522138,
+      null
+    ],
+    [
+      null,
+      0.029713806092820295,
+      null
+    ],
+    [
+      null,
+      0.016147480479929033,
       null
     ]
   ],

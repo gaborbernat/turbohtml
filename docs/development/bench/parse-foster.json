@@ -1,27 +1,72 @@
 {
   "label": "parse foster-parented text",
   "parties": [
-    "turbohtml"
+    "turbohtml",
+    "BeautifulSoup (html.parser)",
+    "BeautifulSoup (lxml)",
+    "selectolax",
+    "parsel",
+    "resiliparse",
+    "lxml",
+    "pyquery",
+    "html5lib",
+    "html5-parser"
   ],
   "metrics": [],
   "rows": [
     [
       "1,024 table rows / fostered text runs",
-      0.00016239688323670028
+      0.00016239688323670028,
+      "different tree: missing tbody and different fostered text placement",
+      "different tree: missing tbody and different fostered text placement",
+      0.000703251030457371,
+      "different tree: missing tbody and different fostered text placement",
+      0.00019400979804989522,
+      "different tree: missing tbody and different fostered text placement",
+      "different tree: missing tbody and different fostered text placement",
+      0.011610732129580963,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ],
     [
       "1 table rows / fostered text runs",
-      9.250114873182724e-07
+      9.250114873182724e-07,
+      "different tree: missing tbody and different fostered text placement",
+      "different tree: missing tbody and different fostered text placement",
+      5.19366785477852e-06,
+      "different tree: missing tbody and different fostered text placement",
+      3.1317177654699436e-06,
+      "different tree: missing tbody and different fostered text placement",
+      "different tree: missing tbody and different fostered text placement",
+      6.0141419828596555e-05,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
     [
       null,
-      0.04770622171924298
+      0.04770622171924298,
+      null,
+      null,
+      0.0020436640723068,
+      null,
+      0.014065738485589573,
+      null,
+      null,
+      0.03621262557130059,
+      null
     ],
     [
       null,
-      0.026844825446522138
+      0.026844825446522138,
+      null,
+      null,
+      0.027487489405161887,
+      null,
+      0.01613144033593997,
+      null,
+      null,
+      0.03673837507310731,
+      null
     ]
   ],
   "notes": {}

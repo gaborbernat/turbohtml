@@ -404,6 +404,9 @@ For the 1,024-run input, the merge-buffer growth rules allocate 8,128 bytes acro
 2,099,196 bytes for successive exact-sized buffers. These source-derived totals exclude other parser allocations and
 allocator overhead; they are not RSS measurements. The parser arena retains old buffers until document teardown.
 
+Turbohtml leads the three parsers that preserve the foster-parented tree. BeautifulSoup's two backends, parsel, lxml,
+and pyquery produce different text placement and omit ``tbody``; those cells have no timing.
+
 .. bench-table::
     :file: bench/parse-foster.json
 
@@ -416,6 +419,10 @@ On this CRLF input, source-derived allocation totals replace 324,000 bytes of co
 normalized-input capacity. These figures exclude arena alignment, allocator overhead, and other parser allocations.
 Markup-heavy inputs can retain more memory because the document now keeps the whole normalized buffer even when source
 locations are disabled. LF-only input keeps the existing borrowed-source path.
+
+Resiliparse takes 81.0 µs on CRLF, close to turbohtml's 80.2 µs within the recorded spread. BeautifulSoup's
+``html.parser`` backend retains CRLF instead of normalizing it, while pyquery adds a ``div`` around the paragraph
+siblings; those differing outputs have no timing. The html5-parser environment retains its libxml2 import mismatch.
 
 .. bench-table::
     :file: bench/parse-crlf.json
@@ -1031,6 +1038,10 @@ rescanning the accumulated sequence before each append. Matched release builds r
 within its measured spread. Candidate spread is 13.59% for the large input and 2.65% for the control; the table retains
 that warning. Both builds produce the same output size and preserve call order. The shared suite and CodSpeed include
 both cases.
+
+All seven competing minifiers preserve the ordered function calls on both inputs. Rjsmin is faster on these cases and
+produces the same byte counts as turbohtml. The rjsmin large-input measurement, both calmjs.parse measurements, and the
+terser control exceed 5% spread; the tables retain those warnings. CLI comparisons include process startup.
 
 .. bench-table::
     :file: bench/js-sequences.json

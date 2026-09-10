@@ -1,27 +1,72 @@
 {
   "label": "parse normalized newlines",
   "parties": [
-    "turbohtml"
+    "turbohtml",
+    "BeautifulSoup (html.parser)",
+    "BeautifulSoup (lxml)",
+    "selectolax",
+    "parsel",
+    "resiliparse",
+    "lxml",
+    "pyquery",
+    "html5lib",
+    "html5-parser"
   ],
   "metrics": [],
   "rows": [
     [
       "1,000 paragraphs / CRLF",
-      8.024827355560168e-05
+      8.024827355560168e-05,
+      "different text: retains CRLF instead of normalizing to LF",
+      0.004087061458267272,
+      0.00034985803528494823,
+      0.00030054562183371065,
+      8.103103170545486e-05,
+      0.0002750846354198681,
+      "different tree: adds a div wrapper around paragraph siblings",
+      0.00832173942035297,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ],
     [
       "1,000 paragraphs / LF",
-      6.902340084025127e-05
+      6.902340084025127e-05,
+      0.005559674304337629,
+      0.003884147571079666,
+      0.0003418709800674454,
+      0.00025395493697336253,
+      7.942676865771622e-05,
+      0.00023270633682841434,
+      "different tree: adds a div wrapper around paragraph siblings",
+      0.008114082290558145,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
     ]
   ],
   "spread": [
     [
       null,
-      0.029713806092820295
+      0.029713806092820295,
+      null,
+      0.049085767962284706,
+      0.018532256017754562,
+      0.01880955289809811,
+      0.011619411265720782,
+      0.010681560985560282,
+      null,
+      0.039295484859030644,
+      null
     ],
     [
       null,
-      0.016147480479929033
+      0.016147480479929033,
+      0.02704706986371723,
+      0.038213521926831966,
+      0.004893267592069136,
+      0.014605653616033025,
+      0.029397933208255046,
+      0.02330192115722664,
+      null,
+      0.03336306930333379,
+      null
     ]
   ],
   "notes": {}
