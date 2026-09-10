@@ -428,9 +428,15 @@ repeated result includes any stylesheet analysis or XPath compilation left in th
 .. bench-table::
     :file: bench/xslt-reuse.json
 
-The numbering cases use one or eight default ``xsl:number`` instructions per node. Forward traversal can reuse the
-preceding sibling's count; repeated instructions can reuse the current node's count. Reverse traversal still needs
-preceding-sibling scans for each newly visited node. The one-node and zero-instruction cases measure fixed overhead.
+The sibling-numbering cases use one or eight default ``xsl:number`` instructions per node. Forward traversal can reuse
+the preceding sibling's count; repeated instructions can reuse the current node's count. Reverse sibling traversal still
+needs preceding-sibling scans for each newly visited node. The one-node and zero-instruction cases measure fixed
+overhead.
+
+The ``any:`` cases number matching nodes across the document. Repeated default ``level="any"`` numbering caches their
+counts, including for reverse visits. The first call and repeated calls for the same node allocate no index; subsequent
+calls for different nodes retain only matching nodes until the application finishes. Cases with one final-node visit,
+alternating names, intervening text/comments, and an explicit ``count`` pattern cover different reuse opportunities.
 
 .. bench-table::
     :file: bench/xslt-number.json

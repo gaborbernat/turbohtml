@@ -16,6 +16,7 @@
    needing to touch the core function library. */
 
 #include "core/common.h"
+#include "core/node_map.h"
 #include "core/vec.h"
 #include "dom/nodes.h"
 #include "dom/tree.h"
@@ -596,6 +597,13 @@ typedef struct engine {
     Py_ssize_t ctx_size;
     int gen_counter;
     int depth;
+
+    th_node_map any_positions;
+    th_node *any_last;
+    long any_count;
+    int any_type;
+    const Py_UCS4 *any_name;
+    Py_ssize_t any_name_len;
 
     /* Reuse sibling counts to avoid quadratic scans during repeated numbering. */
     const th_node *number_memo_node;
@@ -2555,6 +2563,51 @@ static th_node *doc_next(th_node *node) {
     return NULL; /* GCOVR_EXCL_LINE */
 }
 
+static int default_any_number(engine *eng, long *out) {
+    int repeated = eng->any_type == (int)eng->cur_node->type &&
+                   (eng->cur_node->type != TH_NODE_ELEMENT ||
+                    (eng->any_name_len == eng->cur_node->text_len &&
+                     memcmp(eng->any_name, eng->cur_node->text, (size_t)eng->any_name_len * sizeof(Py_UCS4)) == 0));
+    if (!repeated) {
+        PyMem_Free(eng->any_positions.entries);
+        eng->any_positions = (th_node_map){0};
+        eng->any_last = NULL;
+        eng->any_count = 0;
+        eng->any_type = (int)eng->cur_node->type;
+        eng->any_name = eng->cur_node->type == TH_NODE_ELEMENT ? eng->cur_node->text : NULL;
+        eng->any_name_len = eng->cur_node->type == TH_NODE_ELEMENT ? eng->cur_node->text_len : 0;
+    }
+    if (eng->any_last == eng->cur_node) {
+        *out = eng->any_count;
+        return 0;
+    }
+    Py_ssize_t position = th_node_map_find(&eng->any_positions, eng->cur_node);
+    if (position != 0) {
+        *out = (long)position;
+        return 0;
+    }
+    long count = eng->any_positions.entries == NULL ? 0 : eng->any_count;
+    th_node *node = eng->any_positions.entries == NULL ? eng->src_root : doc_next(eng->any_last);
+    for (;; node = doc_next(node)) {
+        if (number_counts(eng, NULL, 0, node)) {
+            count++;
+            /* One numbering call does not amortize a document index. */
+            if (repeated) {
+                if (th_node_map_insert(&eng->any_positions, node, count) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+                    PyErr_NoMemory();                                           /* GCOVR_EXCL_LINE */
+                    return fail_py(eng);                                        /* GCOVR_EXCL_LINE */
+                }
+            }
+        }
+        if (node == eng->cur_node) {
+            eng->any_last = node;
+            eng->any_count = count;
+            *out = count;
+            return 0;
+        }
+    }
+}
+
 static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     long values[64];
     Py_ssize_t nvalues = 0;
@@ -2609,17 +2662,23 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         const Py_UCS4 *level = attr_lookup(eng->sheet_tree, instruction, "level", &level_len);
         if (level != NULL && ucs4_ascii_eq(level, level_len, "any")) {
             long counter = 0;
-            /* The current node is a descendant of the source root, so the walk always breaks at
-               it before the loop condition can see a NULL. */
-            for (th_node *node = eng->src_root; node != NULL; /* GCOVR_EXCL_BR_LINE */ node = doc_next(node)) {
-                if (have_from && match_set_has(&from_set, node, -1)) {
-                    counter = 0;
+            if (!have_count && !have_from) {
+                if (default_any_number(eng, &counter) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    return -1;                               /* GCOVR_EXCL_LINE */
                 }
-                if (number_counts(eng, &count_set, have_count, node)) {
-                    counter++;
-                }
-                if (node == eng->cur_node) {
-                    break;
+            } else {
+                /* The current node is a descendant of the source root, so the walk always breaks at
+                   it before the loop condition can see a NULL. */
+                for (th_node *node = eng->src_root; node != NULL; /* GCOVR_EXCL_BR_LINE */ node = doc_next(node)) {
+                    if (have_from && match_set_has(&from_set, node, -1)) {
+                        counter = 0;
+                    }
+                    if (number_counts(eng, &count_set, have_count, node)) {
+                        counter++;
+                    }
+                    if (node == eng->cur_node) {
+                        break;
+                    }
                 }
             }
             values[nvalues++] = counter;
@@ -4224,6 +4283,7 @@ static PyObject *serialize_markup(engine *eng, th_node *root) {
 /* ---- engine lifecycle ----------------------------------------------------- */
 
 static void engine_clear(engine *eng) {
+    PyMem_Free(eng->any_positions.entries);
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
         match_set_free(&eng->rules[index].matched);
     }
@@ -4289,6 +4349,10 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree)
     eng->ns_counter = 0;
     eng->gen_counter = 0;
     eng->depth = 0;
+    eng->any_positions = (th_node_map){0};
+    eng->any_last = NULL;
+    eng->any_count = 0;
+    eng->any_type = -1;
     eng->number_memo_node = NULL;
     eng->number_memo_instruction = NULL;
     if (model->nrules > 0) {

@@ -172,6 +172,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "transform-number-single": ("transform-number", 2),
+    "transform-number-any": ("transform-number", 8),
+    "transform-number-any-reversed": ("transform-number", 9),
     "node-equals-reversed": ("node-equals", 7),
     "node-equals-early-mismatch": ("node-equals", 8),
     "node-equals-duplicates": ("node-equals", 12),

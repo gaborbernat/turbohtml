@@ -418,7 +418,7 @@ OPERATIONS: dict[str, Operation] = {
     "transform-reuse": Operation("apply one compiled 300-template stylesheet ten times", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
-    "transform-number": Operation("XSLT number sibling nodes", "us"),
+    "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
     "stream": Operation("push-parse a page in chunks", "us"),
@@ -878,29 +878,73 @@ def _transform_dense_cases() -> tuple[tuple[str, object], ...]:
 
 
 def _transform_number_cases() -> tuple[tuple[str, object], ...]:
+    return (
+        tuple(
+            (
+                (
+                    f"{rows:,} {'sibling' if rows == 1 else 'siblings'} / "
+                    f"{instructions} {'instruction' if instructions == 1 else 'instructions'} / {order}"
+                ),
+                (
+                    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                    '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root/n">'
+                    + ('<xsl:sort select="@id" data-type="number" order="descending"/>' if order == "reverse" else "")
+                    + "<xsl:number/><xsl:text>:</xsl:text>" * instructions
+                    + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
+                    "<root>" + "".join(f'<n id="{index}"/>' for index in range(1, rows + 1)) + "</root>",
+                ),
+            )
+            for rows, instructions, order in (
+                (200, 1, "forward"),
+                (200, 8, "forward"),
+                (2_000, 1, "forward"),
+                (2_000, 8, "forward"),
+                (1, 8, "forward"),
+                (200, 8, "reverse"),
+                (200, 0, "forward"),
+            )
+        )
+        + _transform_any_number_cases()
+    )
+
+
+def _transform_any_number_cases() -> tuple[tuple[str, object], ...]:
     return tuple(
         (
-            (
-                f"{rows:,} {'sibling' if rows == 1 else 'siblings'} / "
-                f"{instructions} {'instruction' if instructions == 1 else 'instructions'} / {order}"
-            ),
+            f"any: {rows:,} {'node' if rows == 1 else 'nodes'} / {variant}",
             (
                 '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
-                '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root/n">'
-                + ('<xsl:sort select="@id" data-type="number" order="descending"/>' if order == "reverse" else "")
-                + "<xsl:number/><xsl:text>:</xsl:text>" * instructions
+                '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root/*'
+                + ("[last()]" if variant == "last-only" else "")
+                + '">'
+                + ('<xsl:sort select="@id" data-type="number" order="descending"/>' if variant == "reverse" else "")
+                + (
+                    '<xsl:number level="any"'
+                    + (' count="p"' if variant == "explicit-count" else "")
+                    + "/><xsl:text>:</xsl:text>"
+                )
+                * (8 if variant == "repeated" else 1)
                 + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
-                "<root>" + "".join(f'<n id="{index}"/>' for index in range(1, rows + 1)) + "</root>",
+                "<root>"
+                + "".join(
+                    ("text<!--gap-->" if variant == "mixed-nodes" else "")
+                    + f'<{"q" if variant == "alternating" and index % 2 == 0 else "p"} id="{index}"/>'
+                    for index in range(1, rows + 1)
+                )
+                + "</root>",
             ),
         )
-        for rows, instructions, order in (
-            (200, 1, "forward"),
-            (200, 8, "forward"),
-            (2_000, 1, "forward"),
-            (2_000, 8, "forward"),
-            (1, 8, "forward"),
-            (200, 8, "reverse"),
-            (200, 0, "forward"),
+        for rows, variant in (
+            (32, "forward"),
+            (1_024, "forward"),
+            (1_024, "reverse"),
+            (1_024, "last-only"),
+            (1_024, "alternating"),
+            (1_024, "mixed-nodes"),
+            (1, "repeated"),
+            (1_024, "explicit-count"),
+            (2, "forward"),
+            (8, "forward"),
         )
     )
 

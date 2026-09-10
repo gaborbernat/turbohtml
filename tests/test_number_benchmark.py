@@ -32,16 +32,41 @@ def test_number_benchmark_output(library: str, case: int, rows: int, instruction
 
 
 @pytest.mark.parametrize(
-    ("name", "instructions"),
+    ("name", "instructions", "rows", "step"),
     [
-        pytest.param("transform-number", 8, id="repeated"),
-        pytest.param("transform-number-single", 1, id="single"),
+        pytest.param("transform-number", 8, 2_000, 1, id="repeated"),
+        pytest.param("transform-number-single", 1, 2_000, 1, id="single"),
+        pytest.param("transform-number-any", 1, 1_024, 1, id="any-forward"),
+        pytest.param("transform-number-any-reversed", 1, 1_024, -1, id="any-reverse"),
     ],
 )
-def test_codspeed_number_benchmark_output(name: str, instructions: int) -> None:
+def test_codspeed_number_benchmark_output(name: str, instructions: int, rows: int, step: int) -> None:
     _, operation, load = next(case for case in benchmarks() if case[0] == name)
-    expected: Final = "".join(f"{position}:" * instructions + "|" for position in range(1, 2_001))
+    positions: Final = range(1, rows + 1) if step == 1 else range(rows, 0, -1)
+    expected: Final = "".join(f"{position}:" * instructions + "|" for position in positions)
     assert cast("Callable[[tuple[str, str]], str]", operation)(cast("tuple[str, str]", load())) == expected
+
+
+@pytest.mark.parametrize("library", ["core", "competitors.lxml"], ids=["turbohtml", "lxml"])
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        pytest.param(7, "".join(f"{ordinal}:|" for ordinal in range(1, 33)), id="any-small"),
+        pytest.param(8, "".join(f"{ordinal}:|" for ordinal in range(1, 1_025)), id="any-forward"),
+        pytest.param(9, "".join(f"{ordinal}:|" for ordinal in range(1_024, 0, -1)), id="any-reverse"),
+        pytest.param(10, "1024:|", id="any-last-only"),
+        pytest.param(11, "".join(f"{ordinal}:|" * 2 for ordinal in range(1, 513)), id="any-alternating"),
+        pytest.param(12, "".join(f"{ordinal}:|" for ordinal in range(1, 1_025)), id="any-mixed-nodes"),
+        pytest.param(13, "1:" * 8 + "|", id="any-repeated"),
+        pytest.param(14, "".join(f"{ordinal}:|" for ordinal in range(1, 1_025)), id="any-explicit-count"),
+        pytest.param(15, "1:|2:|", id="any-two-nodes"),
+        pytest.param(16, "".join(f"{ordinal}:|" for ordinal in range(1, 9)), id="any-eight-nodes"),
+    ],
+)
+def test_any_number_benchmark_output(library: str, case: int, expected: str) -> None:
+    module: Final = pytest.importorskip(f"bench.{library}", exc_type=ImportError)
+    operation: Final = module.OPERATIONS["transform-number"][0]
+    assert str(operation(cast("tuple[str, str]", INPUTS["transform-number"]()[case][1]))) == expected
 
 
 @pytest.mark.parametrize("library", ["core", "competitors.lxml"], ids=["turbohtml", "lxml"])

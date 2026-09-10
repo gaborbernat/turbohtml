@@ -237,6 +237,10 @@ no-numbering controls. Both libraries reuse a compiled stylesheet and parsed sou
 lxml returns an XSLT result tree, with string conversion outside timing. See :doc:`/development/performance` for the
 build configuration and per-cell spread.
 
+Repeated default ``level="any"`` numbering reuses document-order counts. The explicit-count control still takes 15.6 ms
+with turbohtml versus 3.90 ms with lxml because it evaluates count patterns for each call. The larger default-any lxml
+cells have high spread and retain noise warnings in the table.
+
 ****************
  How to migrate
 ****************
