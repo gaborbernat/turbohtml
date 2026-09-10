@@ -389,13 +389,13 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
             index++;
             continue;
         }
-        /* the upcoming word's code-point count tells md_flush_space whether the
-           owed space should become a wrap break before the word is laid down */
-        Py_ssize_t word_end = index;
-        while (word_end < len && !is_space(text[word_end])) {
-            word_end++;
+        if (ctx->space_pending && !ctx->drop_space && ctx->opt->wrap_width > 0 && ctx->no_wrap == 0) {
+            Py_ssize_t word_end = index;
+            while (word_end < len && !is_space(text[word_end])) {
+                word_end++;
+            }
+            ctx->pending_word = (int)(word_end - index);
         }
-        ctx->pending_word = (int)(word_end - index);
         md_before_visible(ctx);
         if (!ctx->line_has_content && ch >= '0' && ch <= '9') {
             Py_ssize_t consumed = md_escape_line_number(ctx, text, index, len);

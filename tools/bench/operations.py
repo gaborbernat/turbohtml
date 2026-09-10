@@ -1600,6 +1600,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("list (4 KiB)", ("default", _MARKDOWN_LIST)),
         ("table (4 KiB)", ("default", _MARKDOWN_TABLE)),
         ("configured (4 KiB)", ("configured", _MARKDOWN_CONFIGURED)),
+        ("8192 asterisks", ("escaped", "<p>" + "*" * 8192 + "</p>")),
+        ("8192 letters", ("escaped", "<p>" + "a" * 8192 + "</p>")),
     ),
     "markdown-google": lambda: (("google_doc (4 KiB)", _MARKDOWN_GOOGLE),),
     "tables": lambda: (

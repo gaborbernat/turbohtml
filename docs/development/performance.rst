@@ -165,18 +165,29 @@ comparison. turbohtml folds the same transform into its C walk and pays neither 
 **********
 
 :meth:`turbohtml.Node.to_markdown` against `markdownify <https://github.com/matthewwithanm/python-markdownify>`_ (on
-BeautifulSoup) and `html2text <https://github.com/Alir3z4/html2text>`_ (a streaming ``HTMLParser`` subclass). All three
-take an HTML string and return Markdown, so each parses first; turbohtml parses to the WHATWG tree and walks it in C,
-where the others build and convert in Python. The single C pass converts a page in a few microseconds, two orders of
-magnitude ahead of both. The ``configured`` row turns the option surface on in all three (underscore emphasis, reference
-links, padded tables, full escaping), where turbohtml stays 48 times ahead of html2text and 125 times ahead of
-markdownify.
+BeautifulSoup) and `html2text <https://github.com/Alir3z4/html2text>`_ (a streaming ``HTMLParser`` subclass). The
+turbohtml adapter reuses a cached parsed document and times its Markdown conversion. The markdownify and html2text
+adapters parse and convert the HTML string on each call. These timings therefore include different parsing costs. The
+``configured`` row enables underscore emphasis, reference links, padded tables, and full escaping.
 
 .. bench-table::
     :file: bench/markdown.json
 
 The ``google_doc`` row reads the inline-CSS styling a Google Docs export carries (html2text's google_doc mode) and runs
 32 times faster; markdownify has no equivalent.
+
+The long-run cases convert 8,192 asterisks or ASCII letters. Turbohtml and markdownify use default escaping; html2text
+enables ``escape_snob`` to preserve the asterisks as literal characters. The outputs match apart from a trailing
+newline. Word wrapping needs the next word's length only when it may replace a pending space with a line break. Skipping
+that scan elsewhere avoids rescanning the remaining suffix after each escaped character. CodSpeed tracks both cases.
+
+Matched CPython 3.14.7 release builds without PGO or LTO reduced the asterisk case from 8,652.190 to 43.807 µs (99.49%
+faster). The letter control fell from 13.493 to 10.782 µs (20.09% faster), with 7–9% sample spread. All eight runs
+passed CPU-headroom and memory-pressure guards. These rows reuse the parsed turbohtml document; the table contains only
+the measured turbohtml results.
+
+.. bench-table::
+    :file: bench/markdown-runs.json
 
 *****************
  Structured data

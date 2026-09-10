@@ -1,0 +1,28 @@
+{
+  "label": "Markdown escaping and plain text",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "8192 asterisks",
+      4.380727035216599e-05
+    ],
+    [
+      "8192 letters",
+      1.0782335448311641e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.044453609452737124
+    ],
+    [
+      null,
+      0.09117927583951978
+    ]
+  ],
+  "notes": {}
+}
