@@ -86,6 +86,10 @@ What html2text has that turbohtml does not
 Performance
 ===========
 
+The 8,192-character rows measure escaped asterisks and plain ASCII letters. Turbohtml reuses a parsed document;
+html2text parses and converts each timed call. These two html2text cases set ``body_width=0`` and ``escape_snob=True``
+so the escaped content matches turbohtml, apart from a trailing newline.
+
 .. bench-table::
     :file: bench/html2text.json
 

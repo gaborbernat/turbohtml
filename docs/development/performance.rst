@@ -183,8 +183,8 @@ that scan elsewhere avoids rescanning the remaining suffix after each escaped ch
 
 Matched CPython 3.14.7 release builds without PGO or LTO reduced the asterisk case from 8,652.190 to 43.807 µs (99.49%
 faster). The letter control fell from 13.493 to 10.782 µs (20.09% faster), with 7–9% sample spread. All eight runs
-passed CPU-headroom and memory-pressure guards. These rows reuse the parsed turbohtml document; the table contains only
-the measured turbohtml results.
+passed CPU-headroom and memory-pressure guards. The four competitor measurements also passed those guards. These rows
+reuse the parsed turbohtml document; markdownify and html2text parse and convert each timed call.
 
 .. bench-table::
     :file: bench/markdown-runs.json

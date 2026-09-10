@@ -96,6 +96,9 @@ What markdownify has that turbohtml does not
 Performance
 ===========
 
+The 8,192-character rows measure escaped asterisks and plain ASCII letters. Turbohtml reuses a parsed document;
+markdownify parses and converts each timed call. Both use default escaping and produce identical output.
+
 .. bench-table::
     :file: bench/markdownify.json
 

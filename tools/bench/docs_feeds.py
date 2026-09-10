@@ -170,7 +170,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "url-cleaning": "urls-clean",
     "markdown-runs": Combined(
         label="Markdown escaping and plain text",
-        parties=("turbohtml",),
+        parties=("turbohtml", "markdownify", "html2text"),
         rows=(("8192 asterisks", "markdown"), ("8192 letters", "markdown")),
     ),
     "markdown": Combined(
