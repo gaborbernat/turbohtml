@@ -20,6 +20,16 @@
       "100 meta candidates",
       1.828077740384515e-05,
       5.459096957357209e-05
+    ],
+    [
+      "score visible date candidates — 1000 distinct visible dates",
+      0.00028813639870956345,
+      "returns no date with original_date=False; expected 2002-09-26"
+    ],
+    [
+      "score visible date candidates — 1000 repeated visible dates",
+      0.0002723804200286395,
+      "returns no date with original_date=False; expected 2000-01-01"
     ]
   ],
   "spread": [
@@ -37,6 +47,16 @@
       null,
       0.008026401759229225,
       0.021206735172214816
+    ],
+    [
+      null,
+      0.029323840440314167,
+      null
+    ],
+    [
+      null,
+      0.023545110328657404,
+      null
     ]
   ],
   "row_notes": {

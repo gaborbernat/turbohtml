@@ -90,6 +90,10 @@ The 8,192-character rows measure escaped asterisks and plain ASCII letters. Turb
 html2text parses and converts each timed call. These two html2text cases set ``body_width=0`` and ``escape_snob=True``
 so the escaped content matches turbohtml, apart from a trailing newline.
 
+The 10,000-word rows compare wrapping at widths of 8,192 and 80. Html2text uses a cached converter with ``body_width``
+set to the requested width; its output matches apart from two trailing newlines. Turbohtml reuses its parsed tree, while
+the competitor parses and converts each timed call.
+
 .. bench-table::
     :file: bench/html2text.json
 

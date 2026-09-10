@@ -199,6 +199,10 @@ wrapping and 3.07% at 80 columns. All eight comparisons passed CPU-headroom and 
 both widths; document parsing and option construction happen outside the timer. The table uses separate measurements of
 the shared adapter, including its cached-setup lookup.
 
+Markdownify uses ``wrap=True`` and ``wrap_width``; html2text sets ``body_width`` on a cached converter. Both parse and
+convert each timed HTML input, while turbohtml reuses its parsed tree. The wrapped content matches exactly; html2text
+adds two trailing newlines. All four competitor measurements passed the resource guards.
+
 .. bench-table::
     :file: bench/markdown-wrap.json
 
@@ -281,6 +285,9 @@ The visible-date tally cases contain 1,000 distinct dates or 1,000 copies of one
 unstructured text with the default preference for the latest date. Hashing the tally reduced elapsed time from 421.770
 µs to 288.136 µs (31.68%) for distinct dates in the matched release-build comparison. The repeated-date control measured
 276.243 µs before and 272.380 µs after, within its measured spread.
+
+htmldate 1.10.0 returns no date for either input with ``original_date=False``, so its cells report the mismatch without
+timings.
 
 .. bench-table::
     :file: bench/date-tally.json

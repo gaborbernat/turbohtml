@@ -99,6 +99,10 @@ Performance
 The 8,192-character rows measure escaped asterisks and plain ASCII letters. Turbohtml reuses a parsed document;
 markdownify parses and converts each timed call. Both use default escaping and produce identical output.
 
+The 10,000-word rows compare wrapping at widths of 8,192 and 80. Markdownify uses ``wrap=True`` and ``wrap_width``; its
+wrapped output matches turbohtml exactly. Turbohtml reuses its parsed tree, while the competitor parses and converts
+each timed call.
+
 .. bench-table::
     :file: bench/markdownify.json
 
