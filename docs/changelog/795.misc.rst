@@ -1,0 +1,1 @@
+Reuse repeated-character mappings in XPath ``translate()`` and defer indexing until repeated scans justify its cost.

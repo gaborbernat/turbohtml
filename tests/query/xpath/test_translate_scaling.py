@@ -22,9 +22,9 @@ from turbohtml import parse_xml
         pytest.param("abcdefghijklmnop", "A", "", "", id="empty-text"),
         pytest.param(
             "".join(chr(256 + index * 128) for index in range(16)),
-            "A" * 16,
-            chr(256 + 15 * 128) * 64,
-            "A" * 64,
+            "ABCDEFGHIJKLMNOP",
+            "".join(chr(256 + index * 128) for index in range(16)) * 4,
+            "ABCDEFGHIJKLMNOP" * 4,
             id="hash-collisions",
         ),
     ],

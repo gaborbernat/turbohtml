@@ -7,7 +7,8 @@
     The September 8 audit measurements remain provisional. The first two passes checked CPU headroom without enforcing
     memory-pressure or swap limits. The third and fourth passes enforced those limits, but some before/after comparisons
     used different interpreter builds. Those comparisons need repeats with one interpreter before they establish a speed
-    improvement. The normalization and attribute tables below use a matched interpreter and binary configuration.
+    improvement. The normalization, attribute, and translation tables below use matched interpreter and binary
+    configurations.
 
 These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
 8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
@@ -875,8 +876,13 @@ The numeric cases use disjoint ranges and include a first-pair match as a contro
 .. bench-table::
     :file: bench/xpath-order.json
 
-The translation cases keep text length fixed while increasing the character map. A short ASCII case-folding input checks
-the cost of small maps and short text.
+The translation cases vary map size, repeated characters, and cycling ASCII or Unicode text. Early matches and a map
+longer than its input check whether building an index costs more than scanning. A short ASCII case-folding input checks
+call overhead. These cases reuse a parsed tree and include XPath evaluation and result conversion in each measurement.
+
+The September 10 translation measurements use CPython 3.14.7 and a plain release build without PGO or LTO. Repeated
+characters reuse their previous mapping; varied input builds an index after scanning costs exceed its setup cost. The
+short-text case retains a direct scan. Competitor cells with high spread retain the table's noise warning.
 
 .. bench-table::
     :file: bench/xpath-translate.json

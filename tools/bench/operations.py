@@ -10,6 +10,7 @@ are integer row counts; the rest are HTML strings or corpus documents.
 
 from __future__ import annotations
 
+import string
 import unicodedata
 from dataclasses import dataclass
 from textwrap import dedent
@@ -1185,6 +1186,25 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
                 "translate(string(//p), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')",
                 "<p>A Short TITLE</p>",
             ),
+        ),
+        *tuple(
+            (
+                label,
+                (f"translate(string(//p), '{source}', '{target}')", f"<p>{content}</p>"),
+            )
+            for label, source, target, content in (
+                ("early match, 32 KiB text", string.ascii_lowercase, string.ascii_uppercase, "a" * 32768),
+                ("duplicate map, 32 KiB text", "a" * 512, "b", "a" * 32768),
+                ("long map, 64 character text", "a" * 8192, "b", "a" * 64),
+                ("second entry, 32 KiB text", string.ascii_lowercase, string.ascii_uppercase, "b" * 32768),
+                ("ASCII cycling", string.ascii_lowercase, string.ascii_uppercase, string.ascii_lowercase * 1260),
+                (
+                    "Unicode cycling",
+                    "".join(chr(256 + index) for index in range(128)),
+                    "",
+                    "".join(chr(256 + index) for index in range(256)) * 128,
+                ),
+            )
         ),
     )),
     "xpath-set": lambda: (

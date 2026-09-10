@@ -185,44 +185,79 @@ static int translate(const Py_UCS4 *text, Py_ssize_t slen, const Py_UCS4 *from, 
     if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;     /* GCOVR_EXCL_LINE */
     }
-    translate_entry *entries = NULL;
-    size_t capacity = 0;
-    if (slen >= 64 && flen >= 16) {
-        size_t bytes;
-        const int fits = th_grow_cap((size_t)flen * 2, 0, 32, sizeof(*entries), &capacity, &bytes);
-        if (!fits) {         /* GCOVR_EXCL_BR_LINE: allocation size overflow */
-            PyMem_Free(buf); /* GCOVR_EXCL_LINE: allocation size overflow */
-            return -1;       /* GCOVR_EXCL_LINE: allocation size overflow */
-        }
-        entries = PyMem_Calloc(1, bytes);
-        if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-            PyMem_Free(buf);   /* GCOVR_EXCL_LINE: allocation failure */
-            return -1;         /* GCOVR_EXCL_LINE: allocation failure */
-        }
-        for (Py_ssize_t index = 0; index < flen; index++) {
-            const size_t slot = translate_slot(entries, capacity - 1, from[index]);
-            if (entries[slot].position == 0) {
-                entries[slot] = (translate_entry){from[index], index + 1};
-            }
-        }
-    }
-    Py_ssize_t write_pos = 0;
-    for (Py_ssize_t index = 0; index < slen; index++) {
-        Py_ssize_t from_index = 0;
-        if (entries != NULL) {
-            const Py_ssize_t position = entries[translate_slot(entries, capacity - 1, text[index])].position;
-            from_index = position == 0 ? flen : position - 1;
-        } else {
+    if (slen < 64) {
+        Py_ssize_t write_pos = 0;
+        for (Py_ssize_t index = 0; index < slen; index++) {
+            Py_ssize_t from_index = 0;
             while (from_index < flen && from[from_index] != text[index]) {
                 from_index++;
             }
+            if (from_index >= flen) {
+                buf[write_pos++] = text[index];
+            } else if (from_index < tlen) {
+                buf[write_pos++] = to[from_index];
+            }
         }
-        if (from_index >= flen) {
+        result_string(out, buf, write_pos);
+        return 0;
+    }
+    translate_entry *entries = NULL;
+    size_t capacity = 0;
+    size_t scan_budget = (size_t)flen * 2;
+    Py_ssize_t write_pos = 0;
+    Py_ssize_t index = 0;
+    Py_UCS4 previous = 0xFFFFFFFF;
+    Py_UCS4 replacement = 0;
+    int emit_previous = 0;
+    for (; index < slen; index++) {
+        if (text[index] == previous) {
+            if (emit_previous) {
+                buf[write_pos++] = replacement;
+            }
+            continue;
+        }
+        Py_ssize_t from_index = 0;
+        while (from_index < flen && from[from_index] != text[index]) {
+            from_index++;
+        }
+        if (from_index >= 8 && flen >= 16 && slen - index > 16) {
+            if ((size_t)from_index < scan_budget) {
+                scan_budget -= (size_t)from_index;
+            } else {
+                size_t bytes;
+                const int fits = th_grow_cap((size_t)flen * 2, 0, 32, sizeof(*entries), &capacity, &bytes);
+                if (!fits) {         /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                    PyMem_Free(buf); /* GCOVR_EXCL_LINE: allocation size overflow */
+                    return -1;       /* GCOVR_EXCL_LINE: allocation size overflow */
+                }
+                entries = PyMem_Calloc(1, bytes);
+                if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    PyMem_Free(buf);   /* GCOVR_EXCL_LINE: allocation failure */
+                    return -1;         /* GCOVR_EXCL_LINE: allocation failure */
+                }
+                for (Py_ssize_t position = 0; position < flen; position++) {
+                    const size_t slot = translate_slot(entries, capacity - 1, from[position]);
+                    if (entries[slot].position == 0) {
+                        entries[slot] = (translate_entry){from[position], position + 1};
+                    }
+                }
+                break;
+            }
+        }
+        previous = text[index];
+        emit_previous = from_index >= flen || from_index < tlen;
+        if (emit_previous) {
+            replacement = from_index >= flen ? text[index] : to[from_index];
+            buf[write_pos++] = replacement;
+        }
+    }
+    for (; index < slen; index++) {
+        const Py_ssize_t position = entries[translate_slot(entries, capacity - 1, text[index])].position;
+        if (position == 0) {
             buf[write_pos++] = text[index];
-        } else if (from_index < tlen) {
-            buf[write_pos++] = to[from_index];
+        } else if (position <= tlen) {
+            buf[write_pos++] = to[position - 1];
         }
-        /* else: in `from` but past the end of `to`, so the character is removed */
     }
     PyMem_Free(entries);
     result_string(out, buf, write_pos);
