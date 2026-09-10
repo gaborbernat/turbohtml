@@ -226,9 +226,6 @@ static void queue_record(th_tree *tree, int kind, th_node *target, uint32_t atom
         int want_old = 0;
         for (Py_ssize_t reg_index = 0; reg_index < observer->reg_count; reg_index++) {
             const th_mo_reg *reg = &observer->regs[reg_index];
-            if (!reg_covers(reg, target)) {
-                continue;
-            }
             if (reg->target != target && !reg->subtree) {
                 continue;
             }
@@ -244,6 +241,9 @@ static void queue_record(th_tree *tree, int kind, th_node *target, uint32_t atom
                 }
             }
             if (kind == TH_MO_CHARACTER_DATA && !reg->character_data) {
+                continue;
+            }
+            if (!reg_covers(reg, target)) {
                 continue;
             }
             interested = 1;

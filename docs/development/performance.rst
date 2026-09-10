@@ -700,6 +700,17 @@ runs outside the timer; CodSpeed tracks both cases. Under the same release confi
 .. bench-table::
     :file: bench/range-partial.json
 
+:class:`~turbohtml.MutationObserver` checks event options before walking ancestors to determine whether a registration
+covers a mutation. These cases register 1,000 unrelated nodes and edit an attribute 100 levels deep. The target requests
+child-list events; the control requests attribute events, so it still needs the ancestry checks. Construction and
+registration happen outside the timer; timing covers one attribute edit and draining the empty record queue.
+
+Under the same release configuration and resource guards, rejecting the wrong event kind fell from 57.659 to 1.466 µs
+(97.46% faster). The same-kind control rose from 57.886 to 59.572 µs (2.91% slower). CodSpeed tracks both cases.
+
+.. bench-table::
+    :file: bench/observe-registrations.json
+
 Adding attributes through ``element.attrs`` reserves space for later insertions, reducing array copies and retained
 arena buffers on elements with many attributes. Replacement cases exercise existing names; they do not benefit from
 extra capacity. The insertion benchmarks construct their input outside the timer.

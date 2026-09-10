@@ -1,0 +1,28 @@
+{
+  "label": "reject unrelated observer registrations",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 wrong-kind",
+      1.465723047052355e-06
+    ],
+    [
+      "1000 unrelated",
+      5.957158103531886e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.04901744021975728
+    ],
+    [
+      null,
+      0.012318433385805313
+    ]
+  ],
+  "notes": {}
+}

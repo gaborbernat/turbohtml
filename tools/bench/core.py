@@ -1168,7 +1168,7 @@ def _range_boundary_setup(case: tuple[int, str]) -> Callable[[], None]:
     return run
 
 
-def _run_range(run: Callable[[], None]) -> None:
+def _run_prepared(run: Callable[[], None]) -> None:
     run()
 
 
@@ -1206,10 +1206,29 @@ def _range_partial_setup(case: tuple[int, str]) -> Callable[[], None]:
     return run
 
 
+def _observe_registrations_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.set_inner_html("<div>" * 100 + "target" + "</div>" * 100 + "<span></span>" * count)
+    target: Final = root.select("div")[-1]
+    observer: Final = turbohtml.MutationObserver()
+    for watched in root.select("span"):
+        observer.observe(watched, child_list=variant == "wrong-kind", attributes=variant != "wrong-kind", subtree=True)
+    if variant == "match":
+        observer.observe(root, attributes=True, subtree=True)
+
+    def run() -> None:
+        target.attrs["data-change"] = "changed"
+        observer.take_records()
+
+    return run
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
-    "range-boundary": (Mutating(_range_boundary_setup, _run_range), "turbohtml"),
-    "range-contained": (Mutating(_range_contained_setup, _run_range), "turbohtml"),
-    "range-partial": (Mutating(_range_partial_setup, _run_range), "turbohtml"),
+    "observe-registrations": (Mutating(_observe_registrations_setup, _run_prepared), "turbohtml"),
+    "range-boundary": (Mutating(_range_boundary_setup, _run_prepared), "turbohtml"),
+    "range-contained": (Mutating(_range_contained_setup, _run_prepared), "turbohtml"),
+    "range-partial": (Mutating(_range_partial_setup, _run_prepared), "turbohtml"),
     "node-equals": (_node_equals, "turbohtml"),
     "build": (build, "turbohtml"),
     "build-e": (build_e, "turbohtml"),

@@ -360,6 +360,7 @@ OPERATIONS: dict[str, Operation] = {
     "set-html": Operation("replace body inner HTML", "us"),
     "set-text": Operation("replace body text", "us"),
     "observe": Operation("observe a subtree through many edits", "us"),
+    "observe-registrations": Operation("reject unrelated observer registrations", "us"),
     "navigate": Operation("walk every descendant", "us"),
     "treewalk": Operation("walk every element (TreeWalker)", "us"),
     "chain": Operation("fluent jQuery-style chain", "us"),
@@ -1248,6 +1249,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "set-html": _readpath_cases,
     "set-text": _readpath_cases,
     "observe": _readpath_cases,
+    "observe-registrations": lambda: (
+        ("1000 wrong-kind", (1_000, "wrong-kind")),
+        ("1000 unrelated", (1_000, "unrelated")),
+    ),
     "navigate": _readpath_cases,
     "treewalk": _readpath_cases,
     "chain": _readpath_cases,

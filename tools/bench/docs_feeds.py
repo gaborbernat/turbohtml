@@ -60,6 +60,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "range-boundary": "range-boundary",
     "range-contained": "range-contained",
     "range-partial": "range-partial",
+    "observe-registrations": "observe-registrations",
     "node-equals": "node-equals",
     "normalize-marks": "normalize-marks",
     "parse-xml-attrs": "parse-xml-attrs",
