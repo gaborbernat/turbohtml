@@ -1,4 +1,5 @@
 Reuse repeated-character mappings in XPath ``translate()`` and defer indexing until repeated scans justify its cost.
 Index repeated attribute-name searches in ``Node.equals()`` for large elements while preserving early mismatch returns.
 Reuse default XSLT sibling numbers across instructions for the same node and adjacent siblings. Cache matching-node
-counts during repeated default ``xsl:number level="any"`` traversal.
+counts during repeated default ``xsl:number level="any"`` traversal. Reuse explicit XSLT numbering match sets for
+unprefixed element names and wildcards within each application.

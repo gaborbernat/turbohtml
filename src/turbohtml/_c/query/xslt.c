@@ -521,6 +521,11 @@ typedef struct {
     xp_program *program;
 } xslt_expr;
 
+typedef struct {
+    const Py_UCS4 *source;
+    match_set matched;
+} xslt_number_match;
+
 /* A source text node detached by whitespace stripping (section 3.4), kept so the caller's
    tree is restored to its original shape after the transform returns. */
 struct strip_entry {
@@ -597,6 +602,9 @@ typedef struct engine {
     Py_ssize_t ctx_size;
     int gen_counter;
     int depth;
+
+    xslt_number_match number_count_match;
+    xslt_number_match number_from_match;
 
     th_node_map any_positions;
     th_node *any_last;
@@ -2494,6 +2502,41 @@ static int build_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, ma
     return 0;
 }
 
+static int get_number_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, xslt_number_match *cache,
+                              match_set *local, const match_set **matched) {
+    if (cache->source == pattern) {
+        *matched = &cache->matched;
+        return 0;
+    }
+    Py_ssize_t starts[64];
+    Py_ssize_t lengths[64];
+    if (split_union(pattern, len, starts, lengths, 64) != 1) {
+        return build_matcher(eng, pattern, len, local);
+    }
+    const xp_program *prog = compile_pattern(eng, pattern + starts[0], lengths[0]);
+    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation validates stylesheet patterns */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    const xn *root = &prog->nodes[prog->root];
+    if (root->kind != XN_PATH || !root->absolute || root->first < 0) {
+        return build_matcher(eng, pattern, len, local);
+    }
+    const xn *step = &prog->nodes[root->first];
+    /* Predicates and extension calls may depend on the current XSLT node. */
+    if (step->axis != AX_DESCENDANT || step->first >= 0 || step->next >= 0 || step->prefix_len != 0 ||
+        (step->test != NT_NAME && step->test != NT_STAR)) {
+        return build_matcher(eng, pattern, len, local);
+    }
+    match_set_free(&cache->matched);
+    cache->source = NULL;
+    if (build_matcher(eng, pattern, len, &cache->matched) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+        return -1;                                               /* GCOVR_EXCL_LINE */
+    }
+    cache->source = pattern;
+    *matched = &cache->matched;
+    return 0;
+}
+
 /* Whether node counts under xsl:number: membership of the compiled count set when count was
    given, else the default -- same node type and, for elements, the same name as the current
    node (section 7.7). */
@@ -2615,6 +2658,8 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     const Py_UCS4 *value_expr = attr_lookup(eng->sheet_tree, instruction, "value", &value_len);
     match_set count_set = {0};
     match_set from_set = {0};
+    const match_set *count_matches = &count_set;
+    const match_set *from_matches = &from_set;
     int have_count = 0;
     int have_from = 0;
     if (value_expr != NULL) {
@@ -2642,7 +2687,7 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         if (count != NULL) {
             have_count = 1;
             /* GCOVR_EXCL_BR_START */
-            if (build_matcher(eng, count, count_len, &count_set) < 0) {
+            if (get_number_matcher(eng, count, count_len, &eng->number_count_match, &count_set, &count_matches) < 0) {
                 match_set_free(&count_set); /* GCOVR_EXCL_LINE */
                 return -1;                  /* GCOVR_EXCL_LINE */
             }
@@ -2651,7 +2696,7 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         if (from != NULL) {
             have_from = 1;
             /* GCOVR_EXCL_BR_START */
-            if (build_matcher(eng, from, from_len, &from_set) < 0) {
+            if (get_number_matcher(eng, from, from_len, &eng->number_from_match, &from_set, &from_matches) < 0) {
                 match_set_free(&count_set); /* GCOVR_EXCL_LINE */
                 match_set_free(&from_set);  /* GCOVR_EXCL_LINE */
                 return -1;                  /* GCOVR_EXCL_LINE */
@@ -2670,10 +2715,10 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
                 /* The current node is a descendant of the source root, so the walk always breaks at
                    it before the loop condition can see a NULL. */
                 for (th_node *node = eng->src_root; node != NULL; /* GCOVR_EXCL_BR_LINE */ node = doc_next(node)) {
-                    if (have_from && match_set_has(&from_set, node, -1)) {
+                    if (have_from && match_set_has(from_matches, node, -1)) {
                         counter = 0;
                     }
-                    if (number_counts(eng, &count_set, have_count, node)) {
+                    if (number_counts(eng, count_matches, have_count, node)) {
                         counter++;
                     }
                     if (node == eng->cur_node) {
@@ -2690,31 +2735,31 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
                 if (depth == 64) { /* GCOVR_EXCL_BR_LINE: overflow guard for the chain buffer */
                     break;         /* GCOVR_EXCL_LINE */
                 }
-                if (have_from && match_set_has(&from_set, node, -1)) {
+                if (have_from && match_set_has(from_matches, node, -1)) {
                     break;
                 }
-                if (number_counts(eng, &count_set, have_count, node)) {
+                if (number_counts(eng, count_matches, have_count, node)) {
                     chain[depth++] = node;
                 }
             }
             for (Py_ssize_t index = depth - 1; index >= 0; index--) {
-                values[nvalues++] = level_number(eng, instruction, &count_set, have_count, chain[index]);
+                values[nvalues++] = level_number(eng, instruction, count_matches, have_count, chain[index]);
             }
         } else {
             /* single (the default): the nearest ancestor-or-self that matches count, bounded by
                the nearest from ancestor. */
             th_node *target = NULL;
             for (th_node *node = eng->cur_node; node != NULL; node = node->parent) {
-                if (have_from && match_set_has(&from_set, node, -1)) {
+                if (have_from && match_set_has(from_matches, node, -1)) {
                     break;
                 }
-                if (number_counts(eng, &count_set, have_count, node)) {
+                if (number_counts(eng, count_matches, have_count, node)) {
                     target = node;
                     break;
                 }
             }
             if (target != NULL) {
-                values[nvalues++] = level_number(eng, instruction, &count_set, have_count, target);
+                values[nvalues++] = level_number(eng, instruction, count_matches, have_count, target);
             }
         }
     }
@@ -4283,6 +4328,8 @@ static PyObject *serialize_markup(engine *eng, th_node *root) {
 /* ---- engine lifecycle ----------------------------------------------------- */
 
 static void engine_clear(engine *eng) {
+    match_set_free(&eng->number_count_match.matched);
+    match_set_free(&eng->number_from_match.matched);
     PyMem_Free(eng->any_positions.entries);
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
         match_set_free(&eng->rules[index].matched);
@@ -4349,6 +4396,8 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree)
     eng->ns_counter = 0;
     eng->gen_counter = 0;
     eng->depth = 0;
+    eng->number_count_match = (xslt_number_match){0};
+    eng->number_from_match = (xslt_number_match){0};
     eng->any_positions = (th_node_map){0};
     eng->any_last = NULL;
     eng->any_count = 0;

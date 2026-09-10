@@ -905,6 +905,7 @@ def _transform_number_cases() -> tuple[tuple[str, object], ...]:
             )
         )
         + _transform_any_number_cases()
+        + _transform_pattern_number_cases()
     )
 
 
@@ -945,6 +946,50 @@ def _transform_any_number_cases() -> tuple[tuple[str, object], ...]:
             (1_024, "explicit-count"),
             (2, "forward"),
             (8, "forward"),
+        )
+    )
+
+
+def _transform_pattern_number_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"any: {rows:,} {'node' if rows == 1 else 'nodes'} / {variant}",
+            (
+                '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root//p">'
+                + (
+                    '<xsl:sort select="@id" data-type="number" order="descending"/>'
+                    if variant == "count-reverse"
+                    else ""
+                )
+                + (
+                    f'<xsl:number level="any" count="{pattern}"'
+                    + (' from="section"' if variant == "count-from-sections" else "")
+                    + "/><xsl:text>:</xsl:text>"
+                )
+                * (8 if variant == "count-repeated" else 1)
+                + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
+                "<root>"
+                + "".join(
+                    ("<section>" if variant == "count-from-sections" and index % 64 == 1 else "")
+                    + f'<p id="{index}" cat="{index % 2}"/>'
+                    + ("</section>" if variant == "count-from-sections" and index % 64 == 0 else "")
+                    for index in range(1, rows + 1)
+                )
+                + "</root>",
+            ),
+        )
+        for rows, pattern, variant in (
+            (1, "p", "count-single-call"),
+            (1, "p[true()]", "predicate-single-call"),
+            (1, "p|q", "union-single-call"),
+            (1_024, "p[true()]", "count-predicate"),
+            (1_024, "p[@cat=current()/@cat]", "count-current"),
+            (1_024, "p", "count-from-sections"),
+            (1_024, "p", "count-reverse"),
+            (1_024, "p", "count-repeated"),
+            (1_024, "*", "count-wildcard"),
+            (1_024, "missing", "count-empty"),
         )
     )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from bench import core
 from bench.ci import benchmarks
 from bench.operations import INPUTS
 
@@ -38,6 +39,7 @@ def test_number_benchmark_output(library: str, case: int, rows: int, instruction
         pytest.param("transform-number-single", 1, 2_000, 1, id="single"),
         pytest.param("transform-number-any", 1, 1_024, 1, id="any-forward"),
         pytest.param("transform-number-any-reversed", 1, 1_024, -1, id="any-reverse"),
+        pytest.param("transform-number-count", 1, 1_024, 1, id="any-count"),
     ],
 )
 def test_codspeed_number_benchmark_output(name: str, instructions: int, rows: int, step: int) -> None:
@@ -61,12 +63,32 @@ def test_codspeed_number_benchmark_output(name: str, instructions: int, rows: in
         pytest.param(14, "".join(f"{ordinal}:|" for ordinal in range(1, 1_025)), id="any-explicit-count"),
         pytest.param(15, "1:|2:|", id="any-two-nodes"),
         pytest.param(16, "".join(f"{ordinal}:|" for ordinal in range(1, 9)), id="any-eight-nodes"),
+        pytest.param(17, "1:|", id="count-single-call"),
+        pytest.param(18, "1:|", id="predicate-single-call"),
+        pytest.param(19, "1:|", id="union-single-call"),
+        pytest.param(20, "".join(f"{ordinal}:|" for ordinal in range(1, 1_025)), id="count-predicate"),
+        pytest.param(22, "".join(f"{ordinal}:|" for ordinal in range(1, 65)) * 16, id="count-from-sections"),
+        pytest.param(23, "".join(f"{ordinal}:|" for ordinal in range(1_024, 0, -1)), id="count-reverse"),
+        pytest.param(24, "".join(f"{ordinal}:" * 8 + "|" for ordinal in range(1, 1_025)), id="count-repeated"),
+        pytest.param(25, "".join(f"{ordinal}:|" for ordinal in range(2, 1_026)), id="count-wildcard"),
+        pytest.param(26, "0:|" * 1_024, id="count-empty"),
     ],
 )
 def test_any_number_benchmark_output(library: str, case: int, expected: str) -> None:
     module: Final = pytest.importorskip(f"bench.{library}", exc_type=ImportError)
     operation: Final = module.OPERATIONS["transform-number"][0]
     assert str(operation(cast("tuple[str, str]", INPUTS["transform-number"]()[case][1]))) == expected
+
+
+def test_number_benchmark_current_pattern() -> None:
+    expected: Final = "".join(f"{ordinal}:|" * 2 for ordinal in range(1, 513))
+    assert core.transform(cast("tuple[str, str]", INPUTS["transform-number"]()[21][1])) == expected
+
+
+def test_codspeed_number_from_benchmark_output() -> None:
+    _, operation, load = next(case for case in benchmarks() if case[0] == "transform-number-count-from")
+    expected: Final = "".join(f"{ordinal}:|" for ordinal in range(1, 65)) * 16
+    assert cast("Callable[[tuple[str, str]], str]", operation)(cast("tuple[str, str]", load())) == expected
 
 
 @pytest.mark.parametrize("library", ["core", "competitors.lxml"], ids=["turbohtml", "lxml"])

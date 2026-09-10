@@ -347,8 +347,16 @@ def transform_compile(case: tuple[str, str]) -> None:
 @functools.cache
 def _xslt_compiled(sheet: str, source: str):  # ruff:ignore[missing-return-type-private-function]  # lxml has no types
     """Keep construction and source parsing outside application timing."""
-    transform = lxml_etree.XSLT(lxml_etree.fromstring(sheet.encode()))
-    return transform, lxml_etree.fromstring(source.encode())
+    document: Final = lxml_etree.fromstring(sheet.encode())
+    if any(
+        "current()" in number.get(attribute, "")
+        for number in document.iter("{http://www.w3.org/1999/XSL/Transform}number")
+        for attribute in ("count", "from")
+    ):
+        # XSLT 1.0 section 12.4 forbids current() in patterns; libxslt gives this fixture different semantics.
+        unsupported: Final = "XSLT 1.0 forbids current() in patterns; libxslt numbering differs from turbohtml"
+        raise NotImplementedError(unsupported)
+    return lxml_etree.XSLT(document), lxml_etree.fromstring(source.encode())
 
 
 def transform(case: tuple[str, str]) -> lxml_etree._XSLTResultTree:
