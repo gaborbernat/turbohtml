@@ -281,6 +281,7 @@ OPERATIONS: dict[str, Operation] = {
     "emit": Operation("emit a built tree", "us"),
     "shadow": Operation("attach a shadow tree with slots and flatten", "us"),
     "shadow-slot": Operation("collect children assigned to a late shadow slot", "us"),
+    "shadow-assignment": Operation("flatten uniquely named shadow slots", "us"),
     "shadow-fallback": Operation("flatten nested fallback slots", "us"),
     "parse": Operation("parse to a tree", "us"),
     "parse-formatting": Operation("parse under a formatting ancestor", "us"),
@@ -1257,6 +1258,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "strip-tags": _readpath_cases,
     "set-html": _readpath_cases,
     "set-text": _readpath_cases,
+    "shadow-assignment": lambda: (("1000 unique", (1_000, "unique")), ("1 unique", (1, "unique"))),
     "shadow-fallback": lambda: (("1000 wide", (1_000, "wide")), ("1 wide", (1, "wide"))),
     "observe": _readpath_cases,
     "observe-registrations": lambda: (

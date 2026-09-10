@@ -159,13 +159,127 @@ static void collect_slotables(th_tree *tree, th_node *slot, nodevec *vec) {
     }
 }
 
+typedef struct {
+    const Py_UCS4 *name;
+    Py_ssize_t name_len;
+    th_node *slot;
+    nodevec assigned;
+} slot_bucket;
+
+typedef struct {
+    th_node *root;
+    slot_bucket *buckets;
+    size_t cap;
+} slot_index;
+
+static void slot_index_clear(slot_index *index) {
+    for (size_t position = 0; position < index->cap; position++) {
+        PyMem_Free(index->buckets[position].assigned.items);
+    }
+    PyMem_Free(index->buckets);
+    *index = (slot_index){0};
+}
+
+static slot_bucket *slot_index_bucket(slot_index *index, const Py_UCS4 *name, Py_ssize_t name_len) {
+    size_t hash = 2166136261U;
+    for (Py_ssize_t position = 0; position < name_len; position++) {
+        hash = (hash ^ name[position]) * 16777619U;
+    }
+    size_t position = hash & (index->cap - 1);
+    while (index->buckets[position].slot != NULL &&
+           !runs_equal(name, name_len, index->buckets[position].name, index->buckets[position].name_len)) {
+        position = (position + 1) & (index->cap - 1);
+    }
+    return &index->buckets[position];
+}
+
+static int slot_index_build(th_tree *tree, slot_index *index) {
+    size_t count = 0;
+    for (th_node *node = index->root->first_child; node != NULL; node = preorder_next(node, index->root)) {
+        count += is_slot(node);
+    }
+    size_t cap = 8;
+    while (count >= cap / 2) {
+        if (cap > SIZE_MAX / 2 / sizeof(slot_bucket)) { /* GCOVR_EXCL_BR_LINE: unforceable allocation overflow */
+            return -1;                                  /* GCOVR_EXCL_LINE: allocation-overflow path */
+        } /* GCOVR_EXCL_LINE: closes the allocation-overflow-only branch */
+        cap *= 2;
+    }
+    index->buckets = PyMem_Calloc(cap, sizeof(slot_bucket));
+    if (index->buckets == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                /* GCOVR_EXCL_LINE: allocation-failure path */
+    } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
+    index->cap = cap;
+    for (th_node *node = index->root->first_child; node != NULL; node = preorder_next(node, index->root)) {
+        if (is_slot(node)) {
+            const Py_UCS4 *name = NULL;
+            Py_ssize_t name_len = 0;
+            named_value(node, TH_ATTR_NAME, &name, &name_len);
+            slot_bucket *bucket = slot_index_bucket(index, name, name_len);
+            if (bucket->slot == NULL) {
+                bucket->name = name;
+                bucket->name_len = name_len;
+                bucket->slot = node;
+            }
+        }
+    }
+    for (th_node *child = th_shadow_host(tree, index->root)->first_child; child != NULL; child = child->next_sibling) {
+        if (!is_slottable(child)) {
+            continue;
+        }
+        const Py_UCS4 *name = NULL;
+        Py_ssize_t name_len = 0;
+        if (child->type == TH_NODE_ELEMENT) {
+            named_value(child, TH_ATTR_SLOT, &name, &name_len);
+        }
+        slot_bucket *bucket = slot_index_bucket(index, name, name_len);
+        if (bucket->slot != NULL) {
+            nodevec_push(&bucket->assigned, child);
+            if (bucket->assigned.failed) { /* GCOVR_EXCL_BR_LINE: nodevec fails only on allocation failure */
+                return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
+        }
+    }
+    return 0;
+}
+
+static void collect_slotables_indexed(th_tree *tree, th_node *slot, th_node *root, nodevec *vec, slot_index *index) {
+    if (index == NULL || th_shadow_host(tree, root)->first_child == NULL) {
+        collect_slotables(tree, slot, vec);
+        return;
+    }
+    if (index->root != root) {
+        slot_index_clear(index);
+        index->root = root;
+        collect_slotables(tree, slot, vec);
+        return;
+    }
+    if (index->buckets == NULL) {
+        /* GCOVR_EXCL_BR_START: allocation failure cannot be forced from a test */
+        if (slot_index_build(tree, index) < 0) {
+            vec->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            return;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
+        /* GCOVR_EXCL_BR_STOP */
+    }
+    const Py_UCS4 *name = NULL;
+    Py_ssize_t name_len = 0;
+    named_value(slot, TH_ATTR_NAME, &name, &name_len);
+    slot_bucket *bucket = slot_index_bucket(index, name, name_len);
+    if (bucket->slot == slot) {
+        for (Py_ssize_t position = 0; position < bucket->assigned.len; position++) {
+            nodevec_push(vec, bucket->assigned.items[position]);
+        }
+    }
+}
+
 /* Collect the assigned slotables or fallback children that one slot contributes. */
-static void collect_flattened_candidates(th_tree *tree, th_node *slot, nodevec *assigned) {
+static void collect_flattened_candidates(th_tree *tree, th_node *slot, nodevec *assigned, slot_index *index) {
     th_node *root = node_root(slot);
     if (!th_node_is_shadow_root(root)) {
         return;
     }
-    collect_slotables(tree, slot, assigned);
+    collect_slotables_indexed(tree, slot, root, assigned, index);
     if (assigned->failed) { /* GCOVR_EXCL_BR_LINE: nodevec fails only on allocation failure */
         return;             /* GCOVR_EXCL_LINE: allocation-failure path */
     } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
@@ -180,10 +294,10 @@ static void collect_flattened_candidates(th_tree *tree, th_node *slot, nodevec *
 
 /* Collect flattened slotables depth first. pending is an explicit checked stack, so nested fallback slots do not
    consume the C stack. (DOM: find flattened slotables.) */
-static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec) {
+static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec, slot_index *slots) {
     nodevec pending = {0};
     nodevec assigned = {0};
-    collect_flattened_candidates(tree, slot, &assigned);
+    collect_flattened_candidates(tree, slot, &assigned, slots);
     for (Py_ssize_t index = assigned.len; index > 0; index--) {
         nodevec_push(&pending, assigned.items[index - 1]);
     }
@@ -197,7 +311,7 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec) {
         th_node *node = pending.items[--pending.len];
         if (is_slot(node) && th_node_is_shadow_root(node_root(node))) {
             assigned.len = 0;
-            collect_flattened_candidates(tree, node, &assigned);
+            collect_flattened_candidates(tree, node, &assigned, slots);
             for (Py_ssize_t index = assigned.len; index > 0; index--) {
                 nodevec_push(&pending, assigned.items[index - 1]);
             }
@@ -220,18 +334,20 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec) {
    flattened slotables. Every other child passes through unchanged. */
 static void collect_flattened_children(th_tree *tree, th_node *node, nodevec *vec) {
     if (is_slot(node) && th_node_is_shadow_root(node_root(node))) {
-        collect_flattened(tree, node, vec);
+        collect_flattened(tree, node, vec, NULL);
         return;
     }
     th_node *shadow = th_element_shadow_root(tree, node);
     th_node *base = shadow != NULL ? shadow : node;
+    slot_index slots = {0};
     for (th_node *child = base->first_child; child != NULL; child = child->next_sibling) {
         if (is_slot(child) && th_node_is_shadow_root(node_root(child))) {
-            collect_flattened(tree, child, vec);
+            collect_flattened(tree, child, vec, &slots);
         } else {
             nodevec_push(vec, child);
         }
     }
+    slot_index_clear(&slots);
 }
 
 /* Wrap a collected node array into a Python list, filtering to elements when
@@ -331,7 +447,7 @@ static PyObject *slot_assigned(PyObject *self, PyObject *args, PyObject *kwds, i
     nodevec vec = {0};
     Py_BEGIN_CRITICAL_SECTION(node->handle);
     if (flatten) {
-        collect_flattened(tree, node->node, &vec);
+        collect_flattened(tree, node->node, &vec, NULL);
     } else {
         collect_slotables(tree, node->node, &vec);
     }

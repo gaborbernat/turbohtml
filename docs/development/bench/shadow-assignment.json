@@ -1,0 +1,28 @@
+{
+  "label": "flatten uniquely named shadow slots",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 unique",
+      8.460509616270429e-05
+    ],
+    [
+      "1 unique",
+      3.87414244566268e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.018469507627148617
+    ],
+    [
+      null,
+      0.1001092700240629
+    ]
+  ],
+  "notes": {}
+}

@@ -1236,7 +1236,20 @@ def _shadow_fallback_setup(case: tuple[int, str]) -> Callable[[], None]:
     return run
 
 
+def _shadow_assignment_setup(case: tuple[int, str]) -> Callable[[], None]:
+    host: Final = turbohtml.Element("div")
+    host.set_inner_html("".join(f'<i slot="name-{index}">{index}</i>' for index in range(case[0])))
+    shadow: Final = host.attach_shadow("open")
+    shadow.set_inner_html("".join(f'<slot name="name-{index}">fallback</slot>' for index in range(case[0])))
+
+    def run() -> None:
+        _ = host.flattened_children
+
+    return run
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "shadow-assignment": (Mutating(_shadow_assignment_setup, _run_prepared), "turbohtml"),
     "shadow-fallback": (Mutating(_shadow_fallback_setup, _run_prepared), "turbohtml"),
     "observe-registrations": (Mutating(_observe_registrations_setup, _run_prepared), "turbohtml"),
     "range-boundary": (Mutating(_range_boundary_setup, _run_prepared), "turbohtml"),

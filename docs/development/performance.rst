@@ -1039,6 +1039,18 @@ overhead. We ran both comparisons under CPU-headroom and memory-pressure guards.
 .. bench-table::
     :file: bench/shadow-fallback.json
 
+Flattening several named slots builds a temporary assignment index after the first slot lookup. The index preserves
+first-slot precedence and light-tree child order, then frees its storage before returning. These cases flatten a host
+with 1,000 uniquely named slots and matching light children, or one slot and child. Tree construction happens outside
+the timer; timing includes building and freeing the index. CodSpeed tracks both cases.
+
+On CPython 3.14.7 with a release build without PGO or LTO, the 1,000-slot comparison fell from 4,997.827 to 84.605 µs
+(98.31% faster). The single-slot means were 0.407 and 0.387 µs, within sample noise; we do not claim a control speedup.
+All eight comparison runs passed CPU-headroom and memory-pressure guards.
+
+.. bench-table::
+    :file: bench/shadow-assignment.json
+
 .. bench-table::
     :file: bench/shadow.json
 
