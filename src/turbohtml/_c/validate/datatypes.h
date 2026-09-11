@@ -824,7 +824,8 @@ static int facet_check(valctx *ctx, th_node *node, const facetset *facets, const
         report(ctx, node, "facet", "value length %zd exceeds maxLength %d", len, facets->max_length);
         ok = 0;
     }
-    if (dt_is_numeric(facets->base_id)) {
+    if (dt_is_numeric(facets->base_id) && (facets->has_min_inclusive || facets->has_max_inclusive ||
+                                           facets->has_min_exclusive || facets->has_max_exclusive)) {
         double number = dt_to_double(value, len);
         if (facets->has_min_inclusive && number < facets->min_inclusive) {
             report(ctx, node, "facet", "value is below minInclusive");

@@ -66,6 +66,10 @@ def _rng_schema(schema: str) -> lxml_etree.RelaxNG:
     return lxml_etree.RelaxNG(lxml_etree.fromstring(schema.encode()))
 
 
+def _compile_rng(schema: str) -> lxml_etree.RelaxNG:
+    return lxml_etree.RelaxNG(lxml_etree.fromstring(schema.encode()))
+
+
 def build(count: int) -> None:
     """Build a ``<ul>`` of rows with lxml's Element factory and ``.text``, then serialize (the aggregate workload)."""
     ul = lxml_html.Element("ul")
@@ -483,9 +487,12 @@ OPERATIONS = {
     "compile-pattern": (_compile_pattern, "lxml.etree.XMLSchema"),
     "validate-facets": (validate, "lxml.etree.XMLSchema"),
     "validate-attributes": (validate, "lxml.etree.XMLSchema"),
+    "validate-numeric-facets": (validate, "lxml.etree.XMLSchema"),
     "compile-facets": (_compile_pattern, "lxml.etree.XMLSchema"),
     "validate-pattern": (validate, "lxml.etree.XMLSchema"),
     "validate-rng": (_validate_rng, "lxml.etree.RelaxNG"),
+    "validate-rng-reuse": (_validate_rng, "lxml.etree.RelaxNG"),
+    "compile-rng-reuse": (_compile_rng, "lxml.etree.RelaxNG"),
     "fragment": (fragment, "lxml"),
     "build": (build, "lxml"),
     "build-e": (build_e, "lxml.builder"),

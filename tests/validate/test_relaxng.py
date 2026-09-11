@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Final
+from typing import Final, cast
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import parse_xml
 from turbohtml.validate import RelaxNG, SchemaValidationError, ValidationResult
@@ -735,6 +736,12 @@ def test_shared_schema_validates_distinct_documents(name: str) -> None:
     assert [result.valid for result in results] == [index % 2 == 0 for index in range(32)]
 
 
+@pytest.mark.parametrize("index", range(4), ids=["optional-group", "optional-interleave", "small-group", "recursive"])
+def test_reuse_benchmark_output(index: int) -> None:
+    source, document = cast("tuple[str, str]", INPUTS["validate-rng-reuse"]()[index][1])
+    assert RelaxNG(source).validate(parse_xml(document)).errors == ()
+
+
 @pytest.mark.parametrize(
     ("pattern", "documents"),
     [
@@ -816,3 +823,15 @@ def test_relaxng_matches_lxml(schema: str, doc: str) -> None:
     etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
     validator: Final = etree.RelaxNG(etree.fromstring(schema.encode()))
     assert RelaxNG(schema).validate(parse_xml(doc)).valid == validator.validate(etree.fromstring(doc.encode()))
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("index", range(4), ids=["optional-group", "optional-interleave", "small-group", "recursive"])
+def test_lxml_rng_reuse_benchmark_output(index: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    source, document = cast("tuple[str, str]", INPUTS["validate-rng-reuse"]()[index][1])
+    schema: Final = etree.RelaxNG(etree.fromstring(source.encode()))
+    assert [
+        schema.validate(etree.fromstring(text.encode()))
+        for text in (document, document.replace("</", "<unexpected/></", 1))
+    ] == [True, False]

@@ -40,6 +40,7 @@ typedef struct nameclass {
 
 struct pattern {
     int type;
+    int nullable;
     pattern *p1, *p2;
     nameclass *nc;
     int def_index;
@@ -57,6 +58,10 @@ static pattern *pat_new(th_schema *schema, int type) {
     }
     memset(pattern, 0, sizeof(*pattern));
     pattern->type = type;
+    pattern->nullable =
+        type == P_REF || type == P_CHOICE || type == P_GROUP || type == P_INTERLEAVE || type == P_ONEMORE
+            ? -1
+            : type == P_EMPTY || type == P_TEXT;
     return pattern;
 }
 
@@ -67,6 +72,9 @@ static pattern *pat_binary(th_schema *schema, int type, pattern *p1, pattern *p2
     }
     node->p1 = p1;
     node->p2 = p2;
+    if (type != P_AFTER && p1->nullable >= 0 && p2->nullable >= 0) {
+        node->nullable = type == P_CHOICE ? p1->nullable || p2->nullable : p1->nullable && p2->nullable;
+    }
     return node;
 }
 
@@ -128,6 +136,7 @@ static pattern *pat_onemore(th_schema *schema, pattern *p1) {
         return schema->p_notallowed; /* GCOVR_EXCL_LINE */
     }
     node->p1 = p1;
+    node->nullable = p1->nullable;
     return node;
 }
 
@@ -582,6 +591,10 @@ static pattern *rng_resolve(th_schema *schema, int def_index) {
 /* ---- derivatives ---- */
 
 static int rng_nullable(th_schema *schema, pattern *p) {
+    /* Reference nullability depends on the active recursion guard. */
+    if (p->nullable >= 0) {
+        return p->nullable;
+    }
     switch (p->type) {
     case P_EMPTY:
     case P_TEXT:

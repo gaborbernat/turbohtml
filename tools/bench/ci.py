@@ -279,7 +279,18 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "xpath-replace-short": ("xpath-replace", 1),
     "date-tally-repeated": ("date-tally", 1),
     "validate-facets-plain": ("validate-facets", 1),
+    "validate-rng-reuse-interleave": ("validate-rng-reuse", 1),
+    "validate-rng-reuse-small": ("validate-rng-reuse", 2),
+    "validate-rng-reuse-recursive": ("validate-rng-reuse", 3),
+    "compile-rng-reuse-small": ("compile-rng-reuse", 1),
     "validate-attributes-small": ("validate-attributes", 1),
+    "validate-attributes-sparse": ("validate-attributes", 2),
+    "validate-attributes-few-declarations": ("validate-attributes", 3),
+    "validate-facets-attributes": ("validate-facets", 2),
+    "validate-facets-small": ("validate-facets", 3),
+    "validate-numeric-facets-bounded": ("validate-numeric-facets", 1),
+    "validate-numeric-facets-small": ("validate-numeric-facets", 2),
+    "validate-numeric-facets-string": ("validate-numeric-facets", 3),
     "validate-pattern-plain": ("validate-pattern-reuse", 1),
     "xpath-concat-long": ("xpath-concat", 1),
     "xpath-translate-short": ("xpath-translate", 3),
@@ -339,7 +350,10 @@ _LOADERS["date-tally"] = partial(_inline, "date-tally")
 _LOADERS["validate-pattern-reuse"] = partial(_inline, "validate-pattern-reuse")
 _LOADERS["compile-pattern"] = partial(_inline, "compile-pattern")
 _LOADERS["validate-facets"] = partial(_inline, "validate-facets")
+_LOADERS["validate-rng-reuse"] = partial(_inline, "validate-rng-reuse")
+_LOADERS["compile-rng-reuse"] = partial(_inline, "compile-rng-reuse")
 _LOADERS["validate-attributes"] = partial(_inline, "validate-attributes")
+_LOADERS["validate-numeric-facets"] = partial(_inline, "validate-numeric-facets")
 _LOADERS["compile-facets"] = partial(_inline, "compile-facets")
 _LOADERS["xpath-concat"] = partial(_inline, "xpath-concat")
 _LOADERS["node-equals"] = partial(_inline, "node-equals", 5)

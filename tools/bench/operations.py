@@ -317,7 +317,10 @@ OPERATIONS: dict[str, Operation] = {
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
+    "validate-rng-reuse": Operation("validate repeated RELAX NG content models", "us"),
+    "compile-rng-reuse": Operation("compile repeated RELAX NG content models", "us"),
     "validate-attributes": Operation("validate XSD attribute declarations", "us"),
+    "validate-numeric-facets": Operation("validate numeric values with optional bounds", "us"),
     "validate-facets": Operation("validate inherited facet metadata", "us"),
     "compile-facets": Operation("compile inherited facet metadata", "us"),
     "validate-pattern-reuse": Operation("validate repeated pattern facets", "us"),
@@ -1410,6 +1413,69 @@ def _wide_path_cases() -> tuple[tuple[str, str], ...]:
     return tuple((f"{size:,} siblings", f"<ul>{'<li>value</li>' * size}</ul>") for size in (100, 1_000, 10_000))
 
 
+def _validate_rng_reuse_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return (
+        *(
+            (
+                f"{width} {kind} fields across {rows} rows",
+                (
+                    '<element xmlns="http://relaxng.org/ns/structure/1.0" name="root"><oneOrMore>'
+                    '<element name="row">'
+                    f"<{kind}>"
+                    + "".join(
+                        f'<optional><element name="field{index}"><text/></element></optional>' for index in range(width)
+                    )
+                    + '<element name="value"><text/></element>'
+                    + f"</{kind}>"
+                    + "</element></oneOrMore></element>",
+                    "<root>" + "<row><value>text</value></row>" * rows + "</root>",
+                ),
+            )
+            for kind, width, rows in (("group", 128, 64), ("interleave", 32, 64), ("group", 4, 4))
+        ),
+        (
+            "16 recursive nodes",
+            (
+                (
+                    '<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><ref name="node"/></start>'
+                    '<define name="node"><element name="node"><optional><ref name="node"/></optional>'
+                    "</element></define></grammar>"
+                ),
+                "<node>" * 16 + "</node>" * 16,
+            ),
+        ),
+    )
+
+
+def _validate_numeric_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            label,
+            (
+                (
+                    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                    '<xs:element name="root"><xs:complexType><xs:sequence>'
+                    '<xs:element name="value" minOccurs="0" maxOccurs="unbounded"><xs:simpleType>'
+                    f'<xs:restriction base="xs:{kind}">{facets}</xs:restriction>'
+                    "</xs:simpleType></xs:element></xs:sequence></xs:complexType></xs:element></xs:schema>"
+                ),
+                "<root>" + "<value>1234567890.1234567890123456789012</value>" * count + "</root>",
+            ),
+        )
+        for label, kind, count, facets in (
+            ("64 decimals without bounds", "decimal", 64, ""),
+            (
+                "64 decimals with bounds",
+                "decimal",
+                64,
+                '<xs:minInclusive value="0"/><xs:maxInclusive value="100000000000000000000"/>',
+            ),
+            ("one decimal without bounds", "decimal", 1, ""),
+            ("64 strings without bounds", "string", 64, ""),
+        )
+    )
+
+
 def _validate_attribute_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
     return tuple(
         (
@@ -1589,8 +1655,42 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
     ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
-    "validate-facets": _validate_facet_cases,
-    "validate-attributes": _validate_attribute_cases,
+    "validate-rng-reuse": _validate_rng_reuse_cases,
+    "compile-rng-reuse": lambda: tuple((label, case[0]) for label, case in _validate_rng_reuse_cases()[::2]),
+    "validate-facets": lambda: (
+        *_validate_facet_cases(),
+        (
+            "1000 attributes, four-level derived type",
+            (
+                _validate_facet_cases()[0][1][0].replace(
+                    '<xs:element name="value" type="item" maxOccurs="unbounded"/>',
+                    '<xs:element name="value" maxOccurs="unbounded"><xs:complexType>'
+                    '<xs:attribute name="data" type="item"/></xs:complexType></xs:element>',
+                ),
+                "<root>" + '<value data="abc123"/>' * 1000 + "</root>",
+            ),
+        ),
+        (
+            "one value, four-level derived type",
+            (_validate_facet_cases()[0][1][0], "<root><value>abc123</value></root>"),
+        ),
+    ),
+    "validate-attributes": lambda: (
+        *_validate_attribute_cases(),
+        ("512 declarations, one attribute", (_validate_attribute_cases()[0][1][0], '<root item0="value"/>')),
+        (
+            "one declaration, 512 attributes",
+            (
+                (
+                    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="root">'
+                    '<xs:complexType><xs:attribute name="item0" type="xs:string"/></xs:complexType>'
+                    "</xs:element></xs:schema>"
+                ),
+                _validate_attribute_cases()[0][1][1],
+            ),
+        ),
+    ),
+    "validate-numeric-facets": _validate_numeric_facet_cases,
     "compile-facets": lambda: (("four-level derived type", _validate_facet_cases()[0][1][0]),),
     "validate-pattern-reuse": _validate_pattern_reuse_cases,
     "compile-pattern": lambda: (("two pattern facets", _validate_pattern_reuse_cases()[0][1][0]),),

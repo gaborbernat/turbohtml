@@ -529,8 +529,47 @@ static void xsd_validate_simple(valctx *ctx, th_node *node, int builtin_id, th_n
 
 /* ---- attributes ---- */
 
+typedef struct {
+    Py_ssize_t *slots;
+    size_t capacity;
+} xattr_index;
+
+static int xsd_index_attrs(valctx *ctx, th_node *instance, xattr_index *index) {
+    if (instance->attr_count < 32) {
+        return 0;
+    }
+    size_t bytes;
+    /* GCOVR_EXCL_BR_START: allocation size overflow */
+    if (!th_grow_cap((size_t)instance->attr_count * 2, 0, 64, sizeof(*index->slots), &index->capacity, &bytes)) {
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation failure */
+        return -1;        /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    index->slots = arena_alloc(&ctx->schema->mem, bytes);
+    if (index->slots == NULL) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
+        PyErr_NoMemory();       /* GCOVR_EXCL_LINE: allocation failure */
+        return -1;              /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    memset(index->slots, 0, bytes);
+    for (Py_ssize_t position = 0; position < instance->attr_count; position++) {
+        Py_ssize_t length;
+        const char *name = th_attr_name(ctx->tree, instance->attrs[position].name_atom, &length);
+        uint64_t hash = UINT64_C(1469598103934665603);
+        for (Py_ssize_t byte = 0; byte < length; byte++) {
+            hash ^= (unsigned char)name[byte];
+            hash *= UINT64_C(1099511628211);
+        }
+        size_t slot = (size_t)hash & (index->capacity - 1);
+        while (index->slots[slot] != 0) {
+            slot = (slot + 1) & (index->capacity - 1);
+        }
+        index->slots[slot] = position + 1;
+    }
+    return 0;
+}
+
 /* Validate one declared attribute against the instance, honoring use/fixed/default. */
-static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl) {
+static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl, const xattr_index *attrs) {
     th_schema *schema = ctx->schema;
     th_tree *tree = schema->tree;
     th_tree *inst = ctx->tree;
@@ -558,7 +597,20 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
     char namebuf[256];
     const char *name_bytes = name_utf8(name, name_len, namebuf, sizeof(namebuf));
     const th_node_attr *present = NULL;
-    for (Py_ssize_t index = 0; index < instance->attr_count; index++) {
+    if (attrs->slots != NULL) {
+        size_t slot = (size_t)named_hash(name, name_len) & (attrs->capacity - 1);
+        while (attrs->slots[slot] != 0) {
+            const th_node_attr *candidate = &instance->attrs[attrs->slots[slot] - 1];
+            Py_ssize_t length;
+            const char *bytes = th_attr_name(inst, candidate->name_atom, &length);
+            if (length == name_len && u_eq_ascii(name, name_len, bytes)) {
+                present = candidate;
+                break;
+            }
+            slot = (slot + 1) & (attrs->capacity - 1);
+        }
+    }
+    for (Py_ssize_t index = 0; attrs->slots == NULL && index < instance->attr_count; index++) {
         Py_ssize_t alen = 0;
         const char *abytes = th_attr_name(inst, instance->attrs[index].name_atom, &alen);
         if ((Py_ssize_t)alen == name_len && u_eq_ascii(name, name_len, abytes)) {
@@ -590,9 +642,6 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
     const Py_UCS4 *type = xsd_attr(tree, effective, "type", &type_len);
     th_node *inline_type = first_schema_child(schema, effective, XSD_NS, "simpleType");
     if (type != NULL) {
-        facetset probe;
-        facetset_init(&probe, DT_STRING);
-        int base_id = xsd_base_id(schema, effective, type, type_len, &probe, 0);
         th_node *named = NULL;
         const Py_UCS4 *local, *prefix, *uri;
         Py_ssize_t local_len = 0, prefix_len = 0, uri_len = 0;
@@ -600,6 +649,12 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
         resolve_ns(tree, effective, prefix, prefix_len, &uri, &uri_len);
         if (!is_xsd_uri(uri, uri_len)) {
             named = named_find(&schema->simple_types, local, local_len);
+        }
+        int base_id = DT_STRING;
+        if (named == NULL) {
+            facetset probe;
+            facetset_init(&probe, DT_STRING);
+            base_id = xsd_base_id(schema, effective, type, type_len, &probe, 0);
         }
         xsd_validate_simple(ctx, instance, base_id, named, value, value_len);
     } else if (inline_type != NULL) {
@@ -611,12 +666,13 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
    refs, and the extension base), then flag any undeclared instance attribute. */
 static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared);
 
-static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared) {
+static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared,
+                              const xattr_index *attrs) {
     th_schema *schema = ctx->schema;
     th_tree *tree = schema->tree;
     for (th_node *child = scope->first_child; child != NULL; child = child->next_sibling) {
         if (is_schema_el(schema, child, XSD_NS, "attribute")) {
-            xsd_validate_attr_decl(ctx, instance, child);
+            xsd_validate_attr_decl(ctx, instance, child, attrs);
             th_node *eff = child;
             Py_ssize_t ref_len = 0;
             const Py_UCS4 *ref = xsd_attr(tree, child, "ref", &ref_len);
@@ -642,7 +698,7 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                 split_prefix(ref, ref_len, &local, &local_len, &prefix, &prefix_len);
                 th_node *group = named_find(&schema->attr_groups, local, local_len);
                 if (group != NULL) {
-                    xsd_collect_attrs(ctx, instance, group, declared);
+                    xsd_collect_attrs(ctx, instance, group, declared, attrs);
                 }
             }
         } else if (is_schema_el(schema, child, XSD_NS, "complexContent") ||
@@ -661,10 +717,10 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                     resolve_ns(tree, derivation, prefix, prefix_len, &uri, &uri_len);
                     th_node *base_type = named_find(&schema->complex_types, local, local_len);
                     if (base_type != NULL) {
-                        xsd_collect_attrs(ctx, instance, base_type, declared);
+                        xsd_collect_attrs(ctx, instance, base_type, declared, attrs);
                     }
                 }
-                xsd_collect_attrs(ctx, instance, derivation, declared);
+                xsd_collect_attrs(ctx, instance, derivation, declared, attrs);
             }
         }
     }
@@ -672,7 +728,12 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
 
 static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared) {
     th_tree *inst = ctx->tree;
-    xsd_collect_attrs(ctx, instance, scope, declared);
+    xattr_index attrs = {0};
+    if (xsd_index_attrs(ctx, instance, &attrs) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        ctx->failed = 1;                              /* GCOVR_EXCL_LINE: allocation failure */
+        return;                                       /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    xsd_collect_attrs(ctx, instance, scope, declared, &attrs);
     named_vec names = {0};
     if (declared->count >= 32 && instance->attr_count >= 32) {
         for (Py_ssize_t index = 0; index < declared->count; index++) {
@@ -933,7 +994,7 @@ static void xsd_validate_element(valctx *ctx, th_node *instance, th_node *decl) 
             xsd_validate_complex(ctx, instance, complex);
         } else {
             th_node *simple = is_xsd_ns ? NULL : named_find(&schema->simple_types, local, local_len);
-            int base_id = xsd_base_id(schema, decl, type, type_len, &(facetset){0}, 0);
+            int base_id = simple == NULL ? xsd_base_id(schema, decl, type, type_len, &(facetset){0}, 0) : DT_STRING;
             for (th_node *child = instance->first_child; child != NULL; child = child->next_sibling) {
                 if (child->type == TH_NODE_ELEMENT) {
                     report(ctx, child, "structure", "simple-typed element must not contain child elements");

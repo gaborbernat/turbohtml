@@ -1621,6 +1621,12 @@ def test_wide_attribute_declarations_with_sparse_instance() -> None:
     ]
 
 
+@pytest.mark.parametrize("index", range(4), ids=["unbounded", "bounded", "small", "string"])
+def test_numeric_facet_benchmark_output(index: int) -> None:
+    source, document = cast("tuple[str, str]", INPUTS["validate-numeric-facets"]()[index][1])
+    assert XMLSchema(source).validate(parse_xml(document)).errors == ()
+
+
 @pytest.mark.oracle
 @pytest.mark.parametrize(
     ("schema", "doc"),
@@ -1688,6 +1694,8 @@ def test_xsd_matches_lxml(schema: str, doc: str) -> None:
         pytest.param("validate-facets", 0, [True, False], id="derived-type"),
         pytest.param("validate-facets", 1, [True, True], id="builtin-type"),
         pytest.param("compile-facets", 0, [True, False], id="compile"),
+        pytest.param("validate-facets", 2, [True, False], id="named-attributes"),
+        pytest.param("validate-facets", 3, [True, False], id="small-named-type"),
     ],
 )
 def test_lxml_facet_benchmark_output(operation: str, index: int, expected: list[bool]) -> None:
@@ -1729,7 +1737,7 @@ def test_lxml_pattern_benchmark_output(name: str, expected: list[bool]) -> None:
 
 
 @pytest.mark.oracle
-@pytest.mark.parametrize("index", range(2), ids=["wide-attributes", "small-attributes"])
+@pytest.mark.parametrize("index", range(4), ids=["wide-attributes", "small-attributes", "sparse", "few-declarations"])
 def test_lxml_attribute_benchmark_output(index: int) -> None:
     etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
     source, document = cast("tuple[str, str]", INPUTS["validate-attributes"]()[index][1])
@@ -1737,4 +1745,34 @@ def test_lxml_attribute_benchmark_output(index: int) -> None:
     assert [
         schema.validate(etree.fromstring(text.encode()))
         for text in (document, document.replace("<root ", '<root unknown="x" '))
+    ] == [index != 3, False]
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("index", range(4), ids=["unbounded", "bounded", "small", "string"])
+def test_lxml_numeric_facet_benchmark_output(index: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    source, document = cast("tuple[str, str]", INPUTS["validate-numeric-facets"]()[index][1])
+    schema: Final = etree.XMLSchema(etree.fromstring(source.encode()))
+    assert [
+        schema.validate(etree.fromstring(text.encode()))
+        for text in (document, document.replace("</root>", "<unexpected/></root>"))
     ] == [True, False]
+
+
+@pytest.mark.parametrize(
+    ("index", "errors"), [(0, 0), (1, 0), (2, 0), (3, 511)], ids=["wide", "small", "sparse", "few-declarations"]
+)
+def test_instance_attribute_index_benchmark_output(index: int, errors: int) -> None:
+    source, document = cast("tuple[str, str]", INPUTS["validate-attributes"]()[index][1])
+    assert len(XMLSchema(source).validate(parse_xml(document)).errors) == errors
+
+
+@pytest.mark.parametrize("index", range(4), ids=["named-elements", "builtin", "named-attributes", "small"])
+def test_named_facet_probe_benchmark_output(index: int) -> None:
+    source, document = cast("tuple[str, str]", INPUTS["validate-facets"]()[index][1])
+    schema: Final = XMLSchema(source)
+    assert [schema.validate(parse_xml(value)).valid for value in (document, document.replace("abc123", "ab"))] == [
+        True,
+        index == 1,
+    ]
