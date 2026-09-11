@@ -1,0 +1,1 @@
+Speed up serialization of elements with large attribute sets.

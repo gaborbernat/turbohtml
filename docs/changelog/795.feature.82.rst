@@ -1,0 +1,1 @@
+Speed up iteration over SAX element records.

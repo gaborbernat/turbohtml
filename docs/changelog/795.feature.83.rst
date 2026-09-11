@@ -1,0 +1,1 @@
+Speed up queries combining many roots supplied out of document order.

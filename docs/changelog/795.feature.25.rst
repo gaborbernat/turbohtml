@@ -1,0 +1,1 @@
+Speed up DOM normalization of adjacent text nodes.

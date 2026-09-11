@@ -1,0 +1,1 @@
+Release temporary validation buffers after each call when reusing an XSD or RELAX NG schema.

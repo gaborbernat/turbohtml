@@ -1,0 +1,1 @@
+Speed up JavaScript initialization-order checks across many variable pairs.

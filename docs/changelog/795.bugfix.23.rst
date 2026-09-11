@@ -1,0 +1,1 @@
+Avoid crashes when minifying detached subtrees containing adjacent ruby annotations or option groups.

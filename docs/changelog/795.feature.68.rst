@@ -1,0 +1,1 @@
+Speed up streaming rewrites that add many attributes to a start tag.

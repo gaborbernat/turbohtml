@@ -1,0 +1,1 @@
+Speed up shadow-slot assignment queries on hosts with many children.

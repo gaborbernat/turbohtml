@@ -1,0 +1,1 @@
+Speed up microdata extraction with repeated item references.

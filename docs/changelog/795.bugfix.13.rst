@@ -1,0 +1,1 @@
+Preserve JavaScript variable behavior when duplicate declarations include an uninitialized declaration.

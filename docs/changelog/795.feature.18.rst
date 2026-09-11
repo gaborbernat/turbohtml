@@ -1,0 +1,1 @@
+Speed up XPath ``set:has-same-node()`` on large node sets.

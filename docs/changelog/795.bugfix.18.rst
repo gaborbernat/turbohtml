@@ -1,0 +1,1 @@
+Protect Query parent, child and sibling traversal against concurrent mutation of the same tree on free-threaded Python.

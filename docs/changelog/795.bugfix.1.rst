@@ -1,0 +1,1 @@
+Fix crashes when annotation exporters consume generators that yield temporary labels.

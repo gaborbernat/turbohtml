@@ -1,0 +1,1 @@
+Speed up DOM linkification of long non-ASCII text.

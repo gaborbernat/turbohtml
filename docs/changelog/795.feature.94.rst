@@ -1,0 +1,1 @@
+Speed up importing turbohtml from an installed wheel.

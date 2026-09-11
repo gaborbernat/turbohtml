@@ -1,0 +1,1 @@
+Avoid concurrent writes to shared schema text during RELAX NG validation.

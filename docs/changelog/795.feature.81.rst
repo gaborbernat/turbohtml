@@ -1,0 +1,1 @@
+Speed up canonical serialization of deeply nested trees with xlink attributes.

@@ -1,0 +1,1 @@
+Speed up JavaScript minification of declarations with single-use initializers.

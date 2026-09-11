@@ -1,0 +1,1 @@
+Speed up XSLT numbering with explicit element, wildcard or document-root patterns.

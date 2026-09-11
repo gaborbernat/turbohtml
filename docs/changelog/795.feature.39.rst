@@ -1,0 +1,1 @@
+Speed up XPath ``str:concat()`` over many short text nodes.

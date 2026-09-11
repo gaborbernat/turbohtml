@@ -1,0 +1,1 @@
+Avoid crashes during form-data collection when a garbage-collection callback detaches a control's ancestor.

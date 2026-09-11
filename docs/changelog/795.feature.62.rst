@@ -1,0 +1,1 @@
+Speed up XSD validation with inherited simple-type facets.

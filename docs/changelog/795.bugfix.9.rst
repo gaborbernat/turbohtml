@@ -1,0 +1,1 @@
+Separate multi-level XSLT numbers with periods when the format contains no separator token.

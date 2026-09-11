@@ -1,0 +1,1 @@
+Prevent buffer overruns when XPath regular-expression flags contain repeated letters.

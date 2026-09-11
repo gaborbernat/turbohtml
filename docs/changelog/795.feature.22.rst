@@ -1,0 +1,1 @@
+Speed up XPath ordered numeric comparisons between node sets.

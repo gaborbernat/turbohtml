@@ -1,0 +1,1 @@
+Speed up feed extraction from entries with extension fields.

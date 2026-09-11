@@ -1,0 +1,1 @@
+Speed up table extraction with large row and column spans.

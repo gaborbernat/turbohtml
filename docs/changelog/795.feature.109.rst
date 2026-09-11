@@ -1,0 +1,1 @@
+Speed up JavaScript minification that removes declarations from long statement lists.

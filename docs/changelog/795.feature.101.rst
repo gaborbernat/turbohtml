@@ -1,0 +1,1 @@
+Speed up CSS minification with long conflicting declaration values.

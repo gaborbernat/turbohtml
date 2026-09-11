@@ -1,0 +1,1 @@
+Speed up encoding detection of short inputs.

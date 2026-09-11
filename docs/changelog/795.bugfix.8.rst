@@ -1,0 +1,1 @@
+Avoid invalid integer conversions when formatting large XPath numbers.

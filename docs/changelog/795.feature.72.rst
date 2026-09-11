@@ -1,0 +1,1 @@
+Speed up HTML serialization with explicit options.

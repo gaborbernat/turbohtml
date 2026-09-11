@@ -1,0 +1,1 @@
+Speed up XML parsing of long attribute values without character references.

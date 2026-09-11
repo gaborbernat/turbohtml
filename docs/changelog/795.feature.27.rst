@@ -1,0 +1,1 @@
+Speed up XPath ``translate()`` on text with repeated characters.

@@ -1,0 +1,1 @@
+Speed up HTML parsing with many active formatting elements.

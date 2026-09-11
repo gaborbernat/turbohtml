@@ -1,0 +1,1 @@
+Speed up XPath ``set:difference()`` on large node sets.

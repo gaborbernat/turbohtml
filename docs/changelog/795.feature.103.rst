@@ -1,0 +1,1 @@
+Speed up XSD validation of decimals without numeric bounds.

@@ -1,0 +1,1 @@
+Speed up plain-text serialization with explicit options.

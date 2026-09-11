@@ -1,0 +1,1 @@
+Speed up repeated computed-style lookups on an unchanged tree.
