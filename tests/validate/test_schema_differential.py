@@ -7,9 +7,11 @@ It still runs and validates wherever lxml installs, agreeing on the valid/invali
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final, cast
 
 import pytest
+from bench.ci import benchmarks
+from bench.operations import INPUTS
 
 from turbohtml import parse_xml
 from turbohtml.validate import RelaxNG, XMLSchema
@@ -142,3 +144,48 @@ def test_xsd_matches_lxml(schema: str, doc: str) -> None:
 def test_relaxng_matches_lxml(schema: str, doc: str) -> None:
     etree: Any = pytest.importorskip("lxml.etree")
     assert RelaxNG(schema).validate(parse_xml(doc)).valid == _lxml_rng_valid(etree, schema, doc)
+
+
+@pytest.mark.parametrize(
+    ("operation", "index", "expected"),
+    [
+        pytest.param("validate-facets", 0, [True, False], id="derived-type"),
+        pytest.param("validate-facets", 1, [True, True], id="builtin-type"),
+        pytest.param("compile-facets", 0, [True, False], id="compile"),
+    ],
+)
+def test_lxml_facet_benchmark_output(operation: str, index: int, expected: list[bool]) -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    if operation == "compile-facets":
+        source = cast("str", INPUTS[operation]()[index][1])
+        document = "<root><value>abc123</value></root>"
+    else:
+        source, document = cast("tuple[str, str]", INPUTS[operation]()[index][1])
+    schema: Final = module.OPERATIONS["compile-facets"][0](source)
+    assert [
+        schema.validate(etree.fromstring(text.encode())) for text in (document, document.replace("abc123", "ab"))
+    ] == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("validate-pattern-reuse", [True, False], id="two-patterns"),
+        pytest.param("validate-pattern-plain", [True, True], id="no-patterns"),
+        pytest.param("compile-pattern", [True, False], id="compile"),
+    ],
+)
+def test_lxml_pattern_benchmark_output(name: str, expected: list[bool]) -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
+    if name == "compile-pattern":
+        source = cast("str", load())
+        document = "<root><value>abc123</value></root>"
+    else:
+        source, document = cast("tuple[str, str]", load())
+    schema: Final = module.OPERATIONS["compile-pattern"][0](source)
+    assert [
+        schema.validate(etree.fromstring(text.encode())) for text in (document, document.replace("abc123", "abc"))
+    ] == expected

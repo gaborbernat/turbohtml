@@ -36,25 +36,3 @@ def test_facet_compile_benchmark_output() -> None:
         True,
         False,
     ]
-
-
-@pytest.mark.parametrize(
-    ("operation", "index", "expected"),
-    [
-        pytest.param("validate-facets", 0, [True, False], id="derived-type"),
-        pytest.param("validate-facets", 1, [True, True], id="builtin-type"),
-        pytest.param("compile-facets", 0, [True, False], id="compile"),
-    ],
-)
-def test_lxml_facet_benchmark_output(operation: str, index: int, expected: list[bool]) -> None:
-    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
-    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
-    if operation == "compile-facets":
-        source = cast("str", INPUTS[operation]()[index][1])
-        document = "<root><value>abc123</value></root>"
-    else:
-        source, document = cast("tuple[str, str]", INPUTS[operation]()[index][1])
-    schema: Final = module.OPERATIONS["compile-facets"][0](source)
-    assert [
-        schema.validate(etree.fromstring(text.encode())) for text in (document, document.replace("abc123", "ab"))
-    ] == expected

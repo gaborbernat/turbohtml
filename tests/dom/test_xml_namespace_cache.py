@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Final, cast
+from typing import Final
 
 import pytest
-from bench.operations import INPUTS
 
 from turbohtml import HTMLParseError, parse_xml
 
@@ -47,15 +46,3 @@ def test_xml_namespace_first_error(source: str, code: str) -> None:
     with pytest.raises(HTMLParseError) as error:
         parse_xml(source)
     assert error.value.error.code == code
-
-
-@pytest.mark.parametrize(("index", "count"), [(0, 128), (1, 1)], ids=["many", "single"])
-def test_lxml_namespace_benchmark_output(index: int, count: int) -> None:
-    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
-    root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-prefixes"]()[index][1]).encode())
-    assert (root.tag, list(root.nsmap.items()), list(root.attrib.items()), len(root)) == (
-        "root",
-        [(f"p{number}", f"urn:{number}") for number in range(count)],
-        [(f"{{urn:{number}}}value", "x") for number in range(count)],
-        0,
-    )

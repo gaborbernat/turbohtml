@@ -7,7 +7,10 @@ It still runs and validates wherever lxml installs.
 
 from __future__ import annotations
 
+from typing import Final, cast
+
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import Document, Element, parse_xml
 
@@ -41,3 +44,15 @@ def test_round_trip_against_lxml() -> None:
     ours = root_of(parse_xml(source))
     their_locals = [lxml_etree.QName(node).localname for node in theirs.iter() if isinstance(node.tag, str)]
     assert localnames(ours) == their_locals
+
+
+@pytest.mark.parametrize(("index", "count"), [(0, 128), (1, 1)], ids=["many", "single"])
+def test_lxml_namespace_benchmark_output(index: int, count: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-prefixes"]()[index][1]).encode())
+    assert (root.tag, list(root.nsmap.items()), list(root.attrib.items()), len(root)) == (
+        "root",
+        [(f"p{number}", f"urn:{number}") for number in range(count)],
+        [(f"{{urn:{number}}}value", "x") for number in range(count)],
+        0,
+    )

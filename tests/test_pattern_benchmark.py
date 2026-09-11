@@ -39,26 +39,3 @@ def test_pattern_compile_benchmark_output() -> None:
         True,
         False,
     ]
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        pytest.param("validate-pattern-reuse", [True, False], id="two-patterns"),
-        pytest.param("validate-pattern-plain", [True, True], id="no-patterns"),
-        pytest.param("compile-pattern", [True, False], id="compile"),
-    ],
-)
-def test_lxml_pattern_benchmark_output(name: str, expected: list[bool]) -> None:
-    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
-    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
-    _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
-    if name == "compile-pattern":
-        source = cast("str", load())
-        document = "<root><value>abc123</value></root>"
-    else:
-        source, document = cast("tuple[str, str]", load())
-    schema: Final = module.OPERATIONS["compile-pattern"][0](source)
-    assert [
-        schema.validate(etree.fromstring(text.encode())) for text in (document, document.replace("abc123", "abc"))
-    ] == expected
