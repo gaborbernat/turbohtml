@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -718,6 +719,9 @@ def test_query_root_groups_refresh_after_cross_document_adoption() -> None:
     assert [node.text for node in query.find("p")] == ["b", "a"]
 
 
+@pytest.mark.skipif(
+    sys.implementation.name != "cpython", reason="requires immediate CPython reference-count finalization"
+)
 @pytest.mark.parametrize("adopt", [False, True], ids=["same-tree", "cross-document"])
 def test_query_root_groups_follow_selector_eviction_mutation(*, adopt: bool) -> None:
     first, last = parse("<main><p>a</p></main><main><p>c</p></main>").select("main")

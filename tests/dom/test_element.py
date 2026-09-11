@@ -2145,24 +2145,37 @@ def test_form_data_fieldset_refreshes_after_enabling() -> None:
 
 
 @pytest.mark.skipif(sys.implementation.name != "cpython", reason="CPython allocation-triggered collection")
-def test_form_data_handles_legend_detachment_during_collection() -> None:
+@pytest.mark.parametrize("mutation", ["detach", "remove", "replace"])
+def test_form_data_handles_legend_changes_during_collection(mutation: str) -> None:
+    controls: Final = "".join(f'<input name="n{index}" value="v{index}">' for index in range(256))
+    content: Final = (
+        f"<legend></legend><div>{controls}</div>" if mutation == "remove" else f"<legend>{controls}</legend>"
+    )
+    disabled: Final = "" if mutation == "remove" else " disabled"
     form: Final = parse(
-        "<form><fieldset disabled><legend>"
-        + "".join(f'<input name="n{index}" value="v{index}">' for index in range(256))
-        + '</legend><input name="blocked"></fieldset><input name="tail" value="ok"></form>'
+        f'<form><fieldset{disabled}>{content}<input name="blocked"></fieldset><input name="tail" value="ok"></form>'
     ).select("form")[0]
+    fieldset: Final = form.select("fieldset")[0]
     legend: Final = form.select("legend")[0]
     collect: Final = form.form_data
     thresholds: Final = gc.get_threshold()
     restore_gc: Final = gc.enable if gc.isenabled() else gc.disable
+    changed = False
 
-    def detach_legend(phase: str, _info: dict[str, int]) -> None:
-        if phase == "start" and legend.parent is not None:
-            legend.extract()
+    def change_legend(phase: str, _info: dict[str, int]) -> None:
+        nonlocal changed
+        if phase == "start" and not changed:
+            changed = True
+            if mutation == "replace":
+                legend.insert_before(Element("legend"))
+            else:
+                legend.extract()
+                if mutation == "remove":
+                    fieldset.attrs["disabled"] = ""
 
     gc.disable()
     gc.collect()
-    gc.callbacks.append(detach_legend)
+    gc.callbacks.append(change_legend)
     try:
         gc.set_threshold(gc.get_count()[0] + 64, thresholds[1], thresholds[2])
         gc.enable()
@@ -2170,10 +2183,16 @@ def test_form_data_handles_legend_detachment_during_collection() -> None:
         gc.collect()
     finally:
         gc.disable()
-        gc.callbacks.remove(detach_legend)
+        gc.callbacks.remove(change_legend)
         gc.set_threshold(*thresholds)
         restore_gc()
-    expected: Final = [(f"n{index}", f"v{index}") for index in range(256)]
-    # CPython 3.12+ defers collection until the C call returns.
-    assert (0 < len(pairs) < 256) if sys.version_info < (3, 12) else len(pairs) == 257
-    assert (legend.parent, pairs) == (None, [*expected, ("tail", "ok")][: len(pairs)])
+    count: Final = sum(name.startswith("n") for name, _value in pairs)
+    expected: Final = [(f"n{index}", f"v{index}") for index in range(count)]
+    tail: Final = [] if sys.version_info < (3, 12) and mutation == "detach" else [("tail", "ok")]
+    blocked: Final = [("blocked", "")] if sys.version_info >= (3, 12) and mutation == "remove" else []
+    assert count == 256 if sys.version_info >= (3, 12) else 0 < count < 256
+    assert (changed, legend.parent, pairs) == (
+        True,
+        fieldset if mutation == "replace" else None,
+        [*expected, *blocked, *tail],
+    )

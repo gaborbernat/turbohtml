@@ -832,6 +832,7 @@ static th_node *fieldset_first_legend(th_node *fieldset) {
     return NULL;
 }
 
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
 static int control_in_first_legend(th_node *fieldset, th_node *control) {
     th_node *legend = fieldset_first_legend(fieldset);
     if (legend == NULL) {
@@ -844,6 +845,7 @@ static int control_in_first_legend(th_node *fieldset, th_node *control) {
     }
     return 0;
 }
+#endif
 
 /* Whether a control is barred from submission: its own disabled attribute, or a
    disabling fieldset between it and the form. */
@@ -851,7 +853,8 @@ static int control_disabled(th_node *control, th_node *form) {
     if (find_node_attr(control, TH_ATTR_DISABLED) != NULL) {
         return 1;
     }
-    /* Pair allocation can detach the current subtree during collection. */
+    /* CPython 3.12+ defers collection callbacks until this C call returns. */
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
     for (th_node *ancestor = control->parent; ancestor != form; ancestor = ancestor->parent) {
         if (ancestor == NULL) {
             return 1;
@@ -861,6 +864,9 @@ static int control_disabled(th_node *control, th_node *form) {
             return 1;
         }
     }
+#else
+    (void)form;
+#endif
     return 0;
 }
 
@@ -960,12 +966,16 @@ static th_node *next_form_control(th_node *current, th_node *form) {
     } else if (current->atom != TH_TAG_TEMPLATE && current->first_child != NULL) {
         return current->first_child;
     }
-    while (current != NULL && current != form) {
+    while (current != form) {
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
+        if (current == NULL) {
+            return NULL;
+        }
+#endif
         th_node *parent = current->parent;
         /* Pair allocation can run callbacks, so re-read fieldset state before skipping siblings. */
-        if (current->next_sibling != NULL &&
-            !(current->atom == TH_TAG_LEGEND && parent != NULL && parent->atom == TH_TAG_FIELDSET &&
-              find_node_attr(parent, TH_ATTR_DISABLED) != NULL)) {
+        if (current->next_sibling != NULL && !(current->atom == TH_TAG_LEGEND && parent->atom == TH_TAG_FIELDSET &&
+                                               find_node_attr(parent, TH_ATTR_DISABLED) != NULL)) {
             return current->next_sibling;
         }
         current = parent;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -637,6 +638,9 @@ def test_prune_detached_subtree_keeps_removed_references() -> None:
     )
 
 
+@pytest.mark.skipif(
+    sys.implementation.name != "cpython", reason="requires immediate CPython reference-count finalization"
+)
 @pytest.mark.parametrize("adopt", [pytest.param(False, id="same-tree"), pytest.param(True, id="adopted-owner")])
 @pytest.mark.parametrize(
     ("operation", "expected"),
@@ -673,6 +677,9 @@ def test_selector_eviction_refreshes_mutated_owner(
     assert operation(owner) == expected
 
 
+@pytest.mark.skipif(
+    sys.implementation.name != "cpython", reason="requires immediate CPython reference-count finalization"
+)
 def test_selector_eviction_refreshes_owner_returned_to_original_tree() -> None:
     home: Final = Element("section")
     owner: Final = Element("main")

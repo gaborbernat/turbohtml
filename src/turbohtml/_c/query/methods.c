@@ -178,10 +178,9 @@ retry:;
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *handle = ((NodeObject *)self)->handle;
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
     int error = 0;
     int moved = 0;
-    Py_INCREF(handle);
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: a concurrent mutate must not rewire mid-walk */
     HandleObject *handle_obj = (HandleObject *)handle;
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, handle_obj, arg);
@@ -415,11 +414,17 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     PyObject *handles = NULL;
 #ifndef Py_GIL_DISABLED
     handles = index_root_handles(roots, count, selector);
-    error = handles == NULL && PyErr_Occurred() != NULL;
+    if (PyErr_Occurred() != NULL) { /* GCOVR_EXCL_BR_LINE: handle-index allocation failure */
+        PyMem_Free(batches);        /* GCOVR_EXCL_LINE */
+        PyMem_Free(group);          /* GCOVR_EXCL_LINE */
+        PyMem_Free(roots);          /* GCOVR_EXCL_LINE */
+        Py_DECREF(out);             /* GCOVR_EXCL_LINE */
+        return NULL;                /* GCOVR_EXCL_LINE */
+    }
 #endif
     int ordered = 1;
     Py_ssize_t previous_group = 0;
-    for (Py_ssize_t first = 0; first < count && !error;) {
+    for (Py_ssize_t first = 0; first < count;) {
         if (roots[first].processed) {
             first++;
             continue;
@@ -469,7 +474,10 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
             }
             PyMem_Free(tops.entries);
             /* Keep tracked-list allocation outside the lifetime of the root grouping. */
-            for (Py_ssize_t head = first_group; head != 0 && !error; head = roots[head - 1].next_group) {
+            for (Py_ssize_t head = first_group; head != 0; head = roots[head - 1].next_group) {
+                if (error) { /* GCOVR_EXCL_BR_LINE: group-map or result allocation failure */
+                    break;   /* GCOVR_EXCL_LINE */
+                }
                 Py_ssize_t tree_first = head - 1;
                 ordered = ordered && tree_first >= previous_group;
                 previous_group = tree_first;
@@ -535,13 +543,12 @@ PyObject *node_select_one(PyObject *self, PyObject *arg) {
         return NULL;
     }
 retry:;
-    PyObject *handle = ((NodeObject *)self)->handle;
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
     th_node *found = NULL;
     int error = 0;
     int moved = 0;
     sel_nth_memo nth_memo = {0};
-    sel_has_memo has_memo = {0}; /* shared across the walk so :has() memoizes its subtree scans */
-    Py_INCREF(handle);
+    sel_has_memo has_memo = {0};       /* shared across the walk so :has() memoizes its subtree scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock around the walk */
     HandleObject *handle_obj = (HandleObject *)handle;
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, handle_obj, arg);
@@ -1659,11 +1666,10 @@ PyObject *node_css_matches(PyObject *self, PyObject *arg) {
         return NULL;
     }
 retry:;
-    PyObject *handle = ((NodeObject *)self)->handle;
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
     int matched = 0;
     int error = 0;
     int moved = 0;
-    Py_INCREF(handle);
     Py_BEGIN_CRITICAL_SECTION(handle); /* selector_matches walks ancestors/siblings */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
     if (compiled == NULL) {
@@ -1831,7 +1837,7 @@ PyObject *node_prune(PyObject *self, PyObject *arg) {
         return NULL;
     }
 retry:;
-    PyObject *handle = ((NodeObject *)self)->handle;
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
     prune_keep *keep = NULL;
     th_node_map ancestors = {0};
     Py_ssize_t count = 0;
@@ -1839,8 +1845,7 @@ retry:;
     int error = 0;
     int moved = 0;
     sel_nth_memo nth_memo = {0};
-    sel_has_memo has_memo = {0}; /* shared across the walk so :has() memoizes its subtree scans */
-    Py_INCREF(handle);
+    sel_has_memo has_memo = {0};       /* shared across the walk so :has() memoizes its subtree scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
     if (compiled == NULL) {
@@ -1979,11 +1984,10 @@ PyObject *node_remove(PyObject *self, PyObject *arg) {
         return NULL;
     }
 retry:;
-    PyObject *handle = ((NodeObject *)self)->handle;
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
     node_snapshot snapshot = {NULL, 0, 0};
     int error = 0;
     int moved = 0;
-    Py_INCREF(handle);
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
     if (compiled == NULL) {
@@ -2021,11 +2025,10 @@ PyObject *node_strip_tags(PyObject *self, PyObject *arg) {
         return NULL;
     }
 retry:;
-    PyObject *handle = ((NodeObject *)self)->handle;
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
     node_snapshot snapshot = {NULL, 0, 0};
     int error = 0;
     int moved = 0;
-    Py_INCREF(handle);
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
     if (compiled == NULL) {
