@@ -1255,7 +1255,8 @@ static int read_sees_initialized(jm_program *prog, int32_t sym, int32_t stmt, in
         return 1;
     }
     if (prog->syms[sym].decl != 0 || !is_value_literal(prog, init) ||
-        stmt != prog->scopes[prog->syms[sym].scope].first_stmt) {
+        stmt != prog->scopes[prog->syms[sym].scope].first_stmt ||
+        (prog->syms[sym].ref_scope != prog->syms[sym].scope && prog->nodes[stmt].a != declr)) {
         return 0;
     }
     for (int32_t earlier = prog->nodes[stmt].a; earlier != declr; earlier = prog->nodes[earlier].next) {

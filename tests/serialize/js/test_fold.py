@@ -1128,49 +1128,12 @@ def test_sequence_growth_preserves_call_order(count: int, *, nested: bool) -> No
             '[[{"x":1,"z":3},1,3,2],[2]]\n',
             id="declarator-side-effect-order-shorthand",
         ),
+        pytest.param(
+            "function f(){var y=g(),x=1;function g(){return x}return y}console.log(JSON.stringify(f()))",
+            "undefined\n",
+            id="captured-var-before-initialization",
+        ),
     ],
 )
 def test_declaration_reads_preserve_behavior(source: str, expected: str) -> None:
-    assert _run(minify_js(source)) == expected
-
-
-@pytest.mark.skipif(_NODE is None, reason="node not available")
-@pytest.mark.parametrize(
-    ("source", "expected"),
-    [
-        pytest.param(
-            "function f(){var x=1,x;return[x,x]}console.log(JSON.stringify(f()))",
-            "[1,1]\n",
-            id="declarator-first-repeated-target",
-        ),
-        pytest.param(
-            "function f(){var x=1;var x;return[x,x]}console.log(JSON.stringify(f()))",
-            "[1,1]\n",
-            id="declarator-later-bare-statement",
-        ),
-        pytest.param(
-            "function f(){var x=1,x=2;return[x,x]}console.log(JSON.stringify(f()))",
-            "[2,2]\n",
-            id="declarator-reinitialization",
-        ),
-        pytest.param(
-            "function f(){const x=1,{y}={y:2},z=3;return[()=>[x,y,z],x,z]}"
-            "const result=f();console.log(JSON.stringify([result[0](),result.slice(1)]))",
-            "[[1,2,3],[1,3]]\n",
-            id="declarator-destructuring-capture",
-        ),
-        pytest.param(
-            "function f(){const x=y,y=1;return[y,y]}try{f()}catch(error){console.log(error.name)}",
-            "ReferenceError\n",
-            id="declarator-tdz",
-        ),
-        pytest.param(
-            "const trace=[];function f(g){const x=1,y=g(2),z=3;return[{x,z},x,z,y]}"
-            "console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
-            '[[{"x":1,"z":3},1,3,2],[2]]\n',
-            id="declarator-side-effect-order-shorthand",
-        ),
-    ],
-)
-def test_declarator_positions_preserve_behavior(source: str, expected: str) -> None:
-    assert _run(minify_js(source)) == expected
+    assert (_run(source), _run(minify_js(source))) == (expected, expected)
