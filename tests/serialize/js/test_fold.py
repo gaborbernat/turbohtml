@@ -1072,6 +1072,11 @@ def test_sequence_growth_preserves_call_order(count: int, *, nested: bool) -> No
             id="declarator-capture-called-in-earlier-initializer",
         ),
         pytest.param(
+            "function f(){const y=g(),x=1;function g(){return x}return y}try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-single-capture-called-in-earlier-initializer",
+        ),
+        pytest.param(
             "function f(){const x=1;return(()=>[x,x])()}console.log(JSON.stringify(f()))",
             "[1,1]\n",
             id="declarator-capture-after-first-initializer",
