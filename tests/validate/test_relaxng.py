@@ -719,15 +719,38 @@ def test_rng_define_dedup_finds_on_later_iteration() -> None:
     assert rng_ok(schema, "<r>x</r>")
 
 
-def test_shared_schema_validates_distinct_documents() -> None:
+@pytest.mark.parametrize("name", ["node", "xml:node"], ids=["unqualified", "xml-prefix"])
+def test_shared_schema_validates_distinct_documents(name: str) -> None:
     schema: Final = RelaxNG(
         '<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><ref name="node"/></start>'
-        '<define name="node"><element name="node"><zeroOrMore><ref name="node"/></zeroOrMore>'
+        f'<define name="node"><element><name>{name}</name><zeroOrMore><ref name="node"/></zeroOrMore>'
         "</element></define></grammar>"
     )
     documents: Final = [
-        parse_xml("<node><node/></node>" if index % 2 == 0 else "<node><other/></node>") for index in range(32)
+        parse_xml(f"<{name}><{name}/></{name}>" if index % 2 == 0 else f"<{name}><other/></{name}>")
+        for index in range(32)
     ]
     with ThreadPoolExecutor(max_workers=4) as executor:
         results: Final = list(executor.map(schema.validate, documents))
     assert [result.valid for result in results] == [index % 2 == 0 for index in range(32)]
+
+
+@pytest.mark.parametrize(
+    ("pattern", "documents"),
+    [
+        pytest.param(
+            "<value><![CDATA[]]></value>",
+            ("<doc><![CDATA[]]></doc>", "<doc>x</doc>"),
+            id="empty-cdata",
+        ),
+        pytest.param(
+            '<mixed><zeroOrMore><element name="child"><empty/></element></zeroOrMore></mixed>',
+            ("<doc>a<![CDATA[]]><child/>b</doc>", "<doc><other/></doc>"),
+            id="mixed-text",
+        ),
+    ],
+)
+def test_repeated_validation_preserves_character_data(pattern: str, documents: tuple[str, str]) -> None:
+    schema: Final = RelaxNG(rwrap(pattern))
+    parsed: Final = tuple(map(parse_xml, documents))
+    assert [schema.validate(document).valid for _ in range(3) for document in parsed] == [True, False] * 3

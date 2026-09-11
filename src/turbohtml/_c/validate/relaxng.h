@@ -880,8 +880,13 @@ static pattern *rng_children_deriv(valctx *ctx, pattern *p, th_node *element) {
         if (child->type == TH_NODE_ELEMENT) {
             current = rng_child_element(ctx, current, child);
         } else if (is_chardata(child)) {
-            Py_ssize_t len = 0;
-            const Py_UCS4 *text = th_node_data(tree, child, &len);
+            Py_ssize_t len = child->text_len;
+            const Py_UCS4 *text = len == 0 ? EMPTY_UCS4 : th_node_realize_text(tree, child);
+            if (text == NULL) {              /* GCOVR_EXCL_BR_LINE: text realization allocation failure */
+                ctx->failed = 1;             /* GCOVR_EXCL_LINE */
+                PyErr_NoMemory();            /* GCOVR_EXCL_LINE */
+                return schema->p_notallowed; /* GCOVR_EXCL_LINE */
+            }
             if (!rng_is_whitespace(text, len)) {
                 current = rng_text_deriv(schema, current, text, len);
             }

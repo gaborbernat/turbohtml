@@ -555,6 +555,11 @@ static int regex_cache_schema(th_schema *schema, th_node *node) {
             if (regex_cache_schema(schema, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
                 return -1;                               /* GCOVR_EXCL_LINE */
             }
+        } else if (is_chardata(child) && child->text_len > 0) {
+            /* Lazy definitions must not realize shared schema spans during validation. */
+            if (th_node_realize_text(schema->tree, child) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;                                           /* GCOVR_EXCL_LINE */
+            }
         }
     }
     return 0;
