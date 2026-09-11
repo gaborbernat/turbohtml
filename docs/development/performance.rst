@@ -943,6 +943,18 @@ expanded attribute names, namespace bindings and ordering. CodSpeed covers both 
 .. bench-table::
     :file: bench/parse-xml-prefixes.json
 
+XML text parsing scans clean one-byte blocks before falling back to the existing character checks at markup, references,
+controls or a possible CDATA closing sequence. Both paths retain source spans for unchanged text. Matched parsing of 64
+KiB of clean text fell from 98.903 to 4.886 µs (95.06%). The reference-rich control changed from 154.782 to 154.651 µs
+(0.08%), within measurement noise. Five text characters cost 0.304 µs instead of 0.296 µs, an increase of 2.81% or 0.008
+µs.
+
+The checks cover block boundaries, Latin-1, wider Unicode and error columns. Both libraries return the same text for all
+three shared inputs, and CodSpeed covers the target and both controls.
+
+.. bench-table::
+    :file: bench/parse-xml-text.json
+
 Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
 affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
 comparisons per attribute on average. Early mismatches return before allocating the index.

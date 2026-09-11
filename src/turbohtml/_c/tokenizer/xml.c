@@ -513,6 +513,23 @@ static int consume_text(xml_parser *parser) {
     Py_ssize_t start = parser->pos;
     Py_ssize_t scan = start;
     int needs_build = 0;
+    if (parser->kind == PyUnicode_1BYTE_KIND) {
+        while (scan + 8 <= parser->length) {
+            uint64_t word;
+            memcpy(&word, (const uint8_t *)parser->data + scan, sizeof(word));
+            const uint64_t ones = UINT64_C(0x0101010101010101);
+            const uint64_t controls = word & UINT64_C(0xE0E0E0E0E0E0E0E0);
+            const uint64_t markup = word ^ (ones * '<');
+            const uint64_t reference = word ^ (ones * '&');
+            const uint64_t bracket = word ^ (ones * ']');
+            if ((((controls - ones) & ~controls) | ((markup - ones) & ~markup) | ((reference - ones) & ~reference) |
+                 ((bracket - ones) & ~bracket)) &
+                UINT64_C(0x8080808080808080)) {
+                break;
+            }
+            scan += 8;
+        }
+    }
     while (scan < parser->length && cp(parser, scan) != '<') {
         Py_UCS4 ch = cp(parser, scan);
         if (!is_xml_char(ch)) {
