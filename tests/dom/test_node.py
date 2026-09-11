@@ -1032,3 +1032,11 @@ def test_node_equality_duplicate_benchmark_result() -> None:
 def test_codspeed_node_equality_result(name: str, *, expected: bool) -> None:
     _, operation, load = next(case for case in benchmarks() if case[0] == name)
     assert cast("Callable[[object], bool]", operation)(load()) is expected
+
+
+@pytest.mark.oracle
+def test_competitor_node_equality_duplicates_unsupported() -> None:
+    beautifulsoup: Final = pytest.importorskip("bench.competitors.beautifulsoup4", exc_type=ImportError)
+    operation: Final = cast("Callable[[tuple[int, str]], bool]", beautifulsoup.OPERATIONS["node-equals"][0])
+    with pytest.raises(ValueError, match="constructor does not normalize case variants"):
+        operation(cast("tuple[int, str]", INPUTS["node-equals"]()[12][1]))

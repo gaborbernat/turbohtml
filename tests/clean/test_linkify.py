@@ -1796,3 +1796,20 @@ def test_existing_anchors_reach_the_callback_without_a_phone(html: str) -> None:
 def test_candidate_phone_defaults_to_none() -> None:
     assert LinkCandidate("http://x", "x").phone is None
     assert LinkCandidate("tel:+1", "1", phone=None).phone is None
+
+
+@pytest.mark.parametrize("case", [1, 2, 3, 4], ids=["wide", "ascii", "no-links", "many-links"])
+@pytest.mark.oracle
+def test_linkify_snapshot_outputs(case: int) -> None:
+    html: Final = pytest.importorskip("lxml.html")
+    clean: Final = pytest.importorskip("lxml_html_clean")
+    source: Final = cast("str", INPUTS["linkify-node"]()[case][1])
+    root: Final = html.fragment_fromstring(source, create_parent="div")
+    clean.autolink(root, avoid_hosts=())
+    assert (
+        Linker().linkify_node(parse_fragment(source)).inner_html,
+        "".join(html.tostring(child, encoding="unicode") for child in root),
+    ) == (
+        source.replace("https://example.com", '<a href="https://example.com" rel="nofollow">https://example.com</a>'),
+        source.replace("https://example.com", '<a href="https://example.com">https://example.com</a>'),
+    )
