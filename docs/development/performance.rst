@@ -1770,3 +1770,15 @@ CodSpeed includes these five cases.
 
 .. bench-table::
     :file: bench/linkify-traversal.json
+
+******************
+ Table generation
+******************
+
+Table regeneration reads combining classes during the Unicode decomposition scan and searches composition pairs among
+canonical decompositions. Offline generation of the complete Unicode 16.0.0 normalization header, including its
+four-form self-check and file output, fell from 2.306 to 2.165 seconds (6.10%) in a matched ABBA comparison. The two
+baseline observations were 2.301 and 2.311 seconds; the candidate observations were 2.179 and 2.151 seconds. Both
+variants emitted byte-identical headers. Network retrieval happens before measurement; the generator still verifies the
+pinned source digest. The CodSpeed generator case covers this full workload without adding Python-only table
+regeneration to native PGO training.

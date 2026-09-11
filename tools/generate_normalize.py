@@ -27,7 +27,7 @@ import hashlib
 import sys
 import unicodedata
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from httpfetch import fetch_bytes
 
@@ -64,11 +64,6 @@ def _fetch(url: str, expected_sha256: str) -> str:
     return raw.decode("utf-8")
 
 
-def _is_hangul_syllable(code: int) -> bool:
-    """Whether *code* is a precomposed Hangul syllable, whose (de)composition C handles arithmetically."""
-    return _HANGUL_SBASE <= code < _HANGUL_SBASE + _HANGUL_SCOUNT
-
-
 def _code_points() -> Iterable[int]:
     """Every assignable scalar value: the whole space minus the surrogate block, which no string can hold."""
     for code in range(0x110000):
@@ -77,33 +72,31 @@ def _code_points() -> Iterable[int]:
         yield code
 
 
-def _combining() -> dict[int, int]:
-    """Map each code point with a non-zero canonical combining class to that class, read from unicodedata."""
-    return {code: klass for code in _code_points() if (klass := unicodedata.combining(chr(code)))}
-
-
-def _decompositions() -> tuple[dict[int, list[int]], dict[int, list[int]]]:
+def _character_tables() -> tuple[dict[int, list[int]], dict[int, list[int]], dict[int, int]]:
     """
-    Return the full canonical (NFD) and compatibility (NFKD) decompositions of every non-Hangul code point.
+    Collect combining classes during the decomposition scan to avoid another scalar pass.
 
     ``unicodedata.normalize`` on a single character yields its fully-resolved, canonically-ordered decomposition, so the
     C engine never recurses. The compatibility table stores only the code points whose NFKD differs from their NFD; the
     engine falls back to the canonical table for the rest, halving the compatibility rows.
     """
-    canonical: dict[int, list[int]] = {}
-    compatibility: dict[int, list[int]] = {}
+    combining: Final[dict[int, int]] = {}
+    canonical: Final[dict[int, list[int]]] = {}
+    compatibility: Final[dict[int, list[int]]] = {}
     for code in _code_points():
-        if _is_hangul_syllable(code):
-            continue
         char = chr(code)
+        if klass := unicodedata.combining(char):
+            combining[code] = klass
+        if _HANGUL_SBASE <= code < _HANGUL_SBASE + _HANGUL_SCOUNT:
+            continue
         if (nfd := unicodedata.normalize("NFD", char)) != char:
             canonical[code] = [ord(part) for part in nfd]
         if (nfkd := unicodedata.normalize("NFKD", char)) != nfd:
             compatibility[code] = [ord(part) for part in nfkd]
-    return canonical, compatibility
+    return canonical, compatibility, combining
 
 
-def _composition_pairs() -> list[tuple[int, int, int]]:
+def _composition_pairs(canonical: dict[int, list[int]]) -> list[tuple[int, int, int]]:
     """
     Return the canonical recomposition pairs ``(first, second, composed)``, sorted.
 
@@ -112,13 +105,8 @@ def _composition_pairs() -> list[tuple[int, int, int]]:
     decompositions all fail to recompose), so it is the authoritative source unicodedata already carries.
     """
     pairs: list[tuple[int, int, int]] = []
-    for code in _code_points():
-        if _is_hangul_syllable(code):
-            continue
-        decomposition = unicodedata.decomposition(chr(code))
-        if not decomposition or decomposition.startswith("<"):
-            continue
-        parts = decomposition.split()
+    for code in canonical:
+        parts = unicodedata.decomposition(chr(code)).split()
         if len(parts) != 2:
             continue
         first, second = int(parts[0], 16), int(parts[1], 16)
@@ -346,9 +334,8 @@ def generate(out_path: Path) -> None:
             "run under a matching Python or bump UNICODE_VERSION and review the diff"
         )
         raise SystemExit(msg)
-    combining = _combining()
-    canonical, compatibility = _decompositions()
-    pairs = _composition_pairs()
+    canonical, compatibility, combining = _character_tables()
+    pairs = _composition_pairs(canonical)
     quick = _quick_check(_fetch(f"{_UCD_BASE}/DerivedNormalizationProps.txt", _DERIVED_NORM_SHA256))
     _self_check(canonical, compatibility, combining, pairs)
     out_path.write_text(_emit(canonical, compatibility, combining, pairs, quick), encoding="utf-8")
