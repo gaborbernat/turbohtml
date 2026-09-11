@@ -70,6 +70,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "normalize-marks": "normalize-marks",
     "parse-xml-attrs": "parse-xml-attrs",
     "parse-xml-append": "parse-xml-append",
+    "token-attributes": "token-attributes",
+    "tokenize-attributes": "tokenize-attributes",
     "rewrite-attributes": "rewrite-attributes",
     "parse-xml-values": "parse-xml-values",
     "parse-xml-text": "parse-xml-text",

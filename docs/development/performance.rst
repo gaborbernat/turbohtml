@@ -966,6 +966,23 @@ target and both controls; the lxml comparisons check complete decoded values.
 .. bench-table::
     :file: bench/parse-xml-values.json
 
+Token attribute access allocates the result list at its known length. In matched release builds, reading 100 attributes
+from a prepared token fell from 3.582 to 3.255 µs (9.13%); ten attributes fell from 0.290 to 0.249 µs (14.08%). One
+attribute changed from 0.0695 to 0.0668 µs (3.81%), and an empty list from 0.0409 to 0.0412 µs (+0.79%). Each access
+still returns a fresh list in source order.
+
+The property measurements below exclude tokenization. The shared suite uses its untimed setup hook for this operation,
+and CodSpeed covers all four sizes.
+
+.. bench-table::
+    :file: bench/token-attributes.json
+
+Tokenizing and reading all 100 attributes changed from 9.570 to 9.211 µs (3.76%); this end-to-end control does not meet
+the 5% acceptance threshold. The shared suite and CodSpeed also include this control.
+
+.. bench-table::
+    :file: bench/tokenize-attributes.json
+
 Streaming rewrite handlers reuse attribute capacity across additions and removals. Adding 1,000 distinct names to one
 start tag fell from 121.342 to 97.037 µs (20.03%) in matched release builds. Adding one name increased from 0.790 to
 0.810 µs (2.50%, or 0.020 µs). Capacity grows geometrically using the existing node field; mutation order and escaping

@@ -227,15 +227,12 @@ static PyObject *token_get_target(PyObject *self, void *Py_UNUSED(closure)) {
     Py_RETURN_NONE;
 }
 
-/* Build the attribute list (the tokenizer already dropped duplicate names, so
-   the first occurrence is the only one left), mapping a valueless attribute to
-   None. */
 static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
     const th_token *record = &((TokenObject *)self)->record;
     if (!is_tag(record)) {
         Py_RETURN_NONE;
     }
-    PyObject *list = PyList_New(0);
+    PyObject *list = PyList_New(record->attr_count);
     if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -254,13 +251,11 @@ static PyObject *token_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
         PyObject *pair = PyTuple_Pack(2, name, value);
         Py_DECREF(name);
         Py_DECREF(value);
-        /* allocation failure cannot be forced from a test */
-        if (pair == NULL || PyList_Append(list, pair) < 0) { /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(pair);                                /* GCOVR_EXCL_LINE: allocation-failure path */
-            Py_DECREF(list);                                 /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;                                     /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (pair == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(list); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        Py_DECREF(pair);
+        PyList_SET_ITEM(list, index, pair);
     }
     return list;
 }

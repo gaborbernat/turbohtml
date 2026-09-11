@@ -320,6 +320,8 @@ OPERATIONS: dict[str, Operation] = {
     "escape": Operation("escape", "us"),
     "unescape": Operation("unescape", "us"),
     "tokenize": Operation("tokenize", "us"),
+    "token-attributes": Operation("read token attributes", "us"),
+    "tokenize-attributes": Operation("tokenize and read attributes", "us"),
     "find": Operation("find every anchor", "us"),
     "find-cold": Operation("query a cold 10,000-element tree", "us"),
     "select": Operation("select div a[href]", "us"),
@@ -1093,6 +1095,13 @@ def _transform_number_prefix_cases() -> tuple[tuple[str, object], ...]:
     )
 
 
+def _token_attribute_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (f"{count} attributes", f"<p {' '.join(f'a{index}={index}' for index in range(count))}>")
+        for count in (100, 0, 1, 10)
+    )
+
+
 def _tokenize_cases() -> tuple[tuple[str, object], ...]:
     """Return synthetic and corpus documents for the tokenization table."""
     corpus_cases = tuple(
@@ -1424,6 +1433,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "escape": corpus.escape_cases,
     "unescape": corpus.unescape_cases,
     "tokenize": _tokenize_cases,
+    "token-attributes": _token_attribute_cases,
+    "tokenize-attributes": lambda: _token_attribute_cases()[:1],
     "edit": _readpath_cases,
     "class-edit": _readpath_cases,
     "strip-remove": _readpath_cases,

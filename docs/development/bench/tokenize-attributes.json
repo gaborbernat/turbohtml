@@ -1,0 +1,20 @@
+{
+  "label": "tokenize and read attributes",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 attributes",
+      9.210787887070637e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.012055967097734658
+    ]
+  ],
+  "notes": {}
+}

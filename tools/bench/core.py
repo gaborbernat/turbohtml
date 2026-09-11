@@ -274,6 +274,19 @@ def tokenize(text: str) -> None:
         pass
 
 
+def _token_attribute_setup(text: str) -> turbohtml.Token:
+    return next(iter(turbohtml.tokenize(text)))
+
+
+def _token_attributes(token: turbohtml.Token) -> list[tuple[str, str]] | None:
+    return token.attrs
+
+
+def _tokenize_attributes(text: str) -> None:
+    for token in turbohtml.tokenize(text):
+        _ = token.attrs
+
+
 @functools.cache
 def _parsed(text: str) -> turbohtml.Document:
     """Return a document parsed once, cached so the read-path operations time only the query."""
@@ -1365,6 +1378,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "escape": (escape, "turbohtml"),
     "unescape": (unescape, "turbohtml"),
     "tokenize": (tokenize, "turbohtml"),
+    "token-attributes": (Mutating(_token_attribute_setup, _token_attributes), "turbohtml"),
+    "tokenize-attributes": (_tokenize_attributes, "turbohtml"),
     "find": (find, "turbohtml"),
     "find-cold": (Mutating(_find_cold_setup, _find_cold), "turbohtml"),
     "select": (select, "turbohtml"),
