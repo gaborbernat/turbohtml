@@ -2695,3 +2695,38 @@ def test_sanitizer_instance_reuses_xml_policy() -> None:
     cleaner = Sanitizer(_XML)
     assert cleaner.sanitize("<br>") == "<br/>"
     assert cleaner.sanitize("<img src=x>") == '<img src="x"/>'
+
+
+_XML_ORACLE_POLICY: Final = Policy(
+    tags=frozenset({"p", "br", "a", "strong", "em", "img", "ul", "li", "svg", "rect", "circle", "math", "mi"}),
+    attributes={"a": frozenset({"href"}), "img": frozenset({"src", "alt"})},
+    strip_comments=False,
+    xml=True,
+)
+
+
+@pytest.mark.parametrize(
+    ("html", "tags", "text"),
+    [
+        pytest.param("<p>a<br>b<br>c</p>", ["p"], "abc", id="voids"),
+        pytest.param("<ul><li>one<li>two</ul>", ["ul"], "onetwo", id="implied-end-tags"),
+        pytest.param('<a href="?x=1&y=2&z">link & more</a>', ["a"], "link & more", id="entities"),
+        pytest.param("<p>a<!-- c--d- -->b</p>", ["p"], "ab", id="comment"),
+        pytest.param("<svg><rect/><circle/></svg>", ["svg"], "", id="svg"),
+        pytest.param("<math><mi>x</mi></math>", ["math"], "x", id="mathml"),
+        pytest.param("<p>ctrl\x0c\x01chars</p>", ["p"], "ctrlchars", id="control-chars"),
+        pytest.param("<img src=x alt='a<b\"c'>", ["img"], "", id="attr-specials"),
+        pytest.param(
+            "<p>text</p><script>evil()</script><em>more</em>",
+            ["p", "em"],
+            "text<script>evil()</script>more",
+            id="escaped-script",
+        ),
+    ],
+)
+@pytest.mark.oracle
+def test_output_parses_under_lxml(html: str, tags: list[str], text: str) -> None:
+    lxml_etree: Final = pytest.importorskip("lxml.etree")
+    fragment = sanitize(html, _XML_ORACLE_POLICY)
+    root = lxml_etree.fromstring(f"<root>{fragment}</root>".encode())
+    assert ([lxml_etree.QName(child).localname for child in root], root.xpath("string(.)")) == (tags, text)

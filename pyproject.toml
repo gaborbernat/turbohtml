@@ -384,13 +384,11 @@ ini_options.filterwarnings = [
 # from portable coverage; the oracle marker scopes exclusions within consolidated modules.
 run.omit = [
   "tests/benchmarks/*",                                # run only under --codspeed (the CI benchmark job), never in the coverage run
-  "tests/clean/test_sanitizer_differential.py",
   "tests/conformance/test_c14n_conformance.py",        # runs only in the dedicated conformance env; the matrix deselects tests/conformance
   "tests/conformance/test_cssom_jsdom_conformance.py", # differential oracle: skips when the node/jsdom toolchain is absent
   "tests/conformance/test_dom_jsdom_differential.py",
   "tests/conformance/test_xml_conformance.py",
   "tests/dom/test_treebuild_differential.py",
-  "tests/query/match/test_soupsieve_differential.py",
   "tests/query/xpath/test_xpath_differential.py",
   "tests/serialize/js/test_minify_differential.py",
   "tests/validate/test_conformance_differential.py",   # differential oracle: skips when html5validator/vnu.jar or a JRE is absent
