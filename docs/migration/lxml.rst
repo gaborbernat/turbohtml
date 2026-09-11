@@ -133,6 +133,11 @@ turbohtml parses two to four times faster than lxml while matching a browser on 
 the operational surface: fragment parsing, CSS selection, text and tree walks, the link helpers, XPath, and the
 node-path generators.
 
+The deep canonicalization cases compare each library's HTML parser and canonical serializer. Lxml omits the empty head
+element on all three inputs and the SVG and xlink namespace declarations on the sparse-xlink input. The table records
+these byte-output mismatches without competitor timings; its native values cover 150-level trees with and without xlink
+attributes, plus a shallow ordinary document.
+
 .. bench-table::
     :file: bench/lxml.json
 

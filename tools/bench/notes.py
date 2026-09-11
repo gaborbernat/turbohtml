@@ -29,6 +29,9 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "canonicalize-deep": {
+        "lxml method=c14n": "HTML parsing omits the empty head element and SVG/xlink namespace declarations",
+    },
     "transform-number": {
         "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
     },

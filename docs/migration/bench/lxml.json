@@ -1560,6 +1560,21 @@
       "parse XML attribute values — five value characters",
       3.3984982411213357e-07,
       8.517014821407542e-07
+    ],
+    [
+      "canonicalize deep trees with and without xlink attributes (c14n) — deep tree (150 deep)",
+      1.5708761253563353e-05,
+      "different HTML infoset"
+    ],
+    [
+      "canonicalize deep trees with and without xlink attributes (c14n) — sparse xlink (150 deep)",
+      9.907305305271544e-06,
+      "different HTML infoset"
+    ],
+    [
+      "canonicalize deep trees with and without xlink attributes (c14n) — shallow ordinary",
+      2.5364455385664305e-07,
+      "different HTML infoset"
     ]
   ],
   "spread": [
@@ -3117,6 +3132,21 @@
       null,
       0.01700529342393773,
       0.013702399456266109
+    ],
+    [
+      null,
+      0.01390137407846425,
+      null
+    ],
+    [
+      null,
+      0.019098772271180568,
+      null
+    ],
+    [
+      null,
+      0.020425949166036714,
+      null
     ]
   ],
   "row_notes": {
@@ -3161,6 +3191,9 @@
     "271": "returns an XSLT result tree; conversion to a Python string is outside timing",
     "272": "returns an XSLT result tree; conversion to a Python string is outside timing",
     "273": "returns an XSLT result tree; conversion to a Python string is outside timing",
-    "274": "returns an XSLT result tree; conversion to a Python string is outside timing"
+    "274": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    "311": "lxml HTML parsing omits the empty head element",
+    "312": "lxml HTML parsing omits the empty head element; its SVG input also lacks SVG and xlink namespace declarations",
+    "313": "lxml HTML parsing omits the empty head element"
   }
 }
