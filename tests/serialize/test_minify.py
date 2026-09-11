@@ -7,7 +7,7 @@ every individual rule and option is pinned with an explicit expected string.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -938,3 +938,18 @@ def test_minify_is_idempotent(source: str) -> None:
 def test_minify_shrinks_documents() -> None:
     big = "<!doctype html><html><body>" + "<p class='x'>  text  </p>\n" * 200 + "</body></html>"
     assert len(minify(big)) < len(big)
+
+
+@pytest.mark.parametrize(
+    ("tag", "sibling"),
+    [
+        pytest.param("rt", "rt", id="ruby-text"),
+        pytest.param("rt", "rp", id="ruby-parenthesis"),
+        pytest.param("optgroup", "optgroup", id="option-group"),
+    ],
+)
+@pytest.mark.parametrize("inner", [False, True], ids=["outer", "inner"])
+def test_minify_detached_root_bounds_scope(tag: str, sibling: str, *, inner: bool) -> None:
+    root: Final = Element("div", children=[Element(tag, children=[Text("a")]), Element(sibling, children=[Text("b")])])
+    content: Final = f"<{tag}>a</{tag}><{sibling}>b"
+    assert root.serialize(Html(layout=Minify()), inner=inner) == (content if inner else f"<div>{content}</div>")
