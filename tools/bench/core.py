@@ -377,6 +377,12 @@ def computed_style(text: str) -> None:
             _computed_style(node)
 
 
+def _computed_style_reverse(text: str) -> None:
+    for node in reversed(tuple(_parsed(text).descendants)):
+        if isinstance(node, turbohtml.Element):
+            _computed_style(node)
+
+
 def _computed_style_first(text: str) -> None:
     _computed_style(turbohtml.parse(text).select("div")[0])
 
@@ -1474,6 +1480,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "xpath-order": (_xpath_scaling, "turbohtml"),
     "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
+    "computed-style-selectors": (computed_style, "turbohtml"),
+    "computed-style-selectors-reverse": (_computed_style_reverse, "turbohtml"),
     "computed-style-filter": (computed_style, "turbohtml"),
     "computed-style-filter-cold": (_computed_style_first, "turbohtml"),
     "computed-style-specificity": (computed_style, "turbohtml"),

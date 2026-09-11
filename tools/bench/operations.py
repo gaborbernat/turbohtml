@@ -359,6 +359,8 @@ OPERATIONS: dict[str, Operation] = {
     "computed-style-filter-cold": Operation("compile CSS predicate order and resolve one element", "ms"),
     "computed-style-specificity": Operation("compute styles across matching selector alternatives", "ms"),
     "computed-style-specificity-cold": Operation("compile styles and resolve the first element", "ms"),
+    "computed-style-selectors": Operation("reuse computed-style selector matches", "ms"),
+    "computed-style-selectors-reverse": Operation("compute styles in reverse document order", "ms"),
     "computed-style": Operation("computed style for every element", "us"),
     "computed-style-dense": Operation("computed style over a property-dense sheet", "us"),
     "match": Operation("match each anchor against div a[href]", "us"),
@@ -563,6 +565,22 @@ def _form_data_fieldset_cases() -> tuple[tuple[str, str], ...]:
             ),
             ("enabled / 2,048 controls / depth 64", "<fieldset>", "</fieldset>", 64, 2_048),
             ("plain / 4 controls", "", "", 0, 4),
+        )
+    )
+
+
+def _computed_style_selector_cases() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            label,
+            f"<!doctype html><style>div{{color:blue}}div{selector}{{color:red}}</style>"
+            + ("<div>" * count + leaf + "</div>" * count if nested else "<div></div>" * count),
+        )
+        for label, selector, count, nested, leaf in (
+            ("deep missing :has / 512 elements", ":has(.hit)", 512, True, "<span></span>"),
+            ("deep matching :has / 512 elements", ":has(.hit)", 512, True, '<span class="hit"></span>'),
+            ("wide :nth-child / 4,096 elements", ":nth-child(odd)", 4_096, False, ""),
+            ("shallow :has / 8 elements", ":has(.hit)", 8, True, '<span class="hit"></span>'),
         )
     )
 
@@ -1788,6 +1806,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "computed-style-filter": lambda: _FILTER_STYLED_PAGES,
     "computed-style-filter-cold": lambda: _FILTER_STYLED_PAGES,
+    "computed-style-selectors": _computed_style_selector_cases,
+    "computed-style-selectors-reverse": _computed_style_selector_cases,
     "computed-style-specificity": lambda: _SPECIFICITY_STYLED_PAGES,
     "computed-style-specificity-cold": lambda: _SPECIFICITY_STYLED_PAGES,
     "computed-style": lambda: (("styled page (3 kB)", _styled_page(8)), ("styled page (11 kB)", _styled_page(40))),

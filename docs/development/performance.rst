@@ -1530,6 +1530,21 @@ selector cases and the construction case.
 .. bench-table::
     :file: bench/computed-style-filter-cold.json
 
+Computed style reuses descendant ``:has()`` results across element requests. Scope-dependent selectors keep their
+existing matching rules; document and stylesheet edits clear the memo. Updating an existing entry leaves its key count
+unchanged, so repeated requests do not keep expanding the table.
+
+On the two 512-div inputs, matched release time fell from 2.941 to 2.682 ms (8.81%) for a missing descendant and from
+2.939 to 2.686 ms (8.62%) for a matching descendant. The shallow control changed from 68.919 to 69.273 µs (+0.51%). The
+reverse-order positional control changed from 40.632 to 40.770 ms (+0.34%). Both builds include the memo-count fix.
+CodSpeed covers these four cases.
+
+.. bench-table::
+    :file: bench/computed-style-selectors.json
+
+.. bench-table::
+    :file: bench/computed-style-selectors-reverse.json
+
 Extraction
 ==========
 

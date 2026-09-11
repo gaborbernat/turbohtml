@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import gc
 from typing import TYPE_CHECKING, Final
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import Element, Text, parse
 from turbohtml._html import _css_declaration_index, _css_declaration_text
@@ -12,6 +14,8 @@ from turbohtml.build import E
 from turbohtml.cssom import ComputedStyle, RuleList, StyleDeclaration, StyleRule, StyleSheet, computed_style
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from turbohtml import Document
 
 
@@ -748,3 +752,91 @@ def test_computed_style_predicate_order_preserves_foreign_elements() -> None:
         '<!doctype html><style>:has(circle).hit{color:red}g{color:blue}</style><svg><g class="hit"><circle/></g></svg>'
     )
     assert computed_style(document.select("g")[0])["color"] == "red"
+
+
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        pytest.param(":has(.hit)", "red", id="descendant-match"),
+        pytest.param(":has(.absent)", "blue", id="descendant-miss"),
+        pytest.param(":has(:scope > .hit)", "blue", id="scope-relative-child"),
+        pytest.param(":has(:is(:scope > .hit))", "blue", id="nested-scope"),
+    ],
+)
+def test_computed_style_deep_has_scope(selector: str, expected: str) -> None:
+    document: Final = parse(
+        f"<style>div{{color:blue}}div{selector}{{color:red}}</style>"
+        + "<div>" * 64
+        + '<span class="hit"></span>'
+        + "</div>" * 64
+    )
+    nodes: Final = tuple(document.select("div"))
+    for node in reversed(nodes):
+        computed_style(node)
+    assert computed_style(nodes[0])["color"] == expected
+
+
+@pytest.mark.parametrize("mutation", ["attribute", "insert", "remove", "text", "stylesheet"])
+def test_computed_style_has_refreshes_after_mutation(mutation: str) -> None:
+    selector: Final = ":has(span:empty)" if mutation == "text" else ":has(.hit)"
+    leaf: Final = '<span class="hit"></span>' if mutation == "remove" else "<span></span>"
+    document: Final = parse(
+        f"<style>div{{color:blue}}div{selector}{{color:red}}</style>" + "<div>" * 64 + leaf + "</div>" * 64
+    )
+    outer: Final = document.select("div")[0]
+    target: Final = document.select("span")[0]
+    before: Final = computed_style(outer)["color"]
+    if mutation == "attribute":
+        target.attrs["class"] = "hit"
+    elif mutation == "insert":
+        target.append(Element("b", {"class": "hit"}))
+    elif mutation == "remove":
+        target.extract()
+    elif mutation == "text":
+        target.append(Text("filled"))
+    else:
+        style_text: Final = document.select("style")[0].children[0]
+        assert isinstance(style_text, Text)
+        style_text.data = "div{color:red}"
+    expected: Final = ("red", "blue") if mutation in {"remove", "text"} else ("blue", "red")
+    assert (before, computed_style(outer)["color"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("case_index", "expected"),
+    [
+        pytest.param(0, ("blue",) * 512, id="deep-missing"),
+        pytest.param(1, ("red",) * 510 + ("blue",) * 2, id="deep-matching"),
+        pytest.param(2, ("red", "blue") * 2_048, id="wide-positional"),
+        pytest.param(3, ("red",) * 8, id="shallow-has"),
+    ],
+)
+def test_computed_style_selector_shared_inputs(case_index: int, expected: tuple[str, ...]) -> None:
+    source: Final = INPUTS["computed-style-selectors"]()[case_index][1]
+    assert isinstance(source, str)
+    document: Final = parse(source)
+    assert tuple(computed_style(node)["color"] for node in document.select("div")) == expected
+
+
+def test_computed_style_repeated_missing_has_bounds_retained_memory() -> None:
+    tracing: Final[ModuleType] = pytest.importorskip("tracemalloc")
+    document: Final = parse(
+        "<style>div{color:blue}div:has(.absent){color:red}</style>" + "<div>" * 64 + "<span></span>" + "</div>" * 64
+    )
+    nodes: Final = tuple(document.select("div"))[:3]
+    tracing.start()
+    try:
+        for node in nodes:
+            computed_style(node)
+        gc.collect()
+        before: Final = tracing.get_traced_memory()[0]
+        for _ in range(1_024):
+            for node in nodes:
+                computed_style(node)
+        gc.collect()
+        retained: Final = tracing.get_traced_memory()[0] - before
+    finally:
+        tracing.stop()
+    assert (tuple(computed_style(node)["color"] for node in nodes), retained < 32_768) == (("blue",) * 3, True), (
+        retained
+    )

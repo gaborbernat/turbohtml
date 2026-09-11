@@ -2095,11 +2095,10 @@ static int sel_has_memo_get(const sel_has_memo *memo, const sel_complex *rel, co
     return 1;
 }
 
-/* Insert a (rel, node) slot, assuming no matching key is present (the caller only
-   inserts after a get miss), so the found slot is the empty one it belongs in. */
 static void sel_has_memo_insert(sel_has_memo *memo, const sel_complex *rel, const th_node *node, unsigned char result) {
-    memo->slots[sel_has_memo_find(memo, rel, node)] = (sel_has_slot){rel, node, result};
-    memo->count++;
+    sel_has_slot *slot = &memo->slots[sel_has_memo_find(memo, rel, node)];
+    memo->count += slot->rel == NULL;
+    *slot = (sel_has_slot){rel, node, result};
 }
 
 /* Grow (or first-allocate) the table to the next power of two and rehash. On

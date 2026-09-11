@@ -1,0 +1,20 @@
+{
+  "label": "compute styles in reverse document order",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "wide :nth-child / 4,096 elements",
+      0.040769774642346115
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.0170070325767149
+    ]
+  ],
+  "notes": {}
+}

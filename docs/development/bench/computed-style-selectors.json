@@ -1,0 +1,36 @@
+{
+  "label": "reuse computed-style selector matches",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "deep missing :has / 512 elements",
+      0.002681899588606029
+    ],
+    [
+      "deep matching :has / 512 elements",
+      0.00268566955425437
+    ],
+    [
+      "shallow :has / 8 elements",
+      6.92733086774903e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.006612275462425066
+    ],
+    [
+      null,
+      0.014129793837507443
+    ],
+    [
+      null,
+      0.01505845759282812
+    ]
+  ],
+  "notes": {}
+}

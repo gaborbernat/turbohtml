@@ -171,6 +171,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "computed-style-selectors-matching": ("computed-style-selectors", 1),
+    "computed-style-selectors-shallow": ("computed-style-selectors", 3),
     "query-root-groups-connected": ("query-root-groups", 1),
     "query-root-groups-small": ("query-root-groups", 2),
     "form-data-fieldsets-legend": ("form-data-fieldsets", 1),
@@ -309,6 +311,7 @@ def _inline(operation: str, case_index: int = 0) -> object:
     return INPUTS[operation]()[case_index][1]
 
 
+_LOADERS["computed-style-selectors-reverse"] = partial(_inline, "computed-style-selectors-reverse", 2)
 _LOADERS["xpath-id-nodes"] = partial(_inline, "xpath-id-nodes")
 _LOADERS["xpath-replace"] = partial(_inline, "xpath-replace")
 _LOADERS["date-tally"] = partial(_inline, "date-tally")

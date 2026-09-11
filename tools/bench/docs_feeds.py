@@ -48,6 +48,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "canonicalize-attrs": "canonicalize-attrs",
     "canonicalize-deep": "canonicalize-deep",
     "computed-style": "computed-style",
+    "computed-style-selectors": "computed-style-selectors",
+    "computed-style-selectors-reverse": "computed-style-selectors-reverse",
     "computed-style-deep": "computed-style-deep",
     "computed-style-dense": "computed-style-dense",
     "computed-style-filter": "computed-style-filter",

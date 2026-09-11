@@ -1046,12 +1046,15 @@ typedef struct {
 /* Two entries retain a parent while successive child styles replace the other entry. */
 typedef struct {
     uint64_t attr_version;
+    sel_has_memo has_memo;
     css_computed_entry entries[2];
 } css_computed_cache;
 
 static void css_free_computed(HandleObject *handle) {
     css_computed_cache *cache = handle->css_computed;
     if (cache != NULL) {
+        /* Memo keys borrow stylesheet selectors, so clear them before rebuilding sheets. */
+        sel_has_memo_free(&cache->has_memo);
         css_free_map(cache->entries[0].values);
         css_free_map(cache->entries[1].values);
         PyMem_Free(cache);
@@ -1236,7 +1239,7 @@ static css_sheet *css_cached_sheets(module_state *state, HandleObject *handle, P
    style, writing the resolved computed values into out given the parent's computed
    map. Returns -1 on allocation failure. */
 static int css_cascade_element(th_node *element, const css_sheet *sheets, Py_ssize_t sheet_count, th_tree *tree,
-                               int quirks, const css_value *parent, css_value *out) {
+                               int quirks, const css_value *parent, css_value *out, css_computed_cache *cache) {
     css_slot slots[NUM_PROPS] = {0};
     sel_ctx ctx = {tree, element, quirks, NULL, NULL};
     long order = 0;
@@ -1250,6 +1253,7 @@ static int css_cascade_element(th_node *element, const css_sheet *sheets, Py_ssi
             }
             const css_specificity *specificities = current->specificities + offset;
             offset += compiled->count;
+            ctx.has_memo = selector_uses_has_memo(compiled) ? &cache->has_memo : NULL;
             int best_a = -1;
             int best_b = 0;
             int best_c = 0;
@@ -1366,7 +1370,7 @@ static int css_compute_map(module_state *state, HandleObject *handle, th_node *e
     const int quirks = th_tree_quirks(handle->tree);
     if (parent_slot >= 0) {
         const int resolved = css_cascade_element(element, sheets, sheet_count, handle->tree, quirks,
-                                                 cache->entries[parent_slot].values, out);
+                                                 cache->entries[parent_slot].values, out, cache);
         if (resolved < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             return -1;      /* GCOVR_EXCL_LINE: allocation failure */
         }
@@ -1379,7 +1383,7 @@ static int css_compute_map(module_state *state, HandleObject *handle, th_node *e
         for (Py_ssize_t index = 0; index < chain_len; index++) {
             css_value current[NUM_PROPS] = {0};
             const int resolved =
-                css_cascade_element(chain[index], sheets, sheet_count, handle->tree, quirks, out, current);
+                css_cascade_element(chain[index], sheets, sheet_count, handle->tree, quirks, out, current, cache);
             css_free_map(out);
             memcpy(out, current, sizeof(current));
             if (resolved < 0) {    /* GCOVR_EXCL_BR_LINE: allocation failure */
