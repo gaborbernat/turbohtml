@@ -1242,6 +1242,14 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 .. bench-table::
     :file: bench/link-filtering.json
 
+External-link filtering stops public-suffix probes at the maximum rule depth in the pinned table. The generator derives
+that limit from the same source data, including wildcard rules. For 900 links with 64 subdomains, matched release time
+fell from 6.155 to 2.992 ms (51.39%). The ordinary-host control changed from 1.291 to 1.286 ms (0.43%), below the
+acceptance threshold. Both inputs return the same 600-link sets before and after the change. CodSpeed covers both cases.
+
+.. bench-table::
+    :file: bench/links-external.json
+
 *******************
  Scaling workloads
 *******************

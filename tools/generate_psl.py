@@ -97,6 +97,7 @@ def generate(out_path: Path) -> None:
         "    uint8_t labels;\n"
         "    uint8_t kind;\n"
         "} th_psl_entry;\n\n"
+        f"enum {{ TH_PSL_MAX_LABELS = {max(name.count('.') + 1 for name in names)} }};\n\n"
         f"static const int th_psl_count = {len(names)};\n"
         "static const th_psl_entry th_psl_table[] = {\n"
         f"{table_lines}\n"

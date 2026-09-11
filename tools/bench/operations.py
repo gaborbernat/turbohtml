@@ -1933,5 +1933,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),
     ),
     "links-filter": _readpath_cases,
-    "links-external": lambda: (("900 mixed-site links", _EXTERNAL_LINKS_HTML),),
+    "links-external": lambda: (
+        ("900 mixed-site links", _EXTERNAL_LINKS_HTML),
+        ("900 mixed-site links / 64 subdomains", _EXTERNAL_LINKS_HTML.replace("https://", "https://" + "s." * 64)),
+    ),
 }

@@ -1,0 +1,28 @@
+{
+  "label": "extract links outside the base site",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "900 mixed-site links",
+      0.0012857205737115387
+    ],
+    [
+      "900 mixed-site links / 64 subdomains",
+      0.002991697981815378
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.008883658681374074
+    ],
+    [
+      null,
+      0.009264852053604939
+    ]
+  ],
+  "notes": {}
+}
