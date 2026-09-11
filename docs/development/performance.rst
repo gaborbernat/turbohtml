@@ -898,6 +898,9 @@ These cases use names ``a0`` onward with the one-character value ``a``. The tabl
 cleanup, using CPython 3.14.7 release builds without PGO or LTO. The one-attribute control changed from 0.368 to 0.357
 microseconds; its 3.04% difference falls below the 5% improvement threshold. CodSpeed covers both inputs.
 
+Lxml preserves the same attribute names, values and ordering. It takes 79.874 µs for 1,000 attributes and 0.832 µs for
+one attribute, compared with turbohtml's 57.124 and 0.357 µs.
+
 .. bench-table::
     :file: bench/parse-xml-append.json
 
@@ -1078,6 +1081,10 @@ The guard-return cases fold 512 or one conditional return before a final return.
 avoids rescanning each completed suffix. Matched release time fell from 631.548 to 284.383 µs (54.97%) for 512 guards.
 The single-guard control increased from 1.834 to 1.854 µs (1.11%, or 0.020 µs). Both builds produce the same byte counts
 and preserve return order. Candidate spread is 1.10% for 512 guards and 2.05% for one guard.
+
+The competing outputs preserve return values and side effects on both inputs. Rjsmin is faster and retains 12,607 bytes
+on the large case, compared with turbohtml's 7,487 bytes. Tdewolff emits 7,484 bytes. CLI timings include process
+startup. The large calmjs.parse and terser cells and the single-guard tdewolff cell retain spread warnings.
 
 .. bench-table::
     :file: bench/js-guards.json
