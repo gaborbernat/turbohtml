@@ -16,8 +16,10 @@ deviation as ``±N%``. Compare gaps against that spread. The published turbohtml
 unless a section states otherwise; the default benchmark command builds a plain wheel for development.
 
 The harness creates an isolated ``uv`` environment for each library. Mutation cases rebuild their input before each
-timed iteration, with setup excluded from the measurement. Read operations reuse a parsed tree. The corpora include
-`Project Gutenberg's War and Peace <https://www.gutenberg.org/ebooks/2600>`_, the `WHATWG HTML specification source
+timed iteration, with setup excluded from the measurement. Read operations reuse a parsed tree. Each pyperf worker
+validates its assigned input before timing, keeping other cases' parsed trees out of its process cache. The manager
+records input failures as error cells. The corpora include `Project Gutenberg's War and Peace
+<https://www.gutenberg.org/ebooks/2600>`_, the `WHATWG HTML specification source
 <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification <https://github.com/tc39/ecma262>`_,
 `web-platform-tests <https://github.com/web-platform-tests/wpt>`_ pages, and saved blog, news, and product pages from
 `mozilla/readability <https://github.com/mozilla/readability>`_. Synthetic scaling cases vary sibling count, tree depth,
