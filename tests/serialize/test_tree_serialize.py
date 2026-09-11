@@ -1192,6 +1192,17 @@ def test_sort_attributes_off_keeps_source_order() -> None:
     assert node.serialize() == '<p z="1" a="2">x</p>'
 
 
+@pytest.mark.parametrize("tag", ["pre", "textarea", "listing"])
+@pytest.mark.parametrize("clear", [False, True], ids=["empty", "cleared"])
+def test_serialize_empty_leading_text(tag: str, *, clear: bool) -> None:
+    element: Final = Element(tag)
+    text: Final = Text("x" if clear else "")
+    element.append(text)
+    if clear:
+        text.data = ""
+    assert element.serialize() == f"<{tag}></{tag}>"
+
+
 @pytest.mark.parametrize(
     ("attrs", "expected"),
     [
