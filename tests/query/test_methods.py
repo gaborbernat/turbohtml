@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import re
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
 from turbohtml import Document, Element, parse
+from turbohtml.query import Query
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _DOC = '<section><p class="lead">a</p><span>s</span><p class="tail">b</p><div><p>nested</p></div></section>'
 
@@ -631,3 +635,60 @@ def test_prune_detached_subtree_keeps_removed_references() -> None:
         "<i>drop</i>",
         None,
     )
+
+
+@pytest.mark.parametrize("adopt", [pytest.param(False, id="same-tree"), pytest.param(True, id="adopted-owner")])
+@pytest.mark.parametrize(
+    ("operation", "expected"),
+    [
+        pytest.param(lambda node: str(len(node.select("[fresh]"))), "1", id="select"),
+        pytest.param(lambda node: (node.select_one("[fresh]") or node).tag, "b", id="select-one"),
+        pytest.param(lambda node: str(node.matches("[fresh]")), "True", id="matches"),
+        pytest.param(lambda node: (node.closest("[fresh]") or Element("missing")).tag, "main", id="closest"),
+        pytest.param(lambda node: node.prune("[fresh]").inner_html, '<b fresh="yes">hit</b>', id="prune"),
+        pytest.param(lambda node: node.remove("[fresh]").inner_html, "<i>miss</i>", id="remove"),
+        pytest.param(lambda node: node.strip_tags("[fresh]").inner_html, "hit<i>miss</i>", id="strip-tags"),
+        pytest.param(lambda node: str(len(Query([node, Element("aside")]).find("[fresh]"))), "1", id="query-find"),
+        pytest.param(lambda node: str(len(Query(node).filter("[fresh]"))), "1", id="query-filter"),
+    ],
+)
+def test_selector_eviction_refreshes_mutated_owner(
+    operation: Callable[[Element], str], expected: str, *, adopt: bool
+) -> None:
+    owner: Final = parse("<main><b>hit</b><i>miss</i></main>").select("main")[0]
+    destination: Final = Element("section")
+
+    class MutatingSelector(str):  # ruff:ignore[subclass-builtin]  # native selectors require a real str
+        __slots__ = ()
+
+        def __del__(self) -> None:
+            if adopt:
+                destination.append(owner)
+            owner.attrs["fresh"] = "yes"
+            owner.select("b")[0].attrs["fresh"] = "yes"
+
+    owner.select(MutatingSelector("unmatched"))
+    for index in range(15):
+        owner.select(f"unused{index}")
+    assert operation(owner) == expected
+
+
+def test_selector_eviction_refreshes_owner_returned_to_original_tree() -> None:
+    home: Final = Element("section")
+    owner: Final = Element("main")
+    owner.append(Element("b"))
+    home.append(owner)
+    destination: Final = Element("aside")
+
+    class MovingSelector(str):  # ruff:ignore[subclass-builtin]  # native selectors require a real str
+        __slots__ = ()
+
+        def __del__(self) -> None:
+            destination.append(owner)
+            home.append(owner)
+            owner.select("b")[0].attrs["fresh"] = "yes"
+
+    owner.select(MovingSelector("unmatched"))
+    for index in range(15):
+        owner.select(f"unused{index}")
+    assert [node.tag for node in owner.select("[fresh]")] == ["b"]
