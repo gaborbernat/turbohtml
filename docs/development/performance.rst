@@ -955,6 +955,17 @@ three shared inputs, and CodSpeed covers the target and both controls.
 .. bench-table::
     :file: bench/parse-xml-text.json
 
+For an attribute value's clean one-byte prefix, XML parsing reserves scratch capacity once and widens the validated run
+in a batch. References, literal whitespace and wider strings retain their existing paths. A 64 KiB clean value fell from
+113.798 to 40.866 µs (64.09%) in matched release builds. The reference-rich control changed from 83.650 to 82.920 µs
+(0.87%), and five characters changed from 0.3413 to 0.3398 µs (0.42%); neither establishes a gain.
+
+Both quote styles preserve values, reference expansion and CRLF normalization. The shared suite and CodSpeed include the
+target and both controls; the lxml comparisons check complete decoded values.
+
+.. bench-table::
+    :file: bench/parse-xml-values.json
+
 Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
 affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
 comparisons per attribute on average. Early mismatches return before allocating the index.

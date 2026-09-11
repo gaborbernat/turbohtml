@@ -1343,6 +1343,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse-xml": (parse_xml, "turbohtml"),
     "parse-xml-attrs": (parse_xml, "turbohtml"),
     "parse-xml-append": (parse_xml, "turbohtml"),
+    "parse-xml-values": (parse_xml, "turbohtml"),
     "parse-xml-text": (parse_xml, "turbohtml"),
     "parse-xml-prefixes": (parse_xml, "turbohtml"),
     "parse-xml-names": (parse_xml, "turbohtml"),

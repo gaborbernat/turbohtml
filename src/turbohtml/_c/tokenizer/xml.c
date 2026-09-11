@@ -1022,6 +1022,36 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
     Py_UCS4 quote = cp(parser, parser->pos);
     parser->pos++; /* past the opening quote */
     parser->scratch_len = 0;
+    if (parser->kind == PyUnicode_1BYTE_KIND) {
+        const uint8_t *bytes = parser->data;
+        Py_ssize_t end = parser->pos;
+        while (end < parser->length && bytes[end] >= 0x20 && bytes[end] != quote && bytes[end] != '<' &&
+               bytes[end] != '&') {
+            end++;
+        }
+        const Py_ssize_t length = end - parser->pos;
+        if (length > parser->scratch_cap) {
+            size_t capacity, size;
+            const int fits =
+                th_grow_cap((size_t)length, (size_t)parser->scratch_cap, 64, sizeof(Py_UCS4), &capacity, &size);
+            if (!fits) {                  /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                parser->tree->failed = 1; /* GCOVR_EXCL_LINE */
+                return -1;                /* GCOVR_EXCL_LINE */
+            }
+            Py_UCS4 *grown = PyMem_Realloc(parser->scratch, size);
+            if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure */
+                parser->tree->failed = 1; /* GCOVR_EXCL_LINE */
+                return -1;                /* GCOVR_EXCL_LINE */
+            }
+            parser->scratch = grown;
+            parser->scratch_cap = (Py_ssize_t)capacity;
+        }
+        for (Py_ssize_t index = 0; index < length; index++) {
+            parser->scratch[index] = bytes[parser->pos + index];
+        }
+        parser->scratch_len = length;
+        parser->pos = end;
+    }
     while (parser->pos < parser->length && cp(parser, parser->pos) != quote) {
         Py_UCS4 ch = cp(parser, parser->pos);
         if (ch == '<') {

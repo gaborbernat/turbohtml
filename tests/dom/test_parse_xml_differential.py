@@ -67,3 +67,14 @@ def test_lxml_text_benchmark_output(index: int, expected: str) -> None:
     etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
     root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-text"]()[index][1]).encode())
     assert (root.tag, root.text, len(root)) == ("root", expected, 0)
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [(0, "a" * 65536), (1, "a&b " * 8192), (2, "hello")],
+    ids=["clean", "references", "tiny"],
+)
+def test_lxml_value_benchmark_output(index: int, expected: str) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-values"]()[index][1]).encode())
+    assert (root.tag, root.text, list(root.attrib.items()), len(root)) == ("root", None, [("value", expected)], 0)
