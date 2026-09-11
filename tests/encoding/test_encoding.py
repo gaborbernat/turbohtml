@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
+
 import pytest
 
 from turbohtml import parse
 from turbohtml.detect import detect
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def test_str_input_has_no_encoding() -> None:
@@ -426,3 +432,22 @@ def test_sniffing_edge_cases(data: bytes, expected: str) -> None:
 def test_parse_requires_an_argument() -> None:
     with pytest.raises(TypeError):
         parse()  # ty: ignore[missing-argument]  # the missing markup is rejected at runtime
+
+
+def _encoding_cases() -> Iterator[tuple[str, bytes, str]]:
+    # Scripted cases require document.write(), which this parser does not execute.
+    for name in ("tests1.dat", "tests2.dat", "test-yahoo-jp.dat"):
+        for index, chunk in enumerate(
+            (Path(__file__).parents[1] / "html5lib-tests" / "encoding" / name).read_bytes().split(b"#data\n")[1:]
+        ):
+            head, _, tail = chunk.partition(b"#encoding\n")
+            yield f"{name}-{index}", head.removesuffix(b"\n"), tail.split(b"\n", 1)[0].decode("ascii").strip()
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"), [pytest.param(data, expected, id=name) for name, data, expected in _encoding_cases()]
+)
+def test_encoding_sniffing(data: bytes, expected: str) -> None:
+    encoding: Final = parse(data).encoding
+    assert encoding is not None
+    assert encoding.lower() == expected.lower()
