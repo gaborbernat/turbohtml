@@ -218,6 +218,7 @@ typedef struct {
     Py_ssize_t next;
     Py_ssize_t tail;
     Py_ssize_t next_group;
+    Py_ssize_t next_handle;
 } multi_root;
 
 typedef struct {
@@ -318,6 +319,47 @@ static void sort_roots(th_node **group, Py_ssize_t group_count) {
     }
 }
 
+#ifndef Py_GIL_DISABLED
+static PyObject *index_root_handles(multi_root *roots, Py_ssize_t count, PyObject *selector) {
+    if (count < 32 || !PyUnicode_CheckExact(selector)) {
+        return NULL;
+    }
+    Py_ssize_t distinct = 1;
+    while (distinct < count && roots[distinct].node->handle == roots[0].node->handle) {
+        distinct++;
+    }
+    if (distinct == count) {
+        return NULL;
+    }
+    PyObject *handles = PyDict_New();
+    if (handles == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;       /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = count; index-- > 0;) {
+        HandleObject *handle = (HandleObject *)roots[index].node->handle;
+        PyObject *previous = PyDict_GetItemWithError(handles, (PyObject *)handle);
+        if (previous == NULL) {
+            /* Exact keys cannot run a destructor during later selector-cache eviction. */
+            for (int entry = 0; entry < handle->sel_cache_len; entry++) {
+                if (!PyUnicode_CheckExact(handle->sel_cache[entry].key)) {
+                    Py_DECREF(handles);
+                    return NULL;
+                }
+            }
+        }
+        roots[index].next_handle = previous == NULL ? count : PyLong_AsSsize_t(previous);
+        PyObject *position = PyLong_FromSsize_t(index);
+        if (position == NULL || PyDict_SetItem(handles, (PyObject *)handle, position) < 0) { /* GCOVR_EXCL_BR_LINE */
+            Py_XDECREF(position); /* GCOVR_EXCL_LINE: allocation failure */
+            Py_DECREF(handles);   /* GCOVR_EXCL_LINE: allocation failure */
+            return NULL;          /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        Py_DECREF(position);
+    }
+    return handles;
+}
+#endif
+
 PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     PyObject *roots_obj;
     PyObject *selector;
@@ -347,9 +389,14 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     }
     module_state *state = PyModule_GetState(module);
     int error = 0;
+    PyObject *handles = NULL;
+#ifndef Py_GIL_DISABLED
+    handles = index_root_handles(roots, count, selector);
+    error = handles == NULL && PyErr_Occurred() != NULL;
+#endif
     int ordered = 1;
     Py_ssize_t previous_group = 0;
-    for (Py_ssize_t first = 0; first < count;) {
+    for (Py_ssize_t first = 0; first < count && !error;) {
         if (roots[first].processed) {
             first++;
             continue;
@@ -364,7 +411,8 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
             th_node *first_top = NULL;
             Py_ssize_t first_group = 0;
             Py_ssize_t last_group = 0;
-            for (Py_ssize_t index = first; index < count; index++) {
+            for (Py_ssize_t index = first; index < count;
+                 index = handles == NULL ? index + 1 : roots[index].next_handle) {
                 NodeObject *candidate = roots[index].node;
                 if (roots[index].processed || candidate->handle != anchor->handle) {
                     continue;
@@ -426,6 +474,7 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
         }
         first++;
     }
+    Py_XDECREF(handles);
     if (!error && !ordered) {
         PyObject *result = PyList_New(PyList_GET_SIZE(out));
         if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */

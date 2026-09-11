@@ -560,7 +560,14 @@ for the shuffled case is 5.92%, above the comparison threshold. The sorted-root 
 A native index groups detached subtrees that share one tree handle after selector compilation. Grouping 2,048 detached
 roots fell from 2.480 ms to 63.822 µs (97.43%). The connected-root control improved from 6.181 to 6.119 ms (1.00%); four
 connected roots changed from 0.3244 to 0.3277 µs (+1.02%). Groups retain their first-occurrence order across interleaved
-documents. CodSpeed covers the detached, connected, and small inputs.
+documents.
+
+A second index groups roots from different documents on GIL builds when selectors and cached selector keys are exact
+strings. Selector subclasses retain the scan because cache eviction can invoke Python callbacks that move nodes.
+Grouping 512 documents fell from 84.457 to 33.044 µs (60.87%). Against the preceding root-index implementation, detached
+roots changed from 64.813 to 66.457 µs (+2.54%), connected roots from 6.117 to 6.092 ms (-0.40%), and four roots from
+0.3289 to 0.3377 µs (+2.67%). The four-root candidate spread is 6.94%, so that control is noisy. The table includes
+these final document-index measurements; CodSpeed covers all four inputs.
 
 .. bench-table::
     :file: bench/query-root-groups.json

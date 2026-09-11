@@ -175,6 +175,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "computed-style-selectors-shallow": ("computed-style-selectors", 3),
     "query-root-groups-connected": ("query-root-groups", 1),
     "query-root-groups-small": ("query-root-groups", 2),
+    "query-root-groups-documents": ("query-root-groups", 3),
     "form-data-fieldsets-legend": ("form-data-fieldsets", 1),
     "form-data-fieldsets-enabled": ("form-data-fieldsets", 2),
     "form-data-fieldsets-plain": ("form-data-fieldsets", 3),

@@ -749,3 +749,24 @@ def test_query_root_groups_keep_later_documents_after_reordering() -> None:
     second: Final = parse("<main><p>b</p></main>").select("main")[0]
     fourth: Final = parse("<main><p>d</p></main>").select("main")[0]
     assert [node.text for node in Query([first, second, third, fourth]).find("p")] == list("abcd")
+
+
+def test_query_root_groups_interleaved_document_members() -> None:
+    first: Final = parse("<main><p>a</p></main>" * 32).select("main")
+    second: Final = parse("<main><p>b</p></main>" * 32).select("main")
+    roots: Final = [node for pair in zip(first, second, strict=True) for node in pair]
+    assert [node.text for node in Query(roots).find("p")] == ["a"] * 32 + ["b"] * 32
+
+
+def test_query_root_groups_accept_selector_subclass() -> None:
+    class Selector(str):  # ruff:ignore[subclass-builtin]  # the native API requires a real str
+        __slots__ = ()
+
+    roots: Final = [parse(f"<main><p>{index}</p></main>").select("main")[0] for index in range(32)]
+    assert [node.text for node in Query(roots).find(Selector("p"))] == [str(index) for index in range(32)]
+
+
+def test_query_root_groups_many_documents_reject_invalid_selector() -> None:
+    roots: Final = [parse("<main><p>x</p></main>").select("main")[0] for _ in range(32)]
+    with pytest.raises(SelectorSyntaxError):
+        Query(roots).find("[")
