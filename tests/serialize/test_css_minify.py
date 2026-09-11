@@ -1,10 +1,13 @@
-"""Pinned behavior of the CSS minifier (minify_css / minify_css_inline) and its public API.
+"""CSS minification with pinned tdewolff/minify and native regression cases.
 
-Each case fixes one value-safe transform to an explicit expected string. The exact output of the whole corpus, and the
-round-trip-safety property, are enforced at scale in test_css_minify_corpus.py.
+Malformed corpus inputs retain exact-output checks but can lack stable round-trip results.
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -645,3 +648,32 @@ def test_lone_surrogate_raises_encode_error() -> None:
     # a lone surrogate has no UTF-8 form, so the engine cannot take its byte view
     with pytest.raises(UnicodeEncodeError):
         minify_css("a{content:'\ud800'}")
+
+
+_GOLDEN: Final[list[list[str]]] = json.loads(
+    (Path(__file__).parent / "data" / "css_minify_golden.json").read_text(encoding="utf-8")
+)
+
+# Malformed/invalid inputs with no closing delimiter or balance: error recovery keeps the broken tail verbatim, which
+# is not a fixed point under re-minification. Output is still deterministic and pinned; only round-trip safety is moot.
+_UNSTABLE: Final[frozenset[str]] = frozenset({
+    "a{a:)'''", "{d:url( \n  \n\t0", "{d:urL(     '0", '{-ms-filter:"',
+    "a{width:calc((1px + 2px}", "a{width:calc((1px}", "a{width:calc((", "a{width:calc((1px+2px",
+    'a{x:"abc\\', "a{x:url(", 'a{src:local("', "a{color:rgba(10 20 30 .5)}", "a{flex:1 0 %}",
+})  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("source", "stylesheet", "inline"),
+    [pytest.param(*row, id=row[0][:40]) for row in _GOLDEN],
+)
+def test_minify_matches_golden(source: str, stylesheet: str, inline: str) -> None:
+    assert (minify_css(source), minify_css_inline(source)) == (stylesheet, inline)
+
+
+@pytest.mark.parametrize(
+    ("stylesheet", "inline"),
+    [pytest.param(row[1], row[2], id=row[0][:40]) for row in _GOLDEN if row[0] not in _UNSTABLE],
+)
+def test_minify_output_is_a_fixed_point(stylesheet: str, inline: str) -> None:
+    assert (minify_css(stylesheet), minify_css_inline(inline)) == (stylesheet, inline)

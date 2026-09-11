@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import pickle  # ruff:ignore[suspicious-pickle-import]  # round-tripping our own trusted payloads
+import threading
 from typing import Final
 
 import pytest
@@ -922,3 +923,43 @@ def test_parser_text_coalescing_keeps_fostered_text_before_table() -> None:
     root: Final = parse("<div><table>" + "x<tr><td>cell</td></tr>" * 40 + "</table></div>").find("div")
     assert root is not None
     assert [node.text for node in root.children] == ["x" * 40, "cell" * 40]
+
+
+def test_independent_parsers_in_parallel_each_build_correctly() -> None:
+    document: Final = "<html><body>" + "".join(f"<div><p>x{index}</p></div>" for index in range(200)) + "</body></html>"
+    expected: Final = parse(document).html
+    results: Final[list[str]] = []
+    lock: Final = threading.Lock()
+    start: Final = threading.Barrier(4)
+
+    def worker() -> None:
+        start.wait()
+        parser: Final = IncrementalParser()
+        for position in range(0, len(document), 4):
+            parser.feed(document[position : position + 4])
+        with lock:
+            results.append(parser.close().html)
+
+    threads: Final = [threading.Thread(target=worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results == [expected, expected, expected, expected]
+
+
+def test_concurrent_feeds_on_one_parser_are_memory_safe() -> None:
+    parser: Final = IncrementalParser()
+    start: Final = threading.Barrier(2)
+
+    def feeder(tag: str) -> None:
+        start.wait()
+        for index in range(200):
+            parser.feed(f"<{tag}>{index}</{tag}>")
+
+    threads: Final = [threading.Thread(target=feeder, args=(tag,)) for tag in ("p", "span")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert isinstance(parser.close().html, str)  # interleaving is undefined, but never a crash
