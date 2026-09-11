@@ -171,6 +171,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "minify-js-jquery": ("minify-js", 2),
     "token-attributes-empty": ("token-attributes", 1),
     "token-attributes-one": ("token-attributes", 2),
     "token-attributes-ten": ("token-attributes", 3),

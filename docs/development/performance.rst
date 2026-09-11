@@ -1150,6 +1150,12 @@ with the time to produce it; both ratios are against turbohtml.
 .. bench-table::
     :file: bench/js-minification.json
 
+The fold pass leaves canonical ``!0`` and ``!1`` nodes unchanged. Recreating them marked each pass as changed and forced
+repeated traversals up to the pass limit. In matched release builds, Underscore fell from 2.033 to 1.196 ms (41.17%),
+and the held-out jQuery input from 10.202 to 6.393 ms (37.34%). Their output sizes remain 19,297 and 87,776 bytes. The
+single-guard control changed from 1.797 to 1.814 µs (+0.95%, or 0.017 µs). CodSpeed covers both libraries and the guard
+control. The tables update these native cells and retain existing competitor measurements.
+
 The expression-sequence cases merge 1,000 or two consecutive function calls. Retaining the tail during folding avoids
 rescanning the accumulated sequence before each append. Matched release builds reduced the 1,000-statement case from
 692.917 to 334.477 µs (51.73% less time). The longer two-statement control comparison measured 1.188 versus 1.167 µs,

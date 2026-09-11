@@ -1399,12 +1399,16 @@ static void walk(F *folder, int32_t idx) {
     switch (node->kind) {
     case JN_UNARY:
         if (node->op == JT_NOT) {
+            const jm_node *operand = &folder->prog->nodes[node->a];
+            if (operand->kind == JN_NUM && operand->str_len == 1 &&
+                (operand->str[0] == '0' || operand->str[0] == '1')) {
+                return;
+            }
             int truth = pure_truthy(folder, node->a);
             if (truth >= 0) {
                 fold_boolean(folder, idx, !truth);
                 return;
             }
-            const jm_node *operand = &folder->prog->nodes[node->a];
             if (operand->kind == JN_BINARY && (operand->op == JT_EQ_EQ || operand->op == JT_NE ||
                                                operand->op == JT_EQ_EQ_EQ || operand->op == JT_NE_EQ)) {
                 /* !(a==b) and a!=b are the same boolean everywhere, not just in a test position

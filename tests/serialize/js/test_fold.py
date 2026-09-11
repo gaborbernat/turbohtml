@@ -22,6 +22,11 @@ _NODE = shutil.which("node")
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        pytest.param("x=!0", "x=!0", id="canonical-true"),
+        pytest.param("x=!1", "x=!1", id="canonical-false"),
+        pytest.param("x=!2", "x=!1", id="noncanonical-number"),
+        pytest.param("x=!10", "x=!1", id="multidigit-number"),
+        pytest.param("x=!!0", "x=!1", id="nested-not"),
         pytest.param("x=true", "x=!0", id="true"),
         pytest.param("x=false", "x=!1", id="false"),
         pytest.param("x=a?true:false", "x=a?!0:!1", id="ternary"),
