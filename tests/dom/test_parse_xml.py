@@ -1,8 +1,9 @@
-"""parse_xml(): the strict XML 1.0 well-formedness parsing mode."""
-
 from __future__ import annotations
 
+from typing import Final, cast
+
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import (
     CData,
@@ -534,3 +535,175 @@ def test_attributes_with_distinct_expanded_names_are_allowed(markup: str) -> Non
 def test_non_str_raises_type_error() -> None:
     with pytest.raises(TypeError):
         parse_xml(b"<root/>")  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize("count", [pytest.param(1, id="single"), pytest.param(1000, id="many")])
+def test_xml_attribute_append_preserves_values_and_order(count: int) -> None:
+    expected: Final = [(f"a{index}", str(index)) for index in range(count)]
+    source: Final = "<root " + " ".join(f'{name}="{value}"' for name, value in expected) + "/>"
+    root: Final = parse_xml(source).find("root")
+    assert root is not None
+    assert list(root.attrs.items()) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "code"),
+    [
+        pytest.param('<r a="1" a="2"/>', "xml-duplicate-attribute", id="lexical-duplicate"),
+        pytest.param('<r p:a="1" p:a="2"/>', "xml-duplicate-attribute", id="duplicate-before-prefix-check"),
+        pytest.param('<r xmlns:p="urn:a" xmlns:p=""/>', "xml-duplicate-attribute", id="duplicate-before-declaration"),
+        pytest.param('<r a="1" a="&bad;"/>', "xml-undefined-entity", id="invalid-value-before-duplicate"),
+    ],
+)
+def test_xml_attribute_append_preserves_first_error(source: str, code: str) -> None:
+    with pytest.raises(HTMLParseError) as error:
+        parse_xml(source)
+    assert error.value.error.code == code
+
+
+def test_xml_attribute_append_keeps_later_attribute_replacement() -> None:
+    root: Final = parse_xml('<root a="before"/>').find("root")
+    assert root is not None
+    root.attrs["a"] = "after"
+    root.attrs["b"] = "new"
+    assert list(root.attrs.items()) == [("a", "after"), ("b", "new")]
+
+
+@pytest.mark.parametrize("quote", ['"', "'"], ids=["double", "single"])
+@pytest.mark.parametrize("character", ["a", "é", "λ", "𐀀"], ids=["ascii", "latin1", "ucs2", "ucs4"])
+@pytest.mark.parametrize("length", [0, 65, 65536], ids=["empty", "growth", "long"])
+def test_xml_attribute_run_value(quote: str, character: str, length: int) -> None:
+    value: Final = character * length
+    root: Final = parse_xml(f"<root value={quote}{value}{quote}/>").find("root")
+    assert root is not None
+    assert root.attrs["value"] == value
+
+
+@pytest.mark.parametrize("quote", ['"', "'"], ids=["double", "single"])
+def test_xml_attribute_run_normalization(quote: str) -> None:
+    root: Final = parse_xml(f"<root value={quote}" + "a" * 80 + f"&amp;b\t&#9;\r\n{quote}/>").find("root")
+    assert root is not None
+    assert root.attrs["value"] == "a" * 80 + "&b \t "
+
+
+def test_xml_attribute_run_scratch_reuse() -> None:
+    long: Final = "a" * 1024
+    root: Final = parse_xml(f'<root first="{long}" second="short" third="{long}"/>').find("root")
+    assert root is not None
+    assert list(root.attrs.items()) == [("first", long), ("second", "short"), ("third", long)]
+
+
+@pytest.mark.parametrize(
+    ("tail", "code"),
+    [
+        pytest.param("<", "xml-lt-in-attribute", id="markup"),
+        pytest.param("\x00", "xml-invalid-char", id="null"),
+        pytest.param("\x01", "xml-invalid-char", id="control"),
+    ],
+)
+def test_xml_attribute_run_error_position(tail: str, code: str) -> None:
+    with pytest.raises(HTMLParseError) as error:
+        parse_xml('<root a="' + "a" * 80 + tail + '"/>')
+    assert (error.value.error.code, error.value.error.line, error.value.error.col) == (code, 1, 89)
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [(0, "a" * 65536), (1, "a&b " * 8192), (2, "hello")],
+    ids=["clean", "references", "tiny"],
+)
+def test_xml_value_benchmark_output(index: int, expected: str) -> None:
+    root: Final = parse_xml(cast("str", INPUTS["parse-xml-values"]()[index][1])).find("root")
+    assert root is not None
+    assert root.attrs["value"] == expected
+
+
+@pytest.mark.parametrize("prefix", ["p", "λ", "𐀀"], ids=["ascii", "ucs2", "ucs4"])
+@pytest.mark.parametrize("count", [1, 128], ids=["single", "many"])
+def test_xml_namespace_attribute_order(prefix: str, count: int) -> None:
+    expected: Final = [(f"xmlns:{prefix}{index}", f"urn:{index}") for index in range(count)] + [
+        (f"{prefix}{index}:value", "x") for index in range(count)
+    ]
+    root: Final = parse_xml("<root " + " ".join(f'{name}="{value}"' for name, value in expected) + "/>").find("root")
+    assert root is not None
+    assert list(root.attrs.items()) == expected
+
+
+def test_xml_namespace_self_closing_rebinding() -> None:
+    root: Final = parse_xml(
+        '<root xmlns:p="urn:p" xmlns:q="urn:q"><before xmlns:p="urn:q" p:value="a"/>'
+        '<after p:value="b" q:value="c"/></root>'
+    ).find("after")
+    assert root is not None
+    assert list(root.attrs.items()) == [("p:value", "b"), ("q:value", "c")]
+
+
+@pytest.mark.parametrize(
+    ("source", "code"),
+    [
+        pytest.param(
+            '<root xmlns:p="urn:p" xmlns:q="urn:q"><child xmlns:p="urn:q" p:value="a" q:value="b"/></root>',
+            "xml-duplicate-attribute",
+            id="rebound-collision",
+        ),
+        pytest.param(
+            '<root xmlns:p="urn:p" xmlns:q="urn:p" p:value="a" q:value="b" missing:value="c"/>',
+            "xml-undeclared-namespace",
+            id="prefix-error-before-expanded-collision",
+        ),
+    ],
+)
+def test_xml_namespace_first_error(source: str, code: str) -> None:
+    with pytest.raises(HTMLParseError) as error:
+        parse_xml(source)
+    assert error.value.error.code == code
+
+
+@pytest.mark.parametrize("length", [0, 7, 8, 16], ids=["start", "last-byte", "next-block", "two-blocks"])
+@pytest.mark.parametrize(
+    ("tail", "expected"),
+    [
+        pytest.param("end", "end", id="plain"),
+        pytest.param("&amp;end", "&end", id="reference"),
+        pytest.param("\r\nend", "\nend", id="crlf"),
+        pytest.param("]end", "]end", id="bracket"),
+        pytest.param("<child/>end", "end", id="markup"),
+    ],
+)
+def test_xml_text_block_boundary(length: int, tail: str, expected: str) -> None:
+    root: Final = parse_xml("<root>" + "a" * length + tail + "</root>").find("root")
+    assert root is not None
+    assert root.text == "a" * length + expected
+
+
+@pytest.mark.parametrize("text", ["a", "é", "λ", "𐀀"], ids=["ascii", "latin1", "ucs2", "ucs4"])
+def test_xml_text_block_width(text: str) -> None:
+    root: Final = parse_xml("<root>" + text * 65536 + "</root>").find("root")
+    assert root is not None
+    assert root.text == text * 65536
+
+
+@pytest.mark.parametrize("length", [7, 8, 16], ids=["last-byte", "next-block", "two-blocks"])
+@pytest.mark.parametrize(
+    ("tail", "code"),
+    [
+        pytest.param("\x00", "xml-invalid-char", id="null"),
+        pytest.param("\x01", "xml-invalid-char", id="control"),
+        pytest.param("]]>", "xml-cdata-close-in-content", id="cdata-close"),
+    ],
+)
+def test_xml_text_block_error_position(length: int, tail: str, code: str) -> None:
+    with pytest.raises(HTMLParseError) as error:
+        parse_xml("<root>" + "a" * length + tail + "</root>")
+    assert (error.value.error.code, error.value.error.line, error.value.error.col) == (code, 1, length + 6)
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [(0, "a" * 65536), (1, "a&b " * 8192), (2, "hello")],
+    ids=["clean", "references", "tiny"],
+)
+def test_xml_text_benchmark_output(index: int, expected: str) -> None:
+    root: Final = parse_xml(cast("str", INPUTS["parse-xml-text"]()[index][1])).find("root")
+    assert root is not None
+    assert root.text == expected

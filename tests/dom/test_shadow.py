@@ -1,12 +1,10 @@
-"""The Shadow DOM tree model: attach_shadow / ShadowRoot, slot assignment, and the flattened tree."""
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
-from turbohtml import Comment, Element, Range, ShadowRoot, Text, parse
+from turbohtml import Comment, Element, Range, ShadowRoot, Text, parse, parse_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -395,3 +393,329 @@ def test_attach_shadow_on_a_parsed_element() -> None:
     app.append(Element("p", None, [Text("slotted")]))
     assert _tags(_element(root.select_one("slot")).assigned_nodes()) == ["p"]
     assert app.shadow_root == root
+
+
+def _declarative_shadow_element(node: object) -> Element:
+    """Narrow a find result to a non-None Element."""
+    assert isinstance(node, Element)
+    return node
+
+
+def _shadow(node: object) -> ShadowRoot:
+    """Narrow a shadow_root result to a non-None ShadowRoot."""
+    assert isinstance(node, ShadowRoot)
+    return node
+
+
+def test_open_shadowrootmode_attaches_a_shadow_root() -> None:
+    host = _declarative_shadow_element(
+        parse("<div id=h><template shadowrootmode=open><p>shadow</p></template></div>").find(id="h")
+    )
+    root = _shadow(host.shadow_root)
+    assert root.mode == "open"
+    assert root.html == "<p>shadow</p>"
+
+
+def test_declarative_template_is_off_the_light_tree() -> None:
+    host = _declarative_shadow_element(
+        parse("<div id=h><template shadowrootmode=open><p>x</p></template><b>light</b></div>").find(id="h")
+    )
+    assert host.find("template") is None
+    assert host.html == '<div id="h"><b>light</b></div>'
+
+
+def test_closed_shadowrootmode_hides_the_root_but_keeps_its_content() -> None:
+    host = _declarative_shadow_element(
+        parse("<div id=h><template shadowrootmode=closed><b>secret</b></template></div>").find(id="h")
+    )
+    assert host.shadow_root is None  # a closed root is not exposed, like the mutation API
+    assert host.find("template") is None
+    assert [node.tag for node in host.flattened_children if isinstance(node, Element)] == ["b"]
+
+
+@pytest.mark.parametrize("mode", ["open", "closed"])
+def test_shadowrootmode_value_is_case_insensitive(mode: str) -> None:
+    host = _declarative_shadow_element(
+        parse(f"<div id=h><template shadowrootmode={mode.upper()}>x</template></div>").find(id="h")
+    )
+    assert host.find("template") is None  # OPEN / CLOSED still make a declarative root
+
+
+def test_delegates_focus_and_clonable_flags_are_set() -> None:
+    markup = "<div id=h><template shadowrootmode=open shadowrootdelegatesfocus shadowrootclonable>x</template></div>"
+    root = _shadow(_declarative_shadow_element(parse(markup).find(id="h")).shadow_root)
+    assert root.delegates_focus is True
+    assert root.clonable is True
+
+
+def test_flags_default_off_without_the_attributes() -> None:
+    root = _shadow(
+        _declarative_shadow_element(
+            parse("<div id=h><template shadowrootmode=open>x</template></div>").find(id="h")
+        ).shadow_root
+    )
+    assert root.delegates_focus is False
+    assert root.clonable is False
+
+
+def test_mutation_attached_shadow_has_no_declarative_flags() -> None:
+    root = Element("div").attach_shadow("open")
+    assert root.delegates_focus is False
+    assert root.clonable is False
+
+
+def test_a_slot_in_the_shadow_assigns_light_children() -> None:
+    markup = "<div id=h><template shadowrootmode=open><slot></slot></template><p>light</p></div>"
+    host = _declarative_shadow_element(parse(markup).find(id="h"))
+    slot = _declarative_shadow_element(_shadow(host.shadow_root).find("slot"))
+    assert [node.tag for node in slot.assigned_nodes() if isinstance(node, Element)] == ["p"]
+
+
+def test_nested_declarative_shadow_roots() -> None:
+    markup = (
+        "<div id=o><template shadowrootmode=open>"
+        "<section id=i><template shadowrootmode=open><b>deep</b></template></section>"
+        "</template></div>"
+    )
+    outer = _shadow(_declarative_shadow_element(parse(markup).find(id="o")).shadow_root)
+    inner = _shadow(_declarative_shadow_element(outer.find(id="i")).shadow_root)
+    assert inner.html == "<b>deep</b>"
+
+
+def test_second_template_under_a_host_stays_a_normal_template() -> None:
+    markup = "<div id=h><template shadowrootmode=open>a</template><template shadowrootmode=open>b</template></div>"
+    host = _declarative_shadow_element(parse(markup).find(id="h"))
+    assert _shadow(host.shadow_root).html == "a"
+    assert _declarative_shadow_element(host.find("template")) is not None  # the host already had a shadow root
+
+
+@pytest.mark.parametrize("tag", ["div", "span", "section", "article", "h1", "body", "my-widget"])
+def test_valid_shadow_host_elements_attach(tag: str) -> None:
+    host = _declarative_shadow_element(
+        parse(f"<body><{tag} id=h><template shadowrootmode=open>x</template></{tag}></body>").find(id="h")
+    )
+    assert host.shadow_root is not None
+
+
+@pytest.mark.parametrize("tag", ["b", "ul", "foo"])
+def test_invalid_shadow_host_elements_keep_a_normal_template(tag: str) -> None:
+    host = _declarative_shadow_element(
+        parse(f"<body><{tag} id=h><template shadowrootmode=open>x</template></{tag}></body>").find(id="h")
+    )
+    assert host.shadow_root is None
+    assert host.find("template") is not None
+
+
+def test_foreign_integration_point_is_not_a_shadow_host() -> None:
+    # foreignObject runs HTML rules while the current node is SVG-namespaced, so it is no host
+    doc = parse("<div><svg><foreignObject id=h><template shadowrootmode=open>x</template></foreignObject></svg></div>")
+    host = _declarative_shadow_element(doc.find(id="h"))
+    assert host.shadow_root is None
+    assert host.find("template") is not None
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<template>x</template>",
+        "<template shadowrootmode>x</template>",
+        "<template shadowrootmode=off>x</template>",
+        "<template shadowrootmode=ope1>x</template>",
+    ],
+)
+def test_non_declarative_template_makes_a_content_fragment(markup: str) -> None:
+    host = _declarative_shadow_element(parse(f"<div id=h>{markup}</div>").find(id="h"))
+    assert host.shadow_root is None
+    template = _declarative_shadow_element(host.find("template"))
+    assert template.inner_html == "x"  # a normal template content fragment, not a shadow root
+
+
+def test_a_dummy_same_length_attribute_is_not_shadowrootmode() -> None:
+    # the 14-char attribute matches shadowrootmode's length but not its bytes
+    markup = "<div id=h><template aaaaaaaaaaaaaa=1 shadowrootmode=open>x</template></div>"
+    assert _declarative_shadow_element(parse(markup).find(id="h")).shadow_root is not None
+
+
+def test_template_at_the_document_root_is_not_declarative() -> None:
+    # the adjusted current node is the topmost element, so it makes a normal template
+    doc = parse("<template shadowrootmode=open>x</template>")
+    assert _declarative_shadow_element(doc.find("template")) is not None
+
+
+def test_document_parsing_can_disable_declarative_shadow() -> None:
+    markup = "<div id=h><template shadowrootmode=open>x</template></div>"
+    host = _declarative_shadow_element(parse(markup, allow_declarative_shadow_roots=False).find(id="h"))
+    assert host.shadow_root is None
+    assert host.find("template") is not None
+
+
+def test_fragment_parsing_defaults_to_no_declarative_shadow() -> None:
+    host = _declarative_shadow_element(
+        parse_fragment("<section><template shadowrootmode=open>x</template></section>", "body").find("section")
+    )
+    assert host.shadow_root is None
+    assert host.find("template") is not None
+
+
+def test_fragment_parsing_opts_in_to_declarative_shadow() -> None:
+    fragment = parse_fragment(
+        "<section><template shadowrootmode=open>x</template></section>", "body", allow_declarative_shadow_roots=True
+    )
+    assert _declarative_shadow_element(fragment.find("section")).shadow_root is not None
+
+
+def test_fragment_context_element_is_the_shadow_host() -> None:
+    fragment = parse_fragment(
+        "<template shadowrootmode=open><p>x</p></template>", "div", allow_declarative_shadow_roots=True
+    )
+    assert _shadow(fragment.shadow_root).html == "<p>x</p>"
+
+
+def test_fragment_context_that_is_not_a_valid_host_keeps_a_template() -> None:
+    fragment = parse_fragment("<template shadowrootmode=open>x</template>", "html", allow_declarative_shadow_roots=True)
+    assert fragment.shadow_root is None
+    assert _declarative_shadow_element(fragment.find("template")) is not None
+
+
+@pytest.mark.parametrize("mode", ["open", "closed"])
+@pytest.mark.parametrize(
+    ("light", "shadow", "expected"),
+    [
+        pytest.param(
+            "",
+            '<slot name="a">first</slot><slot name="b">second</slot>',
+            ["first", "second"],
+            id="empty-host",
+        ),
+        pytest.param(
+            '<b slot="b">one</b><i slot="a">two</i><u slot="b">three</u>',
+            '<slot name="a"></slot><slot name="b"></slot>',
+            ['<i slot="a">two</i>', '<b slot="b">one</b>', '<u slot="b">three</u>'],
+            id="host-order",
+        ),
+        pytest.param(
+            '<b slot="a">one</b>',
+            '<slot name="a"></slot><slot name="a">fallback</slot><slot name="a">last</slot>',
+            ['<b slot="a">one</b>', "fallback", "last"],
+            id="duplicate-first-wins",
+        ),
+        pytest.param(
+            '<b slot="a">one</b>',
+            '<section><slot name="a"></slot></section><slot name="a">fallback</slot><slot name="a">last</slot>',
+            ['<section><slot name="a"></slot></section>', "fallback", "last"],
+            id="first-slot-nested",
+        ),
+        pytest.param(
+            '<!--ignore-->text<b>one</b><i slot="">two</i><u slot="absent">three</u>',
+            '<slot name="absent"></slot><slot name>fallback</slot><slot name="">duplicate</slot>',
+            ['<u slot="absent">three</u>', "text", "<b>one</b>", '<i slot="">two</i>', "duplicate"],
+            id="default-name-and-text",
+        ),
+        pytest.param(
+            '<b slot="é">one</b><i slot="水">two</i><u slot="🦀">three</u>',
+            '<slot name="é"></slot><slot name="🦀"></slot><slot name="水"></slot>',
+            ['<b slot="é">one</b>', '<u slot="🦀">three</u>', '<i slot="水">two</i>'],
+            id="unicode-names",
+        ),
+        pytest.param(
+            '<b slot="missing">one</b>',
+            '<slot name="first">first</slot><slot name="second"><slot name="third">nested</slot></slot>',
+            ["first", "nested"],
+            id="unmatched-nested-fallback",
+        ),
+    ],
+)
+def test_flattened_assignment_order(mode: str, light: str, shadow: str, expected: list[str]) -> None:
+    host: Final = Element("div")
+    host.set_inner_html(light)
+    root: Final = host.attach_shadow(mode)
+    root.set_inner_html(shadow)
+    assert [node.serialize() for node in host.flattened_children] == expected
+
+
+def test_flattened_assignment_updates_after_edit() -> None:
+    host: Final = Element("div")
+    host.set_inner_html('<b slot="a">one</b><i slot="b">two</i>')
+    root: Final = host.attach_shadow()
+    root.set_inner_html('<slot name="a"></slot><slot name="b"></slot>')
+    before: Final = host.flattened_children
+    host.set_inner_html('<u slot="b">new</u>')
+    root.set_inner_html('<slot name="b"></slot><slot name="a">fallback</slot>')
+    assert (
+        [node.serialize() for node in before],
+        [node.serialize() for node in host.flattened_children],
+    ) == (['<b slot="a">one</b>', '<i slot="b">two</i>'], ['<u slot="b">new</u>', "fallback"])
+
+
+def test_flattened_assignment_many_names() -> None:
+    host: Final = Element("div")
+    host.set_inner_html("".join(f'<i slot="name-{index}">{index}</i>' for index in range(1000)))
+    root: Final = host.attach_shadow()
+    root.set_inner_html("".join(f'<slot name="name-{index}">fallback</slot>' for index in reversed(range(1000))))
+    assert [node.text for node in host.flattened_children] == [str(index) for index in reversed(range(1000))]
+
+
+def test_shadow_flatten_keeps_sibling_fallback_order() -> None:
+    shadow: Final = Element("div").attach_shadow("open")
+    shadow.set_inner_html("<slot>" + "".join(f"<slot>{index}</slot>" for index in range(100)) + "</slot>")
+    assert [node.text for node in shadow.select("slot")[0].assigned_nodes(flatten=True)] == [
+        str(index) for index in range(100)
+    ]
+
+
+@pytest.mark.parametrize("mode", [pytest.param("open", id="open"), pytest.param("closed", id="closed")])
+def test_late_slot_collects_children_in_order(mode: str) -> None:
+    host: Final[Element] = Element("div")
+    host.set_inner_html(
+        "<!--before-->" + "<!--between-->".join(f'<span slot="target">{index}</span>' for index in range(64))
+    )
+    root: Final[ShadowRoot] = host.attach_shadow(mode)
+    root.set_inner_html('<slot name="unused"></slot>' * 64 + '<slot name="target"></slot>')
+    assert root.select('slot[name="target"]')[0].assigned_nodes() == host.select("span")
+
+
+def test_renaming_first_slot_reassigns_children() -> None:
+    host: Final[Element] = Element("div")
+    host.set_inner_html('<span slot="target">a</span><b slot="other">b</b>')
+    root: Final[ShadowRoot] = host.attach_shadow("open")
+    root.set_inner_html('<slot name="target"></slot><slot name="target"></slot>')
+    first, second = root.select("slot")
+    before: Final = (first.assigned_nodes(), second.assigned_nodes())
+    first.attrs["name"] = "other"
+    assert (before, first.assigned_nodes(), second.assigned_nodes()) == (
+        ([host.children[0]], []),
+        [host.children[1]],
+        [host.children[0]],
+    )
+
+
+def test_editing_child_slot_reassigns_children() -> None:
+    host: Final[Element] = Element("div")
+    host.set_inner_html('<span slot="target">a</span>')
+    root: Final[ShadowRoot] = host.attach_shadow("open")
+    root.set_inner_html('<slot name="target"></slot><slot></slot>')
+    named, default = root.select("slot")
+    before: Final = named.assigned_nodes()
+    del host.select("span")[0].attrs["slot"]
+    assert (before, named.assigned_nodes(), default.assigned_nodes()) == (
+        [host.children[0]],
+        [],
+        [host.children[0]],
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("<!--comment-->" * 64, id="comments"),
+        pytest.param('<span slot="other">value</span>', id="nonmatching"),
+    ],
+)
+def test_unassigned_slot_keeps_fallback(content: str) -> None:
+    host: Final[Element] = Element("div")
+    host.set_inner_html(content)
+    root: Final[ShadowRoot] = host.attach_shadow("open")
+    root.set_inner_html('<slot name="other"></slot>' * 64 + '<slot name="target"><b>fallback</b></slot>')
+    slot: Final[Element] = root.select('slot[name="target"]')[0]
+    assert (slot.assigned_nodes(), slot.assigned_nodes(flatten=True)) == ([], slot.select("b"))

@@ -12,6 +12,9 @@ from turbohtml.migration.markupsafe import EscapeFormatter, Markup, escape, esca
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+from typing import Final
+
+from turbohtml._html import _collapse_whitespace
 
 
 class Renderable:
@@ -414,3 +417,48 @@ def test_jinja2_migrates_to_turbohtml_markup() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "MIGRATION_OK" in result.stdout
+
+
+@pytest.mark.parametrize("offset", range(8), ids=lambda value: f"offset-{value}")
+@pytest.mark.parametrize(
+    ("pair", "escaped"),
+    [
+        pytest.param("&'", "&amp;&#39;", id="amp-apostrophe"),
+        pytest.param("'&", "&#39;&amp;", id="apostrophe-amp"),
+        pytest.param("<=", "&lt;=", id="less-equals"),
+        pytest.param("=<", "=&lt;", id="equals-less"),
+        pytest.param(">?", "&gt;?", id="greater-question"),
+        pytest.param("?>", "?&gt;", id="question-greater"),
+        pytest.param('"#', "&#34;#", id="quote-hash"),
+        pytest.param('#"', "#&#34;", id="hash-quote"),
+        pytest.param("\xa6\xa7", "\xa6\xa7", id="high-bits"),
+        pytest.param("&\x00", "&amp;\x00", id="embedded-null"),
+    ],
+)
+def test_escape_adjacent_byte_lanes(pair: str, escaped: str, offset: int) -> None:
+    prefix: Final = "x" * offset
+    assert str(escape(prefix + pair * 8 + "tail")) == prefix + escaped * 8 + "tail"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("  a \t b\n\nc  ", "a b c", id="runs-collapse-and-edges-drop"),
+        pytest.param("a\u00a0b\u2003c", "a b c", id="unicode-whitespace-splits"),
+        pytest.param("", "", id="empty"),
+        pytest.param(" \n ", "", id="only-whitespace"),
+        pytest.param("one", "one", id="one-word"),
+        pytest.param("\u00e9t\u00e9 \U0001f600", "\u00e9t\u00e9 \U0001f600", id="wide-code-points-survive"),
+    ],
+)
+def test_collapse_whitespace(text: str, expected: str) -> None:
+    assert _collapse_whitespace(text) == expected
+
+
+def test_collapse_needs_a_str() -> None:
+    with pytest.raises(TypeError, match="must be a str"):
+        _collapse_whitespace(b"a b")  # ty: ignore[invalid-argument-type]  # the argument check is the point
+
+
+def test_striptags_reads_the_same_fold() -> None:
+    assert Markup("<p>a \n <b>b</b>\t</p> c").striptags() == "a b c"

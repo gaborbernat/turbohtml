@@ -7,11 +7,19 @@ from typing import cast
 import pytest
 
 from turbohtml import Element, parse
-from turbohtml.query import (
+from turbohtml.query import (  # the soupsieve names
+    DEBUG,
     Matching,
     SelectorSyntaxError,
+    closest,
     compile,  # ruff:ignore[builtin-import-shadowing]  # the soupsieve entry-point name
     css,
+    escape_identifier,
+    filter,  # ruff:ignore[builtin-import-shadowing]  # the soupsieve name
+    iselect,
+    match,
+    select,
+    select_one,
 )
 
 _DOC = "<div><a href=x>one</a><span><a href=y>two</a></span><a>bare</a></div>"
@@ -149,3 +157,105 @@ def test_options_are_carried_on_the_matcher() -> None:
     matcher = compile("a", Matching(namespaces={"svg": "http://www.w3.org/2000/svg"}, flags=1))
     assert matcher.namespaces == {"svg": "http://www.w3.org/2000/svg"}
     assert matcher.flags == 1
+
+
+def test_default_is_soupsieves_html_mode() -> None:
+    assert Matching() == Matching(namespaces=None, flags=0)
+
+
+def test_config_is_frozen() -> None:
+    with pytest.raises(AttributeError):
+        Matching().flags = 1  # ty: ignore[invalid-assignment]  # asserting the frozen dataclass rejects it
+
+
+def test_soupsieve_preset_maps_the_call_convention() -> None:
+    namespaces = {"svg": "http://www.w3.org/2000/svg"}
+    config = Matching.soupsieve(namespaces=namespaces, flags=DEBUG)
+    assert config == Matching(namespaces=namespaces, flags=DEBUG)
+
+
+def test_soupsieve_preset_defaults_match_the_plain_config() -> None:
+    assert Matching.soupsieve() == Matching()
+
+
+def test_debug_flag_value() -> None:
+    assert DEBUG == 0x1
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param("", "", id="empty"),
+        pytest.param("foo", "foo", id="plain"),
+        pytest.param("ABC", "ABC", id="uppercase-kept"),
+        pytest.param("_x", "_x", id="underscore-kept"),
+        pytest.param("a-", "a-", id="trailing-dash-kept"),
+        pytest.param("café", "café", id="non-ascii-kept"),
+        pytest.param("foo bar", "foo\\ bar", id="space-backslashed"),
+        pytest.param("a#b.c", "a\\#b\\.c", id="punctuation-backslashed"),
+        pytest.param("-", "\\-", id="lone-dash"),
+        pytest.param("--", "--", id="double-dash-kept"),
+        pytest.param("-1", "-\\31 ", id="dash-then-digit"),
+        pytest.param("12ab", "\\31 2ab", id="leading-digit"),
+        pytest.param("0", "\\30 ", id="lone-digit"),
+        pytest.param("a\tb", "a\\9 b", id="interior-control"),
+        pytest.param("\x7f", "\\7f ", id="delete-char"),
+        pytest.param("\x00abc", "�abc", id="null-to-replacement"),
+        pytest.param("a1b", "a1b", id="digit-after-letter-stays"),
+        pytest.param("1-", "\\31 -", id="leading-digit-then-dash"),
+        pytest.param("-a1", "-a1", id="dash-letter-digit"),
+    ],
+)
+def test_escape_matches_cssom(raw: str, expected: str) -> None:
+    assert escape_identifier(raw) == expected
+
+
+def test_non_str_identifier_raises_type_error() -> None:
+    with pytest.raises(TypeError, match="must be str"):
+        escape_identifier(cast("str", b"raw-bytes"))
+
+
+_MODULE_DOC = "<div><a href=x>one</a><span><a href=y>two</a></span></div>"
+
+
+def _module_root() -> Element:
+    root = parse(_MODULE_DOC).root
+    assert root is not None
+    return root
+
+
+def test_select_collects_matches() -> None:
+    assert [node.attr("href") for node in select("a[href]", _module_root())] == ["x", "y"]
+
+
+def test_select_honors_limit() -> None:
+    assert [node.attr("href") for node in select("a[href]", _module_root(), limit=1)] == ["x"]
+
+
+def test_select_one_returns_first() -> None:
+    found = select_one("a[href]", _module_root())
+    assert found is not None
+    assert found.attr("href") == "x"
+
+
+def test_iselect_iterates_matches() -> None:
+    assert [node.attr("href") for node in iselect("a[href]", _module_root(), limit=2)] == ["x", "y"]
+
+
+def test_match_tests_an_element() -> None:
+    anchor = select_one("a[href]", _module_root())
+    assert anchor is not None
+    assert match("a[href]", anchor) is True
+
+
+def test_filter_keeps_matching_members() -> None:
+    anchors = _module_root().select("a")
+    assert [node.attr("href") for node in filter("[href=y]", anchors)] == ["y"]
+
+
+def test_closest_walks_up() -> None:
+    anchor = select_one("a[href=y]", _module_root())
+    assert anchor is not None
+    found = closest("div", anchor)
+    assert found is not None
+    assert found.tag == "div"

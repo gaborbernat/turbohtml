@@ -6,8 +6,11 @@ from itertools import islice, product
 
 import pytest
 
-from turbohtml import parse
+from turbohtml import _html, parse
+from turbohtml._html import _codec_label, _decode, _detect, _detect_language, _detect_rank, _DetectStream
 from turbohtml.detect import (
+    Detection,
+    EncodingDetector,
     EncodingMatch,
     LanguageDetection,
     LanguageMatch,
@@ -425,3 +428,701 @@ def test_language_detection_rejects_allowed_with_excluded() -> None:
 def test_prescan_dispatch_edges(payload: bytes) -> None:
     # the answer only has to be a real decision; the point is that the prescan walks the shape without misreading it
     assert detect(payload).encoding
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("whatwg_utf_16le", (True, "utf-16-le"), id="a-byte-order-mark-name-delegates"),
+        pytest.param("WHATWG-UTF-8-SIG", (True, "utf-8-sig"), id="case-and-dashes-fold"),
+        pytest.param("whatwg_windows_1252", (False, "windows-1252"), id="an-underscored-label-tries-its-dash"),
+        pytest.param("whatwg-shift_jis", (False, "shift_jis"), id="an-underscore-label-stays"),
+        pytest.param("whatwg-koi8-ru", (False, "koi8-ru"), id="a-spec-only-label"),
+        pytest.param("whatwg-nonsense", None, id="an-unknown-label"),
+        pytest.param("utf-8", None, id="no-prefix"),
+        pytest.param("whatwg_", None, id="the-bare-prefix"),
+        pytest.param("whatwg-" + "x" * 80, None, id="longer-than-any-label"),
+    ],
+)
+def test_codec_label(name: str, expected: tuple[bool, str] | None) -> None:
+    assert _codec_label(name) == expected
+
+
+def test_codec_label_needs_a_str() -> None:
+    with pytest.raises(TypeError):
+        _codec_label(b"whatwg-utf-8")  # ty: ignore[invalid-argument-type]  # the argument check is the point
+
+
+def test_an_escape_driven_codec_decodes_nothing_to_nothing() -> None:
+    # ISO-2022-JP is the one decoder the all-ASCII fast path skips, so empty input reaches its multi-byte entry;
+    # the codec machinery short-circuits empty bytes itself, so the C entry point is called directly
+    assert not _decode(b"", "iso-2022-jp")
+
+
+def test_detect_of_nothing_is_none() -> None:
+    assert _detect(b"", None) is None
+
+
+@pytest.mark.parametrize(
+    ("chunks", "settled"),
+    [
+        pytest.param([b"\xef\xbb\xbfa"], True, id="utf-8"),
+        pytest.param([b"\xfe\xff"], True, id="utf-16be"),
+        pytest.param([b"\x00\x00\xfe\xff"], True, id="utf-32be"),
+        pytest.param([b"\xff\xfe\x00\x00"], True, id="utf-32le"),
+        pytest.param([b"\xff\xfe"], False, id="ff-fe-alone-could-still-be-utf-32le"),
+        pytest.param([b"\xff\xfe", b"a\x00"], True, id="ff-fe-settles-once-the-next-pair-arrives"),
+        pytest.param([b"\xef\xbb"], False, id="a-truncated-mark"),
+        pytest.param([b"hello"], False, id="no-mark"),
+        pytest.param([b"\xff\xffab"], False, id="ff-then-not-fe"),
+        pytest.param([b"\xef\xbb\xbe"], False, id="a-mark-that-differs-in-its-last-byte"),
+        pytest.param([b""], False, id="an-empty-chunk"),
+    ],
+)
+def test_feed_reports_whether_a_mark_settled_the_stream(chunks: list[bytes], settled: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]  # a parametrize value
+    stream = _DetectStream(None)
+    assert [stream.feed(chunk) for chunk in chunks][-1] is settled
+
+
+def test_an_unfed_stream_closes_to_none() -> None:
+    stream = _DetectStream(None)
+    stream.feed(b"")
+    assert stream.close() is None
+
+
+def test_a_fed_stream_closes_to_a_result() -> None:
+    stream = _DetectStream(None)
+    stream.feed("Привет".encode("cp1251"))
+    result = stream.close()
+    assert result is not None
+    assert result[0] == "windows-1251"
+
+
+def test_the_language_threshold_blanks_a_faint_match() -> None:
+    text = "the quick brown fox jumps over the lazy dog"
+    full = _detect_language(text, None, frozenset(), 0.0)
+    assert full[0] == "eng"
+    assert _detect_language(text, None, frozenset(), 1.1) == (None, 0.0, None, None)
+
+
+def test_the_language_entry_needs_a_threshold() -> None:
+    with pytest.raises(TypeError):
+        _detect_language("text", None, frozenset())  # ty: ignore[missing-argument]  # the arity check is the point
+
+
+@pytest.mark.parametrize(
+    ("data", "encoding", "codec"),
+    [
+        pytest.param(b'<meta charset="x-mac-cyrillic">\xd0', "x-mac-cyrillic", "whatwg-x-mac-cyrillic", id="mac"),
+        pytest.param(b'<meta charset="hz-gb-2312">x', "replacement", "whatwg-replacement", id="replacement"),
+        pytest.param(b'<meta charset="big5">\x87\x40', "Big5", "whatwg-big5", id="big5"),
+        pytest.param(b'<meta charset="shift_jis">\x80', "Shift_JIS", "whatwg-shift_jis", id="shift_jis"),
+        pytest.param(b"\xef\xbb\xbfhi", "UTF-8-SIG", "whatwg-utf-8-sig", id="utf-8-bom"),
+        pytest.param(b"\xff\xfeh\x00", "UTF-16LE", "whatwg-utf-16le", id="utf-16le-bom"),
+    ],
+)
+def test_codec_names_a_registered_decoder(data: bytes, encoding: str, codec: str) -> None:
+    match = detect(data)
+    assert match.encoding == encoding
+    assert match.codec == codec
+
+
+@pytest.mark.parametrize(
+    ("data", "text"),
+    [
+        pytest.param(b'<meta charset="x-mac-cyrillic">\xd0', "\u2013", id="x-mac-cyrillic-has-no-cpython-codec"),
+        pytest.param(b'<meta charset="hz-gb-2312">x', "\ufffd", id="replacement-has-no-cpython-codec"),
+    ],
+)
+def test_the_whatwg_name_alone_cannot_be_decoded(data: bytes, text: str) -> None:
+    match = detect(data)
+    assert match.encoding is not None
+    assert match.codec is not None
+    with pytest.raises(LookupError):
+        data.decode(match.encoding)
+    assert data.decode(match.codec).endswith(text)  # the codec always can, and decodes as the parser does
+
+
+@pytest.mark.parametrize(
+    ("data", "text"),
+    [
+        pytest.param(b'<meta charset="koi8-u">\xae', "ў", id="koi8-u-is-koi8-ru"),
+        pytest.param(b'<meta charset="big5">\x87\x40', "䏰", id="big5-index-is-a-superset"),
+        pytest.param(b'<meta charset="gbk">\x80', "€", id="gbk-euro"),
+    ],
+)
+def test_decoding_through_codec_reproduces_what_the_parser_saw(data: bytes, text: str) -> None:
+    match = detect(data)
+    assert match.codec is not None
+    assert data.decode(match.codec).endswith(text)
+
+
+@pytest.mark.parametrize(
+    ("data", "text"),
+    [
+        pytest.param(b"\xef\xbb\xbfhi", "hi", id="utf-8-sig-strips-the-mark"),
+        pytest.param(b"\xff\xfeh\x00", "\ufeffh", id="utf-16le-keeps-the-mark"),
+    ],
+)
+def test_a_byte_order_mark_codec_delegates_to_cpython(data: bytes, text: str) -> None:
+    # CPython's UTF-8 and UTF-16 decoders match the spec, so the whatwg-* name resolves straight to them
+    match = detect(data)
+    assert match.codec is not None
+    assert data.decode(match.codec) == text
+
+
+def test_a_whatwg_codec_refuses_to_encode() -> None:
+    # the generated tables are decode-side only; encoding to a legacy charset is a separate spec algorithm
+    with pytest.raises(UnicodeError, match="decodes only"):
+        "x".encode("whatwg-big5")
+
+
+def test_an_unknown_whatwg_codec_is_not_registered() -> None:
+    # non-empty input: CPython answers b"".decode(anything) with "" before it ever resolves the codec
+    with pytest.raises(LookupError):
+        b"x".decode("whatwg-no-such-encoding")
+
+
+def test_the_no_match_sentinel_has_no_codec() -> None:
+    match = detect(b"")
+    assert match.encoding is None
+    assert match.codec is None
+
+
+def test_pure_ascii_agrees_with_the_parser() -> None:
+    # "ascii" is not an encoding the spec names; its label resolves to windows-1252, which decodes ASCII identically
+    assert detect(b"plain ascii").encoding == "windows-1252"
+    assert parse(b"plain ascii", detect_encoding=True).encoding == "windows-1252"
+
+
+_DETECTOR_RUSSIAN = "Программирование помогает понять структуру вычислительных систем сегодня здесь.".encode("cp1251")
+
+
+def test_chunked_feeds_equal_a_one_shot_detect() -> None:
+    detector = EncodingDetector()
+    detector.feed(_DETECTOR_RUSSIAN[:7])
+    detector.feed(_DETECTOR_RUSSIAN[7:])
+    assert not detector.done
+    assert detector.result is None
+    assert detector.close() == detect(_DETECTOR_RUSSIAN)
+    assert detector.done
+
+
+def test_a_leading_bom_finishes_the_stream_early() -> None:
+    detector = EncodingDetector()
+    detector.feed(b"\xef\xbb\xbf")
+    assert detector.done
+    detector.feed("Ω".encode("cp1253"))  # ignored: the mark already decided the stream
+    assert detector.close() == EncodingMatch("UTF-8-SIG", 1.0, None, bom=True, codec="whatwg-utf-8-sig")
+
+
+def test_a_bom_split_across_feeds_still_finishes_early() -> None:
+    detector = EncodingDetector()
+    detector.feed(b"\xef\xbb")
+    assert not detector.done
+    detector.feed(b"\xbftail")
+    assert detector.done
+
+
+def test_utf_32le_mark_waits_for_the_pair_that_rules_out_utf_16le() -> None:
+    # FF FE alone could be UTF-16LE or the start of the UTF-32LE mark FF FE 00 00, so the stream is
+    # not done until the next pair resolves it; here it does, to UTF-32LE
+    detector = EncodingDetector()
+    detector.feed(b"\xff\xfe")
+    assert not detector.done
+    detector.feed(b"\x00\x00")
+    assert detector.done
+    assert detector.close() == EncodingMatch("UTF-32LE", 1.0, None, bom=True, codec="whatwg-utf-32le")
+
+
+@pytest.mark.parametrize(
+    ("chunk", "encoding"),
+    [
+        pytest.param(b"\xff\xfeh\x00", "UTF-16LE", id="utf-16le-non-zero-pair"),
+        pytest.param(b"\x00\x00\xfe\xff", "UTF-32BE", id="utf-32be"),
+    ],
+)
+def test_a_resolved_mark_finishes_early(chunk: bytes, encoding: str) -> None:
+    # a mark that a single chunk resolves (FF FE + non-00 00 is UTF-16LE, 00 00 FE FF is UTF-32BE)
+    # finishes the stream at once
+    detector = EncodingDetector()
+    detector.feed(chunk)
+    assert detector.done
+    assert detector.close() == EncodingMatch(encoding, 1.0, None, bom=True, codec=f"whatwg-{encoding.casefold()}")
+
+
+def test_close_caches_its_result() -> None:
+    detector = EncodingDetector()
+    detector.feed(b"plain ascii")
+    assert detector.close() is detector.close()
+    assert detector.result == EncodingMatch("windows-1252", 1.0, None, codec="whatwg-windows-1252")
+
+
+def test_close_without_a_feed_reports_no_encoding() -> None:
+    assert EncodingDetector().close() == EncodingMatch(None, 0.0, None)
+
+
+def test_reset_starts_a_fresh_stream() -> None:
+    detector = EncodingDetector()
+    detector.feed(b"\xff\xfeh\x00")
+    detector.close()
+    detector.reset()
+    assert detector.result is None
+    assert not detector.done
+    detector.feed(_DETECTOR_RUSSIAN)
+    assert detector.close().encoding == "windows-1251"
+
+
+def test_detector_honors_its_options() -> None:
+    detector = EncodingDetector(Detection.chardet())
+    detector.feed(b"\x81\n")
+    assert detector.close() == EncodingMatch(None, 0.0, None)
+
+
+# The samples exercise every structural answer the stream can reach: an escape-driven
+# ISO-2022-JP run, a multi-byte UTF-8 run, a CJK run whose sequences straddle the feeds, and a
+# pure-ASCII run that carries no evidence at all.
+_SAMPLES = [
+    pytest.param("日本語のテキスト".encode("iso-2022-jp"), id="iso-2022-jp"),
+    pytest.param("café naïve 日本語".encode(), id="utf-8"),
+    pytest.param(b"plain ascii only", id="ascii"),
+    pytest.param("中文简体测试".encode("gbk"), id="gbk"),
+    pytest.param("日本語のテキスト".encode("shift_jis"), id="shift_jis"),
+    pytest.param("한국어 텍스트".encode("euc-kr"), id="euc-kr"),
+    pytest.param("中文字元測試".encode("big5"), id="big5"),
+    pytest.param("Příliš žluťoučký kůň".encode("windows-1250"), id="windows-1250"),
+    pytest.param("Съешь же ещё этих".encode("windows-1251"), id="windows-1251"),
+]
+
+
+@pytest.mark.parametrize("raw", _SAMPLES)
+@pytest.mark.parametrize("size", [pytest.param(size, id=f"chunk-{size}") for size in (1, 2, 3, 5, 8)])
+def test_chunk_boundaries_never_change_the_answer(raw: bytes, size: int) -> None:
+    # a multi-byte sequence, an escape, and the two bytes the scoring looks back at all straddle
+    # these boundaries; the detector carries each across the feed
+    detector = EncodingDetector()
+    for start in range(0, len(raw), size):
+        detector.feed(raw[start : start + size])
+    assert detector.close() == detect(raw)
+
+
+def test_a_long_stream_still_answers_what_one_shot_does() -> None:
+    # the candidates carry state, not bytes, so 4096 feeds cost what one does and answer the same
+    chunk = "Съешь же ещё этих мягких".encode("windows-1251")
+    detector = EncodingDetector()
+    for _ in range(4096):
+        detector.feed(chunk)
+    assert detector.close() == detect(chunk * 4096)
+
+
+def test_feeding_a_closed_stream_is_an_error() -> None:
+    stream = _html._DetectStream(None)
+    stream.feed(b"caf\xe9")
+    stream.close()
+    with pytest.raises(ValueError, match="closed"):
+        stream.feed(b"more")
+
+
+def test_closing_a_closed_stream_is_an_error() -> None:
+    stream = _html._DetectStream(None)
+    stream.close()
+    with pytest.raises(ValueError, match="closed"):
+        stream.close()
+
+
+def test_the_stream_takes_only_a_tld() -> None:
+    with pytest.raises(TypeError):
+        _html._DetectStream(None, "extra")  # ty: ignore[too-many-positional-arguments]  # rejected at runtime
+
+
+def test_the_stream_rejects_a_non_string_tld() -> None:
+    with pytest.raises(TypeError):
+        _html._DetectStream(7)  # ty: ignore[invalid-argument-type]  # rejected at runtime
+
+
+def test_detect_rejects_a_non_string_tld() -> None:
+    with pytest.raises(TypeError):
+        _html._detect(b"abc", 7)  # ty: ignore[invalid-argument-type]  # rejected at runtime
+
+
+def test_the_stream_feeds_only_bytes() -> None:
+    with pytest.raises(TypeError):
+        _html._DetectStream(None).feed("not bytes")  # ty: ignore[invalid-argument-type]  # rejected at runtime
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(b"\x1b", id="escape-alone"),
+        pytest.param(b"\x1b$", id="escape-truncated"),
+        pytest.param(b"text\x1b(", id="escape-truncated-after-text"),
+    ],
+)
+def test_a_stream_ending_mid_escape_is_not_iso_2022_jp(raw: bytes) -> None:
+    # the escape never completes, so the structural ISO-2022-JP answer is off the table
+    detector = EncodingDetector()
+    for byte in raw:
+        detector.feed(bytes([byte]))
+    assert detector.close() == detect(raw)
+    assert detect(raw).encoding != "ISO-2022-JP"
+
+
+@pytest.mark.parametrize("shift", [pytest.param(0x0E, id="shift-out"), pytest.param(0x0F, id="shift-in")])
+def test_a_shift_code_before_the_escape_rules_out_iso_2022_jp(shift: int) -> None:
+    # the decoder's ASCII state rejects both shift codes, so the escape that follows cannot
+    # rescue the stream, and the scan stays dead through every later feed
+    raw = bytes([ord("a"), shift, ord("b")]) + "日本語".encode("iso-2022-jp")
+    assert detect(raw).encoding != "ISO-2022-JP"
+    detector = EncodingDetector()
+    for byte in raw:
+        detector.feed(bytes([byte]))
+    assert detector.close() == detect(raw)
+
+
+_EMPTY_ENCODING_MATCH = EncodingMatch(None, 0.0, None)
+_OPTIONS_RUSSIAN = "Привет мир, как дела".encode("cp1251")
+
+
+@pytest.mark.parametrize(
+    "threshold",
+    [
+        pytest.param(-0.1, id="below-zero"),
+        pytest.param(1.1, id="above-one"),
+    ],
+)
+def test_out_of_range_threshold_is_rejected(threshold: float) -> None:
+    with pytest.raises(ValueError, match=r"threshold must be within \[0\.0, 1\.0\]"):
+        Detection(threshold=threshold)
+
+
+def test_allowed_and_excluded_are_mutually_exclusive() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Detection(allowed=frozenset({"utf-8"}), excluded=frozenset({"gbk"}))
+
+
+def test_chardet_preset_mirrors_the_minimum_threshold() -> None:
+    assert Detection.chardet() == Detection(threshold=0.2)
+
+
+def test_chardet_preset_drops_the_no_evidence_fallback() -> None:
+    assert detect(b"\x81\n", Detection.chardet()) == _EMPTY_ENCODING_MATCH
+
+
+def test_chardet_preset_keeps_a_confident_result() -> None:
+    assert detect(_OPTIONS_RUSSIAN, Detection.chardet()).encoding == "windows-1251"
+
+
+def test_threshold_filters_detect_all() -> None:
+    kept = detect_all(_OPTIONS_RUSSIAN, Detection(threshold=0.5))
+    assert kept == [match for match in detect_all(_OPTIONS_RUSSIAN) if match.confidence >= 0.5]
+    assert len(kept) == 1
+
+
+def test_allowed_restricts_the_winner() -> None:
+    assert detect(_OPTIONS_RUSSIAN, Detection(allowed=frozenset({"KOI8-U", "IBM866"}))).encoding == "KOI8-U"
+
+
+def test_allowed_matches_names_case_insensitively() -> None:
+    assert detect(_OPTIONS_RUSSIAN, Detection(allowed=frozenset({"koi8-u"}))).encoding == "KOI8-U"
+
+
+def test_allowed_ruling_every_candidate_out_yields_no_match() -> None:
+    assert detect(_OPTIONS_RUSSIAN, Detection(allowed=frozenset({"UTF-8"}))) == _EMPTY_ENCODING_MATCH
+
+
+def test_excluded_promotes_the_runner_up() -> None:
+    runner_up = detect_all(_OPTIONS_RUSSIAN)[1]
+    assert detect(_OPTIONS_RUSSIAN, Detection(excluded=frozenset({"windows-1251"}))) == runner_up
+
+
+def test_excluding_a_certain_result_yields_no_match() -> None:
+    assert detect(b"\xef\xbb\xbfx", Detection(excluded=frozenset({"utf-8-sig"}))) == _EMPTY_ENCODING_MATCH
+
+
+def test_language_hint_prefers_the_matching_model() -> None:
+    match = detect(_OPTIONS_RUSSIAN, Detection(language="Hebrew"))
+    assert match.encoding == "windows-1255"
+    assert match.language == "Hebrew"
+
+
+def test_language_hint_without_positive_evidence_changes_nothing() -> None:
+    assert detect(_OPTIONS_RUSSIAN, Detection(language="Thai")) == detect(_OPTIONS_RUSSIAN)
+
+
+# One detector result: (winner, certain, [(name, score)], had_bom). The ranker shapes and filters it.
+_SCORED = ("windows-1251", False, [("windows-1251", 60), ("koi8-r", 40)], False)
+_LANGUAGES = {"windows-1251": "ru", "koi8-r": "ru", "windows-1252": "en"}
+
+
+def test_a_certain_result_is_one_candidate() -> None:
+    rows = _detect_rank(("utf-8", True, [], True), None, (), None, 0.0, _LANGUAGES)
+    assert rows == [("utf-8", 1.0, None, True, "whatwg-utf-8")]
+
+
+def test_no_winner_takes_the_windows_1252_fallback() -> None:
+    rows = _detect_rank((None, False, [], False), None, (), None, 0.0, _LANGUAGES)
+    assert rows == [("windows-1252", 1.0, "en", False, "whatwg-windows-1252")]
+
+
+def test_scores_become_shares_of_the_positive_total() -> None:
+    rows = _detect_rank(_SCORED, None, (), None, 0.0, _LANGUAGES)
+    assert [(row[0], round(row[1], 2)) for row in rows] == [("windows-1251", 0.6), ("koi8-r", 0.4)]
+
+
+def test_the_winner_leads_even_when_it_scored_lower() -> None:
+    result = ("koi8-r", False, [("windows-1251", 60), ("koi8-r", 40)], False)
+    assert [row[0] for row in _detect_rank(result, None, (), None, 0.0, _LANGUAGES)] == ["koi8-r", "windows-1251"]
+
+
+def test_a_winner_that_never_scored_leads_at_zero() -> None:
+    result = ("windows-1252", False, [("windows-1251", 60)], False)
+    rows = _detect_rank(result, None, (), None, 0.0, _LANGUAGES)
+    assert [(row[0], row[1]) for row in rows] == [("windows-1252", 0.0), ("windows-1251", 1.0)]
+
+
+def test_one_encoding_scored_twice_keeps_its_better_score() -> None:
+    result = ("windows-1251", False, [("windows-1251", 10), ("koi8-r", 40), ("windows-1251", 60)], False)
+    rows = _detect_rank(result, None, (), None, 0.0, _LANGUAGES)
+    assert [(row[0], round(row[1], 2)) for row in rows] == [("windows-1251", 0.6), ("koi8-r", 0.4)]
+
+
+def test_a_non_positive_score_reads_as_zero_confidence() -> None:
+    result = ("windows-1251", False, [("windows-1251", 60), ("koi8-r", 0)], False)
+    assert [row[1] for row in _detect_rank(result, None, (), None, 0.0, _LANGUAGES)] == [1.0, 0.0]
+
+
+def test_the_allowlist_drops_everything_else() -> None:
+    rows = _detect_rank(_SCORED, ("KOI8-R",), (), None, 0.0, _LANGUAGES)
+    assert [row[0] for row in rows] == ["koi8-r"]
+
+
+_NO_MATCH = (None, 0.0, None, False, None)
+
+
+def test_an_empty_allowlist_leaves_the_no_match_row() -> None:
+    assert _detect_rank(_SCORED, (), (), None, 0.0, _LANGUAGES) == [_NO_MATCH]
+
+
+def test_no_result_is_the_no_match_row() -> None:
+    assert _detect_rank(None, None, (), None, 0.0, _LANGUAGES) == [_NO_MATCH]
+
+
+def test_the_exclusions_drop_their_own() -> None:
+    rows = _detect_rank(_SCORED, None, ("Windows-1251",), None, 0.0, _LANGUAGES)
+    assert [row[0] for row in rows] == ["koi8-r"]
+
+
+def test_the_threshold_drops_the_weak() -> None:
+    rows = _detect_rank(_SCORED, None, (), None, 0.5, _LANGUAGES)
+    assert [row[0] for row in rows] == ["windows-1251"]
+
+
+def test_a_language_hint_floats_its_encodings_first() -> None:
+    result = ("windows-1252", False, [("windows-1252", 60), ("koi8-r", 40)], False)
+    rows = _detect_rank(result, None, (), "ru", 0.0, _LANGUAGES)
+    assert [row[0] for row in rows] == ["koi8-r", "windows-1252"]
+
+
+def test_a_language_hint_leaves_a_zero_confidence_candidate_behind() -> None:
+    # a candidate the detector scored at zero carries no evidence, so the hint cannot promote it
+    result = ("windows-1252", False, [("windows-1252", 60), ("koi8-r", 0)], False)
+    rows = _detect_rank(result, None, (), "ru", 0.0, _LANGUAGES)
+    assert [row[0] for row in rows] == ["windows-1252", "koi8-r"]
+
+
+def test_a_language_hint_leaves_an_encoding_naming_no_language_behind() -> None:
+    # utf-8 names no language, so the hint has nothing to compare it against and it cannot be promoted
+    result = ("utf-8", False, [("utf-8", 60), ("koi8-r", 40)], False)
+    rows = _detect_rank(result, None, (), "ru", 0.0, _LANGUAGES)
+    assert [row[0] for row in rows] == ["koi8-r", "utf-8"]
+
+
+def test_a_language_hint_no_encoding_claims_keeps_the_order() -> None:
+    rows = _detect_rank(_SCORED, None, (), "zz", 0.0, _LANGUAGES)
+    assert [row[0] for row in rows] == ["windows-1251", "koi8-r"]
+
+
+def test_an_encoding_naming_no_language_reports_none() -> None:
+    rows = _detect_rank(("utf-8", True, [], False), None, (), None, 0.0, _LANGUAGES)
+    assert rows[0][2] is None
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(("notatuple", None, (), None, 0.0, _LANGUAGES), id="result-is-not-a-tuple"),
+        pytest.param((_SCORED, None, (), None, 0.0, "notadict"), id="languages-is-not-a-dict"),
+        pytest.param((_SCORED, None, (), None, "notafloat", _LANGUAGES), id="threshold-is-not-a-number"),
+        pytest.param((_SCORED, None, ()), id="too-few-arguments"),
+    ],
+)
+def test_the_ranker_rejects_bad_arguments(args: tuple[object, ...]) -> None:
+    with pytest.raises(TypeError):
+        _detect_rank(*args)  # ty: ignore[invalid-argument-type]  # the argument check is the point
+
+
+# Czech in ISO-8859-2. The hint decides on text like this, where the Central European encodings score alike and the
+# Cyrillic and Western TLDs disagree about whether ISO-8859-2 or windows-1252 should read it.
+_CZECH: bytes = "Příliš žluťoučký kůň úpěl ďábelské ódy".encode("iso-8859-2")
+
+# The same text, short enough that no candidate scores well and the TLD's own encoding is left to answer.
+_CZECH_SHORT: bytes = "Příliš žluťoučký kůň úpěl".encode("iso-8859-2")
+
+# The two Chinese scripts, which nothing but a TLD separates at this length.
+_TRADITIONAL: bytes = "繁體中文字元測試內容".encode("big5")
+_SIMPLIFIED: bytes = "天地玄黄宇宙洪荒日月盈昃".encode("gb18030")
+
+# Byte soup that kills one candidate of a sibling pair and leaves the other scoring, so the TLD falls back on its
+# sibling script. Big5 dies on the first, ISO-8859-2 on the second; chardetng answers as asserted below.
+_NO_TRADITIONAL: bytes = bytes.fromhex("e098bcf194a9")
+_NO_CENTRAL_ISO: bytes = bytes.fromhex("a699dd")
+
+# Byte soup too short to hold a two-letter word in either script. ISO-8859-6 is native to .sa and windows-1256 to
+# .my without being what either domain expects, so each one scores there and nowhere else.
+_SHORT_ARABIC_ISO: bytes = bytes.fromhex("bfed")
+_SHORT_ARABIC_WINDOWS: bytes = bytes.fromhex("d6a59ebd")
+
+
+def _ranked(raw: bytes, tld: str | None = None) -> set[str | None]:
+    """The encodings that scored, which is not every encoding ``detect_all`` reports: the winner leads it either way."""
+    return {match.encoding for match in detect_all(raw, Detection(tld=tld))[1:]}
+
+
+@pytest.mark.parametrize(
+    ("tld", "encoding"),
+    [
+        pytest.param(None, "ISO-8859-2", id="no-hint"),
+        pytest.param("com", "ISO-8859-2", id="a-generic-label-hints-nothing"),
+        pytest.param("cz", "ISO-8859-2", id="the-native-encoding-keeps-its-score"),
+        pytest.param("pl", "ISO-8859-2", id="a-sibling-central-label-agrees"),
+        pytest.param("ru", "windows-1252", id="cyrillic-zeroes-the-central-candidates"),
+        pytest.param("de", "windows-1252", id="a-western-label-does-too"),
+        pytest.param("zz", "windows-1252", id="an-unlisted-country-code-reads-as-western"),
+        pytest.param("edu", "windows-1252", id="edu-reads-as-western"),
+        pytest.param("xn--unlisted", "ISO-8859-2", id="an-unlisted-punycode-label-hints-nothing"),
+        pytest.param("longlabel", "ISO-8859-2", id="a-label-that-is-not-punycode-hints-nothing"),
+        pytest.param("xn--p1a", "ISO-8859-2", id="a-label-too-short-to-be-punycode-hints-nothing"),
+        pytest.param("th", "ISO-8859-2", id="a-script-absent-from-the-bytes-penalizes-nothing"),
+    ],
+)
+def test_the_tld_narrows_the_candidates(tld: str | None, encoding: str) -> None:
+    assert detect(_CZECH, Detection(tld=tld)).encoding == encoding
+
+
+def test_the_tlds_own_encoding_answers_when_nothing_outscores_it() -> None:
+    # windows-1251 finds no Cyrillic word here, so it never scores. It wins because a Cyrillic TLD zeroes the
+    # Central candidates, and this text is too short for the Western one to stay ahead of a default.
+    assert detect(_CZECH_SHORT, Detection(tld="ru")).encoding == "windows-1251"
+
+
+def test_a_punycode_label_classifies_like_the_ascii_one() -> None:
+    assert detect(_CZECH_SHORT, Detection(tld="xn--p1ai")) == detect(_CZECH_SHORT, Detection(tld="ru"))
+
+
+def test_a_traditional_tld_picks_traditional_over_simplified() -> None:
+    assert detect(_SIMPLIFIED, Detection(tld="tw")).encoding == "Big5"
+
+
+def test_a_simplified_tld_picks_simplified_over_traditional() -> None:
+    assert detect(_TRADITIONAL, Detection(tld="cn")).encoding == "GBK"
+
+
+def test_a_traditional_tld_falls_back_on_simplified_when_no_big5_survives() -> None:
+    # .tw expects Big5, which these bytes kill. chardetng then scores the page as though it came from a Simplified
+    # domain, handing GBK the point the TLD's own encoding would have taken and penalizing the Latin candidate that
+    # wins with no TLD at all.
+    assert detect(_NO_TRADITIONAL).encoding == "windows-1252"
+    assert detect(_NO_TRADITIONAL, Detection(tld="tw")).encoding == "GBK"
+    assert detect(_NO_TRADITIONAL, Detection(tld="tw")) == detect(_NO_TRADITIONAL, Detection(tld="cn"))
+
+
+def test_a_tld_whose_sibling_script_is_also_absent_leaves_the_bytes_alone() -> None:
+    # .tw expects Big5 and would settle for GBK, and Czech text carries neither. With both gone chardetng has no
+    # expectation left to flip to, so it drops the TLD rather than let a dead sibling hand GBK the point.
+    assert detect(_CZECH, Detection(tld="tw")).encoding == detect(_CZECH).encoding == "ISO-8859-2"
+
+
+def test_a_central_iso_tld_falls_back_on_central_windows() -> None:
+    # .hu expects ISO-8859-2, which these bytes kill, so windows-1250 inherits the expectation
+    assert detect(_NO_CENTRAL_ISO, Detection(tld="hu")).encoding == "windows-1250"
+
+
+def test_a_caseless_candidate_survives_the_word_gate_on_its_native_tld() -> None:
+    # ISO-8859-6 never sees the two-letter Arabic word the gate asks for, so it scores only where its script is
+    # native. .sa expects windows-1256, so nothing injects ISO-8859-6 as that domain's default.
+    assert "ISO-8859-6" in _ranked(_SHORT_ARABIC_ISO, "sa")
+    assert "ISO-8859-6" not in _ranked(_SHORT_ARABIC_ISO)
+
+
+def test_an_arabic_french_candidate_survives_the_word_gate_on_its_native_tld() -> None:
+    # .my expects windows-1252 and counts windows-1256 as native, which is what carries it past the gate
+    assert "windows-1256" in _ranked(_SHORT_ARABIC_WINDOWS, "my")
+    assert "windows-1256" not in _ranked(_SHORT_ARABIC_WINDOWS)
+
+
+def test_a_tld_whose_script_never_appears_stops_penalizing_the_rest() -> None:
+    # .th expects windows-874, and no Thai appears in Czech text. With its expectation broken, chardetng reads the
+    # label as mistaken rather than as evidence, so the bytes alone decide.
+    assert detect(_CZECH, Detection(tld="th")).encoding == detect(_CZECH).encoding
+
+
+def test_a_tld_whose_script_did_appear_keeps_penalizing() -> None:
+    # Thai does score on Big5 bytes, so the expectation holds and Big5 pays the penalty .th levies on it
+    assert detect(_TRADITIONAL, Detection(tld="th")).encoding == "windows-874"
+
+
+def test_the_hint_cannot_overrule_a_structural_answer() -> None:
+    # UTF-8 validity is a proof rather than a guess, and no label outvotes it
+    assert detect("日本語のテキストです".encode(), Detection(tld="ru")).encoding == "UTF-8"
+
+
+def test_the_hint_cannot_overrule_a_byte_order_mark() -> None:
+    assert detect(b"\xff\xfe\x41\x00", Detection(tld="jp")).encoding == "UTF-16LE"
+
+
+def test_the_hint_reorders_every_ranked_candidate() -> None:
+    # detect_all reports the scores the winner came from, so the hint has to move the whole ranking. A runner-up
+    # ranked by unadjusted scores would contradict the answer above it.
+    assert detect_all(_CZECH, Detection(tld="ru"))[0].encoding == "windows-1252"
+
+
+def test_the_streaming_detector_honors_the_hint() -> None:
+    detector = EncodingDetector(Detection(tld="ru"))
+    for start in range(0, len(_CZECH), 5):
+        detector.feed(_CZECH[start : start + 5])
+    assert detector.close() == detect(_CZECH, Detection(tld="ru"))
+
+
+def test_reset_keeps_the_hint() -> None:
+    detector = EncodingDetector(Detection(tld="ru"))
+    detector.feed(_CZECH)
+    detector.close()
+    detector.reset()
+    detector.feed(_CZECH)
+    assert detector.close().encoding == "windows-1252"
+
+
+@pytest.mark.parametrize(
+    "tld",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("JP", id="upper-case"),
+        pytest.param("example.jp", id="whole-hostname"),
+        pytest.param(".jp", id="leading-dot"),
+        pytest.param("рф", id="non-ascii"),
+        pytest.param("jp ", id="trailing-space"),
+    ],
+)
+def test_a_malformed_tld_is_rejected(tld: str) -> None:
+    with pytest.raises(ValueError, match="rightmost DNS label"):
+        Detection(tld=tld)
+
+
+@pytest.mark.parametrize(
+    "repeats",
+    [pytest.param(1, id="sentence"), pytest.param(100, id="page"), pytest.param(10_000, id="long-prose")],
+)
+def test_language_detection_of_repeated_prose(repeats: int) -> None:
+    assert detect_language(
+        "There is no reason not to learn a new language every single year of your life. " * repeats
+    ) == LanguageMatch("eng", 1.0, "Latin", "English")

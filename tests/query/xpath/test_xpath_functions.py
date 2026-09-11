@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Final
+import string
+from string import ascii_lowercase, ascii_uppercase
+from typing import Final, cast
 from xml.etree import ElementTree as ET  # ruff:ignore[suspicious-xml-etree-import]
 
 import pytest
+from bench.ci import benchmarks
+from bench.operations import INPUTS
 
 import turbohtml
-from turbohtml import Element
+from turbohtml import Element, parse, parse_xml
 
 
 def number(node: turbohtml.Node, expr: str) -> float:
@@ -430,3 +434,247 @@ def test_string_functions_agree_with_elementpath(expr: str) -> None:
     root = ET.fromstring(markup)  # ruff:ignore[suspicious-xml-element-tree-usage]
     want = elementpath.select(root, expr, parser=elementpath.XPath2Parser)
     assert turbohtml.parse(markup).xpath(expr) == want
+
+
+@pytest.mark.parametrize(
+    ("text", "source", "target", "expected"),
+    [
+        pytest.param("a" * 32768, ascii_lowercase, ascii_uppercase, "A" * 32768, id="first-map-entry"),
+        pytest.param("b" * 32768, ascii_lowercase, ascii_uppercase, "B" * 32768, id="second-map-entry"),
+        pytest.param("a" * 64, "a" * 65536, "X", "X" * 64, id="duplicate-first-entry"),
+        pytest.param("a" * 64, "a" * 65536, "", "", id="duplicate-first-removal"),
+        pytest.param(
+            "yz" * 64 + "a", "abcdefghijklmnopaa", "ABCDEFGHIJKLMNOPXY", "yz" * 64 + "A", id="duplicate-after-index"
+        ),
+        pytest.param(
+            "yz" * 64 + "界😀", "abcdefghijklmnop界😀", "ABCDEFGHIJKLMNOPé", "yz" * 64 + "é", id="unicode-after-index"
+        ),
+        pytest.param("a" * 128 + "z", ascii_lowercase, "A", "A" * 128, id="late-removal"),
+        pytest.param("yz" * 64, "", "X", "yz" * 64, id="empty-map"),
+        pytest.param("", ascii_lowercase, "A", "", id="empty-input"),
+    ],
+)
+def test_translate_deferred_index(text: str, source: str, target: str, expected: str) -> None:
+    document: Final = parse("<p></p>")
+    assert document.xpath(f"translate('{text}', '{source}', '{target}')") == expected
+
+
+def test_translate_nul_mapping() -> None:
+    document: Final = parse("<p></p>")
+    assert (
+        document.xpath(
+            "translate($text, $source, $target)",
+            text="yz" * 64 + "\x00a",
+            source="abcdefghijklmnop\x00",
+            target="ABCDEFGHIJKLMNOP!",
+        )
+        == "yz" * 64 + "!A"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "text", "expected"),
+    [
+        pytest.param("abcdefghijklmnop", "ABCDEFGHIJKLMNOP", "apz" * 64, "APz" * 64, id="map-and-miss"),
+        pytest.param("abcdefghijklmnop", "A", "apz" * 64, "Az" * 64, id="delete"),
+        pytest.param("a" * 16, "ABCDEFGHIJKLMNOP", "a" * 64, "A" * 64, id="first-duplicate"),
+        pytest.param("雪" * 16, "𐀀", "雪z" * 64, "𐀀z" * 64, id="wide-unicode"),
+        pytest.param("abcdefghijklmnop", "", "a" * 64, "", id="delete-all"),
+        pytest.param("abcdefghijklmno", "A", "az" * 64, "Az" * 64, id="short-map"),
+        pytest.param("abcdefghijklmnop", "A", "a" * 63, "A" * 63, id="short-text"),
+        pytest.param("abcdefghijklmnop", "A", "a" * 64, "A" * 64, id="threshold"),
+        pytest.param("", "A", "a" * 64, "a" * 64, id="empty-map"),
+        pytest.param("abcdefghijklmnop", "A", "", "", id="empty-text"),
+        pytest.param(
+            "".join(chr(256 + index * 128) for index in range(16)),
+            "ABCDEFGHIJKLMNOP",
+            "".join(chr(256 + index * 128) for index in range(16)) * 4,
+            "ABCDEFGHIJKLMNOP" * 4,
+            id="hash-collisions",
+        ),
+    ],
+)
+def test_translate_character_map(source: str, target: str, text: str, expected: str) -> None:
+    document: Final = parse_xml(f"<root>{text}</root>")
+    assert document.xpath(f"translate(string(/root), '{source}', '{target}')") == expected
+
+
+ID_HTML = (
+    "<html><body><p id='a'>one</p><p id='b'>two</p><div class='x' id='c'>three</div>"
+    "<span>no id</span><i id=''>empty</i><!--note--></body></html>"
+)
+
+NS_HTML = "<html><body><p id='p'>html</p><svg id='s'><circle/></svg><math><mi>x</mi></math></body></html>"
+
+LANG_HTML = (
+    "<html><body><p id='nolang'>x</p>"
+    "<div lang='en-US'><p id='inherit'>a</p></div>"
+    "<div lang='en'><p id='outer'>o</p>"
+    "<div lang='FR'><span><p id='inner'>i</p></span></div></div>"
+    "</body></html>"
+)
+
+
+def tags(result: list[Element | str]) -> list[str]:
+    return [node.tag if isinstance(node, Element) else node for node in result]
+
+
+@pytest.fixture
+def ids() -> turbohtml.Node:
+    return turbohtml.parse(ID_HTML)
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("id('a')", ["p"], id="single"),
+        pytest.param("id('a c')", ["p", "div"], id="multiple-tokens"),
+        pytest.param("id('  a   c  ')", ["p", "div"], id="surrounding-and-inner-space"),
+        pytest.param("id('xx a')", ["p"], id="token-length-mismatch-then-hit"),
+        pytest.param("id('missing')", [], id="no-such-id"),
+        pytest.param("id('')", [], id="empty-string"),
+        pytest.param("id(//div/@id)", ["div"], id="nodeset-argument"),
+        pytest.param("id(//div/@class)", [], id="nodeset-argument-no-match"),
+        pytest.param("id(//p)", [], id="nodeset-string-values-are-text"),
+        pytest.param("id(//zzz)", [], id="empty-nodeset-argument"),
+    ],
+)
+def test_id(ids: turbohtml.Node, expr: str, expected: list[str]) -> None:
+    assert tags(ids.xpath(expr)) == expected
+
+
+def test_id_string_value(ids: turbohtml.Node) -> None:
+    assert ids.xpath("string(id('b'))") == "two"
+
+
+def test_id_hash_collisions_keep_document_order() -> None:
+    document = turbohtml.parse("<p id=a></p><div id=ba></div><span id=q></span><i id=x></i>")
+    assert tags(document.xpath("id('a ba q a missing')")) == ["p", "div", "span"]
+
+
+@pytest.fixture
+def foreign() -> turbohtml.Node:
+    return turbohtml.parse(NS_HTML)
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("namespace-uri(//p)", "", id="html-element"),
+        pytest.param("namespace-uri(//*[local-name()='svg'])", "http://www.w3.org/2000/svg", id="svg-element"),
+        pytest.param("namespace-uri(//*[local-name()='math'])", "http://www.w3.org/1998/Math/MathML", id="mathml"),
+        pytest.param("namespace-uri(//p/@id)", "", id="attribute"),
+        pytest.param("namespace-uri(//p/text())", "", id="text-node"),
+        pytest.param("namespace-uri('literal')", "", id="non-nodeset-argument"),
+        pytest.param("namespace-uri(//zzz)", "", id="empty-nodeset-argument"),
+    ],
+)
+def test_namespace_uri(foreign: turbohtml.Node, expr: str, expected: str) -> None:
+    assert foreign.xpath(expr) == expected
+
+
+def test_namespace_uri_context_node_counts_svg_subtree(foreign: turbohtml.Node) -> None:
+    # The <svg> and its <circle> child are both in the SVG namespace.
+    assert foreign.xpath("count(//*[namespace-uri()='http://www.w3.org/2000/svg'])") == pytest.approx(2.0)
+
+
+@pytest.fixture
+def langs() -> turbohtml.Node:
+    return turbohtml.parse(LANG_HTML)
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("//p[@id='inherit'][lang('en')]", ["p"], id="subtag-prefix"),
+        pytest.param("//p[@id='inherit'][lang('en-US')]", ["p"], id="exact"),
+        pytest.param("//p[@id='inherit'][lang('EN')]", ["p"], id="case-insensitive-want"),
+        pytest.param("//p[@id='outer'][lang('en')]", ["p"], id="direct-attribute"),
+        pytest.param("//p[@id='inner'][lang('fr')]", ["p"], id="case-insensitive-tag-via-ancestor"),
+        pytest.param("//p[@id='inner'][lang('en')]", [], id="nearest-wins-no-fallthrough"),
+        pytest.param("//p[@id='nolang'][lang('en')]", [], id="no-lang-in-any-ancestor"),
+        pytest.param("//p[@id='inherit'][lang('e')]", [], id="not-a-subtag-boundary"),
+        pytest.param("//p[@id='inherit'][lang('en-US-extra')]", [], id="want-longer-than-tag"),
+    ],
+)
+def test_lang(langs: turbohtml.Node, expr: str, expected: list[str]) -> None:
+    assert tags(langs.xpath(expr)) == expected
+
+
+def test_lang_reads_html_lang_attribute_where_lxml_reads_xml_lang(langs: turbohtml.Node) -> None:
+    # lxml's lang() returns nothing here (no xml:lang); turbohtml matches the
+    # 'inherit' (lang='en-US') and 'outer' (lang='en') paragraphs.
+    assert len(langs.xpath("//p[lang('en')]")) == 2
+
+
+def test_lang_on_a_text_node_context_reads_ancestor_lang() -> None:
+    # lang() walks self-or-ancestor elements from the context node; on a text-node
+    # context it used to loop over a text-node span's attr_count with attrs == NULL and
+    # dereference a null pointer (issue #422)
+    doc = turbohtml.parse("<p lang=en>hi<b>x</b></p>")
+    assert doc.xpath('//text()[lang("en")]') == ["hi", "x"]
+
+
+def test_lang_is_false_with_no_lang_bearing_ancestor() -> None:
+    doc = turbohtml.parse("<div><p>hi</p></div>")
+    assert doc.xpath("//text()[lang('en')]") == []
+
+
+@pytest.mark.parametrize("count", [pytest.param(1, id="one"), pytest.param(1000, id="many")])
+def test_id_node_values_preserve_order(count: int) -> None:
+    document: Final = parse(
+        '<main><b id="first"></b><b id="second"></b>' + "<i> second  first second </i>" * count + "</main>"
+    )
+    assert document.xpath("id(//i)/@id") == ["first", "second"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("xpath-id-nodes", id="many-short-nodes"),
+        pytest.param("xpath-id-nodes-long", id="few-long-nodes"),
+    ],
+)
+def test_id_nodes_benchmark_output(name: str) -> None:
+    _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
+    expression, source = cast("tuple[str, str]", load())
+    assert parse(source).xpath(expression) == ["first", "second"]
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        pytest.param(0, "z" * 32768, id="map-32"),
+        pytest.param(1, "z" * 32768, id="map-128"),
+        pytest.param(2, "z" * 32768, id="map-512"),
+        pytest.param(3, "a short title", id="short"),
+        pytest.param(4, "A" * 32768, id="first-entry"),
+        pytest.param(5, "b" * 32768, id="duplicates"),
+        pytest.param(6, "b" * 64, id="long-map"),
+        pytest.param(7, "B" * 32768, id="second-entry"),
+        pytest.param(8, string.ascii_uppercase * 1260, id="ascii-cycle"),
+        pytest.param(9, "".join(chr(384 + index) for index in range(128)) * 128, id="unicode-cycle"),
+    ],
+)
+def test_translate_benchmark_result(case: int, expected: str) -> None:
+    expression, source = cast("tuple[str, str]", INPUTS["xpath-translate"]()[case][1])
+    document: Final = parse(source)
+    assert document.xpath(expression) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("xpath-translate-repeated", "B" * 32768, id="repeated"),
+        pytest.param("xpath-translate-long-map", "b" * 64, id="long-map"),
+        pytest.param(
+            "xpath-translate-varied",
+            "".join(chr(384 + index) for index in range(128)) * 128,
+            id="varied",
+        ),
+    ],
+)
+def test_codspeed_translate_result(name: str, expected: str) -> None:
+    load: Final = next(load for identity, _, load in benchmarks() if identity == name)
+    expression, source = cast("tuple[str, str]", load())
+    assert parse(source).xpath(expression) == expected

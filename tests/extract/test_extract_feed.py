@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Final, cast
+
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import parse
-from turbohtml.extract import feed
-from turbohtml.extract._feed import Entry, Feed
+from turbohtml.extract import Entry, Feed, feed
 
 RSS = """<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -276,3 +278,119 @@ def test_feed_ignores_non_item_children() -> None:
     xml = "<rss><channel><title>t</title><image>logo</image><item><title>real</title></item></channel></rss>"
     result = parse_feed(xml)
     assert [entry.title for entry in result.entries] == ["real"]
+
+
+_RSS: Final = Feed(
+    "rss",
+    "Example Engineering Blog",
+    "https://blog.example/",
+    "Notes from the Example engineering team.",
+    "Tue, 07 Jul 2026 09:00:00 GMT",
+    tuple(
+        Entry(
+            f"Release {index}: what changed",
+            f"https://blog.example/posts/{index}",
+            f"tag:blog.example,2026:{index}",
+            None,
+            "Tue, 07 Jul 2026 09:00:00 GMT",
+            f"Short summary of release {index}.",
+            f"<p>The full body of release {index}, with details.</p>",
+            "A. Writer",
+        )
+        for index in range(30)
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        pytest.param(0, _RSS, id="rss"),
+        pytest.param(1, _RSS, id="rss-extensions"),
+        pytest.param(
+            2,
+            Feed(
+                "atom",
+                "Example",
+                None,
+                None,
+                None,
+                tuple(
+                    Entry(
+                        f"Entry {index}",
+                        f"https://example.com/{index}",
+                        f"urn:{index}",
+                        "2026-07-06",
+                        None,
+                        f"Summary {index}",
+                        "Full body",
+                        "Writer",
+                    )
+                    for index in range(30)
+                ),
+            ),
+            id="atom",
+        ),
+    ],
+)
+def test_feed_benchmark_output(case: int, expected: Feed) -> None:
+    assert feed(cast("str", INPUTS["syndication"]()[case][1])) == expected
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        pytest.param(
+            "<dc:creator>creator</dc:creator><author>author</author><content>plain</content>"
+            "<content:encoded>encoded</content:encoded><dc:description>dc</dc:description>"
+            "<description>description</description><summary>summary</summary><dc:date>dc-date</dc:date>"
+            "<pubdate>pubdate</pubdate><published>published</published><lastbuilddate>last</lastbuilddate>"
+            '<updated>updated</updated><id>id</id><guid isPermaLink="false">guid</guid><title>title</title>',
+            ("title", None, "guid", "updated", "published", "summary", "encoded", "author"),
+            id="field-name-precedence",
+        ),
+        pytest.param(
+            "<title> </title><title>later</title><summary></summary><summary>later</summary>"
+            "<description>fallback</description>",
+            (None, None, None, None, None, "fallback", None, None),
+            id="first-empty-occurrence",
+        ),
+        pytest.param(
+            "<guid></guid><guid>later</guid><id>identifier</id>",
+            (None, None, "identifier", None, None, None, None, None),
+            id="first-guid-controls-fallback",
+        ),
+        pytest.param(
+            '<link href="self" rel="self"/><link href="first" rel="alternate"/><link href="second"/>',
+            (None, "first", None, None, None, None, None, None),
+            id="first-alternate-link",
+        ),
+        pytest.param(
+            '<link>rss-link</link><link href="alternate" rel="alternate"/>',
+            (None, "rss-link", None, None, None, None, None, None),
+            id="rss-text-before-atom-link",
+        ),
+        pytest.param(
+            "<author><name></name>ignored</author><author>later</author><dc:creator>creator</dc:creator>",
+            (None, None, None, None, None, None, None, "creator"),
+            id="nested-empty-author-name",
+        ),
+        pytest.param(
+            "text<!--comment--><extension><title>nested</title></extension><updatxx>fake</updatxx>"
+            "<xxxxxxx>ignored</xxxxxxx><x>ignored</x><title>direct</title>",
+            ("direct", None, None, None, None, None, None, None),
+            id="only-direct-exact-tags",
+        ),
+    ],
+)
+def test_entry_field_precedence(fields: str, expected: tuple[str | None, ...]) -> None:
+    result: Final = feed(f"<rss><channel><item>{fields}</item></channel></rss>")
+    assert result is not None
+    assert result.entries == (expected,)
+
+
+def test_feed_empty_metadata_uses_fallback() -> None:
+    assert feed(
+        "<rss><channel><title> </title><description> </description><subtitle>fallback</subtitle>"
+        "<updated> </updated><lastbuilddate>date</lastbuilddate></channel></rss>"
+    ) == ("rss", None, None, "fallback", "date", ())
