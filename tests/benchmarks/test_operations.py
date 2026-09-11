@@ -11,20 +11,16 @@ a benchmark run can never silently measure nothing.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, cast
 
-import generate_normalize
 import pytest
 from bench.ci import benchmarks
-from bench.corpus import large_text
 from bench.timing import Mutating
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pytest_codspeed import BenchmarkFixture
-    from pytest_mock import MockerFixture
 
 
 @pytest.mark.parametrize(
@@ -42,16 +38,3 @@ def test_feature(benchmark: BenchmarkFixture, operation: object, load: Callable[
         benchmark.pedantic(operation.run, setup=lambda: ((operation.setup(case),), {}))
     else:
         benchmark(cast("Callable[[object], object]", operation), case)
-
-
-def test_generate_normalization(benchmark: BenchmarkFixture, mocker: MockerFixture, tmp_path: Path) -> None:
-    mocker.patch(
-        "generate_normalize.fetch_bytes",
-        return_value=large_text(
-            "DerivedNormalizationProps-16.0.0.txt",
-            "https://www.unicode.org/Public/16.0.0/ucd/DerivedNormalizationProps.txt",
-        ).encode("utf-8"),
-    )
-    output: Final = tmp_path / "normalize_table.h"
-    benchmark(generate_normalize.generate, output)
-    assert output.read_bytes() == (Path(__file__).parents[2] / "src/turbohtml/_c/data/normalize_table.h").read_bytes()

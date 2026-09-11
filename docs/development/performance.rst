@@ -1828,5 +1828,5 @@ canonical decompositions. Offline generation of the complete Unicode 16.0.0 norm
 four-form self-check and file output, fell from 2.306 to 2.165 seconds (6.10%) in a matched ABBA comparison. The two
 baseline observations were 2.301 and 2.311 seconds; the candidate observations were 2.179 and 2.151 seconds. Both
 variants emitted byte-identical headers. Network retrieval happens before measurement; the generator still verifies the
-pinned source digest. The CodSpeed generator case covers this full workload without adding Python-only table
-regeneration to native PGO training.
+pinned source digest. We measure this build-time workload with elapsed time outside CodSpeed simulation and native PGO
+training.
