@@ -384,15 +384,16 @@ ini_options.filterwarnings = [
 # module importorskips itself where its oracle is absent; measuring them would make the gate
 # environment-dependent. They still run and validate wherever the oracle installs (the dev env).
 run.omit = [
-  "tests/benchmarks/*",                                 # run only under --codspeed (the CI benchmark job), never in the coverage run
+  "tests/benchmarks/*",                                # run only under --codspeed (the CI benchmark job), never in the coverage run
   "tests/clean/test_linkify_differential.py",
   "tests/clean/test_sanitizer_differential.py",
-  "tests/conformance/test_c14n_conformance.py",         # runs only in the dedicated conformance env; the matrix deselects tests/conformance
-  "tests/conformance/test_cssom_jsdom_conformance.py",  # differential oracle: skips when the node/jsdom toolchain is absent
+  "tests/conformance/test_c14n_conformance.py",        # runs only in the dedicated conformance env; the matrix deselects tests/conformance
+  "tests/conformance/test_cssom_jsdom_conformance.py", # differential oracle: skips when the node/jsdom toolchain is absent
   "tests/conformance/test_dom_jsdom_differential.py",
   "tests/conformance/test_xml_conformance.py",
   "tests/convert/test_css_to_xpath_differential.py",
   "tests/convert/test_transform_differential.py",
+  "tests/dom/test_node_differential.py",
   "tests/dom/test_parse_xml_differential.py",
   "tests/dom/test_tables_differential.py",
   "tests/dom/test_treebuild_differential.py",
@@ -401,8 +402,7 @@ run.omit = [
   "tests/query/test_query_differential.py",
   "tests/query/xpath/test_xpath_differential.py",
   "tests/serialize/test_c14n_differential.py",
-  "tests/dom/test_node_differential.py",
-  "tests/validate/test_conformance_differential.py",    # differential oracle: skips when html5validator/vnu.jar or a JRE is absent
+  "tests/validate/test_conformance_differential.py",   # differential oracle: skips when html5validator/vnu.jar or a JRE is absent
   "tests/validate/test_schema_differential.py",
 ]
 run.parallel = true
