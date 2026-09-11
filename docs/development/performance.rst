@@ -1447,6 +1447,22 @@ costs of matching rules and copying computed values.
 .. bench-table::
     :file: bench/computed-style-deep.json
 
+The specificity cases resolve 128 elements against 256 matching rules. Caching each selector alternative's specificity
+reduces the nested ``:is()``/``:where()`` case from 6.048 ms to 2.523 ms (58.29%) and the ordinary selector-list case
+from 1.934 ms to 1.781 ms (7.90%). The cascade still chooses the most specific matching alternative and preserves
+declaration order. Each stylesheet retains 12 bytes per alternative, or 6 KiB for these cases, until stylesheet
+invalidation.
+
+Parsing the same documents, compiling their stylesheets, and resolving the first element takes 758.850 µs for nested
+selectors and 89.234 µs for ordinary selectors. These construction controls increase by 0.35% (2.622 µs) and 2.65%
+(2.306 µs). CodSpeed covers both reused and cold cases with both selector shapes.
+
+.. bench-table::
+    :file: bench/computed-style-specificity.json
+
+.. bench-table::
+    :file: bench/computed-style-specificity-cold.json
+
 Extraction
 ==========
 

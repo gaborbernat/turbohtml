@@ -1,0 +1,28 @@
+{
+  "label": "compute styles across matching selector alternatives",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 rules / 128 elements / nested alternatives",
+      0.0025226576165247633
+    ],
+    [
+      "256 rules / 128 elements / ordinary alternatives",
+      0.0017810906464850026
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.02547805791394016
+    ],
+    [
+      null,
+      0.004826273287103565
+    ]
+  ],
+  "notes": {}
+}

@@ -1,0 +1,28 @@
+{
+  "label": "compile styles and resolve the first element",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 rules / 128 elements / nested alternatives",
+      0.0007588497178251904
+    ],
+    [
+      "256 rules / 128 elements / ordinary alternatives",
+      8.923353538345205e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.012175279820910802
+    ],
+    [
+      null,
+      0.028116467602978132
+    ]
+  ],
+  "notes": {}
+}

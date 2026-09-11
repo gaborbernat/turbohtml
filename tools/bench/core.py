@@ -373,6 +373,10 @@ def computed_style(text: str) -> None:
             _computed_style(node)
 
 
+def _computed_style_first(text: str) -> None:
+    _computed_style(turbohtml.parse(text).select("div")[0])
+
+
 def match(text: str) -> None:
     """Test every anchor against a selector with the soupsieve-shaped turbohtml.query matcher."""
     matcher = _query.compile(_CSS)
@@ -1413,6 +1417,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "xpath-order": (_xpath_scaling, "turbohtml"),
     "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
+    "computed-style-specificity": (computed_style, "turbohtml"),
+    "computed-style-specificity-cold": (_computed_style_first, "turbohtml"),
     "computed-style-dense": (computed_style, "turbohtml"),
     "match": (match, "turbohtml"),
     "find-text": (find_text, "turbohtml"),

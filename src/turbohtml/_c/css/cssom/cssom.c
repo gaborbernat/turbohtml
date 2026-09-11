@@ -1022,6 +1022,12 @@ static int css_resolve(css_value *out, const css_slot *slot, const css_value *pa
     return css_value_set_ascii(out, meta->initial);
 }
 
+typedef struct {
+    int ids;
+    int classes;
+    int types;
+} css_specificity;
+
 /* A parsed stylesheet kept alive for the cascade: the cleaned buffer, its rules,
    and each rule's compiled selector (NULL when the selector did not compile). */
 typedef struct {
@@ -1029,6 +1035,7 @@ typedef struct {
     css_rule *rules;
     Py_ssize_t rule_count;
     sel_compiled **compiled;
+    css_specificity *specificities;
 } css_sheet;
 
 typedef struct {
@@ -1069,6 +1076,7 @@ static void css_free_sheets(css_sheet *sheets, Py_ssize_t count) {
                 selector_free(sheets[index].compiled[rule]);
             }
         }
+        PyMem_Free(sheets[index].specificities);
         PyMem_Free(sheets[index].compiled);
         css_free_rules(sheets[index].rules, sheets[index].rule_count);
         PyMem_Free(sheets[index].clean);
@@ -1119,6 +1127,7 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
             PyMem_Free(clean);                 /* GCOVR_EXCL_LINE: allocation-failure path */
             goto fail;                         /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+        Py_ssize_t alternative_count = 0;
         for (Py_ssize_t rule = 0; rule < rule_count; rule++) {
             PyObject *selector = css_slice_str(rules[rule].selector, rules[rule].selector_len);
             if (selector == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1136,6 +1145,8 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
             if (compiled[rule] == NULL) {
                 /* an unsupported or invalid selector list drops its rule (it matches nothing) */
                 PyErr_Clear();
+            } else {
+                alternative_count += compiled[rule]->count;
             }
         }
         if (count == capacity) {
@@ -1153,7 +1164,26 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
             sheets = bigger;
             capacity = grown;
         }
-        sheets[count++] = (css_sheet){clean, rules, rule_count, compiled};
+        sheets[count++] = (css_sheet){clean, rules, rule_count, compiled, NULL};
+        if (alternative_count == 0) {
+            continue;
+        }
+        css_specificity *specificities = PyMem_Calloc((size_t)alternative_count, sizeof(css_specificity));
+        if (specificities == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            goto fail;               /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        sheets[count - 1].specificities = specificities;
+        Py_ssize_t offset = 0;
+        for (Py_ssize_t rule = 0; rule < rule_count; rule++) {
+            if (compiled[rule] == NULL) {
+                continue;
+            }
+            for (int alt = 0; alt < compiled[rule]->count; alt++) {
+                sel_specificity(&compiled[rule]->alts[alt], &specificities[offset].ids, &specificities[offset].classes,
+                                &specificities[offset].types);
+                offset++;
+            }
+        }
     }
     *out_count = count;
     return sheets;
@@ -1192,11 +1222,14 @@ static int css_cascade_element(th_node *element, const css_sheet *sheets, Py_ssi
     long order = 0;
     for (Py_ssize_t sheet = 0; sheet < sheet_count; sheet++) {
         const css_sheet *current = &sheets[sheet];
+        Py_ssize_t offset = 0;
         for (Py_ssize_t rule = 0; rule < current->rule_count; rule++) {
             sel_compiled *compiled = current->compiled[rule];
             if (compiled == NULL) {
                 continue;
             }
+            const css_specificity *specificities = current->specificities + offset;
+            offset += compiled->count;
             int best_a = -1;
             int best_b = 0;
             int best_c = 0;
@@ -1204,10 +1237,9 @@ static int css_cascade_element(th_node *element, const css_sheet *sheets, Py_ssi
                 if (!selector_matches_alt(element, &compiled->alts[alt], &ctx)) {
                     continue;
                 }
-                int spec_a = 0;
-                int spec_b = 0;
-                int spec_c = 0;
-                sel_specificity(&compiled->alts[alt], &spec_a, &spec_b, &spec_c);
+                int spec_a = specificities[alt].ids;
+                int spec_b = specificities[alt].classes;
+                int spec_c = specificities[alt].types;
                 if (spec_a > best_a ||
                     (spec_a == best_a && (spec_b > best_b || (spec_b == best_b && spec_c > best_c)))) {
                     best_a = spec_a;

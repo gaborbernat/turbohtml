@@ -49,6 +49,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "computed-style": "computed-style",
     "computed-style-deep": "computed-style-deep",
     "computed-style-dense": "computed-style-dense",
+    "computed-style-specificity": "computed-style-specificity",
+    "computed-style-specificity-cold": "computed-style-specificity-cold",
     "detect-language": "detect-language",
     "detect-language-long": "detect-language-long",
     "microdata": "microdata",
