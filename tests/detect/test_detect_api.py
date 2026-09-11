@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from itertools import islice, product
+from typing import Final, cast
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import _html, parse
 from turbohtml._html import _codec_label, _decode, _detect, _detect_language, _detect_rank, _DetectStream
@@ -1126,3 +1128,91 @@ def test_language_detection_of_repeated_prose(repeats: int) -> None:
     assert detect_language(
         "There is no reason not to learn a new language every single year of your life. " * repeats
     ) == LanguageMatch("eng", 1.0, "Latin", "English")
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(b"", id="empty"),
+        pytest.param(b"plain ASCII", id="ascii"),
+        pytest.param(b"\xef\xbb\xbfhello", id="bom"),
+        pytest.param("déjà vu, bientôt à Paris".encode("cp1252"), id="ambiguous"),
+    ],
+)
+@pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param(Detection(), id="default"),
+        pytest.param(Detection(threshold=0.9), id="threshold"),
+        pytest.param(Detection(allowed=frozenset({"windows-1252"})), id="allowed"),
+    ],
+)
+def test_detect_first_record_matches_ranked_and_streamed(data: bytes, options: Detection) -> None:
+    expected: Final = detect_all(data, options)[0]
+    detector: Final = EncodingDetector(options)
+    detector.feed(data[:3])
+    detector.feed(data[3:])
+    assert detect(data, options) == detector.close() == expected
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    ("module", "streamed", "case", "expected"),
+    [
+        pytest.param(
+            module,
+            streamed,
+            case,
+            expected,
+            id=f"{module}-{'stream' if streamed else 'detect'}-{label}",
+            marks=(
+                pytest.mark.xfail(
+                    strict=True,
+                    reason="Detector misdecodes the CP1252 fixture instead of preserving its accented text",
+                )
+                if case == 0 and module in {"chardet", "charset_normalizer"}
+                else ()
+            ),
+        )
+        for module, streamed in (
+            ("turbohtml.detect", False),
+            ("chardet", False),
+            ("cchardet", False),
+            ("charset_normalizer", False),
+            ("bs4", False),
+            ("resiliparse.parse.encoding", False),
+            ("turbohtml.detect", True),
+            ("chardet", True),
+            ("cchardet", True),
+        )
+        for case, expected, label in (
+            (0, "déjà vu, bientôt à Paris", "legacy"),
+            (1, "A short plain message", "ascii"),
+            (2, "hello", "bom"),
+        )
+    ],
+)
+def test_encoding_result_benchmark_preserves_decoded_text(
+    module: str, case: int, expected: str, *, streamed: bool
+) -> None:
+    library: Final = pytest.importorskip(module)
+    data: Final = cast("bytes", INPUTS["encoding-result"]()[case][1])
+    if streamed:
+        detector: Final = library.EncodingDetector() if module == "turbohtml.detect" else library.UniversalDetector()
+        detector.feed(data)
+        result: Final = detector.close()
+        encoding = result.codec if module == "turbohtml.detect" else detector.result["encoding"]
+    elif module == "turbohtml.detect":
+        encoding = library.detect(data).codec
+    elif module in {"chardet", "cchardet"}:
+        encoding = library.detect(data)["encoding"]
+    elif module == "charset_normalizer":
+        match: Final = library.from_bytes(data).best()
+        assert match is not None
+        encoding = match.encoding
+    elif module == "bs4":
+        encoding = library.UnicodeDammit(data).original_encoding
+    else:
+        encoding = library.detect_encoding(data)
+    assert encoding is not None
+    assert data.decode(encoding).removeprefix("\ufeff") == expected

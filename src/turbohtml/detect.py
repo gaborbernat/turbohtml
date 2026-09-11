@@ -221,7 +221,8 @@ def detect(data: bytes, options: Detection | None = None, /) -> EncodingMatch:
         ``bom`` set, so a caller can strip it.
     :raises TypeError: when ``data`` is not a bytes-like object.
     """
-    return _matches(data, options or _DEFAULT)[0]
+    active: Final = options or _DEFAULT
+    return EncodingMatch(*_rank(_detect(data, active.tld), active)[0])
 
 
 def detect_all(data: bytes, options: Detection | None = None, /) -> list[EncodingMatch]:
@@ -281,7 +282,7 @@ class EncodingDetector:
     def close(self) -> EncodingMatch:
         """Read the detector's answer, cache it, and return it."""
         if self._result is None:
-            self._result = _rank(self._stream.close(), self._options)[0]
+            self._result = EncodingMatch(*_rank(self._stream.close(), self._options)[0])
             self.done = True
         return self._result
 
@@ -293,16 +294,13 @@ class EncodingDetector:
 
 
 def _matches(data: bytes, options: Detection) -> list[EncodingMatch]:
-    """Rank the candidates for ``data`` and apply the options; C answers with the no-match row when nothing fits."""
-    return _rank(_detect(data, options.tld), options)
+    return list(starmap(EncodingMatch, _rank(_detect(data, options.tld), options)))
 
 
 def _rank(
     result: tuple[str | None, bool, list[tuple[str, int]], bool] | None, options: Detection
-) -> list[EncodingMatch]:
-    """Shape one detector result and apply the options; the rows always hold at least the no-match sentinel."""
-    rows = _detect_rank(result, options.allowed, options.excluded, options.language, options.threshold, _LANGUAGES)
-    return list(starmap(EncodingMatch, rows))
+) -> list[tuple[str | None, float, str | None, bool, str | None]]:
+    return _detect_rank(result, options.allowed, options.excluded, options.language, options.threshold, _LANGUAGES)
 
 
 @dataclass(frozen=True, slots=True)

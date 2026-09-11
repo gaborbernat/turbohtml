@@ -343,6 +343,7 @@ OPERATIONS = {
     "strip-tags": (strip_tags, "BeautifulSoup (html.parser)"),
     "rewrite": (rewrite, "BeautifulSoup (html.parser)"),
     "encoding": (encoding, "BeautifulSoup (html.parser)"),
+    "encoding-result": (encoding, "BeautifulSoup (html.parser)"),
     "edit": (Mutating(_fresh, edit), "BeautifulSoup (html.parser)"),
     "set-html": (Mutating(_fresh, set_html), "BeautifulSoup (html.parser)"),
     "set-text": (Mutating(_fresh, set_text), "BeautifulSoup (html.parser)"),

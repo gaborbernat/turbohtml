@@ -502,6 +502,8 @@ OPERATIONS: dict[str, Operation] = {
     "minify-js-single-use": Operation("check single-use JavaScript initializers", "us"),
     "minify-js-guards": Operation("minify guard return chains", "us"),
     "stream": Operation("push-parse a page in chunks", "us"),
+    "encoding-result": Operation("construct the winning encoding result", "us"),
+    "encoding-result-stream": Operation("construct the streamed encoding result", "us"),
     "encoding": Operation("detect a byte stream's encoding", "us"),
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
@@ -1545,6 +1547,14 @@ def _validate_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
     )
 
 
+def _encoding_result_cases() -> tuple[tuple[str, bytes], ...]:
+    return (
+        ("short ambiguous legacy bytes", "déjà vu, bientôt à Paris".encode("cp1252")),
+        ("short ASCII", b"A short plain message"),
+        ("UTF-8 byte-order mark", b"\xef\xbb\xbfhello"),
+    )
+
+
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "startup": lambda: (("fresh import and version", "import"), ("fresh CLI minification", "minify")),
     "radio-group": _radio_group_cases,
@@ -2319,6 +2329,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         (f"{count} expression statements", ";".join(f"f({index})" for index in range(count))) for count in (1000, 2)
     ),
     "stream": _readpath_cases,
+    "encoding-result": _encoding_result_cases,
+    "encoding-result-stream": _encoding_result_cases,
     "encoding": _encoding_cases,
     "decode": _decode_cases,
     "normalize": _normalize_cases,

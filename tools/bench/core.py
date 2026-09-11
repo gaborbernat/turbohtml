@@ -29,6 +29,7 @@ from turbohtml.conformance import check as _check_conformance
 from turbohtml.convert import css_specificity as _css_specificity
 from turbohtml.convert import css_to_xpath as _css_to_xpath
 from turbohtml.cssom import computed_style as _computed_style
+from turbohtml.detect import EncodingDetector as _EncodingDetector
 from turbohtml.detect import detect as _detect_encoding
 from turbohtml.detect import detect_language as _detect_language
 from turbohtml.detect import normalize as _normalize
@@ -1128,6 +1129,12 @@ def stream(text: str) -> None:
     parser.close()
 
 
+def _encoding_stream(data: bytes) -> None:
+    detector: Final = _EncodingDetector()
+    detector.feed(data)
+    detector.close()
+
+
 def encoding(data: bytes) -> None:
     """Detect a byte stream's character encoding with turbohtml's C sniffing pipeline."""
     _detect_encoding(data)
@@ -1667,6 +1674,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "minify-js-unused-declarations": (minify_js, "turbohtml"),
     "minify-js-var-initialization": (minify_js, "turbohtml"),
     "stream": (stream, "turbohtml"),
+    "encoding-result": (encoding, "turbohtml"),
+    "encoding-result-stream": (_encoding_stream, "turbohtml"),
     "encoding": (encoding, "turbohtml"),
     "decode": (decode, "turbohtml"),
     "detect-language": (detect_language, "turbohtml"),

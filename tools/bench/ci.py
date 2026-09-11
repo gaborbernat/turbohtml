@@ -171,6 +171,10 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "encoding-result-ascii": ("encoding-result", 1),
+    "encoding-result-bom": ("encoding-result", 2),
+    "encoding-result-stream-ascii": ("encoding-result-stream", 1),
+    "encoding-result-stream-bom": ("encoding-result-stream", 2),
     "minify-css-conflicts-short": ("minify-css-conflicts", 1),
     "minify-css-conflicts-small": ("minify-css-conflicts", 2),
     "minify-css-merges-media-large": ("minify-css-merges", 2),

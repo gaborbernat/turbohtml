@@ -12,4 +12,4 @@ def encoding(data: bytes) -> None:
     from_bytes(data).best()
 
 
-OPERATIONS = {"encoding": (encoding, "charset-normalizer")}
+OPERATIONS = {"encoding": (encoding, "charset-normalizer"), "encoding-result": (encoding, "charset-normalizer")}

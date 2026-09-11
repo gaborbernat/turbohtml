@@ -167,6 +167,7 @@ OPERATIONS = {
     "serialize": (serialize, "resiliparse"),
     "navigate": (navigate, "resiliparse"),
     "encoding": (encoding, "resiliparse"),
+    "encoding-result": (encoding, "resiliparse"),
     "extract-attr": (extract_attr, "resiliparse"),
     "extract-text": (extract_text, "resiliparse"),
     "links-extract": (links_extract, "resiliparse"),
