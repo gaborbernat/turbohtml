@@ -963,14 +963,12 @@ static th_node *next_form_control(th_node *current, th_node *form) {
     while (current != NULL && current != form) {
         th_node *parent = current->parent;
         /* Pair allocation can run callbacks, so re-read fieldset state before skipping siblings. */
-        if (current->atom == TH_TAG_LEGEND && parent != NULL && parent->atom == TH_TAG_FIELDSET &&
-            find_node_attr(parent, TH_ATTR_DISABLED) != NULL) {
-            current = parent;
-        } else if (current->next_sibling != NULL) {
+        if (current->next_sibling != NULL &&
+            !(current->atom == TH_TAG_LEGEND && parent != NULL && parent->atom == TH_TAG_FIELDSET &&
+              find_node_attr(parent, TH_ATTR_DISABLED) != NULL)) {
             return current->next_sibling;
-        } else {
-            current = parent;
         }
+        current = parent;
     }
     return NULL;
 }

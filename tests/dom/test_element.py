@@ -2175,7 +2175,5 @@ def test_form_data_handles_legend_detachment_during_collection() -> None:
         restore_gc()
     expected: Final = [(f"n{index}", f"v{index}") for index in range(256)]
     # CPython 3.12+ defers collection until the C call returns.
-    if sys.version_info >= (3, 12):
-        assert (legend.parent, pairs) == (None, [*expected, ("tail", "ok")])
-    else:
-        assert (legend.parent, 0 < len(pairs) < 256, pairs) == (None, True, expected[: len(pairs)])
+    assert (0 < len(pairs) < 256) if sys.version_info < (3, 12) else len(pairs) == 257
+    assert (legend.parent, pairs) == (None, [*expected, ("tail", "ok")][: len(pairs)])
