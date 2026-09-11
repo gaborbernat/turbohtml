@@ -1,0 +1,28 @@
+{
+  "label": "add custom attributes",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1,000 new names",
+      9.7037131736973e-05
+    ],
+    [
+      "one new name",
+      8.095895767705012e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.025389305802585364
+    ],
+    [
+      null,
+      0.05019936454410806
+    ]
+  ],
+  "notes": {}
+}

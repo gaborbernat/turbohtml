@@ -562,13 +562,27 @@ static PyObject *rw_has(rw_handle *self, PyObject *name) {
     return PyBool_FromLong(found);
 }
 
-/* Grow an element's attribute array by one slot; returns the new slot or NULL (OOM). */
 static th_node_attr *rw_attr_grow(th_node *node) {
-    th_node_attr *grown = PyMem_Realloc(node->attrs, (size_t)(node->attr_count + 1) * sizeof(th_node_attr));
-    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    size_t capacity = node->attr_capacity_shift ? (size_t)1 << node->attr_capacity_shift : 0;
+    if ((size_t)node->attr_count < capacity) {
+        return &node->attrs[node->attr_count];
+    }
+    size_t bytes;
+    const int fits = th_grow_cap((size_t)node->attr_count + 1, capacity, 2, sizeof(th_node_attr), &capacity, &bytes);
+    if (!fits) {          /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    th_node_attr *grown = PyMem_Realloc(node->attrs, bytes);
+    if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     node->attrs = grown;
+    node->attr_capacity_shift = 0;
+    for (size_t slots = capacity; slots > 1; slots >>= 1) {
+        node->attr_capacity_shift++;
+    }
     return &grown[node->attr_count];
 }
 

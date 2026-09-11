@@ -906,17 +906,20 @@ def rewrite(text: str) -> None:
     )
 
 
-def rewrite_attributes(text: str) -> None:
-    """Add 1,000 distinct custom attributes in one streaming handler."""
-    _rewrite(text, elements=(("x", _rewrite_attributes),))
+def rewrite_attributes(case: tuple[int, str]) -> None:
+    """Exclude attribute-name preparation from steady-state timing."""
+    _rewrite(case[1], elements=(("x", _rewrite_attribute_handler(case[0])),))
 
 
-def _rewrite_attributes(element: _RewriteElement) -> None:
-    for name in _REWRITE_ATTR_NAMES:
-        element.set_attribute(name, "x")
+@functools.cache
+def _rewrite_attribute_handler(count: int) -> Callable[[_RewriteElement], None]:
+    names: Final = tuple(f"a{index}" for index in range(count))
 
+    def add(element: _RewriteElement) -> None:
+        for name in names:
+            element.set_attribute(name, "x")
 
-_REWRITE_ATTR_NAMES: Final[tuple[str, ...]] = tuple(f"a{index}" for index in range(1_000))
+    return add
 
 
 def css_path(text: str) -> None:

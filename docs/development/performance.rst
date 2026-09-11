@@ -966,6 +966,14 @@ target and both controls; the lxml comparisons check complete decoded values.
 .. bench-table::
     :file: bench/parse-xml-values.json
 
+Streaming rewrite handlers reuse attribute capacity across additions and removals. Adding 1,000 distinct names to one
+start tag fell from 121.342 to 97.037 µs (20.03%) in matched release builds. Adding one name increased from 0.790 to
+0.810 µs (2.50%, or 0.020 µs). Capacity grows geometrically using the existing node field; mutation order and escaping
+retain their behavior. The shared suite and CodSpeed cover both sizes.
+
+.. bench-table::
+    :file: bench/rewrite-attributes.json
+
 Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
 affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
 comparisons per attribute on average. Early mismatches return before allocating the index.
