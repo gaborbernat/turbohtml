@@ -68,21 +68,21 @@
     [
       "propagate repeated JavaScript literal reads — 256 literal bindings / interleaved declarations",
       2327,
-      0.00022239926231577557,
+      0.00023127182887492382,
       7518.0,
       0.0008276304904332695
     ],
     [
       "propagate repeated JavaScript literal reads — 1 literal bindings / interleaved declarations",
       32,
-      2.0930082968106945e-06,
+      2.090794373129275e-06,
       45.0,
       6.2755164222494385e-06
     ],
     [
       "propagate repeated JavaScript literal reads — 256 literal bindings / one declaration",
       2327,
-      0.0002706510096080213,
+      0.0001890878458690774,
       5988.0,
       0.0006524099830433745
     ]
@@ -147,21 +147,21 @@
     [
       null,
       null,
-      0.006605008159743298,
+      0.06472300088548513,
       null,
       0.00832276701408454
     ],
     [
       null,
       null,
-      0.008176154276917641,
+      0.014250806891917947,
       null,
       0.012308267973897391
     ],
     [
       null,
       null,
-      0.007907501405500336,
+      0.020548051634025788,
       null,
       0.005064268263555969
     ]

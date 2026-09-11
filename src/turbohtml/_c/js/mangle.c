@@ -539,8 +539,8 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         return;
     case JN_VAR:
         for (int32_t declarator = node->a; declarator >= 0; declarator = mangler->prog->nodes[declarator].next) {
-            walk(mangler, mangler->prog->nodes[declarator].a, scope, 1); /* resolve the (declared) target */
-            walk(mangler, mangler->prog->nodes[declarator].b, scope, 0); /* the initializer is a reference context */
+            walk(mangler, mangler->prog->nodes[declarator].a, scope, 1);
+            walk(mangler, mangler->prog->nodes[declarator].b, scope, 0);
             /* Single-declaration transforms cannot account for another declaration target. */
             if (mangler->prog->nodes[mangler->prog->nodes[declarator].a].kind == JN_IDENT) {
                 int32_t target = mangler->prog->nodes[mangler->prog->nodes[declarator].a].sym;
@@ -549,6 +549,7 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
                         mangler->prog->syms[target].writes++;
                     }
                     mangler->prog->syms[target].decl_node = idx;
+                    mangler->prog->syms[target].declr_node = declarator;
                 }
             }
         }
@@ -1413,13 +1414,8 @@ static void replace_reads(jm_program *prog, int32_t idx, jm_propagation *plans) 
     }
 }
 
-/* Inline every read of a never-written binding holding a short value literal, when the copies cost
-   less than the binding: N reads of a one-character mangled name plus the declarator (name, `=`,
-   value, separator) against N copies of the value -- N*(len-1) < 3+len, so a one-character literal
-   always wins and longer ones need fewer reads. The domination rules match inline_single_use:
-   reads must follow initialization to preserve TDZ errors, and a var must sit in its function body's
-   first statement (min_ref follows parse order). The qualifying bindings are
-   collected first and rewritten in a single tree walk. */
+/* Literal copies save bytes when N*(len-1) < 3+len: each removes a one-character name,
+   while deleting the binding saves its name, equals sign, value and separator. */
 static int propagate_value_literals(jm_program *prog, int32_t global) {
     jm_propagation *plans = NULL;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
@@ -1428,10 +1424,7 @@ static int propagate_value_literals(jm_program *prog, int32_t global) {
             continue; /* decl > 2 also skips functions; only var/let/const record a JN_VAR decl_node */
         }
         int32_t stmt = prog->syms[sym].decl_node;
-        int32_t declr = prog->nodes[stmt].a;
-        while (!(prog->nodes[prog->nodes[declr].a].kind == JN_IDENT && prog->nodes[prog->nodes[declr].a].sym == sym)) {
-            declr = prog->nodes[declr].next;
-        }
+        int32_t declr = prog->syms[sym].declr_node;
         int32_t init = prog->nodes[declr].b;
         if (init < 0 || !is_value_literal(prog, init)) {
             continue;

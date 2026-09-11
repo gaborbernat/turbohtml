@@ -252,15 +252,12 @@ typedef struct {
     int32_t slot;     /* rename slot: bindings sharing a slot take the same short name */
     Py_UCS4 *mangled; /* assigned short name (owned), or NULL to keep the original */
     Py_ssize_t mangled_len;
-    /* single-use inlining and dead-binding elimination: refs counts read references and writes counts
-       assignment/update/for-target references (a binding read once and never written has refs == 1,
-       writes == 0); ref_node is the one read's node when refs == 1; decl_node is the single-declarator
-       statement (var/let/const or function) the binding is declared by */
     int32_t refs;
     int32_t writes;
     int32_t ref_node;
     int32_t ref_scope; /* common read scope, or -1 when reads span scopes */
     int32_t decl_node;
+    int32_t declr_node;
     int32_t ref_prop; /* the `{ x }` property node when a read is a shorthand: the read doubles as
                          the key, so an inline must first give the property an explicit key */
     int32_t min_ref;  /* the lowest read node index: parse order is textual order, so a read below
