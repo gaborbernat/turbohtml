@@ -22,7 +22,7 @@ from turbohtml import Document, Element, XPath, XPathString
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-    from types import ModuleType, SimpleNamespace
+    from types import SimpleNamespace
 from operator import ge, gt, le, lt
 from typing import TYPE_CHECKING, Final
 
@@ -1173,7 +1173,8 @@ _LXML_EXPRS: Final = [
 @pytest.mark.parametrize("expr", _LXML_EXPRS, ids=lambda expr: expr)
 @pytest.mark.parametrize("doc_name", list(_LXML_DOCS), ids=list(_LXML_DOCS))
 @pytest.mark.oracle
-def test_matches_lxml(doc_name: str, expr: str, lxml_html: ModuleType) -> None:
+def test_matches_lxml(doc_name: str, expr: str) -> None:
+    lxml_html: Final = pytest.importorskip("lxml.html")
     html: Final = _LXML_DOCS[doc_name]
     ours: Final = turbohtml.parse(html).xpath(expr)
     theirs: Final = lxml_html.document_fromstring(html).xpath(expr)
@@ -1181,11 +1182,6 @@ def test_matches_lxml(doc_name: str, expr: str, lxml_html: ModuleType) -> None:
         assert _normalize_lxml(ours) == _normalize_lxml(theirs)
     else:
         assert ours == theirs
-
-
-@pytest.fixture(scope="module")
-def lxml_html() -> ModuleType:
-    return pytest.importorskip("lxml.html")
 
 
 @pytest.mark.oracle

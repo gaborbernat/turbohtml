@@ -312,7 +312,8 @@ _LXML_CORPUS: Final = [
 
 @pytest.mark.parametrize("markup", _LXML_CORPUS)
 @pytest.mark.oracle
-def test_parse_into_rebuilds_the_tree_in_lxml(markup: str, lxml_etree: ModuleType) -> None:
+def test_parse_into_rebuilds_the_tree_in_lxml(markup: str) -> None:
+    lxml_etree: Final = pytest.importorskip("lxml.etree")
     built: Final = cast("_LxmlNode", parse_into(markup, _LxmlBuilder(lxml_etree)))
     mine: Final[list[_LxmlEvent]] = []
     _flatten_lxml(built[0], mine, lxml_etree)
@@ -323,7 +324,8 @@ def test_parse_into_rebuilds_the_tree_in_lxml(markup: str, lxml_etree: ModuleTyp
 
 @pytest.mark.oracle
 @pytest.mark.parametrize("data", ["", "echo 1"], ids=["empty", "body"])
-def test_lxml_builder_preserves_processing_instruction(data: str, lxml_etree: ModuleType) -> None:
+def test_lxml_builder_preserves_processing_instruction(data: str) -> None:
+    lxml_etree: Final = pytest.importorskip("lxml.etree")
     built: Final = cast("_LxmlNode", parse_into(f"<body><?php {data}?></body>", _LxmlBuilder(lxml_etree)))
     expected: Final = f"<html><head/><body><!--?php{f' {data}' if data else ''}?--></body></html>".encode()
     assert lxml_etree.tostring(built[0]) == expected
@@ -332,6 +334,7 @@ def test_lxml_builder_preserves_processing_instruction(data: str, lxml_etree: Mo
 _LxmlEvent = tuple[object, ...]
 
 
+@pytest.mark.oracle
 class _LxmlNode(Protocol):
     """lxml provides no stubs for the builder protocol."""
 
@@ -349,6 +352,7 @@ class _LxmlNode(Protocol):
     def __iter__(self) -> Iterator[_LxmlNode]: ...
 
 
+@pytest.mark.oracle
 class _LxmlBuilder:
     def __init__(self, etree: ModuleType) -> None:
         self.etree = etree
@@ -387,6 +391,7 @@ class _LxmlBuilder:
         node.append(child)
 
 
+@pytest.mark.oracle
 def _flatten_lxml(node: object, out: list[_LxmlEvent], etree: ModuleType) -> None:
     element: Final = cast("_LxmlNode", node)
     if element.tag is etree.Comment:
@@ -401,6 +406,7 @@ def _flatten_lxml(node: object, out: list[_LxmlEvent], etree: ModuleType) -> Non
             out.append(("text", child.tail))
 
 
+@pytest.mark.oracle
 def _flatten_turbo(node: Node, out: list[_LxmlEvent]) -> None:
     for child in node.children:
         if isinstance(child, DomDoctype):
@@ -416,11 +422,7 @@ def _flatten_turbo(node: Node, out: list[_LxmlEvent]) -> None:
             _flatten_turbo(child, out)
 
 
-@pytest.fixture(scope="module")
-def lxml_etree() -> ModuleType:
-    return pytest.importorskip("lxml.etree")
-
-
+@pytest.mark.oracle
 def _attr_value(value: str | list[str] | None) -> str:
     if isinstance(value, list):
         return " ".join(value)

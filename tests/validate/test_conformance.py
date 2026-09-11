@@ -376,24 +376,16 @@ _VNU_CASES: Final = [
 
 @pytest.mark.parametrize("markup", _VNU_CASES)
 @pytest.mark.oracle
-def test_conformance_verdict_matches_vnu(markup: str, vnu_command: tuple[str, str]) -> None:
-    assert check_html(markup).valid is not _vnu_has_error(markup, vnu_command)
-
-
-@pytest.fixture(scope="module")
-def vnu_command() -> tuple[str, str]:
+def test_conformance_verdict_matches_vnu(markup: str) -> None:
     jar: Final = Path(pytest.importorskip("vnujar").__file__).parent / "vnu.jar"
     if (java := shutil.which("java")) is None or not jar.is_file():
-        pytest.skip("a JRE and vnu.jar are required")  # pragma: no cover - optional Java installation
-    return java, str(jar)
-
-
-@pytest.mark.oracle
-def _vnu_has_error(markup: str, command: tuple[str, str]) -> bool:
+        pytest.skip("a JRE and vnu.jar are required")
     completed: Final = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Java arguments and in-repository markup
-        [command[0], "-jar", command[1], "--format", "json", "--stdin", "-"],
+        [java, "-jar", str(jar), "--format", "json", "--stdin", "-"],
         input=markup.encode(),
         capture_output=True,
         check=False,
     )
-    return any(message["type"] == "error" for message in json.loads(completed.stderr)["messages"])
+    assert check_html(markup).valid is not any(
+        message["type"] == "error" for message in json.loads(completed.stderr)["messages"]
+    )
