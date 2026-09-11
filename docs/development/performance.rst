@@ -1263,6 +1263,12 @@ and the held-out jQuery input from 10.202 to 6.393 ms (37.34%). Their output siz
 single-guard control changed from 1.797 to 1.814 µs (+0.95%, or 0.017 µs). CodSpeed covers both libraries and the guard
 control. The tables update these native cells and retain existing competitor measurements.
 
+Integer printing skips exponent formatting when fewer than three trailing zeros could be replaced. In matched release
+builds, the shared ``minify-js-integers`` case with 4,096 integers fell from 345.365 to 245.119 µs (29.03%). The
+trailing-zero control cost 0.50% more, the single-integer case improved 5.12%, and the ordinary-script control cost
+0.24% more. These comparisons use the same interpreter and build flags; all 16 timed processes passed CPU and memory
+guards. The shared suite and CodSpeed include the large, trailing-zero and single-integer inputs.
+
 The expression-sequence cases merge 1,000 or two consecutive function calls. Retaining the tail during folding avoids
 rescanning the accumulated sequence before each append. Matched release builds reduced the 1,000-statement case from
 692.917 to 334.477 µs (51.73% less time). The longer two-statement control comparison measured 1.188 versus 1.167 µs,
