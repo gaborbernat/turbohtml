@@ -40,6 +40,26 @@
       "linkify a parsed tree — markup (4 KiB)",
       3.8318818117962415e-05,
       0.0001288206666837747
+    ],
+    [
+      "linkify a parsed tree — wide text, one link",
+      7.720048197370488e-05,
+      "omits rel=\"nofollow\""
+    ],
+    [
+      "linkify a parsed tree — ASCII text, one link",
+      3.561011447648828e-05,
+      "omits rel=\"nofollow\""
+    ],
+    [
+      "linkify a parsed tree — wide text, no links",
+      7.013849462964573e-05,
+      0.0005766515712214944
+    ],
+    [
+      "linkify a parsed tree — 1024 wide-text links",
+      0.0007390321506439552,
+      "omits rel=\"nofollow\""
     ]
   ],
   "spread": [
@@ -77,6 +97,26 @@
       null,
       0.027549034962003238,
       0.011040248017480233
+    ],
+    [
+      null,
+      0.01400169856216121,
+      null
+    ],
+    [
+      null,
+      0.025066538015657086,
+      null
+    ],
+    [
+      null,
+      0.02541032233009691,
+      0.004690499470641959
+    ],
+    [
+      null,
+      0.018782798523369726,
+      null
     ]
   ],
   "row_notes": {
@@ -84,6 +124,10 @@
     "3": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
     "4": "links URLs inside existing markup and never linkifies email addresses; on the prose case it produces no links at all, so that timing is the cost of finding nothing",
     "5": "blocklist policy rather than turbohtml's allowlist; not security equivalence",
-    "6": "host exclusions disabled; URL/mailto linking but no bare email addresses"
+    "6": "host exclusions disabled; URL/mailto linking but no bare email addresses",
+    "7": "host exclusions disabled; autolink omits rel=\"nofollow\", so linked outputs differ",
+    "8": "host exclusions disabled; autolink omits rel=\"nofollow\", so linked outputs differ",
+    "9": "host exclusions disabled; autolink omits rel=\"nofollow\", so linked outputs differ",
+    "10": "host exclusions disabled; autolink omits rel=\"nofollow\", so linked outputs differ"
   }
 }

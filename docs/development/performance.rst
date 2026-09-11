@@ -1694,5 +1694,14 @@ compiled policy and include parsing and serialization; all three also run in Cod
 .. bench-table::
     :file: bench/sanitize-attributes.json
 
+Linkification reuses its owned four-byte Unicode snapshot during tree mutation, retaining the snapshot across callbacks.
+The wide-text, one-link case decreases from 81.535 to 77.200 microseconds (5.32%). ASCII, clean-wide-text and many-link
+controls differ by -1.24%, +0.85% and -2.58%. These parsed-node samples use 32 iterations per value, with fresh trees
+prepared outside timing. The callback case includes parsing and differs by -2.85%, without a separate gain claim.
+CodSpeed includes these five cases.
+
 .. bench-table::
     :file: bench/linkify-node.json
+
+.. bench-table::
+    :file: bench/linkify-traversal.json

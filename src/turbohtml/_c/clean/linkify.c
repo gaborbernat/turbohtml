@@ -1543,7 +1543,9 @@ static PyObject *snapshot_text(PyObject *module, PyObject *target) {
 
 static int apply_text(PyObject *module, PyObject *target, PyObject *text, PyObject *spans,
                       const candidate_result *results) {
-    Py_UCS4 *points = PyUnicode_AsUCS4Copy(text);
+    /* process_text retains this immutable snapshot through callbacks and the tree update. */
+    int borrowed = PyUnicode_KIND(text) == PyUnicode_4BYTE_KIND;
+    Py_UCS4 *points = borrowed ? PyUnicode_4BYTE_DATA(text) : PyUnicode_AsUCS4Copy(text);
     if (points == NULL) { /* GCOVR_EXCL_BR_LINE: UCS4 input copy cannot be forced from a test */
         return -1;        /* GCOVR_EXCL_LINE */
     }
@@ -1585,7 +1587,9 @@ static int apply_text(PyObject *module, PyObject *target, PyObject *text, PyObje
         }
     }
     Py_END_CRITICAL_SECTION();
-    PyMem_Free(points);
+    if (!borrowed) {
+        PyMem_Free(points);
+    }
     return status;
 }
 

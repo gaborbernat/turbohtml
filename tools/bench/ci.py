@@ -171,6 +171,11 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "linkify-node-wide": ("linkify-node", 1),
+    "linkify-node-ascii": ("linkify-node", 2),
+    "linkify-node-wide-clean": ("linkify-node", 3),
+    "linkify-node-wide-links": ("linkify-node", 4),
+    "linkify-traversal-wide-callbacks": ("linkify-traversal", 5),
     "syndication-extensions": ("syndication", 1),
     "syndication-atom": ("syndication", 2),
     "sanitize-attributes-allowed": ("sanitize-attributes", 1),

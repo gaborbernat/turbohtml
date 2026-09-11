@@ -169,6 +169,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "sanitize-attributes": "sanitize-attributes",
     "syndication": "syndication",
     "linkify-node": "linkify-node",
+    "linkify-traversal": "linkify-traversal",
     "sanitize-templates": "sanitize-templates",
     "serializing": "serialize",
     "serialize-inner": "serialize-inner",

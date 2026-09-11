@@ -640,6 +640,7 @@ _LINKIFY_TRAVERSAL_CASES: Final[tuple[tuple[str, tuple[str, str]], ...]] = (
         ("callbacks", '<a href="https://kept.example">kept</a> https://example.com ' * 200),
     ),
     ("2,000 nodes without text", ("default", "<div></div>" * 2_000)),
+    ("wide text, two callbacks", ("callbacks", "<p>" + "😀 " * 32_768 + "https://example.com</p>")),
 )
 
 _FIND_COLD_BODY: Final[str] = "<span>x</span>" * 10_000
@@ -1813,7 +1814,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("join (escapes operands)", ("join", _MARKUP_JOIN_PARTS)),
     ),
     "linkify": lambda: _LINKIFY_CASES,
-    "linkify-node": lambda: (("markup (4 KiB)", _LINKIFY_CASES[2][1]),),
+    "linkify-node": lambda: (
+        ("markup (4 KiB)", _LINKIFY_CASES[2][1]),
+        ("wide text, one link", "<p>" + "😀 " * 32_768 + "https://example.com</p>"),
+        ("ASCII text, one link", "<p>" + "a " * 32_768 + "https://example.com</p>"),
+        ("wide text, no links", "<p>" + "😀 " * 32_768 + "</p>"),
+        ("1024 wide-text links", "<p>" + "😀 https://example.com " * 1_024 + "</p>"),
+    ),
     "linkify-traversal": lambda: _LINKIFY_TRAVERSAL_CASES,
     "detect": lambda: (
         ("find comment (1 link, 1 email)", ("find", _LINKIFY_CASES[0][1])),
