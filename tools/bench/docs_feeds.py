@@ -46,6 +46,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "attribute-grow": "attribute-grow",
     "canonicalize": "canonicalize",
     "canonicalize-attrs": "canonicalize-attrs",
+    "canonicalize-deep": "canonicalize-deep",
     "computed-style": "computed-style",
     "computed-style-deep": "computed-style-deep",
     "computed-style-dense": "computed-style-dense",

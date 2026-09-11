@@ -11,12 +11,27 @@ namespace-declaration placement matches and the comparison is a genuine byte-exa
 from __future__ import annotations
 
 from io import BytesIO
+from typing import Final, cast
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import Canonical, Html, parse
 
 _NS = {"s": "http://www.w3.org/2000/svg", "m": "http://www.w3.org/1998/Math/MathML"}
+
+
+@pytest.mark.parametrize("case", [0, 1, 2], ids=["deep", "sparse-xlink", "shallow"])
+def test_canonicalize_benchmark_html_parser_difference(case: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    source: Final = cast("str", INPUTS["canonicalize-deep"]()[case][1])
+    expected: Final = parse(source).canonicalize()
+    assert etree.tostring(etree.HTML(source), method="c14n") == (
+        expected
+        .replace(b"<head></head>", b"")
+        .replace(b' xmlns="http://www.w3.org/2000/svg"', b"")
+        .replace(b' xmlns:xlink="http://www.w3.org/1999/xlink"', b"")
+    )
 
 
 @pytest.mark.parametrize(

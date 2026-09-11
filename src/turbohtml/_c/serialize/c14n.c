@@ -130,20 +130,6 @@ static int c14n_xlink_in_scope(th_tree *tree, const th_node *node) {
     return 0;
 }
 
-/* Whether a proper ancestor of node up to and including apex binds the xlink prefix
-   -- the exclusive-c14n test for "already rendered by an output ancestor". apex is
-   always an ancestor of node here, so the walk always reaches it. */
-static int c14n_ancestor_binds_xlink(th_tree *tree, const th_node *node, const th_node *apex) {
-    for (const th_node *scan = node->parent;; scan = scan->parent) {
-        if (c14n_has_xlink(tree, scan)) {
-            return 1;
-        }
-        if (scan == apex) {
-            return 0;
-        }
-    }
-}
-
 static int c14n_prefix_forced(const th_c14n_opts *opts, const char *prefix) {
     int forced = 0;
     for (Py_ssize_t index = 0; index < opts->inclusive_count && !forced; index++) {
@@ -229,7 +215,8 @@ static int c14n_already_has(const c14n_attr *attrs, Py_ssize_t count, const char
    c14n namespace axis renders (default namespace, then the xlink prefix), followed
    by the attributes in (namespace URI, local name) order. When node is the apex its
    ancestors' xml: attributes are inherited onto it (c14n 1.1 excludes xml:id). */
-static void c14n_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_node *apex, const th_c14n_opts *opts) {
+static void c14n_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_node *apex, const th_c14n_opts *opts,
+                          const th_node **xlink_binding) {
     sbuf_putc(out, '<');
     sbuf_put_ucs4(out, node->text, node->text_len);
 
@@ -246,18 +233,19 @@ static void c14n_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_node
         sbuf_putc(out, '"');
     }
 
+    int has_xlink = c14n_has_xlink(tree, node);
     int render_xlink;
     if (node == apex) {
         if (opts->exclusive) {
-            render_xlink =
-                c14n_has_xlink(tree, node) || (c14n_prefix_forced(opts, "xlink") && c14n_xlink_in_scope(tree, node));
+            render_xlink = has_xlink || (c14n_prefix_forced(opts, "xlink") && c14n_xlink_in_scope(tree, node));
         } else {
-            render_xlink = c14n_xlink_in_scope(tree, node);
+            render_xlink = has_xlink || *xlink_binding != NULL;
         }
-    } else if (opts->exclusive) {
-        render_xlink = c14n_has_xlink(tree, node) && !c14n_ancestor_binds_xlink(tree, node, apex);
     } else {
-        render_xlink = c14n_has_xlink(tree, node) && !c14n_xlink_in_scope(tree, node->parent);
+        render_xlink = has_xlink && *xlink_binding == NULL;
+    }
+    if (has_xlink && *xlink_binding == NULL) {
+        *xlink_binding = node;
     }
     if (render_xlink) {
         sbuf_puts(out, " xmlns:xlink=\"");
@@ -358,11 +346,12 @@ static void c14n_put_pi(sbuf *out, const th_node *node) {
    visits, or NULL once the subtree is done. Iterative -- descending through
    first_child and closing each element on the way back up -- so an arbitrarily deep
    tree serializes without one C stack frame per level. */
-static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node *apex, const th_c14n_opts *opts) {
+static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node *apex, const th_c14n_opts *opts,
+                          const th_node **xlink_binding) {
     th_node *descend = NULL;
     switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT:
-        c14n_open_tag(out, tree, node, apex, opts);
+        c14n_open_tag(out, tree, node, apex, opts, xlink_binding);
         if (node->first_child != NULL) {
             descend = node->first_child;
         } else {
@@ -394,6 +383,9 @@ static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node
         return descend;
     }
     while (node != apex) {
+        if (*xlink_binding == node) {
+            *xlink_binding = NULL;
+        }
         if (node->next_sibling != NULL) {
             return node->next_sibling;
         }
@@ -406,9 +398,11 @@ static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node
 }
 
 static void c14n_subtree(sbuf *out, th_tree *tree, th_node *apex, const th_c14n_opts *opts) {
+    /* Only the first actual binding needs a lifetime; nested bindings cannot outlive it. */
+    const th_node *xlink_binding = !opts->exclusive && c14n_xlink_in_scope(tree, apex->parent) ? apex->parent : NULL;
     th_node *node = apex;
     while (node != NULL) {
-        node = c14n_step(out, tree, node, apex, opts);
+        node = c14n_step(out, tree, node, apex, opts, &xlink_binding);
     }
 }
 

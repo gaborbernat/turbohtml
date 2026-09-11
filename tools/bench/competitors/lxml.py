@@ -497,6 +497,7 @@ OPERATIONS = {
     "serialize": (serialize, "lxml"),
     "serialize-xml": (serialize_xml, "lxml method=xml"),
     "canonicalize": (canonicalize, "lxml method=c14n"),
+    "canonicalize-deep": (canonicalize, "lxml method=c14n"),
     "extract-attr": (extract_attr, "lxml"),
     "extract-text": (extract_text, "lxml"),
     "strip-remove": (strip_remove, "lxml"),

@@ -383,7 +383,7 @@ OPERATIONS: dict[str, Operation] = {
     "serialize-xml": Operation("serialize a parsed tree to XML", "us"),
     "canonicalize": Operation("canonicalize a parsed tree (c14n)", "us"),
     "canonicalize-attrs": Operation("canonicalize an element with many attributes", "ms"),
-    "canonicalize-deep": Operation("canonicalize a deep xlink-free tree (c14n)", "us"),
+    "canonicalize-deep": Operation("canonicalize deep trees with and without xlink attributes (c14n)", "us"),
     "lossless-serialize": Operation("edit then re-emit untouched bytes (to_source)", "us"),
     "minify": Operation("minify a document", "us"),
     "edit": Operation("tag every link rel=nofollow", "us"),
@@ -1770,7 +1770,14 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         )
         for size in (100, 1_000, 10_000)
     ),
-    "canonicalize-deep": lambda: (("deep tree (150 deep)", _deep_tree(150, 3)),),
+    "canonicalize-deep": lambda: (
+        ("deep tree (150 deep)", _deep_tree(150, 3)),
+        (
+            "sparse xlink (150 deep)",
+            "<svg>" + ('<g><use xlink:href="#x"/>' * 150) + "</g>" * 150 + "</svg>",
+        ),
+        ("shallow ordinary", "<main><p>plain text</p><div id=a>more text</div></main>"),
+    ),
     "lossless-serialize": _readpath_cases,
     "minify": _readpath_cases,
     "socialcard": lambda: (

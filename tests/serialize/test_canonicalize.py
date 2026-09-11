@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import Canonical, CData, Element, ProcessingInstruction, Text, parse
 
@@ -342,3 +345,95 @@ def test_w3c_spec_example_pis_and_comments() -> None:
         ],
     )
     assert node.canonicalize() == b"<doc><?pi-without-data?><e1></e1><e2></e2></doc>"
+
+
+@pytest.mark.parametrize(
+    "size",
+    [
+        pytest.param(1, id="single"),
+        pytest.param(31, id="31-attrs"),
+        pytest.param(32, id="32-attrs"),
+        pytest.param(33, id="33-attrs"),
+        pytest.param(1_000, id="wide"),
+    ],
+)
+def test_canonicalize_orders_many_attributes(size: int) -> None:
+    element: Final[Element] = parse(
+        "<div " + " ".join(f'data-{index:05d}="{index}"' for index in range(size, 0, -1)) + "></div>"
+    ).select("div")[0]
+    assert (
+        element.canonicalize()
+        == ("<div " + " ".join(f'data-{index:05d}="{index}"' for index in range(1, size + 1)) + "></div>").encode()
+    )
+
+
+_XLINK: Final = ' xmlns:xlink="http://www.w3.org/1999/xlink"'
+_SVG: Final = ' xmlns="http://www.w3.org/2000/svg"'
+
+
+@pytest.mark.parametrize("exclusive", [False, True], ids=["inclusive", "exclusive"])
+@pytest.mark.parametrize(
+    ("children", "expected"),
+    [
+        pytest.param(
+            '<use xlink:href="a"/><use xlink:href="b"/>',
+            f'<use{_XLINK} xlink:href="a"></use><use{_XLINK} xlink:href="b"></use>',
+            id="empty-siblings",
+        ),
+        pytest.param(
+            '<g xlink:href="a"><use xlink:href="b"/></g><use xlink:href="c"/>',
+            f'<g{_XLINK} xlink:href="a"><use xlink:href="b"></use></g><use{_XLINK} xlink:href="c"></use>',
+            id="nested-binding-closes",
+        ),
+        pytest.param(
+            '<g xlink:href="a"><g><use xlink:href="b"/></g><use xlink:href="c"/></g>',
+            f'<g{_XLINK} xlink:href="a"><g><use xlink:href="b"></use></g><use xlink:href="c"></use></g>',
+            id="outer-binding-survives-inner-close",
+        ),
+        pytest.param(
+            '<g xlink:href="a">text<!--comment--><use/></g><g><use xlink:href="b"/></g>',
+            f'<g{_XLINK} xlink:href="a">text<use></use></g><g><use{_XLINK} xlink:href="b"></use></g>',
+            id="text-and-comment",
+        ),
+    ],
+)
+def test_canonicalize_sibling_scopes(children: str, expected: str, *, exclusive: bool) -> None:
+    node = parse(f"<svg>{children}</svg>").select_one("svg")
+    assert node is not None
+    assert node.canonicalize(Canonical(exclusive=exclusive)) == f"<svg{_SVG}>{expected}</svg>".encode()
+
+
+@pytest.mark.parametrize(
+    ("options", "apex_declaration", "child_declaration"),
+    [
+        pytest.param(Canonical(), _XLINK, "", id="inclusive"),
+        pytest.param(Canonical(exclusive=True), "", _XLINK, id="exclusive"),
+        pytest.param(Canonical(exclusive=True, inclusive_ns_prefixes=("xlink",)), _XLINK, _XLINK, id="forced-prefix"),
+    ],
+)
+def test_canonicalize_inherited_scope(options: Canonical, apex_declaration: str, child_declaration: str) -> None:
+    node = parse('<svg xlink:href="outer" xml:lang="en"><g><use xlink:href="inner"/></g></svg>').select_one("g")
+    assert node is not None
+    assert node.canonicalize(options) == (
+        f'<g{_SVG}{apex_declaration} xml:lang="en"><use{child_declaration} xlink:href="inner"></use></g>'.encode()
+    )
+
+
+def test_canonicalize_scope_after_attribute_mutation() -> None:
+    node = parse('<svg xlink:href="outer"><g><use xlink:href="inner"/></g></svg>').select_one("svg")
+    assert node is not None
+    node.canonicalize()
+    del node.attrs["xlink:href"]
+    assert node.canonicalize() == f'<svg{_SVG}><g><use{_XLINK} xlink:href="inner"></use></g></svg>'.encode()
+
+
+def test_canonicalize_shared_sparse_xlink_input() -> None:
+    source = INPUTS["canonicalize-deep"]()[1][1]
+    assert isinstance(source, str)
+    assert (
+        parse(source).canonicalize()
+        == (
+            "<html><head></head><body>"
+            f"<svg{_SVG}>" + f'<g><use{_XLINK} xlink:href="#x"></use>' * 150 + "</g>" * 150 + "</svg></body></html>"
+        ).encode()
+    )

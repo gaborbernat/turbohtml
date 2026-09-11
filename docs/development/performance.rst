@@ -1571,6 +1571,17 @@ normalization and canonicalization inputs measure the smaller workloads alongsid
 .. bench-table::
     :file: bench/canonicalize-attrs.json
 
+Tracking the active xlink namespace scope during serialization avoids ancestor scans at each xlink attribute. On an SVG
+tree 150 levels deep with one xlink-bearing sibling per level, matched release time fell from 20.392 to 9.907 µs
+(51.41%). The deep tree without xlink changed from 15.168 to 15.709 µs (+3.57%); the shallow ordinary control changed
+from 0.244 to 0.254 µs (+3.89%). CodSpeed covers these three inputs.
+
+Lxml's HTML parser omits the empty head element on these inputs and the SVG and xlink namespace declarations on the
+sparse-xlink input. These output differences exclude its cells from timing comparisons.
+
+.. bench-table::
+    :file: bench/canonicalize-deep.json
+
 Language detection
 ==================
 
