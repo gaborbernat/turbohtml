@@ -166,6 +166,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "querying-6": "escape-identifier",
     "sanitize": "sanitize",
     "sanitize-node": "sanitize-node",
+    "sanitize-attributes": "sanitize-attributes",
     "linkify-node": "linkify-node",
     "sanitize-templates": "sanitize-templates",
     "serializing": "serialize",

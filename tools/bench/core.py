@@ -55,6 +55,9 @@ if TYPE_CHECKING:
     from turbohtml import Node
 
 _SANITIZER = _clean.Sanitizer(_clean.Policy.relaxed())
+_SANITIZER_ATTRIBUTES: Final = _clean.Sanitizer(
+    _clean.Policy(tags=frozenset({"p"}), attribute_prefixes=frozenset({"data-"}))
+)
 _SANITIZER_TEMPLATES = _clean.Sanitizer(replace(_clean.Policy.relaxed(), strip_template_markers=True))
 _SANITIZER_STYLES = _clean.Sanitizer(
     replace(
@@ -613,6 +616,11 @@ def syndication(text: str) -> None:
 def sanitize(text: str) -> None:
     """Sanitize with turbohtml's relaxed policy, reusing a prebuilt sanitizer."""
     _SANITIZER.sanitize(text)
+
+
+def sanitize_attributes(text: str) -> None:
+    """Reuse the policy to isolate attribute handling from sanitizer construction."""
+    _SANITIZER_ATTRIBUTES.sanitize(text)
 
 
 def sanitize_templates(text: str) -> None:
@@ -1474,6 +1482,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "sanitize-named-props": (sanitize_named_props, "turbohtml"),
     "sanitize-report": (sanitize_report, "turbohtml"),
     "sanitize-node": (Mutating(turbohtml.parse_fragment, sanitize_node), "turbohtml"),
+    "sanitize-attributes": (sanitize_attributes, "turbohtml"),
     "sanitize-styles": (sanitize_styles, "turbohtml"),
     "sanitize-transform": (sanitize_transform, "turbohtml"),
     "sanitize-custom-elements": (sanitize_custom_elements, "turbohtml"),

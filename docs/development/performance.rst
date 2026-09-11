@@ -1677,5 +1677,14 @@ already-linked tree. These operations can be stages in an application's cleanup 
 .. bench-table::
     :file: bench/sanitize-node.json
 
+The sanitizer batches name-policy rejections on elements with at least 32 attributes when reporting and
+attribute/custom-element callbacks are disabled. The retained attributes still pass the URL, style and value safety
+checks. Matched runs reduced the 1,024-rejected-attribute case from 359.0 to 116.4 microseconds, a 67.57% gain. The
+1,024-allowed-attribute control slowed by 0.06%; the four-allowed-attribute control slowed by 2.82%. These cases reuse a
+compiled policy and include parsing and serialization; all three also run in CodSpeed.
+
+.. bench-table::
+    :file: bench/sanitize-attributes.json
+
 .. bench-table::
     :file: bench/linkify-node.json

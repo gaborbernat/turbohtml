@@ -1,0 +1,36 @@
+{
+  "label": "sanitize attribute allowlists",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1024 rejected attributes",
+      0.00011641045872086882
+    ],
+    [
+      "1024 allowed attributes",
+      0.00017659213720738382
+    ],
+    [
+      "four allowed attributes",
+      1.5934406494425938e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01938614000734418
+    ],
+    [
+      null,
+      0.018378016537515418
+    ],
+    [
+      null,
+      0.04987311474084385
+    ]
+  ],
+  "notes": {}
+}
