@@ -248,6 +248,8 @@ def test_speculative_backtrack_does_not_leak_error(source: str, expected: str) -
         pytest.param("x = 1_000_000", "x=1e6", id="separators-and-exponent"),
         pytest.param("x = 1000", "x=1e3", id="round-integer-exponent"),
         pytest.param("x = 100", "x=100", id="exponent-not-shorter"),
+        pytest.param("x = 0", "x=0", id="zero-integer"),
+        pytest.param("x = " + "1" + "0" * 63, "x=1e63", id="long-integer-exponent"),
         pytest.param("x = 0xFF", "x=0xFF", id="hex-kept"),
         pytest.param("x = 007", "x=007", id="legacy-octal-kept"),
         pytest.param("x = 0.0", "x=0", id="zero-point-zero"),

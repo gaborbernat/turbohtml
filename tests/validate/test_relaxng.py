@@ -835,3 +835,34 @@ def test_lxml_rng_reuse_benchmark_output(index: int) -> None:
         schema.validate(etree.fromstring(text.encode()))
         for text in (document, document.replace("</", "<unexpected/></", 1))
     ] == [True, False]
+
+
+@pytest.mark.parametrize(
+    ("combinator", "left", "right", "expected"),
+    [
+        pytest.param("choice", "<empty/>", '<element name="x"><empty/></element>', True, id="choice-left-empty"),
+        pytest.param("choice", '<element name="x"><empty/></element>', "<empty/>", True, id="choice-right-empty"),
+        pytest.param(
+            "choice",
+            '<element name="x"><empty/></element>',
+            '<element name="y"><empty/></element>',
+            False,
+            id="choice-neither-empty",
+        ),
+        pytest.param("group", "<empty/>", "<empty/>", True, id="group-both-empty"),
+        pytest.param("group", '<element name="x"><empty/></element>', "<empty/>", False, id="group-left-required"),
+        pytest.param("group", "<empty/>", '<element name="x"><empty/></element>', False, id="group-right-required"),
+        pytest.param("interleave", "<empty/>", "<empty/>", True, id="interleave-empty"),
+        pytest.param("oneOrMore", "<empty/>", "<empty/>", True, id="one-or-more-empty"),
+        pytest.param("choice", '<ref name="left"/>', "<empty/>", True, id="recursive-choice-empty"),
+    ],
+)
+def test_rng_reference_nullability(combinator: str, left: str, right: str, *, expected: bool) -> None:
+    schema: Final = RelaxNG(
+        '<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><element name="r">'
+        '<attribute name="a"><list>'
+        f'<{combinator}><ref name="left"/><ref name="right"/></{combinator}>'
+        "</list></attribute></element></start>"
+        f'<define name="left">{left}</define><define name="right">{right}</define></grammar>'
+    )
+    assert schema.validate(parse_xml('<r a=""/>')).valid is expected

@@ -640,18 +640,14 @@ static void print_number(St *st, const jm_node *node) {
         }
         char digits[8];
         int digit_len = snprintf(digits, sizeof(digits), "%lld", (long long)zeros);
-        if (head + 1 + digit_len < len) {
-            for (Py_ssize_t index = 0; index < head; index++) {
-                out[out_len++] = buf[index];
-            }
-            out[out_len++] = 'e';
-            for (int index = 0; index < digit_len; index++) {
-                out[out_len++] = (Py_UCS4)(unsigned char)digits[index];
-            }
-            put_run(st, out, out_len);
-            return;
+        for (Py_ssize_t index = 0; index < head; index++) {
+            out[out_len++] = buf[index];
         }
-        put_run(st, buf, len);
+        out[out_len++] = 'e';
+        for (int index = 0; index < digit_len; index++) {
+            out[out_len++] = (Py_UCS4)(unsigned char)digits[index];
+        }
+        put_run(st, out, out_len);
         return;
     }
     Py_ssize_t istart = 0;

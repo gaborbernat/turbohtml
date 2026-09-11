@@ -1776,3 +1776,14 @@ def test_named_facet_probe_benchmark_output(index: int) -> None:
         True,
         index == 1,
     ]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("1." + "0" * 80, True, id="long-fraction-in-bound"),
+        pytest.param("9" * 80, False, id="long-integer-out-of-bound"),
+    ],
+)
+def test_xsd_long_decimal_bound(value: str, *, expected: bool) -> None:
+    assert check(restricted('<xs:maxInclusive value="2"/>', "xs:decimal"), f"<v>{value}</v>").valid is expected

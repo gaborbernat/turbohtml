@@ -367,6 +367,16 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             id="regex-not-in-next-expr-kept",
         ),
         pytest.param(
+            "function f(){var r=/a/;return c?r.test(s):g()}",
+            "function f(){return c?/a/.test(s):g()}",
+            id="regex-into-ternary-consquent",
+        ),
+        pytest.param(
+            "function f(){var r=/a/;return c?g():r.test(s)}",
+            "function f(){return c?g():/a/.test(s)}",
+            id="regex-into-ternary-alt",
+        ),
+        pytest.param(
             "function f(){var r=/a/;throw g(w);function g(x){return r.test(x)}}",
             "function f(){var a=/a/;throw function(b){return a.test(b)}(w)}",
             id="regex-next-throw-without-read-kept",
@@ -384,6 +394,16 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             "function f(){var r=/a/;if(c){var q}g(r.test(s),q)}",
             "function f(){var b=/a/;if(c)var a;g(b.test(s),a)}",
             id="regex-past-if-kept",
+        ),
+        pytest.param(
+            "function f(){var r=/a/;for(;c;)g(r.test(s));}",
+            "function f(){for(var a=/a/;c;)g(a.test(s))}",
+            id="regex-into-for-loop-body",
+        ),
+        pytest.param(
+            "function f(){var r=/a/;for(;c;h(r.test(s)));}",
+            "function f(){for(var a=/a/;c;h(a.test(s)));}",
+            id="regex-into-for-loop-update",
         ),
         pytest.param(
             "function f(){var x=1;return function(){return{k:x,m:x}}}",
@@ -438,6 +458,11 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             "function f(){var r=/a/;while(c)h();return r.test(s)}",
             "function f(){for(var a=/a/;c;)h();return a.test(s)}",
             id="regex-past-loop-kept",
+        ),
+        pytest.param(
+            "function f(c){var r=/a/;return c?1:r}",
+            "function f(a){return a?1:/a/}",
+            id="regex-conditional-alternate",
         ),
         # a non-literal single use collapses only when its declaration immediately precedes the use as a
         # whole `return`/`throw` value (nothing runs between, no closure captures it); otherwise it stays

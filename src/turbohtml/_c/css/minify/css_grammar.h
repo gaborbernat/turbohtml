@@ -853,10 +853,10 @@ static int css_summarize_body(const css_buf *pool, Py_ssize_t offset, Py_ssize_t
 
 static int css_summaries_conflict(const css_buf *pool, const rule_item *first, const rule_item *second,
                                   css_body_summary *left, css_body_summary *right) {
-    if (!css_summarize_body(pool, first->body_off, first->body_len,
-                            left) || /* GCOVR_EXCL_BR_LINE: allocation failure */
-        !css_summarize_body(pool, second->body_off, second->body_len,
-                            right)) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+    /* GCOVR_EXCL_BR_START: allocation failure */
+    if (!css_summarize_body(pool, first->body_off, first->body_len, left) ||
+        !css_summarize_body(pool, second->body_off, second->body_len, right)) {
+        /* GCOVR_EXCL_BR_STOP */
         /* GCOVR_EXCL_START: allocation failure fallback */
         return css_bodies_conflict(pool, first->body_off, first->body_len, second->body_off, second->body_len);
         /* GCOVR_EXCL_STOP */

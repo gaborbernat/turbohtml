@@ -596,9 +596,6 @@ static int rng_nullable(th_schema *schema, pattern *p) {
         return p->nullable;
     }
     switch (p->type) {
-    case P_EMPTY:
-    case P_TEXT:
-        return 1;
     case P_CHOICE:
         return rng_nullable(schema, p->p1) || rng_nullable(schema, p->p2);
     case P_GROUP:
@@ -606,7 +603,7 @@ static int rng_nullable(th_schema *schema, pattern *p) {
         return rng_nullable(schema, p->p1) && rng_nullable(schema, p->p2);
     case P_ONEMORE:
         return rng_nullable(schema, p->p1);
-    case P_REF: {
+    default: { /* P_REF is the remaining kind without cached nullability. */
         def_entry *entry = &schema->defines.items[p->def_index];
         if (entry->building) { /* a ref recursive without an element guard is not nullable */
             return 0;
@@ -616,8 +613,6 @@ static int rng_nullable(th_schema *schema, pattern *p) {
         entry->building = 0;
         return nullable;
     }
-    default:
-        return 0;
     }
 }
 
