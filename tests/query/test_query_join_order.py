@@ -15,6 +15,7 @@ from turbohtml.query import Query
     [
         pytest.param(["a"], ["b", "c"], id="single-root"),
         pytest.param(["a", "b"], ["b", "c", "a"], id="same-parent"),
+        pytest.param(["a", "b", "c"], ["b", "c", "a"], id="complete-parent"),
         pytest.param(["b", "a"], ["a", "c", "b"], id="reverse-roots"),
         pytest.param(["a", "d", "b"], ["b", "c", "e", "a"], id="interleaved-parents"),
     ],

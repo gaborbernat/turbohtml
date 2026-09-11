@@ -1551,11 +1551,19 @@ PyObject *node_css_matches(PyObject *self, PyObject *arg) {
 }
 
 PyObject *node_css_closest(PyObject *self, PyObject *arg) {
-    if (check_selector_arg(arg) < 0) {
+    th_node *found;
+    if (node_css_closest_borrowed(self, arg, &found) < 0) {
         return NULL;
     }
+    return node_wrap(state_of(self), ((NodeObject *)self)->handle, found);
+}
+
+int node_css_closest_borrowed(PyObject *self, PyObject *arg, th_node **found) {
+    if (check_selector_arg(arg) < 0) {
+        return -1;
+    }
     PyObject *handle = ((NodeObject *)self)->handle;
-    th_node *found = NULL;
+    *found = NULL;
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock around the ancestor walk */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
@@ -1566,16 +1574,16 @@ PyObject *node_css_closest(PyObject *self, PyObject *arg) {
         th_node *scope = ((NodeObject *)self)->node;
         for (th_node *node = scope; node != NULL; node = node->parent) {
             if (node->type == TH_NODE_ELEMENT && selector_matches(node, compiled, scope)) {
-                found = node;
+                *found = node;
                 break;
             }
         }
     }
     Py_END_CRITICAL_SECTION();
     if (error) {
-        return NULL;
+        return -1;
     }
-    return node_wrap(state_of(self), handle, found);
+    return 0;
 }
 
 /* One entry in prune()'s keep set: a node the prune must retain. full marks a

@@ -558,8 +558,23 @@
     ],
     [
       "collect selected nodes' siblings — 1024 siblings, one selected",
-      3.32605689701874e-05,
+      1.1217695530045072e-05,
       4.766030679851004e-05
+    ],
+    [
+      "collect closest matching ancestors — 1024 children, distinct ancestors",
+      3.30035854972266e-05,
+      0.008992374120862224
+    ],
+    [
+      "collect selected nodes' parents — 1024 children, shared parent",
+      3.543244466897022e-06,
+      3.3878582782638963e-05
+    ],
+    [
+      "collect selected nodes' parents — 1024 children, distinct parents",
+      1.8144916635757604e-05,
+      0.0029544495622152076
     ]
   ],
   "spread": [
@@ -1115,8 +1130,23 @@
     ],
     [
       null,
-      0.00867315348940588,
+      0.00850065501833793,
       0.013889415118836674
+    ],
+    [
+      null,
+      0.012270255589286072,
+      0.010174383113537723
+    ],
+    [
+      null,
+      0.0022773708210177407,
+      0.007392727859271202
+    ],
+    [
+      null,
+      0.0074493507514251205,
+      0.016638820076204264
     ]
   ],
   "row_notes": {}

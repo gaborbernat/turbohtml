@@ -381,6 +381,9 @@ OPERATIONS: dict[str, Operation] = {
     "set-html": Operation("replace body inner HTML", "us"),
     "set-text": Operation("replace body text", "us"),
     "observe": Operation("observe a subtree through many edits", "us"),
+    "query-closest": Operation("collect closest matching ancestors", "us"),
+    "node-closest": Operation("find a node's closest matching ancestor", "us"),
+    "query-parents": Operation("collect selected nodes' parents", "us"),
     "query-siblings": Operation("collect selected nodes' siblings", "us"),
     "prune-shared": Operation("prune shared ancestors", "us"),
     "observe-registrations": Operation("reject unrelated observer registrations", "us"),
@@ -1406,6 +1409,15 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "shadow-assignment": lambda: (("1000 unique", (1_000, "unique")), ("1 unique", (1, "unique"))),
     "shadow-fallback": lambda: (("1000 wide", (1_000, "wide")), ("1 wide", (1, "wide"))),
     "observe": _readpath_cases,
+    "query-closest": lambda: (
+        ("1024 children, shared ancestor", (1024, True)),
+        ("1024 children, distinct ancestors", (1024, False)),
+    ),
+    "node-closest": lambda: (("one child, cached selector", (1, True)),),
+    "query-parents": lambda: (
+        ("1024 children, shared parent", (1024, True)),
+        ("1024 children, distinct parents", (1024, False)),
+    ),
     "query-siblings": lambda: (
         ("1024 siblings, all selected", (1024, True)),
         ("1024 siblings, one selected", (1024, False)),

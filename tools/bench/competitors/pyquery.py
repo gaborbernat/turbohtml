@@ -191,6 +191,24 @@ def _encode_inner(text: str) -> bytes:
     return _serialize_inner(text).encode()
 
 
+def _query_closest(case: tuple[int, bool]) -> PyQuery:
+    if case[1]:
+        unsupported: Final = "Pyquery closest retains duplicate ancestors for multiple roots"
+        raise NotImplementedError(unsupported)
+    return _query_parents_case(case).closest("main")
+
+
+def _query_parents(case: tuple[int, bool]) -> PyQuery:
+    return _query_parents_case(case).parent()
+
+
+@functools.cache
+def _query_parents_case(case: tuple[int, bool]) -> PyQuery:
+    count, shared = case
+    text: Final = "<main>" + "<p>x</p>" * count + "</main>" if shared else "<main><p>x</p></main>" * count
+    return PyQuery(text, parser="html")("p")
+
+
 def _query_siblings(case: tuple[int, bool]) -> PyQuery:
     return _query_siblings_case(case).siblings()
 
@@ -205,6 +223,8 @@ def _query_siblings_case(case: tuple[int, bool]) -> PyQuery:
 
 
 OPERATIONS = {
+    "query-closest": (_query_closest, "pyquery"),
+    "query-parents": (_query_parents, "pyquery"),
     "query-siblings": (_query_siblings, "pyquery"),
     "serialize-inner": (_serialize_inner, "pyquery"),
     "encode-inner": (_encode_inner, "pyquery"),

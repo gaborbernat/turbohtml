@@ -1,0 +1,33 @@
+{
+  "label": "collect closest matching ancestors",
+  "parties": [
+    "turbohtml",
+    "pyquery"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1024 children, shared ancestor",
+      1.7496007616083867e-05,
+      "Pyquery closest retains duplicate ancestors for multiple roots"
+    ],
+    [
+      "1024 children, distinct ancestors",
+      3.30035854972266e-05,
+      0.008992374120862224
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.010277027486656331,
+      null
+    ],
+    [
+      null,
+      0.012270255589286072,
+      0.010174383113537723
+    ]
+  ],
+  "notes": {}
+}

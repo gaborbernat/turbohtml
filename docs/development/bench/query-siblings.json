@@ -8,24 +8,24 @@
   "rows": [
     [
       "1024 siblings, all selected",
-      7.12547770187181e-05,
+      1.5081256609050798e-05,
       "Pyquery siblings retains duplicates and uses a different result order for multiple roots"
     ],
     [
       "1024 siblings, one selected",
-      3.32605689701874e-05,
+      1.1217695530045072e-05,
       4.766030679851004e-05
     ]
   ],
   "spread": [
     [
       null,
-      0.02058901025192514,
+      0.008951011842204152,
       null
     ],
     [
       null,
-      0.00867315348940588,
+      0.00850065501833793,
       0.013889415118836674
     ]
   ],

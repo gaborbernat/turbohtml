@@ -1283,6 +1283,25 @@ def _prune_shared(root: turbohtml.Element) -> None:
     root.prune("b")
 
 
+def _query_closest(case: tuple[int, bool]) -> None:
+    _query_parents_case(case).closest("main")
+
+
+def _node_closest(case: tuple[int, bool]) -> None:
+    _query_parents_case(case)[0].closest("main")
+
+
+def _query_parents(case: tuple[int, bool]) -> None:
+    _query_parents_case(case).parent()
+
+
+@functools.cache
+def _query_parents_case(case: tuple[int, bool]) -> _Query:
+    count, shared = case
+    text: Final = "<main>" + "<p>x</p>" * count + "</main>" if shared else "<main><p>x</p></main>" * count
+    return _Query(text)("p")
+
+
 def _query_siblings(case: tuple[int, bool]) -> None:
     _query_siblings_case(case).siblings()
 
@@ -1295,6 +1314,9 @@ def _query_siblings_case(case: tuple[int, bool]) -> _Query:
 
 
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "query-closest": (_query_closest, "turbohtml"),
+    "node-closest": (_node_closest, "turbohtml"),
+    "query-parents": (_query_parents, "turbohtml"),
     "query-siblings": (_query_siblings, "turbohtml"),
     "prune-shared": (Mutating(_prune_shared_setup, _prune_shared), "turbohtml"),
     "shadow-assignment": (Mutating(_shadow_assignment_setup, _run_prepared), "turbohtml"),

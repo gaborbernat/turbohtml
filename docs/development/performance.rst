@@ -503,12 +503,39 @@ release builds without PGO or LTO reduced the all-selected case from 35,528.207 
 single-selected control measured 33.243 and 33.261 µs, effectively unchanged. Candidate spread was 2.06% and 0.87%. All
 eight comparisons passed CPU-headroom and memory-pressure guards. CodSpeed tracks both cases.
 
+A further allocation change emits the omitted node once per sibling group, then skips that completed group. Matched time
+fell from 70.843 to 15.081 µs (78.71%) for all selected siblings and from 33.632 to 11.218 µs (66.65%) for one selected
+sibling. The table shows these final measurements.
+
 The single-selected case also compares pyquery, with parsing and selection cached for both libraries. pyquery measured
-47.660 µs (1.39% spread), versus 33.261 µs for turbohtml. Its multi-selected result retains duplicates and uses a
+47.660 µs (1.39% spread), versus 11.218 µs for turbohtml. Its multi-selected result retains duplicates and uses a
 different order, so that cell is unsupported rather than timed.
 
 .. bench-table::
     :file: bench/query-siblings.json
+
+Parent and closest joins deduplicate native node identities before allocating result wrappers. The parent cases select
+1,024 children with either one shared parent or 1,024 distinct parents. Matched time fell from 30.545 to 3.543 µs
+(88.40%) for the shared parent and from 42.602 to 18.145 µs (57.41%) for distinct parents. Input owners keep the trees
+alive throughout traversal; output order follows the first encounter of each result.
+
+.. bench-table::
+    :file: bench/query-parents.json
+
+Closest joins keep each selected element's selector scope and the existing ancestor walk. For 1,024 children, matched
+time fell from 45.406 to 17.496 µs (61.47%) with a shared matching ancestor and from 60.596 to 33.004 µs (45.54%) with
+distinct matching ancestors. Pyquery retains duplicate ancestors for the shared case; only the distinct case is
+comparable. Both libraries cache parsing and initial selection outside these join timings.
+
+.. bench-table::
+    :file: bench/query-closest.json
+
+The direct ``Node.closest()`` control changed from 0.0983 to 0.0967 µs, below the 5% improvement threshold. Its cached
+selector and single-child input check the shared ancestor-walk path. These join allocation changes apply to GIL builds;
+free-threaded builds retain their existing traversal and deduplication paths. CodSpeed covers all seven cases.
+
+.. bench-table::
+    :file: bench/node-closest.json
 
 A text-content search runs through :meth:`~turbohtml.Node.find_all` with ``text=`` (a regex matched against each
 element's collected subtree text), raced against ``BeautifulSoup.find_all(string=...)`` and the equivalent text filters

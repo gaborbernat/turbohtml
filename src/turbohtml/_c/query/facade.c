@@ -83,6 +83,11 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
         return NULL;
     }
     PyObject *out = PyList_New(0);
+#ifndef Py_GIL_DISABLED
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+#else
     PyObject *seen = PySet_New(NULL);
     /* GCOVR_EXCL_BR_START: list and set allocation cannot be forced to fail */
     if (out == NULL || seen == NULL) {
@@ -91,6 +96,7 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
         return NULL;      /* GCOVR_EXCL_LINE */
     }
     /* GCOVR_EXCL_BR_STOP */
+#endif
 #ifndef Py_GIL_DISABLED
     th_node_map parents = {0};
 #endif
@@ -108,16 +114,16 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
         }
 #ifndef Py_GIL_DISABLED
         /* The memo must not outlive exclusive traversal access to the tree. */
-        Py_ssize_t first = th_node_map_find(&parents, node->parent);
+        const Py_ssize_t first = th_node_map_find(&parents, node->parent);
         if (first != 0) {
-            PyObject *previous = PyList_GET_ITEM(nodes, first - 1);
-            th_node *omitted = ((NodeObject *)previous)->node;
-            PyObject *wrapper = turbohtml_node_wrap_in(previous, omitted);
-            status = wrapper == NULL ? -1 : facade_keep_new(out, seen, wrapper, omitted); /* GCOVR_EXCL_BR_LINE */
-            Py_XDECREF(wrapper);                                                          /* GCOVR_EXCL_BR_LINE */
-            if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                break;        /* GCOVR_EXCL_LINE */
-            } /* GCOVR_EXCL_LINE */
+            if (first <= PyList_GET_SIZE(nodes)) {
+                status =
+                    PyList_Append(out, PyList_GET_ITEM(nodes, first - 1)); /* GCOVR_EXCL_BR_LINE: allocation failure */
+                parents.entries[th_node_map_slot(&parents, node->parent)].value = PyList_GET_SIZE(nodes) + 1;
+                if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    break;        /* GCOVR_EXCL_LINE */
+                }
+            }
             continue;
         }
         if (th_node_map_insert(&parents, node->parent, index + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -137,7 +143,11 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
                 break;       /* GCOVR_EXCL_LINE */
             }
             /* GCOVR_EXCL_BR_STOP */
+#ifndef Py_GIL_DISABLED
+            status = PyList_Append(out, wrapper); /* GCOVR_EXCL_BR_LINE: allocation failure */
+#else
             status = facade_keep_new(out, seen, wrapper, sibling);
+#endif
             Py_DECREF(wrapper);
             if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
                 break;        /* GCOVR_EXCL_LINE */
@@ -149,8 +159,9 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
     }
 #ifndef Py_GIL_DISABLED
     PyMem_Free(parents.entries);
-#endif
+#else
     Py_DECREF(seen);
+#endif
     if (status < 0) {
         Py_DECREF(out);
         return NULL;
@@ -166,6 +177,12 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
         return NULL;
     }
     PyObject *out = PyList_New(0);
+#ifndef Py_GIL_DISABLED
+    th_node_map seen = {0};
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+#else
     PyObject *seen = PySet_New(NULL);
     /* GCOVR_EXCL_BR_START: list and set allocation cannot be forced to fail */
     if (out == NULL || seen == NULL) {
@@ -174,6 +191,7 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
         return NULL;      /* GCOVR_EXCL_LINE */
     }
     /* GCOVR_EXCL_BR_STOP */
+#endif
     int status = 0;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(nodes); index++) {
         PyObject *owner = PyList_GET_ITEM(nodes, index);
@@ -186,18 +204,36 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
         if (parent == NULL || parent->type != TH_NODE_ELEMENT) {
             continue; /* the document root, or a fragment's top-level element */
         }
+#ifndef Py_GIL_DISABLED
+        if (th_node_map_find(&seen, parent) != 0) {
+            continue;
+        }
+        if (th_node_map_insert(&seen, parent, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyErr_NoMemory();                           /* GCOVR_EXCL_LINE */
+            status = -1;                                /* GCOVR_EXCL_LINE */
+            break;                                      /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE */
+#endif
         PyObject *wrapper = turbohtml_node_wrap_in(owner, parent);
         if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: wrapper allocation cannot be forced to fail */
             status = -1;       /* GCOVR_EXCL_LINE */
             break;             /* GCOVR_EXCL_LINE */
         }
+#ifndef Py_GIL_DISABLED
+        status = PyList_Append(out, wrapper); /* GCOVR_EXCL_BR_LINE: allocation failure */
+#else
         status = facade_keep_new(out, seen, wrapper, parent);
+#endif
         Py_DECREF(wrapper);
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
             break;        /* GCOVR_EXCL_LINE */
         }
     }
+#ifndef Py_GIL_DISABLED
+    PyMem_Free(seen.entries);
+#else
     Py_DECREF(seen);
+#endif
     if (status < 0) {
         Py_DECREF(out);
         return NULL;
@@ -252,6 +288,12 @@ PyObject *turbohtml_query_closest(PyObject *module, PyObject *args) {
         return NULL;
     }
     PyObject *out = PyList_New(0);
+#ifndef Py_GIL_DISABLED
+    th_node_map seen = {0};
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+#else
     PyObject *seen = PySet_New(NULL);
     /* GCOVR_EXCL_BR_START: list and set allocation cannot be forced to fail */
     if (out == NULL || seen == NULL) {
@@ -260,6 +302,7 @@ PyObject *turbohtml_query_closest(PyObject *module, PyObject *args) {
         return NULL;      /* GCOVR_EXCL_LINE */
     }
     /* GCOVR_EXCL_BR_STOP */
+#endif
     int status = 0;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(nodes); index++) {
         PyObject *owner = PyList_GET_ITEM(nodes, index);
@@ -267,6 +310,24 @@ PyObject *turbohtml_query_closest(PyObject *module, PyObject *args) {
             status = -1;
             break;
         }
+#ifndef Py_GIL_DISABLED
+        th_node *node;
+        if (node_css_closest_borrowed(owner, selector, &node) < 0) {
+            status = -1;
+            break;
+        }
+        if (node == NULL || th_node_map_find(&seen, node) != 0) {
+            continue;
+        }
+        if (th_node_map_insert(&seen, node, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyErr_NoMemory();                         /* GCOVR_EXCL_LINE */
+            status = -1;                              /* GCOVR_EXCL_LINE */
+            break;                                    /* GCOVR_EXCL_LINE */
+        }
+        PyObject *found = turbohtml_node_wrap_in(owner, node);
+        status = found == NULL ? -1 : PyList_Append(out, found); /* GCOVR_EXCL_BR_LINE: allocation failure */
+        Py_XDECREF(found);
+#else
         PyObject *found = node_css_closest(owner, selector);
         if (found == NULL) {
             status = -1; /* an invalid selector */
@@ -276,11 +337,16 @@ PyObject *turbohtml_query_closest(PyObject *module, PyObject *args) {
             status = facade_keep_new(out, seen, found, facade_node(module, found));
         }
         Py_DECREF(found);
+#endif
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
             break;        /* GCOVR_EXCL_LINE */
         }
     }
+#ifndef Py_GIL_DISABLED
+    PyMem_Free(seen.entries);
+#else
     Py_DECREF(seen);
+#endif
     if (status < 0) {
         Py_DECREF(out);
         return NULL;
