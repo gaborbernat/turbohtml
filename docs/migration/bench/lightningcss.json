@@ -43,6 +43,69 @@
       0.008693945529860988,
       674333.0,
       0.01717652689573394
+    ],
+    [
+      "batch CSS rule merges — 10 identical media blocks",
+      155,
+      3.2320295455671534e-06,
+      65.0,
+      1.2561061273193749e-05
+    ],
+    [
+      "batch CSS rule merges — 1000 identical media blocks",
+      15905,
+      0.0002903690771442295,
+      5915.0,
+      0.006386193579237443
+    ],
+    [
+      "batch CSS rule merges — 10 identical declaration bodies",
+      50,
+      2.128971937054303e-06,
+      50.0,
+      7.003654134981237e-06
+    ],
+    [
+      "batch CSS rule merges — 1000 identical declaration bodies",
+      5900,
+      0.0001956030156482787,
+      5900.0,
+      0.0010730094609243679
+    ],
+    [
+      "batch CSS rule merges — 100 alternating media preludes",
+      2940,
+      3.1277452399081086e-05,
+      2940.0,
+      0.00010019563274757578
+    ],
+    [
+      "batch CSS rule merges — 100 rules with comment barriers",
+      2381,
+      2.2076973376291183e-05,
+      500.0,
+      6.650098880527367e-05
+    ],
+    [
+      "merge CSS rules across disjoint declarations — 32 rule pairs, 32 properties, 128 value bytes",
+      8818,
+      0.001534815234299458,
+      8818.0,
+      0.0009527734812460646
+    ],
+    [
+      "merge CSS rules across disjoint declarations — 32 rule pairs, 32 properties, 1 value bytes",
+      690,
+      0.000720662456357483,
+      690.0,
+      0.0008488582249507696
+    ],
+    [
+      "merge CSS rules across disjoint declarations — 1 rule pairs, 2 properties, 1 value bytes",
+      46,
+      8.943995756756824e-07,
+      46.0,
+      3.296143936874311e-06
     ]
   ],
   "spread": [
@@ -80,6 +143,69 @@
       0.12618949595325846,
       null,
       0.11449298554009829
+    ],
+    [
+      null,
+      null,
+      0.033998991065060304,
+      null,
+      0.007410582697123576
+    ],
+    [
+      null,
+      null,
+      0.011776467074972256,
+      null,
+      0.016219378293166265
+    ],
+    [
+      null,
+      null,
+      0.036145192230390887,
+      null,
+      0.009272616764195
+    ],
+    [
+      null,
+      null,
+      0.011685570930659781,
+      null,
+      0.008699574757384925
+    ],
+    [
+      null,
+      null,
+      0.009737992841934454,
+      null,
+      0.012815561270777868
+    ],
+    [
+      null,
+      null,
+      0.020681453435026666,
+      null,
+      0.005489938097840862
+    ],
+    [
+      null,
+      null,
+      0.011147349547324057,
+      null,
+      0.006752270719206326
+    ],
+    [
+      null,
+      null,
+      0.014938501764703004,
+      null,
+      0.007342180512737423
+    ],
+    [
+      null,
+      null,
+      0.04623363777835419,
+      null,
+      0.01938200824199317
     ]
   ],
   "row_notes": {}

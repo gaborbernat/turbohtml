@@ -96,6 +96,10 @@ Calmjs.parse also rejects the three call-initializer inputs because they declare
 the syntax mismatch. Turbohtml preserves callback order and returned values, producing 3,142 bytes for each 256-call
 layout and 37 bytes for one call.
 
+The mixed-declarator inputs also use ``const``, which calmjs.parse rejects. The ``var`` initialization inputs work in
+both libraries, including reads that must return ``undefined`` before their initializer runs. The comparison checks
+complete callback traces and returned values before timing.
+
 .. bench-table::
     :file: bench/calmjs-parse.json
 

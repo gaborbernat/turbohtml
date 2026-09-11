@@ -1,0 +1,130 @@
+{
+  "label": "remove mixed JavaScript declarators",
+  "parties": [
+    "turbohtml",
+    "esbuild",
+    "terser",
+    "rjsmin",
+    "jsmin",
+    "tdewolff",
+    "css-html-js-minify"
+  ],
+  "metrics": [
+    "size",
+    "time"
+  ],
+  "rows": [
+    [
+      "256 retained/literal pairs / one declaration",
+      4166,
+      0.00027648959686909315,
+      5907.0,
+      0.030402291643743713,
+      3565.0,
+      0.08963566523355743,
+      12680.0,
+      9.979738862853083e-06,
+      12680.0,
+      0.0014650728733613505,
+      5903.0,
+      0.0047161734393739605,
+      12680.0,
+      0.0008890126514112732
+    ],
+    [
+      "256 retained/literal pairs / separate declarations",
+      4166,
+      0.0002862023790309346,
+      5907.0,
+      0.03069509657410284,
+      3565.0,
+      0.09014152769620219,
+      14210.0,
+      1.1824020207029662e-05,
+      14210.0,
+      0.0016561113283387386,
+      5903.0,
+      0.004771397743509927,
+      14210.0,
+      0.0009965485235322073
+    ],
+    [
+      "1 retained/literal pairs / one declaration",
+      41,
+      2.257433022082959e-06,
+      46.0,
+      0.03039208613530112,
+      32.0,
+      0.046299035428091884,
+      68.0,
+      1.4313858075857648e-07,
+      68.0,
+      9.284866508115404e-06,
+      45.0,
+      0.0042525615477643445,
+      68.0,
+      6.353315400531301e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      null,
+      0.010675766547228148,
+      null,
+      0.011381024797695318,
+      null,
+      0.009347241087109237,
+      null,
+      0.005144332300525814,
+      null,
+      0.006835818229075166,
+      null,
+      0.00918336329539463,
+      null,
+      0.013263863472694022
+    ],
+    [
+      null,
+      null,
+      0.008132932677013201,
+      null,
+      0.010132242797120663,
+      null,
+      0.0044501168351053794,
+      null,
+      0.009226055164296936,
+      null,
+      0.009154841160107398,
+      null,
+      0.020471220314784558,
+      null,
+      0.007682243995729988
+    ],
+    [
+      null,
+      null,
+      0.01925808998379394,
+      null,
+      0.013997003113816612,
+      null,
+      0.026269645284707384,
+      null,
+      0.005308134335903983,
+      null,
+      0.006167268115091248,
+      null,
+      0.01913413892044787,
+      null,
+      0.009440476273955787
+    ]
+  ],
+  "notes": {
+    "esbuild": "runs a fresh command per call, including process startup and pipe I/O",
+    "terser": "runs a fresh command per call, including process startup and pipe I/O",
+    "rjsmin": "removes whitespace and comments; does not perform declaration or expression compression",
+    "jsmin": "removes whitespace and comments; does not perform declaration or expression compression",
+    "tdewolff": "runs a fresh command per call, including process startup and pipe I/O",
+    "css-html-js-minify": "removes whitespace and comments; does not perform declaration or expression compression"
+  }
+}

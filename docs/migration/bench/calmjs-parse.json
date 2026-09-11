@@ -106,6 +106,27 @@
       1.5377683748892442e-06,
       "ES5 parser rejects const",
       "ES5 parser rejects const"
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read after initialization",
+      3652,
+      0.00022982708333074697,
+      5191.0,
+      0.03897750491742045
+    ],
+    [
+      "check JavaScript var initialization order — 1 var pairs / read after initialization",
+      37,
+      2.0490305150981195e-06,
+      42.0,
+      0.0010633084645936227
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read before initialization",
+      4274,
+      0.00022446345478025856,
+      4277.0,
+      0.03349665277055465
     ]
   ],
   "spread": [
@@ -206,6 +227,27 @@
       0.016991173127781586,
       null,
       null
+    ],
+    [
+      null,
+      null,
+      0.010652664523775333,
+      null,
+      0.0498671089424858
+    ],
+    [
+      null,
+      null,
+      0.019888882536445274,
+      null,
+      0.015425530496553068
+    ],
+    [
+      null,
+      null,
+      0.01132166475402571,
+      null,
+      0.0474552197325009
     ]
   ],
   "row_notes": {

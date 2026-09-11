@@ -135,5 +135,29 @@ NOTES: Final[dict[str, dict[str, str]]] = {
     },
 }
 NOTES["navigate"] = {"resiliparse": NOTES["text-content"]["resiliparse"]}
+NOTES.update({
+    operation: {
+        **dict.fromkeys(
+            ("esbuild", "terser", "tdewolff"), "runs a fresh command per call, including process startup and pipe I/O"
+        ),
+        **dict.fromkeys(
+            ("rjsmin", "jsmin", "css-html-js-minify"),
+            "removes whitespace and comments; does not perform declaration or expression compression",
+        ),
+    }
+    for operation in ("minify-js-unlink", "minify-js-unused-declarations", "minify-js-var-initialization")
+})
+NOTES.update({
+    operation: {
+        **dict.fromkeys(
+            ("esbuild", "tdewolff"), "runs a fresh command per call, including process startup and pipe I/O"
+        ),
+        **dict.fromkeys(
+            ("rcssmin", "cssmin", "css-html-js-minify"),
+            "removes whitespace and comments; does not merge rules",
+        ),
+    }
+    for operation in ("minify-css-merges", "minify-css-conflicts")
+})
 
 __all__ = ["NOTES"]

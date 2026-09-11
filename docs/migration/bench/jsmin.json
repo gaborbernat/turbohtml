@@ -106,6 +106,62 @@
       1.5377683748892442e-06,
       39,
       5.704659524970642e-06
+    ],
+    [
+      "remove mixed JavaScript declarators — 256 retained/literal pairs / one declaration",
+      4166,
+      0.00027648959686909315,
+      12680.0,
+      0.0014650728733613505
+    ],
+    [
+      "remove mixed JavaScript declarators — 256 retained/literal pairs / separate declarations",
+      4166,
+      0.0002862023790309346,
+      14210.0,
+      0.0016561113283387386
+    ],
+    [
+      "remove mixed JavaScript declarators — 1 retained/literal pairs / one declaration",
+      41,
+      2.257433022082959e-06,
+      68.0,
+      9.284866508115404e-06
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read after initialization",
+      3652,
+      0.00022982708333074697,
+      10484.0,
+      0.001214587413414847
+    ],
+    [
+      "check JavaScript var initialization order — 1 var pairs / read after initialization",
+      37,
+      2.0490305150981195e-06,
+      59.0,
+      8.270332332926956e-06
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read before initialization",
+      4274,
+      0.00022446345478025856,
+      9570.0,
+      0.001119561935896248
+    ],
+    [
+      "remove unused JavaScript declarators — 256 unused retained/literal pairs",
+      2427,
+      0.00016929657807243832,
+      6355.0,
+      0.0007390604814645485
+    ],
+    [
+      "remove unused JavaScript declarators — 1 unused retained/literal pairs",
+      36,
+      1.8480759069442835e-06,
+      49.0,
+      6.9958663938033775e-06
     ]
   ],
   "spread": [
@@ -206,6 +262,62 @@
       0.016991173127781586,
       null,
       0.0063223627906830405
+    ],
+    [
+      null,
+      null,
+      0.010675766547228148,
+      null,
+      0.006835818229075166
+    ],
+    [
+      null,
+      null,
+      0.008132932677013201,
+      null,
+      0.009154841160107398
+    ],
+    [
+      null,
+      null,
+      0.01925808998379394,
+      null,
+      0.006167268115091248
+    ],
+    [
+      null,
+      null,
+      0.010652664523775333,
+      null,
+      0.009193718866401003
+    ],
+    [
+      null,
+      null,
+      0.019888882536445274,
+      null,
+      0.008068949045342336
+    ],
+    [
+      null,
+      null,
+      0.01132166475402571,
+      null,
+      0.0044537831267621505
+    ],
+    [
+      null,
+      null,
+      0.011445727274730836,
+      null,
+      0.012823820436350684
+    ],
+    [
+      null,
+      null,
+      0.015329064744613447,
+      null,
+      0.02841219184327094
     ]
   ],
   "row_notes": {
@@ -215,6 +327,14 @@
     "3": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
     "8": "preserves literal bindings; turbohtml propagates their values into reads",
     "9": "preserves literal bindings; turbohtml propagates their values into reads",
-    "10": "preserves literal bindings; turbohtml propagates their values into reads"
+    "10": "preserves literal bindings; turbohtml propagates their values into reads",
+    "14": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "15": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "16": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "17": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "18": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "19": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "20": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "21": "jsmin: removes whitespace and comments; does not perform declaration or expression compression"
   }
 }

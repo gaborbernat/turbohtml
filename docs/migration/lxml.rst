@@ -138,9 +138,19 @@ element on all three inputs and the SVG and xlink namespace declarations on the 
 these byte-output mismatches without competitor timings; its native values cover 150-level trees with and without xlink
 attributes, plus a shallow ordinary document.
 
-The attribute-validation rows compare 512 declared attributes with a four-attribute control. Both libraries reuse the
-compiled schema and parse the instance within each measurement. Turbohtml allocates its declaration index per
-validation; repeated calls and concurrent validators share no mutable index.
+The attribute-validation rows compare 512 attributes, four attributes, and cases with unequal declaration and instance
+attribute counts. Both libraries reuse the compiled schema and parse the instance within each measurement. Turbohtml
+allocates its instance and declaration indexes per validation; concurrent validators share no mutable index. Named-facet
+rows cover elements and attributes, builtin types, and one-value documents. Turbohtml reuses compiled facets without
+gathering a discarded temporary copy before checking each named value.
+
+The numeric-facet cases cover bounded and unbounded decimals, a one-value document, and strings. Validation keeps
+lexical and facet checks while avoiding a double conversion when no numeric bound uses it. The same compiled-schema
+reuse and instance-parsing boundary applies to these cases.
+
+The RELAX NG reuse cases cover optional groups, interleaves and recursive definitions. Validation reuses a compiled
+schema and parses each instance; construction measures schema parsing and compilation. Turbohtml stores reference-free
+nullability in immutable compiled patterns and keeps recursive definition state local to each validation call.
 
 .. bench-table::
     :file: bench/lxml.json

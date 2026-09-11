@@ -99,6 +99,10 @@ Performance
 .. bench-table::
     :file: bench/chardet.json
 
+The short-result cases include the detector call and construction of its answer. Streamed cases create a detector, feed
+the bytes, and close it. The legacy input is CP1252 text, ``déjà vu, bientôt à Paris``; chardet misdecodes this fixture,
+so its cells omit timings. The ASCII and UTF-8 byte-order-mark cases preserve the decoded text.
+
 Certain input short-circuits before any scoring, so ASCII, valid UTF-8, and real web pages resolve 30x to 1500x ahead of
 chardet's prober ensemble; declaration-less legacy single-byte text still runs 3.9x to 5.4x ahead. Both libraries decode
 a 15-sample multilingual differential correctly, though chardet often names a sibling or superset where turbohtml

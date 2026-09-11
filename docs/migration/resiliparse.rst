@@ -124,6 +124,10 @@ to ~77x faster on a large UTF-8 page:
 .. bench-table::
     :file: bench/resiliparse.json
 
+The short encoding-result cases compare ``detect_encoding()`` with ``detect()`` on CP1252 text, ASCII, and a UTF-8
+byte-order mark. Timings include detection and result construction; both detectors preserve the decoded text on these
+three fixtures.
+
 ****************
  How to migrate
 ****************

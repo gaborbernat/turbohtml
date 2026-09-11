@@ -25,6 +25,9 @@ def minify_css(css: str) -> str:
 OPERATIONS = {
     "minify-js-guards": (minify_js, "esbuild"),
     "minify-js-propagation": (minify_js, "esbuild"),
+    "minify-js-var-initialization": (minify_js, "esbuild"),
+    "minify-js-unused-declarations": (minify_js, "esbuild"),
+    "minify-js-unlink": (minify_js, "esbuild"),
     "minify-js-single-use": (minify_js, "esbuild"),
     "minify-js-sequences": (minify_js, "esbuild"),
     "minify-js": (minify_js, "esbuild"),

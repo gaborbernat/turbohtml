@@ -102,6 +102,11 @@ elements faster; turbohtml is faster on the one-attribute and early-mismatch cas
 .. bench-table::
     :file: bench/beautifulsoup.json
 
+The short encoding-result cases compare ``UnicodeDammit`` with ``detect()`` on CP1252 text, ASCII, and a UTF-8
+byte-order mark. Timings include detection and result construction. All three fixtures retain their decoded text; these
+measurements use the ``html.parser`` adapter's detector entry with the installed faust-cchardet backend and do not
+measure HTML tree construction.
+
 The :doc:`/development/performance` page benchmarks the build and edit paths against BeautifulSoup too.
 
 The attribute-comparison rows compare ``Tag.__eq__`` with :meth:`~turbohtml.Node.equals` on detached elements. Both

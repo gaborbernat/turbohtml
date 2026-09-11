@@ -1189,6 +1189,31 @@ comparison is output size, where turbohtml stays within a couple percent and com
 .. bench-table::
     :file: bench/css-minification.json
 
+Adjacent equal media blocks and rules with identical declaration bodies now merge a whole run in one copy. For 1,000
+media blocks, matched release time fell from 979.356 to 290.369 µs (70.35%); 1,000 equal declaration bodies fell from
+3,098.577 to 195.603 µs (93.69%). Ten-block controls improved by 7.08% and 9.18%, while alternating media preludes,
+comment barriers, and an ordinary stylesheet stayed within 1.91%. All calls include tokenization, parsing, merging, and
+serialization. The output preserves selector order and stops batching where an intervening rule or growing selector list
+changes which merge applies. CodSpeed covers both large targets, small inputs, and the media/comment barriers.
+
+.. bench-table::
+    :file: bench/css-rule-merges.json
+
+Merging repeated selectors across intervening rules requires checking whether their declarations conflict. For larger
+stylesheets, the minifier records property boundaries and shorthand relationships once per rendered body, then reuses
+them until a merge changes that body. Across 32 pairs of rules with 32 disjoint custom properties and 128-byte values,
+matched release time fell from 4,280.530 to 1,534.815 µs (64.14%). With one-byte values it fell from 1,400.700 to
+720.662 µs (48.55%). A two-rule stylesheet and the ordinary stylesheet control stayed within 0.52%. These measurements
+include parsing and summary construction. Strings, ``all``, and overlapping shorthand or longhand declarations still
+prevent unsafe movement. CodSpeed covers the large, short-value, and two-rule cases.
+
+.. bench-table::
+    :file: bench/css-rule-conflicts.json
+
+Lightningcss takes 952.8 µs on the long-value conflict case versus turbohtml's 1,534.8 µs; both emit 8,818 bytes.
+Rcssmin is faster on the merge cases but retains more bytes because it does not combine rules. CLI columns include
+process startup and pipe I/O.
+
 ``csscompressor`` (the YUI port) and ``cssmin`` (its BSD descendant) rewrite values to their shortest form the way
 turbohtml does, but as pure-Python regex passes they turn quadratic on a large stylesheet and trail the C engine by tens
 to over four hundred times, ``cssmin`` and ``css-html-js-minify`` reaching roughly four seconds on the 745 kB
@@ -1295,6 +1320,41 @@ CLI startup, as do esbuild's and tdewolff's. All measured cells have less than 3
 .. bench-table::
     :file: bench/js-single-use.json
 
+Literal propagation removes eligible declarators in one traversal of each declaration. For 256 retained call
+initializers interleaved with removable literals, elapsed time fell from 345.072 to 277.512 µs (19.58%). Separate
+declarations fell from 480.944 to 414.659 µs (13.78%). One pair changed from 2.217 to 2.212 µs; the existing all-literal
+grouped control changed from 185.885 to 185.453 µs. The shared suite and CodSpeed cover all three mixed layouts. Public
+tests check returned values, callback order and retained destructuring siblings.
+
+Declaration merging keeps the current tail while joining adjacent declarations. After the earlier changes, the 256-pair
+separate-declaration case fell from 406.565 to 286.202 µs (29.60%). The grouped control changed from 277.959 to 276.490
+µs; one pair changed from 2.221 to 2.257 µs (+1.63%). Tests check declaration-kind boundaries, destructuring order and
+merging into a ``for`` initializer.
+
+.. bench-table::
+    :file: bench/js-unlink.json
+
+The binding walk records whether a read precedes its initializer. Single-use inlining can then check ``var``
+initialization order without walking earlier initializer subtrees. For 256 interleaved call/literal pairs, elapsed time
+fell from 556.081 to 289.931 µs (47.86%); a read-before-initialization control fell from 702.393 to 224.498 µs (68.04%).
+One pair changed from 2.043 to 2.032 µs, and the ordinary library control from 1,135.986 to 1,128.868 µs. The flag fits
+existing symbol padding. Captured-variable and temporal-dead-zone guards remain in place.
+
+The binding walk also records declarator predecessors in existing symbol padding on 64-bit builds. Removing a declarator
+updates its successor, avoiding repeated prefix scans during dead-binding removal and single-use inlining. With the
+initialization snapshot in both builds, the 256-pair case fell from 288.107 to 229.827 µs (20.23%). One pair changed
+from 2.018 to 2.049 µs (+1.55%); the early-read control changed from 224.494 to 224.463 µs.
+
+.. bench-table::
+    :file: bench/js-var-initialization.json
+
+For unused bindings interleaved with retained call initializers, predecessor tracking reduced 256 pairs from 378.040 to
+169.297 µs (55.22%). One pair changed from 1.809 to 1.848 µs (+2.17%). Public tests check the complete callback trace
+and empty returned array; the shared suite and CodSpeed cover both sizes.
+
+.. bench-table::
+    :file: bench/js-unused-declarations.json
+
 ********************
  Encoding detection
 ********************
@@ -1303,8 +1363,8 @@ CLI startup, as do esbuild's and tdewolff's. All measured cells have less than 3
 (the pure-Python prober ensemble), `charset-normalizer <https://charset-normalizer.readthedocs.io/>`_ (decode-and-score,
 what ``requests`` uses), `faust-cchardet <https://github.com/faust-streaming/cChardet>`_ (the maintained C binding of
 uchardet; the original cchardet stops compiling at Python 3.11), `resiliparse <https://resiliparse.chatnoir.eu/>`_'s
-``detect_encoding``, and BeautifulSoup's ``UnicodeDammit``, benchmarked with the ``chardet`` backend it only sniffs
-with. turbohtml resolves certain input -- a byte-order mark, a ``<meta>`` declaration, valid UTF-8, pure ASCII --
+``detect_encoding``, and BeautifulSoup's ``UnicodeDammit``, which delegates statistical detection to an installed
+backend. turbohtml resolves certain input -- a byte-order mark, a ``<meta>`` declaration, valid UTF-8, pure ASCII --
 structurally before any scoring, which is where the tens-to-nearly-2000x rows on the ASCII and pre-declared pages come
 from, and its chardetng frequency scoring keeps declaration-less single-byte text 3.9x-5.4x ahead of chardet.
 
@@ -1317,6 +1377,22 @@ score it and a CJK stream leaves several standing.
 
 .. bench-table::
     :file: bench/encoding-detection.json
+
+``detect()`` and ``EncodingDetector.close()`` construct the winning ``EncodingMatch`` after native ranking.
+``detect_all()`` still constructs the full ranked list. On the short legacy-byte input below, constructing only the
+requested record reduced one-shot detection from 12.16 to 10.07 µs (17.2%) and streamed detection from 12.45 to 10.37 µs
+(16.7%). ASCII and byte-order-mark controls retained their outputs and had no measured slowdown. Both variants used the
+same native binary; the shared cases include detection and result construction.
+
+The short-result comparison used faust-cchardet as UnicodeDammit's installed backend. Resiliparse takes 2.48 µs on the
+legacy input, faust-cchardet 5.71 µs, and turbohtml 10.07 µs. Chardet and charset-normalizer misdecode that fixture;
+their affected cells omit timings. The ASCII and byte-order-mark comparisons preserve decoded text.
+
+.. bench-table::
+    :file: bench/encoding-result.json
+
+.. bench-table::
+    :file: bench/encoding-result-stream.json
 
 *****************
  Legacy decoding
@@ -1511,20 +1587,35 @@ Constructing the target schema increased from 3.924 to 4.951 µs (26.19%, or 1.0
 metadata until release; normalization and matching scratch memory remain local to each validation. Inheritance cutoffs,
 whitespace normalization and diagnostics retain their behavior.
 
+Named-type validation now reads those cached facets without gathering a discarded second copy. The matched element case
+falls from 1.61248 to 1.29548 ms (19.66%); the named-attribute case falls from 1.74647 to 1.47412 ms (15.59%). The
+attribute measurement has 12.78% spread, retained in the table. The builtin control changes by -0.14%, and a one-value
+named-type document improves 21.50%. These four cases include instance parsing; CodSpeed covers each.
+
 Lxml takes 245.954 µs for inherited-facet validation and 120.291 µs for the builtin control; it remains faster at
 validation. Its schema-construction measurement is 14.229 µs with 7.33% spread; the table retains that warning.
 
-Attribute validation indexes declared names within each call for instances with at least 32 attributes and 32 attribute
-declarations. It checks required, prohibited and fixed values in declaration order before rejecting unknown instance
-attributes. The two cases contain 512 and four attributes; both reuse a compiled schema and include parsing the instance
-and constructing the temporary index. Validation of 512 attributes fell from 607.066 to 410.526 µs (32.38%); four
-attributes changed from 1.3990 to 1.4278 µs (+2.05%). CodSpeed covers both sizes.
+Attribute validation indexes instance names once when an element has at least 32 attributes, sharing the index through
+attribute-group and base-type checks. It retains the declaration-name index for the later unknown-attribute pass.
+Required, prohibited and fixed-value diagnostics keep declaration order. Each call owns its temporary indexes.
 
-Lxml takes 357.829 µs for 512 attributes and 1.7860 µs for four. It remains faster for the wide case; turbohtml is
-faster for the small case.
+The 512-attribute case falls from 399.558 to 126.712 µs (68.29%). Four attributes change by +0.73%; 512 declarations
+with one instance attribute change by +0.86%; one declaration with 512 instance attributes is unchanged. All four cases
+include instance parsing and index construction, and have CodSpeed entries.
+
+The unchanged lxml inputs retain their earlier measurements: 357.829 µs for 512 attributes and 1.7860 µs for four.
+Turbohtml takes 126.712 and 1.4230 µs on those cases.
 
 .. bench-table::
     :file: bench/validate-attributes.json
+
+Numeric validation converts a value to double only when a min/max bound needs it. Lexical validation and the other
+facets still run. The 64-value unbounded decimal case improves from 20.788 to 18.741 µs (9.85%). Bounded decimals change
+by +0.13%; one unbounded decimal improves 2.81%, and the string control improves 1.51%. Each case reuses a compiled
+schema and includes instance parsing. CodSpeed covers all four cases.
+
+.. bench-table::
+    :file: bench/validate-numeric-facets.json
 
 .. bench-table::
     :file: bench/validate-facets.json
@@ -1537,6 +1628,21 @@ faster for the small case.
 
 .. bench-table::
     :file: bench/validate-rng.json
+
+RELAX NG constructors retain nullability for patterns whose result does not depend on recursive references. Validation
+reuses this immutable value for optional groups and interleaves; reference-dependent patterns keep the recursion guard.
+The extra integer fits existing pattern padding. The cases cover optional groups, interleaves, a small group and
+recursive elements. Validation reuses a compiled schema and includes parsing the instance. Compilation includes parsing
+the schema. Optional groups improve from 3.314 ms to 210.3 µs (93.65%); interleaves improve from 56.05 µs to 51.16 µs
+(8.73%). The small group improves 5.22%. Recursive validation and both compilation controls show no material regression;
+their observed differences range from 0.51% to 1.17%. Both builds include the same schema text ownership and namespace
+fixes. CodSpeed covers all four validation cases and both construction controls.
+
+.. bench-table::
+    :file: bench/validate-rng-reuse.json
+
+.. bench-table::
+    :file: bench/compile-rng-reuse.json
 
 Computed styles
 ===============

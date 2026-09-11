@@ -106,6 +106,62 @@
       1.5377683748892442e-06,
       39,
       1.2517059912268518e-07
+    ],
+    [
+      "remove mixed JavaScript declarators — 256 retained/literal pairs / one declaration",
+      4166,
+      0.00027648959686909315,
+      12680.0,
+      9.979738862853083e-06
+    ],
+    [
+      "remove mixed JavaScript declarators — 256 retained/literal pairs / separate declarations",
+      4166,
+      0.0002862023790309346,
+      14210.0,
+      1.1824020207029662e-05
+    ],
+    [
+      "remove mixed JavaScript declarators — 1 retained/literal pairs / one declaration",
+      41,
+      2.257433022082959e-06,
+      68.0,
+      1.4313858075857648e-07
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read after initialization",
+      3652,
+      0.00022982708333074697,
+      10484.0,
+      8.485984301387361e-06
+    ],
+    [
+      "check JavaScript var initialization order — 1 var pairs / read after initialization",
+      37,
+      2.0490305150981195e-06,
+      59.0,
+      1.4173027138575378e-07
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read before initialization",
+      4274,
+      0.00022446345478025856,
+      9570.0,
+      7.761623124243518e-06
+    ],
+    [
+      "remove unused JavaScript declarators — 256 unused retained/literal pairs",
+      2427,
+      0.00016929657807243832,
+      6355.0,
+      5.219959178267194e-06
+    ],
+    [
+      "remove unused JavaScript declarators — 1 unused retained/literal pairs",
+      36,
+      1.8480759069442835e-06,
+      49.0,
+      1.329792421141581e-07
     ]
   ],
   "spread": [
@@ -206,6 +262,62 @@
       0.016991173127781586,
       null,
       0.008500994886596414
+    ],
+    [
+      null,
+      null,
+      0.010675766547228148,
+      null,
+      0.005144332300525814
+    ],
+    [
+      null,
+      null,
+      0.008132932677013201,
+      null,
+      0.009226055164296936
+    ],
+    [
+      null,
+      null,
+      0.01925808998379394,
+      null,
+      0.005308134335903983
+    ],
+    [
+      null,
+      null,
+      0.010652664523775333,
+      null,
+      0.0015283803532802176
+    ],
+    [
+      null,
+      null,
+      0.019888882536445274,
+      null,
+      0.01575122960306743
+    ],
+    [
+      null,
+      null,
+      0.01132166475402571,
+      null,
+      0.0027856690584753983
+    ],
+    [
+      null,
+      null,
+      0.011445727274730836,
+      null,
+      0.003855542008876688
+    ],
+    [
+      null,
+      null,
+      0.015329064744613447,
+      null,
+      0.010159208915974218
     ]
   ],
   "row_notes": {
@@ -215,6 +327,14 @@
     "3": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
     "8": "preserves literal bindings; turbohtml propagates their values into reads",
     "9": "preserves literal bindings; turbohtml propagates their values into reads",
-    "10": "preserves literal bindings; turbohtml propagates their values into reads"
+    "10": "preserves literal bindings; turbohtml propagates their values into reads",
+    "14": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "15": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "16": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "17": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "18": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "19": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "20": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "21": "rjsmin: removes whitespace and comments; does not perform declaration or expression compression"
   }
 }

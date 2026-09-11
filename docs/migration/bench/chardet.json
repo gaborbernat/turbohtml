@@ -35,6 +35,36 @@
       "utf-8 page (95 kB)",
       9.080427233835545e-07,
       0.0013319131658893941
+    ],
+    [
+      "construct the streamed encoding result — short ambiguous legacy bytes",
+      1.0374455411484481e-05,
+      "misdecodes the CP1252 fixture"
+    ],
+    [
+      "construct the streamed encoding result — short ASCII",
+      7.821018495057785e-06,
+      5.0700029820897426e-05
+    ],
+    [
+      "construct the streamed encoding result — UTF-8 byte-order mark",
+      4.681415366529033e-06,
+      4.833396604529601e-05
+    ],
+    [
+      "construct the winning encoding result — short ambiguous legacy bytes",
+      1.0071063394434532e-05,
+      "misdecodes the CP1252 fixture"
+    ],
+    [
+      "construct the winning encoding result — short ASCII",
+      8.690336665987767e-07,
+      5.0333207233658565e-05
+    ],
+    [
+      "construct the winning encoding result — UTF-8 byte-order mark",
+      7.512360047220076e-07,
+      4.7859390576832084e-05
     ]
   ],
   "spread": [
@@ -67,6 +97,36 @@
       null,
       0.09984062000003383,
       0.010247606289130554
+    ],
+    [
+      null,
+      0.011720712883123796,
+      null
+    ],
+    [
+      null,
+      0.009855937291844127,
+      0.010207808260162227
+    ],
+    [
+      null,
+      0.004068807757235398,
+      0.00985299665175502
+    ],
+    [
+      null,
+      0.01746333710744745,
+      null
+    ],
+    [
+      null,
+      0.01350141244620692,
+      0.011760559212284905
+    ],
+    [
+      null,
+      0.018449962344121423,
+      0.009248684430825205
     ]
   ],
   "row_notes": {}

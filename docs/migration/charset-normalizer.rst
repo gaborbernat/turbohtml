@@ -108,6 +108,10 @@ Performance
 .. bench-table::
     :file: bench/charset-normalizer.json
 
+The short-result cases include ``from_bytes(data).best()`` and turbohtml's ``detect(data)``. The legacy input is CP1252
+text, ``déjà vu, bientôt à Paris``; charset-normalizer misdecodes this fixture, so its cell omits a timing. The ASCII
+and UTF-8 byte-order-mark cases preserve the decoded text.
+
 Declared or structurally certain input short-circuits, so ASCII, UTF-8, and real web pages resolve in microseconds --
 43x to 650x ahead of charset-normalizer, which always runs its scoring passes. On declaration-less legacy bytes
 turbohtml stays 1.7x to 5.7x ahead (see the table).

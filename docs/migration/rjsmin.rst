@@ -105,6 +105,10 @@ The call-initializer cases check once-read bindings while preserving callback or
 faster on all three inputs. For 256 calls, turbohtml produces 3,142 bytes in either layout; rjsmin retains 4,050 bytes
 for one declaration and 5,580 bytes for separate declarations.
 
+The mixed-declarator cases retain call initializers while removing repeated literal bindings. The ``var`` cases also
+cover reads before initialization, where replacing ``undefined`` with the later value would change behavior. Both
+libraries preserve the complete callback traces and returned values on these inputs.
+
 .. bench-table::
     :file: bench/rjsmin.json
 

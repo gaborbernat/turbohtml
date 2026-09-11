@@ -104,6 +104,10 @@ strictly less work. Each ratio is against turbohtml:
 .. bench-table::
     :file: bench/rcssmin.json
 
+The rule-merge cases include repeated media blocks, equal declaration bodies, and comment barriers. Conflict cases vary
+selector count and name length. Compare output bytes alongside elapsed time: rcssmin removes whitespace and comments,
+while turbohtml also merges rules. The compared outputs preserve the input cascade on these fixtures.
+
 Both round-trip safely -- the output parses to the same cascade -- and both are idempotent. turbohtml is still far
 faster than every *other* value-rewriting minifier, which are pure-Python and turn quadratic on a large stylesheet.
 
