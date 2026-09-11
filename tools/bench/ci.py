@@ -171,6 +171,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "parse-xml-prefixes-single": ("parse-xml-prefixes", 1),
     "query-closest-distinct": ("query-closest", 1),
     "query-parents-distinct": ("query-parents", 1),
     "query-siblings-single": ("query-siblings", 1),

@@ -301,6 +301,7 @@ OPERATIONS: dict[str, Operation] = {
     "parse-xml": Operation("parse XML to a tree", "us"),
     "parse-xml-append": Operation("parse XML with distinct attribute names", "us"),
     "parse-xml-attrs": Operation("parse XML with growing attribute counts", "us"),
+    "parse-xml-prefixes": Operation("parse XML namespace attributes", "us"),
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
@@ -1363,6 +1364,17 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "parse-xml-append": lambda: tuple(
         (f"{label} / value=a", "<root " + " ".join(f'a{index}="a"' for index in range(count)) + "/>")
         for count, label in ((1_000, "1,000 attributes"), (1, "1 attribute"))
+    ),
+    "parse-xml-prefixes": lambda: tuple(
+        (
+            f"{count} prefixes and attributes",
+            "<root "
+            + " ".join(f'xmlns:p{index}="urn:{index}"' for index in range(count))
+            + " "
+            + " ".join(f'p{index}:value="x"' for index in range(count))
+            + "/>",
+        )
+        for count in (128, 1)
     ),
     "parse-xml-names": lambda: (
         (

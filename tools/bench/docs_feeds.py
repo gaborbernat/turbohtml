@@ -70,6 +70,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "normalize-marks": "normalize-marks",
     "parse-xml-attrs": "parse-xml-attrs",
     "parse-xml-append": "parse-xml-append",
+    "parse-xml-prefixes": "parse-xml-prefixes",
     "path-wide": "path-wide",
     "path-xpath-wide": "path-xpath-wide",
     "path-cold": "path-cold",

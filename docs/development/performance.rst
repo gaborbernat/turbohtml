@@ -931,6 +931,18 @@ one attribute, compared with turbohtml's 57.124 and 0.357 µs.
 .. bench-table::
     :file: bench/parse-xml-append.json
 
+XML parsing caches each attribute's namespace resolution for duplicate expanded-name checks within a start tag. The
+target declares 128 distinct prefixes and uses each on an attribute with the same local name. Matched time fell from
+633.785 to 47.403 µs (92.52%). The one-prefix control changed from 0.441 to 0.434 µs; its 1.64% difference is below the
+improvement threshold. Prefix rebinding, declaration scope and first-error precedence retain their behavior.
+
+The cache keeps four index fields per attribute instead of two, released after parsing. On a 64-bit build the initial
+allocation grows from 128 to 512 bytes, and the 256-attribute target needs 8 KiB instead of 4 KiB. Lxml checks the same
+expanded attribute names, namespace bindings and ordering. CodSpeed covers both inputs.
+
+.. bench-table::
+    :file: bench/parse-xml-prefixes.json
+
 Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
 affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
 comparisons per attribute on average. Early mismatches return before allocating the index.
