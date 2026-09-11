@@ -64,6 +64,27 @@
       1.8137537852661958e-06,
       49.0,
       0.0011015658401447581
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / interleaved declarations",
+      2327,
+      0.00022239926231577557,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 1 literal bindings / interleaved declarations",
+      32,
+      2.0930082968106945e-06,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / one declaration",
+      2327,
+      0.0002706510096080213,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
     ]
   ],
   "spread": [
@@ -122,7 +143,32 @@
       0.040253606681332654,
       null,
       0.021326748049291796
+    ],
+    [
+      null,
+      null,
+      0.006605008159743298,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.008176154276917641,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.007907501405500336,
+      null,
+      null
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "8": "ES5 parser rejects the const declarations in these inputs",
+    "9": "ES5 parser rejects the const declarations in these inputs",
+    "10": "ES5 parser rejects the const declarations in these inputs"
+  }
 }

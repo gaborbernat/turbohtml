@@ -14,6 +14,7 @@ def minify_js(source: str) -> str:
 
 OPERATIONS = {
     "minify-js-guards": (minify_js, "rjsmin"),
+    "minify-js-propagation": (minify_js, "rjsmin"),
     "minify-js-sequences": (minify_js, "rjsmin"),
     "minify-js": (minify_js, "rjsmin"),
 }

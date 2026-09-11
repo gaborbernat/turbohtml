@@ -259,7 +259,7 @@ typedef struct {
     int32_t refs;
     int32_t writes;
     int32_t ref_node;
-    int32_t ref_scope; /* the scope the one read sits in; a function inlines only into its own scope */
+    int32_t ref_scope; /* common read scope, or -1 when reads span scopes */
     int32_t decl_node;
     int32_t ref_prop; /* the `{ x }` property node when a read is a shorthand: the read doubles as
                          the key, so an inline must first give the property an explicit key */

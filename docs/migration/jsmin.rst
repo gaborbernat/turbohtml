@@ -86,6 +86,10 @@ On the library ladder (``python -m bench minify-js``) turbohtml runs about two t
 output is up to half the size, because jsmin only deletes whitespace where turbohtml renames every local binding and
 runs the structural folds. Each ratio is against turbohtml:
 
+The literal-propagation inputs contain 256 or one local ``const`` binding and repeated reads. Both libraries preserve
+the complete callback order and returned values. Turbohtml produces 2,327 bytes for the interleaved large case; jsmin
+retains 7,518 bytes. The grouped-declaration case retains 5,988 bytes in jsmin, versus 2,327 in turbohtml.
+
 .. bench-table::
     :file: bench/jsmin.json
 

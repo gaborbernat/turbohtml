@@ -1221,6 +1221,20 @@ startup. The large calmjs.parse and terser cells and the single-guard tdewolff c
 .. bench-table::
     :file: bench/js-guards.json
 
+Indexing literal-propagation plans by symbol removes a linear search through those plans for each read. With the same
+correctness fixes in both release builds, time for 256 interleaved declarations fell from 296.119 to 222.399 µs
+(24.90%). The Underscore control changed from 1.15847 to 1.15785 ms. The final build measured 2.093 µs for one binding
+and 270.651 µs for 256 bindings in one declaration. CodSpeed includes the three propagation cases and the existing
+library input.
+
+The six competing minifiers preserve callback order and returned values on these inputs; calmjs.parse rejects their
+``const`` declarations. Rjsmin is faster on all three cases and retains 7,518 bytes on the large interleaved input,
+compared with turbohtml's 2,327 bytes. The large css-html-js-minify and grouped-declaration tdewolff cells exceed 5%
+spread; their warnings remain in the table. CLI timings include process startup.
+
+.. bench-table::
+    :file: bench/js-propagation.json
+
 ********************
  Encoding detection
 ********************

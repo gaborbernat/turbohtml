@@ -441,7 +441,11 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
             if (bind == 0) { /* a read reference */
                 mangler->prog->syms[sym].refs++;
                 mangler->prog->syms[sym].ref_node = idx;
-                mangler->prog->syms[sym].ref_scope = scope;
+                if (mangler->prog->syms[sym].refs == 1) {
+                    mangler->prog->syms[sym].ref_scope = scope;
+                } else if (mangler->prog->syms[sym].ref_scope != scope) {
+                    mangler->prog->syms[sym].ref_scope = -1;
+                }
                 if (idx < mangler->prog->syms[sym].min_ref) {
                     mangler->prog->syms[sym].min_ref = idx;
                 }
@@ -537,13 +541,11 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         for (int32_t declarator = node->a; declarator >= 0; declarator = mangler->prog->nodes[declarator].next) {
             walk(mangler, mangler->prog->nodes[declarator].a, scope, 1); /* resolve the (declared) target */
             walk(mangler, mangler->prog->nodes[declarator].b, scope, 0); /* the initializer is a reference context */
-            /* record the declaring statement on each ident-target binding so the inline and unused passes
-               can find it. A redeclaration that initializes again is a write: the declarator search
-               lands on the first, so its value must not propagate over the later one. */
+            /* Single-declaration transforms cannot account for another declaration target. */
             if (mangler->prog->nodes[mangler->prog->nodes[declarator].a].kind == JN_IDENT) {
                 int32_t target = mangler->prog->nodes[mangler->prog->nodes[declarator].a].sym;
                 if (target >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on a hoist allocation failure */
-                    if (mangler->prog->syms[target].decl_node >= 0 && mangler->prog->nodes[declarator].b >= 0) {
+                    if (mangler->prog->syms[target].decl_node >= 0) {
                         mangler->prog->syms[target].writes++;
                     }
                     mangler->prog->syms[target].decl_node = idx;
@@ -634,6 +636,11 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         for (int32_t clause = node->b; clause >= 0; clause = mangler->prog->nodes[clause].next) {
             walk(mangler, mangler->prog->nodes[clause].a, inner, 0); /* case test */
             walk_chain(mangler, mangler->prog->nodes[clause].b, inner, 0);
+        }
+        /* A case jump can skip an initializer in the shared switch scope. */
+        for (int32_t sym = mangler->prog->scopes[inner].first_sym; sym >= 0;
+             sym = mangler->prog->syms[sym].scope_next) {
+            mangler->prog->syms[sym].decl_node = -1;
         }
         undo_to(mangler, mark);
         return;
@@ -1228,7 +1235,8 @@ static int expand_shorthand_ref(jm_program *prog, int32_t sym) {
 }
 
 /* Whether the binding's declaration dominates its one read with a value that survives the move:
-   a value let/const dominates anywhere (TDZ), a regex may ride only into the very next
+   a value let/const must have no read before initialization. Cross-scope reads require the first
+   initializer in the function, before a caller could run. A regex may ride only into the very next
    single-shot statement (a fresh object per evaluation, 13.2.7.5, so the read must run at most
    once per pass over the declaration and outside any nested function), and a value var must sit
    in its function body's first statement -- nothing executes before it except the initializers of
@@ -1236,7 +1244,9 @@ static int expand_shorthand_ref(jm_program *prog, int32_t sym) {
 static int read_sees_initialized(jm_program *prog, int32_t sym, int32_t stmt, int32_t declr, int32_t init,
                                  int32_t ref) {
     if (prog->syms[sym].decl >= 1 && is_value_literal(prog, init)) {
-        return 1;
+        return prog->syms[sym].min_ref >= declr &&
+               (prog->syms[sym].ref_scope == prog->syms[sym].scope ||
+                (stmt == prog->scopes[prog->syms[sym].scope].first_stmt && prog->nodes[stmt].a == declr));
     }
     if (prog->nodes[init].kind == JN_REGEX && prog->syms[sym].ref_scope == prog->syms[sym].scope &&
         prog->nodes[stmt].next >= 0 && single_shot_stmt(prog, prog->nodes[stmt].next) &&
@@ -1261,8 +1271,8 @@ static int read_sees_initialized(jm_program *prog, int32_t sym, int32_t stmt, in
    declaration assigns is the value that single read sees, and the read is a genuine read position --
    never an assignment or for-in target the inlined value would land on illegally. Two cases are sound:
 
-     - a let/const initialized to a literal: the value is constant and the declaration dominates its use
-       (block scope / TDZ), so the read takes that value wherever it sits, a nested closure included;
+     - a let/const initialized to a literal: textual order protects same-scope reads; cross-scope reads
+       require initialization before the function can call a closure;
 
      - any binding whose declaration is immediately followed by `return x` / `throw x` (x being the one
        read): nothing executes between the declaration and the read and the read is not inside a
@@ -1356,11 +1366,8 @@ static int inline_single_use(jm_program *prog, int32_t global) {
    `{ x }` shorthand read first gains its explicit key. The declarator still stands while this
    runs, so if a key allocation fails mid-walk the untouched reads keep the binding -- the
    caller unlinks it only once every read was replaced. */
-/* One planned propagation: every read of `sym` (its declarator target excluded) becomes a copy of
-   the literal at `init`; `replaced` counts the copies so the caller unlinks the declarator only
-   once every read was rewritten. */
+/* Indexed by symbol ID; target == -1 marks a binding without a propagation plan. */
 typedef struct {
-    int32_t sym;
     int32_t init;
     int32_t target;
     int32_t replaced;
@@ -1370,58 +1377,51 @@ typedef struct {
    explicit key; if that allocation fails mid-walk the declarators are all still linked, and a
    partially-rewritten binding stays consistent -- the remaining reads see the binding holding the
    same value the copies carry. */
-static void replace_reads(jm_program *prog, int32_t idx, jm_propagation *plans, int32_t count) {
+static void replace_reads(jm_program *prog, int32_t idx, jm_propagation *plans) {
     for (; idx >= 0; idx = prog->nodes[idx].next) {
         if (prog->nodes[idx].kind == JN_PROP && (prog->nodes[idx].flags & JN_F_SHORTHAND)) {
             int32_t read = prog->nodes[idx].a;
-            for (int32_t plan = 0; plan < count; plan++) {
-                if (prog->nodes[read].sym != plans[plan].sym) {
-                    continue;
-                }
+            int32_t sym = prog->nodes[read].sym;
+            if (sym >= 0 && plans[sym].target >= 0) {
                 int32_t key = jm_node_new(prog, JN_IDENT);
                 if (key < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the binding */
                     return;    /* GCOVR_EXCL_LINE */
                 }
-                prog->nodes[key].str = prog->syms[plans[plan].sym].name;
-                prog->nodes[key].str_len = prog->syms[plans[plan].sym].name_len;
+                prog->nodes[key].str = prog->syms[sym].name;
+                prog->nodes[key].str_len = prog->syms[sym].name_len;
                 prog->nodes[idx].a = key;
                 prog->nodes[idx].b = read;
                 prog->nodes[idx].flags &= (uint16_t)~JN_F_SHORTHAND;
-                break;
             }
         }
         if (prog->nodes[idx].kind == JN_IDENT && prog->nodes[idx].sym >= 0) {
-            for (int32_t plan = 0; plan < count; plan++) {
-                if (prog->nodes[idx].sym != plans[plan].sym || idx == plans[plan].target) {
-                    continue;
-                }
+            jm_propagation *plan = &plans[prog->nodes[idx].sym];
+            if (plan->target >= 0 && idx != plan->target) {
                 int32_t next = prog->nodes[idx].next;
-                prog->nodes[idx] = prog->nodes[plans[plan].init];
+                prog->nodes[idx] = prog->nodes[plan->init];
                 prog->nodes[idx].next = next;
-                plans[plan].replaced++;
-                break;
+                plan->replaced++;
             }
             if (prog->nodes[idx].kind != JN_IDENT) {
                 continue; /* just rewritten into the literal: nothing below to walk */
             }
         }
-        replace_reads(prog, prog->nodes[idx].a, plans, count);
-        replace_reads(prog, prog->nodes[idx].b, plans, count);
-        replace_reads(prog, prog->nodes[idx].c, plans, count);
-        replace_reads(prog, prog->nodes[idx].d, plans, count);
+        replace_reads(prog, prog->nodes[idx].a, plans);
+        replace_reads(prog, prog->nodes[idx].b, plans);
+        replace_reads(prog, prog->nodes[idx].c, plans);
+        replace_reads(prog, prog->nodes[idx].d, plans);
     }
 }
 
 /* Inline every read of a never-written binding holding a short value literal, when the copies cost
    less than the binding: N reads of a one-character mangled name plus the declarator (name, `=`,
    value, separator) against N copies of the value -- N*(len-1) < 3+len, so a one-character literal
-   always wins and longer ones need fewer reads. The domination rules match inline_single_use: a
-   let/const dominates by TDZ, a var must sit in its function body's first statement with no read
-   left of its own declarator (min_ref, in parse = textual order). The qualifying bindings are
+   always wins and longer ones need fewer reads. The domination rules match inline_single_use:
+   reads must follow initialization to preserve TDZ errors, and a var must sit in its function body's
+   first statement (min_ref follows parse order). The qualifying bindings are
    collected first and rewritten in a single tree walk. */
 static int propagate_value_literals(jm_program *prog, int32_t global) {
     jm_propagation *plans = NULL;
-    int32_t count = 0;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].refs < 2 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
             prog->syms[sym].scope == global || prog->syms[sym].decl > 2) {
@@ -1440,32 +1440,39 @@ static int propagate_value_literals(jm_program *prog, int32_t global) {
         if (prog->syms[sym].refs * (len - 1) >= 3 + len) {
             continue; /* the copies would outweigh the binding */
         }
-        if (prog->syms[sym].decl == 0 &&
-            (stmt != prog->scopes[prog->syms[sym].scope].first_stmt || prog->syms[sym].min_ref < declr)) {
-            continue; /* only the function body's first statement runs before every possible read */
+        if (prog->syms[sym].min_ref < declr ||
+            (prog->syms[sym].decl == 0 && stmt != prog->scopes[prog->syms[sym].scope].first_stmt) ||
+            (prog->syms[sym].ref_scope != prog->syms[sym].scope &&
+             (stmt != prog->scopes[prog->syms[sym].scope].first_stmt || prog->nodes[stmt].a != declr))) {
+            continue;
         }
         if (plans == NULL) {
             plans = jm_malloc((size_t)prog->sym_count * sizeof(jm_propagation));
             if (plans == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
                 return 0;        /* GCOVR_EXCL_LINE */
             }
+            for (int32_t slot = 0; slot < prog->sym_count; slot++) {
+                plans[slot].target = -1;
+            }
         }
-        plans[count++] = (jm_propagation){.sym = sym, .init = init, .target = prog->nodes[declr].a, .replaced = 0};
+        plans[sym] = (jm_propagation){.init = init, .target = prog->nodes[declr].a, .replaced = 0};
     }
     if (plans == NULL) {
         return 0;
     }
-    replace_reads(prog, prog->nodes[prog->root].a, plans, count);
+    replace_reads(prog, prog->nodes[prog->root].a, plans);
     int changed = 0;
-    for (int32_t plan = 0; plan < count; plan++) {
-        int32_t sym = plans[plan].sym;
-        if (plans[plan].replaced != prog->syms[sym].refs) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
-            continue;                                       /* GCOVR_EXCL_LINE */
+    for (int32_t sym = 0; sym < prog->sym_count; sym++) {
+        if (plans[sym].target < 0) {
+            continue;
+        }
+        if (plans[sym].replaced != prog->syms[sym].refs) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
+            continue;                                      /* GCOVR_EXCL_LINE */
         }
         int32_t stmt = prog->syms[sym].decl_node;
         int32_t declr = prog->nodes[stmt].a;
         int32_t declr_prev = -1;
-        while (prog->nodes[declr].a != plans[plan].target) {
+        while (prog->nodes[declr].a != plans[sym].target) {
             declr_prev = declr;
             declr = prog->nodes[declr].next;
         }

@@ -88,6 +88,10 @@ On the ES5 library ladder turbohtml reaches the smaller output, and the speed ga
 (``python -m bench minify-js``) calmjs.parse takes hundreds of milliseconds where turbohtml takes milliseconds. Each
 ratio is against turbohtml:
 
+The literal-propagation inputs contain 256 or one local ``const`` binding and repeated reads. Calmjs.parse rejects these
+ES2015 declarations; the corresponding cells record the syntax mismatch instead of a timing. Turbohtml preserves the
+callback order and returned values, producing 2,327 bytes for each large case and 32 bytes for the small case.
+
 .. bench-table::
     :file: bench/calmjs-parse.json
 

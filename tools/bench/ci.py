@@ -196,6 +196,8 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "token-attributes-ten": ("token-attributes", 3),
     "computed-style-filter-matching": ("computed-style-filter", 1),
     "computed-style-filter-class-first": ("computed-style-filter", 2),
+    "minify-js-propagation-single": ("minify-js-propagation", 1),
+    "minify-js-propagation-declaration": ("minify-js-propagation", 2),
     "canonicalize-deep-xlink": ("canonicalize-deep", 1),
     "canonicalize-deep-shallow": ("canonicalize-deep", 2),
     "computed-style-specificity-ordinary": ("computed-style-specificity", 1),

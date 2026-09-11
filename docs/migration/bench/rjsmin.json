@@ -64,6 +64,27 @@
       1.8137537852661958e-06,
       48.0,
       1.3660460057944116e-07
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / interleaved declarations",
+      2327,
+      0.00022239926231577557,
+      7518.0,
+      6.648828637404828e-06
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 1 literal bindings / interleaved declarations",
+      32,
+      2.0930082968106945e-06,
+      45.0,
+      1.2983374607274573e-07
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / one declaration",
+      2327,
+      0.0002706510096080213,
+      5988.0,
+      4.912134469492458e-06
     ]
   ],
   "spread": [
@@ -122,12 +143,36 @@
       0.040253606681332654,
       null,
       0.01210305898455314
+    ],
+    [
+      null,
+      null,
+      0.006605008159743298,
+      null,
+      0.0038673882341324264
+    ],
+    [
+      null,
+      null,
+      0.008176154276917641,
+      null,
+      0.010037884800101081
+    ],
+    [
+      null,
+      null,
+      0.007907501405500336,
+      null,
+      0.003748581212014611
     ]
   ],
   "row_notes": {
     "0": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
     "1": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
     "2": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
-    "3": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB"
+    "3": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
+    "8": "preserves literal bindings; turbohtml propagates their values into reads",
+    "9": "preserves literal bindings; turbohtml propagates their values into reads",
+    "10": "preserves literal bindings; turbohtml propagates their values into reads"
   }
 }
