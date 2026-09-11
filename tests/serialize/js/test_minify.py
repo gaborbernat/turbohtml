@@ -9,11 +9,22 @@ Correctness across a large corpus is gated in ``test_corpus.py``.
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - Node executes the fixed benchmark corpus
+from typing import TYPE_CHECKING, Final, cast
+
 import pytest
+from bench.operations import INPUTS
 
 import turbohtml
 from turbohtml import Html, Minify, _html
 from turbohtml.clean import JSMinify, minify_js
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_NODE: Final = shutil.which("node")
 
 
 def minify(source: str) -> str:
@@ -453,3 +464,101 @@ def test_jsminify_is_frozen_and_comparable() -> None:
     assert JSMinify(fold=False) != JSMinify()
     with pytest.raises(AttributeError):
         JSMinify().mangle = False  # ty: ignore[invalid-assignment]  # frozen on purpose
+
+
+@pytest.mark.oracle
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(
+    ("operation", "case", "shape"),
+    [
+        pytest.param("minify-js-propagation", 0, (256, 2), id="propagation-interleaved"),
+        pytest.param("minify-js-propagation", 1, (1, 2), id="propagation-single"),
+        pytest.param("minify-js-propagation", 2, (256, 2), id="propagation-grouped"),
+        pytest.param("minify-js-var-initialization", 0, (256, 2), id="var-many"),
+        pytest.param("minify-js-var-initialization", 1, (1, 2), id="var-one"),
+        pytest.param("minify-js-var-initialization", 2, (256, 1), id="var-early"),
+        pytest.param("minify-js-unlink", 0, (256, 3), id="unlink-grouped"),
+        pytest.param("minify-js-unlink", 1, (256, 3), id="unlink-separated"),
+        pytest.param("minify-js-unlink", 2, (1, 3), id="unlink-single"),
+        pytest.param("minify-js-unused-declarations", 0, (256, 0), id="unused-many"),
+        pytest.param("minify-js-unused-declarations", 1, (1, 0), id="unused-one"),
+        pytest.param("minify-js-single-use", 0, (256, 1), id="single-use-grouped"),
+        pytest.param("minify-js-single-use", 1, (256, 1), id="single-use-separated"),
+        pytest.param("minify-js-single-use", 2, (1, 1), id="single-use-single"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("module", "executable"),
+    [
+        pytest.param("bench.core", None, id="turbohtml"),
+        pytest.param("bench.competitors.calmjs_parse", None, id="calmjs"),
+        pytest.param("bench.competitors.rjsmin", None, id="rjsmin"),
+        pytest.param("bench.competitors.jsmin", None, id="jsmin"),
+        pytest.param("bench.competitors.css_html_js_minify", None, id="css-html-js-minify"),
+        pytest.param("bench.competitors.terser", "terser", id="terser"),
+        pytest.param("bench.competitors.esbuild", "esbuild", id="esbuild"),
+        pytest.param("bench.competitors.tdewolff", "minify", id="tdewolff"),
+    ],
+)
+def test_minifiers_preserve_callback_order(
+    operation: str, case: int, shape: tuple[int, int], module: str, executable: str | None
+) -> None:
+    if module == "bench.competitors.calmjs_parse" and operation != "minify-js-var-initialization":
+        pytest.skip("ES5 parser rejects const; covered by the rejection test")
+    if executable is not None and shutil.which(executable) is None:
+        pytest.skip(f"{executable} not available")
+    minify: Final = cast("Callable[[str], str]", pytest.importorskip(module).minify_js)
+    source: Final = cast("str", INPUTS[operation]()[case][1])
+    count, repeat = shape
+    values: Final = [index % 10 if operation == "minify-js-propagation" else index for index in range(count)]
+    expected: Final[dict[str, list[int] | list[None]]]
+    if operation == "minify-js-var-initialization":
+        expected = (
+            {"calls": [None] * count, "result": [None] * count}
+            if case == 2
+            else {"calls": values, "result": [value for index in values for value in (index, index % 10)]}
+        )
+    elif operation == "minify-js-unlink":
+        expected = {
+            "calls": values,
+            "result": [value for index in values for value in (index, index % 10, index % 10)],
+        }
+    else:
+        expected = {"calls": values, "result": [value for value in values for _ in range(repeat)]}
+    assert (
+        json.loads(
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed corpus and CLI arguments
+                [
+                    cast("str", _NODE),
+                    "-e",
+                    minify(source) + ";const calls=[];const result=f(value=>(calls.push(value),value));"
+                    "console.log(JSON.stringify({calls,result}))",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
+            ).stdout
+        )
+        == expected
+    )
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    ("operation", "case"),
+    [
+        pytest.param(operation, case, id=f"{operation}-{case}")
+        for operation, count in (
+            ("minify-js-propagation", 3),
+            ("minify-js-single-use", 3),
+            ("minify-js-unlink", 3),
+            ("minify-js-unused-declarations", 2),
+        )
+        for case in range(count)
+    ],
+)
+def test_minifiers_calmjs_rejects_const(operation: str, case: int) -> None:
+    minify: Final = cast("Callable[[str], str]", pytest.importorskip("bench.competitors.calmjs_parse").minify_js)
+    with pytest.raises(SyntaxError, match="Unexpected 'const'"):
+        minify(cast("str", INPUTS[operation]()[case][1]))

@@ -390,7 +390,6 @@ run.omit = [
   "tests/conformance/test_xml_conformance.py",
   "tests/dom/test_treebuild_differential.py",
   "tests/query/xpath/test_xpath_differential.py",
-  "tests/serialize/js/test_minify_differential.py",
   "tests/validate/test_conformance_differential.py",   # differential oracle: skips when html5validator/vnu.jar or a JRE is absent
   "tests/validate/test_schema_differential.py",
 ]
