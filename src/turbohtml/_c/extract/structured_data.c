@@ -531,15 +531,39 @@ static int node_ptr_before(const void *left, const void *right) {
     return node_before(*(th_node *const *)left, *(th_node *const *)right);
 }
 
-static void sort_properties(node_stack *results) {
+static int sort_properties(node_stack *results) {
     if (results->len < 2) {
-        return;
+        return 0;
     }
     const int direction = node_before(results->items[0], results->items[1]);
     for (Py_ssize_t index = 2; index < results->len; index++) {
         if (node_before(results->items[index - 1], results->items[index]) != direction) {
-            qsort(results->items, (size_t)results->len, sizeof(th_node *), node_ptr_before);
-            return;
+            if (results->len < 32) {
+                qsort(results->items, (size_t)results->len, sizeof(th_node *), node_ptr_before);
+                return 0;
+            }
+            th_node_map selected = {0};
+            for (Py_ssize_t property = 0; property < results->len; property++) {
+                /* GCOVR_EXCL_BR_START: allocation failure */
+                if (th_node_map_insert(&selected, results->items[property], 1) < 0) {
+                    PyMem_Free(selected.entries); /* GCOVR_EXCL_LINE */
+                    PyErr_NoMemory();             /* GCOVR_EXCL_LINE */
+                    return -1;                    /* GCOVR_EXCL_LINE */
+                }
+                /* GCOVR_EXCL_BR_STOP */
+            }
+            th_node *root = results->items[0];
+            while (root->parent != NULL) {
+                root = root->parent;
+            }
+            Py_ssize_t written = 0;
+            for (th_node *node = root; written < results->len; node = preorder_next(node, root)) {
+                if (th_node_map_find(&selected, node)) {
+                    results->items[written++] = node;
+                }
+            }
+            PyMem_Free(selected.entries);
+            return 0;
         }
     }
     if (direction > 0) {
@@ -549,6 +573,7 @@ static void sort_properties(node_stack *results) {
             results->items[results->len - index - 1] = node;
         }
     }
+    return 0;
 }
 
 /* Without itemref, preorder visits each property once in tree order, so no visited set or sort is needed. */
@@ -590,7 +615,9 @@ static int collect_properties(micro_ctx *ctx, th_node *element, PyObject *proper
         if (crawled < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             goto done;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        sort_properties(&results);
+        if (sort_properties(&results) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            goto done;                       /* GCOVR_EXCL_LINE */
+        }
     }
     for (Py_ssize_t index = 0; index < results.len; index++) {
         th_node *property = results.items[index];

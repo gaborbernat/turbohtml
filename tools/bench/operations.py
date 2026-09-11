@@ -418,7 +418,7 @@ OPERATIONS: dict[str, Operation] = {
     "socialcard": Operation("social-card extraction", "us"),
     "structured": Operation("structured-data extraction", "us"),
     "microdata": Operation("Microdata item extraction", "us"),
-    "microdata-itemref": Operation("resolve 1,000 Microdata item references", "ms"),
+    "microdata-itemref": Operation("resolve Microdata item references", "ms"),
     "syndication": Operation("RSS/Atom feed parsing", "us"),
     "sanitize": Operation("sanitize", "us"),
     "sanitize-templates": Operation("sanitize (template-safe)", "us"),
@@ -1869,6 +1869,11 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             _MICRODATA_ITEMREF.replace(
                 _MICRODATA_REFS, " ".join(f"r{index}" for offset in (0, 1) for index in range(offset, 1_000, 2)), 1
             ),
+        ),
+        (
+            "4 shuffled references",
+            '<div itemscope itemref="r0 r2 r1 r3"></div>'
+            + "".join(f'<meta id=r{index} itemprop=p content="{index}">' for index in range(4)),
         ),
     ),
     "syndication": lambda: (

@@ -280,6 +280,8 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "select-nth-filtered": ("select-nth", 4),
     "xpath-wide-union": ("xpath-wide", 4),
     "microdata-itemref-interleaved": ("microdata-itemref", 2),
+    "microdata-itemref-reversed": ("microdata-itemref", 1),
+    "microdata-itemref-small": ("microdata-itemref", 3),
     "transform-dispatch-1": ("transform-dispatch", 1),
     "transform-dispatch-4": ("transform-dispatch", 2),
     "transform-dispatch-16": ("transform-dispatch", 3),

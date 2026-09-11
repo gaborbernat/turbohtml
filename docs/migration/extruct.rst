@@ -98,6 +98,10 @@ What extruct has that turbohtml does not
 Performance
 ===========
 
+For ``itemref`` extraction, check property order when migrating. On the benchmark's four shuffled references, extruct
+0.18.0 returns ``["0", "2", "1", "3"]`` in reference-token order; turbohtml returns ``["0", "1", "2", "3"]`` in document
+order. We omit extruct from the ``microdata-itemref`` comparison because these outputs differ.
+
 ``extruct`` starts from the raw HTML string, so it parses before it extracts: it builds an lxml tree and runs a separate
 extractor per syntax, where :meth:`~turbohtml.Document.structured_data` parses to the WHATWG tree and gathers every
 format in one C walk. On a product page carrying JSON-LD, Microdata, and OpenGraph at once, the single pass runs roughly

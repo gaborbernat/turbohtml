@@ -1139,6 +1139,30 @@ def test_microdata_nested_scope_keeps_following_properties() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "size",
+    [
+        pytest.param(1, id="single"),
+        pytest.param(4, id="tiny"),
+        pytest.param(31, id="small"),
+        pytest.param(32, id="indexed"),
+        pytest.param(1000, id="wide"),
+    ],
+)
+@pytest.mark.parametrize("depth", [pytest.param(0, id="siblings"), pytest.param(20, id="nested")])
+def test_microdata_shuffled_references_keep_tree_order(size: int, depth: int) -> None:
+    references: Final = " ".join(f"r{index}" for offset in (0, 1) for index in range(offset, size, 2))
+    document: Final = parse(
+        f'<div itemscope itemref="{references}"></div>'
+        + "<section>" * depth
+        + "".join(f'<span id="r{index}" itemprop=name>{index}</span>' for index in range(size))
+        + "</section>" * depth
+    )
+    assert document.microdata() == [
+        MicrodataItem(type=None, id=None, properties={"name": [str(index) for index in range(size)]})
+    ]
+
+
 def test_microdata_wide_item_keeps_all_values() -> None:
     document: Final[Document] = parse(
         "<div itemscope>" + "".join(f"<span itemprop=name>{index}</span>" for index in range(1_000)) + "</div>"

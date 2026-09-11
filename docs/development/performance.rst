@@ -1573,6 +1573,14 @@ the number of candidate containers.
 .. bench-table::
     :file: bench/microdata-empty-scope.json
 
+For shuffled references with at least 32 properties, Microdata extraction uses a temporary membership table and one
+tree-order walk. It releases the table before constructing property values. Smaller collections keep comparison sorting,
+and ordered or reversed collections need no table.
+
+On 1,000 interleaved references, matched release time fell from 2.325 to 0.655 ms (71.82%). The ordered, reversed and
+four-reference controls stayed within 1.53% of baseline. All four cases include HTML parsing and extraction; CodSpeed
+covers the target and controls.
+
 .. bench-table::
     :file: bench/microdata-itemref.json
 
