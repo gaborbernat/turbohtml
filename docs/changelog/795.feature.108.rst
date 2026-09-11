@@ -1,1 +1,1 @@
-Speed up JavaScript minification of integer arrays.
+Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of integer arrays.

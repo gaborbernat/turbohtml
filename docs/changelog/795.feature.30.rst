@@ -1,1 +1,1 @@
-Speed up repeated default XSLT ``level="any"`` numbering.
+Speed up repeated default :class:`XSLT <turbohtml.transform.Transform>` ``level="any"`` numbering.

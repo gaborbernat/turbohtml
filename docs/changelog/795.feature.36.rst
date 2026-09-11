@@ -1,1 +1,1 @@
-Speed up Range operations on fully contained sibling intervals.
+Speed up :class:`Range <turbohtml.Range>` operations on fully contained sibling intervals.

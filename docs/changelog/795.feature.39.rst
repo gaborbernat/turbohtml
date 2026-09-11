@@ -1,1 +1,1 @@
-Speed up XPath ``str:concat()`` over many short text nodes.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``str:concat()`` over many short text nodes.

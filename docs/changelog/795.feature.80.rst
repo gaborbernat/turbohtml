@@ -1,1 +1,1 @@
-Speed up computed-style matching of class-qualified selectors.
+Speed up :func:`computed-style <turbohtml.cssom.computed_style>` matching of class-qualified selectors.

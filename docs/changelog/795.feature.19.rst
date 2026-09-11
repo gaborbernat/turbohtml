@@ -1,1 +1,1 @@
-Speed up article extraction from deeply nested content.
+Speed up :meth:`article extraction <turbohtml.Node.article>` from deeply nested content.

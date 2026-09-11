@@ -1,1 +1,1 @@
-Speed up cloning partially selected Range ancestors.
+Speed up cloning partially selected :class:`Range <turbohtml.Range>` ancestors.

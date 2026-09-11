@@ -1,1 +1,1 @@
-Speed up CSS minification with many rules sharing declaration bodies.
+Speed up :func:`CSS minification <turbohtml.clean.minify_css>` with many rules sharing declaration bodies.

@@ -1,1 +1,1 @@
-Speed up XSD validation of values with named-type facets.
+Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation of values with named-type facets.

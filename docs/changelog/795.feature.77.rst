@@ -1,1 +1,1 @@
-Speed up feed extraction from entries with extension fields.
+Speed up :func:`feed extraction <turbohtml.extract.feed>` from entries with extension fields.

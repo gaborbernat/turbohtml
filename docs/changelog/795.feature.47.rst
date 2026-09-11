@@ -1,1 +1,1 @@
-Speed up XSLT applications with many template rules.
+Speed up :class:`XSLT <turbohtml.transform.Transform>` applications with many template rules.

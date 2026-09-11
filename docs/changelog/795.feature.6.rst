@@ -1,1 +1,1 @@
-Speed up article extraction from pages with many content candidates.
+Speed up :meth:`article extraction <turbohtml.Node.article>` from pages with many content candidates.

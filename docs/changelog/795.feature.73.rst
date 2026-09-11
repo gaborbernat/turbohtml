@@ -1,1 +1,1 @@
-Speed up plain-text serialization with explicit options.
+Speed up :meth:`plain-text serialization <turbohtml.Node.to_text>` with explicit options.

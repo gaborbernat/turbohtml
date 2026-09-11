@@ -1,1 +1,1 @@
-Speed up Markdown conversion of long runs of punctuation.
+Speed up :meth:`Markdown conversion <turbohtml.Node.to_markdown>` of long runs of punctuation.

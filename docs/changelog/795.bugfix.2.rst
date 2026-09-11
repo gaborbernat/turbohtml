@@ -1,1 +1,1 @@
-Release temporary text buffers after boilerplate extraction.
+Release temporary text buffers after :func:`boilerplate extraction <turbohtml.extract.boilerplate>`.

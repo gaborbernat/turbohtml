@@ -1,1 +1,1 @@
-Speed up XPath ``id()`` when its argument contains many short nodes.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``id()`` when its argument contains many short nodes.

@@ -1,1 +1,1 @@
-Speed up microdata extraction when properties are local to their item.
+Speed up :meth:`microdata extraction <turbohtml.Document.microdata>` when properties are local to their item.

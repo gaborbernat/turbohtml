@@ -1,1 +1,2 @@
-Avoid crashes during form-data collection when a garbage-collection callback detaches a control's ancestor.
+Avoid crashes during :meth:`form-data collection <turbohtml.Element.form_data>` when a garbage-collection callback
+detaches a control's ancestor.

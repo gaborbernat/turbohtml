@@ -1,1 +1,1 @@
-Speed up generation of the Unicode normalization tables.
+Speed up generation of the :func:`Unicode normalization <turbohtml.detect.normalize>` tables.

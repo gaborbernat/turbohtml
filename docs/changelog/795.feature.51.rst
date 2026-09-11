@@ -1,1 +1,1 @@
-Speed up Markdown wrapping of long lines.
+Speed up :meth:`Markdown wrapping <turbohtml.Node.to_markdown>` of long lines.

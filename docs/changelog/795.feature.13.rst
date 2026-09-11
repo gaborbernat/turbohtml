@@ -1,1 +1,1 @@
-Speed up XPath ``set:distinct()`` on large node sets.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:distinct()`` on large node sets.

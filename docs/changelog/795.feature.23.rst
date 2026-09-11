@@ -1,1 +1,1 @@
-Speed up XPath equality comparisons of long strings.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` equality comparisons of long strings.

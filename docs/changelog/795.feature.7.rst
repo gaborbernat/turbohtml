@@ -1,1 +1,1 @@
-Speed up microdata extraction with repeated item references.
+Speed up :meth:`microdata extraction <turbohtml.Document.microdata>` with repeated item references.

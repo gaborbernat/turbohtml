@@ -1,1 +1,1 @@
-Speed up structured-data extraction from documents without metadata.
+Speed up :meth:`structured-data extraction <turbohtml.Document.structured_data>` from documents without metadata.

@@ -1,1 +1,1 @@
-Speed up language detection on text with many distinct trigrams.
+Speed up :func:`language detection <turbohtml.detect.detect_language>` on text with many distinct trigrams.

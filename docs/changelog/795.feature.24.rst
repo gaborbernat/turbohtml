@@ -1,1 +1,1 @@
-Speed up XPath ``translate()`` with large character maps.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``translate()`` with large character maps.

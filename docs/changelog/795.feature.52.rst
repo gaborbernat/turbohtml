@@ -1,1 +1,1 @@
-Speed up XPath ``str:replace()`` with sparse matches of long strings.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``str:replace()`` with sparse matches of long strings.

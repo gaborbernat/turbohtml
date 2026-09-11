@@ -1,1 +1,1 @@
-Avoid invalid integer conversions when formatting large XPath numbers.
+Avoid invalid integer conversions when formatting large :meth:`XPath <turbohtml.Node.xpath>` numbers.

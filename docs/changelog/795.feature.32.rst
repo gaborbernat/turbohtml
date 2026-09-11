@@ -1,1 +1,1 @@
-Speed up XSLT stylesheets with repeated numbering patterns.
+Speed up :class:`XSLT <turbohtml.transform.Transform>` stylesheets with repeated numbering patterns.

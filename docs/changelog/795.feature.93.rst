@@ -1,1 +1,1 @@
-Speed up JavaScript minification of declarations with single-use initializers.
+Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of declarations with single-use initializers.

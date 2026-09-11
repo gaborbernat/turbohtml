@@ -1,1 +1,1 @@
-Speed up DOM linkification of long non-ASCII text.
+Speed up :func:`DOM linkification <turbohtml.clean.linkify_node>` of long non-ASCII text.

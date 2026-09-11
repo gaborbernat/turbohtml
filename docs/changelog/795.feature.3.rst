@@ -1,1 +1,1 @@
-Speed up XPath unions of results already in document order.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` unions of results already in document order.

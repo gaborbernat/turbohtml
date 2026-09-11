@@ -1,1 +1,1 @@
-Speed up JavaScript minification that merges long declaration lists.
+Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` that merges long declaration lists.

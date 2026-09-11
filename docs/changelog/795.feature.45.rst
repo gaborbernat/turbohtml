@@ -1,1 +1,1 @@
-Speed up DOM normalization of empty text nodes.
+Speed up :meth:`DOM normalization <turbohtml.Element.normalize>` of empty text nodes.

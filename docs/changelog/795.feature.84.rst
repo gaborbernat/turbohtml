@@ -1,1 +1,1 @@
-Speed up JavaScript literal propagation across many interleaved declarations.
+Speed up :func:`JavaScript literal propagation <turbohtml.clean.minify_js>` across many interleaved declarations.

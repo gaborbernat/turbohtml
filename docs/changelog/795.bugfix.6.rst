@@ -1,1 +1,1 @@
-Avoid concurrent writes to shared schema text during RELAX NG validation.
+Avoid concurrent writes to shared schema text during :class:`RELAX NG <turbohtml.validate.RelaxNG>` validation.

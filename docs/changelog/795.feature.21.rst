@@ -1,1 +1,1 @@
-Speed up XPath inequality comparisons between node sets.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` inequality comparisons between node sets.

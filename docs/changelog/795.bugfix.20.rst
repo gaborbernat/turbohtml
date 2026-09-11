@@ -1,1 +1,1 @@
-Prevent buffer overruns when XPath regular-expression flags contain repeated letters.
+Prevent buffer overruns when :meth:`XPath <turbohtml.Node.xpath>` regular-expression flags contain repeated letters.

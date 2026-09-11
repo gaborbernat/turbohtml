@@ -1,1 +1,1 @@
-Speed up RELAX NG validation of optional groups and interleaves.
+Speed up :class:`RELAX NG <turbohtml.validate.RelaxNG>` validation of optional groups and interleaves.

@@ -1,1 +1,1 @@
-Speed up XSLT applications with many named declarations.
+Speed up :class:`XSLT <turbohtml.transform.Transform>` applications with many named declarations.

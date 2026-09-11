@@ -1,1 +1,1 @@
-Speed up canonical serialization of deeply nested trees with xlink attributes.
+Speed up :meth:`canonical serialization <turbohtml.Node.serialize>` of deeply nested trees with xlink attributes.

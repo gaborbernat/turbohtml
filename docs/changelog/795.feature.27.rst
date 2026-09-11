@@ -1,1 +1,1 @@
-Speed up XPath ``translate()`` on text with repeated characters.
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``translate()`` on text with repeated characters.
