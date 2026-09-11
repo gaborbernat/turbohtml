@@ -84,6 +84,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "validate-rng": "validate-rng",
     "validate-pattern-reuse": "validate-pattern-reuse",
     "compile-pattern": "compile-pattern",
+    "validate-facets": "validate-facets",
+    "compile-facets": "compile-facets",
     "validate-pattern": "validate-pattern",
     "xpath-wide": "xpath-wide",
     "xpath-distinct": "xpath-distinct",

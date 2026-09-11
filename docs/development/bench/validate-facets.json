@@ -1,0 +1,33 @@
+{
+  "label": "validate inherited facet metadata",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 values, four-level derived type",
+      0.0017006404503566348,
+      0.00024595435103644074
+    ],
+    [
+      "1000 values, builtin string",
+      0.001307342989366589,
+      0.00012029070897672985
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.0077975538305949605,
+      0.026581143242011548
+    ],
+    [
+      null,
+      0.014239464103031129,
+      0.01575350589275942
+    ]
+  ],
+  "notes": {}
+}

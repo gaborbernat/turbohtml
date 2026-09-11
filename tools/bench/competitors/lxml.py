@@ -478,6 +478,8 @@ OPERATIONS = {
     "validate": (validate, "lxml.etree.XMLSchema"),
     "validate-pattern-reuse": (validate, "lxml.etree.XMLSchema"),
     "compile-pattern": (_compile_pattern, "lxml.etree.XMLSchema"),
+    "validate-facets": (validate, "lxml.etree.XMLSchema"),
+    "compile-facets": (_compile_pattern, "lxml.etree.XMLSchema"),
     "validate-pattern": (validate, "lxml.etree.XMLSchema"),
     "validate-rng": (_validate_rng, "lxml.etree.RelaxNG"),
     "fragment": (fragment, "lxml"),

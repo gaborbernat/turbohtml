@@ -304,6 +304,8 @@ OPERATIONS: dict[str, Operation] = {
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
+    "validate-facets": Operation("validate inherited facet metadata", "us"),
+    "compile-facets": Operation("compile inherited facet metadata", "us"),
     "validate-pattern-reuse": Operation("validate repeated pattern facets", "us"),
     "compile-pattern": Operation("compile pattern facets", "us"),
     "validate-pattern": Operation("validate growing regex character classes", "us"),
@@ -1251,6 +1253,39 @@ def _validate_pattern_reuse_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
     )
 
 
+def _validate_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            label,
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                + declarations
+                + '<xs:element name="root"><xs:complexType><xs:sequence>'
+                f'<xs:element name="value" type="{type_name}" maxOccurs="unbounded"/>'
+                "</xs:sequence></xs:complexType></xs:element></xs:schema>",
+                "<root>" + "<value>abc123</value>" * 1000 + "</root>",
+            ),
+        )
+        for label, type_name, declarations in (
+            (
+                "1000 values, four-level derived type",
+                "item",
+                (
+                    '<xs:simpleType name="base"><xs:restriction base="xs:token">'
+                    '<xs:minLength value="3"/><xs:maxLength value="12"/></xs:restriction></xs:simpleType>'
+                    '<xs:simpleType name="middle"><xs:restriction base="base">'
+                    '<xs:pattern value="[a-z]+[0-9]+"/></xs:restriction></xs:simpleType>'
+                    '<xs:simpleType name="choice"><xs:restriction base="middle">'
+                    '<xs:enumeration value="abc123"/><xs:enumeration value="def456"/></xs:restriction></xs:simpleType>'
+                    '<xs:simpleType name="item"><xs:restriction base="choice">'
+                    '<xs:maxLength value="9"/></xs:restriction></xs:simpleType>'
+                ),
+            ),
+            ("1000 values, builtin string", "xs:string", ""),
+        )
+    )
+
+
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "build": lambda: _ROWS,
     "build-e": lambda: _ROWS,
@@ -1337,6 +1372,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
     ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
+    "validate-facets": _validate_facet_cases,
+    "compile-facets": lambda: (("four-level derived type", _validate_facet_cases()[0][1][0]),),
     "validate-pattern-reuse": _validate_pattern_reuse_cases,
     "compile-pattern": lambda: (("two pattern facets", _validate_pattern_reuse_cases()[0][1][0]),),
     "validate-pattern": lambda: tuple(

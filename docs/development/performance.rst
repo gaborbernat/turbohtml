@@ -1288,6 +1288,24 @@ frees its own active-state lists and visitation markers, so concurrent calls sha
 .. bench-table::
     :file: bench/compile-pattern.json
 
+Compiled XSD schemas retain effective facet metadata for named and inline simple types. The inherited-facet case
+validates 1,000 values against a four-level derived type; the control uses the builtin string type. Both include
+instance parsing and reuse the schema. Matched validation time fell from 2,010.788 to 1,700.640 µs (15.42%). The
+builtin-type control increased from 1,301.321 to 1,307.343 µs (0.46%).
+
+Constructing the target schema increased from 3.924 to 4.951 µs (26.19%, or 1.028 µs). Compiled schemas keep the facet
+metadata until release; normalization and matching scratch memory remain local to each validation. Inheritance cutoffs,
+whitespace normalization and diagnostics retain their behavior.
+
+Lxml takes 245.954 µs for inherited-facet validation and 120.291 µs for the builtin control; it remains faster at
+validation. Its schema-construction measurement is 14.229 µs with 7.33% spread; the table retains that warning.
+
+.. bench-table::
+    :file: bench/validate-facets.json
+
+.. bench-table::
+    :file: bench/compile-facets.json
+
 .. bench-table::
     :file: bench/validate.json
 

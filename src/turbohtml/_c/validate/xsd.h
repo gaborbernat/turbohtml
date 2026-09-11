@@ -417,6 +417,9 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
             base_id = xsd_gather_facets(schema, inner, facets, depth + 1);
         }
     }
+    if (base_id < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
     facets->base_id = base_id;
     facets->ws = dt_default_ws(base_id);
     for (th_node *facet = restriction->first_child; facet != NULL; facet = facet->next_sibling) {
@@ -430,10 +433,73 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
         Py_ssize_t value_len = 0;
         const Py_UCS4 *value = xsd_attr(tree, facet, "value", &value_len);
         if (value != NULL) {
-            facet_add(&schema->mem, facets, name.local, name.local_len, value, value_len);
+            const int status = facet_add(&schema->mem, facets, name.local, name.local_len, value, value_len);
+            if (status < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+                return -1;    /* GCOVR_EXCL_LINE */
+            }
         }
     }
     return base_id;
+}
+
+typedef struct xfacet_entry {
+    th_node *node;
+    facetset facets;
+} xfacet_entry;
+
+static int xsd_cache_facets(th_schema *schema, th_node *node) {
+    if (is_schema_el(schema, node, XSD_NS, "simpleType")) {
+        if (schema->facet_count == schema->facet_cap) {
+            size_t capacity, bytes;
+            const int fits =
+                th_grow_cap(schema->facet_count + 1, schema->facet_cap, 8, sizeof(xfacet_entry), &capacity, &bytes);
+            if (!fits) {   /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                return -1; /* GCOVR_EXCL_LINE */
+            }
+            xfacet_entry *entries = arena_alloc(&schema->mem, bytes);
+            if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+                return -1;         /* GCOVR_EXCL_LINE */
+            }
+            if (schema->facet_count > 0) {
+                memcpy(entries, schema->facet_entries, schema->facet_count * sizeof(xfacet_entry));
+            }
+            schema->facet_entries = entries;
+            schema->facet_cap = capacity;
+        }
+        xfacet_entry *entry = &schema->facet_entries[schema->facet_count++];
+        entry->node = node;
+        facetset_init(&entry->facets, DT_STRING);
+        if (xsd_gather_facets(schema, node, &entry->facets, 0) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                                                /* GCOVR_EXCL_LINE */
+        }
+    }
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            if (xsd_cache_facets(schema, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+                return -1;                             /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    return 0;
+}
+
+static int xsd_facet_order(const void *left, const void *right) {
+    const uintptr_t left_node = (uintptr_t)((const xfacet_entry *)left)->node;
+    const uintptr_t right_node = (uintptr_t)((const xfacet_entry *)right)->node;
+    return (left_node > right_node) - (left_node < right_node);
+}
+
+static const facetset *xsd_cached_facets(const th_schema *schema, const th_node *node) {
+    size_t low = 0, high = schema->facet_count;
+    while (low < high) {
+        const size_t middle = low + (high - low) / 2;
+        if ((uintptr_t)schema->facet_entries[middle].node < (uintptr_t)node) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return &schema->facet_entries[low].facets;
 }
 
 /* Validate a text value against a simple type (built-in id, or a named/inline
@@ -441,21 +507,24 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
 static void xsd_validate_simple(valctx *ctx, th_node *node, int builtin_id, th_node *simpletype, const Py_UCS4 *value,
                                 Py_ssize_t len) {
     th_schema *schema = ctx->schema;
-    facetset facets;
-    facetset_init(&facets,
-                  builtin_id >= 0 ? builtin_id : DT_STRING); /* GCOVR_EXCL_BR_LINE: builtin_id is always >= 0 */
+    facetset builtin;
+    const facetset *facets;
     if (simpletype != NULL) {
-        xsd_gather_facets(schema, simpletype, &facets, 0);
+        facets = xsd_cached_facets(schema, simpletype);
+    } else {
+        facetset_init(&builtin,
+                      builtin_id >= 0 ? builtin_id : DT_STRING); /* GCOVR_EXCL_BR_LINE: negative only on arena OOM */
+        facets = &builtin;
     }
     Py_ssize_t norm_len = 0;
-    const Py_UCS4 *norm = dt_normalize_ws(&schema->mem, facets.ws, value, len, &norm_len);
-    if (!dt_check_lexical(facets.base_id, norm, norm_len)) {
+    const Py_UCS4 *norm = dt_normalize_ws(&schema->mem, facets->ws, value, len, &norm_len);
+    if (!dt_check_lexical(facets->base_id, norm, norm_len)) {
         char buffer[128];
         report(ctx, node, "datatype", "value '%s' is not a valid %s", name_utf8(norm, norm_len, buffer, sizeof(buffer)),
-               DT_NAMES[facets.base_id].name);
+               DT_NAMES[facets->base_id].name);
         return;
     }
-    facet_check(ctx, node, &facets, norm, norm_len);
+    facet_check(ctx, node, facets, norm, norm_len);
 }
 
 /* ---- attributes ---- */
@@ -900,6 +969,13 @@ static int xsd_compile(th_schema *schema) {
             PyErr_NoMemory();                         /* GCOVR_EXCL_LINE */
             return 0;                                 /* GCOVR_EXCL_LINE */
         }
+    }
+    if (xsd_cache_facets(schema, schema->root) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        PyErr_NoMemory();                             /* GCOVR_EXCL_LINE */
+        return 0;                                     /* GCOVR_EXCL_LINE */
+    }
+    if (schema->facet_count > 1) {
+        qsort(schema->facet_entries, schema->facet_count, sizeof(xfacet_entry), xsd_facet_order);
     }
     return 1;
 }

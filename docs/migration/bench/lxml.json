@@ -1505,6 +1505,21 @@
       "parse XML with distinct attribute names — 1 attribute / value=a",
       3.5702437841678145e-07,
       8.316973810096328e-07
+    ],
+    [
+      "validate inherited facet metadata — 1000 values, four-level derived type",
+      0.0017006404503566348,
+      0.00024595435103644074
+    ],
+    [
+      "validate inherited facet metadata — 1000 values, builtin string",
+      0.001307342989366589,
+      0.00012029070897672985
+    ],
+    [
+      "compile inherited facet metadata — four-level derived type",
+      4.951191752944339e-06,
+      1.4229321264262277e-05
     ]
   ],
   "spread": [
@@ -3007,6 +3022,21 @@
       null,
       0.021112397433787577,
       0.027836216607728625
+    ],
+    [
+      null,
+      0.0077975538305949605,
+      0.026581143242011548
+    ],
+    [
+      null,
+      0.014239464103031129,
+      0.01575350589275942
+    ],
+    [
+      null,
+      0.007012032059504464,
+      0.07329105848895837
     ]
   ],
   "row_notes": {

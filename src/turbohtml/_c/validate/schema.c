@@ -481,6 +481,8 @@ typedef struct th_schema {
     sqname_entry *sqnames;
     Py_ssize_t sqname_count;
     struct rpattern *regex_patterns;
+    struct xfacet_entry *facet_entries;
+    size_t facet_count, facet_cap;
 } th_schema;
 
 /* Look up a schema element node's precomputed qname. schema_build_qname_cache enters every

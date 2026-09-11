@@ -1324,6 +1324,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse-xml-names": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
+    "validate-facets": (validate, "turbohtml"),
+    "compile-facets": (_XMLSchema, "turbohtml"),
     "validate-pattern-reuse": (validate, "turbohtml"),
     "compile-pattern": (_XMLSchema, "turbohtml"),
     "validate-pattern": (validate, "turbohtml"),
