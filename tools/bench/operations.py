@@ -353,6 +353,8 @@ OPERATIONS: dict[str, Operation] = {
     "path-one-cold": Operation("build one CSS path on a fresh tree", "us"),
     "path-xpath-one-cold": Operation("build one XPath path on a fresh tree", "us"),
     "path-class-edit": Operation("build CSS paths after class edits", "ms"),
+    "computed-style-filter": Operation("reject CSS rules before traversal predicates", "ms"),
+    "computed-style-filter-cold": Operation("compile CSS predicate order and resolve one element", "ms"),
     "computed-style-specificity": Operation("compute styles across matching selector alternatives", "ms"),
     "computed-style-specificity-cold": Operation("compile styles and resolve the first element", "ms"),
     "computed-style": Operation("computed style for every element", "us"),
@@ -751,6 +753,22 @@ def _article_page(paragraphs: int) -> str:
     )
     article = f"<article class=post><h1>Comets</h1>{para * paragraphs}</article>"
     return f"{head}{nav}{article}<footer><p>Copyright notice, all rights reserved here.</p></footer></body></html>"
+
+
+_FILTER_STYLED_PAGES: Final = tuple(
+    (
+        f"256 rules / 128 parent-child pairs / {label}",
+        "<style>"
+        + (selector + "{color:red}") * 256
+        + "div{color:blue}</style>"
+        + '<div class="hit"><span></span></div>' * 128,
+    )
+    for label, selector in (
+        ("irrelevant pseudo-first", ":has(span).missing"),
+        ("matching pseudo-first", ":has(span).hit"),
+        ("irrelevant class-first", ".missing:has(span)"),
+    )
+)
 
 
 _SPECIFICITY_STYLED_PAGES: Final = tuple(
@@ -1716,6 +1734,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         )
         for depth in (10, 100, 500)
     ),
+    "computed-style-filter": lambda: _FILTER_STYLED_PAGES,
+    "computed-style-filter-cold": lambda: _FILTER_STYLED_PAGES,
     "computed-style-specificity": lambda: _SPECIFICITY_STYLED_PAGES,
     "computed-style-specificity-cold": lambda: _SPECIFICITY_STYLED_PAGES,
     "computed-style": lambda: (("styled page (3 kB)", _styled_page(8)), ("styled page (11 kB)", _styled_page(40))),

@@ -1463,6 +1463,18 @@ selectors and 89.234 µs for ordinary selectors. These construction controls inc
 .. bench-table::
     :file: bench/computed-style-specificity-cold.json
 
+Checking a required ID or class before a pseudo-class avoids descendant searches for irrelevant cascade rules. On 256
+rules and 128 parent-child pairs, matched release time fell from 3.520 to 2.157 ms (38.70%). Matching pseudo-first rules
+improved from 4.479 to 3.618 ms (19.22%). The class-first control changed from 2.160 to 2.181 ms (+0.97%); constructing
+the document and resolving its first element improved from 114.949 to 104.661 µs (8.95%). CodSpeed includes the three
+selector cases and the construction case.
+
+.. bench-table::
+    :file: bench/computed-style-filter.json
+
+.. bench-table::
+    :file: bench/computed-style-filter-cold.json
+
 Extraction
 ==========
 

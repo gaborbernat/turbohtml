@@ -1092,6 +1092,25 @@ void handle_clear_css_cache(HandleObject *handle) {
     handle->css_sheets_ready = 0;
 }
 
+static void css_prioritize_subject(sel_compiled *compiled) {
+    for (int alt = 0; alt < compiled->count; alt++) {
+        sel_complex *complex = &compiled->alts[alt];
+        sel_compound *subject = &complex->compounds[complex->count - 1];
+        if (subject->simples[0].kind != ':' && subject->simples[0].kind != '*') {
+            continue;
+        }
+        for (int index = 1; index < subject->count; index++) {
+            if (subject->simples[index].kind == '#' || subject->simples[index].kind == '.') {
+                /* A compound is a conjunction; its specificity does not depend on predicate order. */
+                sel_simple first = subject->simples[0];
+                subject->simples[0] = subject->simples[index];
+                subject->simples[index] = first;
+                break;
+            }
+        }
+    }
+}
+
 /* Collect every <style> element's text under root (document order), parsing each
    into a sheet whose selectors are compiled against tree. A selector that fails to
    compile leaves compiled[rule] NULL so the rule matches nothing. Returns the sheet
@@ -1146,6 +1165,7 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
                 /* an unsupported or invalid selector list drops its rule (it matches nothing) */
                 PyErr_Clear();
             } else {
+                css_prioritize_subject(compiled[rule]);
                 alternative_count += compiled[rule]->count;
             }
         }

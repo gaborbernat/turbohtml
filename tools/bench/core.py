@@ -1425,6 +1425,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "xpath-order": (_xpath_scaling, "turbohtml"),
     "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
+    "computed-style-filter": (computed_style, "turbohtml"),
+    "computed-style-filter-cold": (_computed_style_first, "turbohtml"),
     "computed-style-specificity": (computed_style, "turbohtml"),
     "computed-style-specificity-cold": (_computed_style_first, "turbohtml"),
     "computed-style-dense": (computed_style, "turbohtml"),

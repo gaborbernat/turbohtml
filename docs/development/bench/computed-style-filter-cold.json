@@ -1,0 +1,20 @@
+{
+  "label": "compile CSS predicate order and resolve one element",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 rules / 128 parent-child pairs / irrelevant pseudo-first",
+      0.00010466126854377459
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.014349469268254656
+    ]
+  ],
+  "notes": {}
+}
