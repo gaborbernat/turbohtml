@@ -1141,6 +1141,50 @@ def test_sequence_growth_preserves_call_order(count: int, *, nested: bool) -> No
             '["x",true,false]\n',
             id="regex-conditional-alternate",
         ),
+        pytest.param(
+            "function f(g){const a=g(1),b=2,{c}={c:g(3)},d=4,e=g(5);return[a,b,b,c,d,d,e]}"
+            "const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            "[[1,2,2,3,4,4,5],[1,3,5]]\n",
+            id="propagation-retains-destructuring-order",
+        ),
+        pytest.param(
+            "function f(g){const dead=0,keep=g(1),a=2,b=3;return[keep,a,b]}"
+            "const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            "[[1,2,3],[1]]\n",
+            id="predecessors-after-dead-head",
+        ),
+        pytest.param(
+            "function f(g){const a=1,{keep}={keep:g(2)},b=3;return[a,keep,b]}"
+            "const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            "[[1,2,3],[2]]\n",
+            id="predecessors-around-destructuring",
+        ),
+        pytest.param(
+            "const trace=[];function mark(x){trace.push(x);return x}"
+            "var first=mark(1);var second=mark(2);var third;for(var fourth=mark(3);false;);"
+            "console.log(JSON.stringify([trace,first,second,third,fourth]))",
+            "[[1,2,3],1,2,null,3]\n",
+            id="merge-declarations-before-for-init",
+        ),
+        pytest.param(
+            "const trace=[];function mark(x){trace.push(x);return x}"
+            "let first=mark(1);let second=mark(2);const third=mark(3);const fourth=mark(4);"
+            "console.log(JSON.stringify([trace,first,second,third,fourth]))",
+            "[[1,2,3,4],1,2,3,4]\n",
+            id="merge-declarations-stops-at-kind-change",
+        ),
+        pytest.param(
+            "const trace=[];function mark(x){trace.push(x);return{x}}"
+            "const {x:first}=mark(1);const {x:second}=mark(2);const {x:third}=mark(3);"
+            "console.log(JSON.stringify([trace,first,second,third]))",
+            "[[1,2,3],1,2,3]\n",
+            id="merge-declarations-keeps-destructuring-order",
+        ),
+        pytest.param(
+            "var first=console.log(1);var second=console.log(2)",
+            "1\n2\n",
+            id="merge-declarations-at-end",
+        ),
     ],
 )
 def test_declaration_reads_preserve_behavior(source: str, expected: str) -> None:
@@ -1155,3 +1199,54 @@ def test_single_use_initializers_preserve_call_order(case: int, count: int) -> N
     program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
     expected: Final = list(range(count))
     assert _run(minify_js(program)) == json.dumps([expected, expected], separators=(",", ":")) + "\n"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(("case", "count"), [(0, 256), (1, 256), (2, 1)], ids=["grouped", "separate", "single"])
+def test_propagation_unlink_preserves_call_order(case: int, count: int) -> None:
+    source: Final = INPUTS["minify-js-unlink"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = (
+        json.dumps(
+            [[value for index in range(count) for value in (index, index % 10, index % 10)], list(range(count))],
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    assert (_run(program), _run(minify_js(program))) == (expected, expected)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(
+    ("case", "count", "early"),
+    [
+        pytest.param(0, 256, False, id="many"),
+        pytest.param(1, 1, False, id="one"),
+        pytest.param(2, 256, True, id="early"),
+    ],
+)
+def test_var_initialization_benchmark_order(case: int, count: int, *, early: bool) -> None:
+    source: Final = INPUTS["minify-js-var-initialization"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = (
+        json.dumps(
+            [[None] * count, [None] * count]
+            if early
+            else [[value for index in range(count) for value in (index, index % 10)], list(range(count))],
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    assert (_run(program), _run(minify_js(program))) == (expected, expected)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(("case", "count"), [pytest.param(0, 256, id="many"), pytest.param(1, 1, id="one")])
+def test_unused_declarators_preserve_call_order(case: int, count: int) -> None:
+    source: Final = INPUTS["minify-js-unused-declarations"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = json.dumps([[], list(range(count))], separators=(",", ":")) + "\n"
+    assert (_run(program), _run(minify_js(program))) == (expected, expected)

@@ -271,6 +271,9 @@ SIZE_OPS: Final[frozenset[str]] = frozenset({
     "minify-js-guards",
     "minify-js-propagation",
     "minify-js-single-use",
+    "minify-js-unlink",
+    "minify-js-unused-declarations",
+    "minify-js-var-initialization",
 })
 
 # Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
@@ -484,6 +487,9 @@ OPERATIONS: dict[str, Operation] = {
     "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
+    "minify-js-unlink": Operation("remove mixed JavaScript declarators", "us"),
+    "minify-js-unused-declarations": Operation("remove unused JavaScript declarators", "us"),
+    "minify-js-var-initialization": Operation("check JavaScript var initialization order", "us"),
     "minify-js-sequences": Operation("minify expression sequences", "us"),
     "minify-js-propagation": Operation("propagate repeated JavaScript literal reads", "us"),
     "minify-js-single-use": Operation("check single-use JavaScript initializers", "us"),
@@ -2081,6 +2087,20 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
     "minify-js": _minify_js_cases,
+    "minify-js-var-initialization": lambda: tuple(
+        (
+            f"{count} var pairs / {'read before initialization' if early else 'read after initialization'}",
+            "function f(g){var "
+            + ",".join(
+                f"keep{index}=g({'value' + str(index) if early else str(index)}),value{index}={index % 10}"
+                for index in range(count)
+            )
+            + ";return["
+            + ",".join(f"keep{index}" if early else f"keep{index},value{index}" for index in range(count))
+            + "]}",
+        )
+        for count, early in ((256, False), (1, False), (256, True))
+    ),
     "minify-js-single-use": lambda: tuple(
         (
             f"{count} call initializers / {layout}",
@@ -2092,6 +2112,29 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             )
             + "return["
             + ",".join(f"v{index}" for index in range(count))
+            + "]}",
+        )
+        for count, layout in ((256, "one declaration"), (256, "separate declarations"), (1, "one declaration"))
+    ),
+    "minify-js-unused-declarations": lambda: tuple(
+        (
+            f"{count} unused retained/literal pairs",
+            "function f(g){const "
+            + ",".join(f"keep{index}=g({index}),value{index}={index % 10}" for index in range(count))
+            + ";return[]}",
+        )
+        for count in (256, 1)
+    ),
+    "minify-js-unlink": lambda: tuple(
+        (
+            f"{count} retained/literal pairs / {layout}",
+            "function f(g){"
+            "const "
+            + ("," if layout == "one declaration" else ";const ").join(
+                f"keep{index}=g({index}),value{index}={index % 10}" for index in range(count)
+            )
+            + ";return["
+            + ",".join(f"keep{index},value{index},value{index}" for index in range(count))
             + "]}",
         )
         for count, layout in ((256, "one declaration"), (256, "separate declarations"), (1, "one declaration"))

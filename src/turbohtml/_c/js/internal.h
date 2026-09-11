@@ -248,9 +248,11 @@ typedef struct {
     int32_t scope;      /* declaring scope id */
     int32_t scope_next; /* next symbol declared in the same scope, or -1 */
     uint8_t decl;       /* 0 var / 1 let / 2 const / 3 param / 4 function / 5 catch / 6 class */
+    uint8_t read_before_init;
     uint32_t uses;
-    int32_t slot;     /* rename slot: bindings sharing a slot take the same short name */
-    Py_UCS4 *mangled; /* assigned short name (owned), or NULL to keep the original */
+    int32_t slot;       /* rename slot: bindings sharing a slot take the same short name */
+    int32_t declr_prev; /* fits the pointer-alignment gap on 64-bit builds */
+    Py_UCS4 *mangled;   /* assigned short name (owned), or NULL to keep the original */
     Py_ssize_t mangled_len;
     int32_t refs;
     int32_t writes;

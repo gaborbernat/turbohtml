@@ -419,11 +419,14 @@ static int32_t merge_declarations(F *folder, int32_t first) {
         if (next >= 0 && nodes[idx].kind == JN_VAR && nodes[next].kind == JN_VAR &&
             nodes[idx].decl == nodes[next].decl) {
             int32_t tail = nodes[idx].a;
-            while (nodes[tail].next >= 0) {
-                tail = nodes[tail].next;
-            }
-            nodes[tail].next = nodes[next].a;
-            nodes[idx].next = nodes[next].next;
+            do {
+                while (nodes[tail].next >= 0) {
+                    tail = nodes[tail].next;
+                }
+                nodes[tail].next = nodes[next].a;
+                nodes[idx].next = nodes[next].next;
+                next = nodes[idx].next;
+            } while (next >= 0 && nodes[next].kind == JN_VAR && nodes[idx].decl == nodes[next].decl);
             folder->changed = 1;
             continue;
         }

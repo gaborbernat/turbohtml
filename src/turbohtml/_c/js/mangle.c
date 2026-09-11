@@ -538,7 +538,8 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         walk(mangler, node->d, scope, 0);
         return;
     case JN_VAR:
-        for (int32_t declarator = node->a; declarator >= 0; declarator = mangler->prog->nodes[declarator].next) {
+        for (int32_t declarator = node->a, previous = -1; declarator >= 0;
+             previous = declarator, declarator = mangler->prog->nodes[declarator].next) {
             walk(mangler, mangler->prog->nodes[declarator].a, scope, 1);
             walk(mangler, mangler->prog->nodes[declarator].b, scope, 0);
             /* Single-declaration transforms cannot account for another declaration target. */
@@ -550,6 +551,9 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
                     }
                     mangler->prog->syms[target].decl_node = idx;
                     mangler->prog->syms[target].declr_node = declarator;
+                    mangler->prog->syms[target].declr_prev = previous;
+                    /* Preserve traversal order when compression moves expression nodes. */
+                    mangler->prog->syms[target].read_before_init = mangler->prog->syms[target].refs != 0;
                 }
             }
         }
@@ -1134,6 +1138,28 @@ static int is_droppable_init(jm_program *prog, int32_t init) {
     }
 }
 
+static void unlink_declarator(jm_program *prog, int32_t sym) {
+    int32_t stmt = prog->syms[sym].decl_node;
+    int32_t declr = prog->syms[sym].declr_node;
+    int32_t previous = prog->syms[sym].declr_prev;
+    int32_t next = prog->nodes[declr].next;
+    if (previous < 0) {
+        prog->nodes[stmt].a = next;
+    } else {
+        prog->nodes[previous].next = next;
+    }
+    if (next >= 0) {
+        int32_t target = prog->nodes[next].a;
+        if (prog->nodes[target].kind == JN_IDENT) {
+            prog->syms[prog->nodes[target].sym].declr_prev = previous;
+        }
+    }
+    if (prog->nodes[stmt].a < 0) {
+        prog->nodes[stmt].kind = JN_EMPTY;
+    }
+    prog->syms[sym].decl_node = -2;
+}
+
 /* Drop a local binding that is never referenced (dead-code elimination, ECMA-262 has no observable
    effect for an unread binding). A function declaration is dropped whole; a var/let/const declarator is
    dropped when its initializer is side-effect-free -- one declarator is unlinked from its statement, and
@@ -1156,29 +1182,9 @@ static int drop_unused(jm_program *prog, int32_t global) {
             changed = 1;
             continue;
         }
-        int32_t prev = -1; /* find this binding's declarator among the statement's declarators */
-        /* GCOVR_EXCL_BR_START: decl_node records the statement holding this binding, so the declarator is
-           always present and the loop always breaks at it -- the declr < 0 exhaustion never runs */
-        for (int32_t declr = prog->nodes[stmt].a; declr >= 0; prev = declr, declr = prog->nodes[declr].next) {
-            /* GCOVR_EXCL_BR_STOP */
-            int32_t target = prog->nodes[declr].a;
-            if (prog->nodes[target].kind != JN_IDENT || prog->nodes[target].sym != sym) {
-                continue;
-            }
-            if (!is_droppable_init(prog, prog->nodes[declr].b)) {
-                break; /* a side-effecting initializer keeps the whole declarator */
-            }
-            if (prev < 0) {
-                prog->nodes[stmt].a = prog->nodes[declr].next;
-            } else {
-                prog->nodes[prev].next = prog->nodes[declr].next;
-            }
-            if (prog->nodes[stmt].a < 0) { /* removed the last declarator: the statement is now empty */
-                prog->nodes[stmt].kind = JN_EMPTY;
-            }
-            prog->syms[sym].decl_node = -2;
+        if (is_droppable_init(prog, prog->nodes[prog->syms[sym].declr_node].b)) {
+            unlink_declarator(prog, sym);
             changed = 1;
-            break;
         }
     }
     return changed;
@@ -1259,12 +1265,7 @@ static int read_sees_initialized(jm_program *prog, int32_t sym, int32_t stmt, in
         (prog->syms[sym].ref_scope != prog->syms[sym].scope && prog->nodes[stmt].a != declr)) {
         return 0;
     }
-    for (int32_t earlier = prog->nodes[stmt].a; earlier != declr; earlier = prog->nodes[earlier].next) {
-        if (subtree_contains(prog, earlier, ref)) {
-            return 0;
-        }
-    }
-    return 1;
+    return !prog->syms[sym].read_before_init;
 }
 
 /* Inline a single-declarator binding that is read exactly once into that one read and drop the
@@ -1340,21 +1341,10 @@ static int inline_single_use(jm_program *prog, int32_t global) {
         if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             continue;                           /* GCOVR_EXCL_LINE */
         }
-        int32_t declr_prev = -1;
-        for (int32_t sibling = prog->nodes[stmt].a; sibling != declr; sibling = prog->nodes[sibling].next) {
-            declr_prev = sibling;
-        }
         int32_t next = prog->nodes[ref].next;
         prog->nodes[ref] = prog->nodes[init];
         prog->nodes[ref].next = next;
-        if (lone) {
-            prog->nodes[stmt].kind = JN_EMPTY;
-        } else if (declr_prev < 0) { /* unlink just this declarator; its siblings keep the statement */
-            prog->nodes[stmt].a = prog->nodes[declr].next;
-        } else {
-            prog->nodes[declr_prev].next = prog->nodes[declr].next;
-        }
-        prog->syms[sym].decl_node = -2; /* mark inlined so assign_slots spends no name on it */
+        unlink_declarator(prog, sym);
         changed = 1;
     }
     return changed;
@@ -1453,28 +1443,36 @@ static int propagate_value_literals(jm_program *prog, int32_t global) {
     replace_reads(prog, prog->nodes[prog->root].a, plans);
     int changed = 0;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
-        if (plans[sym].target < 0) {
+        if (plans[sym].target < 0 || prog->syms[sym].decl_node < 0) {
             continue;
         }
         if (plans[sym].replaced != prog->syms[sym].refs) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
             continue;                                      /* GCOVR_EXCL_LINE */
         }
         int32_t stmt = prog->syms[sym].decl_node;
-        int32_t declr = prog->nodes[stmt].a;
         int32_t declr_prev = -1;
-        while (prog->nodes[declr].a != plans[sym].target) {
-            declr_prev = declr;
-            declr = prog->nodes[declr].next;
+        for (int32_t declr = prog->nodes[stmt].a; declr >= 0; declr = prog->nodes[declr].next) {
+            int32_t target = prog->nodes[declr].a;
+            if (prog->nodes[target].kind != JN_IDENT || plans[prog->nodes[target].sym].target != target) {
+                declr_prev = declr;
+                continue;
+            }
+            int32_t binding = prog->nodes[target].sym;
+            if (plans[binding].replaced != prog->syms[binding].refs) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
+                declr_prev = declr;                                    /* GCOVR_EXCL_LINE */
+                continue;                                              /* GCOVR_EXCL_LINE */
+            }
+            if (declr_prev < 0) {
+                prog->nodes[stmt].a = prog->nodes[declr].next;
+            } else {
+                prog->nodes[declr_prev].next = prog->nodes[declr].next;
+            }
+            prog->syms[binding].decl_node = -2;
+            changed = 1;
         }
-        if (declr_prev < 0 && prog->nodes[declr].next < 0) {
+        if (prog->nodes[stmt].a < 0) {
             prog->nodes[stmt].kind = JN_EMPTY;
-        } else if (declr_prev < 0) {
-            prog->nodes[stmt].a = prog->nodes[declr].next;
-        } else {
-            prog->nodes[declr_prev].next = prog->nodes[declr].next;
         }
-        prog->syms[sym].decl_node = -2; /* no name is spent on the gone binding */
-        changed = 1;
     }
     jm_free(plans);
     return changed;
