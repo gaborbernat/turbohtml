@@ -890,6 +890,17 @@ replacements, and XML attributes.
 .. bench-table::
     :file: bench/parse-xml-attrs.json
 
+For XML attributes, the parser checks for duplicate names before appending through the shared attribute-storage code.
+Skipping a second lookup reduced parsing time for 1,000 distinct attributes from 210.20 to 57.12 microseconds (72.82%)
+in a matched comparison. Duplicate errors retain their position relative to value and namespace errors.
+
+These cases use names ``a0`` onward with the one-character value ``a``. The table includes document allocation and
+cleanup, using CPython 3.14.7 release builds without PGO or LTO. The one-attribute control changed from 0.368 to 0.357
+microseconds; its 3.04% difference falls below the 5% improvement threshold. CodSpeed covers both inputs.
+
+.. bench-table::
+    :file: bench/parse-xml-append.json
+
 Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
 affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
 comparisons per attribute on average. Early mismatches return before allocating the index.

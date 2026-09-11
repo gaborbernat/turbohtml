@@ -474,6 +474,7 @@ OPERATIONS = {
     "parse-scope": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
     "parse-xml-attrs": (parse_xml, "lxml.etree"),
+    "parse-xml-append": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),
     "validate-pattern-reuse": (validate, "lxml.etree.XMLSchema"),
     "compile-pattern": (_compile_pattern, "lxml.etree.XMLSchema"),

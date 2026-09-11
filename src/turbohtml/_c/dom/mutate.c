@@ -224,8 +224,8 @@ static void mark_start_dirty(th_tree *tree, th_node *node) {
     }
 }
 
-int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
-                     Py_ssize_t value_len, int has_value) {
+static int node_attr_store(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                           Py_ssize_t value_len, int has_value, int append) {
     tree->attr_version++;
     mark_start_dirty(tree, node);
     uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
@@ -238,7 +238,7 @@ int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
         }
         memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
     }
-    Py_ssize_t existing = th_node_attr_find(tree, node, name, name_len);
+    Py_ssize_t existing = append ? -1 : th_node_attr_find(tree, node, name, name_len);
     if (existing >= 0) {
         th_mo_attr_changed(tree, node, atom, node->attrs[existing].value, node->attrs[existing].value_len, 1);
     } else {
@@ -275,6 +275,16 @@ int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
     node->attrs[node->attr_count].value_len = has_value ? value_len : 0;
     node->attr_count++;
     return 0;
+}
+
+int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                     Py_ssize_t value_len, int has_value) {
+    return node_attr_store(tree, node, name, name_len, value, value_len, has_value, 0);
+}
+
+int th_node_attr_append(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                        Py_ssize_t value_len, int has_value) {
+    return node_attr_store(tree, node, name, name_len, value, value_len, has_value, 1);
 }
 
 /* Replace a node's character data with a copy of len code points (an empty buffer

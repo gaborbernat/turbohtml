@@ -299,6 +299,7 @@ OPERATIONS: dict[str, Operation] = {
     "parse-scope": Operation("parse ignored block end tags", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
+    "parse-xml-append": Operation("parse XML with distinct attribute names", "us"),
     "parse-xml-attrs": Operation("parse XML with growing attribute counts", "us"),
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
@@ -1320,6 +1321,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "parse-xml-attrs": lambda: tuple(
         (f"{count} attributes", "<root " + " ".join(f'a{index}="value"' for index in range(count)) + "/>")
         for count in (1, 10, 100, 1_000)
+    ),
+    "parse-xml-append": lambda: tuple(
+        (f"{label} / value=a", "<root " + " ".join(f'a{index}="a"' for index in range(count)) + "/>")
+        for count, label in ((1_000, "1,000 attributes"), (1, "1 attribute"))
     ),
     "parse-xml-names": lambda: (
         (

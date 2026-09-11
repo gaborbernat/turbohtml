@@ -1050,8 +1050,8 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
         record(parser, "xml-duplicate-attribute", name_start);
         return -1;
     }
-    int stored = th_node_attr_set(parser->tree, element, name, u8_len, parser->scratch, parser->scratch_len, 1);
-    if (stored < 0) { /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on allocation */
+    int stored = th_node_attr_append(parser->tree, element, name, u8_len, parser->scratch, parser->scratch_len, 1);
+    if (stored < 0) { /* GCOVR_EXCL_BR_LINE: th_node_attr_append only fails on allocation */
         return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (parser->attr_spans_len == parser->attr_spans_cap) {

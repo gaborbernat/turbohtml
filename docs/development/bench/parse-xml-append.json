@@ -1,0 +1,28 @@
+{
+  "label": "parse XML with distinct attribute names",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1,000 attributes / value=a",
+      5.7123755525860057e-05
+    ],
+    [
+      "1 attribute / value=a",
+      3.5702437841678145e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.009716029738181305
+    ],
+    [
+      null,
+      0.021112397433787577
+    ]
+  ],
+  "notes": {}
+}

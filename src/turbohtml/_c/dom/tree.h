@@ -272,6 +272,9 @@ th_node *th_tree_build_shell(th_tree *tree, const Py_UCS4 *lang, Py_ssize_t lang
    it valueless. Returns 0, or -1 on allocation failure. */
 int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
                      Py_ssize_t value_len, int has_value);
+/* The caller has already established that this attribute name is absent. */
+int th_node_attr_append(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                        Py_ssize_t value_len, int has_value);
 
 /* An element's attribute array and count; (NULL, 0) for every non-element node. */
 static inline Py_ssize_t th_node_attributes(const th_node *node, th_node_attr **attrs) {

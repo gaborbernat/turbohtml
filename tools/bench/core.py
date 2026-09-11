@@ -1320,6 +1320,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "parse-dense": (parse, "turbohtml"),
     "parse-xml": (parse_xml, "turbohtml"),
     "parse-xml-attrs": (parse_xml, "turbohtml"),
+    "parse-xml-append": (parse_xml, "turbohtml"),
     "parse-xml-names": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
