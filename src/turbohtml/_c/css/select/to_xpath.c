@@ -943,14 +943,14 @@ static void spec_of_simple(const sel_simple *simple, int *spec_a, int *spec_b, i
     if (simple->kind == '*') {
         return; /* the universal selector adds nothing */
     }
-    /* only pseudo-classes reach here: :where() is zero, :is()/:not()/:has() take their most specific argument, and
-       every other pseudo-class is one b-level component */
     if (simple->pseudo == PSEUDO_WHERE) {
         return;
     }
     if (simple->pseudo != PSEUDO_IS && simple->pseudo != PSEUDO_NOT && simple->pseudo != PSEUDO_HAS) {
         (*spec_b)++;
-        return;
+        if (simple->pseudo != PSEUDO_NTH_CHILD && simple->pseudo != PSEUDO_NTH_LAST_CHILD) {
+            return;
+        }
     }
     int best_a = 0;
     int best_b = 0;
