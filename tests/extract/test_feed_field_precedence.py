@@ -57,3 +57,10 @@ def test_entry_field_precedence(fields: str, expected: tuple[str | None, ...]) -
     result: Final = feed(f"<rss><channel><item>{fields}</item></channel></rss>")
     assert result is not None
     assert result.entries == (expected,)
+
+
+def test_feed_empty_metadata_uses_fallback() -> None:
+    assert feed(
+        "<rss><channel><title> </title><description> </description><subtitle>fallback</subtitle>"
+        "<updated> </updated><lastbuilddate>date</lastbuilddate></channel></rss>"
+    ) == ("rss", None, None, "fallback", "date", ())
