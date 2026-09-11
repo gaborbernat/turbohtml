@@ -2196,3 +2196,69 @@ def test_form_data_handles_legend_changes_during_collection(mutation: str) -> No
         fieldset if mutation == "replace" else None,
         [*expected, *blocked, *tail],
     )
+
+
+@pytest.mark.parametrize("edit", ["none", "rename", "type", "append", "detach"])
+def test_radio_group_index_tracks_scope_and_edits(edit: str) -> None:
+    document: Final = parse(
+        '<form><input type=radio name="é水😀" checked><input type=radio name="é水😀"></form>'
+        '<form><input type=radio name="é水😀" checked></form>'
+    )
+    form: Final = document.select("form")[0]
+    first, selected, outside = document.select("input")
+    if edit == "rename":
+        first.attrs["name"] = "other"
+    elif edit == "type":
+        first.attrs["type"] = "checkbox"
+    elif edit == "append":
+        form.append(Element("input", {"type": "radio", "name": "é水😀", "checked": ""}))
+        document.select("input")
+    elif edit == "detach":
+        form.extract()
+        document.select("input")
+    selected.checked = True
+    assert ([node.checked for node in form.children if isinstance(node, Element)], outside.checked) == (
+        [edit in {"rename", "type"}, True, *([False] if edit == "append" else [])],
+        True,
+    )
+
+
+def test_radio_group_index_preserves_attribute_observer_order() -> None:
+    document: Final = parse("<form><input type=radio name=a checked><input type=radio name=a></form>")
+    form: Final = document.select("form")[0]
+    first, selected = document.select("input")
+    observer: Final = MutationObserver()
+    observer.observe(form, attributes=True, subtree=True, attribute_old_value=True)
+    selected.checked = True
+    assert [(record.target, record.attribute_name, record.old_value) for record in observer.take_records()] == [
+        (selected, "checked", None),
+        (first, "checked", ""),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("case", "selected"),
+    [
+        pytest.param(0, 15, id="document-radios"),
+        pytest.param(1, 0, id="unindexed-change"),
+        pytest.param(2, 15, id="many-forms"),
+        pytest.param(3, 7, id="invalidation"),
+    ],
+)
+def test_radio_group_benchmark_output(case: int, selected: int) -> None:
+    operation: Final = cast("Mutating", OPERATIONS["radio-group"][0])
+    data: Final = INPUTS["radio-group"]()[case][1]
+    assert operation.run(operation.setup(data)) == tuple(index == selected for index in range(16))
+
+
+@pytest.mark.parametrize("indexed", [pytest.param(False, id="unindexed"), pytest.param(True, id="indexed")])
+def test_radio_group_document_scope_keeps_other_names_and_types(*, indexed: bool) -> None:
+    document: Final = parse(
+        '<input type=radio name="é水😀" checked><input type=radio name="é水😀">'
+        '<input type=radio name=other checked><input type=checkbox name="é水😀" checked>'
+    )
+    radios: Final = [node for node in document.children[0].children[-1].children if isinstance(node, Element)]
+    if indexed:
+        document.select("input")
+    radios[1].checked = True
+    assert [node.checked for node in radios] == [False, True, True, True]

@@ -283,6 +283,7 @@ MEMORY_OPS: Final[frozenset[str]] = frozenset({
 
 
 OPERATIONS: dict[str, Operation] = {
+    "radio-group": Operation("change a radio group selection", "us"),
     "form-data-fieldsets": Operation("collect form controls around disabled fieldsets", "us"),
     "build": Operation("build a list (constructors)", "us"),
     "build-e": Operation("build a list (terse builders)", "us"),
@@ -540,6 +541,15 @@ def _readpath_cases() -> tuple[tuple[str, object], ...]:
     label, relative, encoding = corpus.CORPUS_FILES[5]  # whatwg spec (235 kB), the large content page
     pages.append((label, corpus.corpus_text(relative, encoding)))
     return tuple(pages)
+
+
+def _radio_group_cases() -> tuple[tuple[str, tuple[int, int, int, str]], ...]:
+    return (
+        ("document radios, index build and 64 changes", (4096, 1, 64, "document")),
+        ("small form, one unindexed change", (0, 1, 1, "plain")),
+        ("one form among 256, index build and 64 changes", (0, 256, 64, "select")),
+        ("eight changes with index invalidation", (256, 1, 8, "mutate")),
+    )
 
 
 def _form_data_fieldset_cases() -> tuple[tuple[str, str], ...]:
@@ -1402,6 +1412,7 @@ def _validate_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
 
 
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
+    "radio-group": _radio_group_cases,
     "form-data-fieldsets": _form_data_fieldset_cases,
     "build": lambda: _ROWS,
     "build-e": lambda: _ROWS,

@@ -548,6 +548,19 @@ disabled fieldsets, so its output is not equivalent for these target cases.
 .. bench-table::
     :file: bench/form-data-fieldsets.json
 
+Document-scoped radio selection reuses an existing input-tag index to skip unrelated elements. With 4,096 unrelated
+nodes and 64 selection changes, matched release time fell from 441.671 to 31.658 µs (92.83%). Index construction is
+included in that timed call; parsing occurs in setup. A single change in a small form changed from 1.320 to 1.354 µs
+(+2.58%), and selecting within one of 256 forms changed from 101.902 to 104.531 µs (+2.58%). Eight changes with an
+append and index rebuild between each improved from 16.770 to 15.086 µs (10.04%). Form-owned radios retain the scoped
+scan, so a small form does not scan every input in the document. Group names, attribute notifications, and mutation
+invalidation retain their existing behavior. CodSpeed covers all four cases. lxml's ``InputElement.checked`` setter only
+changes that input's attribute; its ``RadioGroup`` requires a separately collected group and selects by value, so
+neither supplies an equivalent automatic document-scoped group operation.
+
+.. bench-table::
+    :file: bench/radio-group.json
+
 Sorting large unordered root groups with ``qsort`` avoids insertion sort's repeated comparisons. Groups already in
 document order keep a linear check; groups smaller than 32 retain insertion sort. Matched release time for 512 reversed
 roots fell from 47.867 to 1.787 ms (96.27%); shuffled roots improved from 12.271 to 1.974 ms (83.91%). Candidate spread

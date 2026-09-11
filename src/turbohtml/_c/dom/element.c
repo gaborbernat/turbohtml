@@ -768,7 +768,8 @@ static PyObject *element_get_checked(PyObject *self, void *Py_UNUSED(closure)) {
 
 /* Remove the checked flag from the other same-name radios in the radio's owning
    form (nearest ancestor form, else the document), enforcing group exclusivity. */
-static void clear_radio_group(th_tree *tree, th_node *radio) {
+static void clear_radio_group(HandleObject *handle, th_node *radio) {
+    th_tree *tree = handle->tree;
     const th_node_attr *name = find_node_attr(radio, TH_ATTR_NAME);
     if (name == NULL || name->value == NULL || name->value_len == 0) {
         return;
@@ -782,7 +783,11 @@ static void clear_radio_group(th_tree *tree, th_node *radio) {
         }
     }
     th_node *scope = form != NULL ? form : root;
-    for (th_node *node = preorder_next(scope, scope); node != NULL; node = preorder_next(node, scope)) {
+    const int indexed = scope == root && handle->index_built && handle_index_usable(handle, root);
+    Py_ssize_t cursor = indexed ? handle->index_offsets[TH_TAG_INPUT] : 0;
+    const Py_ssize_t end = indexed ? handle->index_offsets[TH_TAG_INPUT + 1] : 0;
+    for (th_node *node = indexed ? handle->index_nodes[cursor] : preorder_next(scope, scope); node != NULL;
+         node = indexed ? (++cursor < end ? handle->index_nodes[cursor] : NULL) : preorder_next(node, scope)) {
         if (node == radio || node->atom != TH_TAG_INPUT || !input_type_is(node, "radio")) {
             continue;
         }
@@ -814,7 +819,7 @@ static int element_set_checked(PyObject *self, PyObject *value, void *Py_UNUSED(
     if (on) {
         rc = th_node_attr_set(tree, node, "checked", 7, NULL, 0, 0);
         if (rc >= 0 && input_type_is(node, "radio")) { /* GCOVR_EXCL_BR_LINE: attr_set only fails on OOM */
-            clear_radio_group(tree, node);
+            clear_radio_group((HandleObject *)((NodeObject *)self)->handle, node);
         }
     } else {
         th_node_attr_del(tree, node, "checked", 7);

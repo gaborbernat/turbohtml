@@ -1233,6 +1233,31 @@ def _equality_pair(count: int, variant: str) -> tuple[turbohtml.Element, turboht
     return left, right
 
 
+def _radio_group_setup(case: tuple[int, int, int, str]) -> Callable[[], tuple[bool, ...]]:
+    padding, forms, repeats, mode = case
+    tag: Final = "section" if mode in {"document", "mutate"} else "form"
+    markup: Final = f"<{tag}>" + "<input type=radio name=choice>" * 16 + "<div></div>" * padding + f"</{tag}>"
+    document: Final = turbohtml.parse(markup * forms)
+    form: Final = cast("turbohtml.Element", document.children[0].children[-1].children[0])
+    radios: Final = [node for node in form.children if isinstance(node, turbohtml.Element) and node.tag == "input"]
+
+    def run() -> tuple[bool, ...]:
+        if mode in {"document", "select"}:
+            document.select("input")
+        for index in range(repeats):
+            if mode == "mutate":
+                form.append(turbohtml.Element("i"))
+                document.select("input")
+            radios[index % len(radios)].checked = True
+        return tuple(node.checked for node in radios)
+
+    return run
+
+
+def _run_radio_group(run: Callable[[], tuple[bool, ...]]) -> tuple[bool, ...]:
+    return run()
+
+
 def _range_boundary_setup(case: tuple[int, str]) -> Callable[[], None]:
     count, variant = case
     root: Final = turbohtml.Element("div")
@@ -1409,6 +1434,7 @@ def _query_root_group_case(case: tuple[str, int]) -> _Query:
 
 OPERATIONS: dict[str, tuple[object, str]] = {
     "query-root-groups": (_query_root_groups, "turbohtml"),
+    "radio-group": (Mutating(_radio_group_setup, _run_radio_group), "turbohtml"),
     "form-data-fieldsets": (_form_data_fieldsets, "turbohtml"),
     "query-closest": (_query_closest, "turbohtml"),
     "query-roots": (_query_roots, "turbohtml"),

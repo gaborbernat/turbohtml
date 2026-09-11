@@ -73,6 +73,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "query-roots": "query-roots",
     "query-root-groups": "query-root-groups",
     "form-data-fieldsets": "form-data-fieldsets",
+    "radio-group": "radio-group",
     "sax-records": "sax-records",
     "sax-records-callback": "sax-records-callback",
     "query-siblings": "query-siblings",
