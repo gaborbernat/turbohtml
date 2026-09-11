@@ -266,6 +266,8 @@ class Operation:
 SIZE_OPS: Final[frozenset[str]] = frozenset({
     "minify",
     "minify-css",
+    "minify-css-conflicts",
+    "minify-css-merges",
     "minify-js",
     "minify-js-sequences",
     "minify-js-guards",
@@ -486,6 +488,8 @@ OPERATIONS: dict[str, Operation] = {
     "transform-rules": Operation("dispatch XSLT template rules", "us"),
     "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
+    "minify-css-conflicts": Operation("merge CSS rules across disjoint declarations", "us"),
+    "minify-css-merges": Operation("batch CSS rule merges", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
     "minify-js-unlink": Operation("remove mixed JavaScript declarators", "us"),
     "minify-js-unused-declarations": Operation("remove unused JavaScript declarators", "us"),
@@ -815,6 +819,45 @@ def _table_html(data_rows: int) -> str:
         for index in range(data_rows)
     )
     return f"<table>{header}{body}</table>"
+
+
+def _css_merge_inputs() -> tuple[tuple[str, str], ...]:
+    return (
+        *(
+            (
+                f"{count} identical media blocks",
+                "".join(f"@media screen{{.a{index}{{color:red}}}}" for index in range(count)),
+            )
+            for count in (10, 100, 1_000)
+        ),
+        *(
+            (f"{count} identical declaration bodies", "".join(f".a{index}{{color:red}}" for index in range(count)))
+            for count in (10, 100, 1_000)
+        ),
+        (
+            "100 alternating media preludes",
+            "".join(f"@media {'screen' if index % 2 else 'print'}{{.a{index}{{color:red}}}}" for index in range(100)),
+        ),
+        ("100 rules with comment barriers", "/*!keep*/".join(f".a{index}{{color:red}}" for index in range(100))),
+    )
+
+
+def _css_conflict_inputs() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            f"{repeats} rule pairs, {properties} properties, {value_length} value bytes",
+            (
+                ".a{"
+                + ";".join(f"--a{index}:f({'x' * value_length})" for index in range(properties))
+                + "}"
+                + ".b{"
+                + ";".join(f"--b{index}:f({'y' * value_length})" for index in range(properties))
+                + "}"
+            )
+            * repeats,
+        )
+        for repeats, properties, value_length in ((32, 32, 128), (32, 32, 1), (1, 2, 1))
+    )
 
 
 def _article_page(paragraphs: int) -> str:
@@ -2086,6 +2129,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
+    "minify-css-conflicts": _css_conflict_inputs,
+    "minify-css-merges": _css_merge_inputs,
     "minify-js": _minify_js_cases,
     "minify-js-var-initialization": lambda: tuple(
         (

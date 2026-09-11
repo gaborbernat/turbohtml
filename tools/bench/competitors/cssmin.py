@@ -12,4 +12,8 @@ def minify_css(css: str) -> str:
     return cssmin.cssmin(css)
 
 
-OPERATIONS = {"minify-css": (minify_css, "cssmin")}
+OPERATIONS = {
+    "minify-css": (minify_css, "cssmin"),
+    "minify-css-merges": (minify_css, "cssmin"),
+    "minify-css-conflicts": (minify_css, "cssmin"),
+}

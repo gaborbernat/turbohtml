@@ -12,4 +12,8 @@ def minify_css(css: str) -> str:
     return csscompressor.compress(css)
 
 
-OPERATIONS = {"minify-css": (minify_css, "csscompressor")}
+OPERATIONS = {
+    "minify-css": (minify_css, "csscompressor"),
+    "minify-css-merges": (minify_css, "csscompressor"),
+    "minify-css-conflicts": (minify_css, "csscompressor"),
+}

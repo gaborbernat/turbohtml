@@ -39,5 +39,7 @@ OPERATIONS = {
     "minify-js-sequences": (minify_js, "tdewolff"),
     "minify-js": (minify_js, "tdewolff"),
     "minify-css": (minify_css, "tdewolff"),
+    "minify-css-merges": (minify_css, "tdewolff"),
+    "minify-css-conflicts": (minify_css, "tdewolff"),
     "minify": (minify, "tdewolff"),
 }

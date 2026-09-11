@@ -1653,6 +1653,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "transform-rules": (transform, "turbohtml"),
     "transform-names": (transform, "turbohtml"),
     "minify-css": (minify_css, "turbohtml"),
+    "minify-css-conflicts": (minify_css, "turbohtml"),
+    "minify-css-merges": (minify_css, "turbohtml"),
     "minify-js": (minify_js, "turbohtml"),
     "minify-js-sequences": (minify_js, "turbohtml"),
     "minify-js-guards": (minify_js, "turbohtml"),

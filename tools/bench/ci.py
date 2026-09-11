@@ -171,6 +171,13 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "minify-css-conflicts-short": ("minify-css-conflicts", 1),
+    "minify-css-conflicts-small": ("minify-css-conflicts", 2),
+    "minify-css-merges-media-large": ("minify-css-merges", 2),
+    "minify-css-merges-selectors-small": ("minify-css-merges", 3),
+    "minify-css-merges-selectors-large": ("minify-css-merges", 5),
+    "minify-css-merges-alternating": ("minify-css-merges", 6),
+    "minify-css-merges-comments": ("minify-css-merges", 7),
     "computed-style-selectors-matching": ("computed-style-selectors", 1),
     "computed-style-selectors-shallow": ("computed-style-selectors", 3),
     "query-root-groups-connected": ("query-root-groups", 1),

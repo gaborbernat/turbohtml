@@ -6,13 +6,19 @@ Malformed corpus inputs retain exact-output checks but can lack stable round-tri
 from __future__ import annotations
 
 import json
+import re
+import shutil
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml import clean
 from turbohtml.clean import CSSMinify, minify_css, minify_css_inline
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _NEWLY = CSSMinify(baseline=2021)
 
@@ -677,3 +683,211 @@ def test_minify_matches_golden(source: str, stylesheet: str, inline: str) -> Non
 )
 def test_minify_output_is_a_fixed_point(stylesheet: str, inline: str) -> None:
     assert (minify_css(stylesheet), minify_css_inline(inline)) == (stylesheet, inline)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "@media screen{a{x:1}}@media screen{b{x:2}}@media screen{c{x:3}}",
+            "@media screen{a{x:1}b{x:2}c{x:3}}",
+            id="media-run",
+        ),
+        pytest.param("a{x:1}b{x:1}c{x:1}", "a,b,c{x:1}", id="selector-run"),
+        pytest.param("a{x:1}b{x:1}a,b{x:1}", "a,b{x:1}", id="growing-list-equality"),
+        pytest.param("a{x:1}b{x:1}a{x:1}", "a,b,a{x:1}", id="repeated-selector"),
+        pytest.param("a{x:1}b{y:1}c{x:1}b{x:1}", "a,c{x:1}b{y:1;x:1}", id="earlier-selector-claim"),
+        pytest.param("a{x:1}b{x:1}/*!keep*/c{x:1}", "a,b{x:1}/*!keep*/c{x:1}", id="selector-comment-barrier"),
+        pytest.param("a{x:1}b{x:1}c{y:1}", "a,b{x:1}c{y:1}", id="different-declaration-body"),
+        pytest.param(
+            "@media screen{a{x:1}}q{x:2}@media screen{b{x:3}}",
+            "@media screen{a{x:1}}q{x:2}@media screen{b{x:3}}",
+            id="media-qualified-rule-barrier",
+        ),
+        pytest.param(
+            "@media screen{a{x:1}}@media speech{b{x:2}}",
+            "@media screen{a{x:1}}@media speech{b{x:2}}",
+            id="media-equal-length-different-prelude",
+        ),
+        pytest.param(
+            "@media screen{a{x:1}}/*!keep*/@media screen{b{x:2}}",
+            "@media screen{a{x:1}}/*!keep*/@media screen{b{x:2}}",
+            id="media-comment-barrier",
+        ),
+    ],
+)
+def test_minify_css_batch_merge_order(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(
+    "case_index",
+    [
+        pytest.param(0, id="media10"),
+        pytest.param(1, id="media100"),
+        pytest.param(2, id="media1000"),
+        pytest.param(3, id="selectors10"),
+        pytest.param(4, id="selectors100"),
+        pytest.param(5, id="selectors1000"),
+        pytest.param(6, id="different-media"),
+        pytest.param(7, id="comments"),
+    ],
+)
+def test_minify_css_merge_shared_inputs(case_index: int) -> None:
+    source: Final = cast("str", INPUTS["minify-css-merges"]()[case_index][1])
+    count: Final = (10, 100, 1_000)[case_index % 3]
+    expected: Final = (
+        "@media screen{" + "".join(f".a{index}{{color:red}}" for index in range(count)) + "}"
+        if case_index < 3
+        else ",".join(f".a{index}" for index in range(count)) + "{color:red}"
+        if case_index < 6
+        else source
+    )
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(
+    "case", [pytest.param(0, id="long-values"), pytest.param(1, id="short-values"), pytest.param(2, id="single-pair")]
+)
+def test_minify_css_disjoint_rule_benchmark(case: int) -> None:
+    source: Final = cast("str", INPUTS["minify-css-conflicts"]()[case][1])
+    first_pair: Final = source[: source.index("}", source.index("}") + 1) + 1]
+    assert minify_css(source) == first_pair
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "a{color:red}b{margin:0}a{margin-left:1px}",
+            "a{color:red}b{margin:0}a{margin-left:1px}",
+            id="shorthand-barrier",
+        ),
+        pytest.param(
+            "a{color:red}b{margin-left:1px}a{margin:0}",
+            "a{color:red}b{margin-left:1px}a{margin:0}",
+            id="longhand-barrier",
+        ),
+        pytest.param(
+            "a{color:red}b{all:initial}a{width:1px}", "a{color:red}b{all:initial}a{width:1px}", id="all-barrier"
+        ),
+        pytest.param(
+            'a{color:red}b{content:";"}a{width:1px}', 'a{color:red}b{content:";"}a{width:1px}', id="string-barrier"
+        ),
+        pytest.param("a{--X:1}b{--x:2}a{height:3px}", "a{--X:1;height:3px}b{--x:2}", id="custom-case-sensitive"),
+        pytest.param(
+            'a{color:red}b{width:1px}a{content:";"}',
+            'a{color:red}b{width:1px}a{content:";"}',
+            id="incoming-string-barrier",
+        ),
+        pytest.param(
+            "a{color:red}b{width:1px}a{all:initial}", "a{color:red}b{width:1px}a{all:initial}", id="incoming-all"
+        ),
+        pytest.param(
+            "a{color:red}b{width:1px}a{width:2px}", "a{color:red}b{width:1px}a{width:2px}", id="same-property"
+        ),
+        pytest.param(
+            "a{color:red}b{margin:0}a{border-color:red}",
+            "a{color:red;border-color:red}b{margin:0}",
+            id="disjoint-shorthands",
+        ),
+        pytest.param(
+            "a{--first:1}b{--second:2}c{--third:3}a{--last:4}",
+            "a{--first:1;--last:4}b{--second:2}c{--third:3}",
+            id="reuse-across-two-barriers",
+        ),
+        pytest.param(
+            "a{--first:1}b{--other:url(data:image/png;base64,AAAA)}a{--mine:2}",
+            "a{--first:1;--mine:2}b{--other:url(data:image/png;base64,AAAA)}",
+            id="url-semicolon",
+        ),
+    ],
+)
+def test_minify_css_large_rule_conflict_barriers(source: str, expected: str) -> None:
+    prefix: Final = "".join(f".pad{index}{{--pad{index}:{index}}}" for index in range(32))
+    assert minify_css(prefix + source) == prefix + expected
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    ("operation", "case"),
+    [
+        pytest.param(operation, case, id=f"{operation}-{case}")
+        for operation, cases in (("minify-css-merges", (0, 2, 3, 5, 6, 7)), ("minify-css-conflicts", (0, 1, 2)))
+        for case in cases
+    ],
+)
+@pytest.mark.parametrize(
+    ("module", "executable"),
+    [
+        pytest.param("bench.core", None, id="turbohtml"),
+        pytest.param("bench.competitors.rcssmin", None, id="rcssmin"),
+        pytest.param("bench.competitors.cssmin", None, id="cssmin"),
+        pytest.param("bench.competitors.csscompressor", None, id="csscompressor"),
+        pytest.param("bench.competitors.css_html_js_minify", None, id="css-html-js-minify"),
+        pytest.param("bench.competitors.lightningcss", None, id="lightningcss"),
+        pytest.param("bench.competitors.esbuild", "esbuild", id="esbuild"),
+        pytest.param("bench.competitors.tdewolff", "minify", id="tdewolff"),
+    ],
+)
+def test_merge_benchmark_preserves_fixture_cascade(
+    operation: str, case: int, module: str, executable: str | None
+) -> None:
+    if executable is not None and shutil.which(executable) is None:
+        pytest.skip(f"{executable} not available")
+    minimize: Final = cast("Callable[[str], str]", pytest.importorskip(module).minify_css)
+    source: Final = cast("str", INPUTS[operation]()[case][1])
+    expected: Final[dict[tuple[str, str], dict[str, str]]]
+    if operation == "minify-css-merges":
+        count: Final = (10, 100, 1_000, 10, 100, 1_000, 100, 100)[case]
+        expected = {
+            (("screen" if index % 2 else "print") if case == 6 else "screen" if case < 3 else "all", f".a{index}"): {
+                "color": "red"
+            }
+            for index in range(count)
+        }
+    else:
+        properties, value_length = ((32, 128), (32, 1), (2, 1))[case]
+        expected = {
+            ("all", f".{name}"): {f"--{name}{index}": f"f({value * value_length})" for index in range(properties)}
+            for name, value in (("a", "x"), ("b", "y"))
+        }
+    assert _merge_fixture_cascade(minimize(source)) == expected
+
+
+@pytest.mark.oracle
+def _merge_fixture_cascade(source: str, media: str = "all") -> dict[tuple[str, str], dict[str, str]]:
+    parser: Final = pytest.importorskip("tinycss2")
+    colors: Final = pytest.importorskip("tinycss2.color3")
+    result: Final[dict[tuple[str, str], dict[str, str]]] = {}
+    for rule_index, rule in enumerate(parser.parse_stylesheet(source, skip_comments=True, skip_whitespace=True)):
+        if rule.type == "at-rule":
+            if rule.lower_at_keyword == "charset":
+                assert (rule_index, media, rule.content) == (0, "all", None)
+                assert parser.serialize(rule.prelude).strip().lower() == '"utf-8"'
+                continue
+            assert rule.lower_at_keyword == "media"
+            assert rule.content is not None
+            condition: Final = parser.serialize(rule.prelude).strip()
+            assert media == "all"
+            assert condition in {"screen", "print"}
+            for key, nested_properties in _merge_fixture_cascade(parser.serialize(rule.content), condition).items():
+                result.setdefault(key, {}).update(nested_properties)
+            continue
+        assert rule.type == "qualified-rule"
+        declarations: Final[dict[str, str]] = {}
+        for declaration in parser.parse_declaration_list(rule.content, skip_comments=True, skip_whitespace=True):
+            assert declaration.type == "declaration"
+            assert not declaration.important
+            value = parser.serialize(declaration.value).strip()
+            if declaration.lower_name == "color":
+                assert colors.parse_color(value) == (1.0, 0.0, 0.0, 1.0)
+                value = "red"
+            else:
+                assert re.fullmatch(r"--[ab][0-9]+", declaration.name)
+            declarations[declaration.name] = value
+        for raw_selector in parser.serialize(rule.prelude).split(","):
+            selector: Final = raw_selector.strip()
+            assert re.fullmatch(r"\.[ab][0-9]*", selector)
+            result.setdefault((media, selector), {}).update(declarations)
+    return result
