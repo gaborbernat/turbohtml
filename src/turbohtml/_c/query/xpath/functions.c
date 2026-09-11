@@ -596,7 +596,13 @@ static PyObject *exslt_pattern(struct th_tree *tree, xp_result *pattern_arg, xp_
             if (letter == 'g') {
                 *global = 1;
             } else if (letter == 'i' || letter == 'm' || letter == 's' || letter == 'x') {
-                inline_flags[flag_count++] = letter;
+                Py_ssize_t flag_index = 0;
+                while (flag_index < flag_count && inline_flags[flag_index] != letter) {
+                    flag_index++;
+                }
+                if (flag_index == flag_count) {
+                    inline_flags[flag_count++] = letter;
+                }
             }
         }
         PyMem_Free(flags);

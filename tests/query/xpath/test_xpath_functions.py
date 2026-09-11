@@ -123,6 +123,7 @@ def doc() -> turbohtml.Node:
         pytest.param("matches('abc123', '[0-9]+')", True, id="matches-true"),
         pytest.param("matches('abcdef', '[0-9]+')", False, id="matches-miss"),
         pytest.param("matches('ABC', 'abc', 'i')", True, id="matches-flags"),
+        pytest.param("matches('ABC', 'abc', 'iiiiimmmmmsssssxxxxx')", True, id="matches-repeated-flags"),
         pytest.param("replace('a1b2c3', '[0-9]', '#')", "a#b#c#", id="replace-all"),
         pytest.param("replace('2024-05-06', '(\\d+)-(\\d+)-(\\d+)', '$3/$2/$1')", "06/05/2024", id="replace-groups"),
         pytest.param("replace('a', '(a)', '$1z')", "az", id="replace-group-then-letter"),
