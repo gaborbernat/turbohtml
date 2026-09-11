@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess  # ruff:ignore[suspicious-subprocess-import]  # exercise the generator's public CLI
 import sys
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Final
 
@@ -54,6 +55,35 @@ def test_generate_version_import_matches_layout(version_project: Path, *, editab
         check=True,
     )
     assert result.stdout == expected + "\n"
+
+
+def test_generate_version_installed_source_in_wheel_layout(version_project: Path) -> None:
+    installed: Final = Path(sys.prefix) / "cbuild" / "_version.py"
+    frozen: Final = version_project / "src/turbohtml/_version.py"
+    frozen.parent.mkdir(parents=True)
+    frozen.symlink_to(installed)
+    package: Final = version_project / "turbohtml"
+    package.mkdir()
+    package.joinpath("_version.py").symlink_to(installed)
+    package.joinpath("__init__.py").write_text("from ._version import __version__\n", encoding="utf-8")
+    metadata: Final = version_project / "turbohtml-9.8.7.dist-info"
+    metadata.mkdir()
+    metadata.joinpath("METADATA").write_text(
+        "Metadata-Version: 2.1\nName: turbohtml\nVersion: 9.8.7\n", encoding="utf-8"
+    )
+    spec: Final = spec_from_file_location("turbohtml.version_fixture", package / "__init__.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module: Final = module_from_spec(spec)
+    sys.modules[spec.name] = module
+    sys.path.insert(0, str(version_project))
+    try:
+        spec.loader.exec_module(module)
+        assert module.__version__ + "\n" == _version_cli(version_project)
+    finally:
+        sys.path.remove(str(version_project))
+        sys.modules.pop(f"{spec.name}._version", None)
+        del sys.modules[spec.name]
 
 
 def test_generate_version_sdist_keeps_configured_value(version_project: Path) -> None:
