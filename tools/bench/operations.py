@@ -452,6 +452,8 @@ OPERATIONS: dict[str, Operation] = {
     "extract-url": Operation("extract URL hints", "us"),
     "htmlparser": Operation("feed and dispatch a page", "us"),
     "sax": Operation("SAX parse a page (no tree)", "us"),
+    "sax-records": Operation("iterate typed SAX records", "us"),
+    "sax-records-callback": Operation("dispatch SAX callbacks", "us"),
     "treebuild": Operation("parse into a custom tree (no DOM)", "us"),
     "rewrite": Operation("streaming rewrite a page (no tree)", "us"),
     "rewrite-attributes": Operation("add custom attributes", "us"),
@@ -489,6 +491,13 @@ OPERATIONS: dict[str, Operation] = {
     "links-filter": Operation("extract filtered page links", "us"),
     "links-external": Operation("extract links outside the base site", "ms"),
 }
+
+
+def _sax_record_cases() -> tuple[tuple[str, object], ...]:
+    return (
+        ("4,096 small elements", "<!DOCTYPE html>" + "<p>x</p>" * 4096),
+        ("one small element", "<p>x</p>"),
+    )
 
 
 def _parse_cases() -> tuple[tuple[str, object], ...]:
@@ -1935,6 +1944,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "htmlparser": _readpath_cases,
     "sax": _readpath_cases,
+    "sax-records": _sax_record_cases,
+    "sax-records-callback": _sax_record_cases,
     "treebuild": _readpath_cases,
     "rewrite": _readpath_cases,
     "rewrite-attributes": lambda: (("1,000 new names", (1000, "<x></x>")), ("one new name", (1, "<x></x>"))),

@@ -68,6 +68,8 @@ TABLES: Final[dict[str, str | Combined]] = {
     "query-closest": "query-closest",
     "node-closest": "node-closest",
     "query-parents": "query-parents",
+    "sax-records": "sax-records",
+    "sax-records-callback": "sax-records-callback",
     "query-siblings": "query-siblings",
     "prune-shared": "prune-shared",
     "observe-registrations": "observe-registrations",

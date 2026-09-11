@@ -321,6 +321,17 @@ scan; wherever markup appears, the state machine runs roughly eight to sixteen t
 .. bench-table::
     :file: bench/tokenizing.json
 
+The SAX record wrapper constructs each named tuple through its record type, avoiding the temporary field list and
+``_make`` conversion. Matched release time to iterate 4,096 elements fell from 2.951 to 2.463 ms (16.54%); the
+tiny-record control improved from 2.773 to 2.339 µs (15.64%). The native callback control changed from 673.879 to
+689.403 µs (+2.30%, with 4.60% candidate spread). CodSpeed covers both record sizes and the callback path.
+
+.. bench-table::
+    :file: bench/sax-records.json
+
+.. bench-table::
+    :file: bench/sax-records-callback.json
+
 *********
  Parsing
 *********

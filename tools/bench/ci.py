@@ -171,6 +171,7 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "sax-records-tiny": ("sax-records", 1),
     "tables-spans-ordinary": ("tables-spans", 1),
     "tables-spans-records": ("tables-spans", 2),
     "linkify-node-wide": ("linkify-node", 1),

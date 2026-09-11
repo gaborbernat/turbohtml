@@ -43,6 +43,7 @@ from turbohtml.query import escape_identifier as _escape_identifier
 from turbohtml.rewrite import Element as _RewriteElement
 from turbohtml.rewrite import rewrite as _rewrite
 from turbohtml.saxparse import SaxHandler as _SaxHandler
+from turbohtml.saxparse import iter_events as _iter_events
 from turbohtml.saxparse import sax_parse as _sax_parse
 from turbohtml.transform import Transform as _Transform
 from turbohtml.treebuild import parse_into as _parse_into
@@ -881,6 +882,10 @@ def sax(text: str) -> None:
     _sax_parse(text, _SaxCounter())
 
 
+def _sax_records(text: str) -> None:
+    deque(_iter_events(text), maxlen=0)
+
+
 class _Node:
     """A compact tree node a turbohtml.treebuild builder materializes: a tag and its children, no navigable Node."""
 
@@ -1525,6 +1530,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "extract-url": (extract_url, "turbohtml"),
     "htmlparser": (htmlparser, "turbohtml"),
     "sax": (sax, "turbohtml"),
+    "sax-records": (_sax_records, "turbohtml"),
+    "sax-records-callback": (sax, "turbohtml"),
     "treebuild": (treebuild, "turbohtml"),
     "rewrite": (rewrite, "turbohtml"),
     "rewrite-attributes": (rewrite_attributes, "turbohtml"),

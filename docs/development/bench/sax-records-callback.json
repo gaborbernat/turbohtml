@@ -1,0 +1,20 @@
+{
+  "label": "dispatch SAX callbacks",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "4,096 small elements",
+      0.0006894026097900981
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.04600507843557901
+    ]
+  ],
+  "notes": {}
+}
