@@ -171,6 +171,9 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "query-roots-shuffled": ("query-roots", 1),
+    "query-roots-sorted": ("query-roots", 2),
+    "query-roots-small": ("query-roots", 3),
     "sax-records-tiny": ("sax-records", 1),
     "tables-spans-ordinary": ("tables-spans", 1),
     "tables-spans-records": ("tables-spans", 2),

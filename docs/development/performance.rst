@@ -533,6 +533,15 @@ alive throughout traversal; output order follows the first encounter of each res
 .. bench-table::
     :file: bench/query-parents.json
 
+Sorting large unordered root groups with ``qsort`` avoids insertion sort's repeated comparisons. Groups already in
+document order keep a linear check; groups smaller than 32 retain insertion sort. Matched release time for 512 reversed
+roots fell from 47.867 to 1.787 ms (96.27%); shuffled roots improved from 12.271 to 1.974 ms (83.91%). Candidate spread
+for the shuffled case is 5.92%, above the comparison threshold. The sorted-root control changed from 198.706 to 199.189
+µs (+0.24%); four reversed roots changed from 0.3484 to 0.3508 µs (+0.69%). CodSpeed covers all four orders and sizes.
+
+.. bench-table::
+    :file: bench/query-roots.json
+
 Closest joins keep each selected element's selector scope and the existing ancestor walk. For 1,024 children, matched
 time fell from 45.406 to 17.496 µs (61.47%) with a shared matching ancestor and from 60.596 to 33.004 µs (45.54%) with
 distinct matching ancestors. Pyquery retains duplicate ancestors for the shared case; only the distinct case is

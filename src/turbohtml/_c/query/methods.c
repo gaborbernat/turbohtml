@@ -283,6 +283,33 @@ PyObject *turbohtml_matches_many(PyObject *module, PyObject *args) {
     return out;
 }
 
+static int compare_roots(const void *left, const void *right) {
+    th_node *left_node = *(th_node *const *)left;
+    th_node *right_node = *(th_node *const *)right;
+    return left_node == right_node ? 0 : node_order(left_node, right_node); /* GCOVR_EXCL_BR_LINE: qsort self-compare */
+}
+
+static void sort_roots(th_node **group, Py_ssize_t group_count) {
+    if (group_count >= 32) {
+        for (Py_ssize_t index = 1; index < group_count; index++) {
+            if (node_order(group[index], group[index - 1]) < 0) {
+                qsort(group, (size_t)group_count, sizeof(th_node *), compare_roots);
+                break;
+            }
+        }
+        return;
+    }
+    for (Py_ssize_t index = 1; index < group_count; index++) {
+        th_node *node = group[index];
+        Py_ssize_t position = index;
+        while (position > 0 && node_order(node, group[position - 1]) < 0) {
+            group[position] = group[position - 1];
+            position--;
+        }
+        group[position] = node;
+    }
+}
+
 PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     PyObject *roots_obj;
     PyObject *selector;
@@ -344,15 +371,7 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
                         group[group_count++] = candidate->node;
                     }
                 }
-                for (Py_ssize_t index = 1; index < group_count; index++) {
-                    th_node *node = group[index];
-                    Py_ssize_t position = index;
-                    while (position > 0 && node_order(node, group[position - 1]) < 0) {
-                        group[position] = group[position - 1];
-                        position--;
-                    }
-                    group[position] = node;
-                }
+                sort_roots(group, group_count);
                 PyObject *selected = out;
                 if (tree_first != 0) {
                     selected = PyList_New(0);

@@ -1330,6 +1330,21 @@ def _prune_shared(root: turbohtml.Element) -> None:
     root.prune("b")
 
 
+def _query_roots(case: tuple[int, str]) -> None:
+    _query_root_case(case).find("i")
+
+
+@functools.cache
+def _query_root_case(case: tuple[int, str]) -> _Query:
+    count, order = case
+    nodes = turbohtml.parse("<main>" + "<div><i>x</i></div>" * count + "</main>").select("div")
+    if order == "reversed":
+        nodes.reverse()
+    elif order == "shuffled":
+        nodes = nodes[::2] + nodes[1::2]
+    return _Query(nodes)
+
+
 def _query_closest(case: tuple[int, bool]) -> None:
     _query_parents_case(case).closest("main")
 
@@ -1362,6 +1377,7 @@ def _query_siblings_case(case: tuple[int, bool]) -> _Query:
 
 OPERATIONS: dict[str, tuple[object, str]] = {
     "query-closest": (_query_closest, "turbohtml"),
+    "query-roots": (_query_roots, "turbohtml"),
     "node-closest": (_node_closest, "turbohtml"),
     "query-parents": (_query_parents, "turbohtml"),
     "query-siblings": (_query_siblings, "turbohtml"),

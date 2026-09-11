@@ -393,6 +393,7 @@ OPERATIONS: dict[str, Operation] = {
     "set-html": Operation("replace body inner HTML", "us"),
     "set-text": Operation("replace body text", "us"),
     "observe": Operation("observe a subtree through many edits", "us"),
+    "query-roots": Operation("select within ordered root groups", "us"),
     "query-closest": Operation("collect closest matching ancestors", "us"),
     "node-closest": Operation("find a node's closest matching ancestor", "us"),
     "query-parents": Operation("collect selected nodes' parents", "us"),
@@ -1497,6 +1498,10 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "shadow-assignment": lambda: (("1000 unique", (1_000, "unique")), ("1 unique", (1, "unique"))),
     "shadow-fallback": lambda: (("1000 wide", (1_000, "wide")), ("1 wide", (1, "wide"))),
     "observe": _readpath_cases,
+    "query-roots": lambda: tuple(
+        (f"{count} {order} roots", (count, order))
+        for count, order in ((512, "reversed"), (512, "shuffled"), (512, "sorted"), (4, "reversed"))
+    ),
     "query-closest": lambda: (
         ("1024 children, shared ancestor", (1024, True)),
         ("1024 children, distinct ancestors", (1024, False)),
