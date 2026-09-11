@@ -4,3 +4,10 @@ boilerplate extraction.
 Check the magnitude of XPath numbers before converting them to integers, avoiding undefined behavior for large values.
 
 Use periods between multiple XSLT numbers when the format has no separator token, preserving its prefix and suffix.
+
+Preserve JavaScript initialization errors during literal propagation across closure calls, duplicate declarations and
+switch-case jumps.
+
+Avoid a form-data crash if a garbage-collection callback detaches an ancestor while collecting controls.
+
+Use exact byte counts when escaping adjacent matches so the output contains no unwritten buffer contents.
