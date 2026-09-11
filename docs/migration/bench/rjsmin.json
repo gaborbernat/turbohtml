@@ -85,6 +85,27 @@
       0.0001890878458690774,
       5988.0,
       4.912134469492458e-06
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / one declaration",
+      3142,
+      0.00012956246737303446,
+      4050,
+      3.2857044637069065e-06
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / separate declarations",
+      3142,
+      0.0002017888859351539,
+      5580,
+      4.988794708064385e-06
+    ],
+    [
+      "check single-use JavaScript initializers — 1 call initializers / one declaration",
+      37,
+      1.5377683748892442e-06,
+      39,
+      1.2517059912268518e-07
     ]
   ],
   "spread": [
@@ -164,6 +185,27 @@
       0.020548051634025788,
       null,
       0.003748581212014611
+    ],
+    [
+      null,
+      null,
+      0.008277346590370604,
+      null,
+      0.010854055058857361
+    ],
+    [
+      null,
+      null,
+      0.014445758522265546,
+      null,
+      0.007922866858139626
+    ],
+    [
+      null,
+      null,
+      0.016991173127781586,
+      null,
+      0.008500994886596414
     ]
   ],
   "row_notes": {

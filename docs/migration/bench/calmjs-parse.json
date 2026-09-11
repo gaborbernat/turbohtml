@@ -85,6 +85,27 @@
       0.0001890878458690774,
       "ES5 parser rejects const",
       "ES5 parser rejects const"
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / one declaration",
+      3142,
+      0.00012956246737303446,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / separate declarations",
+      3142,
+      0.0002017888859351539,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "check single-use JavaScript initializers — 1 call initializers / one declaration",
+      37,
+      1.5377683748892442e-06,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
     ]
   ],
   "spread": [
@@ -162,6 +183,27 @@
       null,
       null,
       0.020548051634025788,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.008277346590370604,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.014445758522265546,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.016991173127781586,
       null,
       null
     ]

@@ -270,6 +270,7 @@ SIZE_OPS: Final[frozenset[str]] = frozenset({
     "minify-js-sequences",
     "minify-js-guards",
     "minify-js-propagation",
+    "minify-js-single-use",
 })
 
 # Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
@@ -484,6 +485,7 @@ OPERATIONS: dict[str, Operation] = {
     "minify-js": Operation("minify a JS library", "ms"),
     "minify-js-sequences": Operation("minify expression sequences", "us"),
     "minify-js-propagation": Operation("propagate repeated JavaScript literal reads", "us"),
+    "minify-js-single-use": Operation("check single-use JavaScript initializers", "us"),
     "minify-js-guards": Operation("minify guard return chains", "us"),
     "stream": Operation("push-parse a page in chunks", "us"),
     "encoding": Operation("detect a byte stream's encoding", "us"),
@@ -2077,6 +2079,21 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
     "minify-js": _minify_js_cases,
+    "minify-js-single-use": lambda: tuple(
+        (
+            f"{count} call initializers / {layout}",
+            "function f(g){"
+            + (
+                "const " + ",".join(f"v{index}=g({index})" for index in range(count)) + ";"
+                if layout == "one declaration"
+                else "".join(f"const v{index}=g({index});" for index in range(count))
+            )
+            + "return["
+            + ",".join(f"v{index}" for index in range(count))
+            + "]}",
+        )
+        for count, layout in ((256, "one declaration"), (256, "separate declarations"), (1, "one declaration"))
+    ),
     "minify-js-propagation": lambda: tuple(
         (
             f"{count} literal bindings / {layout}",

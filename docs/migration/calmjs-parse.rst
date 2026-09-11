@@ -92,6 +92,10 @@ The literal-propagation inputs contain 256 or one local ``const`` binding and re
 ES2015 declarations; the corresponding cells record the syntax mismatch instead of a timing. Turbohtml preserves the
 callback order and returned values, producing 2,327 bytes for each large case and 32 bytes for the small case.
 
+Calmjs.parse also rejects the three call-initializer inputs because they declare ``const`` bindings. Their cells record
+the syntax mismatch. Turbohtml preserves callback order and returned values, producing 3,142 bytes for each 256-call
+layout and 37 bytes for one call.
+
 .. bench-table::
     :file: bench/calmjs-parse.json
 

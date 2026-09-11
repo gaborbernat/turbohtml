@@ -1281,6 +1281,20 @@ spread; their warnings remain in the table. CLI timings include process startup.
 .. bench-table::
     :file: bench/js-propagation.json
 
+Single-use inlining checks eligibility before searching for the preceding declarator. This avoids scanning a long
+declaration for call initializers that cannot be inlined. With the same captured-variable correctness fix in both
+builds, 256 call initializers in one declaration fell from 208.416 to 129.562 µs (37.83%). Separate declarations fell
+from 279.196 to 201.789 µs (27.72%); one call initializer changed from 1.521 to 1.538 µs (+1.11%). The shared suite and
+CodSpeed cover all three layouts and check callback order and returned values.
+
+Six competing minifiers preserve callback order and returned values; calmjs.parse rejects these ``const`` inputs. Rjsmin
+is faster on all three cases. For 256 calls, it retains 4,050 bytes in one declaration and 5,580 bytes in separate
+declarations, compared with turbohtml's 3,142 bytes for either layout. Terser produces 1,941 bytes; its timings include
+CLI startup, as do esbuild's and tdewolff's. All measured cells have less than 3.2% spread.
+
+.. bench-table::
+    :file: bench/js-single-use.json
+
 ********************
  Encoding detection
 ********************

@@ -1317,20 +1317,12 @@ static int inline_single_use(jm_program *prog, int32_t global) {
             continue;
         }
         int32_t stmt = prog->syms[sym].decl_node;
-        /* decl_node is recorded only on a var/let/const statement whose ident-target declarator
-           binds this symbol (functions were handled above), so the search always lands; it walks
-           past destructuring siblings, whose bindings never record a decl_node */
-        int32_t declr = prog->nodes[stmt].a;
-        int32_t declr_prev = -1;
-        while (!(prog->nodes[prog->nodes[declr].a].kind == JN_IDENT && prog->nodes[prog->nodes[declr].a].sym == sym)) {
-            declr_prev = declr;
-            declr = prog->nodes[declr].next;
-        }
+        int32_t declr = prog->syms[sym].declr_node;
         int32_t init = prog->nodes[declr].b;
         if (init < 0) {
             continue; /* a bare `var x;` declares no value to propagate */
         }
-        int lone = declr_prev < 0 && prog->nodes[declr].next < 0;
+        int lone = prog->nodes[stmt].a == declr && prog->nodes[declr].next < 0;
         if (!read_sees_initialized(prog, sym, stmt, declr, init, ref)) {
             if (!lone) {
                 continue; /* moving an impure initializer past its sibling declarators would reorder them */
@@ -1347,6 +1339,10 @@ static int inline_single_use(jm_program *prog, int32_t global) {
         }
         if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             continue;                           /* GCOVR_EXCL_LINE */
+        }
+        int32_t declr_prev = -1;
+        for (int32_t sibling = prog->nodes[stmt].a; sibling != declr; sibling = prog->nodes[sibling].next) {
+            declr_prev = sibling;
         }
         int32_t next = prog->nodes[ref].next;
         prog->nodes[ref] = prog->nodes[init];

@@ -207,6 +207,8 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "token-attributes-ten": ("token-attributes", 3),
     "computed-style-filter-matching": ("computed-style-filter", 1),
     "computed-style-filter-class-first": ("computed-style-filter", 2),
+    "minify-js-single-use-separated": ("minify-js-single-use", 1),
+    "minify-js-single-use-single": ("minify-js-single-use", 2),
     "minify-js-propagation-single": ("minify-js-propagation", 1),
     "minify-js-propagation-declaration": ("minify-js-propagation", 2),
     "canonicalize-deep-xlink": ("canonicalize-deep", 1),

@@ -9,11 +9,13 @@ its minified form under Node and asserts identical output.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess  # ruff:ignore[suspicious-subprocess-import]
 from typing import Final
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml.clean import JSMinify, minify_js
 
@@ -1133,7 +1135,23 @@ def test_sequence_growth_preserves_call_order(count: int, *, nested: bool) -> No
             "undefined\n",
             id="captured-var-before-initialization",
         ),
+        pytest.param(
+            "function f(flag,text){const pattern=/x/;return flag?text:pattern.test(text)}"
+            "console.log(JSON.stringify([f(true,'x'),f(false,'x'),f(false,'y')]))",
+            '["x",true,false]\n',
+            id="regex-conditional-alternate",
+        ),
     ],
 )
 def test_declaration_reads_preserve_behavior(source: str, expected: str) -> None:
     assert (_run(source), _run(minify_js(source))) == (expected, expected)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(("case", "count"), [(0, 256), (1, 256), (2, 1)], ids=["grouped", "separate", "single"])
+def test_single_use_initializers_preserve_call_order(case: int, count: int) -> None:
+    source: Final = INPUTS["minify-js-single-use"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = list(range(count))
+    assert _run(minify_js(program)) == json.dumps([expected, expected], separators=(",", ":")) + "\n"

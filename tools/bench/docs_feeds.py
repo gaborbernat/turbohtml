@@ -150,6 +150,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "js-sequences": "minify-js-sequences",
     "js-guards": "minify-js-guards",
     "js-propagation": "minify-js-propagation",
+    "js-single-use": "minify-js-single-use",
     "legacy-decoding": "decode",
     "link-filtering": "links-filter",
     "linkify": "linkify",

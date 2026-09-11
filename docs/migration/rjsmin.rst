@@ -101,6 +101,10 @@ The literal-propagation inputs contain 256 or one local ``const`` binding and re
 the complete callback order and returned values. Turbohtml produces 2,327 bytes for the interleaved large case; rjsmin
 retains 7,518 bytes. The grouped-declaration case retains 5,988 bytes in rjsmin, versus 2,327 in turbohtml.
 
+The call-initializer cases check once-read bindings while preserving callback order and returned values. Rjsmin is
+faster on all three inputs. For 256 calls, turbohtml produces 3,142 bytes in either layout; rjsmin retains 4,050 bytes
+for one declaration and 5,580 bytes for separate declarations.
+
 .. bench-table::
     :file: bench/rjsmin.json
 
