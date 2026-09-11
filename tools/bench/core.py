@@ -1375,7 +1375,17 @@ def _query_siblings_case(case: tuple[int, bool]) -> _Query:
     return selected if all_selected else selected.eq(0)
 
 
+def _form_data_fieldsets(text: str) -> list[tuple[str, str]]:
+    return _form_data_case(text).form_data()
+
+
+@functools.cache
+def _form_data_case(text: str) -> turbohtml.Element:
+    return turbohtml.parse(text).select("form")[0]
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "form-data-fieldsets": (_form_data_fieldsets, "turbohtml"),
     "query-closest": (_query_closest, "turbohtml"),
     "query-roots": (_query_roots, "turbohtml"),
     "node-closest": (_node_closest, "turbohtml"),

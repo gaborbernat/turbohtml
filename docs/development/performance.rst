@@ -533,6 +533,19 @@ alive throughout traversal; output order follows the first encounter of each res
 .. bench-table::
     :file: bench/query-parents.json
 
+Form-data collection skips disabled fieldset subtrees, visiting the first legend because controls inside it can remain
+enabled. On 2,048 disabled controls nested 64 levels deep, matched release time fell from 97.981 to 0.093 µs (99.90%);
+with one enabled control in the first legend, it fell from 136.118 to 0.136 µs (99.90%). Parsing happens outside the
+timed call. The enabled-fieldset control improved from 169.850 to 168.585 µs (0.74%); the four-control input changed by
+less than 1%. The disabled-target and enabled-control comparisons include the same allocation-callback ancestry fix in
+both variants. The first-legend and four-control cells retain the preceding release measurements. CodSpeed covers all
+four cases. The first-legend candidate spread is 6.00%. The traversal reads fieldset state again after collecting a
+control, preserving mutations during allocation. ``lxml.html.FormElement.form_values()`` includes controls under
+disabled fieldsets, so its output is not equivalent for these target cases.
+
+.. bench-table::
+    :file: bench/form-data-fieldsets.json
+
 Sorting large unordered root groups with ``qsort`` avoids insertion sort's repeated comparisons. Groups already in
 document order keep a linear check; groups smaller than 32 retain insertion sort. Matched release time for 512 reversed
 roots fell from 47.867 to 1.787 ms (96.27%); shuffled roots improved from 12.271 to 1.974 ms (83.91%). Candidate spread

@@ -823,16 +823,17 @@ static int element_set_checked(PyObject *self, PyObject *value, void *Py_UNUSED(
     return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on OOM */
 }
 
-/* Whether control sits inside fieldset's first legend child, the subtree a disabled
-   fieldset does not disable. */
-static int control_in_first_legend(th_node *fieldset, th_node *control) {
-    th_node *legend = NULL;
+static th_node *fieldset_first_legend(th_node *fieldset) {
     for (th_node *child = fieldset->first_child; child != NULL; child = child->next_sibling) {
         if (child->atom == TH_TAG_LEGEND) {
-            legend = child;
-            break;
+            return child;
         }
     }
+    return NULL;
+}
+
+static int control_in_first_legend(th_node *fieldset, th_node *control) {
+    th_node *legend = fieldset_first_legend(fieldset);
     if (legend == NULL) {
         return 0;
     }
@@ -850,8 +851,11 @@ static int control_disabled(th_node *control, th_node *form) {
     if (find_node_attr(control, TH_ATTR_DISABLED) != NULL) {
         return 1;
     }
-    /* form is always an ancestor (collect_control only walks its descendants), so the walk stops there */
+    /* Pair allocation can detach the current subtree during collection. */
     for (th_node *ancestor = control->parent; ancestor != form; ancestor = ancestor->parent) {
+        if (ancestor == NULL) {
+            return 1;
+        }
         if (ancestor->atom == TH_TAG_FIELDSET && find_node_attr(ancestor, TH_ATTR_DISABLED) != NULL &&
             !control_in_first_legend(ancestor, control)) {
             return 1;
@@ -947,14 +951,26 @@ PyDoc_STRVAR(form_data_doc, "form_data()\n--\n\n"
                             "by containment in the form.\n\n"
                             ":returns: the (name, value) pairs in document order.");
 
-/* The next node after current's whole subtree within root, skipping its descendants;
-   current is always a descendant of root, so the climb reaches root before NULL. */
-static th_node *after_subtree_within(th_node *current, th_node *root) {
-    while (current != root) {
-        if (current->next_sibling != NULL) {
-            return current->next_sibling;
+static th_node *next_form_control(th_node *current, th_node *form) {
+    if (current->atom == TH_TAG_FIELDSET && find_node_attr(current, TH_ATTR_DISABLED) != NULL) {
+        th_node *legend = fieldset_first_legend(current);
+        if (legend != NULL) {
+            return legend;
         }
-        current = current->parent;
+    } else if (current->atom != TH_TAG_TEMPLATE && current->first_child != NULL) {
+        return current->first_child;
+    }
+    while (current != NULL && current != form) {
+        th_node *parent = current->parent;
+        /* Pair allocation can run callbacks, so re-read fieldset state before skipping siblings. */
+        if (current->atom == TH_TAG_LEGEND && parent != NULL && parent->atom == TH_TAG_FIELDSET &&
+            find_node_attr(parent, TH_ATTR_DISABLED) != NULL) {
+            current = parent;
+        } else if (current->next_sibling != NULL) {
+            return current->next_sibling;
+        } else {
+            current = parent;
+        }
     }
     return NULL;
 }
@@ -972,15 +988,13 @@ static PyObject *element_form_data(PyObject *self, PyObject *Py_UNUSED(ignored))
     }
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    th_node *control = preorder_next(node, node);
+    th_node *control = next_form_control(node, node);
     while (control != NULL) {
         if (collect_control(tree, node, control, pairs) < 0) { /* GCOVR_EXCL_BR_LINE: fails only on OOM */
             error = 1;                                         /* GCOVR_EXCL_LINE: allocation-failure path */
             break;                                             /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        /* A template's contents live in a separate inert fragment; those controls have
-           no form owner, so skip the subtree instead of descending (WHATWG §4.10.3). */
-        control = control->atom == TH_TAG_TEMPLATE ? after_subtree_within(control, node) : preorder_next(control, node);
+        control = next_form_control(control, node);
     }
     Py_END_CRITICAL_SECTION();
     if (error) {          /* GCOVR_EXCL_BR_LINE: error is set only on an allocation failure */

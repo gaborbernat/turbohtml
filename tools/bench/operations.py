@@ -283,6 +283,7 @@ MEMORY_OPS: Final[frozenset[str]] = frozenset({
 
 
 OPERATIONS: dict[str, Operation] = {
+    "form-data-fieldsets": Operation("collect form controls around disabled fieldsets", "us"),
     "build": Operation("build a list (constructors)", "us"),
     "build-e": Operation("build a list (terse builders)", "us"),
     "construct": Operation("construct N elements (no serialize)", "us"),
@@ -536,6 +537,33 @@ def _readpath_cases() -> tuple[tuple[str, object], ...]:
     label, relative, encoding = corpus.CORPUS_FILES[5]  # whatwg spec (235 kB), the large content page
     pages.append((label, corpus.corpus_text(relative, encoding)))
     return tuple(pages)
+
+
+def _form_data_fieldset_cases() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            label,
+            "<form>"
+            + opening
+            + "<div>" * depth
+            + "".join(f'<input name="n{index}" value="v{index}">' for index in range(count))
+            + "</div>" * depth
+            + closing
+            + '<input name="tail" value="ok"></form>',
+        )
+        for label, opening, closing, depth, count in (
+            ("disabled / 2,048 controls / depth 64", "<fieldset disabled>", "</fieldset>", 64, 2_048),
+            (
+                "first legend / 2,048 disabled controls / depth 64",
+                '<fieldset disabled><legend><input name="allowed" value="yes"></legend>',
+                "</fieldset>",
+                64,
+                2_048,
+            ),
+            ("enabled / 2,048 controls / depth 64", "<fieldset>", "</fieldset>", 64, 2_048),
+            ("plain / 4 controls", "", "", 0, 4),
+        )
+    )
 
 
 def _deep_tree(depth: int, leaves: int) -> str:
@@ -1355,6 +1383,7 @@ def _validate_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
 
 
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
+    "form-data-fieldsets": _form_data_fieldset_cases,
     "build": lambda: _ROWS,
     "build-e": lambda: _ROWS,
     "construct": lambda: _ROWS,
