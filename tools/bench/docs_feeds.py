@@ -189,6 +189,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "whitespace-roundtrip": "whitespace-roundtrip",
     "structured-data": "structured",
     "tables": "tables",
+    "tables-spans": "tables-spans",
     "text-content": "text-content",
     "tokenizing": "tokenize",
     "tree-navigation": "navigate",

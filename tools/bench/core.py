@@ -1507,6 +1507,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "markdown-google": (markdown_google, "turbohtml"),
     "tables": (tables, "turbohtml"),
     "tables-wide": (tables, "turbohtml"),
+    "tables-spans": (tables, "turbohtml"),
     "article": (article, "turbohtml"),
     "article-wide": (article, "turbohtml"),
     "article-deep": (article, "turbohtml"),

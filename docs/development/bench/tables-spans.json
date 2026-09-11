@@ -1,0 +1,45 @@
+{
+  "label": "extract shared table span text",
+  "parties": [
+    "turbohtml",
+    "pandas"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "rows / 128 columns / 4096 text characters",
+      3.769692189337093e-06,
+      "omits the header row"
+    ],
+    [
+      "rows / 1 columns / 16 text characters",
+      1.2319756304002283e-06,
+      "omits the header row"
+    ],
+    [
+      "records / 128 columns / 4096 text characters",
+      4.297431860796527e-06,
+      "renames duplicate headers"
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.017716170978074992,
+      null
+    ],
+    [
+      null,
+      0.01628643728875579,
+      null
+    ],
+    [
+      null,
+      0.010979440957128606,
+      null
+    ]
+  ],
+  "notes": {
+    "pandas": "read_html consumes header rows and renames duplicate columns; these outputs differ"
+  }
+}

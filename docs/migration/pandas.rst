@@ -102,6 +102,10 @@ returns plain lists and dicts where ``read_html`` builds a ``DataFrame`` (import
 times faster: the gap is widest on small tables, where pandas pays a fixed per-frame cost, and narrows as the row count
 grows. See :doc:`/development/performance` for the methodology.
 
+The span cases also check header semantics. ``rows()`` includes the header row; ``read_html`` consumes it as column
+labels. ``records()`` keeps the last value for a duplicate header, while pandas renames duplicate columns. Those cells
+record the output differences without a timing comparison.
+
 .. bench-table::
     :file: bench/pandas.json
 

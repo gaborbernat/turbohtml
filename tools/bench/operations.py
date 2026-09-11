@@ -436,6 +436,7 @@ OPERATIONS: dict[str, Operation] = {
     "markdown-google": Operation("Google Docs export to Markdown", "us"),
     "tables": Operation("extract table grids", "us"),
     "tables-wide": Operation("extract a wide table grid", "us"),
+    "tables-spans": Operation("extract repeated table span text", "us"),
     "article": Operation("article extraction", "us"),
     "boilerplate": Operation("paragraph boilerplate classification", "us"),
     "date-tally": Operation("score visible date candidates", "us"),
@@ -1863,6 +1864,22 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("records (100 rows)", ("records", _table_html(100))),
         ("rows (1000 rows)", ("rows", _table_html(1_000))),
         ("records (1000 rows)", ("records", _table_html(1_000))),
+    ),
+    "tables-spans": lambda: tuple(
+        (
+            f"{kind} / {span} columns / {size} text characters",
+            (
+                kind,
+                "<table><tr><th colspan="
+                + str(span)
+                + ">header</th></tr><tr><td colspan="
+                + str(span)
+                + ">"
+                + "x" * size
+                + "</td></tr></table>",
+            ),
+        )
+        for kind, span, size in (("rows", 128, 4096), ("rows", 1, 16), ("records", 128, 4096))
     ),
     "tables-wide": lambda: (("10k columns", ("rows", "<table><tr>" + "<td>x</td>" * 10_000 + "</tr></table>")),),
     "article": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),

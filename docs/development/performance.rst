@@ -1502,6 +1502,14 @@ and 2.23%; those differences do not qualify as gains. These cases include parsin
 .. bench-table::
     :file: bench/syndication.json
 
+Table spans share one trimmed text snapshot and one immutable Python string per source cell. Extracting 128 columns with
+4,096 characters of shared text decreases from 149.150 to 3.770 microseconds for rows (97.47%) and from 149.245 to 4.297
+microseconds for records (97.12%). The ordinary-cell control decreases by 2.90%, without a separate gain claim. Parsing
+stays outside timing; CodSpeed covers the three cases. Output rows and records remain independent of later tree edits.
+
+.. bench-table::
+    :file: bench/tables-spans.json
+
 Path caching
 ============
 
