@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from bench.core import OPERATIONS
+from bench.operations import INPUTS
 
 import turbohtml
 from turbohtml import Element, parse
@@ -662,3 +664,88 @@ def test_find_root_order_after_mutation() -> None:
         [str(index) for index in range(32)],
         [str(index) for index in range(1, 32)] + ["0"],
     )
+
+
+@pytest.mark.parametrize("case_index", [0, 1, 2, 3], ids=["detached", "connected", "small", "documents"])
+def test_query_root_groups_shared_inputs(case_index: int) -> None:
+    case: Final = cast("tuple[str, int]", INPUTS["query-root-groups"]()[case_index][1])
+    operation: Final = cast("Callable[[tuple[str, int]], Query]", OPERATIONS["query-root-groups"][0])
+    assert [node.text for node in operation(case)] == [str(index) for index in range(case[1])]
+
+
+@pytest.mark.parametrize("selector", ["p", "missing"], ids=["matches", "empty"])
+def test_query_root_groups_interleave_handles_and_nested_roots(selector: str) -> None:
+    left, right = parse(
+        "<main><section><p>a</p></section><section><p>b</p></section></main>"
+        "<main><section><p>d</p></section><section><p>e</p></section></main>"
+    ).select("main")
+    left.extract()
+    right.extract()
+    middle: Final = parse("<main><p>c</p></main>").select("main")[0]
+    roots: Final = [left.select("section")[1], middle, right.select("section")[1], left, right]
+    assert [node.text for node in Query(roots).find(selector)] == (["a", "b", "c", "d", "e"] if selector == "p" else [])
+
+
+@pytest.mark.parametrize("empty_group", [0, 1, 2], ids=["first", "middle", "last"])
+def test_query_root_groups_preserve_order_around_empty_group(empty_group: int) -> None:
+    first, last = parse("<main><p>a</p></main><main><p>c</p></main>").select("main")
+    first.extract()
+    last.extract()
+    middle: Final = parse("<main><p>b</p></main>").select("main")[0]
+    roots: Final = [first, middle, last]
+    roots[empty_group].select("p")[0].extract()
+    assert [node.text for node in Query(roots).find("p")] == [
+        value for index, value in enumerate("abc") if index != empty_group
+    ]
+
+
+def test_query_root_groups_refresh_after_reparenting() -> None:
+    first, second = parse("<main><p>a</p></main><main><p>b</p></main>").select("main")
+    first.extract()
+    second.extract()
+    query: Final = Query([second, first])
+    query.find("p")
+    first.append(second)
+    assert [node.text for node in query.find("p")] == ["a", "b"]
+
+
+def test_query_root_groups_refresh_after_cross_document_adoption() -> None:
+    first: Final = parse("<main><p>a</p></main>").select("main")[0]
+    second: Final = parse("<main><p>b</p></main>").select("main")[0]
+    query: Final = Query([first, second])
+    query.find("p")
+    second.append(first)
+    assert [node.text for node in query.find("p")] == ["b", "a"]
+
+
+@pytest.mark.parametrize("adopt", [False, True], ids=["same-tree", "cross-document"])
+def test_query_root_groups_follow_selector_eviction_mutation(*, adopt: bool) -> None:
+    first, last = parse("<main><p>a</p></main><main><p>c</p></main>").select("main")
+    middle: Final = parse("<main><p>b</p></main>").select("main")[0]
+    first.extract()
+    last.extract()
+    destination: Final = middle if adopt else first
+    extra: Final = [parse("<main><p>d</p></main>").select("main")[0] for _ in range(31)]
+
+    class MovingSelector(str):  # ruff:ignore[subclass-builtin]  # native selectors require a real str
+        __slots__ = ()
+
+        def __del__(self) -> None:
+            destination.append(last)
+
+    first.select(MovingSelector("unmatched"))
+    for index in range(15):
+        first.select(f"unused{index}")
+    assert [node.text for node in Query([first, middle, last, *extra]).find("p")] == [
+        *(["a", "b", "c"] if adopt else ["a", "c", "b"]),
+        *(["d"] * 31),
+    ]
+
+
+def test_query_root_groups_keep_later_documents_after_reordering() -> None:
+    first, third = parse("<main><p>a</p></main><main><p>c</p></main>").select("main")
+    first.extract()
+    third.extract()
+    second: Final = parse("<main><p>b</p></main>").select("main")[0]
+    fourth: Final = parse("<main><p>d</p></main>").select("main")[0]
+    assert [node.text for node in Query([first, second, third, fourth]).find("p")] == list("abcd")

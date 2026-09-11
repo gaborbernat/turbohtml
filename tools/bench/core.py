@@ -1384,7 +1384,25 @@ def _form_data_case(text: str) -> turbohtml.Element:
     return turbohtml.parse(text).select("form")[0]
 
 
+def _query_root_groups(case: tuple[str, int]) -> _Query:
+    return _query_root_group_case(case).find("p")
+
+
+@functools.cache
+def _query_root_group_case(case: tuple[str, int]) -> _Query:
+    kind, count = case
+    if kind == "documents":
+        roots = [turbohtml.parse(f"<main><p>{index}</p></main>").select("main")[0] for index in range(count)]
+    else:
+        roots = turbohtml.parse("".join(f"<main><p>{index}</p></main>" for index in range(count))).select("main")
+        if kind == "detached":
+            for root in roots:
+                root.extract()
+    return _Query(roots)
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "query-root-groups": (_query_root_groups, "turbohtml"),
     "form-data-fieldsets": (_form_data_fieldsets, "turbohtml"),
     "query-closest": (_query_closest, "turbohtml"),
     "query-roots": (_query_roots, "turbohtml"),

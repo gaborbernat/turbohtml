@@ -171,6 +171,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "query-root-groups-connected": ("query-root-groups", 1),
+    "query-root-groups-small": ("query-root-groups", 2),
     "form-data-fieldsets-legend": ("form-data-fieldsets", 1),
     "form-data-fieldsets-enabled": ("form-data-fieldsets", 2),
     "form-data-fieldsets-plain": ("form-data-fieldsets", 3),

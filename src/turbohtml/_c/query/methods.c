@@ -215,7 +215,15 @@ PyObject *turbohtml_select_limited(PyObject *module, PyObject *args) {
 typedef struct {
     NodeObject *node;
     int processed;
+    Py_ssize_t next;
+    Py_ssize_t tail;
+    Py_ssize_t next_group;
 } multi_root;
+
+typedef struct {
+    Py_ssize_t offset;
+    Py_ssize_t size;
+} multi_batch;
 
 PyObject *turbohtml_matches_many(PyObject *module, PyObject *args) {
     PyObject *nodes;
@@ -326,7 +334,7 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     }
     multi_root *roots = PyMem_Calloc((size_t)count, sizeof(multi_root));
     th_node **group = PyMem_Malloc((size_t)count * sizeof(th_node *));
-    PyObject **batches = PyMem_Calloc((size_t)count, sizeof(PyObject *));
+    multi_batch *batches = PyMem_Calloc((size_t)count, sizeof(multi_batch));
     if (roots == NULL || group == NULL || batches == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         PyMem_Free(roots);                                   /* GCOVR_EXCL_LINE */
         PyMem_Free(group);                                   /* GCOVR_EXCL_LINE */
@@ -339,6 +347,8 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     }
     module_state *state = PyModule_GetState(module);
     int error = 0;
+    int ordered = 1;
+    Py_ssize_t previous_group = 0;
     for (Py_ssize_t first = 0; first < count;) {
         if (roots[first].processed) {
             first++;
@@ -350,37 +360,50 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
         if (compiled == NULL) {
             error = 1;
         } else {
-            while (1) {
-                Py_ssize_t tree_first = -1;
-                for (Py_ssize_t index = first; index < count; index++) {
-                    if (!roots[index].processed && roots[index].node->handle == anchor->handle) {
-                        tree_first = index;
-                        break;
+            th_node_map tops = {0};
+            th_node *first_top = NULL;
+            Py_ssize_t first_group = 0;
+            Py_ssize_t last_group = 0;
+            for (Py_ssize_t index = first; index < count; index++) {
+                NodeObject *candidate = roots[index].node;
+                if (roots[index].processed || candidate->handle != anchor->handle) {
+                    continue;
+                }
+                th_node *top = node_root(candidate->node);
+                Py_ssize_t head = top == first_top ? first_group : th_node_map_find(&tops, top);
+                if (head == 0) {
+                    if (first_group != 0) {
+                        const int inserted = th_node_map_insert(&tops, top, index + 1);
+                        if (inserted < 0) {   /* GCOVR_EXCL_BR_LINE: allocation failure */
+                            PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+                            error = 1;        /* GCOVR_EXCL_LINE */
+                            break;            /* GCOVR_EXCL_LINE */
+                        }
+                        roots[last_group - 1].next_group = index + 1;
+                    } else {
+                        first_top = top;
+                        first_group = index + 1;
                     }
+                    last_group = index + 1;
+                    roots[index].tail = index;
+                } else {
+                    roots[roots[head - 1].tail].next = index + 1;
+                    roots[head - 1].tail = index;
                 }
-                if (tree_first < 0) {
-                    break;
-                }
-                th_node *top = node_root(roots[tree_first].node->node);
+                roots[index].processed = 1;
+            }
+            PyMem_Free(tops.entries);
+            /* Keep tracked-list allocation outside the lifetime of the root grouping. */
+            for (Py_ssize_t head = first_group; head != 0 && !error; head = roots[head - 1].next_group) {
+                Py_ssize_t tree_first = head - 1;
+                ordered = ordered && tree_first >= previous_group;
+                previous_group = tree_first;
                 Py_ssize_t group_count = 0;
-                for (Py_ssize_t index = tree_first; index < count; index++) {
-                    NodeObject *candidate = roots[index].node;
-                    if (!roots[index].processed && candidate->handle == anchor->handle &&
-                        node_root(candidate->node) == top) {
-                        roots[index].processed = 1;
-                        group[group_count++] = candidate->node;
-                    }
+                for (Py_ssize_t member = head; member != 0; member = roots[member - 1].next) {
+                    group[group_count++] = roots[member - 1].node->node;
                 }
                 sort_roots(group, group_count);
-                PyObject *selected = out;
-                if (tree_first != 0) {
-                    selected = PyList_New(0);
-                    if (selected == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                        error = 1;          /* GCOVR_EXCL_LINE */
-                        break;              /* GCOVR_EXCL_LINE */
-                    }
-                    batches[tree_first] = selected;
-                }
+                batches[tree_first].offset = PyList_GET_SIZE(out);
                 th_node *covered = NULL;
                 for (Py_ssize_t index = 0; index < group_count; index++) {
                     th_node *origin = group[index];
@@ -388,15 +411,13 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
                         continue;
                     }
                     covered = origin;
-                    int append_error = append_selected(selected, state, anchor->handle, origin, compiled, 0);
+                    int append_error = append_selected(out, state, anchor->handle, origin, compiled, 0);
                     if (append_error < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                         error = 1;          /* GCOVR_EXCL_LINE */
                         break;              /* GCOVR_EXCL_LINE */
                     }
                 }
-                if (error) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                    break;   /* GCOVR_EXCL_LINE */
-                }
+                batches[tree_first].size = PyList_GET_SIZE(out) - batches[tree_first].offset;
             }
         }
         Py_END_CRITICAL_SECTION();
@@ -405,21 +426,19 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
         }
         first++;
     }
-    if (!error) {
-        for (Py_ssize_t index = 1; index < count; index++) {
-            if (batches[index] == NULL) {
-                continue;
+    if (!error && !ordered) {
+        PyObject *result = PyList_New(PyList_GET_SIZE(out));
+        if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            error = 1;        /* GCOVR_EXCL_LINE */
+        } else {              /* GCOVR_EXCL_LINE: clang attributes the allocation-failure edge to this brace */
+            Py_ssize_t position = 0;
+            for (Py_ssize_t index = 0; index < count; index++) {
+                for (Py_ssize_t item = 0; item < batches[index].size; item++) {
+                    PyList_SET_ITEM(result, position++, Py_NewRef(PyList_GET_ITEM(out, batches[index].offset + item)));
+                }
             }
-            Py_ssize_t size = PyList_GET_SIZE(out);
-            int extend_error = PyList_SetSlice(out, size, size, batches[index]);
-            if (extend_error < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                error = 1;          /* GCOVR_EXCL_LINE: allocation failure */
-                break;              /* GCOVR_EXCL_LINE */
-            }
+            Py_SETREF(out, result);
         }
-    }
-    for (Py_ssize_t index = 1; index < count; index++) {
-        Py_XDECREF(batches[index]);
     }
     PyMem_Free(batches);
     PyMem_Free(group);

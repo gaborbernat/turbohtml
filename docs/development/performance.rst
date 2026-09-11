@@ -555,6 +555,14 @@ for the shuffled case is 5.92%, above the comparison threshold. The sorted-root 
 .. bench-table::
     :file: bench/query-roots.json
 
+A native index groups detached subtrees that share one tree handle after selector compilation. Grouping 2,048 detached
+roots fell from 2.480 ms to 63.822 µs (97.43%). The connected-root control improved from 6.181 to 6.119 ms (1.00%); four
+connected roots changed from 0.3244 to 0.3277 µs (+1.02%). Groups retain their first-occurrence order across interleaved
+documents. CodSpeed covers the detached, connected, and small inputs.
+
+.. bench-table::
+    :file: bench/query-root-groups.json
+
 Closest joins keep each selected element's selector scope and the existing ancestor walk. For 1,024 children, matched
 time fell from 45.406 to 17.496 µs (61.47%) with a shared matching ancestor and from 60.596 to 33.004 µs (45.54%) with
 distinct matching ancestors. Pyquery retains duplicate ancestors for the shared case; only the distinct case is
