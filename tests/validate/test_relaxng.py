@@ -754,3 +754,65 @@ def test_repeated_validation_preserves_character_data(pattern: str, documents: t
     schema: Final = RelaxNG(rwrap(pattern))
     parsed: Final = tuple(map(parse_xml, documents))
     assert [schema.validate(document).valid for _ in range(3) for document in parsed] == [True, False] * 3
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    ("schema", "doc"),
+    [
+        pytest.param(f'<element name="a" xmlns="{R}"><text/></element>', "<a>hi</a>", id="text-valid"),
+        pytest.param(
+            f'<element name="a" xmlns="{R}"><element name="b"><text/></element></element>',
+            "<a><c>x</c></a>",
+            id="wrong-child-invalid",
+        ),
+        pytest.param(
+            f'<element name="p" xmlns="{R}"><interleave>'
+            '<element name="a"><text/></element><element name="b"><text/></element></interleave></element>',
+            "<p><b>2</b><a>1</a></p>",
+            id="interleave-any-order-valid",
+        ),
+        pytest.param(
+            f'<element name="p" xmlns="{R}"><interleave>'
+            '<element name="a"><text/></element><element name="b"><text/></element></interleave></element>',
+            "<p><a>1</a></p>",
+            id="interleave-missing-invalid",
+        ),
+        pytest.param(
+            f'<element name="r" xmlns="{R}"><oneOrMore><element name="i"><text/></element></oneOrMore></element>',
+            "<r><i>1</i><i>2</i></r>",
+            id="oneOrMore-valid",
+        ),
+        pytest.param(
+            f'<element name="r" xmlns="{R}"><oneOrMore><element name="i"><text/></element></oneOrMore></element>',
+            "<r/>",
+            id="oneOrMore-empty-invalid",
+        ),
+        pytest.param(
+            f'<element name="e" xmlns="{R}" datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">'
+            '<data type="int"/></element>',
+            "<e>7</e>",
+            id="data-int-valid",
+        ),
+        pytest.param(
+            f'<element name="e" xmlns="{R}" datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">'
+            '<data type="int"/></element>',
+            "<e>seven</e>",
+            id="data-int-invalid",
+        ),
+        pytest.param(
+            f'<element name="r" xmlns="{R}"><attribute name="id"><text/></attribute><text/></element>',
+            '<r id="1">x</r>',
+            id="attribute-valid",
+        ),
+        pytest.param(
+            f'<element name="r" xmlns="{R}"><attribute name="id"><text/></attribute><text/></element>',
+            "<r>x</r>",
+            id="attribute-missing-invalid",
+        ),
+    ],
+)
+def test_relaxng_matches_lxml(schema: str, doc: str) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    validator: Final = etree.RelaxNG(etree.fromstring(schema.encode()))
+    assert RelaxNG(schema).validate(parse_xml(doc)).valid == validator.validate(etree.fromstring(doc.encode()))
