@@ -1770,7 +1770,24 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             ),
         ),
     ),
-    "syndication": lambda: (("rss 30 items", _FEED_XML),),
+    "syndication": lambda: (
+        ("rss 30 items", _FEED_XML),
+        (
+            "rss 30 items / 128 extensions each",
+            _FEED_XML.replace("<item>", "<item>" + "<extension>x</extension>" * 128),
+        ),
+        (
+            "atom 30 entries",
+            '<feed xmlns="http://www.w3.org/2005/Atom"><title>Example</title>'
+            + "".join(
+                f'<entry><title>Entry {index}</title><link href="https://example.com/{index}"/>'
+                f"<id>urn:{index}</id><updated>2026-07-06</updated><summary>Summary {index}</summary>"
+                "<content>Full body</content><author><name>Writer</name></author></entry>"
+                for index in range(30)
+            )
+            + "</feed>",
+        ),
+    ),
     "sanitize": lambda: (
         ("comment", "<p>Thanks for the <a href='http://example.com'>link</a>! <script>evil()</script></p>"),
         ("post 4 KiB", _SANITIZE_POST * 20),

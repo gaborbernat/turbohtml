@@ -171,6 +171,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "syndication-extensions": ("syndication", 1),
+    "syndication-atom": ("syndication", 2),
     "sanitize-attributes-allowed": ("sanitize-attributes", 1),
     "sanitize-attributes-tiny": ("sanitize-attributes", 2),
     "html-options-none": ("html-options", 1),

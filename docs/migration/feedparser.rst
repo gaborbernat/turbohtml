@@ -93,6 +93,11 @@ Performance
 Both start from the raw feed string and parse before they read it. On a 30-item RSS feed carrying titles, links, guids,
 dates, ``dc:creator``, and ``content:encoded`` bodies, the C walk runs over 60 times faster than feedparser's scanner:
 
+The extension-heavy RSS and Atom cases compare the complete feed header and eight entry fields before timing. The
+extension-heavy case measures 542.1 microseconds for turbohtml and 22.20 milliseconds for feedparser; Atom measures 44.4
+microseconds and 2.00 milliseconds. These plain-release results include parsing. The original RSS row retains its
+existing feedparser measurement.
+
 .. bench-table::
     :file: bench/feedparser.json
 

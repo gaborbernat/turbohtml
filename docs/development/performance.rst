@@ -1494,6 +1494,14 @@ with parsing outside the timed interval.
 .. bench-table::
     :file: bench/article-deep.json
 
+Feed extraction collects entry fields in one child traversal while preserving field-name precedence and the first
+occurrence of each field. On 30 RSS entries with 128 extension elements each, matched plain-release runs decrease from
+581.615 to 542.065 microseconds (6.80%). Candidate variation is 5.25%. Ordinary RSS and Atom controls decrease by 1.16%
+and 2.23%; those differences do not qualify as gains. These cases include parsing, and CodSpeed covers all three.
+
+.. bench-table::
+    :file: bench/syndication.json
+
 Path caching
 ============
 

@@ -1,5 +1,5 @@
 {
-  "label": "operation",
+  "label": "extract RSS and Atom feeds",
   "parties": [
     "turbohtml",
     "feedparser"
@@ -39,5 +39,5 @@
       0.006214880347835198
     ]
   ],
-  "row_notes": {}
+  "notes": {}
 }
