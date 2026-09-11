@@ -1866,6 +1866,26 @@ CodSpeed includes these five cases.
 .. bench-table::
     :file: bench/linkify-traversal.json
 
+*********
+ Startup
+*********
+
+Wheels store their configured version beside the package, avoiding distribution-metadata lookup during import. Editable
+installs still report the installed distribution's version after a rebuild changes the checkout version. An sdist also
+retains its configured version when unpacked inside another Git repository.
+
+Matched fresh-process measurements include interpreter startup, import and process exit. In a wheel environment with one
+installed distribution, import fell from 46.046 to 34.538 ms (24.99%) and CLI minification from 52.597 to 44.587 ms
+(15.23%). With 40 installed distributions, import fell from 45.397 to 33.382 ms (26.47%) and CLI minification from
+54.249 to 45.467 ms (16.19%). Each comparison uses the same interpreter and native binary on both sides. One
+small-environment candidate import batch had 11.22% spread; retain that uncertainty when comparing the percentages.
+
+The table contains the larger environment's candidate measurements. The shared pyperf suite covers both operations;
+CodSpeed simulation excludes these elapsed-time subprocess measurements.
+
+.. bench-table::
+    :file: bench/startup.json
+
 ******************
  Table generation
 ******************

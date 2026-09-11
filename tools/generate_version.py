@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Final
 
 # tools/ lives next to src/, so the project root is one level up from this file.
 _ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +40,8 @@ def _git(*args: str) -> str | None:
 
 
 def _version_from_git() -> str | None:
+    if not (_ROOT / ".git").exists():
+        return None
     if (described := _git("describe", "--tags", "--long", "--match", "[0-9]*")) is not None:
         tag, distance, commit = described.rsplit("-", 2)
         if int(distance) == 0:
@@ -54,7 +57,7 @@ def _version_from_file() -> str | None:
     path = _ROOT / _VERSION_FILE
     if not path.is_file():
         return None
-    match = re.search(r'__version__ = "([^"]+)"', path.read_text(encoding="utf-8"))
+    match = re.search(r'__version__(?:: Final\[str\])? = "([^"]+)"', path.read_text(encoding="utf-8"))
     return match.group(1) if match else None
 
 
@@ -68,15 +71,29 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", type=Path, help="write __version__ to this file instead of printing it")
     parser.add_argument("--meson-dist", action="store_true", help="resolve --write against MESON_DIST_ROOT")
+    parser.add_argument("--version", help="use the configured Meson project version")
     args = parser.parse_args()
 
-    version = resolve()
+    version: Final = resolve() if args.version is None else args.version
     if args.write is None:
         print(version)
         return
     target = Path(os.environ.get("MESON_DIST_ROOT", "")) / args.write if args.meson_dist else args.write
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+    target.write_text(
+        "from pathlib import Path as _Path\n"
+        "from typing import Final\n\n"
+        "from . import __file__ as _PACKAGE_FILE\n\n"
+        "__version__: Final[str]\n"
+        "if _Path(__file__).parent == _Path(_PACKAGE_FILE).parent:\n"
+        f'    __version__ = "{version}"\n'
+        "else:\n"
+        "    # Editable rebuilds can change Meson's version without replacing installed metadata.\n"
+        "    from importlib.metadata import version as _installed_version\n\n"
+        '    __version__ = _installed_version("turbohtml")\n\n'
+        '__all__ = ["__version__"]\n',
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

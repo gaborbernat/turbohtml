@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import functools
 import re
+import subprocess
+import sys
 from collections import deque
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final, cast
@@ -201,6 +203,19 @@ def _slotted(case: tuple[int, str]) -> turbohtml.Element:
     root: Final[turbohtml.ShadowRoot] = host.attach_shadow("open")
     root.set_inner_html('<slot name="unused"></slot>' * case[0] + '<slot name="target"></slot>')
     return root.select('slot[name="target"]')[0]
+
+
+def startup(mode: str) -> str:
+    """Include interpreter startup so cached imports cannot hide wheel initialization costs."""
+    return subprocess.run(
+        [sys.executable, "-c", "import turbohtml; print(turbohtml.__version__)"]
+        if mode == "import"
+        else [sys.executable, "-m", "turbohtml", "minify"],
+        input="<p>a  b</p><!-- c -->",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
 
 
 def parse(text: str) -> None:
@@ -1455,6 +1470,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "emit": (emit, "turbohtml"),
     "shadow": (shadow, "turbohtml"),
     "shadow-slot": (_shadow_slot, "turbohtml"),
+    "startup": (startup, "turbohtml"),
     "parse": (parse, "turbohtml"),
     "parse-formatting": (parse, "turbohtml"),
     "parse-foster": (parse, "turbohtml"),

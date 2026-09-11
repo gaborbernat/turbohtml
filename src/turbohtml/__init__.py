@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from importlib.metadata import version
-
 from ._html import (
     Axis,
     CData,
@@ -44,6 +42,7 @@ from ._internal import (
 from ._internal._locations import SourceLocation, SourceSpan  # registers the source-location record types on import
 from ._internal._render import Canonical, Html, Markdown, PlainText
 from ._internal._selectors import SelectorSyntaxError  # registers the selector error type with the C core on import
+from ._version import __version__
 from .build import E, ElementMaker
 from .extract._article import Article  # registers the Article record type with the C core on import
 from .extract._feed import Entry, Feed  # registers the Feed/Entry record types with the C core on import
@@ -57,9 +56,6 @@ from .extract._structured_data import (  # registers the JSON-LD parser and reco
 from .mutations import MutationObserver, MutationRecord  # registers the MutationRecord type on import
 from .query._xpath import XPathString  # registers the smart-string type with the C core on import
 from .traverse import NodeFilter, NodeIterator, TreeWalker
-
-__version__ = version("turbohtml")
-"""The installed package version."""
 
 __all__ = [
     "Article",

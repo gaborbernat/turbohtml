@@ -385,6 +385,8 @@ def benchmarks() -> Iterator[tuple[str, object, Callable[[], object]]]:
     retires the flaky small-input benchmark and gates the large-input one as a fresh identity.
     """
     for name, (run, _owner) in OPERATIONS.items():
+        if name == "startup":
+            continue  # Startup needs elapsed time for a fresh child interpreter.
         identity = _RESIZED[name][0] if name in _RESIZED else name
         yield identity, run, loader_for(name)
     for identity, (name, case_index) in _ADDITIONAL_CASES.items():

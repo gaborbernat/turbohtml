@@ -294,6 +294,7 @@ OPERATIONS: dict[str, Operation] = {
     "shadow-slot": Operation("collect children assigned to a late shadow slot", "us"),
     "shadow-assignment": Operation("flatten uniquely named shadow slots", "us"),
     "shadow-fallback": Operation("flatten nested fallback slots", "us"),
+    "startup": Operation("start a fresh Python process", "ms"),
     "parse": Operation("parse to a tree", "us"),
     "parse-formatting": Operation("parse under a formatting ancestor", "us"),
     "parse-foster": Operation("parse foster-parented text", "us"),
@@ -1430,6 +1431,7 @@ def _validate_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
 
 
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
+    "startup": lambda: (("fresh import and version", "import"), ("fresh CLI minification", "minify")),
     "radio-group": _radio_group_cases,
     "form-data-fieldsets": _form_data_fieldset_cases,
     "build": lambda: _ROWS,

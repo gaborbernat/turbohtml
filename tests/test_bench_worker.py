@@ -7,9 +7,17 @@ import os
 import subprocess  # ruff:ignore[suspicious-subprocess-import]  # fixed Python executable and generated fixture script
 import sys
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from bench import core
+from bench.ci import benchmarks
+from bench.operations import INPUTS
+
+from turbohtml import __version__
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _SCRIPT: Final = """\
 from __future__ import annotations
@@ -37,6 +45,16 @@ core.OPERATIONS["audit-worker"] = ({operation}, "files")
 operations.INPUTS["audit-worker"] = lambda: tuple((Path(source).name, source) for source in CASES)
 worker.main()
 """
+
+
+@pytest.mark.parametrize(("case", "expected"), [(0, __version__ + "\n"), (1, "<p>a b")], ids=["import", "cli"])
+def test_worker_startup_public_output(case: int, expected: str) -> None:
+    operation: Final = cast("Callable[[object], str]", core.OPERATIONS["startup"][0])
+    assert operation(INPUTS["startup"]()[case][1]) == expected
+
+
+def test_worker_startup_uses_elapsed_time() -> None:
+    assert ("startup" in core.OPERATIONS, "startup" in {name for name, _, _ in benchmarks()}) == (True, False)
 
 
 @pytest.mark.parametrize("mutating", [False, True], ids=["plain", "mutating"])

@@ -125,6 +125,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "xpath-id-nodes": "xpath-id-nodes",
     "boilerplate-classification": "boilerplate",
     "building": "build",
+    "startup": "startup",
     "building-2": "construct",
     "building-3": "emit",
     "building-4": "build-e",
