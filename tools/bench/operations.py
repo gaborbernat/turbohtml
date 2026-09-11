@@ -310,6 +310,7 @@ OPERATIONS: dict[str, Operation] = {
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
+    "validate-attributes": Operation("validate XSD attribute declarations", "us"),
     "validate-facets": Operation("validate inherited facet metadata", "us"),
     "compile-facets": Operation("compile inherited facet metadata", "us"),
     "validate-pattern-reuse": Operation("validate repeated pattern facets", "us"),
@@ -1357,6 +1358,21 @@ def _wide_path_cases() -> tuple[tuple[str, str], ...]:
     return tuple((f"{size:,} siblings", f"<ul>{'<li>value</li>' * size}</ul>") for size in (100, 1_000, 10_000))
 
 
+def _validate_attribute_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            f"{size:,} attributes",
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="root"><xs:complexType>'
+                + "".join(f'<xs:attribute name="item{index}" type="xs:string"/>' for index in range(size))
+                + "</xs:complexType></xs:element></xs:schema>",
+                "<root " + " ".join(f'item{index}="value"' for index in reversed(range(size))) + "/>",
+            ),
+        )
+        for size in (512, 4)
+    )
+
+
 def _validate_pattern_reuse_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
     return tuple(
         (
@@ -1521,6 +1537,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
     "validate-facets": _validate_facet_cases,
+    "validate-attributes": _validate_attribute_cases,
     "compile-facets": lambda: (("four-level derived type", _validate_facet_cases()[0][1][0]),),
     "validate-pattern-reuse": _validate_pattern_reuse_cases,
     "compile-pattern": lambda: (("two pattern facets", _validate_pattern_reuse_cases()[0][1][0]),),

@@ -1473,6 +1473,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
     "validate-facets": (validate, "turbohtml"),
+    "validate-attributes": (validate, "turbohtml"),
     "compile-facets": (_XMLSchema, "turbohtml"),
     "validate-pattern-reuse": (validate, "turbohtml"),
     "compile-pattern": (_XMLSchema, "turbohtml"),

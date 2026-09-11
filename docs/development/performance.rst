@@ -1500,6 +1500,18 @@ whitespace normalization and diagnostics retain their behavior.
 Lxml takes 245.954 µs for inherited-facet validation and 120.291 µs for the builtin control; it remains faster at
 validation. Its schema-construction measurement is 14.229 µs with 7.33% spread; the table retains that warning.
 
+Attribute validation indexes declared names within each call for instances with at least 32 attributes and 32 attribute
+declarations. It checks required, prohibited and fixed values in declaration order before rejecting unknown instance
+attributes. The two cases contain 512 and four attributes; both reuse a compiled schema and include parsing the instance
+and constructing the temporary index. Validation of 512 attributes fell from 607.066 to 410.526 µs (32.38%); four
+attributes changed from 1.3990 to 1.4278 µs (+2.05%). CodSpeed covers both sizes.
+
+Lxml takes 357.829 µs for 512 attributes and 1.7860 µs for four. It remains faster for the wide case; turbohtml is
+faster for the small case.
+
+.. bench-table::
+    :file: bench/validate-attributes.json
+
 .. bench-table::
     :file: bench/validate-facets.json
 

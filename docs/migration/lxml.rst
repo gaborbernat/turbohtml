@@ -138,6 +138,10 @@ element on all three inputs and the SVG and xlink namespace declarations on the 
 these byte-output mismatches without competitor timings; its native values cover 150-level trees with and without xlink
 attributes, plus a shallow ordinary document.
 
+The attribute-validation rows compare 512 declared attributes with a four-attribute control. Both libraries reuse the
+compiled schema and parse the instance within each measurement. Turbohtml allocates its declaration index per
+validation; repeated calls and concurrent validators share no mutable index.
+
 .. bench-table::
     :file: bench/lxml.json
 

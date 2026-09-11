@@ -1562,3 +1562,60 @@ def test_pattern_compile_benchmark_output() -> None:
         True,
         False,
     ]
+
+
+@pytest.mark.parametrize("name", ["validate-attributes", "validate-attributes-small"])
+def test_declaration_benchmark_output(name: str) -> None:
+    _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
+    source, document = cast("tuple[str, str]", load())
+    assert XMLSchema(source).validate(parse_xml(document)).errors == ()
+
+
+@pytest.mark.parametrize(
+    ("declarations", "attributes", "expected"),
+    [
+        pytest.param(
+            '<xs:attribute name="missing" use="required"/>',
+            "",
+            ["required attribute 'missing' is missing"],
+            id="required",
+        ),
+        pytest.param(
+            '<xs:attribute name="forbidden" use="prohibited"/>',
+            'forbidden="x" unknown="x"',
+            ["attribute 'forbidden' is prohibited", "attribute 'unknown' is not declared"],
+            id="diagnostic-order",
+        ),
+        pytest.param(
+            '<xs:attribute name="fixed" fixed="yes"/>',
+            'fixed="no"',
+            ["attribute 'fixed' must equal its fixed value"],
+            id="fixed",
+        ),
+        pytest.param("", 'xmlns:f="urn:foreign" f:unknown="x"', [], id="foreign-attribute"),
+        pytest.param('<xs:attribute name="item0"/>', "", [], id="duplicate-declaration"),
+    ],
+)
+def test_wide_attribute_declaration_order(declarations: str, attributes: str, expected: list[str]) -> None:
+    schema: Final = XMLSchema(
+        f'<xs:schema {XS}><xs:element name="root"><xs:complexType>'
+        + "".join(f'<xs:attribute name="item{index}" type="xs:string"/>' for index in range(32))
+        + declarations
+        + "</xs:complexType></xs:element></xs:schema>"
+    )
+    document: Final = parse_xml(
+        "<root " + " ".join(f'item{index}="text"' for index in reversed(range(32))) + " " + attributes + "/>"
+    )
+    assert [error.message for error in schema.validate(document).errors] == expected
+
+
+def test_wide_attribute_declarations_with_sparse_instance() -> None:
+    schema: Final = XMLSchema(
+        f'<xs:schema {XS}><xs:element name="root"><xs:complexType>'
+        + "".join(f'<xs:attribute name="item{index}" type="xs:string"/>' for index in range(32))
+        + '<xs:attribute name="required" use="required"/>'
+        + "</xs:complexType></xs:element></xs:schema>"
+    )
+    assert [error.message for error in schema.validate(parse_xml('<root item0="value"/>')).errors] == [
+        "required attribute 'required' is missing"
+    ]

@@ -1,0 +1,33 @@
+{
+  "label": "validate XSD attribute declarations",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "512 attributes",
+      0.0004105263778455992,
+      0.00035782850482064533
+    ],
+    [
+      "4 attributes",
+      1.4277837641370657e-06,
+      1.7859703459540319e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01561470594861935,
+      0.009655805576977438
+    ],
+    [
+      null,
+      0.022272789143109515,
+      0.02735443640281806
+    ]
+  ],
+  "notes": {}
+}

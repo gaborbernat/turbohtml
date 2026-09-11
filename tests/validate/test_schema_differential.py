@@ -189,3 +189,14 @@ def test_lxml_pattern_benchmark_output(name: str, expected: list[bool]) -> None:
     assert [
         schema.validate(etree.fromstring(text.encode())) for text in (document, document.replace("abc123", "abc"))
     ] == expected
+
+
+@pytest.mark.parametrize("index", range(2), ids=["wide-attributes", "small-attributes"])
+def test_lxml_attribute_benchmark_output(index: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    source, document = cast("tuple[str, str]", INPUTS["validate-attributes"]()[index][1])
+    schema: Final = etree.XMLSchema(etree.fromstring(source.encode()))
+    assert [
+        schema.validate(etree.fromstring(text.encode()))
+        for text in (document, document.replace("<root ", '<root unknown="x" '))
+    ] == [True, False]

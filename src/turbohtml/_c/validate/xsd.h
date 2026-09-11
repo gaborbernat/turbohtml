@@ -673,6 +673,24 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
 static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared) {
     th_tree *inst = ctx->tree;
     xsd_collect_attrs(ctx, instance, scope, declared);
+    named_vec names = {0};
+    if (declared->count >= 32 && instance->attr_count >= 32) {
+        for (Py_ssize_t index = 0; index < declared->count; index++) {
+            edecl *item = &declared->items[index];
+            /* GCOVR_EXCL_BR_START: arena allocation failure */
+            if (named_push(ctx->schema, &names, item->local, item->local_len, item->decl) < 0) {
+                ctx->failed = 1;  /* GCOVR_EXCL_LINE: arena allocation failure */
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE: arena allocation failure */
+                return;           /* GCOVR_EXCL_LINE: arena allocation failure */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+        }
+        if (named_index(ctx->schema, &names) < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
+            ctx->failed = 1;                        /* GCOVR_EXCL_LINE */
+            PyErr_NoMemory();                       /* GCOVR_EXCL_LINE */
+            return;                                 /* GCOVR_EXCL_LINE */
+        }
+    }
     for (Py_ssize_t index = 0; index < instance->attr_count; index++) {
         Py_ssize_t alen = 0;
         const char *abytes = th_attr_name(inst, instance->attrs[index].name_atom, &alen);
@@ -680,7 +698,23 @@ static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, e
             continue;
         }
         int known = 0;
-        for (Py_ssize_t decl = 0; decl < declared->count; decl++) {
+        if (names.slots != NULL) {
+            uint64_t hash = UINT64_C(1469598103934665603);
+            for (Py_ssize_t byte = 0; byte < alen; byte++) {
+                hash ^= (unsigned char)abytes[byte];
+                hash *= UINT64_C(1099511628211);
+            }
+            size_t slot = (size_t)hash & (names.slot_cap - 1);
+            while (names.slots[slot] != NULL) {
+                named_node *item = names.slots[slot];
+                if (item->len == alen && u_eq_ascii(item->name, item->len, abytes)) {
+                    known = 1;
+                    break;
+                }
+                slot = (slot + 1) & (names.slot_cap - 1);
+            }
+        }
+        for (Py_ssize_t decl = 0; names.slots == NULL && decl < declared->count; decl++) {
             if ((Py_ssize_t)alen == declared->items[decl].local_len &&
                 u_eq_ascii(declared->items[decl].local, declared->items[decl].local_len, abytes)) {
                 known = 1;
