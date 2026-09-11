@@ -1,0 +1,28 @@
+{
+  "label": "serialize with reused options",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "reused defaults",
+      4.5672993101616065e-07
+    ],
+    [
+      "no options",
+      1.0421210533776796e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.020455287990867505
+    ],
+    [
+      null,
+      0.026405545848577214
+    ]
+  ],
+  "notes": {}
+}

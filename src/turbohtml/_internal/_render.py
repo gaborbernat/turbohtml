@@ -339,12 +339,13 @@ class PlainText:
         default = _PLAINTEXT_DEFAULT
         return {
             field_.name: value
-            for field_ in fields(self)
+            for field_ in (_PLAINTEXT_FIELDS if type(self) is PlainText else fields(self))
             if (value := getattr(self, field_.name)) != getattr(default, field_.name)
         }
 
 
 _PLAINTEXT_DEFAULT: Final = PlainText()
+_PLAINTEXT_FIELDS: Final = fields(PlainText)
 
 
 @dataclass(frozen=True)
@@ -374,12 +375,13 @@ class Html:
         default = _HTML_DEFAULT
         return {
             field_.name: value
-            for field_ in fields(self)
+            for field_ in (_HTML_FIELDS if type(self) is Html else fields(self))
             if (value := getattr(self, field_.name)) != getattr(default, field_.name)
         }
 
 
 _HTML_DEFAULT: Final = Html()
+_HTML_FIELDS: Final = fields(Html)
 
 
 @dataclass(frozen=True)
@@ -422,12 +424,13 @@ class Canonical:
         default = _CANONICAL_DEFAULT
         return {
             field_.name: value
-            for field_ in fields(self)
+            for field_ in (_CANONICAL_FIELDS if type(self) is Canonical else fields(self))
             if (value := getattr(self, field_.name)) != getattr(default, field_.name)
         }
 
 
 _CANONICAL_DEFAULT: Final = Canonical()
+_CANONICAL_FIELDS: Final = fields(Canonical)
 
 _register_render_configs(Markdown, PlainText, Html, Canonical)
 

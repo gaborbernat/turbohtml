@@ -966,6 +966,25 @@ target and both controls; the lxml comparisons check complete decoded values.
 .. bench-table::
     :file: bench/parse-xml-values.json
 
+Reused ``Html``, ``PlainText`` and ``Canonical`` options use cached field metadata for their exact types. Subclasses
+retain dynamic field discovery, and each render reads the current option values. On a prepared ``<p>x</p>`` node,
+matched release measurements fell from 0.770 to 0.457 µs for HTML (40.68%), 0.850 to 0.502 µs for text (40.94%), and
+0.711 to 0.426 µs for canonicalization (40.08%). The shared suite excludes node and option construction through its
+setup hook. CodSpeed includes each renderer with and without explicit options.
+
+Without options, HTML changed from 0.1052 to 0.1042 µs and text from 0.1027 to 0.1011 µs. Canonicalization changed from
+0.1334 to 0.1388 µs (+4.03%, or 0.0054 µs), with candidate spread of 5.24%. These unchanged paths bypass option
+unpacking; their small differences do not establish gains.
+
+.. bench-table::
+    :file: bench/html-options.json
+
+.. bench-table::
+    :file: bench/text-options.json
+
+.. bench-table::
+    :file: bench/canonical-options.json
+
 Token attribute access allocates the result list at its known length. In matched release builds, reading 100 attributes
 from a prepared token fell from 3.582 to 3.255 µs (9.13%); ten attributes fell from 0.290 to 0.249 µs (14.08%). One
 attribute changed from 0.0695 to 0.0668 µs (3.81%), and an empty list from 0.0409 to 0.0412 µs (+0.79%). Each access

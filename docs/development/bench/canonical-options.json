@@ -1,0 +1,28 @@
+{
+  "label": "canonicalize with reused options",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "reused defaults",
+      4.2617261152659107e-07
+    ],
+    [
+      "no options",
+      1.388145631553428e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01638677785577065
+    ],
+    [
+      null,
+      0.052370266035269376
+    ]
+  ],
+  "notes": {}
+}

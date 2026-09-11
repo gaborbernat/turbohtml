@@ -171,6 +171,9 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "html-options-none": ("html-options", 1),
+    "text-options-none": ("text-options", 1),
+    "canonical-options-none": ("canonical-options", 1),
     "links-external-deep": ("links-external", 1),
     "minify-js-jquery": ("minify-js", 2),
     "token-attributes-empty": ("token-attributes", 1),

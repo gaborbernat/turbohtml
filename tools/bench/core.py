@@ -274,6 +274,20 @@ def tokenize(text: str) -> None:
         pass
 
 
+def _render_options_setup(case: tuple[str, bool]) -> Callable[[], str | bytes]:
+    node: Final = turbohtml.Element("p", children=[turbohtml.Text("x")])
+    kind, supplied = case
+    if kind == "html":
+        return functools.partial(node.serialize, turbohtml.Html()) if supplied else node.serialize
+    if kind == "text":
+        return functools.partial(node.to_text, turbohtml.PlainText()) if supplied else node.to_text
+    return functools.partial(node.canonicalize, turbohtml.Canonical()) if supplied else node.canonicalize
+
+
+def _render_options(render: Callable[[], str | bytes]) -> str | bytes:
+    return render()
+
+
 def _token_attribute_setup(text: str) -> turbohtml.Token:
     return next(iter(turbohtml.tokenize(text)))
 
@@ -1378,6 +1392,9 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "escape": (escape, "turbohtml"),
     "unescape": (unescape, "turbohtml"),
     "tokenize": (tokenize, "turbohtml"),
+    "html-options": (Mutating(_render_options_setup, _render_options), "turbohtml"),
+    "text-options": (Mutating(_render_options_setup, _render_options), "turbohtml"),
+    "canonical-options": (Mutating(_render_options_setup, _render_options), "turbohtml"),
     "token-attributes": (Mutating(_token_attribute_setup, _token_attributes), "turbohtml"),
     "tokenize-attributes": (_tokenize_attributes, "turbohtml"),
     "find": (find, "turbohtml"),
