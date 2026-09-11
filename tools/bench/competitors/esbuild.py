@@ -23,6 +23,7 @@ def minify_css(css: str) -> str:
 
 
 OPERATIONS = {
+    "minify-js-guards": (minify_js, "esbuild"),
     "minify-js-sequences": (minify_js, "esbuild"),
     "minify-js": (minify_js, "esbuild"),
     "minify-css": (minify_css, "esbuild"),

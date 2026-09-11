@@ -1,0 +1,35 @@
+{
+  "label": "minify guard return chains",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [
+    "size",
+    "time"
+  ],
+  "rows": [
+    [
+      "512 guard returns",
+      7487.0,
+      0.00028438259536566575
+    ],
+    [
+      "1 guard returns",
+      38.0,
+      1.8543932170563455e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      null,
+      0.011033915942673642
+    ],
+    [
+      null,
+      null,
+      0.02053305888018648
+    ]
+  ],
+  "notes": {}
+}

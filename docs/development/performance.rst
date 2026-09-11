@@ -1063,6 +1063,14 @@ terser control exceed 5% spread; the tables retain those warnings. CLI compariso
 .. bench-table::
     :file: bench/js-sequences.json
 
+The guard-return cases fold 512 or one conditional return before a final return. Visiting eligible guards from the end
+avoids rescanning each completed suffix. Matched release time fell from 631.548 to 284.383 µs (54.97%) for 512 guards.
+The single-guard control increased from 1.834 to 1.854 µs (1.11%, or 0.020 µs). Both builds produce the same byte counts
+and preserve return order. Candidate spread is 1.10% for 512 guards and 2.05% for one guard.
+
+.. bench-table::
+    :file: bench/js-guards.json
+
 ********************
  Encoding detection
 ********************

@@ -118,6 +118,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "html-parser-adapter": "htmlparser",
     "js-minification": "minify-js",
     "js-sequences": "minify-js-sequences",
+    "js-guards": "minify-js-guards",
     "legacy-decoding": "decode",
     "link-filtering": "links-filter",
     "linkify": "linkify",
