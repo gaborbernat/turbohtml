@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -330,3 +331,33 @@ def test_table_span_rows_benchmark(case: int, columns: int, size: int) -> None:
 def test_table_span_records_benchmark() -> None:
     source: Final = cast("tuple[str, str]", INPUTS["tables-spans"]()[2][1])[1]
     assert parse(source).select("table")[0].records() == [{"header": "x" * 4096}]
+
+
+@pytest.mark.parametrize(
+    ("case", "columns", "size"),
+    [pytest.param(0, 128, 4096, id="large-span"), pytest.param(1, 1, 16, id="ordinary")],
+)
+@pytest.mark.oracle
+def test_table_span_header_rows_differ(case: int, columns: int, size: int) -> None:
+    pandas: Final = pytest.importorskip("pandas")
+    source: Final = cast("tuple[str, str]", INPUTS["tables-spans"]()[case][1])[1]
+    assert (
+        parse(source).tables(),
+        [frame.to_numpy().tolist() for frame in pandas.read_html(io.StringIO(source))],
+    ) == (
+        [[["header"] * columns, ["x" * size] * columns]],
+        [[["x" * size] * columns]],
+    )
+
+
+@pytest.mark.oracle
+def test_table_span_duplicate_headers_differ() -> None:
+    pandas: Final = pytest.importorskip("pandas")
+    source: Final = cast("tuple[str, str]", INPUTS["tables-spans"]()[2][1])[1]
+    assert (
+        parse(source).select("table")[0].records(),
+        pandas.read_html(io.StringIO(source), header=0)[0].to_dict("records"),
+    ) == (
+        [{"header": "x" * 4096}],
+        [{"header" if index == 0 else f"header.{index}": "x" * 4096 for index in range(128)}],
+    )

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Final
+from io import BytesIO
+from typing import Final, cast
 
 import pytest
 from bench.operations import INPUTS
 
-from turbohtml import Canonical, CData, Element, ProcessingInstruction, Text, parse
+from turbohtml import Canonical, CData, Element, Html, ProcessingInstruction, Text, parse
 
 
 def _one(markup: str, selector: str) -> Element:
@@ -437,3 +438,67 @@ def test_canonicalize_shared_sparse_xlink_input() -> None:
             f"<svg{_SVG}>" + f'<g><use{_XLINK} xlink:href="#x"></use>' * 150 + "</g>" * 150 + "</svg></body></html>"
         ).encode()
     )
+
+
+@pytest.mark.parametrize("case", [0, 1, 2], ids=["deep", "sparse-xlink", "shallow"])
+@pytest.mark.oracle
+def test_canonicalize_benchmark_html_parser_difference(case: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    source: Final = cast("str", INPUTS["canonicalize-deep"]()[case][1])
+    expected: Final = parse(source).canonicalize()
+    assert etree.tostring(etree.HTML(source), method="c14n") == (
+        expected
+        .replace(b"<head></head>", b"")
+        .replace(b' xmlns="http://www.w3.org/2000/svg"', b"")
+        .replace(b' xmlns:xlink="http://www.w3.org/1999/xlink"', b"")
+    )
+
+
+@pytest.mark.parametrize(
+    ("html", "exclusive", "with_comments"),
+    [
+        pytest.param("<p z=1 a=2>x&amp;y</p>", False, False, id="attr-order"),
+        pytest.param("<div><br><p class='a&b<c'>x&amp;<b>y</b></p></div>", False, False, id="mixed"),
+        pytest.param("<p title='a\tb\nc\rd'>t&lt;u&gt;v</p>", False, False, id="char-refs"),
+        pytest.param("<a> keep  the   spaces <b>y</b> here </a>", False, False, id="whitespace"),
+        pytest.param("<svg xlink:href=x><a xlink:title=t><rect/></a></svg>", False, False, id="foreign-xlink"),
+        pytest.param("<math><mi mathvariant=bold>x</mi></math>", False, False, id="mathml"),
+        pytest.param("<a><!--note--><b>y</b><!--tail--></a>", True, False, id="comments-dropped"),
+        pytest.param("<a><!--note--><b>y</b></a>", False, True, id="comments-kept"),
+        pytest.param("<p>caf\xe9 → \xa9</p>", False, False, id="non-ascii"),
+        pytest.param("<svg xlink:href=x><g><rect/></g></svg>", True, False, id="exclusive-doc"),
+    ],
+)
+@pytest.mark.oracle
+def test_whole_document_matches_lxml(html: str, *, exclusive: bool, with_comments: bool) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    tree: Final = parse(html)
+    ours: Final = tree.canonicalize(Canonical(exclusive=exclusive, with_comments=with_comments))
+    reparsed: Final = etree.parse(BytesIO(tree.serialize(Html(xml=True)).encode()))
+    sink: Final = BytesIO()
+    reparsed.write_c14n(sink, exclusive=exclusive, with_comments=with_comments)
+    assert ours == sink.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("selector", "xpath", "exclusive", "prefixes"),
+    [
+        pytest.param("g", ".//s:g", False, None, id="subtree-inclusive"),
+        pytest.param("g", ".//s:g", True, None, id="subtree-exclusive-drops-unused"),
+        pytest.param("g", ".//s:g", True, ["xlink"], id="subtree-exclusive-promotes-prefix"),
+        pytest.param("svg", ".//s:svg", True, None, id="subtree-exclusive-renders-on-user"),
+    ],
+)
+@pytest.mark.oracle
+def test_subtree_matches_lxml(selector: str, xpath: str, *, exclusive: bool, prefixes: list[str] | None) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    tree: Final = parse("<svg xlink:href=x><g><rect/></g></svg>")
+    node: Final = tree.select_one(selector)
+    assert node is not None
+    ours: Final = node.canonicalize(Canonical(exclusive=exclusive, inclusive_ns_prefixes=tuple(prefixes or ())))
+    root: Final = etree.fromstring(tree.serialize(Html(xml=True)).encode())
+    target: Final = root.find(
+        xpath, namespaces={"s": "http://www.w3.org/2000/svg", "m": "http://www.w3.org/1998/Math/MathML"}
+    )
+    theirs: Final = etree.tostring(target, method="c14n", exclusive=exclusive, inclusive_ns_prefixes=prefixes)
+    assert ours == theirs

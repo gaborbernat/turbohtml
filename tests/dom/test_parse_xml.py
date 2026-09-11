@@ -707,3 +707,55 @@ def test_xml_text_benchmark_output(index: int, expected: str) -> None:
     root: Final = parse_xml(cast("str", INPUTS["parse-xml-text"]()[index][1])).find("root")
     assert root is not None
     assert root.text == expected
+
+
+@pytest.mark.oracle
+def test_round_trip_against_lxml() -> None:
+    lxml_etree: Final = pytest.importorskip("lxml.etree")
+    source: Final = (
+        '<catalog xmlns:dc="urn:dc">'
+        '<book id="b1"><dc:title>One</dc:title><price>9.99</price></book>'
+        '<book id="b2"><dc:title>Two &amp; a half</dc:title><price>5.00</price></book>'
+        "<!-- end --></catalog>"
+    )
+    theirs: Final = lxml_etree.fromstring(source.encode())
+    ours: Final = root_of(parse_xml(source))
+    their_locals: Final = [lxml_etree.QName(node).localname for node in theirs.iter() if isinstance(node.tag, str)]
+    assert [node.tag.split(":")[-1] for node in (ours, *ours.descendants) if isinstance(node, Element)] == their_locals
+
+
+@pytest.mark.parametrize(("index", "count"), [(0, 128), (1, 1)], ids=["many", "single"])
+@pytest.mark.oracle
+def test_lxml_namespace_benchmark_output(index: int, count: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-prefixes"]()[index][1]).encode())
+    assert (root.tag, list(root.nsmap.items()), list(root.attrib.items()), len(root)) == (
+        "root",
+        [(f"p{number}", f"urn:{number}") for number in range(count)],
+        [(f"{{urn:{number}}}value", "x") for number in range(count)],
+        0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [(0, "a" * 65536), (1, "a&b " * 8192), (2, "hello")],
+    ids=["clean", "references", "tiny"],
+)
+@pytest.mark.oracle
+def test_lxml_text_benchmark_output(index: int, expected: str) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-text"]()[index][1]).encode())
+    assert (root.tag, root.text, len(root)) == ("root", expected, 0)
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [(0, "a" * 65536), (1, "a&b " * 8192), (2, "hello")],
+    ids=["clean", "references", "tiny"],
+)
+@pytest.mark.oracle
+def test_lxml_value_benchmark_output(index: int, expected: str) -> None:
+    etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
+    root: Final = etree.fromstring(cast("str", INPUTS["parse-xml-values"]()[index][1]).encode())
+    assert (root.tag, root.text, list(root.attrib.items()), len(root)) == ("root", None, [("value", expected)], 0)
