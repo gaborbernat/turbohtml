@@ -634,13 +634,13 @@ static void print_number(St *st, const jm_node *node) {
             zeros++;
         }
         Py_ssize_t head = len - zeros;
-        if (head == 0) { /* the literal 0 */
+        if (head == 0 || zeros < 3) { /* an exponent needs at least two characters */
             put_run(st, buf, len);
             return;
         }
         char digits[8];
         int digit_len = snprintf(digits, sizeof(digits), "%lld", (long long)zeros);
-        if (zeros >= 1 && head + 1 + digit_len < len) { /* <head>e<zeros> is shorter */
+        if (head + 1 + digit_len < len) {
             for (Py_ssize_t index = 0; index < head; index++) {
                 out[out_len++] = buf[index];
             }

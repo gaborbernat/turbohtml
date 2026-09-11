@@ -213,6 +213,8 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "canonical-options-none": ("canonical-options", 1),
     "links-external-deep": ("links-external", 1),
     "minify-js-jquery": ("minify-js", 2),
+    "minify-js-integers-trailing-zeros": ("minify-js-integers", 1),
+    "minify-js-integers-single": ("minify-js-integers", 2),
     "token-attributes-empty": ("token-attributes", 1),
     "token-attributes-one": ("token-attributes", 2),
     "token-attributes-ten": ("token-attributes", 3),

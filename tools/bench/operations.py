@@ -269,6 +269,7 @@ SIZE_OPS: Final[frozenset[str]] = frozenset({
     "minify-css-conflicts",
     "minify-css-merges",
     "minify-js",
+    "minify-js-integers",
     "minify-js-sequences",
     "minify-js-guards",
     "minify-js-propagation",
@@ -494,6 +495,7 @@ OPERATIONS: dict[str, Operation] = {
     "minify-css-conflicts": Operation("merge CSS rules across disjoint declarations", "us"),
     "minify-css-merges": Operation("batch CSS rule merges", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
+    "minify-js-integers": Operation("print JavaScript integer arrays", "us"),
     "minify-js-unlink": Operation("remove mixed JavaScript declarators", "us"),
     "minify-js-unused-declarations": Operation("remove unused JavaScript declarators", "us"),
     "minify-js-var-initialization": Operation("check JavaScript var initialization order", "us"),
@@ -2242,6 +2244,17 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "minify-css-conflicts": _css_conflict_inputs,
     "minify-css-merges": _css_merge_inputs,
     "minify-js": _minify_js_cases,
+    "minify-js-integers": lambda: tuple(
+        (
+            f"{count} integers / {label}",
+            "x=[" + ",".join(str((index + 1) * scale + offset) for index in range(count)) + "]",
+        )
+        for count, scale, offset, label in (
+            (4096, 10, 1, "no trailing zeros"),
+            (4096, 1000, 0, "three trailing zeros"),
+            (1, 10, 1, "no trailing zeros"),
+        )
+    ),
     "minify-js-var-initialization": lambda: tuple(
         (
             f"{count} var pairs / {'read before initialization' if early else 'read after initialization'}",

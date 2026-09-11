@@ -562,3 +562,19 @@ def test_minifiers_calmjs_rejects_const(operation: str, case: int) -> None:
     minify: Final = cast("Callable[[str], str]", pytest.importorskip("bench.competitors.calmjs_parse").minify_js)
     with pytest.raises(SyntaxError, match="Unexpected 'const'"):
         minify(cast("str", INPUTS[operation]()[case][1]))
+
+
+@pytest.mark.parametrize(
+    ("case", "count", "scale", "offset"),
+    [
+        pytest.param(0, 4096, 10, 1, id="plain"),
+        pytest.param(1, 4096, 1000, 0, id="trailing-zeros"),
+        pytest.param(2, 1, 10, 1, id="tiny"),
+    ],
+)
+def test_integer_benchmark_preserves_values(case: int, count: int, scale: int, offset: int) -> None:
+    source: Final = cast("str", INPUTS["minify-js-integers"]()[case][1])
+    minified: Final = minify_js(source)
+    assert [int(float(value)) for value in minified.removeprefix("x=[").removesuffix("]").split(",")] == [
+        (index + 1) * scale + offset for index in range(count)
+    ]
