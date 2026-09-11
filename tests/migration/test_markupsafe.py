@@ -31,6 +31,13 @@ class HtmlBoom:
         raise ValueError
 
 
+class HtmlLookupError:
+    @property
+    def __html__(self) -> Callable[[], str]:
+        msg: Final = "HTML lookup failed"
+        raise ValueError(msg)
+
+
 class Unstringable:
     """Conversion to text raises, to exercise escape's stringification error path."""
 
@@ -98,6 +105,7 @@ def test_escape_stringifies_other_objects() -> None:
     "factory",
     [
         pytest.param(HtmlBoom, id="html-raises"),
+        pytest.param(HtmlLookupError, id="html-lookup-raises"),
         pytest.param(HtmlReturnsUnstringable, id="html-result-unstringable"),
         pytest.param(Unstringable, id="str-raises"),
     ],

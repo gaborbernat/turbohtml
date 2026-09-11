@@ -265,6 +265,9 @@ PyObject *turbohtml_markup_escape(PyObject *module, PyObject *s) {
         Py_DECREF(text);
         return result;
     }
+    if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        return NULL;
+    }
     PyErr_Clear();
     PyObject *text = PyObject_Str(s);
     if (text == NULL) {
