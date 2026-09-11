@@ -11,7 +11,17 @@ across a corpus.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
+
+from turbohtml import Comment as DomComment
+from turbohtml import Doctype as DomDoctype
+from turbohtml import Element, Text, parse
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
+    from types import ModuleType
+
+    from turbohtml import Node
 
 import pytest
 
@@ -288,3 +298,130 @@ def test_a_builder_missing_a_method_raises_attribute_error() -> None:
 def test_non_str_source_raises_type_error() -> None:
     with pytest.raises(TypeError):
         parse_into(b"<p>x</p>", Recorder())  # ty: ignore[invalid-argument-type]  # the rejected bytes is the point
+
+
+_LXML_CORPUS: Final = [
+    pytest.param("<!DOCTYPE html><title>t</title><p id=a class=lead>hi<b>x</b>tail</p>", id="basic"),
+    pytest.param("<ul><li>a<li>b</ul><ol><li>c</li></ol>", id="implied-close"),
+    pytest.param("<table><tr><td>c</td></tr></table>", id="table"),
+    pytest.param("<div><!--note-->text<span>y</span>after</div>", id="comment-and-tail"),
+    pytest.param("<p><b><i>abc</p>def", id="adoption-agency"),
+    pytest.param("<section><input disabled><img src=x alt=y></section>", id="void-and-valueless"),
+]
+
+
+@pytest.mark.parametrize("markup", _LXML_CORPUS)
+@pytest.mark.oracle
+def test_parse_into_rebuilds_the_tree_in_lxml(markup: str, lxml_etree: ModuleType) -> None:
+    built: Final = cast("_LxmlNode", parse_into(markup, _LxmlBuilder(lxml_etree)))
+    mine: Final[list[_LxmlEvent]] = []
+    _flatten_lxml(built[0], mine, lxml_etree)
+    theirs: Final[list[_LxmlEvent]] = []
+    _flatten_turbo(parse(markup), theirs)
+    assert mine == theirs
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("data", ["", "echo 1"], ids=["empty", "body"])
+def test_lxml_builder_preserves_processing_instruction(data: str, lxml_etree: ModuleType) -> None:
+    built: Final = cast("_LxmlNode", parse_into(f"<body><?php {data}?></body>", _LxmlBuilder(lxml_etree)))
+    expected: Final = f"<html><head/><body><!--?php{f' {data}' if data else ''}?--></body></html>".encode()
+    assert lxml_etree.tostring(built[0]) == expected
+
+
+_LxmlEvent = tuple[object, ...]
+
+
+class _LxmlNode(Protocol):
+    """lxml provides no stubs for the builder protocol."""
+
+    text: str | None
+    tail: str | None
+
+    @property
+    def tag(self) -> object: ...
+    @property
+    def attrib(self) -> Mapping[str, str]: ...
+    def set(self, key: str, value: str) -> None: ...
+    def append(self, child: object) -> None: ...
+    def __len__(self) -> int: ...
+    def __getitem__(self, index: int) -> _LxmlNode: ...
+    def __iter__(self) -> Iterator[_LxmlNode]: ...
+
+
+class _LxmlBuilder:
+    def __init__(self, etree: ModuleType) -> None:
+        self.etree = etree
+
+    def create_document(self) -> object:
+        return self.etree.Element("document")
+
+    def create_doctype(self, name: str, public_id: str | None, system_id: str | None) -> object:  # ruff:ignore[unused-method-argument, no-self-use]
+        return ("doctype",)
+
+    def create_element(self, name: str, namespace: str, attrs: tuple[tuple[str, str | None], ...]) -> object:  # ruff:ignore[unused-method-argument]
+        node: Final = self.etree.Element(name)
+        for attr_name, value in attrs:
+            node.set(attr_name, value or "")
+        return node
+
+    def create_text(self, data: str) -> object:  # ruff:ignore[no-self-use]
+        return ("text", data)
+
+    def create_comment(self, data: str) -> object:
+        return self.etree.Comment(data)
+
+    def create_pi(self, target: str, data: str) -> object:
+        return self.etree.Comment(f"?{target}{f' {data}' if data else ''}?")
+
+    def append(self, parent: object, child: object) -> None:  # ruff:ignore[no-self-use]
+        node: Final = cast("_LxmlNode", parent)
+        if isinstance(child, tuple):
+            if child[0] == "text":
+                data: Final = str(child[1])
+                if len(node) == 0:
+                    node.text = (node.text or "") + data
+                else:
+                    node[-1].tail = (node[-1].tail or "") + data
+            return
+        node.append(child)
+
+
+def _flatten_lxml(node: object, out: list[_LxmlEvent], etree: ModuleType) -> None:
+    element: Final = cast("_LxmlNode", node)
+    if element.tag is etree.Comment:
+        out.append(("comment", element.text or ""))
+        return
+    out.append(("element", element.tag, tuple(sorted(element.attrib.items()))))
+    if element.text:
+        out.append(("text", element.text))
+    for child in element:
+        _flatten_lxml(child, out, etree)
+        if child.tail:
+            out.append(("text", child.tail))
+
+
+def _flatten_turbo(node: Node, out: list[_LxmlEvent]) -> None:
+    for child in node.children:
+        if isinstance(child, DomDoctype):
+            continue
+        if isinstance(child, DomComment):
+            out.append(("comment", child.data))
+        elif isinstance(child, Text):
+            out.append(("text", child.data))
+        else:
+            assert isinstance(child, Element)
+            attrs: Final = tuple(sorted((name, _attr_value(value)) for name, value in child.attrs.items()))
+            out.append(("element", child.tag, attrs))
+            _flatten_turbo(child, out)
+
+
+@pytest.fixture(scope="module")
+def lxml_etree() -> ModuleType:
+    return pytest.importorskip("lxml.etree")
+
+
+def _attr_value(value: str | list[str] | None) -> str:
+    if isinstance(value, list):
+        return " ".join(value)
+    return value or ""

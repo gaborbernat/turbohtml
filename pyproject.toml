@@ -388,9 +388,6 @@ run.omit = [
   "tests/conformance/test_cssom_jsdom_conformance.py", # differential oracle: skips when the node/jsdom toolchain is absent
   "tests/conformance/test_dom_jsdom_differential.py",
   "tests/conformance/test_xml_conformance.py",
-  "tests/dom/test_treebuild_differential.py",
-  "tests/query/xpath/test_xpath_differential.py",
-  "tests/validate/test_conformance_differential.py",   # differential oracle: skips when html5validator/vnu.jar or a JRE is absent
 ]
 run.parallel = true
 run.plugins = [

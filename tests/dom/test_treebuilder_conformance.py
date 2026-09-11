@@ -7,9 +7,10 @@ can execute must match its ``#document`` tree.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, cast
 
-from turbohtml import _html
+import turbohtml
+from turbohtml import Comment, Doctype, Document, Element, Namespace, Node, ProcessingInstruction, Text, _html
 
 if TYPE_CHECKING:
     from wpt_tree_corpus import WptHtmlTreeCase, WptHtmlTreeCorpus
@@ -37,3 +38,137 @@ def test_tree_construction(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
         if _build(case) != case["document"]
     ]
     assert not failures, f"{len(failures)}/{len(cases)} failing\n\n" + "\n\n".join(failures[:5])
+
+
+_NAMESPACED_ATTRS: Final = frozenset({
+    "xlink:actuate",
+    "xlink:arcrole",
+    "xlink:href",
+    "xlink:role",
+    "xlink:show",
+    "xlink:title",
+    "xlink:type",
+    "xml:lang",
+    "xml:space",
+    "xmlns:xlink",
+})
+
+
+# The .dat format loses embedded doctype quotes; compare these cases with the native dump (issue #478).
+_DAT_UNREPRESENTABLE: Final[frozenset[tuple[str, str, str | None]]] = frozenset({
+    ("doctype01.dat", "<!DOCTYPE potato SYSTEM 'taco\"'>Hello", None),
+})
+
+
+def test_public_tree_matches_spec(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    cases: Final = [case for case in wpt_html_tree_corpus["cases"] if case["scripting"] is not True]
+    failures: Final = [
+        f"{case['file']}: #data {case['data']!r} (context={case['context']!r})\nexpected:\n{expected}\ngot:\n{got}"
+        for case in cases
+        for expected in [_expected(case)]
+        for got in [_public_dump(case["data"], case["context"])]
+        if got != expected
+    ]
+    assert not failures, f"{len(failures)}/{len(cases)} public/spec divergences\n\n" + "\n\n".join(failures[:5])
+
+
+def _expected(case: WptHtmlTreeCase) -> str:
+    if (case["file"], case["data"], case["context"]) in _DAT_UNREPRESENTABLE:
+        return _internal_dump(case["data"])
+    return case["document"]
+
+
+def _internal_dump(data: str) -> str:
+    return _html._parse_tree(data).rstrip("\n")
+
+
+def _public_dump(data: str, context: str | None) -> str:
+    root: Final = turbohtml.parse_fragment(data, context) if context is not None else turbohtml.parse(data)
+    out: Final[list[str]] = []
+    for child in root.children:
+        _dump_node(child, 0, out)
+    return "\n".join(out)
+
+
+def _dump_node(node: Node, depth: int, out: list[str]) -> None:
+    pad: Final = "| " + "  " * depth
+    if isinstance(node, Element):
+        foreign: Final = node.namespace is not Namespace.HTML
+        prefix: Final = f"{node.namespace.value} " if foreign else ""
+        out.append(f"{pad}<{prefix}{node.tag}>")
+        out.extend(
+            sorted(
+                "| " + "  " * (depth + 1) + _attr_line(name, value or "", foreign=foreign)
+                for name, value in (node.attrs or {}).items()
+            )
+        )
+        if not foreign and node.tag == "template":
+            out.append("| " + "  " * (depth + 1) + "content")
+            for child in node.children[0].children:
+                _dump_node(child, depth + 2, out)
+            return
+        for child in node.children:
+            _dump_node(child, depth + 1, out)
+    elif isinstance(node, Text):
+        out.append(f'{pad}"{node.data}"')
+    elif isinstance(node, Comment):
+        out.append(f"{pad}<!-- {node.data} -->")
+    elif isinstance(node, ProcessingInstruction):
+        out.append(f"{pad}<?{node.target} {node.data}?>")
+    else:
+        doctype: Final = cast("Doctype", node)
+        name: Final = doctype.name or ""
+        if doctype.public_id is not None or doctype.system_id is not None:
+            out.append(f'{pad}<!DOCTYPE {name} "{doctype.public_id or ""}" "{doctype.system_id or ""}">')
+        else:
+            out.append(f"{pad}<!DOCTYPE {name}>")
+
+
+def _attr_line(name: str, value: str | list[str], *, foreign: bool) -> str:
+    if foreign and name in _NAMESPACED_ATTRS:
+        name = name.replace(":", " ")
+    if isinstance(value, list):
+        value = " ".join(value)
+    return f'{name}="{value}"'
+
+
+def test_corpus_exercises_sanitizer_relevant_nodes(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
+    # Keep the corpus sensitive to sanitizer-relevant parser differences.
+    unsafe_tags: Final = {
+        "script",
+        "style",
+        "iframe",
+        "object",
+        "embed",
+        "noscript",
+        "noembed",
+        "noframes",
+        "base",
+        "title",
+        "template",
+        "xmp",
+        "plaintext",
+    }
+    url_attrs: Final = {"href", "src", "action", "formaction", "poster", "cite", "xlink:href", "background"}
+
+    def is_relevant(node: Node) -> bool:
+        if not isinstance(node, Element):
+            return isinstance(node, Document) and any(is_relevant(child) for child in node.children)
+        if node.namespace is not Namespace.HTML or (node.tag in unsafe_tags):
+            return True
+        attrs: Final = node.attrs or {}
+        if any(name.startswith("on") or name in url_attrs for name in attrs):
+            return True
+        return any(is_relevant(child) for child in node.children)
+
+    relevant: Final = sum(
+        1
+        for case in wpt_html_tree_corpus["cases"]
+        if case["scripting"] is not True
+        if is_relevant(
+            turbohtml.parse_fragment(case["data"], context)
+            if (context := case["context"]) is not None
+            else turbohtml.parse(case["data"])
+        )
+    )
+    assert relevant >= 400

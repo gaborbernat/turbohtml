@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+import json
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - the conformance oracle runs the installed vnu.jar
+from pathlib import Path
+from typing import Final, NamedTuple
 
 import pytest
 
@@ -352,3 +356,44 @@ def test_the_filter_needs_a_severity_on_every_message() -> None:
 def test_the_filter_rejects_bad_arguments(args: tuple[object, ...]) -> None:
     with pytest.raises(TypeError):
         _conformance_filter(*args)  # ty: ignore[invalid-argument-type]  # the argument check is the point
+
+
+def valid_doc(inner: str) -> str:
+    return f"<!DOCTYPE html><html lang=en><head><title>Doc</title></head><body>{inner}</body></html>"
+
+
+_VNU_CASES: Final = [
+    pytest.param(valid_doc("<h1>Heading</h1><p>text</p>"), id="conforming"),
+    pytest.param(valid_doc('<img src="x" alt="a cat">'), id="img-with-alt-conforming"),
+    pytest.param(valid_doc("<img src=x>"), id="img-missing-alt"),
+    pytest.param(valid_doc("<font>x</font>"), id="obsolete-element"),
+    pytest.param(valid_doc('<p align="center">x</p>'), id="obsolete-attribute"),
+    pytest.param(valid_doc('<span id="a"></span><span id="a"></span>'), id="duplicate-id"),
+    pytest.param(valid_doc('<div role="bogus">x</div>'), id="invalid-role"),
+    pytest.param("<!DOCTYPE html><html lang=en><head></head><body><p>x</p></body></html>", id="missing-title"),
+]
+
+
+@pytest.mark.parametrize("markup", _VNU_CASES)
+@pytest.mark.oracle
+def test_conformance_verdict_matches_vnu(markup: str, vnu_command: tuple[str, str]) -> None:
+    assert check_html(markup).valid is not _vnu_has_error(markup, vnu_command)
+
+
+@pytest.fixture(scope="module")
+def vnu_command() -> tuple[str, str]:
+    jar: Final = Path(pytest.importorskip("vnujar").__file__).parent / "vnu.jar"
+    if (java := shutil.which("java")) is None or not jar.is_file():
+        pytest.skip("a JRE and vnu.jar are required")  # pragma: no cover - optional Java installation
+    return java, str(jar)
+
+
+@pytest.mark.oracle
+def _vnu_has_error(markup: str, command: tuple[str, str]) -> bool:
+    completed: Final = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Java arguments and in-repository markup
+        [command[0], "-jar", command[1], "--format", "json", "--stdin", "-"],
+        input=markup.encode(),
+        capture_output=True,
+        check=False,
+    )
+    return any(message["type"] == "error" for message in json.loads(completed.stderr)["messages"])

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -2730,3 +2733,227 @@ def test_output_parses_under_lxml(html: str, tags: list[str], text: str) -> None
     fragment = sanitize(html, _XML_ORACLE_POLICY)
     root = lxml_etree.fromstring(f"<root>{fragment}</root>".encode())
     assert ([lxml_etree.QName(child).localname for child in root], root.xpath("string(.)")) == (tags, text)
+
+
+_DOMPURIFY_FIXTURE = Path(__file__).parent / "data" / "dompurify_expect.mjs"
+
+
+@dataclass(frozen=True)
+class _DompurifyCase:
+    payload: str
+    accepted: frozenset[str]
+    title: str
+
+
+def _load_cases() -> list[_DompurifyCase]:
+    """Extract the ``{payload, expected}`` entries from the ESM fixture by decoding each object with the JSON reader."""
+    body = _DOMPURIFY_FIXTURE.read_text(encoding="utf-8").split("export default", 1)[1]
+    decoder = json.JSONDecoder()
+    index = body.index("[") + 1
+    cases: list[_DompurifyCase] = []
+    while True:
+        while body[index] in " \t\r\n,":  # whitespace and the array/element separators between entries
+            index += 1
+        if body[index] == "]":
+            return cases
+        entry, index = decoder.raw_decode(body, index)
+        expected = entry["expected"]
+        accepted = frozenset(expected if isinstance(expected, list) else [expected])
+        cases.append(_DompurifyCase(entry["payload"], accepted, entry.get("title", "")))
+
+
+_DOMPURIFY_CASES = _load_cases()
+_DOMPURIFY_IDS = [
+    f"{position:03d}-{re.sub(r'[^a-z0-9]+', '-', case.title.lower()).strip('-')[:48] or 'untitled'}"
+    for position, case in enumerate(_DOMPURIFY_CASES)
+]
+
+# A max-permissive adversarial policy: keep the whole HTML/SVG/MathML structural surface and every attribute name so the
+# only thing removing danger is the non-configurable C baseline (unsafe tags, on* handlers, non-allowlisted schemes,
+# CSS scrubbing). This is the strongest bypass surface -- a restrictive policy would escape most payloads to inert text
+# and never exercise a kept, attack-capable element.
+_DOMPURIFY_PERMISSIVE_TAGS = frozenset({
+    "a", "abbr", "b", "blockquote", "br", "button", "caption", "cite", "code", "col", "colgroup", "dd", "del", "div",
+    "dl", "dt", "em", "figcaption", "figure", "form", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "input",
+    "ins", "label", "li", "mark", "ol", "option", "p", "pre", "q", "s", "script", "select", "small", "span",
+    "strong", "style",
+    "sub", "sup", "table", "tbody", "td", "textarea", "tfoot", "th", "thead", "tr", "u", "ul",
+    "svg", "g", "rect", "circle", "path", "defs", "filter", "fegaussianblur", "image", "title", "desc",
+    "foreignobject", "text", "use", "animate", "animateColor", "animateMotion", "animateTransform", "set",
+    "math", "mi", "mo", "mn", "ms", "mtext", "mrow", "mglyph", "annotation-xml",
+})  # fmt: skip
+_DOMPURIFY_PERMISSIVE = Policy(
+    tags=_DOMPURIFY_PERMISSIVE_TAGS,
+    attributes=MappingProxyType({"*": frozenset({"*"})}),
+    url_schemes=DEFAULT_SCHEMES,
+    css_properties=DEFAULT_CSS_PROPERTIES,
+)
+_DOMPURIFY_POLICIES = [
+    pytest.param(Policy(), id="default"),
+    pytest.param(Policy.relaxed(), id="relaxed"),
+    pytest.param(_DOMPURIFY_PERMISSIVE, id="permissive"),
+]
+
+# Scriptable elements that execute or load code if they survive in the HTML namespace; scheme prefixes that run script.
+_DOMPURIFY_DANGER_TAGS = frozenset({"script", "iframe", "object", "embed", "frame", "style", "noscript", "base"})
+_DOMPURIFY_DANGER_SCHEMES = ("javascript:", "data:", "vbscript:")
+_DOMPURIFY_URL_ATTRS = frozenset({
+    "href",
+    "src",
+    "action",
+    "xlink:href",
+    "formaction",
+    "poster",
+    "background",
+    "cite",
+    "ping",
+})
+_DOMPURIFY_SVG_ANIMATION_TAGS = frozenset({"animate", "animateColor", "animateMotion", "animateTransform", "set"})
+# CSS constructs that execute or fetch when a kept <style> body or style attribute survives the property scrub.
+_DOMPURIFY_CSS_DANGER = ("javascript:", "vbscript:", "expression(", "@import", "behavior:", "-moz-binding")
+
+
+def _attr_value(raw: str | list[str] | None) -> str:
+    """The lowercased attribute value, joining a duplicate-attribute list and reading a boolean attr as empty."""
+    if raw is None:
+        return ""
+    joined = " ".join(raw) if isinstance(raw, list) else raw
+    return joined.lower()
+
+
+def _style_body(element: Element) -> str:
+    """The lowercased text content of a ``<style>`` element (rawtext, so its children are text nodes)."""
+    return "".join(getattr(child, "data", "") for child in element.children).lower()
+
+
+def _bad_scheme(value: str) -> bool:
+    """Whether a URL value resolves to a script-capable scheme once the control/whitespace obfuscation is stripped."""
+    return "".join(char for char in value if ord(char) > 0x20).startswith(_DOMPURIFY_DANGER_SCHEMES)
+
+
+def _dangerous_element(node: Element) -> str | None:
+    namespace = node.namespace.value
+    if namespace == "svg" and node.tag in _DOMPURIFY_SVG_ANIMATION_TAGS:
+        attrs = {name.lower(): _attr_value(value) for name, value in node.attrs.items()}
+        target = attrs.get("attributename", "")
+        if target.startswith("on"):
+            return f"<{node.tag}>->{target}"
+        if target in _DOMPURIFY_URL_ATTRS:
+            for name in ("from", "to", "values"):
+                if any(_bad_scheme(value) for value in attrs.get(name, "").split(";")):
+                    return f"<{node.tag}>->{target}"
+    if node.tag == "script" and namespace in {"html", "svg"}:
+        return "<script>"
+    if node.tag == "style" and namespace in {"html", "svg"}:
+        return "style-body" if any(token in _style_body(node) for token in _DOMPURIFY_CSS_DANGER) else None
+    if node.tag not in _DOMPURIFY_DANGER_TAGS or namespace != "html":
+        return None
+    return f"<{node.tag}>"
+
+
+def _dangerous_attribute(name: str, value: str) -> str | None:
+    """A label for an executable attribute: an ``on*`` handler, dangerous CSS on ``style``, or a scriptable URL."""
+    if name.startswith("on"):
+        return f"@{name}"
+    if name == "style":
+        return "@style" if any(token in value for token in _DOMPURIFY_CSS_DANGER) else None
+    return f"{name}={value[:32]}" if name in _DOMPURIFY_URL_ATTRS and _bad_scheme(value) else None
+
+
+def _live_danger(html: str) -> list[str]:
+    """Reparse sanitized HTML and list every executable construct that survived; an empty list means inert."""
+    survived: list[str] = []
+    stack = list(parse_fragment(html).children)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Element):
+            if (element_hit := _dangerous_element(node)) is not None:
+                survived.append(element_hit)
+            survived.extend(
+                hit
+                for name, raw in node.attrs.items()
+                if (hit := _dangerous_attribute(name, _attr_value(raw))) is not None
+            )
+            stack.extend(node.children)
+    return survived
+
+
+@pytest.mark.parametrize("policy", _DOMPURIFY_POLICIES)
+@pytest.mark.parametrize("case", _DOMPURIFY_CASES, ids=_DOMPURIFY_IDS)
+def test_dompurify_payload_sanitizes_to_inert(case: _DompurifyCase, policy: Policy) -> None:
+    survived = _live_danger(sanitize(case.payload, policy))
+    assert survived == [], (
+        f"sanitizer bypass -- executable markup survived DOMPurify payload {case.title!r}: {survived}"
+    )
+
+
+@pytest.mark.parametrize("case", _DOMPURIFY_CASES, ids=_DOMPURIFY_IDS)
+def test_turbohtml_is_never_less_safe_than_dompurify(case: _DompurifyCase) -> None:
+    # "output in the accepted set" is the wrong metric on its own: DOMPurify keeps data: image URIs and does not scrub
+    # CSS, so its accepted outputs carry constructs turbohtml strips by design, and the two allowlists differ. The
+    # security-equivalence claim is the one that holds every time -- turbohtml's output is byte-identical to an accepted
+    # DOMPurify output, or, where the allowlists diverge, still provably inert. It is never a downgrade.
+    out = sanitize(case.payload, _DOMPURIFY_PERMISSIVE)
+    assert out in case.accepted or _live_danger(out) == [], f"downgrade vs DOMPurify on {case.title!r}: {out!r}"
+
+
+def test_attr_value_normalizes_every_shape() -> None:
+    assert (_attr_value(None), _attr_value(["A", "B"]), _attr_value("HrEf")) == ("", "a b", "href")
+
+
+# Guard the oracle: each row pins the exact label _live_danger yields (or [] for the inert counterpart), so a checker
+# that stopped detecting a class would fail here rather than silently green-light a bypass in the corpus run above.
+@pytest.mark.parametrize(
+    ("html", "survived"),
+    [
+        pytest.param("<script>alert(1)</script>", ["<script>"], id="scriptable-element"),
+        pytest.param("<svg><script>alert(1)</script></svg>", ["<script>"], id="svg-script"),
+        pytest.param("<style>a{background:url(javascript:alert(1))}</style>", ["style-body"], id="style-body-danger"),
+        pytest.param("<style>a{color:red}</style>", [], id="style-body-benign"),
+        pytest.param("<svg><style>a{behavior:url(#x)}</style></svg>", ["style-body"], id="svg-style-danger"),
+        pytest.param("<svg><style>a{fill:red}</style></svg>", [], id="svg-style-benign"),
+        pytest.param('<img src=x onerror="alert(1)">', ["@onerror"], id="event-handler"),
+        pytest.param('<p style="behavior:url(#x)">x</p>', ["@style"], id="style-attr-danger"),
+        pytest.param('<p style="color:red">x</p>', [], id="style-attr-benign"),
+        pytest.param('<a href="javascript:alert(1)">x</a>', ["href=javascript:alert(1)"], id="url-danger"),
+        pytest.param('<a href="https://example.com">x</a>', [], id="url-benign"),
+        pytest.param(
+            '<svg><animate attributeName="xlink:href" from="javascript:x"></animate></svg>',
+            ["<animate>->xlink:href"],
+            id="svg-animation-from",
+        ),
+        pytest.param(
+            '<svg><set attributeName="XLINK:HREF" to="JAVASCRIPT:x"></set></svg>',
+            ["<set>->xlink:href"],
+            id="svg-animation-to-case",
+        ),
+        pytest.param(
+            '<svg><animateTransform attributeName="xlink:href" values="https://safe;javascript:x"></animateTransform></svg>',
+            ["<animateTransform>->xlink:href"],
+            id="svg-animation-values",
+        ),
+        pytest.param(
+            '<svg><animate attributeName="onload" to="alert(1)"></animate></svg>',
+            ["<animate>->onload"],
+            id="svg-animation-handler",
+        ),
+        pytest.param(
+            '<svg><animate attributeName="fill" to="red"></animate></svg>',
+            [],
+            id="svg-animation-non-url-target",
+        ),
+        pytest.param(
+            '<svg><animate attributeName="xlink:href" from="https://example.com"></animate></svg>',
+            [],
+            id="svg-animation-safe-url",
+        ),
+        pytest.param(
+            '<animate attributeName="xlink:href" from="javascript:x"></animate>',
+            [],
+            id="html-animation-name-inert",
+        ),
+        pytest.param("<iframe></iframe>", ["<iframe>"], id="dangerous-html-element"),
+    ],
+)
+def test_live_danger_labels_every_executable_construct(html: str, survived: list[str]) -> None:
+    assert _live_danger(html) == survived

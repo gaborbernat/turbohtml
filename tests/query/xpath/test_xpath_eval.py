@@ -22,7 +22,7 @@ from turbohtml import Document, Element, XPath, XPathString
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-    from types import SimpleNamespace
+    from types import ModuleType, SimpleNamespace
 from operator import ge, gt, le, lt
 from typing import TYPE_CHECKING, Final
 
@@ -1087,3 +1087,114 @@ def test_node_set_variable_rejects_unsupported_values(
 ) -> None:
     with pytest.raises(TypeError, match="an iterable of elements"):
         variable_doc.xpath("$items", items=make_items(variable_doc))  # ty: ignore[invalid-argument-type]  # deliberately wrong value type
+
+
+_LXML_DOCS: Final = {
+    "article": (
+        "<!doctype html><html><head><title>T</title></head><body>"
+        '<main><article id="a1"><h2>One</h2><p>p1</p><p class="lead">p2</p></article>'
+        '<article id="a2"><h2>Two</h2><p>p3</p></article></main>'
+        '<nav><ul><li><a href="/x">x</a></li><li><a href="/y">y</a></li></ul></nav>'
+        "</body></html>"
+    ),
+    "table": (
+        "<!doctype html><html><head></head><body><table><thead>"
+        "<tr><th>H1</th><th>H2</th></tr></thead><tbody>"
+        "<tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>"
+        "</tbody></table></body></html>"
+    ),
+}
+
+_LXML_EXPRS: Final = [
+    "//p",
+    "//a",
+    "//a/@href",
+    "//p/text()",
+    "//h2/text()",
+    "/html/body//p",
+    "//article",
+    "//article/p",
+    "//article/h2",
+    "//main/article",
+    "//*",
+    "//div//span",
+    "//nav//a/@href",
+    "//td",
+    "//tr/td",
+    "//table//th/text()",
+    "//thead/tr/th",
+    "descendant::li",
+    "//ul/li/a",
+    "/html/head/title/text()",
+    "//body/*",
+    "//p[1]",
+    "//p[2]",
+    "//p[last()]",
+    "//article/p[1]",
+    "//li[position()=2]",
+    "//li[position()<3]",
+    "//li[position()>1]",
+    "//p[@class]",
+    "//p[@class='lead']",
+    "//a[@href='/x']",
+    "//article[@id='a2']/p",
+    "//article[h2]",
+    "//*[contains(@class,'lea')]",
+    "//th[text()='H1']",
+    "(//p)[1]",
+    "(//p)[last()]",
+    "//tr/td[1]",
+    "//tr/td[last()]",
+    "//p[position()=last()]",
+    "//main/following::nav",
+    "//nav/preceding::article",
+    "//article[1]/following::h2",
+    "//article[2]/preceding::h2",
+    "//h2/following::p",
+    "//td/following::td",
+    "//tbody/preceding::th",
+    "//thead/following::td",
+    "//p | //h2",
+    "//th | //td",
+    "count(//p)",
+    "count(//li)",
+    "count(//article)",
+    "string(//title)",
+    "//p[count(//article)=2]",
+    "boolean(//p)",
+    "boolean(//zzz)",
+    "count(//namespace::*)",
+    "name(//body/namespace::*)",
+    "string(//body/namespace::*)",
+    "//article[position()=1]/h2/text()",
+]
+
+
+@pytest.mark.parametrize("expr", _LXML_EXPRS, ids=lambda expr: expr)
+@pytest.mark.parametrize("doc_name", list(_LXML_DOCS), ids=list(_LXML_DOCS))
+@pytest.mark.oracle
+def test_matches_lxml(doc_name: str, expr: str, lxml_html: ModuleType) -> None:
+    html: Final = _LXML_DOCS[doc_name]
+    ours: Final = turbohtml.parse(html).xpath(expr)
+    theirs: Final = lxml_html.document_fromstring(html).xpath(expr)
+    if isinstance(ours, list):
+        assert _normalize_lxml(ours) == _normalize_lxml(theirs)
+    else:
+        assert ours == theirs
+
+
+@pytest.fixture(scope="module")
+def lxml_html() -> ModuleType:
+    return pytest.importorskip("lxml.html")
+
+
+@pytest.mark.oracle
+def _normalize_lxml(result: Iterable[object]) -> list[str]:
+    out: Final[list[str]] = []
+    for item in result:
+        if isinstance(item, str):
+            out.append(item)
+        else:
+            tag: Final = getattr(item, "tag", None)
+            out.append(tag if isinstance(tag, str) else f"<{type(item).__name__}>")
+    return out
