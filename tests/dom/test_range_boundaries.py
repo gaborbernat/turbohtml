@@ -43,3 +43,26 @@ def test_boundary_endpoint(container: Node, offset: int) -> None:
 def test_boundary_rejects_invalid_offset(container: Node, offset: int) -> None:
     with pytest.raises(IndexError, match="out of range"):
         Range(container, offset)
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        pytest.param(Text("é😀"), id="text"),
+        pytest.param(Comment("é😀"), id="comment"),
+        pytest.param(CData("é😀"), id="cdata"),
+    ],
+)
+def test_select_character_data_contents(container: Node) -> None:
+    boundary: Final = Range(container)
+    boundary.select_node_contents(container)
+    assert (boundary.start_offset, boundary.end_offset) == (0, 2)
+
+
+@pytest.mark.parametrize(
+    ("offset", "expected"), [pytest.param(0, 1, id="before-child"), pytest.param(1, -1, id="after-child")]
+)
+def test_compare_descendant_with_ancestor_boundary(offset: int, expected: int) -> None:
+    child: Final = Text("abc")
+    parent: Final = Element("div", children=[child])
+    assert Range(child, 1).compare_boundary_points(Range.START_TO_START, Range(parent, offset)) == expected

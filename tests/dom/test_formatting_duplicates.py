@@ -55,3 +55,16 @@ def test_formatting_duplicate_limit_preserves_nested_structure(source: str, expe
     root: Final = parse(source).find("body")
     assert root is not None
     assert root.inner_html == expected
+
+
+def test_formatting_duplicate_checks_first_of_multiple_attributes() -> None:
+    source: Final = (
+        '<p><b title="same" lang="en"><b title="other" lang="en">' + '<b title="same" lang="en">' * 3 + "one</p>two"
+    )
+    assert [(element.text, dict(element.attrs)) for element in parse(source).find_all("b")] == [
+        ("one", {"title": "same", "lang": "en"}),
+        ("one", {"title": "other", "lang": "en"}),
+        *[("one", {"title": "same", "lang": "en"})] * 3,
+        ("two", {"title": "other", "lang": "en"}),
+        *[("two", {"title": "same", "lang": "en"})] * 3,
+    ]
