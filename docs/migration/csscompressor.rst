@@ -99,10 +99,6 @@ turbohtml:
 .. bench-table::
     :file: bench/csscompressor.json
 
-The rule-merge cases include repeated media blocks, equal declaration bodies, and comment barriers. Conflict cases vary
-selector count and name length. These cases compare both elapsed time and output bytes after checking the resulting
-cascade against the input.
-
 turbohtml also folds constant ``calc()``, merges box longhands into shorthands, and combines adjacent equal-bodied
 rules, none of which csscompressor attempts, so the size gap widens on framework CSS that leans on those forms.
 

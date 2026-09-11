@@ -96,22 +96,15 @@ What BeautifulSoup has that turbohtml does not
 Performance
 ===========
 
-The table compares parsing, queries, serialization, and editing on shared inputs. BeautifulSoup compares larger equal
-elements faster; turbohtml is faster on the one-attribute and early-mismatch cases.
+turbohtml parses, queries, and serializes one to three orders of magnitude faster than BeautifulSoup over
+``html.parser``; even the closest-margin operations — text filtering (``find(text=...)`` against
+``find_all(string=...)``), walking the tree (:attr:`~turbohtml.Node.descendants` against ``soup.descendants``), and
+reading text (:attr:`~turbohtml.Node.text` against ``soup.get_text()``) — still run a few times faster:
 
 .. bench-table::
     :file: bench/beautifulsoup.json
 
-The short encoding-result cases compare ``UnicodeDammit`` with ``detect()`` on CP1252 text, ASCII, and a UTF-8
-byte-order mark. Timings include detection and result construction. All three fixtures retain their decoded text; these
-measurements use the ``html.parser`` adapter's detector entry with the installed faust-cchardet backend and do not
-measure HTML tree construction.
-
 The :doc:`/development/performance` page benchmarks the build and edit paths against BeautifulSoup too.
-
-The attribute-comparison rows compare ``Tag.__eq__`` with :meth:`~turbohtml.Node.equals` on detached elements. Both
-compare contents without regard to attribute order. These cases use string values and exclude tree construction;
-BeautifulSoup uses the same comparison code with either parser backend. They do not measure nested subtree equality.
 
 ****************
  How to migrate

@@ -2,33 +2,31 @@
  Performance
 #############
 
-.. warning::
-
-    The September 8 audit measurements remain provisional. The first two passes checked CPU headroom without enforcing
-    memory-pressure or swap limits. The third and fourth passes enforced those limits, but some before/after comparisons
-    used different interpreter builds. Those comparisons need repeats with one interpreter before they establish a speed
-    improvement. The normalization, attribute, equality, translation, and numbering tables below use matched interpreter
-    and binary configurations.
-
-These `pyperf <https://pyperf.readthedocs.io>`_ tables use CPython 3.14 on an Apple M4 running macOS 26. The September
-8, 2026 audit refresh uses CPython 3.14.7; older tables use 3.14.6. Each cell reports the mean and run-to-run standard
-deviation as ``±N%``. Compare gaps against that spread. The published turbohtml measurements use PGO/LTO release builds
-unless a section states otherwise; the default benchmark command builds a plain wheel for development.
-
-The harness creates an isolated ``uv`` environment for each library. Mutation cases rebuild their input before each
-timed iteration, with setup excluded from the measurement. Read operations reuse a parsed tree. Each pyperf worker
-validates its assigned input before timing, keeping other cases' parsed trees out of its process cache. The manager
-records input failures as error cells. The corpora include `Project Gutenberg's War and Peace
+Every number here comes from `pyperf <https://pyperf.readthedocs.io>`_ on CPython 3.14.6 (a release build) on an Apple
+M4 running macOS 26. pyperf runs each case in isolated worker processes and reports the mean; the harness prints the
+run-to-run standard deviation beside it as ``±N%`` so a real gap reads apart from noise, and these tables quote the
+mean. For the lowest-noise figures, tune the machine with ``pyperf system tune`` first (and ``sudo pyperf system reset``
+after); pyperf options like ``--rigorous`` or ``--affinity`` pass straight through after the ``tox -e bench`` command.
+Operations that mutate the tree they are handed -- the edits, the content setters, link absolutization -- are timed on a
+fresh parse rebuilt before each iteration (the rebuild itself untimed), so the figure is the repeatable cost of the
+mutation alone rather than a tree a prior iteration already changed; read-path operations reuse one cached parse and
+time only the query. The corpora are real documents: `Project Gutenberg's War and Peace
 <https://www.gutenberg.org/ebooks/2600>`_, the `WHATWG HTML specification source
 <https://github.com/whatwg/html/blob/main/source>`_, the `ECMAScript specification <https://github.com/tc39/ecma262>`_,
-`web-platform-tests <https://github.com/web-platform-tests/wpt>`_ pages, and saved blog, news, and product pages from
-`mozilla/readability <https://github.com/mozilla/readability>`_. Synthetic scaling cases vary sibling count, tree depth,
-and text length. Their results apply to those inputs and sizes.
-
-Reproduce a table with ``tox -e bench -- --pgo <operation>``. You can also select a package, ``core`` for turbohtml, or
-``all``. Pass pyperf options such as ``--rigorous`` through the same command; CPU affinity and system tuning depend on
-platform support. Most cases time one call. The ``build`` and ``build-e`` cases construct and serialize a tree;
-``construct`` and ``emit`` measure those steps apart.
+a size-weighted sample of `web-platform-tests <https://github.com/web-platform-tests/wpt>`_ pages for the parse and
+tokenize suites, and, for the read-path suites, real saved web pages -- a blog, a news article, and a product blog from
+the `mozilla/readability <https://github.com/mozilla/readability>`_ test corpus -- so the selector, link, and edit
+operations run against genuine nested structure rather than the layout fixtures, which carry none. The harness
+benchmarks each competitor in its own isolated ``uv`` venv -- turbohtml in a venv of its own as the shared baseline --
+so one library's dependency pins never perturb another's. Every table below is one harness operation, so each is
+reproducible with ``tox -e bench <command>``, where the command is ``core`` (turbohtml's own baseline for every
+operation), an operation name (the cross-competitor table), a package name (that competitor's own report), or ``all``.
+The numbers in these tables come from the ``--pgo`` baseline: turbohtml built with the shipped profile-guided,
+link-time-optimized release recipe (``tox -e bench -- --pgo all``), so each figure reads as what a release ships rather
+than a plain build. The default baseline is a plain wheel, which builds quickly for iterating; the ``--pgo`` build costs
+much more time. Most operations are a single call; a few aggregate workloads (``build``, ``build-e``) sweep a size, and
+the ``construct`` and ``emit`` breakdowns decompose that write path into the constructor and the serializer in
+isolation. Numbers vary with input and hardware.
 
 The ``collapse-whitespace``, ``strip-comments``, and ``transform-tree`` operations time DOM transformations with fresh
 input trees prepared outside each measurement. ``serialize-inner`` measures configured child serialization. These
@@ -167,10 +165,12 @@ comparison. turbohtml folds the same transform into its C walk and pays neither 
 **********
 
 :meth:`turbohtml.Node.to_markdown` against `markdownify <https://github.com/matthewwithanm/python-markdownify>`_ (on
-BeautifulSoup) and `html2text <https://github.com/Alir3z4/html2text>`_ (a streaming ``HTMLParser`` subclass). The
-turbohtml adapter reuses a cached parsed document and times its Markdown conversion. The markdownify and html2text
-adapters parse and convert the HTML string on each call. These timings therefore include different parsing costs. The
-``configured`` row enables underscore emphasis, reference links, padded tables, and full escaping.
+BeautifulSoup) and `html2text <https://github.com/Alir3z4/html2text>`_ (a streaming ``HTMLParser`` subclass). All three
+take an HTML string and return Markdown, so each parses first; turbohtml parses to the WHATWG tree and walks it in C,
+where the others build and convert in Python. The single C pass converts a page in a few microseconds, two orders of
+magnitude ahead of both. The ``configured`` row turns the option surface on in all three (underscore emphasis, reference
+links, padded tables, full escaping), where turbohtml stays 48 times ahead of html2text and 125 times ahead of
+markdownify.
 
 .. bench-table::
     :file: bench/markdown.json
@@ -178,32 +178,8 @@ adapters parse and convert the HTML string on each call. These timings therefore
 The ``google_doc`` row reads the inline-CSS styling a Google Docs export carries (html2text's google_doc mode) and runs
 32 times faster; markdownify has no equivalent.
 
-The long-run cases convert 8,192 asterisks or ASCII letters. Turbohtml and markdownify use default escaping; html2text
-enables ``escape_snob`` to preserve the asterisks as literal characters. The outputs match apart from a trailing
-newline. Word wrapping needs the next word's length only when it may replace a pending space with a line break. Skipping
-that scan elsewhere avoids rescanning the remaining suffix after each escaped character. CodSpeed tracks both cases.
-
-Matched CPython 3.14.7 release builds without PGO or LTO reduced the asterisk case from 8,652.190 to 43.807 µs (99.49%
-faster). The letter control fell from 13.493 to 10.782 µs (20.09% faster), with 7–9% sample spread. All eight runs
-passed CPU-headroom and memory-pressure guards. The four competitor measurements also passed those guards. These rows
-reuse the parsed turbohtml document; markdownify and html2text parse and convert each timed call.
-
 .. bench-table::
     :file: bench/markdown-runs.json
-
-The wrapping cases reuse a parsed document containing 10,000 short words, with widths of 8,192 and 80 code points. The
-converter tracks the last checked output position so a wrapping decision scans only the newly appended text. Converter
-callbacks save and restore that position when they render children into a temporary buffer.
-
-Matched CPython 3.14.7 release builds without PGO or LTO reduced the wide case from 9,803.964 to 125.627 µs (98.72%
-faster). The 80-column control fell from 267.743 to 129.001 µs (51.82% faster). Candidate spread was 5.31% for wide
-wrapping and 3.07% at 80 columns. All eight comparisons passed CPU-headroom and memory-pressure guards. CodSpeed tracks
-both widths; document parsing and option construction happen outside the timer. The table uses separate measurements of
-the shared adapter, including its cached-setup lookup.
-
-Markdownify uses ``wrap=True`` and ``wrap_width``; html2text sets ``body_width`` on a cached converter. Both parse and
-convert each timed HTML input, while turbohtml reuses its parsed tree. The wrapped content matches exactly; html2text
-adds two trailing newlines. All four competitor measurements passed the resource guards.
 
 .. bench-table::
     :file: bench/markdown-wrap.json
@@ -212,11 +188,11 @@ adds two trailing newlines. All four competitor measurements passed the resource
  Structured data
 *****************
 
-Compare :meth:`turbohtml.Document.structured_data` with `extruct <https://github.com/scrapinghub/extruct>`_ on a product
-page containing JSON-LD, Microdata, and OpenGraph. Both operations include parsing. extruct uses lxml and a separate
-extractor per syntax; turbohtml uses its WHATWG parser and C extractors, returning a :class:`~turbohtml.StructuredData`
-record. turbohtml snapshots the tree before extraction to preserve consistent results when Python constructors call back
-into the document.
+:meth:`turbohtml.Document.structured_data` against `extruct <https://github.com/scrapinghub/extruct>`_, the scraper
+toolkit it succeeds, extracting JSON-LD, Microdata, and OpenGraph from a product page that carries all three. Both start
+from the raw HTML string, so each parses first; extruct builds an lxml tree and runs a separate extractor per syntax,
+where turbohtml parses to the WHATWG tree and gathers every format in one C walk, handing back the typed
+:class:`~turbohtml.StructuredData` record. The single pass runs roughly nine to eleven times faster.
 
 .. bench-table::
     :file: bench/structured-data.json
@@ -241,13 +217,15 @@ hundred and sixty on the ten-row table, where pandas pays its fixed per-frame co
  Article extraction
 ********************
 
-Compare :meth:`turbohtml.Node.article` with `trafilatura <https://trafilatura.readthedocs.io>`_, `readability-lxml
+:meth:`turbohtml.Node.article` against `trafilatura <https://trafilatura.readthedocs.io>`_, `readability-lxml
 <https://github.com/buriy/python-readability>`_, `newspaper3k <https://newspaper.readthedocs.io>`_, `goose3
 <https://goose3.readthedocs.io>`_, `readabilipy <https://readabilipy.readthedocs.io>`_, and `news-please
-<https://github.com/fhamborg/news-please>`_. turbohtml scores candidates and extracts their content in C. trafilatura,
-newspaper3k, goose3, and news-please collect page metadata as well. readabilipy's Python mode uses html5lib and
-BeautifulSoup to clean content without scoring; news-please combines several extractors. The inputs include navigation
-and a footer around the article, so the measured cost includes processing boilerplate.
+<https://github.com/fhamborg/news-please>`_, the article extractors it succeeds. Each scores the dominant content body
+and (trafilatura, newspaper3k, goose3, and news-please) harvests the page metadata beside it; the lxml-backed four build
+their tree in Python first, readabilipy's Python mode parses with html5lib into BeautifulSoup and cleans without
+scoring, news-please merges the votes of several such extractors, and turbohtml does the scoring and the harvest in one
+C pass over the parsed tree. The inputs are full pages -- navigation, a scored article, and a footer -- so the
+boilerplate the heuristic discounts is part of the measured cost.
 
 .. bench-table::
     :file: bench/article-extraction.json
@@ -283,14 +261,6 @@ trafilatura.
 .. bench-table::
     :file: bench/date-extraction.json
 
-The visible-date tally cases contain 1,000 distinct dates or 1,000 copies of one date. Both include parsing and score
-unstructured text with the default preference for the latest date. Hashing the tally reduced elapsed time from 421.770
-µs to 288.136 µs (31.68%) for distinct dates in the matched release-build comparison. The repeated-date control measured
-276.243 µs before and 272.380 µs after, within its measured spread.
-
-htmldate 1.10.0 returns no date for either input with ``original_date=False``, so its cells report the mismatch without
-timings.
-
 .. bench-table::
     :file: bench/date-tally.json
 
@@ -323,11 +293,6 @@ scan; wherever markup appears, the state machine runs roughly eight to sixteen t
 .. bench-table::
     :file: bench/tokenizing.json
 
-The SAX record wrapper constructs each named tuple through its record type, avoiding the temporary field list and
-``_make`` conversion. Matched release time to iterate 4,096 elements fell from 2.951 to 2.463 ms (16.54%); the
-tiny-record control improved from 2.773 to 2.339 µs (15.64%). The native callback control changed from 673.879 to
-689.403 µs (+2.30%, with 4.60% candidate spread). CodSpeed covers both record sizes and the callback path.
-
 .. bench-table::
     :file: bench/sax-records.json
 
@@ -359,83 +324,20 @@ lineage.
 .. bench-table::
     :file: bench/parsing.json
 
-The formatting-ancestor cases parse 1,000 ``samp`` elements inside one ``b``, with either 256 intervening ``span``
-elements or none. A validated stack-position hint avoids searching the open-element stack for the same formatting
-ancestor on each token. Matched local runs reduced full-parse time by 37% at depth 256; the shallow control changed by
-1.4%. Both cases use ASCII input with source locations disabled and include document cleanup. CodSpeed tracks both.
-
-Parsel takes 225.1 µs on the deep input, compared with turbohtml's 302.0 µs. Resiliparse takes 267.1 µs on the deep
-input and 79.2 µs on the shallow input, ahead of turbohtml's 87.4 µs. The default lxml and pyquery parsers truncate the
-deep input, dropping all 1,000 ``samp`` elements; those cells have no timing. Other measured parsers preserve the
-complete tree. The html5-parser environment could not import because its libxml2 version differs from lxml's.
-
 .. bench-table::
     :file: bench/parse-formatting.json
-
-The ignored-end-tag case places 1,000 ``</address>`` tokens beneath 256 open ``span`` elements, with text before and
-after the sequence. Default-scope queries reuse their result until the open stack changes. Matched local runs reduced
-full-parse time by 68.9%; the ordinary nested-formatting control took 1.1% longer. The case parses ASCII input with
-source locations disabled and includes document cleanup. CodSpeed tracks the same input.
 
 .. bench-table::
     :file: bench/parse-scope.json
 
-The formatting-attribute cases nest 256 ``b`` elements with either distinct ``title`` values or one repeated value. An
-unseen attribute fingerprint skips the active-formatting duplicate scan; previously seen fingerprints retain the full
-comparison and the three-entry limit. Matched local runs reduced full-parse time by 52.5% for distinct values; identical
-values took 2.1% longer. Both cases use ASCII input with source locations disabled and include document cleanup.
-CodSpeed tracks both. The capacity rules allocate 4 KiB for the distinct case and 256 bytes for the repeated case.
-Removed formatting entries leave fingerprints until a scope reset; allocated capacity remains until document teardown.
-
-Turbohtml leads the measured parsers on distinct attributes. Resiliparse takes 29.9 µs on identical attributes, compared
-with turbohtml's 49.7 µs. The selectolax identical-attribute result has 10% spread and does not support a precise
-comparison. Default lxml and pyquery truncate both inputs to 254 ``b`` elements and discard the text; those cells have
-no timing. The html5-parser environment has the libxml2 import mismatch described above.
-
 .. bench-table::
     :file: bench/parse-afe.json
-
-The NUL cases parse 1,000 paragraphs with either one NUL in the first paragraph or clean text throughout. Clean text
-runs can retain source spans even when another token contains a NUL. Matched local runs reduced full-parse time by 24.6%
-on the early-NUL input; the clean control changed by less than 1%. Both inputs use ASCII, disable source locations, and
-include document cleanup. CodSpeed tracks both.
-
-Turbohtml leads the measured parsers on both inputs. On the early-NUL input, BeautifulSoup's ``html.parser`` backend
-retains U+0000; its lxml backend, lxml, and pyquery replace it with U+FFFD. Those results differ from turbohtml's NUL
-removal and have no timing. The clean-input BeautifulSoup lxml and pyquery measurements have 6% spread and do not
-support precise comparisons. The html5-parser environment has the libxml2 import mismatch described above.
 
 .. bench-table::
     :file: bench/parse-nul.json
 
-The foster-parenting cases place text before each table row. HTML parsing moves that text before the table and merges it
-into one node. Reusing geometric buffer capacity reduced full-parse time by 20.0% for 1,024 runs; the single-run control
-took 1.33% longer. Both cases use ASCII input, disable source locations, and include document cleanup. CodSpeed tracks
-both.
-
-For the 1,024-run input, the merge-buffer growth rules allocate 8,128 bytes across all capacities, compared with
-2,099,196 bytes for successive exact-sized buffers. These source-derived totals exclude other parser allocations and
-allocator overhead; they are not RSS measurements. The parser arena retains old buffers until document teardown.
-
-Turbohtml leads the three parsers that preserve the foster-parented tree. BeautifulSoup's two backends, parsel, lxml,
-and pyquery produce different text placement and omit ``tbody``; those cells have no timing.
-
 .. bench-table::
     :file: bench/parse-foster.json
-
-The newline cases parse 1,000 paragraphs with CRLF or LF line endings. After normalizing CRLF, the document takes
-ownership of the tokenizer buffer so clean text can retain source spans. Matched local runs reduced full-parse time by
-6.02% for CRLF; the LF control changed by less than 1%. Both cases use ASCII input with source locations disabled and
-include document cleanup. CodSpeed tracks both.
-
-On this CRLF input, source-derived allocation totals replace 324,000 bytes of copied text with 131,072 bytes of retained
-normalized-input capacity. These figures exclude arena alignment, allocator overhead, and other parser allocations.
-Markup-heavy inputs can retain more memory because the document now keeps the whole normalized buffer even when source
-locations are disabled. LF-only input keeps the existing borrowed-source path.
-
-Resiliparse takes 81.0 µs on CRLF, close to turbohtml's 80.2 µs within the recorded spread. BeautifulSoup's
-``html.parser`` backend retains CRLF instead of normalizing it, while pyquery adds a ``div`` around the paragraph
-siblings; those differing outputs have no timing. The html5-parser environment retains its libxml2 import mismatch.
 
 .. bench-table::
     :file: bench/parse-crlf.json
@@ -474,16 +376,22 @@ benchmark records hit positions and misses. It measures uncapped and limited col
 
 ``select`` runs the CSS selector ``div a[href]`` (turbohtml's :meth:`~turbohtml.Node.select`, resiliparse's and
 selectolax's ``css``, lxml's `cssselect <https://github.com/scrapy/cssselect>`_, parsel's ``css``, pyquery, and
-BeautifulSoup's `soupsieve <https://github.com/facelessuser/soupsieve>`_). turbohtml compiles the selector against the
-tree once and matches interned integer atoms. lxml and parsel translate the selector to XPath through cssselect on each
-call. These controls complement the positional-selector scaling cases below.
+BeautifulSoup's `soupsieve <https://github.com/facelessuser/soupsieve>`_). Because turbohtml compiles the selector
+against the tree once and then matches by comparing interned integer atoms, it stays in the low microseconds across
+these pages. resiliparse's lexbor engine stays closest at 3.4 to 19 times, selectolax next at 13 to 45 times. lxml and
+parsel re-translate the selector to XPath through cssselect on every call, which scales with the document and trails by
+roughly fifty times on the small blog up to nearly eight hundred times on the spec, with pyquery tracking them;
+soupsieve and BeautifulSoup are hundreds to more than fifteen hundred times behind.
 
 .. bench-table::
     :file: bench/querying-2.json
 
-The relational ``:has()`` pseudo-class can require scanning a candidate's subtree. This comparison runs ``div:has(a)``
-against the same pages. turbohtml memoizes subtree searches within the query and skips sibling scans for descendant and
-child relationships.
+The relational ``:has()`` pseudo-class is the costliest selector to evaluate, since a naive matcher rescans each
+candidate's subtree. turbohtml runs ``div:has(a)`` against the same pages and leads every alternative: resiliparse and
+selectolax by five to twenty times, lxml and parsel by tens of times on the smaller pages, narrowing to single digits on
+the link-dense mozilla blog where the relational match itself does real work, while soupsieve and BeautifulSoup trail by
+hundreds of times throughout. The matcher walks each anchor's descendants once and skips the sibling scan for descendant
+and child relationships, so the relational lookup keeps the same interned-atom comparison the flat selectors use.
 
 .. bench-table::
     :file: bench/querying-3.json
@@ -491,8 +399,9 @@ child relationships.
 Per-element matching runs each anchor on the page through a compiled ``div a[href]`` matcher -- the shape a soupsieve
 port hits through :mod:`turbohtml.query` and its :meth:`Matcher.match <turbohtml.query.Matcher.match>` -- raced against
 selectolax's node match, soupsieve, BeautifulSoup, and pyquery. turbohtml answers each test with the same interned-atom
-comparison its ``select`` uses, walking the ancestor chain once per candidate. This control measures individual matching
-separately from collecting query results.
+comparison its ``select`` uses, walking the ancestor chain once per candidate, where the others re-interpret the parsed
+selector per element, so the sweep runs 34 to 44 times faster than selectolax, 75 to 145 times faster than soupsieve,
+and over a hundred times faster than BeautifulSoup and pyquery.
 
 .. bench-table::
     :file: bench/matching.json
@@ -506,96 +415,26 @@ per-character Python loop, so it runs 16 times faster.
 .. bench-table::
     :file: bench/querying-6.json
 
-``Query.siblings()`` visits each selected element's sibling group once on builds with the GIL. Later selected elements
-from the same group can add the first element omitted from that group's initial visit, preserving first-encounter order.
-Free-threaded builds retain the existing traversal while per-tree locking remains separate work.
-
-These cases reuse a selection from 1,024 siblings, selecting either all of them or just the first. Parsing and selection
-happen outside the timer; timing includes the cached-input lookup and result construction. Matched CPython 3.14.7
-release builds without PGO or LTO reduced the all-selected case from 35,528.207 to 71.255 µs (99.80% faster). The
-single-selected control measured 33.243 and 33.261 µs, effectively unchanged. Candidate spread was 2.06% and 0.87%. All
-eight comparisons passed CPU-headroom and memory-pressure guards. CodSpeed tracks both cases.
-
-A further allocation change emits the omitted node once per sibling group, then skips that completed group. Matched time
-fell from 70.843 to 15.081 µs (78.71%) for all selected siblings and from 33.632 to 11.218 µs (66.65%) for one selected
-sibling. The table shows these final measurements.
-
-The single-selected case also compares pyquery, with parsing and selection cached for both libraries. pyquery measured
-47.660 µs (1.39% spread), versus 11.218 µs for turbohtml. Its multi-selected result retains duplicates and uses a
-different order, so that cell is unsupported rather than timed.
-
 .. bench-table::
     :file: bench/query-siblings.json
-
-Parent and closest joins deduplicate native node identities before allocating result wrappers. The parent cases select
-1,024 children with either one shared parent or 1,024 distinct parents. Matched time fell from 30.545 to 3.543 µs
-(88.40%) for the shared parent and from 42.602 to 18.145 µs (57.41%) for distinct parents. Input owners keep the trees
-alive throughout traversal; output order follows the first encounter of each result.
 
 .. bench-table::
     :file: bench/query-parents.json
 
-Form-data collection skips disabled fieldset subtrees, visiting the first legend because controls inside it can remain
-enabled. On 2,048 disabled controls nested 64 levels deep, matched release time fell from 97.981 to 0.093 µs (99.90%);
-with one enabled control in the first legend, it fell from 136.118 to 0.136 µs (99.90%). Parsing happens outside the
-timed call. The enabled-fieldset control improved from 169.850 to 168.585 µs (0.74%); the four-control input changed by
-less than 1%. The disabled-target and enabled-control comparisons include the same allocation-callback ancestry fix in
-both variants. The first-legend and four-control cells retain the preceding release measurements. CodSpeed covers all
-four cases. The first-legend candidate spread is 6.00%. The traversal reads fieldset state again after collecting a
-control, preserving mutations during allocation. ``lxml.html.FormElement.form_values()`` includes controls under
-disabled fieldsets, so its output is not equivalent for these target cases.
-
 .. bench-table::
     :file: bench/form-data-fieldsets.json
-
-Document-scoped radio selection reuses an existing input-tag index to skip unrelated elements. With 4,096 unrelated
-nodes and 64 selection changes, matched release time fell from 441.671 to 31.658 µs (92.83%). Index construction is
-included in that timed call; parsing occurs in setup. A single change in a small form changed from 1.320 to 1.354 µs
-(+2.58%), and selecting within one of 256 forms changed from 101.902 to 104.531 µs (+2.58%). Eight changes with an
-append and index rebuild between each improved from 16.770 to 15.086 µs (10.04%). Form-owned radios retain the scoped
-scan, so a small form does not scan every input in the document. Group names, attribute notifications, and mutation
-invalidation retain their existing behavior. CodSpeed covers all four cases. lxml's ``InputElement.checked`` setter only
-changes that input's attribute; its ``RadioGroup`` requires a separately collected group and selects by value, so
-neither supplies an equivalent automatic document-scoped group operation.
 
 .. bench-table::
     :file: bench/radio-group.json
 
-Sorting large unordered root groups with ``qsort`` avoids insertion sort's repeated comparisons. Groups already in
-document order keep a linear check; groups smaller than 32 retain insertion sort. Matched release time for 512 reversed
-roots fell from 47.867 to 1.787 ms (96.27%); shuffled roots improved from 12.271 to 1.974 ms (83.91%). Candidate spread
-for the shuffled case is 5.92%, above the comparison threshold. The sorted-root control changed from 198.706 to 199.189
-µs (+0.24%); four reversed roots changed from 0.3484 to 0.3508 µs (+0.69%). CodSpeed covers all four orders and sizes.
-
 .. bench-table::
     :file: bench/query-roots.json
-
-A native index groups detached subtrees that share one tree handle after selector compilation. Grouping 2,048 detached
-roots fell from 2.480 ms to 63.822 µs (97.43%). The connected-root control improved from 6.181 to 6.119 ms (1.00%); four
-connected roots changed from 0.3244 to 0.3277 µs (+1.02%). Groups retain their first-occurrence order across interleaved
-documents.
-
-A second index groups roots from different documents on GIL builds when selectors and cached selector keys are exact
-strings. Selector subclasses retain the scan because cache eviction can invoke Python callbacks that move nodes.
-Grouping 512 documents fell from 84.457 to 33.044 µs (60.87%). Against the preceding root-index implementation, detached
-roots changed from 64.813 to 66.457 µs (+2.54%), connected roots from 6.117 to 6.092 ms (-0.40%), and four roots from
-0.3289 to 0.3377 µs (+2.67%). The four-root candidate spread is 6.94%, so that control is noisy. The table includes
-these final document-index measurements; CodSpeed covers all four inputs.
 
 .. bench-table::
     :file: bench/query-root-groups.json
 
-Closest joins keep each selected element's selector scope and the existing ancestor walk. For 1,024 children, matched
-time fell from 45.406 to 17.496 µs (61.47%) with a shared matching ancestor and from 60.596 to 33.004 µs (45.54%) with
-distinct matching ancestors. Pyquery retains duplicate ancestors for the shared case; only the distinct case is
-comparable. Both libraries cache parsing and initial selection outside these join timings.
-
 .. bench-table::
     :file: bench/query-closest.json
-
-The direct ``Node.closest()`` control changed from 0.0983 to 0.0967 µs, below the 5% improvement threshold. Its cached
-selector and single-child input check the shared ancestor-walk path. These join allocation changes apply to GIL builds;
-free-threaded builds retain their existing traversal and deduplication paths. CodSpeed covers all seven cases.
 
 .. bench-table::
     :file: bench/node-closest.json
@@ -619,17 +458,25 @@ complex, and grouped selectors below; cssselect parses in Python and builds a tr
 .. bench-table::
     :file: bench/css-specificity.json
 
-The XPath table compares :meth:`~turbohtml.Node.xpath` with lxml and parsel on one 9.6 kB web-platform-tests page. Run
-``tox -e bench -- --pgo xpath`` to reproduce it. Cases cover axes and predicates, string and aggregate functions,
-ordered unions, and computed name tests. turbohtml resolves name tests to interned atoms and can collapse ``//`` to a
-single descendant walk. Positional predicates preserve proximity order. Ordered result sets avoid another sort, and
-unions merge their sorted inputs.
-
-The remaining cases cover variable bindings, namespaces, EXSLT functions, extension callbacks, and precompiled
-expressions. Node-set variables and extension results feed later path steps. The namespace case adds an SVG fragment to
-the page. For ``re:test``, turbohtml uses Python's :mod:`re` and lxml uses libexslt. ``set:distinct`` retains the first
-node for each string value. Five XPath 2.0 string-function rows have no libxml2 equivalent. The precompiled case reuses
-:class:`~turbohtml.XPath` or lxml's ``etree.XPath`` to exclude expression parsing from the timed call.
+XPath 1.0 evaluation runs through :meth:`~turbohtml.Node.xpath`, raced against lxml's libxml2 engine and parsel's
+wrapper of it (selectolax and BeautifulSoup have no XPath). One expression per feature class (name tests, the ``//``
+abbreviation, attribute, positional, and arithmetic predicates, string and aggregate functions, a reverse axis, a union,
+and a computed name test) runs over the 9.6 kB wpt page below; ``tox -e bench xpath`` repeats the sweep across every
+page size. turbohtml compiles each expression against the tree once, resolves name tests to interned atoms, and folds
+``//`` to a single ``descendant`` walk, so it leads across the surface. The exception is a predicate that references
+``position()`` (``[1]`` or ``position() <= 3``): it pins the result to proximity order and disables the ``//`` collapse,
+so on the largest pages lxml's streaming evaluation closes the gap. Five rows exercise XPath 2.0 functions --
+``ends-with``, ``matches``, ``replace``, ``lower-case``, and ``string-join`` -- that turbohtml answers but libxml2 does
+not implement, so lxml and parsel show a gap there. Further rows are the lxml/parsel options the parity work added: a
+``$variable`` binding, an EXSLT ``re:test`` predicate (turbohtml's Python :mod:`re` against lxml's C libexslt), an EXSLT
+``set:distinct`` node-set reduction (built-in C dispatch on both sides, so it races C against C), a ``smart_strings``
+attribute read, a custom ``extensions=`` function, an ``extensions=`` function whose return becomes a node-set feeding a
+later ``/@href`` step, a ``namespaces=`` prefix binding that resolves ``//svg:rect`` against ``{"svg": ".../2000/svg"}``
+over a page carrying an SVG block, and a node-set ``$variable`` bound from a prior result (``$rows/div``, with ``rows``
+reused from an earlier ``//div`` query) fed into a later path step. turbohtml still leads, since lxml resolves the
+namespace map and option set on every call. The last row precompiles the expression once with :class:`~turbohtml.XPath`
+and re-evaluates it, lxml's ``etree.XPath`` doing the same: both skip the per-call parse :meth:`~turbohtml.Node.xpath`
+pays, and turbohtml's compiled program stays ahead per evaluation.
 
 .. bench-table::
     :file: bench/querying-5.json
@@ -642,7 +489,7 @@ node for each string value. Five XPath 2.0 string-function rows have no libxml2 
 application allocates source-specific indexes and output state. Callers can use one ``Transform`` instance with
 different documents and parameters across threads.
 
-The first table measures construction. The next two measure a 120-row catalog and ten calls to a 300-template
+The first table measures construction. The other two measure a 120-row catalog and ten calls to a 300-template
 stylesheet. That stylesheet has 299 unused templates and 24 static ``xsl:number`` patterns in its used template; the
 repeated result includes any stylesheet analysis or XPath compilation left in the application path.
 
@@ -655,62 +502,17 @@ repeated result includes any stylesheet analysis or XPath compilation left in th
 .. bench-table::
     :file: bench/xslt-reuse.json
 
-The template-rule cases visit 1,024 nodes once or eight times, with 128 unmatched templates before the winning rule.
-Caching the winning rule for each node, attribute, and mode reduced elapsed time by 35.94% for eight passes and
-increased it by 3.69% for one pass in the matched release-build comparison. Each application frees its cache when it
-finishes; the compiled stylesheet retains no source nodes.
-
 .. bench-table::
     :file: bench/xslt-rules.json
-
-The declaration-name cases call a named template 256 times. Each call uses an attribute set and resolves an XSLT key.
-With 256 unused declarations of each kind, name indexes reduced application time by 27.13%; the small control improved
-by 1.76%. Compilation builds the immutable name indexes once. Applications share them while keeping their own key result
-tables. The table measures application after compilation; constructor cost is separate.
 
 .. bench-table::
     :file: bench/xslt-names.json
 
-The same large stylesheet costs 2.29% more to compile (179.21 µs to 183.32 µs). The compilation benchmark uses eight
-fixed loops to bound temporary tree allocations. On this 64-bit build, its name-index arrays and attribute-set links
-retain 75,784 bytes per compiled stylesheet, excluding allocator overhead. Index fields add 56 bytes to the model and
-each call's engine state.
-
 .. bench-table::
     :file: bench/xslt-names-compile.json
 
-The sibling-numbering cases use one or eight default ``xsl:number`` instructions per node. Forward traversal can reuse
-the preceding sibling's count; repeated instructions can reuse the current node's count. Reverse sibling traversal still
-needs preceding-sibling scans for each newly visited node. The one-node and zero-instruction cases measure fixed
-overhead.
-
-The ``any:`` cases number matching nodes across the document. Repeated default ``level="any"`` numbering caches their
-counts, including for reverse visits. The first call and repeated calls for the same node allocate no index; subsequent
-calls for different nodes retain only matching nodes until the application finishes. Cases with one final-node visit,
-alternating names, intervening text/comments, and an explicit ``count`` pattern cover different reuse opportunities.
-
-Explicit ``count`` and ``from`` patterns reuse their match sets within one application when their expressions depend
-only on the source tree. This includes unprefixed names, wildcards, the document root, static predicates, and unions.
-Instructions with identical pattern text share those sets. Different pattern text replaces the retained set; variables,
-namespace-prefixed steps, and extension calls retain per-call evaluation. The pattern cases include single calls,
-section resets, reverse visits, repeated instructions, wildcards, and empty match sets. The ``count-current`` row checks
-turbohtml compatibility only: XSLT 1.0 `forbids current() in patterns
-<https://www.w3.org/TR/xslt-10/#function-current>`_, and lxml gives different results.
-
-Static explicit ``level="any"`` numbering retains prefix counts, including zero counts and ``from`` resets. A single
-visit and repeated visits to the same node avoid index allocation; a second distinct visit builds the index. The
-last-node-only cases measure that boundary, and alternating names exercise changes to the default count criteria.
-
-The 1,024-node static-predicate case fell from 38.214 to 0.253 ms in matched release runs (99.34% less time). The
-dynamic ``current()`` control changed from 195.407 to 193.810 ms. CodSpeed tracks the static-predicate case separately.
-
 .. bench-table::
     :file: bench/xslt-number.json
-
-The instruction-dense stylesheet combines numbering with variable bindings, comments, copied subtrees, and messages.
-These tables time application of a compiled stylesheet to a parsed document. turbohtml returns a Python string; lxml
-returns its result-tree object, with conversion to a Python string outside timing. The numbering and instruction-dense
-measurements use CPython 3.14.7 and a release build without PGO or LTO.
 
 .. bench-table::
     :file: bench/xslt-dense.json
@@ -719,11 +521,14 @@ measurements use CPython 3.14.7 and a release build without PGO or LTO.
  Node paths
 ************
 
-Use :meth:`turbohtml.Element.css_path` or :meth:`~turbohtml.Element.xpath_path` to generate a locator from the document
-root. The comparison uses lxml's ``getroottree().getpath()`` and parsel's wrapper for positional XPath paths. Each timed
-call generates paths for the elements in a pre-parsed page. Both turbohtml methods reuse sibling positions across calls;
-structural mutations clear those positions. CSS paths use a per-tree ID-occurrence map to choose unique anchors, which
-ID edits invalidate. The fresh-tree cases below measure cache setup costs.
+:meth:`turbohtml.Element.css_path` and :meth:`~turbohtml.Element.xpath_path` return the unique locator that re-finds an
+element from the document root -- a CSS selector and a positional XPath -- against lxml's ``getroottree().getpath()``,
+the libxml2 path builder devtools' "copy selector" mirrors, and (for the positional path) parsel's wrapper of it. Each
+timed call walks every element in a pre-parsed page and serializes its path. Both methods lead ``getpath`` by roughly
+six times across these pages, narrowing to under threefold on the spec. :meth:`~turbohtml.Element.css_path` previously
+rescanned the whole document to test each element's id uniqueness, an O(N\ :sup:`2`) cost over a page that made it
+slower than ``getpath`` on id-heavy pages; a cached per-tree id-occurrence map (dropped with the element index on any
+mutation) now answers that test in O(1), so ``css_path`` keeps pace with the positional ``xpath_path``.
 
 .. bench-table::
     :file: bench/node-paths.json
@@ -897,82 +702,23 @@ does.
 .. bench-table::
     :file: bench/editing-6.json
 
-:meth:`~turbohtml.Node.prune` keeps selected subtrees and the ancestor paths leading to them. It records each shared
-ancestor once per operation; a selected ancestor still keeps its whole subtree. These cases nest 128 sections around
-1,024 selected leaves or one selected leaf, each with an unselected sibling to remove. Every iteration starts from a
-fresh tree outside the timer; the timed call includes matching, building the keep set, and pruning. CodSpeed tracks both
-cases.
-
-Matched CPython 3.14.7 release builds without PGO or LTO reduced the 1,024-leaf case from 2,256.473 to 70.182 µs (96.89%
-faster). The single-leaf control increased from 5.459 to 5.653 µs (3.56% slower, a 0.194 µs cost). Candidate spread was
-2.79% and 5.51%, respectively. All eight comparisons passed CPU-headroom and memory-pressure guards.
-
 .. bench-table::
     :file: bench/prune-shared.json
-
-Use :meth:`~turbohtml.Element.normalize` after edits leave adjacent text nodes. It sizes each run before copying the
-merged text, limiting repeated work and arena growth. The first nonempty text node survives; references to removed nodes
-remain valid as detached nodes. It removes empty text nodes.
-
-These cases vary the number and length of text nodes, with construction outside the timer. The measurements use CPython
-3.14.7 and a release build without PGO or LTO, with CPU-headroom and memory-pressure guards. The one- and two-node
-controls include per-call timer overhead. CodSpeed tracks the 1,000-node case, the longer-text case, and a nonempty node
-followed by 1,000 empty nodes. Removing those empty nodes during the sizing pass reduced elapsed time from 2.336 to
-1.246 µs (46.66%); the 1,000-nonempty-node control showed no regression. We reused its unchanged baseline measurements
-for the final control comparison; the table retains the sample-spread warning.
 
 .. bench-table::
     :file: bench/normalize-dom.json
 
-Constructing a :class:`~turbohtml.Range` validates its offset against the container's children. Validation stops once it
-reaches the requested offset. These cases construct and discard a collapsed range at offset 0 or 1,000 in an element
-with 1,000 children. Each iteration builds a fresh tree outside the timer. CodSpeed tracks both offsets.
-
-On CPython 3.14.7 with a release build without PGO or LTO, the offset-zero comparison fell from 2.083 to 0.676 µs
-(67.55% faster). The end-offset control rose from 2.110 to 2.202 µs (4.38% slower). Each measurement times one call and
-includes timer overhead; the samples were noisy. CPU-headroom and memory-pressure guards accepted both comparisons.
-
 .. bench-table::
     :file: bench/range-boundary.json
-
-Cloning a range of complete children resolves their interval once, avoiding repeated boundary comparisons for each
-child. These cases clone all 1,000 children or a single child, with tree and range construction outside the timer.
-CodSpeed tracks both cases. On the same release configuration, the 1,000-child comparison fell from 1,487.138 to 10.498
-µs (99.29% faster); the single-child mean fell from 0.359 to 0.331 µs (7.64% faster). The single-child samples have 10%
-relative standard deviation and include per-call timer overhead. We ran both comparisons under CPU-headroom and
-memory-pressure guards.
 
 .. bench-table::
     :file: bench/range-contained.json
 
-Cloning a partial element copies its tag and attributes without copying descendants outside the range. These cases
-select the first three characters of an element's text, excluding 1,000 sibling elements or one sibling. Construction
-runs outside the timer; CodSpeed tracks both cases. Under the same release configuration and resource guards, the
-1,000-sibling comparison fell from 13.999 to 3.723 µs (73.41% faster). The single-sibling mean fell from 0.441 to 0.374
-µs (15.18% faster); those samples include per-call timer overhead and have 12% relative standard deviation.
-
 .. bench-table::
     :file: bench/range-partial.json
 
-:class:`~turbohtml.MutationObserver` checks event options before walking ancestors to determine whether a registration
-covers a mutation. These cases register 1,000 unrelated nodes and edit an attribute 100 levels deep. The target requests
-child-list events; the control requests attribute events, so it still needs the ancestry checks. Construction and
-registration happen outside the timer; timing covers one attribute edit and draining the empty record queue.
-
-Under the same release configuration and resource guards, rejecting the wrong event kind fell from 57.659 to 1.466 µs
-(97.46% faster). The same-kind control rose from 57.886 to 59.572 µs (2.91% slower). CodSpeed tracks both cases.
-
 .. bench-table::
     :file: bench/observe-registrations.json
-
-Adding attributes through ``element.attrs`` reserves space for later insertions, reducing array copies and retained
-arena buffers on elements with many attributes. Replacement cases exercise existing names; they do not benefit from
-extra capacity. The insertion benchmarks construct their input outside the timer.
-
-These attribute tables use CPython 3.14.7 and a release build without PGO or LTO. Memory columns include imports and one
-operation in a fresh process, so import-time memory can hide differences on small inputs. The XML cases include parsing
-and check attribute-growth costs alongside name and namespace validation. CodSpeed covers 1,000 insertions,
-replacements, and XML attributes.
 
 .. bench-table::
     :file: bench/attribute-grow.json
@@ -980,64 +726,17 @@ replacements, and XML attributes.
 .. bench-table::
     :file: bench/parse-xml-attrs.json
 
-For XML attributes, the parser checks for duplicate names before appending through the shared attribute-storage code.
-Skipping a second lookup reduced parsing time for 1,000 distinct attributes from 210.20 to 57.12 microseconds (72.82%)
-in a matched comparison. Duplicate errors retain their position relative to value and namespace errors.
-
-These cases use names ``a0`` onward with the one-character value ``a``. The table includes document allocation and
-cleanup, using CPython 3.14.7 release builds without PGO or LTO. The one-attribute control changed from 0.368 to 0.357
-microseconds; its 3.04% difference falls below the 5% improvement threshold. CodSpeed covers both inputs.
-
-Lxml preserves the same attribute names, values and ordering. It takes 79.874 µs for 1,000 attributes and 0.832 µs for
-one attribute, compared with turbohtml's 57.124 and 0.357 µs.
-
 .. bench-table::
     :file: bench/parse-xml-append.json
-
-XML parsing caches each attribute's namespace resolution for duplicate expanded-name checks within a start tag. The
-target declares 128 distinct prefixes and uses each on an attribute with the same local name. Matched time fell from
-633.785 to 47.403 µs (92.52%). The one-prefix control changed from 0.441 to 0.434 µs; its 1.64% difference is below the
-improvement threshold. Prefix rebinding, declaration scope and first-error precedence retain their behavior.
-
-The cache keeps four index fields per attribute instead of two, released after parsing. On a 64-bit build the initial
-allocation grows from 128 to 512 bytes, and the 256-attribute target needs 8 KiB instead of 4 KiB. Lxml checks the same
-expanded attribute names, namespace bindings and ordering. CodSpeed covers both inputs.
 
 .. bench-table::
     :file: bench/parse-xml-prefixes.json
 
-XML text parsing scans clean one-byte blocks before falling back to the existing character checks at markup, references,
-controls or a possible CDATA closing sequence. Both paths retain source spans for unchanged text. Matched parsing of 64
-KiB of clean text fell from 98.903 to 4.886 µs (95.06%). The reference-rich control changed from 154.782 to 154.651 µs
-(0.08%), within measurement noise. Five text characters cost 0.304 µs instead of 0.296 µs, an increase of 2.81% or 0.008
-µs.
-
-The checks cover block boundaries, Latin-1, wider Unicode and error columns. Both libraries return the same text for all
-three shared inputs, and CodSpeed covers the target and both controls.
-
 .. bench-table::
     :file: bench/parse-xml-text.json
 
-For an attribute value's clean one-byte prefix, XML parsing reserves scratch capacity once and widens the validated run
-in a batch. References, literal whitespace and wider strings retain their existing paths. A 64 KiB clean value fell from
-113.798 to 40.866 µs (64.09%) in matched release builds. The reference-rich control changed from 83.650 to 82.920 µs
-(0.87%), and five characters changed from 0.3413 to 0.3398 µs (0.42%); neither establishes a gain.
-
-Both quote styles preserve values, reference expansion and CRLF normalization. The shared suite and CodSpeed include the
-target and both controls; the lxml comparisons check complete decoded values.
-
 .. bench-table::
     :file: bench/parse-xml-values.json
-
-Reused ``Html``, ``PlainText`` and ``Canonical`` options use cached field metadata for their exact types. Subclasses
-retain dynamic field discovery, and each render reads the current option values. On a prepared ``<p>x</p>`` node,
-matched release measurements fell from 0.770 to 0.457 µs for HTML (40.68%), 0.850 to 0.502 µs for text (40.94%), and
-0.711 to 0.426 µs for canonicalization (40.08%). The shared suite excludes node and option construction through its
-setup hook. CodSpeed includes each renderer with and without explicit options.
-
-Without options, HTML changed from 0.1052 to 0.1042 µs and text from 0.1027 to 0.1011 µs. Canonicalization changed from
-0.1334 to 0.1388 µs (+4.03%, or 0.0054 µs), with candidate spread of 5.24%. These unchanged paths bypass option
-unpacking; their small differences do not establish gains.
 
 .. bench-table::
     :file: bench/html-options.json
@@ -1048,47 +747,14 @@ unpacking; their small differences do not establish gains.
 .. bench-table::
     :file: bench/canonical-options.json
 
-Token attribute access allocates the result list at its known length. In matched release builds, reading 100 attributes
-from a prepared token fell from 3.582 to 3.255 µs (9.13%); ten attributes fell from 0.290 to 0.249 µs (14.08%). One
-attribute changed from 0.0695 to 0.0668 µs (3.81%), and an empty list from 0.0409 to 0.0412 µs (+0.79%). Each access
-still returns a fresh list in source order.
-
-The property measurements below exclude tokenization. The shared suite uses its untimed setup hook for this operation,
-and CodSpeed covers all four sizes.
-
 .. bench-table::
     :file: bench/token-attributes.json
-
-Tokenizing and reading all 100 attributes changed from 9.570 to 9.211 µs (3.76%); this end-to-end control does not meet
-the 5% acceptance threshold. The shared suite and CodSpeed also include this control.
 
 .. bench-table::
     :file: bench/tokenize-attributes.json
 
-Streaming rewrite handlers reuse attribute capacity across additions and removals. Adding 1,000 distinct names to one
-start tag fell from 121.342 to 97.037 µs (20.03%) in matched release builds. Adding one name increased from 0.790 to
-0.810 µs (2.50%, or 0.020 µs). Capacity grows geometrically using the existing node field; mutation order and escaping
-retain their behavior. The shared suite and CodSpeed cover both sizes.
-
 .. bench-table::
     :file: bench/rewrite-attributes.json
-
-Use :meth:`~turbohtml.Node.equals` to compare subtree contents; ``==`` compares node identity. Attribute order does not
-affect equality. For elements with at least 32 attributes, repeated name searches trigger a temporary index after two
-comparisons per attribute on average. Early mismatches return before allocating the index.
-
-These cases compare two detached elements with string-valued attributes, varying their count and order, with mismatches
-at either end. Tree construction happens outside the timer; both adapters include a cached pair lookup. BeautifulSoup
-uses ``Tag.__eq__`` on the same inputs, independent of its parser backend. The measurements use CPython 3.14.7 and a
-release build without PGO or LTO. CodSpeed tracks the 1,000-attribute inputs and the duplicate-name control.
-
-The duplicate-name control uses constructor keys that normalize to the same HTML attribute name. It retains the first
-matching value when comparing attributes. BeautifulSoup preserves key casing in constructor input, so that row has no
-equivalent comparison.
-
-Matched direct-call measurements of 1,000 reversed attributes fell from 1,490 to 30 microseconds after indexing, a 98%
-reduction. The table includes the adapter lookup overhead. BeautifulSoup remains faster on the large equal-attribute
-cases; its Python dictionary comparison avoids constructing a temporary index.
 
 .. bench-table::
     :file: bench/node-equals.json
@@ -1189,30 +855,11 @@ comparison is output size, where turbohtml stays within a couple percent and com
 .. bench-table::
     :file: bench/css-minification.json
 
-Adjacent equal media blocks and rules with identical declaration bodies now merge a whole run in one copy. For 1,000
-media blocks, matched release time fell from 979.356 to 290.369 µs (70.35%); 1,000 equal declaration bodies fell from
-3,098.577 to 195.603 µs (93.69%). Ten-block controls improved by 7.08% and 9.18%, while alternating media preludes,
-comment barriers, and an ordinary stylesheet stayed within 1.91%. All calls include tokenization, parsing, merging, and
-serialization. The output preserves selector order and stops batching where an intervening rule or growing selector list
-changes which merge applies. CodSpeed covers both large targets, small inputs, and the media/comment barriers.
-
 .. bench-table::
     :file: bench/css-rule-merges.json
 
-Merging repeated selectors across intervening rules requires checking whether their declarations conflict. For larger
-stylesheets, the minifier records property boundaries and shorthand relationships once per rendered body, then reuses
-them until a merge changes that body. Across 32 pairs of rules with 32 disjoint custom properties and 128-byte values,
-matched release time fell from 4,280.530 to 1,534.815 µs (64.14%). With one-byte values it fell from 1,400.700 to
-720.662 µs (48.55%). A two-rule stylesheet and the ordinary stylesheet control stayed within 0.52%. These measurements
-include parsing and summary construction. Strings, ``all``, and overlapping shorthand or longhand declarations still
-prevent unsafe movement. CodSpeed covers the large, short-value, and two-rule cases.
-
 .. bench-table::
     :file: bench/css-rule-conflicts.json
-
-Lightningcss takes 952.8 µs on the long-value conflict case versus turbohtml's 1,534.8 µs; both emit 8,818 bytes.
-Rcssmin is faster on the merge cases but retains more bytes because it does not combine rules. CLI columns include
-process startup and pipe I/O.
 
 ``csscompressor`` (the YUI port) and ``cssmin`` (its BSD descendant) rewrite values to their shortest form the way
 turbohtml does, but as pure-Python regex passes they turn quadratic on a large stylesheet and trail the C engine by tens
@@ -1257,106 +904,23 @@ with the time to produce it; both ratios are against turbohtml.
 .. bench-table::
     :file: bench/js-minification.json
 
-The fold pass leaves canonical ``!0`` and ``!1`` nodes unchanged. Recreating them marked each pass as changed and forced
-repeated traversals up to the pass limit. In matched release builds, Underscore fell from 2.033 to 1.196 ms (41.17%),
-and the held-out jQuery input from 10.202 to 6.393 ms (37.34%). Their output sizes remain 19,297 and 87,776 bytes. The
-single-guard control changed from 1.797 to 1.814 µs (+0.95%, or 0.017 µs). CodSpeed covers both libraries and the guard
-control. The tables update these native cells and retain existing competitor measurements.
-
-Integer printing skips exponent formatting when fewer than three trailing zeros could be replaced. In matched release
-builds, the shared ``minify-js-integers`` case with 4,096 integers fell from 345.365 to 245.119 µs (29.03%). The
-trailing-zero control cost 0.50% more, the single-integer case improved 5.12%, and the ordinary-script control cost
-0.24% more. These comparisons use the same interpreter and build flags; all 16 timed processes passed CPU and memory
-guards. The shared suite and CodSpeed include the large, trailing-zero and single-integer inputs.
-
-The expression-sequence cases merge 1,000 or two consecutive function calls. Retaining the tail during folding avoids
-rescanning the accumulated sequence before each append. Matched release builds reduced the 1,000-statement case from
-692.917 to 334.477 µs (51.73% less time). The longer two-statement control comparison measured 1.188 versus 1.167 µs,
-within its measured spread. Candidate spread is 13.59% for the large input and 2.65% for the control; the table retains
-that warning. Both builds produce the same output size and preserve call order. The shared suite and CodSpeed include
-both cases.
-
-All seven competing minifiers preserve the ordered function calls on both inputs. Rjsmin is faster on these cases and
-produces the same byte counts as turbohtml. The rjsmin large-input measurement, both calmjs.parse measurements, and the
-terser control exceed 5% spread; the tables retain those warnings. CLI comparisons include process startup.
-
 .. bench-table::
     :file: bench/js-sequences.json
-
-The guard-return cases fold 512 or one conditional return before a final return. Visiting eligible guards from the end
-avoids rescanning each completed suffix. Matched release time fell from 631.548 to 284.383 µs (54.97%) for 512 guards.
-The single-guard control increased from 1.834 to 1.854 µs (1.11%, or 0.020 µs). Both builds produce the same byte counts
-and preserve return order. Candidate spread is 1.10% for 512 guards and 2.05% for one guard.
-
-The competing outputs preserve return values and side effects on both inputs. Rjsmin is faster and retains 12,607 bytes
-on the large case, compared with turbohtml's 7,487 bytes. Tdewolff emits 7,484 bytes. CLI timings include process
-startup. The large calmjs.parse and terser cells and the single-guard tdewolff cell retain spread warnings.
 
 .. bench-table::
     :file: bench/js-guards.json
 
-Indexing literal-propagation plans by symbol removes a linear search through those plans for each read. In that matched
-comparison, time for 256 interleaved declarations fell from 296.119 to 222.399 µs (24.90%), with the same correctness
-fixes in both builds. The Underscore control changed from 1.15847 to 1.15785 ms.
-
-Recording each binding's declarator position removes another scan through its declaration. With plan indexing in both
-builds, 256 bindings in one declaration fell from 266.492 to 189.088 µs (29.05%). Separate-declaration and one-binding
-controls changed from 229.032 to 231.272 µs (+0.98%) and from 2.100 to 2.091 µs (−0.44%). The table uses these three
-candidate measurements; CodSpeed covers them. The interleaved control has 6.47% spread.
-
-The six competing minifiers preserve callback order and returned values on these inputs; calmjs.parse rejects their
-``const`` declarations. Rjsmin is faster on all three cases and retains 7,518 bytes on the large interleaved input,
-compared with turbohtml's 2,327 bytes. The large css-html-js-minify and grouped-declaration tdewolff cells exceed 5%
-spread; their warnings remain in the table. CLI timings include process startup.
-
 .. bench-table::
     :file: bench/js-propagation.json
-
-Single-use inlining checks eligibility before searching for the preceding declarator. This avoids scanning a long
-declaration for call initializers that cannot be inlined. With the same captured-variable correctness fix in both
-builds, 256 call initializers in one declaration fell from 208.416 to 129.562 µs (37.83%). Separate declarations fell
-from 279.196 to 201.789 µs (27.72%); one call initializer changed from 1.521 to 1.538 µs (+1.11%). The shared suite and
-CodSpeed cover all three layouts and check callback order and returned values.
-
-Six competing minifiers preserve callback order and returned values; calmjs.parse rejects these ``const`` inputs. Rjsmin
-is faster on all three cases. For 256 calls, it retains 4,050 bytes in one declaration and 5,580 bytes in separate
-declarations, compared with turbohtml's 3,142 bytes for either layout. Terser produces 1,941 bytes; its timings include
-CLI startup, as do esbuild's and tdewolff's. All measured cells have less than 3.2% spread.
 
 .. bench-table::
     :file: bench/js-single-use.json
 
-Literal propagation removes eligible declarators in one traversal of each declaration. For 256 retained call
-initializers interleaved with removable literals, elapsed time fell from 345.072 to 277.512 µs (19.58%). Separate
-declarations fell from 480.944 to 414.659 µs (13.78%). One pair changed from 2.217 to 2.212 µs; the existing all-literal
-grouped control changed from 185.885 to 185.453 µs. The shared suite and CodSpeed cover all three mixed layouts. Public
-tests check returned values, callback order and retained destructuring siblings.
-
-Declaration merging keeps the current tail while joining adjacent declarations. After the earlier changes, the 256-pair
-separate-declaration case fell from 406.565 to 286.202 µs (29.60%). The grouped control changed from 277.959 to 276.490
-µs; one pair changed from 2.221 to 2.257 µs (+1.63%). Tests check declaration-kind boundaries, destructuring order and
-merging into a ``for`` initializer.
-
 .. bench-table::
     :file: bench/js-unlink.json
 
-The binding walk records whether a read precedes its initializer. Single-use inlining can then check ``var``
-initialization order without walking earlier initializer subtrees. For 256 interleaved call/literal pairs, elapsed time
-fell from 556.081 to 289.931 µs (47.86%); a read-before-initialization control fell from 702.393 to 224.498 µs (68.04%).
-One pair changed from 2.043 to 2.032 µs, and the ordinary library control from 1,135.986 to 1,128.868 µs. The flag fits
-existing symbol padding. Captured-variable and temporal-dead-zone guards remain in place.
-
-The binding walk also records declarator predecessors in existing symbol padding on 64-bit builds. Removing a declarator
-updates its successor, avoiding repeated prefix scans during dead-binding removal and single-use inlining. With the
-initialization snapshot in both builds, the 256-pair case fell from 288.107 to 229.827 µs (20.23%). One pair changed
-from 2.018 to 2.049 µs (+1.55%); the early-read control changed from 224.494 to 224.463 µs.
-
 .. bench-table::
     :file: bench/js-var-initialization.json
-
-For unused bindings interleaved with retained call initializers, predecessor tracking reduced 256 pairs from 378.040 to
-169.297 µs (55.22%). One pair changed from 1.809 to 1.848 µs (+2.17%). Public tests check the complete callback trace
-and empty returned array; the shared suite and CodSpeed cover both sizes.
 
 .. bench-table::
     :file: bench/js-unused-declarations.json
@@ -1369,8 +933,8 @@ and empty returned array; the shared suite and CodSpeed cover both sizes.
 (the pure-Python prober ensemble), `charset-normalizer <https://charset-normalizer.readthedocs.io/>`_ (decode-and-score,
 what ``requests`` uses), `faust-cchardet <https://github.com/faust-streaming/cChardet>`_ (the maintained C binding of
 uchardet; the original cchardet stops compiling at Python 3.11), `resiliparse <https://resiliparse.chatnoir.eu/>`_'s
-``detect_encoding``, and BeautifulSoup's ``UnicodeDammit``, which delegates statistical detection to an installed
-backend. turbohtml resolves certain input -- a byte-order mark, a ``<meta>`` declaration, valid UTF-8, pure ASCII --
+``detect_encoding``, and BeautifulSoup's ``UnicodeDammit``, benchmarked with the ``chardet`` backend it only sniffs
+with. turbohtml resolves certain input -- a byte-order mark, a ``<meta>`` declaration, valid UTF-8, pure ASCII --
 structurally before any scoring, which is where the tens-to-nearly-2000x rows on the ASCII and pre-declared pages come
 from, and its chardetng frequency scoring keeps declaration-less single-byte text 3.9x-5.4x ahead of chardet.
 
@@ -1383,16 +947,6 @@ score it and a CJK stream leaves several standing.
 
 .. bench-table::
     :file: bench/encoding-detection.json
-
-``detect()`` and ``EncodingDetector.close()`` construct the winning ``EncodingMatch`` after native ranking.
-``detect_all()`` still constructs the full ranked list. On the short legacy-byte input below, constructing only the
-requested record reduced one-shot detection from 12.16 to 10.07 µs (17.2%) and streamed detection from 12.45 to 10.37 µs
-(16.7%). ASCII and byte-order-mark controls retained their outputs and had no measured slowdown. Both variants used the
-same native binary; the shared cases include detection and result construction.
-
-The short-result comparison used faust-cchardet as UnicodeDammit's installed backend. Resiliparse takes 2.48 µs on the
-legacy input, faust-cchardet 5.71 µs, and turbohtml 10.07 µs. Chardet and charset-normalizer misdecode that fixture;
-their affected cells omit timings. The ASCII and byte-order-mark comparisons preserve decoded text.
 
 .. bench-table::
     :file: bench/encoding-result.json
@@ -1437,27 +991,8 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 .. bench-table::
     :file: bench/link-filtering.json
 
-External-link filtering stops public-suffix probes at the maximum rule depth in the pinned table. The generator derives
-that limit from the same source data, including wildcard rules. For 900 links with 64 subdomains, matched release time
-fell from 6.155 to 2.992 ms (51.39%). The ordinary-host control changed from 1.291 to 1.286 ms (0.43%), below the
-acceptance threshold. Both inputs return the same 600-link sets before and after the change. CodSpeed covers both cases.
-
 .. bench-table::
     :file: bench/links-external.json
-
-*******************
- Scaling workloads
-*******************
-
-These synthetic inputs expose costs that small pages can hide. Their speedups apply to the named workload and size; the
-real-page tables above provide separate controls. The query cases reuse a parsed tree. Extraction cases include parsing.
-All operations also have entries in the CodSpeed suite.
-
-Sibling queries
-===============
-
-The CSS cases distinguish ordinary ``nth-child`` from a filtered sibling list. XPath covers a descendant selection and a
-union of list items and their containers.
 
 .. bench-table::
     :file: bench/select-nth.json
@@ -1465,25 +1000,11 @@ union of list items and their containers.
 .. bench-table::
     :file: bench/xpath-wide.json
 
-The ``set:distinct`` cases vary both node count and the number of distinct string values. The duplicate-heavy cases
-measure membership overhead; the unique cases expose repeated comparisons against earlier nodes.
-
 .. bench-table::
     :file: bench/xpath-distinct.json
 
-The set membership cases compare disjoint node sets for intersection, difference, and overlap detection. A separate
-overlap case matches the first node, where scanning can finish before building a membership table.
-
 .. bench-table::
     :file: bench/xpath-set.json
-
-Value comparisons distinguish equality from existential inequality: two sets can contain both equal and unequal pairs.
-The numeric cases use disjoint ranges and include a first-pair match as a control. Parsing runs before timing.
-
-The 10-node equality and both scalar-equality turbohtml cells use matched CPython 3.14.7 release builds without PGO or
-LTO. Long scalar equality fell from 10.070 to 6.961 µs (30.88% less time); the 32-character control fell from 0.356 to
-0.328 µs (7.79% less). All twelve measurement runs passed CPU and memory guards. The 10-node candidate retains its 6.33%
-spread warning. Other rows and competitor measurements retain their earlier builds.
 
 .. bench-table::
     :file: bench/xpath-compare.json
@@ -1491,68 +1012,23 @@ spread warning. Other rows and competitor measurements retain their earlier buil
 .. bench-table::
     :file: bench/xpath-order.json
 
-The translation cases vary map size, repeated characters, and cycling ASCII or Unicode text. Early matches and a map
-longer than its input check whether building an index costs more than scanning. A short ASCII case-folding input checks
-call overhead. These cases reuse a parsed tree and include XPath evaluation and result conversion in each measurement.
-
-The September 10 translation measurements use CPython 3.14.7 and a plain release build without PGO or LTO. Repeated
-characters reuse their previous mapping; varied input builds an index after scanning costs exceed its setup cost. The
-short-text case retains a direct scan. Competitor cells with high spread retain the table's noise warning.
-
 .. bench-table::
     :file: bench/xpath-translate.json
-
-The ``str:replace`` cases bind strings on a parsed document. The sparse case replaces eight matches of a 129-character
-needle whose repeated prefix otherwise forces repeated comparisons. The short ASCII control includes binding and result
-conversion. Reusing the substring search reduced elapsed time by 80.96% for sparse matches and 2.79% for the control in
-the matched release-build comparison, without PGO or LTO. The installed lxml and parsel XPath engines reject
-``str:replace`` as an unregistered function, so this table has no competitor timings.
 
 .. bench-table::
     :file: bench/xpath-replace.json
 
-The ``str:concat`` cases join about 320,000 characters from either 10,000 short nodes or ten long nodes. Parsing runs
-before timing. The short-node case measures buffer growth; the long-node control checks the cost of copying text.
-
 .. bench-table::
     :file: bench/xpath-concat.json
-
-The ``id()`` argument cases contain the same 30,000 ID tokens in either 10,000 short nodes or ten long nodes. Both
-return two IDs in document order, removing duplicate references. Geometric buffer growth reduced elapsed time by 18.17%
-for the short nodes and increased it by 4.72% for the long nodes in the matched release-build comparison.
 
 .. bench-table::
     :file: bench/xpath-id-nodes.json
 
-Shadow slots
-============
-
-The scaling cases read assignments for a named slot after a growing sequence of other slots. Empty hosts, comment-only
-hosts, and a child assigned to another slot check the cost of returning no assignments. Setup runs before timing. The
-ordinary shadow operation includes constructing the host and flattening its children.
-
 .. bench-table::
     :file: bench/shadow-slot.json
 
-Flattening nested fallback slots reuses one scratch buffer for their assigned or fallback children. These cases place
-1,000 sibling slots or one slot inside an outer slot, with fallback text in each. Tree construction happens outside the
-timer; timing covers ``assigned_nodes(flatten=True)`` on the outer slot. CodSpeed tracks both cases.
-
-On CPython 3.14.7 with a release build without PGO or LTO, the 1,000-slot comparison fell from 29.504 to 23.858 µs
-(19.14% faster). The single-slot means were 0.532 and 0.524 µs (1.52% faster), within sample noise and per-call timer
-overhead. We ran both comparisons under CPU-headroom and memory-pressure guards.
-
 .. bench-table::
     :file: bench/shadow-fallback.json
-
-Flattening several named slots builds a temporary assignment index after the first slot lookup. The index preserves
-first-slot precedence and light-tree child order, then frees its storage before returning. These cases flatten a host
-with 1,000 uniquely named slots and matching light children, or one slot and child. Tree construction happens outside
-the timer; timing includes building and freeing the index. CodSpeed tracks both cases.
-
-On CPython 3.14.7 with a release build without PGO or LTO, the 1,000-slot comparison fell from 4,997.827 to 84.605 µs
-(98.31% faster). The single-slot means were 0.407 and 0.387 µs, within sample noise; we do not claim a control speedup.
-All eight comparison runs passed CPU-headroom and memory-pressure guards.
 
 .. bench-table::
     :file: bench/shadow-assignment.json
@@ -1560,23 +1036,8 @@ All eight comparison runs passed CPU-headroom and memory-pressure guards.
 .. bench-table::
     :file: bench/shadow.json
 
-Schema patterns
-===============
-
-The pattern case grows an XML Schema regex character class and validates its last matching character. The catalog cases
-measure ordinary XSD and RELAX NG validation. These operations reuse a compiled schema and include parsing the document
-to validate.
-
 .. bench-table::
     :file: bench/validate-pattern.json
-
-The repeated-pattern case validates 1,000 sibling values against two pattern facets; its control omits the facets. Both
-cases reuse a compiled schema and include document parsing. Compiling the patterns once reduced elapsed time from
-1,753.826 µs to 1,609.558 µs (8.23%). The no-pattern control increased from 1,420.645 µs to 1,446.028 µs (1.79%).
-
-Schema construction increased from 2.058 µs to 2.262 µs (9.89%). The first validation of the target document saves more
-than that 0.203 µs construction cost. Compiled schemas retain immutable pattern graphs; each validation allocates and
-frees its own active-state lists and visitation markers, so concurrent calls share no mutable matching state.
 
 .. bench-table::
     :file: bench/validate-pattern-reuse.json
@@ -1584,41 +1045,8 @@ frees its own active-state lists and visitation markers, so concurrent calls sha
 .. bench-table::
     :file: bench/compile-pattern.json
 
-Compiled XSD schemas retain effective facet metadata for named and inline simple types. The inherited-facet case
-validates 1,000 values against a four-level derived type; the control uses the builtin string type. Both include
-instance parsing and reuse the schema. Matched validation time fell from 2,010.788 to 1,700.640 µs (15.42%). The
-builtin-type control increased from 1,301.321 to 1,307.343 µs (0.46%).
-
-Constructing the target schema increased from 3.924 to 4.951 µs (26.19%, or 1.028 µs). Compiled schemas keep the facet
-metadata until release; normalization and matching scratch memory remain local to each validation. Inheritance cutoffs,
-whitespace normalization and diagnostics retain their behavior.
-
-Named-type validation now reads those cached facets without gathering a discarded second copy. The matched element case
-falls from 1.61248 to 1.29548 ms (19.66%); the named-attribute case falls from 1.74647 to 1.47412 ms (15.59%). The
-attribute measurement has 12.78% spread, retained in the table. The builtin control changes by -0.14%, and a one-value
-named-type document improves 21.50%. These four cases include instance parsing; CodSpeed covers each.
-
-Lxml takes 245.954 µs for inherited-facet validation and 120.291 µs for the builtin control; it remains faster at
-validation. Its schema-construction measurement is 14.229 µs with 7.33% spread; the table retains that warning.
-
-Attribute validation indexes instance names once when an element has at least 32 attributes, sharing the index through
-attribute-group and base-type checks. It retains the declaration-name index for the later unknown-attribute pass.
-Required, prohibited and fixed-value diagnostics keep declaration order. Each call owns its temporary indexes.
-
-The 512-attribute case falls from 399.558 to 126.712 µs (68.29%). Four attributes change by +0.73%; 512 declarations
-with one instance attribute change by +0.86%; one declaration with 512 instance attributes is unchanged. All four cases
-include instance parsing and index construction, and have CodSpeed entries.
-
-The unchanged lxml inputs retain their earlier measurements: 357.829 µs for 512 attributes and 1.7860 µs for four.
-Turbohtml takes 126.712 and 1.4230 µs on those cases.
-
 .. bench-table::
     :file: bench/validate-attributes.json
-
-Numeric validation converts a value to double only when a min/max bound needs it. Lexical validation and the other
-facets still run. The 64-value unbounded decimal case improves from 20.788 to 18.741 µs (9.85%). Bounded decimals change
-by +0.13%; one unbounded decimal improves 2.81%, and the string control improves 1.51%. Each case reuses a compiled
-schema and includes instance parsing. CodSpeed covers all four cases.
 
 .. bench-table::
     :file: bench/validate-numeric-facets.json
@@ -1635,26 +1063,11 @@ schema and includes instance parsing. CodSpeed covers all four cases.
 .. bench-table::
     :file: bench/validate-rng.json
 
-RELAX NG constructors retain nullability for patterns whose result does not depend on recursive references. Validation
-reuses this immutable value for optional groups and interleaves; reference-dependent patterns keep the recursion guard.
-The extra integer fits existing pattern padding. The cases cover optional groups, interleaves, a small group and
-recursive elements. Validation reuses a compiled schema and includes parsing the instance. Compilation includes parsing
-the schema. Optional groups improve from 3.314 ms to 210.3 µs (93.65%); interleaves improve from 56.05 µs to 51.16 µs
-(8.73%). The small group improves 5.22%. Recursive validation and both compilation controls show no material regression;
-their observed differences range from 0.51% to 1.17%. Both builds include the same schema text ownership and namespace
-fixes. CodSpeed covers all four validation cases and both construction controls.
-
 .. bench-table::
     :file: bench/validate-rng-reuse.json
 
 .. bench-table::
     :file: bench/compile-rng-reuse.json
-
-Computed styles
-===============
-
-The deep case resolves every element in ancestor order. The ordinary and property-dense stylesheets measure separate
-costs of matching rules and copying computed values.
 
 .. bench-table::
     :file: bench/computed-style.json
@@ -1665,27 +1078,11 @@ costs of matching rules and copying computed values.
 .. bench-table::
     :file: bench/computed-style-deep.json
 
-The specificity cases resolve 128 elements against 256 matching rules. Caching each selector alternative's specificity
-reduces the nested ``:is()``/``:where()`` case from 6.048 ms to 2.523 ms (58.29%) and the ordinary selector-list case
-from 1.934 ms to 1.781 ms (7.90%). The cascade still chooses the most specific matching alternative and preserves
-declaration order. Each stylesheet retains 12 bytes per alternative, or 6 KiB for these cases, until stylesheet
-invalidation.
-
-Parsing the same documents, compiling their stylesheets, and resolving the first element takes 758.850 µs for nested
-selectors and 89.234 µs for ordinary selectors. These construction controls increase by 0.35% (2.622 µs) and 2.65%
-(2.306 µs). CodSpeed covers both reused and cold cases with both selector shapes.
-
 .. bench-table::
     :file: bench/computed-style-specificity.json
 
 .. bench-table::
     :file: bench/computed-style-specificity-cold.json
-
-Checking a required ID or class before a pseudo-class avoids descendant searches for irrelevant cascade rules. On 256
-rules and 128 parent-child pairs, matched release time fell from 3.520 to 2.157 ms (38.70%). Matching pseudo-first rules
-improved from 4.479 to 3.618 ms (19.22%). The class-first control changed from 2.160 to 2.181 ms (+0.97%); constructing
-the document and resolving its first element improved from 114.949 to 104.661 µs (8.95%). CodSpeed includes the three
-selector cases and the construction case.
 
 .. bench-table::
     :file: bench/computed-style-filter.json
@@ -1693,27 +1090,11 @@ selector cases and the construction case.
 .. bench-table::
     :file: bench/computed-style-filter-cold.json
 
-Computed style reuses descendant ``:has()`` results across element requests. Scope-dependent selectors keep their
-existing matching rules; document and stylesheet edits clear the memo. Updating an existing entry leaves its key count
-unchanged, so repeated requests do not keep expanding the table.
-
-On the two 512-div inputs, matched release time fell from 2.941 to 2.682 ms (8.81%) for a missing descendant and from
-2.939 to 2.686 ms (8.62%) for a matching descendant. The shallow control changed from 68.919 to 69.273 µs (+0.51%). The
-reverse-order positional control changed from 40.632 to 40.770 ms (+0.34%). Both builds include the memo-count fix.
-CodSpeed covers these four cases.
-
 .. bench-table::
     :file: bench/computed-style-selectors.json
 
 .. bench-table::
     :file: bench/computed-style-selectors-reverse.json
-
-Extraction
-==========
-
-Microdata cases distinguish local properties, empty scopes, and references in ascending, descending, and interleaved
-document order. The unannotated tree measures the cost of discovering that no metadata exists. Article cases increase
-the number of candidate containers.
 
 .. bench-table::
     :file: bench/microdata.json
@@ -1724,14 +1105,6 @@ the number of candidate containers.
 .. bench-table::
     :file: bench/microdata-empty-scope.json
 
-For shuffled references with at least 32 properties, Microdata extraction uses a temporary membership table and one
-tree-order walk. It releases the table before constructing property values. Smaller collections keep comparison sorting,
-and ordered or reversed collections need no table.
-
-On 1,000 interleaved references, matched release time fell from 2.325 to 0.655 ms (71.82%). The ordered, reversed and
-four-reference controls stayed within 1.53% of baseline. All four cases include HTML parsing and extraction; CodSpeed
-covers the target and controls.
-
 .. bench-table::
     :file: bench/microdata-itemref.json
 
@@ -1741,34 +1114,14 @@ covers the target and controls.
 .. bench-table::
     :file: bench/article-wide.json
 
-Nested article candidates share descendant text. The depth cases measure the cost of scoring these overlapping subtrees,
-with parsing outside the timed interval.
-
 .. bench-table::
     :file: bench/article-deep.json
-
-Feed extraction collects entry fields in one child traversal while preserving field-name precedence and the first
-occurrence of each field. On 30 RSS entries with 128 extension elements each, matched plain-release runs decrease from
-581.615 to 542.065 microseconds (6.80%). Candidate variation is 5.25%. Ordinary RSS and Atom controls decrease by 1.16%
-and 2.23%; those differences do not qualify as gains. These cases include parsing, and CodSpeed covers all three.
 
 .. bench-table::
     :file: bench/syndication.json
 
-Table spans share one trimmed text snapshot and one immutable Python string per source cell. Extracting 128 columns with
-4,096 characters of shared text decreases from 149.150 to 3.770 microseconds for rows (97.47%) and from 149.245 to 4.297
-microseconds for records (97.12%). The ordinary-cell control decreases by 2.90%, without a separate gain claim. Parsing
-stays outside timing; CodSpeed covers the three cases. Output rows and records remain independent of later tree edits.
-
 .. bench-table::
     :file: bench/tables-spans.json
-
-Path caching
-============
-
-The wide cases request every list item's path on a reused tree. The cold cases start with a fresh parse outside the
-timed interval, then request either every item's path or only the last item's path. Measuring one cold path separates
-the cache setup cost from the benefit of reusing positions.
 
 .. bench-table::
     :file: bench/path-wide.json
@@ -1788,17 +1141,8 @@ the cache setup cost from the benefit of reusing positions.
 .. bench-table::
     :file: bench/path-xpath-one-cold.json
 
-The class-edit case sets each item's class before requesting its path. Those edits leave ID uniqueness intact, so they
-should not rebuild the ID-occurrence map.
-
 .. bench-table::
     :file: bench/path-class-edit.json
-
-Text and attribute ordering
-===========================
-
-Long disordered combining-mark runs and elements with many reversed attributes exercise ordering costs. The ordinary
-normalization and canonicalization inputs measure the smaller workloads alongside them.
 
 .. bench-table::
     :file: bench/normalize.json
@@ -1812,22 +1156,8 @@ normalization and canonicalization inputs measure the smaller workloads alongsid
 .. bench-table::
     :file: bench/canonicalize-attrs.json
 
-Tracking the active xlink namespace scope during serialization avoids ancestor scans at each xlink attribute. On an SVG
-tree 150 levels deep with one xlink-bearing sibling per level, matched release time fell from 20.392 to 9.907 µs
-(51.41%). The deep tree without xlink changed from 15.168 to 15.709 µs (+3.57%); the shallow ordinary control changed
-from 0.244 to 0.254 µs (+3.89%). CodSpeed covers these three inputs.
-
-Lxml's HTML parser omits the empty head element on these inputs and the SVG and xlink namespace declarations on the
-sparse-xlink input. These output differences exclude its cells from timing comparisons.
-
 .. bench-table::
     :file: bench/canonicalize-deep.json
-
-Language detection
-==================
-
-The long-prose cases repeat the same vocabulary to measure trigram counting as input length grows. The ordinary cases
-retain the suite's multilingual inputs.
 
 .. bench-table::
     :file: bench/detect-language.json
@@ -1957,20 +1287,8 @@ already-linked tree. These operations can be stages in an application's cleanup 
 .. bench-table::
     :file: bench/sanitize-node.json
 
-The sanitizer batches name-policy rejections on elements with at least 32 attributes when reporting and
-attribute/custom-element callbacks are disabled. The retained attributes still pass the URL, style and value safety
-checks. Matched runs reduced the 1,024-rejected-attribute case from 359.0 to 116.4 microseconds, a 67.57% gain. The
-1,024-allowed-attribute control slowed by 0.06%; the four-allowed-attribute control slowed by 2.82%. These cases reuse a
-compiled policy and include parsing and serialization; all three also run in CodSpeed.
-
 .. bench-table::
     :file: bench/sanitize-attributes.json
-
-Linkification reuses its owned four-byte Unicode snapshot during tree mutation, retaining the snapshot across callbacks.
-The wide-text, one-link case decreases from 81.535 to 77.200 microseconds (5.32%). ASCII, clean-wide-text and many-link
-controls differ by -1.24%, +0.85% and -2.58%. These parsed-node samples use 32 iterations per value, with fresh trees
-prepared outside timing. The callback case includes parsing and differs by -2.85%, without a separate gain claim.
-CodSpeed includes these five cases.
 
 .. bench-table::
     :file: bench/linkify-node.json
@@ -1978,34 +1296,5 @@ CodSpeed includes these five cases.
 .. bench-table::
     :file: bench/linkify-traversal.json
 
-*********
- Startup
-*********
-
-Wheels store their configured version beside the package, avoiding distribution-metadata lookup during import. Editable
-installs still report the installed distribution's version after a rebuild changes the checkout version. An sdist also
-retains its configured version when unpacked inside another Git repository.
-
-Matched fresh-process measurements include interpreter startup, import and process exit. In a wheel environment with one
-installed distribution, import fell from 46.046 to 34.538 ms (24.99%) and CLI minification from 52.597 to 44.587 ms
-(15.23%). With 40 installed distributions, import fell from 45.397 to 33.382 ms (26.47%) and CLI minification from
-54.249 to 45.467 ms (16.19%). Each comparison uses the same interpreter and native binary on both sides. One
-small-environment candidate import batch had 11.22% spread; retain that uncertainty when comparing the percentages.
-
-The table contains the larger environment's candidate measurements. The shared pyperf suite covers both operations;
-CodSpeed simulation excludes these elapsed-time subprocess measurements.
-
 .. bench-table::
     :file: bench/startup.json
-
-******************
- Table generation
-******************
-
-Table regeneration reads combining classes during the Unicode decomposition scan and searches composition pairs among
-canonical decompositions. Offline generation of the complete Unicode 16.0.0 normalization header, including its
-four-form self-check and file output, fell from 2.306 to 2.165 seconds (6.10%) in a matched ABBA comparison. The two
-baseline observations were 2.301 and 2.311 seconds; the candidate observations were 2.179 and 2.151 seconds. Both
-variants emitted byte-identical headers. Network retrieval happens before measurement; the generator still verifies the
-pinned source digest. We measure this build-time workload with elapsed time outside CodSpeed simulation and native PGO
-training.

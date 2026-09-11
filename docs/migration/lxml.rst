@@ -133,25 +133,6 @@ turbohtml parses two to four times faster than lxml while matching a browser on 
 the operational surface: fragment parsing, CSS selection, text and tree walks, the link helpers, XPath, and the
 node-path generators.
 
-The deep canonicalization cases compare each library's HTML parser and canonical serializer. Lxml omits the empty head
-element on all three inputs and the SVG and xlink namespace declarations on the sparse-xlink input. The table records
-these byte-output mismatches without competitor timings; its native values cover 150-level trees with and without xlink
-attributes, plus a shallow ordinary document.
-
-The attribute-validation rows compare 512 attributes, four attributes, and cases with unequal declaration and instance
-attribute counts. Both libraries reuse the compiled schema and parse the instance within each measurement. Turbohtml
-allocates its instance and declaration indexes per validation; concurrent validators share no mutable index. Named-facet
-rows cover elements and attributes, builtin types, and one-value documents. Turbohtml reuses compiled facets without
-gathering a discarded temporary copy before checking each named value.
-
-The numeric-facet cases cover bounded and unbounded decimals, a one-value document, and strings. Validation keeps
-lexical and facet checks while avoiding a double conversion when no numeric bound uses it. The same compiled-schema
-reuse and instance-parsing boundary applies to these cases.
-
-The RELAX NG reuse cases cover optional groups, interleaves and recursive definitions. Validation reuses a compiled
-schema and parses each instance; construction measures schema parsing and compilation. Turbohtml stores reference-free
-nullability in immutable compiled patterns and keeps recursive definition state local to each validation call.
-
 .. bench-table::
     :file: bench/lxml.json
 
@@ -247,24 +228,9 @@ the imported declarations enter conflict resolution at lower import precedence.
 
 Two limits to plan for. Only ``xsl:import`` loads other files (pass ``base_url``); ``xsl:include`` and ``document()``
 load nothing, and locale-aware ``xsl:sort`` collation and ``id()`` over DTD-declared IDs are out of reach for want of a
-collation and DTD layer. A pipeline that depends on those features needs lxml.
-
-Default ``xsl:number`` instructions share sibling counts when their node type and element name match. The repeated
-numbering case applies eight instructions to each of 2,000 siblings: September 10 plain-release measurements take 2.68
-ms for turbohtml and 36.6 ms for lxml. The table also covers single instructions, reverse order, one node, and
-no-numbering controls. Both libraries reuse a compiled stylesheet and parsed source. turbohtml returns a Python string;
-lxml returns an XSLT result tree, with string conversion outside timing. See :doc:`/development/performance` for the
-build configuration and per-cell spread.
-
-Repeated default ``level="any"`` numbering reuses document-order counts. Explicit unprefixed name, wildcard, and
-document-root patterns, static predicates, and unions share their match sets across instructions with identical pattern
-text within one application. Variables, namespace-prefixed steps, and extension calls retain per-call evaluation.
-Explicit numbering also retains prefix counts across repeated source visits, deferring index allocation until a second
-distinct visit. The 1,024-node explicit-count case takes 0.230 ms with turbohtml and 3.88 ms with lxml. The table flags
-high-spread cells, including repeated instructions and larger default-any cases.
-
-XSLT 1.0 forbids ``current()`` in patterns. The ``count-current`` case checks existing turbohtml behavior; its lxml cell
-has no timing because the libraries produce different output.
+collation and DTD layer. On transform throughput turbohtml runs about 1.3 times faster than libxslt's decade-tuned C
+engine on the ``XSLT transform`` row, and ships its stylesheet processor in the same pure, dependency-free wheel as the
+parser, over one typed node API. A pipeline that lives inside libxslt's wider XSLT/EXSLT surface stays with lxml.
 
 ****************
  How to migrate

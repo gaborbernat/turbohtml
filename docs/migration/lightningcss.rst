@@ -97,10 +97,6 @@ minifies all six stylesheets. Each ratio is against turbohtml:
 .. bench-table::
     :file: bench/lightningcss.json
 
-The rule-merge cases include repeated media blocks, equal declaration bodies, and comment barriers. Conflict cases vary
-selector count and name length. These cases compare both elapsed time and output bytes after checking the resulting
-cascade against the input.
-
 Reach for lightningcss when you can pin a browser-target set and want the last few percent of size; reach for turbohtml
 when you want value-safe output with no configuration and tolerance of real-world CSS.
 

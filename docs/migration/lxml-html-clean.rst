@@ -99,10 +99,6 @@ Performance
 blocklist cleaner. lxml-html-clean also ships ``autolink_html``, benchmarked here as the linkify op: turbohtml runs 2.5x
 faster on the comment case and 1.3x on markup, and about half the speed on plain prose (0.6x).
 
-The wide-text cases compare parsed-tree mutation with setup outside timing. turbohtml adds ``rel="nofollow"`` to new
-links; ``autolink`` omits it, so the linked cases record that difference without timings. The clean wide-text case has
-matching output and includes timings for both libraries.
-
 .. bench-table::
     :file: bench/lxml-html-clean.json
 

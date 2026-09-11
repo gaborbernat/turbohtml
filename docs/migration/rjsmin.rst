@@ -97,18 +97,6 @@ The trade is deliberate: rjsmin's regex is faster than a parse, but it shrinks f
 output is up to half the size: jQuery 3.7 minifies to 31% of source under turbohtml versus 51% under rjsmin, lodash 4.17
 to 13% versus 28%, because turbohtml renames and folds rather than only deleting space. Each ratio is against turbohtml:
 
-The literal-propagation inputs contain 256 or one local ``const`` binding and repeated reads. Both libraries preserve
-the complete callback order and returned values. Turbohtml produces 2,327 bytes for the interleaved large case; rjsmin
-retains 7,518 bytes. The grouped-declaration case retains 5,988 bytes in rjsmin, versus 2,327 in turbohtml.
-
-The call-initializer cases check once-read bindings while preserving callback order and returned values. Rjsmin is
-faster on all three inputs. For 256 calls, turbohtml produces 3,142 bytes in either layout; rjsmin retains 4,050 bytes
-for one declaration and 5,580 bytes for separate declarations.
-
-The mixed-declarator cases retain call initializers while removing repeated literal bindings. The ``var`` cases also
-cover reads before initialization, where replacing ``undefined`` with the later value would change behavior. Both
-libraries preserve the complete callback traces and returned values on these inputs.
-
 .. bench-table::
     :file: bench/rjsmin.json
 

@@ -136,10 +136,6 @@ What microdata has that turbohtml does not
 Performance
 ===========
 
-The ``microdata-itemref`` benchmark includes properties outside the ``itemscope`` element. On these inputs, microdata
-0.8.0's ``get_items()`` returns an empty property mapping, while turbohtml resolves the referenced properties. We omit
-microdata from this comparison because it does not perform the same extraction.
-
 ``microdata`` starts from the raw HTML string, so it parses before it extracts: it builds an html5lib tree and walks the
 ``itemscope`` elements in Python, where :func:`~turbohtml.extract.microdata` parses to the WHATWG tree and gathers the
 items in one C walk. On a product page carrying Microdata alongside JSON-LD and OpenGraph, and on an 8 KiB catalog of
