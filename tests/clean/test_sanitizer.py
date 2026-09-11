@@ -2271,33 +2271,6 @@ def test_the_compiler_rejects_too_few_arguments() -> None:
         _sanitize_policy({}, frozenset())  # ty: ignore[missing-argument]  # the arity check is the point
 
 
-# Elements that execute or load script if they survive in the HTML namespace.
-_DANGER_TAGS = frozenset({"script", "iframe", "object", "embed", "frame", "style", "noscript", "base"})
-# Schemes that run script when navigated to.
-_DANGER_SCHEMES = ("javascript:", "data:", "vbscript:")
-
-
-def _live_danger(html: str) -> list[str]:
-    """Reparse sanitized HTML and list every executable construct that survived; empty means safe."""
-    found: list[str] = []
-    stack = list(parse_fragment(html).children)
-    while stack:
-        node = stack.pop()
-        if isinstance(node, Element):
-            if node.tag in _DANGER_TAGS and node.namespace.value == "html":
-                found.append(f"<{node.tag}>")
-            for name, raw in node.attrs.items():
-                value = (" ".join(raw) if isinstance(raw, list) else (raw or "")).lower()
-                if name.startswith("on"):
-                    found.append(f"@{name}")
-                if name in {"href", "src", "action", "xlink:href", "formaction"}:
-                    cleaned = "".join(ch for ch in value if ord(ch) > 0x20)
-                    if cleaned.startswith(_DANGER_SCHEMES):
-                        found.append(f"{name}={cleaned[:24]}")
-        stack.extend(getattr(node, "children", ()))
-    return found
-
-
 XSS_CORPUS = [
     pytest.param("<script>alert(1)</script>", id="script"),
     pytest.param("<scr<script>ipt>alert(1)</scr</script>ipt>", id="nested-script"),
