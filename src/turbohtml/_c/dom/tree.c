@@ -357,12 +357,7 @@ uint16_t th_tag_lookup(const char *bytes, Py_ssize_t len) {
 /* The category bitmask for an atom (0 for TH_TAG_UNKNOWN), so a constructed or
    reconstructed element carries the same flags the parser derives from the name. */
 uint8_t th_tag_flags(uint16_t atom) {
-    for (int index = 0; index < th_tag_count; index++) {
-        if (th_tag_table[index].atom == atom) {
-            return th_tag_table[index].flags;
-        }
-    }
-    return 0;
+    return atom == TH_TAG_UNKNOWN ? 0 : th_tag_table[atom - 1].flags;
 }
 
 int th_tag_is_void(uint16_t atom) {
