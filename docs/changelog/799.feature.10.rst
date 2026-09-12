@@ -1,1 +1,1 @@
-Speed up :attr:`~turbohtml.Html.sort_attributes` for elements with many attributes.
+Speed up attribute sorting with :class:`~turbohtml.Html` for elements with many attributes.
