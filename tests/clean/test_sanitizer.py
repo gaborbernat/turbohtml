@@ -1275,6 +1275,51 @@ def test_attribute_prefix_default_policy_drops_data_attributes() -> None:
     assert sanitize('<a href="http://x" data-id="1">y</a>') == '<a href="http://x">y</a>'
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        pytest.param("data-", id="ascii"),
+        pytest.param("é-", id="latin1"),
+        pytest.param("東京-", id="bmp"),
+        pytest.param("😀-", id="astral"),
+    ],
+)
+def test_attribute_prefix_unicode_names(prefix: str) -> None:
+    policy: Final = Policy(tags=frozenset({"p"}), attributes={}, attribute_prefixes=frozenset({prefix}))
+    assert sanitize(f'<p {prefix}id="1" {prefix}role="2" other="3">x</p>', policy) == (
+        f'<p {prefix}id="1" {prefix}role="2">x</p>'
+    )
+
+
+def test_attribute_prefix_mutation_from_callback() -> None:
+    prefixes: Final = {"data-"}
+
+    def change_prefixes(_tag: str, name: str, value: str) -> str:
+        if name == "data-first":
+            prefixes.clear()
+            prefixes.add("aria-")
+        return value
+
+    policy: Final = Policy(
+        tags=frozenset({"p"}),
+        attributes={},
+        attribute_prefixes=cast("frozenset[str]", prefixes),
+        attribute_filter=change_prefixes,
+    )
+    assert sanitize('<p data-first="1" data-second="2" aria-label="3">x</p>', policy) == (
+        '<p data-first="1" aria-label="3">x</p>'
+    )
+
+
+@pytest.mark.parametrize(
+    "prefixes",
+    [pytest.param(frozenset({"\ud800"}), id="frozen"), pytest.param({"\ud800"}, id="mutable")],
+)
+def test_attribute_prefix_surrogate_raises(prefixes: frozenset[str] | set[str]) -> None:
+    with pytest.raises(UnicodeEncodeError, match="surrogates not allowed"):
+        sanitize('<a data-id="1">x</a>', _prefix_policy(cast("frozenset[str]", prefixes)))
+
+
 def test_attribute_prefix_empty_string_raises_valueerror() -> None:
     with pytest.raises(ValueError, match="attribute_prefixes must not contain an empty prefix"):
         sanitize("<a>y</a>", _prefix_policy(frozenset({""})))

@@ -29,10 +29,11 @@ typedef struct {
     PyObject *remove_with_content; /* frozenset[str]: disallowed tags whose whole subtree is dropped, not escaped */
     PyObject *css_properties;      /* frozenset[str]: CSS property names kept when scrubbing a `style` attribute */
     PyObject *attribute_prefixes;  /* frozenset[str]: allow any attribute whose name starts with one of these */
-    PyObject *attribute_values;    /* dict[str, dict[str, frozenset[str]]]: per (tag, attr) literal value allowlist */
-    PyObject *allowed_styles;      /* dict[str, dict[str, tuple[re.Pattern, ...]]]: per (tag or "*") allowed style
-                                      properties, each mapped to the compiled patterns its value must match, or an empty
-                                      dict when no per-property value allowlist is in force */
+    PyObject *prefix_tuple;
+    PyObject *attribute_values; /* dict[str, dict[str, frozenset[str]]]: per (tag, attr) literal value allowlist */
+    PyObject *allowed_styles;   /* dict[str, dict[str, tuple[re.Pattern, ...]]]: per (tag or "*") allowed style
+                                   properties, each mapped to the compiled patterns its value must match, or an empty
+                                   dict when no per-property value allowlist is in force */
     PyObject *re_search; /* the interned "search" method name, for calling re.Pattern.search from the style scrubber */
     PyObject *media_hosts;    /* frozenset[str]: allowed hosts for an embedded-media (audio/video/source/track) src */
     PyObject *transform_tags; /* dict[str, tuple[str, dict[str, str]]]: source tag -> (target tag, added attributes),
@@ -235,10 +236,32 @@ static int is_srcset_attr(const char *name, Py_ssize_t len) {
     return 0;
 }
 
-/* Does `name` begin with any allowlisted attribute-name prefix (nh3's generic_attribute_prefixes, the `data-*` case)?
-   The prefixes are validated as non-empty str at setup, so each check is a byte-prefix compare. Returns 1 match, 0
-   none, -1 error. Only reached when the prefix set is non-empty, so a policy without prefixes never iterates. */
+static int attribute_prefix_matches(PyObject *prefix, const char *name, Py_ssize_t len) {
+    Py_ssize_t prefix_len = 0;
+    const char *prefix_bytes = PyUnicode_AsUTF8AndSize(prefix, &prefix_len);
+    if (prefix_bytes == NULL) {
+        return -1;
+    }
+    return len >= prefix_len && memcmp(name, prefix_bytes, (size_t)prefix_len) == 0;
+}
+
 static int name_has_allowed_prefix(sanitizer *s, const char *name, Py_ssize_t len) {
+    if (PyFrozenSet_CheckExact(s->attribute_prefixes)) {
+        if (s->prefix_tuple == NULL) {
+            s->prefix_tuple = PySequence_Tuple(s->attribute_prefixes);
+            if (s->prefix_tuple == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        }
+        for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(s->prefix_tuple); index++) {
+            int matched = attribute_prefix_matches(PyTuple_GET_ITEM(s->prefix_tuple, index), name, len);
+            if (matched != 0) {
+                return matched;
+            }
+        }
+        return 0;
+    }
+    /* Callbacks can mutate sets; subclasses can override iteration. */
     PyObject *iterator = PyObject_GetIter(s->attribute_prefixes);
     if (iterator == NULL) { /* GCOVR_EXCL_BR_LINE: getting an iterator over a set cannot fail */
         return -1;          /* GCOVR_EXCL_LINE: error path */
@@ -246,19 +269,12 @@ static int name_has_allowed_prefix(sanitizer *s, const char *name, Py_ssize_t le
     int matched = 0;
     PyObject *prefix;
     while (!matched && (prefix = PyIter_Next(iterator)) != NULL) {
-        Py_ssize_t prefix_len = 0;
-        const char *prefix_bytes = PyUnicode_AsUTF8AndSize(prefix, &prefix_len);
-        if (prefix_bytes == NULL) { /* GCOVR_EXCL_BR_LINE: prefixes are validated as str at setup */
-            Py_DECREF(prefix);      /* GCOVR_EXCL_LINE: error path */
-            Py_DECREF(iterator);    /* GCOVR_EXCL_LINE */
-            return -1;              /* GCOVR_EXCL_LINE */
-        }
-        matched = len >= prefix_len && memcmp(name, prefix_bytes, (size_t)prefix_len) == 0;
+        matched = attribute_prefix_matches(prefix, name, len);
         Py_DECREF(prefix);
     }
     Py_DECREF(iterator);
-    if (PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: set iteration raises no error of its own */
-        return -1;          /* GCOVR_EXCL_LINE: error path */
+    if (PyErr_Occurred()) {
+        return -1;
     }
     return matched;
 }
@@ -2571,6 +2587,7 @@ PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
         return NULL;                                    /* GCOVR_EXCL_LINE */
     }
     int failed = sanitize_children(&s, root, 1) < 0; /* the fragment root is kept context */
+    Py_XDECREF(s.prefix_tuple);
     Py_DECREF(s.star);
     Py_DECREF(s.re_search);
     if (failed) {

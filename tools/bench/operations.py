@@ -2157,6 +2157,7 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("1024 rejected attributes", "<p " + " ".join(f'a{index}="x"' for index in range(1_024)) + ">x</p>"),
         ("1024 allowed attributes", "<p " + " ".join(f'data-{index}="x"' for index in range(1_024)) + ">x</p>"),
         ("four allowed attributes", '<p data-a="x" data-b="x" data-c="x" data-d="x">x</p>'),
+        ("256 elements with four allowed attributes", '<p data-a="x" data-b="x" data-c="x" data-d="x">x</p>' * 256),
     ),
     "sanitize-styles": lambda: (("styled 4 KiB", _SANITIZE_STYLES * 20),),
     "sanitize-transform": lambda: (("legacy 4 KiB", _SANITIZE_LEGACY * 13),),
