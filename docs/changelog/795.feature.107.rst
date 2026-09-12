@@ -1,0 +1,1 @@
+Speed up :class:`streaming encoding detection <turbohtml.detect.EncodingDetector>` of short inputs.

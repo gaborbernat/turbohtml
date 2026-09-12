@@ -291,6 +291,14 @@ uint32_t th_tree_attr_generation(const th_tree *tree) {
     return tree->attr_rec_count;
 }
 
+uint64_t th_tree_attr_version(const th_tree *tree) {
+    return tree->attr_version;
+}
+
+uint64_t th_tree_id_version(const th_tree *tree) {
+    return tree->id_version;
+}
+
 int th_tree_quirks(const th_tree *tree) {
     return tree->quirks;
 }
@@ -419,6 +427,7 @@ static int stack_push(th_tree *tree, th_node *node) {
         tree->open_cap = (Py_ssize_t)cap;
     }
     tree->open[tree->open_len++] = node;
+    tree->stack_version++;
     if (tree->open_len > tree->max_depth) {
         tree->max_depth = tree->open_len;
     }
@@ -431,6 +440,7 @@ static int name_matches(const th_node *node, const th_token *token, int fold);
 static void stack_pop(th_tree *tree) {
     if (tree->open_len > 0) { /* GCOVR_EXCL_BR_LINE: only reached with a non-empty stack */
         tree->open_len--;
+        tree->stack_version++;
         th_node *popped = tree->open[tree->open_len];
         /* record that an end tag named this element (as opposed to an implied or
            EOF close) so escape-mode sanitizing reproduces the author's `</tag>` */
@@ -483,7 +493,7 @@ static int is_scope_boundary(const th_node *node) {
     return node->atom == TH_TAG_FOREIGNOBJECT || node->atom == TH_TAG_DESC || node->atom == TH_TAG_TITLE;
 }
 
-static int has_in_scope(th_tree *tree, uint16_t atom) {
+static int find_in_scope(th_tree *tree, uint16_t atom) {
     for (Py_ssize_t index = tree->open_len - 1; index >= 0; index--) {
         th_node *node = tree->open[index];
         if (node->ns == TH_NS_HTML && node->atom == atom) {
@@ -494,6 +504,15 @@ static int has_in_scope(th_tree *tree, uint16_t atom) {
         }
     }
     return 0;
+}
+
+static int has_in_scope(th_tree *tree, uint16_t atom) {
+    if (tree->scope_version != tree->stack_version || tree->scope_atom != atom) {
+        tree->scope_result = find_in_scope(tree, atom);
+        tree->scope_atom = atom;
+        tree->scope_version = tree->stack_version;
+    }
+    return tree->scope_result;
 }
 
 /* List-item scope: the default boundaries plus ol and ul. */
@@ -928,6 +947,7 @@ static void merge_attrs(th_tree *tree, th_node *node, const th_token *token) {
         }
     }
     node->attrs = merged;
+    node->attr_capacity_shift = 0;
     node->attr_count += add;
 }
 
@@ -1151,15 +1171,35 @@ static void insert_text(th_tree *tree, Py_UCS4 *text, Py_ssize_t len) {
     /* merge into the immediately preceding text node at the same location */
     th_node *prev = before != NULL ? before->prev_sibling : parent->last_child;
     if (prev != NULL && prev->type == TH_NODE_TEXT) {
-        Py_UCS4 *prev_text = need_text(tree, prev); /* realize prev if it was a span */
-        Py_UCS4 *merged = arena_alloc(tree, (prev->text_len + len) * (Py_ssize_t)sizeof(Py_UCS4));
-        if (merged == NULL || prev_text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-            return;                                /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_UCS4 *prev_text = need_text(tree, prev);
+        if (prev_text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return;              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        memcpy(merged, prev_text, (size_t)prev->text_len * sizeof(Py_UCS4));
-        memcpy(merged + prev->text_len, text, (size_t)len * sizeof(Py_UCS4));
-        prev->text = merged;
+        size_t capacity = tree->merged_text_node == prev ? tree->merged_text_capacity : 0;
+        if ((size_t)len > SIZE_MAX - (size_t)prev->text_len) { /* GCOVR_EXCL_BR_LINE: allocation-size overflow */
+            tree->failed = 1;                                  /* GCOVR_EXCL_LINE: allocation-size overflow */
+            return;                                            /* GCOVR_EXCL_LINE: allocation-size overflow */
+        }
+        size_t needed = (size_t)prev->text_len + (size_t)len;
+        if (needed > capacity) {
+            size_t bytes;
+            /* GCOVR_EXCL_BR_START: allocation-size overflow */
+            if (!th_grow_cap(needed, capacity, 16, sizeof(Py_UCS4), &capacity, &bytes) || bytes > PY_SSIZE_T_MAX) {
+                /* GCOVR_EXCL_BR_STOP */
+                tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-size overflow */
+                return;           /* GCOVR_EXCL_LINE: allocation-size overflow */
+            }
+            Py_UCS4 *merged = arena_alloc(tree, (Py_ssize_t)bytes);
+            if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return;           /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            memcpy(merged, prev_text, (size_t)prev->text_len * sizeof(Py_UCS4));
+            prev->text = merged;
+        }
+        memcpy(prev->text + prev->text_len, text, (size_t)len * sizeof(Py_UCS4));
         prev->text_len += len;
+        tree->merged_text_node = prev;
+        tree->merged_text_capacity = capacity;
         return;
     }
     th_node *node = node_new(tree, TH_NODE_TEXT);
@@ -1172,7 +1212,7 @@ static void insert_text(th_tree *tree, Py_UCS4 *text, Py_ssize_t len) {
 }
 
 /* Insert a text run as a zero-copy span into input[off .. off+len). The caller
-   guarantees the run has no NUL (tree->has_nul is false) and the input outlives
+   guarantees the run has no NUL and the input outlives
    the tree (tree->can_span). An adjacent text node is the rare case: realize the
    span and fall back to the merging insert_text. */
 static void insert_text_span(th_tree *tree, Py_ssize_t off, Py_ssize_t len) {
@@ -1406,42 +1446,125 @@ static void maybe_clone_option(th_tree *tree, th_node *option) {
 static void afe_remove_at(th_tree *tree, Py_ssize_t index) {
     memmove(&tree->afe[index], &tree->afe[index + 1], (size_t)(tree->afe_len - index - 1) * sizeof(th_node *));
     tree->afe_len--;
+    if (tree->afe_len == 0) {
+        tree->afe_hash_valid = 0;
+    }
 }
 
 /* Remove the open-elements-stack entry at index, shifting the tail down. */
 static void stack_remove_at(th_tree *tree, Py_ssize_t index) {
     memmove(&tree->open[index], &tree->open[index + 1], (size_t)(tree->open_len - index - 1) * sizeof(th_node *));
     tree->open_len--;
+    tree->stack_version++;
+}
+
+static uint64_t afe_hash(const th_node *node) {
+    uint64_t hash = UINT64_C(14695981039346656037) ^ node->atom;
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        const th_node_attr *attr = &node->attrs[index];
+        hash = (hash ^ attr->name_atom) * UINT64_C(1099511628211);
+        hash = (hash ^ (uint64_t)attr->value_len) * UINT64_C(1099511628211);
+        for (Py_ssize_t offset = 0; offset < attr->value_len; offset++) {
+            hash = (hash ^ attr->value[offset]) * UINT64_C(1099511628211);
+        }
+    }
+    return hash | 1;
+}
+
+static int afe_hash_add(th_tree *tree, const th_node *node) {
+    if (tree->afe_hash_count >= tree->afe_hash_capacity / 2) {
+        size_t capacity;
+        size_t bytes;
+        /* GCOVR_EXCL_BR_START: allocation-size overflow */
+        if (!th_grow_cap(tree->afe_hash_capacity + 1, tree->afe_hash_capacity, 32, sizeof(uint64_t), &capacity,
+                         &bytes)) {
+            tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-size overflow */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-size overflow */
+        }
+        /* GCOVR_EXCL_BR_STOP */
+        uint64_t *hashes = PyMem_Calloc(capacity, sizeof(uint64_t));
+        if (hashes == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        for (size_t index = 0; index < tree->afe_hash_capacity; index++) {
+            uint64_t hash = tree->afe_hashes[index];
+            if (hash != 0) {
+                size_t slot = (size_t)hash & (capacity - 1);
+                while (hashes[slot] != 0) {
+                    slot = (slot + 1) & (capacity - 1);
+                }
+                hashes[slot] = hash;
+            }
+        }
+        PyMem_Free(tree->afe_hashes);
+        tree->afe_hashes = hashes;
+        tree->afe_hash_capacity = capacity;
+    }
+    uint64_t hash = afe_hash(node);
+    size_t slot = (size_t)hash & (tree->afe_hash_capacity - 1);
+    while (tree->afe_hashes[slot] != 0) {
+        if (tree->afe_hashes[slot] == hash) {
+            return 1;
+        }
+        slot = (slot + 1) & (tree->afe_hash_capacity - 1);
+    }
+    tree->afe_hashes[slot] = hash;
+    tree->afe_hash_count++;
+    return 0;
 }
 
 static int afe_push(th_tree *tree, th_node *node) {
-    /* Noah's Ark: at most three earlier entries with the same name+attributes
-       may precede a new one before the oldest is dropped. */
-    int matches = 0;
-    Py_ssize_t earliest = -1;
-    for (Py_ssize_t index = tree->afe_len - 1; index >= 0; index--) {
-        th_node *entry = tree->afe[index];
-        if (entry == NULL) {
-            break; /* stop at the marker */
+    if (!tree->afe_hash_valid) {
+        if (tree->afe_hash_capacity > 0) {
+            memset(tree->afe_hashes, 0, tree->afe_hash_capacity * sizeof(uint64_t));
         }
-        if (entry->atom == node->atom && entry->attr_count == node->attr_count) {
-            int same = 1;
-            for (Py_ssize_t aidx = 0; aidx < node->attr_count && same; aidx++) {
-                if (entry->attrs[aidx].name_atom != node->attrs[aidx].name_atom ||
-                    entry->attrs[aidx].value_len != node->attrs[aidx].value_len ||
-                    memcmp(entry->attrs[aidx].value, node->attrs[aidx].value,
-                           (size_t)node->attrs[aidx].value_len * sizeof(Py_UCS4)) != 0) {
-                    same = 0;
+        tree->afe_hash_count = 0;
+        for (Py_ssize_t index = 0; index < tree->afe_len; index++) {
+            if (tree->afe[index] != NULL) {
+                /* GCOVR_EXCL_BR_START: allocation failure */
+                if (afe_hash_add(tree, tree->afe[index]) < 0) {
+                    return 0; /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                /* GCOVR_EXCL_BR_STOP */
+            }
+        }
+        tree->afe_hash_valid = 1;
+    }
+    int seen = afe_hash_add(tree, node);
+    if (seen < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return 0;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    /* Hash collisions retain the full duplicate comparison. */
+    if (seen) {
+        /* Noah's Ark: at most three earlier entries with the same name+attributes
+           may precede a new one before the oldest is dropped. */
+        int matches = 0;
+        Py_ssize_t earliest = -1;
+        for (Py_ssize_t index = tree->afe_len - 1; index >= 0; index--) {
+            th_node *entry = tree->afe[index];
+            if (entry == NULL) {
+                break; /* stop at the marker */
+            }
+            if (entry->atom == node->atom && entry->attr_count == node->attr_count) {
+                int same = 1;
+                for (Py_ssize_t aidx = 0; aidx < node->attr_count && same; aidx++) {
+                    if (entry->attrs[aidx].name_atom != node->attrs[aidx].name_atom ||
+                        entry->attrs[aidx].value_len != node->attrs[aidx].value_len ||
+                        memcmp(entry->attrs[aidx].value, node->attrs[aidx].value,
+                               (size_t)node->attrs[aidx].value_len * sizeof(Py_UCS4)) != 0) {
+                        same = 0;
+                    }
+                }
+                if (same) {
+                    matches++;
+                    earliest = index;
                 }
             }
-            if (same) {
-                matches++;
-                earliest = index;
-            }
         }
-    }
-    if (matches >= 3) {
-        afe_remove_at(tree, earliest);
+        if (matches >= 3) {
+            afe_remove_at(tree, earliest);
+        }
     }
     if (tree->afe_len == tree->afe_cap) {
         size_t cap;
@@ -1484,6 +1607,7 @@ static void afe_push_marker(th_tree *tree) {
 }
 
 static void afe_clear_to_marker(th_tree *tree) {
+    tree->afe_hash_valid = 0;
     /* afe_clear_to_marker always runs with a marker on the list */
     while (tree->afe_len > 0 /* GCOVR_EXCL_BR_LINE */) {
         th_node *entry = tree->afe[--tree->afe_len];
@@ -1535,6 +1659,15 @@ static th_node *afe_find_atom(th_tree *tree, uint16_t atom) {
     return NULL;
 }
 
+static int afe_on_stack(th_tree *tree, th_node *node) {
+    if (tree->afe_stack_hint >= 0 && tree->afe_stack_hint < tree->open_len &&
+        tree->open[tree->afe_stack_hint] == node) {
+        return 1;
+    }
+    tree->afe_stack_hint = stack_index_of(tree, node);
+    return tree->afe_stack_hint >= 0;
+}
+
 /* Reconstruct the active formatting elements (re-open any that fell off the
    stack of open elements) per the spec. */
 static void reconstruct_afe(th_tree *tree) {
@@ -1542,12 +1675,12 @@ static void reconstruct_afe(th_tree *tree) {
         return;
     }
     Py_ssize_t index = tree->afe_len - 1;
-    if (tree->afe[index] == NULL || stack_index_of(tree, tree->afe[index]) >= 0) {
+    if (tree->afe[index] == NULL || afe_on_stack(tree, tree->afe[index])) {
         return;
     }
     while (index > 0) {
         index--;
-        if (tree->afe[index] == NULL || stack_index_of(tree, tree->afe[index]) >= 0) {
+        if (tree->afe[index] == NULL || afe_on_stack(tree, tree->afe[index])) {
             index++;
             break;
         }
@@ -1666,6 +1799,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
             }
             tree->afe[node_afe] = clone;
             tree->open[node_idx] = clone;
+            tree->stack_version++;
             node = clone;
             if (last == furthest) {
                 bookmark = node_afe + 1;
@@ -1742,6 +1876,7 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         memmove(&tree->open[furthest_now + 2], &tree->open[furthest_now + 1],
                 (size_t)(tree->open_len - furthest_now - 2) * sizeof(th_node *));
         tree->open[furthest_now + 1] = fmt_clone;
+        tree->stack_version++;
     }
     return 1;
 }
@@ -2455,6 +2590,7 @@ static enum th_drain drain_after_head(th_tree *tree, th_token *tok, th_insert *d
                     /* the head is removed from under the template on the
                        stack; the template itself stays open */
                     tree->open[tree->open_len - 1] = node;
+                    tree->stack_version++;
                     if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
                         afe_push_marker(tree);
                         tmpl_push(tree, M_IN_TEMPLATE);
@@ -2637,9 +2773,37 @@ static enum th_drain drain_after_frameset(th_tree *tree, th_token *tok, th_inser
     return TH_DRAIN_NEXT;
 }
 
+static int chunk_has_nul(int kind, const void *data, Py_ssize_t length) {
+    if (kind == PyUnicode_1BYTE_KIND) {
+        return memchr(data, '\0', (size_t)length) != NULL;
+    }
+    if (kind == PyUnicode_2BYTE_KIND) {
+        const uint16_t *units = data;
+        for (Py_ssize_t index = 0; index < length; index++) {
+            if (units[index] == 0) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    const uint32_t *units = data;
+    for (Py_ssize_t index = 0; index < length; index++) {
+        if (units[index] == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int slice_can_span(const th_tree *tree, const th_token *token) {
+    return token->is_slice && tree->can_span &&
+           (!tree->has_nul ||
+            !chunk_has_nul(tree->kind, (const uint8_t *)tree->data + token->src_start * tree->kind, token->src_len));
+}
+
 static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) {
     if (tok->kind == TH_TEXT) {
-        if (tok->is_slice && tree->can_span && !tree->has_nul) {
+        if (slice_can_span(tree, tok)) {
             /* zero-copy: scan the input span directly for the frameset
                and leading-newline rules, then store a span node */
             Py_ssize_t off = tok->src_start + tree->text_offset;
@@ -3169,8 +3333,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
 
 static enum th_drain drain_text(th_tree *tree, th_token *tok, th_insert *dc) {
     if (tok->kind == TH_TEXT) {
-        /* a nul anywhere in the input disables span sharing */
-        if (tok->is_slice && tree->can_span && !tree->has_nul /* GCOVR_EXCL_BR_LINE */) {
+        if (slice_can_span(tree, tok)) {
             Py_ssize_t off = tok->src_start + tree->text_offset;
             Py_ssize_t len = tok->src_len - tree->text_offset;
             /* a text token always has a positive length */
@@ -3883,7 +4046,7 @@ static void run_close(th_tree *tree) {
 
 /* Feed the input to the tokenizer (borrowing when there is no CR to normalize)
    and point tree->data at the tokenizer's authoritative input base. */
-static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *data, Py_ssize_t length) {
+static int setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *data, Py_ssize_t length) {
     /* hoist the width check out of the per-character loop: a 1-byte buffer uses
        libc's vectorized memchr, the wide buffers a tight typed scan */
     int has_cr = 0;
@@ -3909,21 +4072,17 @@ static void setup_input(th_tree *tree, th_tokenizer *sm, int kind, const void *d
         /* borrowed input is not copied and outlives the tree (the caller holds
            the string for the whole parse), so text nodes can be zero-copy spans */
         th_tok_borrow_input(sm, kind, data, length);
-        tree->can_span = 1;
     }
+    tree->can_span = 1;
     th_tok_close(sm);
     tree->data = th_tok_input_data(sm, &tree->kind);
+    return has_cr;
 }
 
-static void retain_normalized_source(th_tree *tree, th_tokenizer *sm) {
-    if (tree->can_span) {
-        return;
-    }
-    if (tree->track_locations) {
+static void retain_normalized_source(th_tree *tree, th_tokenizer *sm, int normalized) {
+    if (normalized) {
         tree->owned_data = th_tok_take_input(sm, &tree->kind, &tree->length);
         tree->data = tree->owned_data;
-    } else {
-        tree->data = NULL;
     }
 }
 
@@ -4029,12 +4188,12 @@ th_tree *th_tree_parse(int kind, const void *data, Py_ssize_t length, int positi
     }
     th_tok_set_error_sink(sm, &tree->errors);
     th_tok_capture_locations(sm, locations);
-    setup_input(tree, sm, kind, data, length);
+    int normalized = setup_input(tree, sm, kind, data, length);
     th_run_state run_state;
     run_state_init(&run_state, M_INITIAL);
     run_drain(tree, sm, &run_state);
     run_close(tree);
-    retain_normalized_source(tree, sm);
+    retain_normalized_source(tree, sm, normalized);
     th_tok_free(sm);
     finalize_document(tree);
 
@@ -4174,12 +4333,12 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     if (model >= 0) {
         th_tok_set_initial(sm, (enum th_initial_state)model, NULL, 0);
     }
-    setup_input(tree, sm, kind, data, length);
+    int normalized = setup_input(tree, sm, kind, data, length);
     th_run_state run_state;
     run_state_init(&run_state, ctx_ns == TH_NS_HTML ? fragment_mode(ctx_atom) : M_IN_BODY);
     run_drain(tree, sm, &run_state);
     run_close(tree);
-    retain_normalized_source(tree, sm);
+    retain_normalized_source(tree, sm, normalized);
     th_tok_free(sm);
 
     /* an html-context fragment starts in "before head"; at EOF the same
@@ -4225,6 +4384,7 @@ void th_tree_free(th_tree *tree) {
     }
     PyMem_Free(tree->open);
     PyMem_Free(tree->afe);
+    PyMem_Free(tree->afe_hashes);
     PyMem_Free(tree->tmpl);
     PyMem_Free(tree->attr_slots);
     PyMem_Free(tree->attr_recs);
@@ -4274,31 +4434,6 @@ th_stream *th_stream_new(int positions, int locations) {
    the drain that follows resolve against this base before the next th_tok_next. */
 static void stream_sync_input(th_stream *stream) {
     stream->tree->data = th_tok_input_data(stream->sm, &stream->tree->kind);
-}
-
-/* Whether a fed chunk holds a U+0000. The whole-input scan setup_input does has no
-   place in a streaming parse, so each chunk is scanned and the result folded into
-   the tree's has_nul flag, which gates the text builder's NUL dropping. */
-static int chunk_has_nul(int kind, const void *data, Py_ssize_t length) {
-    if (kind == PyUnicode_1BYTE_KIND) {
-        return memchr(data, '\0', (size_t)length) != NULL;
-    }
-    if (kind == PyUnicode_2BYTE_KIND) {
-        const uint16_t *units = data;
-        for (Py_ssize_t index = 0; index < length; index++) {
-            if (units[index] == 0) {
-                return 1;
-            }
-        }
-        return 0;
-    }
-    const uint32_t *units = data;
-    for (Py_ssize_t index = 0; index < length; index++) {
-        if (units[index] == 0) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 int th_stream_feed(th_stream *stream, int kind, const void *data, Py_ssize_t length) {

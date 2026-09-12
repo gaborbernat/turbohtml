@@ -185,12 +185,130 @@ static PyObject *extract_link(th_tree *tree, th_node *parent) {
     return Py_NewRef(Py_None);
 }
 
+/* Adjacent fields follow fallback precedence. */
+enum {
+    FEED_TITLE,
+    FEED_GUID,
+    FEED_ID,
+    FEED_UPDATED,
+    FEED_LAST_BUILD,
+    FEED_PUBLISHED,
+    FEED_PUBDATE,
+    FEED_DC_DATE,
+    FEED_SUMMARY,
+    FEED_DESCRIPTION,
+    FEED_DC_DESCRIPTION,
+    FEED_ENCODED,
+    FEED_CONTENT,
+    FEED_AUTHOR,
+    FEED_CREATOR,
+    FEED_FIELD_COUNT
+};
+
+static void collect_entry_fields(th_node *entry, th_node **fields) {
+    static const feed_tag tags[FEED_FIELD_COUNT] = {{"title", 5},
+                                                    {"guid", 4},
+                                                    {"id", 2},
+                                                    {"updated", 7},
+                                                    {"lastbuilddate", 13},
+                                                    {"published", 9},
+                                                    {"pubdate", 7},
+                                                    {"dc:date", 7},
+                                                    {"summary", 7},
+                                                    {"description", 11},
+                                                    {"dc:description", 14},
+                                                    {"content:encoded", 15},
+                                                    {"content", 7},
+                                                    {"author", 6},
+                                                    {"dc:creator", 10}};
+    for (th_node *child = entry->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        int field;
+        switch (child->text_len) {
+        case 2:
+            field = FEED_ID;
+            break;
+        case 4:
+            field = FEED_GUID;
+            break;
+        case 5:
+            field = FEED_TITLE;
+            break;
+        case 6:
+            field = FEED_AUTHOR;
+            break;
+        case 7:
+            switch (lower_ascii(child->text[0])) {
+            case 'u':
+                field = FEED_UPDATED;
+                break;
+            case 'p':
+                field = FEED_PUBDATE;
+                break;
+            case 'd':
+                field = FEED_DC_DATE;
+                break;
+            case 's':
+                field = FEED_SUMMARY;
+                break;
+            case 'c':
+                field = FEED_CONTENT;
+                break;
+            default:
+                continue;
+            }
+            break;
+        case 9:
+            field = FEED_PUBLISHED;
+            break;
+        case 10:
+            field = FEED_CREATOR;
+            break;
+        case 11:
+            field = FEED_DESCRIPTION;
+            break;
+        case 13:
+            field = FEED_LAST_BUILD;
+            break;
+        case 14:
+            field = FEED_DC_DESCRIPTION;
+            break;
+        case 15:
+            field = FEED_ENCODED;
+            break;
+        default:
+            continue;
+        }
+        if (fields[field] == NULL && tag_is(child, tags[field].name, tags[field].len)) {
+            fields[field] = child;
+        }
+    }
+}
+
+static PyObject *entry_field_text(th_tree *tree, th_node *const *fields, size_t count) {
+    for (size_t index = 0; index < count; index++) {
+        if (fields[index] == NULL) {
+            continue;
+        }
+        PyObject *value = node_text_trimmed(tree, fields[index]);
+        if (value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        if (PyUnicode_GET_LENGTH(value) > 0) {
+            return value;
+        }
+        Py_DECREF(value);
+    }
+    return Py_NewRef(Py_None);
+}
+
 /* The author display name of `parent`: an <author>'s nested <name> (the Atom form), else the <author>'s own text (an
    RSS email), else a <dc:creator>, else None. NULL only on the excluded allocation-failure path. */
-static PyObject *extract_author(th_tree *tree, th_node *parent) {
-    static const feed_tag AUTHOR_TAGS[] = {{"author", 6}, {"dc:creator", 10}};
-    for (size_t index = 0; index < sizeof(AUTHOR_TAGS) / sizeof(AUTHOR_TAGS[0]); index++) {
-        th_node *child = child_named(parent, AUTHOR_TAGS[index].name, AUTHOR_TAGS[index].len);
+static PyObject *extract_author(th_tree *tree, th_node *const *fields) {
+    for (size_t index = 0; index < 2; index++) {
+        th_node *child = fields[index];
         if (child == NULL) {
             continue;
         }
@@ -209,9 +327,8 @@ static PyObject *extract_author(th_tree *tree, th_node *parent) {
 
 /* The entry identifier: an RSS <guid> / Atom <id> element text, else the RDF item's rdf:about attribute, else None.
    NULL only on the excluded allocation-failure path. */
-static PyObject *extract_id(th_tree *tree, th_node *entry) {
-    static const feed_tag ID_TAGS[] = {{"guid", 4}, {"id", 2}};
-    PyObject *value = field_text(tree, entry, ID_TAGS, sizeof(ID_TAGS) / sizeof(ID_TAGS[0]));
+static PyObject *extract_id(th_tree *tree, th_node *entry, th_node *const *fields) {
+    PyObject *value = entry_field_text(tree, fields, 2);
     if (value == NULL) { /* GCOVR_EXCL_BR_LINE: field_text fails only on allocation */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -229,11 +346,10 @@ static PyObject *extract_id(th_tree *tree, th_node *entry) {
 /* When an entry has no link element, an RSS <guid> that is a permalink (its isPermaLink is not "false") doubles as the
    link, mirroring feedparser. Replaces *link with the guid text when one qualifies. -1 only on the excluded
    allocation-failure path. */
-static int apply_guid_permalink(th_tree *tree, th_node *entry, PyObject **link) {
+static int apply_guid_permalink(th_tree *tree, th_node *guid, PyObject **link) {
     if (*link != Py_None) {
         return 0;
     }
-    th_node *guid = child_named(entry, "guid", 4);
     if (guid == NULL) {
         return 0;
     }
@@ -266,12 +382,12 @@ static int record_set(PyObject *record, Py_ssize_t index, PyObject *value) {
 
 /* The entry's link with the guid-permalink fallback applied, ready for record_set. NULL only on the excluded
    allocation-failure path. */
-static PyObject *entry_link(th_tree *tree, th_node *item) {
+static PyObject *entry_link(th_tree *tree, th_node *item, th_node *guid) {
     PyObject *link = extract_link(tree, item);
     if (link == NULL) { /* GCOVR_EXCL_BR_LINE: extract_link fails only on allocation */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (apply_guid_permalink(tree, item, &link) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+    if (apply_guid_permalink(tree, guid, &link) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         Py_DECREF(link);                               /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;                                   /* GCOVR_EXCL_LINE */
     }
@@ -282,24 +398,21 @@ static PyObject *entry_link(th_tree *tree, th_node *item) {
    or an RDF item, each field the first present value in its precedence order. NULL only on the excluded
    allocation-failure path. */
 static PyObject *build_entry(module_state *state, th_tree *tree, th_node *item) {
-    static const feed_tag TITLE[] = {{"title", 5}};
-    static const feed_tag UPDATED[] = {{"updated", 7}, {"lastbuilddate", 13}};
-    static const feed_tag PUBLISHED[] = {{"published", 9}, {"pubdate", 7}, {"dc:date", 7}};
-    static const feed_tag SUMMARY[] = {{"summary", 7}, {"description", 11}, {"dc:description", 14}};
-    static const feed_tag CONTENT[] = {{"content:encoded", 15}, {"content", 7}};
+    th_node *fields[FEED_FIELD_COUNT] = {0};
+    collect_entry_fields(item, fields);
     PyObject *record = PyTuple_New(8);
     if (record == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int failed = 0;
-    failed |= record_set(record, 0, field_text(tree, item, TITLE, 1));
-    failed |= record_set(record, 1, entry_link(tree, item));
-    failed |= record_set(record, 2, extract_id(tree, item));
-    failed |= record_set(record, 3, field_text(tree, item, UPDATED, 2));
-    failed |= record_set(record, 4, field_text(tree, item, PUBLISHED, 3));
-    failed |= record_set(record, 5, field_text(tree, item, SUMMARY, 3));
-    failed |= record_set(record, 6, field_text(tree, item, CONTENT, 2));
-    failed |= record_set(record, 7, extract_author(tree, item));
+    failed |= record_set(record, 0, entry_field_text(tree, fields + FEED_TITLE, 1));
+    failed |= record_set(record, 1, entry_link(tree, item, fields[FEED_GUID]));
+    failed |= record_set(record, 2, extract_id(tree, item, fields + FEED_GUID));
+    failed |= record_set(record, 3, entry_field_text(tree, fields + FEED_UPDATED, 2));
+    failed |= record_set(record, 4, entry_field_text(tree, fields + FEED_PUBLISHED, 3));
+    failed |= record_set(record, 5, entry_field_text(tree, fields + FEED_SUMMARY, 3));
+    failed |= record_set(record, 6, entry_field_text(tree, fields + FEED_ENCODED, 2));
+    failed |= record_set(record, 7, extract_author(tree, fields + FEED_AUTHOR));
     if (failed != 0) {     /* GCOVR_EXCL_BR_LINE: a field build fails only on unforceable allocation */
         Py_DECREF(record); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;       /* GCOVR_EXCL_LINE */

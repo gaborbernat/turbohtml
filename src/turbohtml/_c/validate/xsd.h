@@ -417,6 +417,9 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
             base_id = xsd_gather_facets(schema, inner, facets, depth + 1);
         }
     }
+    if (base_id < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
     facets->base_id = base_id;
     facets->ws = dt_default_ws(base_id);
     for (th_node *facet = restriction->first_child; facet != NULL; facet = facet->next_sibling) {
@@ -430,10 +433,73 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
         Py_ssize_t value_len = 0;
         const Py_UCS4 *value = xsd_attr(tree, facet, "value", &value_len);
         if (value != NULL) {
-            facet_add(&schema->mem, facets, name.local, name.local_len, value, value_len);
+            const int status = facet_add(&schema->mem, facets, name.local, name.local_len, value, value_len);
+            if (status < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+                return -1;    /* GCOVR_EXCL_LINE */
+            }
         }
     }
     return base_id;
+}
+
+typedef struct xfacet_entry {
+    th_node *node;
+    facetset facets;
+} xfacet_entry;
+
+static int xsd_cache_facets(th_schema *schema, th_node *node) {
+    if (is_schema_el(schema, node, XSD_NS, "simpleType")) {
+        if (schema->facet_count == schema->facet_cap) {
+            size_t capacity, bytes;
+            const int fits =
+                th_grow_cap(schema->facet_count + 1, schema->facet_cap, 8, sizeof(xfacet_entry), &capacity, &bytes);
+            if (!fits) {   /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                return -1; /* GCOVR_EXCL_LINE */
+            }
+            xfacet_entry *entries = arena_alloc(&schema->mem, bytes);
+            if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+                return -1;         /* GCOVR_EXCL_LINE */
+            }
+            if (schema->facet_count > 0) {
+                memcpy(entries, schema->facet_entries, schema->facet_count * sizeof(xfacet_entry));
+            }
+            schema->facet_entries = entries;
+            schema->facet_cap = capacity;
+        }
+        xfacet_entry *entry = &schema->facet_entries[schema->facet_count++];
+        entry->node = node;
+        facetset_init(&entry->facets, DT_STRING);
+        if (xsd_gather_facets(schema, node, &entry->facets, 0) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                                                /* GCOVR_EXCL_LINE */
+        }
+    }
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            if (xsd_cache_facets(schema, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+                return -1;                             /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    return 0;
+}
+
+static int xsd_facet_order(const void *left, const void *right) {
+    const uintptr_t left_node = (uintptr_t)((const xfacet_entry *)left)->node;
+    const uintptr_t right_node = (uintptr_t)((const xfacet_entry *)right)->node;
+    return (left_node > right_node) - (left_node < right_node);
+}
+
+static const facetset *xsd_cached_facets(const th_schema *schema, const th_node *node) {
+    size_t low = 0, high = schema->facet_count;
+    while (low < high) {
+        const size_t middle = low + (high - low) / 2;
+        if ((uintptr_t)schema->facet_entries[middle].node < (uintptr_t)node) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return &schema->facet_entries[low].facets;
 }
 
 /* Validate a text value against a simple type (built-in id, or a named/inline
@@ -441,27 +507,69 @@ static int xsd_gather_facets(th_schema *schema, th_node *simpletype, facetset *f
 static void xsd_validate_simple(valctx *ctx, th_node *node, int builtin_id, th_node *simpletype, const Py_UCS4 *value,
                                 Py_ssize_t len) {
     th_schema *schema = ctx->schema;
-    facetset facets;
-    facetset_init(&facets,
-                  builtin_id >= 0 ? builtin_id : DT_STRING); /* GCOVR_EXCL_BR_LINE: builtin_id is always >= 0 */
+    facetset builtin;
+    const facetset *facets;
     if (simpletype != NULL) {
-        xsd_gather_facets(schema, simpletype, &facets, 0);
+        facets = xsd_cached_facets(schema, simpletype);
+    } else {
+        facetset_init(&builtin,
+                      builtin_id >= 0 ? builtin_id : DT_STRING); /* GCOVR_EXCL_BR_LINE: negative only on arena OOM */
+        facets = &builtin;
     }
     Py_ssize_t norm_len = 0;
-    const Py_UCS4 *norm = dt_normalize_ws(&schema->mem, facets.ws, value, len, &norm_len);
-    if (!dt_check_lexical(facets.base_id, norm, norm_len)) {
+    const Py_UCS4 *norm = dt_normalize_ws(&schema->mem, facets->ws, value, len, &norm_len);
+    if (!dt_check_lexical(facets->base_id, norm, norm_len)) {
         char buffer[128];
         report(ctx, node, "datatype", "value '%s' is not a valid %s", name_utf8(norm, norm_len, buffer, sizeof(buffer)),
-               DT_NAMES[facets.base_id].name);
+               DT_NAMES[facets->base_id].name);
         return;
     }
-    facet_check(ctx, node, &facets, norm, norm_len);
+    facet_check(ctx, node, facets, norm, norm_len);
 }
 
 /* ---- attributes ---- */
 
+typedef struct {
+    Py_ssize_t *slots;
+    size_t capacity;
+} xattr_index;
+
+static int xsd_index_attrs(valctx *ctx, th_node *instance, xattr_index *index) {
+    if (instance->attr_count < 32) {
+        return 0;
+    }
+    size_t bytes;
+    /* GCOVR_EXCL_BR_START: allocation size overflow */
+    if (!th_grow_cap((size_t)instance->attr_count * 2, 0, 64, sizeof(*index->slots), &index->capacity, &bytes)) {
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation failure */
+        return -1;        /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    index->slots = arena_alloc(&ctx->schema->mem, bytes);
+    if (index->slots == NULL) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
+        PyErr_NoMemory();       /* GCOVR_EXCL_LINE: allocation failure */
+        return -1;              /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    memset(index->slots, 0, bytes);
+    for (Py_ssize_t position = 0; position < instance->attr_count; position++) {
+        Py_ssize_t length;
+        const char *name = th_attr_name(ctx->tree, instance->attrs[position].name_atom, &length);
+        uint64_t hash = UINT64_C(1469598103934665603);
+        for (Py_ssize_t byte = 0; byte < length; byte++) {
+            hash ^= (unsigned char)name[byte];
+            hash *= UINT64_C(1099511628211);
+        }
+        size_t slot = (size_t)hash & (index->capacity - 1);
+        while (index->slots[slot] != 0) {
+            slot = (slot + 1) & (index->capacity - 1);
+        }
+        index->slots[slot] = position + 1;
+    }
+    return 0;
+}
+
 /* Validate one declared attribute against the instance, honoring use/fixed/default. */
-static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl) {
+static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl, const xattr_index *attrs) {
     th_schema *schema = ctx->schema;
     th_tree *tree = schema->tree;
     th_tree *inst = ctx->tree;
@@ -489,7 +597,20 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
     char namebuf[256];
     const char *name_bytes = name_utf8(name, name_len, namebuf, sizeof(namebuf));
     const th_node_attr *present = NULL;
-    for (Py_ssize_t index = 0; index < instance->attr_count; index++) {
+    if (attrs->slots != NULL) {
+        size_t slot = (size_t)named_hash(name, name_len) & (attrs->capacity - 1);
+        while (attrs->slots[slot] != 0) {
+            const th_node_attr *candidate = &instance->attrs[attrs->slots[slot] - 1];
+            Py_ssize_t length;
+            const char *bytes = th_attr_name(inst, candidate->name_atom, &length);
+            if (length == name_len && u_eq_ascii(name, name_len, bytes)) {
+                present = candidate;
+                break;
+            }
+            slot = (slot + 1) & (attrs->capacity - 1);
+        }
+    }
+    for (Py_ssize_t index = 0; attrs->slots == NULL && index < instance->attr_count; index++) {
         Py_ssize_t alen = 0;
         const char *abytes = th_attr_name(inst, instance->attrs[index].name_atom, &alen);
         if ((Py_ssize_t)alen == name_len && u_eq_ascii(name, name_len, abytes)) {
@@ -521,9 +642,6 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
     const Py_UCS4 *type = xsd_attr(tree, effective, "type", &type_len);
     th_node *inline_type = first_schema_child(schema, effective, XSD_NS, "simpleType");
     if (type != NULL) {
-        facetset probe;
-        facetset_init(&probe, DT_STRING);
-        int base_id = xsd_base_id(schema, effective, type, type_len, &probe, 0);
         th_node *named = NULL;
         const Py_UCS4 *local, *prefix, *uri;
         Py_ssize_t local_len = 0, prefix_len = 0, uri_len = 0;
@@ -531,6 +649,12 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
         resolve_ns(tree, effective, prefix, prefix_len, &uri, &uri_len);
         if (!is_xsd_uri(uri, uri_len)) {
             named = named_find(&schema->simple_types, local, local_len);
+        }
+        int base_id = DT_STRING;
+        if (named == NULL) {
+            facetset probe;
+            facetset_init(&probe, DT_STRING);
+            base_id = xsd_base_id(schema, effective, type, type_len, &probe, 0);
         }
         xsd_validate_simple(ctx, instance, base_id, named, value, value_len);
     } else if (inline_type != NULL) {
@@ -542,12 +666,13 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
    refs, and the extension base), then flag any undeclared instance attribute. */
 static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared);
 
-static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared) {
+static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared,
+                              const xattr_index *attrs) {
     th_schema *schema = ctx->schema;
     th_tree *tree = schema->tree;
     for (th_node *child = scope->first_child; child != NULL; child = child->next_sibling) {
         if (is_schema_el(schema, child, XSD_NS, "attribute")) {
-            xsd_validate_attr_decl(ctx, instance, child);
+            xsd_validate_attr_decl(ctx, instance, child, attrs);
             th_node *eff = child;
             Py_ssize_t ref_len = 0;
             const Py_UCS4 *ref = xsd_attr(tree, child, "ref", &ref_len);
@@ -573,7 +698,7 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                 split_prefix(ref, ref_len, &local, &local_len, &prefix, &prefix_len);
                 th_node *group = named_find(&schema->attr_groups, local, local_len);
                 if (group != NULL) {
-                    xsd_collect_attrs(ctx, instance, group, declared);
+                    xsd_collect_attrs(ctx, instance, group, declared, attrs);
                 }
             }
         } else if (is_schema_el(schema, child, XSD_NS, "complexContent") ||
@@ -592,10 +717,10 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                     resolve_ns(tree, derivation, prefix, prefix_len, &uri, &uri_len);
                     th_node *base_type = named_find(&schema->complex_types, local, local_len);
                     if (base_type != NULL) {
-                        xsd_collect_attrs(ctx, instance, base_type, declared);
+                        xsd_collect_attrs(ctx, instance, base_type, declared, attrs);
                     }
                 }
-                xsd_collect_attrs(ctx, instance, derivation, declared);
+                xsd_collect_attrs(ctx, instance, derivation, declared, attrs);
             }
         }
     }
@@ -603,7 +728,30 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
 
 static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared) {
     th_tree *inst = ctx->tree;
-    xsd_collect_attrs(ctx, instance, scope, declared);
+    xattr_index attrs = {0};
+    if (xsd_index_attrs(ctx, instance, &attrs) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        ctx->failed = 1;                              /* GCOVR_EXCL_LINE: allocation failure */
+        return;                                       /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    xsd_collect_attrs(ctx, instance, scope, declared, &attrs);
+    named_vec names = {0};
+    if (declared->count >= 32 && instance->attr_count >= 32) {
+        for (Py_ssize_t index = 0; index < declared->count; index++) {
+            edecl *item = &declared->items[index];
+            /* GCOVR_EXCL_BR_START: arena allocation failure */
+            if (named_push(ctx->schema, &names, item->local, item->local_len, item->decl) < 0) {
+                ctx->failed = 1;  /* GCOVR_EXCL_LINE: arena allocation failure */
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE: arena allocation failure */
+                return;           /* GCOVR_EXCL_LINE: arena allocation failure */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+        }
+        if (named_index(ctx->schema, &names) < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
+            ctx->failed = 1;                        /* GCOVR_EXCL_LINE */
+            PyErr_NoMemory();                       /* GCOVR_EXCL_LINE */
+            return;                                 /* GCOVR_EXCL_LINE */
+        }
+    }
     for (Py_ssize_t index = 0; index < instance->attr_count; index++) {
         Py_ssize_t alen = 0;
         const char *abytes = th_attr_name(inst, instance->attrs[index].name_atom, &alen);
@@ -611,7 +759,23 @@ static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, e
             continue;
         }
         int known = 0;
-        for (Py_ssize_t decl = 0; decl < declared->count; decl++) {
+        if (names.slots != NULL) {
+            uint64_t hash = UINT64_C(1469598103934665603);
+            for (Py_ssize_t byte = 0; byte < alen; byte++) {
+                hash ^= (unsigned char)abytes[byte];
+                hash *= UINT64_C(1099511628211);
+            }
+            size_t slot = (size_t)hash & (names.slot_cap - 1);
+            while (names.slots[slot] != NULL) {
+                named_node *item = names.slots[slot];
+                if (item->len == alen && u_eq_ascii(item->name, item->len, abytes)) {
+                    known = 1;
+                    break;
+                }
+                slot = (slot + 1) & (names.slot_cap - 1);
+            }
+        }
+        for (Py_ssize_t decl = 0; names.slots == NULL && decl < declared->count; decl++) {
             if ((Py_ssize_t)alen == declared->items[decl].local_len &&
                 u_eq_ascii(declared->items[decl].local, declared->items[decl].local_len, abytes)) {
                 known = 1;
@@ -830,7 +994,7 @@ static void xsd_validate_element(valctx *ctx, th_node *instance, th_node *decl) 
             xsd_validate_complex(ctx, instance, complex);
         } else {
             th_node *simple = is_xsd_ns ? NULL : named_find(&schema->simple_types, local, local_len);
-            int base_id = xsd_base_id(schema, decl, type, type_len, &(facetset){0}, 0);
+            int base_id = simple == NULL ? xsd_base_id(schema, decl, type, type_len, &(facetset){0}, 0) : DT_STRING;
             for (th_node *child = instance->first_child; child != NULL; child = child->next_sibling) {
                 if (child->type == TH_NODE_ELEMENT) {
                     report(ctx, child, "structure", "simple-typed element must not contain child elements");
@@ -900,6 +1064,13 @@ static int xsd_compile(th_schema *schema) {
             PyErr_NoMemory();                         /* GCOVR_EXCL_LINE */
             return 0;                                 /* GCOVR_EXCL_LINE */
         }
+    }
+    if (xsd_cache_facets(schema, schema->root) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        PyErr_NoMemory();                             /* GCOVR_EXCL_LINE */
+        return 0;                                     /* GCOVR_EXCL_LINE */
+    }
+    if (schema->facet_count > 1) {
+        qsort(schema->facet_entries, schema->facet_count, sizeof(xfacet_entry), xsd_facet_order);
     }
     return 1;
 }

@@ -33,7 +33,16 @@ def minify(text: str) -> str:
 
 
 OPERATIONS = {
+    "minify-js-guards": (minify_js, "tdewolff"),
+    "minify-js-propagation": (minify_js, "tdewolff"),
+    "minify-js-var-initialization": (minify_js, "tdewolff"),
+    "minify-js-unused-declarations": (minify_js, "tdewolff"),
+    "minify-js-unlink": (minify_js, "tdewolff"),
+    "minify-js-single-use": (minify_js, "tdewolff"),
+    "minify-js-sequences": (minify_js, "tdewolff"),
     "minify-js": (minify_js, "tdewolff"),
     "minify-css": (minify_css, "tdewolff"),
+    "minify-css-merges": (minify_css, "tdewolff"),
+    "minify-css-conflicts": (minify_css, "tdewolff"),
     "minify": (minify, "tdewolff"),
 }

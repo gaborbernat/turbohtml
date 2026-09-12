@@ -1,0 +1,1 @@
+Speed up descendant ``:has()`` selectors on nested elements.

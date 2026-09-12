@@ -1,0 +1,1 @@
+Avoid concurrent writes while resolving the reserved ``xml`` namespace during schema validation.

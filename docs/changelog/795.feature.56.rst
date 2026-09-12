@@ -1,0 +1,1 @@
+Speed up pruning selections that share matching ancestors.

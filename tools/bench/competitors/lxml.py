@@ -53,6 +53,23 @@ def validate(case: tuple[str, str]) -> None:
     validator.validate(etree.fromstring(document.encode()))
 
 
+def _compile_pattern(schema: str) -> lxml_etree.XMLSchema:
+    return lxml_etree.XMLSchema(lxml_etree.fromstring(schema.encode()))
+
+
+def _validate_rng(case: tuple[str, str]) -> None:
+    _rng_schema(case[0]).validate(lxml_etree.fromstring(case[1].encode()))
+
+
+@functools.cache
+def _rng_schema(schema: str) -> lxml_etree.RelaxNG:
+    return lxml_etree.RelaxNG(lxml_etree.fromstring(schema.encode()))
+
+
+def _compile_rng(schema: str) -> lxml_etree.RelaxNG:
+    return lxml_etree.RelaxNG(lxml_etree.fromstring(schema.encode()))
+
+
 def build(count: int) -> None:
     """Build a ``<ul>`` of rows with lxml's Element factory and ``.text``, then serialize (the aggregate workload)."""
     ul = lxml_html.Element("ul")
@@ -259,7 +276,11 @@ def getpath(text: str) -> None:
             root.getpath(element)
 
 
-_EXSLT_NS = {"re": "http://exslt.org/regular-expressions", "set": "http://exslt.org/sets"}
+_EXSLT_NS = {
+    "re": "http://exslt.org/regular-expressions",
+    "set": "http://exslt.org/sets",
+    "str": "http://exslt.org/strings",
+}
 _SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
 
 
@@ -308,6 +329,10 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
 }
 
 
+def _xpath_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).xpath(case[0], namespaces=_EXSLT_NS)
+
+
 def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with lxml's libxml2 engine, by case kind."""
     kind, text = case
@@ -334,15 +359,23 @@ def transform_compile(case: tuple[str, str]) -> None:
 @functools.cache
 def _xslt_compiled(sheet: str, source: str):  # ruff:ignore[missing-return-type-private-function]  # lxml has no types
     """Keep construction and source parsing outside application timing."""
-    transform = lxml_etree.XSLT(lxml_etree.fromstring(sheet.encode()))
-    return transform, lxml_etree.fromstring(source.encode())
+    document: Final = lxml_etree.fromstring(sheet.encode())
+    if any(
+        "current()" in number.get(attribute, "")
+        for number in document.iter("{http://www.w3.org/1999/XSL/Transform}number")
+        for attribute in ("count", "from")
+    ):
+        # XSLT 1.0 section 12.4 forbids current() in patterns; libxslt gives this fixture different semantics.
+        unsupported: Final = "XSLT 1.0 forbids current() in patterns; libxslt numbering differs from turbohtml"
+        raise NotImplementedError(unsupported)
+    return lxml_etree.XSLT(document), lxml_etree.fromstring(source.encode())
 
 
-def transform(case: tuple[str, str]) -> None:
+def transform(case: tuple[str, str]) -> lxml_etree._XSLTResultTree:
     """Apply a compiled XSLT 1.0 stylesheet to a parsed source with lxml's libxslt engine."""
     sheet, source = case
     compiled, document = _xslt_compiled(sheet, source)
-    compiled(document)
+    return compiled(document)
 
 
 def transform_reuse(case: tuple[str, str]) -> None:
@@ -437,8 +470,29 @@ OPERATIONS = {
     "encode-inner-indent": (_encode_inner_indent, "lxml"),
     "strip-comments": (Mutating(lxml_html.document_fromstring, _strip_comments), "lxml"),
     "parse": (parse, "lxml"),
+    "parse-formatting": (parse, "lxml"),
+    "parse-foster": (parse, "lxml"),
+    "parse-crlf": (parse, "lxml"),
+    "parse-nul": (parse, "lxml"),
+    "parse-afe": (parse, "lxml"),
+    "parse-scope": (parse, "lxml"),
     "parse-xml": (parse_xml, "lxml.etree"),
+    "parse-xml-attrs": (parse_xml, "lxml.etree"),
+    "parse-xml-append": (parse_xml, "lxml.etree"),
+    "parse-xml-values": (parse_xml, "lxml.etree"),
+    "parse-xml-text": (parse_xml, "lxml.etree"),
+    "parse-xml-prefixes": (parse_xml, "lxml.etree"),
     "validate": (validate, "lxml.etree.XMLSchema"),
+    "validate-pattern-reuse": (validate, "lxml.etree.XMLSchema"),
+    "compile-pattern": (_compile_pattern, "lxml.etree.XMLSchema"),
+    "validate-facets": (validate, "lxml.etree.XMLSchema"),
+    "validate-attributes": (validate, "lxml.etree.XMLSchema"),
+    "validate-numeric-facets": (validate, "lxml.etree.XMLSchema"),
+    "compile-facets": (_compile_pattern, "lxml.etree.XMLSchema"),
+    "validate-pattern": (validate, "lxml.etree.XMLSchema"),
+    "validate-rng": (_validate_rng, "lxml.etree.RelaxNG"),
+    "validate-rng-reuse": (_validate_rng, "lxml.etree.RelaxNG"),
+    "compile-rng-reuse": (_compile_rng, "lxml.etree.RelaxNG"),
     "fragment": (fragment, "lxml"),
     "build": (build, "lxml"),
     "build-e": (build_e, "lxml.builder"),
@@ -451,6 +505,7 @@ OPERATIONS = {
     "serialize": (serialize, "lxml"),
     "serialize-xml": (serialize_xml, "lxml method=xml"),
     "canonicalize": (canonicalize, "lxml method=c14n"),
+    "canonicalize-deep": (canonicalize, "lxml method=c14n"),
     "extract-attr": (extract_attr, "lxml"),
     "extract-text": (extract_text, "lxml"),
     "strip-remove": (strip_remove, "lxml"),
@@ -472,7 +527,19 @@ OPERATIONS = {
     "path": (getpath, "lxml getpath"),
     "path-xpath": (getpath, "lxml getpath"),
     "xpath": (xpath, "lxml"),
+    "xpath-distinct": (_xpath_scaling, "lxml"),
+    "xpath-set": (_xpath_scaling, "lxml"),
+    "xpath-compare": (_xpath_scaling, "lxml"),
+    "xpath-order": (_xpath_scaling, "lxml"),
+    "xpath-translate": (_xpath_scaling, "lxml"),
+    "xpath-concat": (_xpath_scaling, "lxml"),
+    "xpath-id-nodes": (_xpath_scaling, "lxml"),
     "transform": (transform, "lxml.etree"),
+    "transform-number": (transform, "lxml.etree"),
+    "transform-rules": (transform, "lxml.etree"),
+    "transform-names": (transform, "lxml.etree"),
+    "transform-dense": (transform, "lxml.etree"),
     "transform-compile": (transform_compile, "lxml.etree"),
+    "transform-names-compile": (transform_compile, "lxml.etree"),
     "transform-reuse": (transform_reuse, "lxml.etree"),
 }

@@ -12,7 +12,7 @@
     [
       "underscore 1.13 (67 kB)",
       19297.0,
-      0.0027241270076956425,
+      0.0011963492404296024,
       33991.0,
       0.007651375646673841
     ],
@@ -26,7 +26,7 @@
     [
       "jquery 3.7 (279 kB)",
       87776.0,
-      0.013604465262081552,
+      0.006392547226763175,
       141392.0,
       0.03205720577291989
     ],
@@ -36,13 +36,139 @@
       0.012807822041092246,
       148763.0,
       0.04452209025718427
+    ],
+    [
+      "minify expression sequences — 1000 expression statements",
+      6889.0,
+      0.00033447680128422994,
+      6889.0,
+      0.0007586667747394434
+    ],
+    [
+      "minify expression sequences — 2 expression statements",
+      9.0,
+      1.1670079966237997e-06,
+      9.0,
+      1.7948202340060485e-06
+    ],
+    [
+      "minify guard return chains — 512 guard returns",
+      7487.0,
+      0.00028438259536566575,
+      12607.0,
+      0.001584289344221664
+    ],
+    [
+      "minify guard return chains — 1 guard returns",
+      38.0,
+      1.8137537852661958e-06,
+      48.0,
+      7.1068079563474384e-06
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / interleaved declarations",
+      2327,
+      0.00023127182887492382,
+      7518.0,
+      0.0008276304904332695
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 1 literal bindings / interleaved declarations",
+      32,
+      2.090794373129275e-06,
+      45.0,
+      6.2755164222494385e-06
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / one declaration",
+      2327,
+      0.0001890878458690774,
+      5988.0,
+      0.0006524099830433745
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / one declaration",
+      3142,
+      0.00012956246737303446,
+      4050,
+      0.0004478796984888807
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / separate declarations",
+      3142,
+      0.0002017888859351539,
+      5580,
+      0.0006181185334147207
+    ],
+    [
+      "check single-use JavaScript initializers — 1 call initializers / one declaration",
+      37,
+      1.5377683748892442e-06,
+      39,
+      5.704659524970642e-06
+    ],
+    [
+      "remove mixed JavaScript declarators — 256 retained/literal pairs / one declaration",
+      4166,
+      0.00027648959686909315,
+      12680.0,
+      0.0014650728733613505
+    ],
+    [
+      "remove mixed JavaScript declarators — 256 retained/literal pairs / separate declarations",
+      4166,
+      0.0002862023790309346,
+      14210.0,
+      0.0016561113283387386
+    ],
+    [
+      "remove mixed JavaScript declarators — 1 retained/literal pairs / one declaration",
+      41,
+      2.257433022082959e-06,
+      68.0,
+      9.284866508115404e-06
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read after initialization",
+      3652,
+      0.00022982708333074697,
+      10484.0,
+      0.001214587413414847
+    ],
+    [
+      "check JavaScript var initialization order — 1 var pairs / read after initialization",
+      37,
+      2.0490305150981195e-06,
+      59.0,
+      8.270332332926956e-06
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read before initialization",
+      4274,
+      0.00022446345478025856,
+      9570.0,
+      0.001119561935896248
+    ],
+    [
+      "remove unused JavaScript declarators — 256 unused retained/literal pairs",
+      2427,
+      0.00016929657807243832,
+      6355.0,
+      0.0007390604814645485
+    ],
+    [
+      "remove unused JavaScript declarators — 1 unused retained/literal pairs",
+      36,
+      1.8480759069442835e-06,
+      49.0,
+      6.9958663938033775e-06
     ]
   ],
   "spread": [
     [
       null,
       null,
-      0.026761011286501026,
+      0.027870460547941123,
       null,
       0.02183868062705304
     ],
@@ -56,7 +182,7 @@
     [
       null,
       null,
-      0.0186267125301896,
+      0.012701740472871384,
       null,
       0.011264462040930727
     ],
@@ -66,12 +192,149 @@
       0.022467493597760506,
       null,
       0.01459254660160529
+    ],
+    [
+      null,
+      null,
+      0.13592681347012278,
+      null,
+      0.018062106463852107
+    ],
+    [
+      null,
+      null,
+      0.02651579899818408,
+      null,
+      0.011496503612339743
+    ],
+    [
+      null,
+      null,
+      0.011033915942673642,
+      null,
+      0.03258628335113679
+    ],
+    [
+      null,
+      null,
+      0.040253606681332654,
+      null,
+      0.016066609065960278
+    ],
+    [
+      null,
+      null,
+      0.06472300088548513,
+      null,
+      0.00832276701408454
+    ],
+    [
+      null,
+      null,
+      0.014250806891917947,
+      null,
+      0.012308267973897391
+    ],
+    [
+      null,
+      null,
+      0.020548051634025788,
+      null,
+      0.005064268263555969
+    ],
+    [
+      null,
+      null,
+      0.008277346590370604,
+      null,
+      0.03178388089636171
+    ],
+    [
+      null,
+      null,
+      0.014445758522265546,
+      null,
+      0.0043640987939589405
+    ],
+    [
+      null,
+      null,
+      0.016991173127781586,
+      null,
+      0.0063223627906830405
+    ],
+    [
+      null,
+      null,
+      0.010675766547228148,
+      null,
+      0.006835818229075166
+    ],
+    [
+      null,
+      null,
+      0.008132932677013201,
+      null,
+      0.009154841160107398
+    ],
+    [
+      null,
+      null,
+      0.01925808998379394,
+      null,
+      0.006167268115091248
+    ],
+    [
+      null,
+      null,
+      0.010652664523775333,
+      null,
+      0.009193718866401003
+    ],
+    [
+      null,
+      null,
+      0.019888882536445274,
+      null,
+      0.008068949045342336
+    ],
+    [
+      null,
+      null,
+      0.01132166475402571,
+      null,
+      0.0044537831267621505
+    ],
+    [
+      null,
+      null,
+      0.011445727274730836,
+      null,
+      0.012823820436350684
+    ],
+    [
+      null,
+      null,
+      0.015329064744613447,
+      null,
+      0.02841219184327094
     ]
   ],
   "row_notes": {
     "0": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
     "1": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
     "2": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
-    "3": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB"
+    "3": "strips whitespace and comments without parsing the source, so it performs none of the renaming or structural compression the parsed minifiers do: on jQuery it emits 141.1 kB where turbohtml emits 87.8 kB",
+    "8": "preserves literal bindings; turbohtml propagates their values into reads",
+    "9": "preserves literal bindings; turbohtml propagates their values into reads",
+    "10": "preserves literal bindings; turbohtml propagates their values into reads",
+    "14": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "15": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "16": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "17": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "18": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "19": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "20": "jsmin: removes whitespace and comments; does not perform declaration or expression compression",
+    "21": "jsmin: removes whitespace and comments; does not perform declaration or expression compression"
   }
 }

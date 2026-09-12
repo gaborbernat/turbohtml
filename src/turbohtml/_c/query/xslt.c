@@ -16,6 +16,7 @@
    needing to touch the core function library. */
 
 #include "core/common.h"
+#include "core/node_map.h"
 #include "core/vec.h"
 #include "dom/nodes.h"
 #include "dom/tree.h"
@@ -437,6 +438,51 @@ static void strmap_free(strmap *map) {
     map->count = 0;
 }
 
+typedef struct {
+    const Py_UCS4 *name;
+    Py_ssize_t length;
+    Py_ssize_t first;
+} xslt_name_entry;
+
+typedef struct {
+    xslt_name_entry *entries;
+    size_t capacity;
+} xslt_name_index;
+
+static size_t name_index_slot(const xslt_name_index *index, const Py_UCS4 *name, Py_ssize_t length) {
+    size_t slot = str_hash(name, length) & (index->capacity - 1);
+    while (index->entries[slot].first != 0 &&
+           !str_eq(index->entries[slot].name, index->entries[slot].length, name, length)) {
+        slot = (slot + 1) & (index->capacity - 1);
+    }
+    return slot;
+}
+
+static int name_index_reserve(xslt_name_index *index, Py_ssize_t count) {
+    if (count < 16) {
+        return 0;
+    }
+    size_t bytes;
+    /* GCOVR_EXCL_BR_START: allocation size overflow */
+    if (!th_grow_cap((size_t)count * 2, 0, 32, sizeof(*index->entries), &index->capacity, &bytes)) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    index->entries = PyMem_Calloc(1, bytes);
+    return index->entries == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+}
+
+static Py_ssize_t name_index_add(xslt_name_index *index, const Py_UCS4 *name, Py_ssize_t length, Py_ssize_t position) {
+    const size_t slot = name_index_slot(index, name, length);
+    const Py_ssize_t previous = index->entries[slot].first;
+    index->entries[slot] = (xslt_name_entry){name, length, position + 1};
+    return previous;
+}
+
+static Py_ssize_t name_index_find(const xslt_name_index *index, const Py_UCS4 *name, Py_ssize_t length) {
+    return index->entries[name_index_slot(index, name, length)].first;
+}
+
 /* ---- stylesheet model ----------------------------------------------------- */
 
 typedef struct {
@@ -520,6 +566,23 @@ typedef struct {
     xp_program *program;
 } xslt_expr;
 
+typedef struct {
+    const Py_UCS4 *source;
+    Py_ssize_t length;
+    match_set matched;
+} xslt_number_match;
+
+typedef struct {
+    th_node_map positions;
+    th_node *last;
+    long value;
+    const Py_UCS4 *count_pattern;
+    const Py_UCS4 *from_pattern;
+    int type;
+    const Py_UCS4 *name;
+    Py_ssize_t name_len;
+} xslt_number_prefix;
+
 /* A source text node detached by whitespace stripping (section 3.4), kept so the caller's
    tree is restored to its original shape after the transform returns. */
 struct strip_entry {
@@ -529,6 +592,14 @@ struct strip_entry {
 };
 
 enum output_method { OUT_XML, OUT_HTML, OUT_TEXT };
+
+typedef struct {
+    const th_node *node;
+    Py_ssize_t attr;
+    const Py_UCS4 *mode;
+    Py_ssize_t mode_len;
+    xslt_rule *rule;
+} xslt_dispatch_entry;
 
 typedef struct engine {
     PyObject *module;
@@ -541,6 +612,9 @@ typedef struct engine {
     xslt_rule *rules;
     Py_ssize_t nrules;
     Py_ssize_t rules_cap;
+    xslt_dispatch_entry *dispatch;
+    size_t dispatch_capacity;
+    size_t dispatch_count;
     xslt_named *named;
     Py_ssize_t nnamed;
     Py_ssize_t named_cap;
@@ -553,6 +627,10 @@ typedef struct engine {
     xslt_attrset *attrsets;
     Py_ssize_t nattrsets;
     Py_ssize_t attrsets_cap;
+    xslt_name_index named_index;
+    xslt_name_index key_index;
+    xslt_name_index attrset_index;
+    Py_ssize_t *attrset_next;
     xslt_space *spaces;
     Py_ssize_t nspaces;
     Py_ssize_t spaces_cap;
@@ -597,18 +675,23 @@ typedef struct engine {
     int gen_counter;
     int depth;
 
-    /* One level's number is its preceding matching siblings plus one, so numbering a run of siblings rescans the
-       whole run for each of them and costs O(n^2) over the run. The memo carries the previous answer forward:
-       level_number(node) is level_number(node->prev_sibling) plus whether that sibling counted. It holds the
-       criteria the answer was computed under, because the default criteria follow the current node's type and
-       name, and a run numbered under different criteria cannot reuse it. */
+    xslt_number_match number_count_match;
+    xslt_number_match number_from_match;
+    xslt_number_prefix explicit_any;
+
+    th_node_map any_positions;
+    th_node *any_last;
+    long any_count;
+    int any_type;
+    const Py_UCS4 *any_name;
+    Py_ssize_t any_name_len;
+
+    /* Reuse sibling counts to avoid quadratic scans during repeated numbering. */
     const th_node *number_memo_node;
     long number_memo_value;
-    /* The xsl:number element the memo was taken for. The count set itself is a local of the instruction handler, so
-       its address repeats across calls and cannot identify the criteria; the instruction can, since its count
-       attribute is fixed and two instructions are two nodes. */
     const th_node *number_memo_instruction;
     int number_memo_type;
+    int number_memo_has_count;
     const Py_UCS4 *number_memo_name;
     Py_ssize_t number_memo_name_len;
 
@@ -616,6 +699,36 @@ typedef struct engine {
     int py_error;
     int owns_model;
 } engine;
+
+static int build_name_indexes(engine *eng) {
+    /* GCOVR_EXCL_BR_START: allocation failure */
+    if (name_index_reserve(&eng->named_index, eng->nnamed) < 0 || name_index_reserve(&eng->key_index, eng->nkeys) < 0 ||
+        name_index_reserve(&eng->attrset_index, eng->nattrsets) < 0) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    if (eng->named_index.capacity != 0) {
+        for (Py_ssize_t index = eng->nnamed - 1; index >= 0; index--) {
+            name_index_add(&eng->named_index, eng->named[index].name, eng->named[index].name_len, index);
+        }
+    }
+    if (eng->key_index.capacity != 0) {
+        for (Py_ssize_t index = eng->nkeys - 1; index >= 0; index--) {
+            name_index_add(&eng->key_index, eng->keys[index].name, eng->keys[index].name_len, index);
+        }
+    }
+    if (eng->attrset_index.capacity != 0) {
+        eng->attrset_next = PyMem_Malloc((size_t)eng->nattrsets * sizeof(*eng->attrset_next));
+        if (eng->attrset_next == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                   /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = eng->nattrsets - 1; index >= 0; index--) {
+            eng->attrset_next[index] =
+                name_index_add(&eng->attrset_index, eng->attrsets[index].name, eng->attrsets[index].name_len, index);
+        }
+    }
+    return 0;
+}
 
 /* A cap on template-instantiation nesting (recursive apply-templates / named-template
    calls, xsl:for-each and result-tree construction). The transform recurses in C, so
@@ -1097,10 +1210,15 @@ static int xslt_extension(void *vctx, th_node *context_node, const Py_UCS4 *name
             return -1;          /* GCOVR_EXCL_LINE */
         }
         xslt_key *key = NULL;
-        for (Py_ssize_t index = 0; index < eng->nkeys; index++) {
-            if (str_eq(eng->keys[index].name, eng->keys[index].name_len, key_name, key_name_len)) {
-                key = &eng->keys[index];
-                break;
+        if (eng->key_index.capacity != 0) {
+            const Py_ssize_t position = name_index_find(&eng->key_index, key_name, key_name_len);
+            key = position == 0 ? NULL : &eng->keys[position - 1];
+        } else {
+            for (Py_ssize_t index = 0; index < eng->nkeys; index++) {
+                if (str_eq(eng->keys[index].name, eng->keys[index].name_len, key_name, key_name_len)) {
+                    key = &eng->keys[index];
+                    break;
+                }
             }
         }
         PyMem_Free(key_name);
@@ -1365,10 +1483,66 @@ static int build_rule(engine *eng, xslt_rule *rule) {
     return 0;
 }
 
+static size_t dispatch_slot(const xslt_dispatch_entry *entries, size_t capacity, const th_node *node, Py_ssize_t attr,
+                            const Py_UCS4 *mode, Py_ssize_t mode_len) {
+    const size_t mode_hash = mode == NULL ? 0 : str_hash(mode, mode_len);
+    size_t slot = (ptr_hash(node, attr) ^ mode_hash) & (capacity - 1);
+    while (entries[slot].node != NULL &&
+           (entries[slot].node != node || entries[slot].attr != attr ||
+            (entries[slot].mode == NULL) != (mode == NULL) ||
+            (mode != NULL && !str_eq(entries[slot].mode, entries[slot].mode_len, mode, mode_len)))) {
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return slot;
+}
+
+static int dispatch_grow(engine *eng) {
+    size_t capacity;
+    size_t bytes;
+    /* GCOVR_EXCL_BR_START: alloc */
+    if (!th_grow_cap(eng->dispatch_capacity + 1, eng->dispatch_capacity, 32, sizeof(*eng->dispatch), &capacity,
+                     &bytes)) {
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    xslt_dispatch_entry *entries = PyMem_Calloc(1, bytes);
+    if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;         /* GCOVR_EXCL_LINE */
+    }
+    for (size_t index = 0; index < eng->dispatch_capacity; index++) {
+        const xslt_dispatch_entry *entry = &eng->dispatch[index];
+        if (entry->node != NULL) {
+            entries[dispatch_slot(entries, capacity, entry->node, entry->attr, entry->mode, entry->mode_len)] = *entry;
+        }
+    }
+    PyMem_Free(eng->dispatch);
+    eng->dispatch = entries;
+    eng->dispatch_capacity = capacity;
+    return 0;
+}
+
 /* The best-matching rule for (node, attr) in the given mode, or NULL for none. The
    rule array is pre-sorted by descending (priority, position), so the
    first match wins the section 5.5 conflict resolution. */
 static xslt_rule *best_rule(engine *eng, th_node *node, Py_ssize_t attr, const Py_UCS4 *mode, Py_ssize_t mode_len) {
+    size_t slot = 0;
+    const int cache = eng->nrules >= 16;
+    if (cache) {
+        if (eng->dispatch_count == eng->dispatch_capacity / 2) {
+            /* GCOVR_EXCL_BR_START: alloc */
+            if (dispatch_grow(eng) < 0) {
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+                fail_py(eng);     /* GCOVR_EXCL_LINE */
+                return NULL;      /* GCOVR_EXCL_LINE */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+        }
+        slot = dispatch_slot(eng->dispatch, eng->dispatch_capacity, node, attr, mode, mode_len);
+        if (eng->dispatch[slot].node != NULL) {
+            return eng->dispatch[slot].rule;
+        }
+    }
+    xslt_rule *winner = NULL;
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
         xslt_rule *rule = &eng->rules[index];
         int rule_default = rule->mode == NULL;
@@ -1383,10 +1557,15 @@ static xslt_rule *best_rule(engine *eng, th_node *node, Py_ssize_t attr, const P
             return NULL;
         }
         if (match_set_has(&rule->matched, node, attr)) {
-            return rule;
+            winner = rule;
+            break;
         }
     }
-    return NULL;
+    if (cache) {
+        eng->dispatch[slot] = (xslt_dispatch_entry){node, attr, mode, mode_len, winner};
+        eng->dispatch_count++;
+    }
+    return winner;
 }
 
 /* ---- instruction instantiation -------------------------------------------- */
@@ -1824,9 +2003,11 @@ static int apply_attribute_sets(engine *eng, const Py_UCS4 *names, Py_ssize_t na
         if (index == start) {
             break;
         }
-        for (Py_ssize_t slot = 0; slot < eng->nattrsets; slot++) {
+        const int indexed = eng->attrset_index.capacity != 0;
+        Py_ssize_t slot = indexed ? name_index_find(&eng->attrset_index, names + start, index - start) - 1 : 0;
+        for (; slot >= 0 && slot < eng->nattrsets; slot = indexed ? eng->attrset_next[slot] - 1 : slot + 1) {
             xslt_attrset *set = &eng->attrsets[slot];
-            if (!str_eq(set->name, set->name_len, names + start, index - start)) {
+            if (!indexed && !str_eq(set->name, set->name_len, names + start, index - start)) {
                 continue;
             }
             Py_ssize_t chain_len = 0;
@@ -2414,8 +2595,8 @@ static int format_multi(xb *out, const Py_UCS4 *format, Py_ssize_t format_len, c
     }
     for (Py_ssize_t index = 0; index < nvalues; index++) {
         Py_ssize_t pick = index < ntok ? index : ntok - 1;
-        if (index > 0 && ntok > 0) {
-            int sep = xb_add(out, format + sep_start[pick], sep_len[pick]);
+        if (index > 0) {
+            int sep = ntok > 1 ? xb_add(out, format + sep_start[pick], sep_len[pick]) : xb_add_char(out, '.');
             if (sep < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                 return -1; /* GCOVR_EXCL_LINE */
             }
@@ -2475,9 +2656,9 @@ static int build_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, ma
         const char *feature = NULL;
         int status =
             xp_eval_at(prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, xslt_extension, eng, &matched, &feature);
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: the pattern compiled, so it evaluates */
-            PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error"); /* GCOVR_EXCL_LINE */
-            return fail_py(eng);                                              /* GCOVR_EXCL_LINE */
+        if (status < 0) {
+            PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error");
+            return fail_py(eng);
         }
         for (Py_ssize_t slot = 0; slot < matched.nodes.len; slot++) {
             xp_item item = matched.nodes.items[slot];
@@ -2489,6 +2670,36 @@ static int build_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, ma
         }
         xp_result_free(&matched);
     }
+    return 0;
+}
+
+static int get_number_matcher(engine *eng, const Py_UCS4 *pattern, Py_ssize_t len, xslt_number_match *cache,
+                              match_set *local, const match_set **matched) {
+    if (cache->source == pattern || (cache->source != NULL && cache->length == len &&
+                                     memcmp(cache->source, pattern, (size_t)len * sizeof(Py_UCS4)) == 0)) {
+        *matched = &cache->matched;
+        return 0;
+    }
+    Py_ssize_t starts[64];
+    Py_ssize_t lengths[64];
+    int alternatives = split_union(pattern, len, starts, lengths, 64);
+    for (int index = 0; index < alternatives; index++) {
+        const xp_program *prog = compile_pattern(eng, pattern + starts[index], lengths[index]);
+        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation validates stylesheet patterns */
+            return -1;      /* GCOVR_EXCL_LINE */
+        }
+        if (!xp_pattern_is_static(prog)) {
+            return build_matcher(eng, pattern, len, local);
+        }
+    }
+    match_set_free(&cache->matched);
+    cache->source = NULL;
+    if (build_matcher(eng, pattern, len, &cache->matched) < 0) {
+        return -1;
+    }
+    cache->source = pattern;
+    cache->length = len;
+    *matched = &cache->matched;
     return 0;
 }
 
@@ -2507,31 +2718,28 @@ static int number_counts(const engine *eng, const match_set *count_set, int have
             memcmp(node->text, eng->cur_node->text, (size_t)node->text_len * sizeof(Py_UCS4)) == 0);
 }
 
-/* Whether the memo was taken under the same criteria this call uses, so its answer still applies: the same xsl:number
-   instruction, and, when that instruction names no count pattern, the same current-node type and name the default
-   criteria read. The caller reaches this only for a node whose previous sibling is the memo's node. */
+/* Default counts depend on node type and name, so different instructions can share them. */
 static int number_memo_applies(const engine *eng, const th_node *instruction, int have_count) {
-    if (eng->number_memo_instruction != instruction) {
+    if (have_count != eng->number_memo_has_count) {
         return 0;
     }
-    return have_count ||
-           (eng->number_memo_type == (int)eng->cur_node->type && /* GCOVR_EXCL_BR_LINE: a memo is
-               consulted only across siblings, which one run never spans a type change in */
-            eng->number_memo_name_len == eng->cur_node->text_len &&
-            memcmp(eng->number_memo_name, eng->cur_node->text, (size_t)eng->cur_node->text_len * sizeof(Py_UCS4)) == 0);
+    if (have_count) {
+        return eng->number_memo_instruction == instruction;
+    }
+    return eng->number_memo_type == (int)eng->cur_node->type &&
+           (eng->cur_node->type != TH_NODE_ELEMENT || (eng->number_memo_name_len == eng->cur_node->text_len &&
+                                                       memcmp(eng->number_memo_name, eng->cur_node->text,
+                                                              (size_t)eng->cur_node->text_len * sizeof(Py_UCS4)) == 0));
 }
 
-/* The count of node plus its preceding siblings that match the count criteria (one level's
-   number). Numbering a run of siblings walks it once in total rather than once per sibling: the
-   answer for a node is the answer for its previous sibling plus whether that sibling counted. */
 static long level_number(engine *eng, const th_node *instruction, const match_set *count_set, int have_count,
                          th_node *node) {
     long count = 1;
     th_node *prev = node->prev_sibling;
-    if (prev != NULL && prev == eng->number_memo_node && number_memo_applies(eng, instruction, have_count)) {
-        /* the memo holds the node the previous call numbered, and a call only ever numbers a node that met
-           the count criteria, so reaching it through prev means prev counted */
-        count = eng->number_memo_value + 1;
+    int repeated = !have_count && node == eng->number_memo_node;
+    if ((repeated || (prev != NULL && prev == eng->number_memo_node)) &&
+        number_memo_applies(eng, instruction, have_count)) {
+        count = eng->number_memo_value + !repeated;
     } else {
         for (; prev != NULL; prev = prev->prev_sibling) {
             if (number_counts(eng, count_set, have_count, prev)) {
@@ -2543,6 +2751,7 @@ static long level_number(engine *eng, const th_node *instruction, const match_se
     eng->number_memo_value = count;
     eng->number_memo_instruction = instruction;
     eng->number_memo_type = (int)eng->cur_node->type;
+    eng->number_memo_has_count = have_count;
     eng->number_memo_name = eng->cur_node->text;
     eng->number_memo_name_len = eng->cur_node->text_len;
     return count;
@@ -2563,6 +2772,121 @@ static th_node *doc_next(th_node *node) {
     return NULL; /* GCOVR_EXCL_LINE */
 }
 
+static int default_any_number(engine *eng, long *out) {
+    int repeated = eng->any_type == (int)eng->cur_node->type &&
+                   (eng->cur_node->type != TH_NODE_ELEMENT ||
+                    (eng->any_name_len == eng->cur_node->text_len &&
+                     memcmp(eng->any_name, eng->cur_node->text, (size_t)eng->any_name_len * sizeof(Py_UCS4)) == 0));
+    if (!repeated) {
+        PyMem_Free(eng->any_positions.entries);
+        eng->any_positions = (th_node_map){0};
+        eng->any_last = NULL;
+        eng->any_count = 0;
+        eng->any_type = (int)eng->cur_node->type;
+        eng->any_name = eng->cur_node->type == TH_NODE_ELEMENT ? eng->cur_node->text : NULL;
+        eng->any_name_len = eng->cur_node->type == TH_NODE_ELEMENT ? eng->cur_node->text_len : 0;
+    }
+    if (eng->any_last == eng->cur_node) {
+        *out = eng->any_count;
+        return 0;
+    }
+    Py_ssize_t position = th_node_map_find(&eng->any_positions, eng->cur_node);
+    if (position != 0) {
+        *out = (long)position;
+        return 0;
+    }
+    long count = eng->any_positions.entries == NULL ? 0 : eng->any_count;
+    th_node *node = eng->any_positions.entries == NULL ? eng->src_root : doc_next(eng->any_last);
+    for (;; node = doc_next(node)) {
+        if (number_counts(eng, NULL, 0, node)) {
+            count++;
+            /* One numbering call does not amortize a document index. */
+            if (repeated) {
+                if (th_node_map_insert(&eng->any_positions, node, count) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+                    PyErr_NoMemory();                                           /* GCOVR_EXCL_LINE */
+                    return fail_py(eng);                                        /* GCOVR_EXCL_LINE */
+                }
+            }
+        }
+        if (node == eng->cur_node) {
+            eng->any_last = node;
+            eng->any_count = count;
+            *out = count;
+            return 0;
+        }
+    }
+}
+
+static long unindexed_any_number(const engine *eng, const match_set *count_matches, int have_count,
+                                 const match_set *from_matches, int have_from) {
+    long counter = 0;
+    for (th_node *node = eng->src_root;; node = doc_next(node)) {
+        if (have_from && match_set_has(from_matches, node, -1)) {
+            counter = 0;
+        }
+        if (number_counts(eng, count_matches, have_count, node)) {
+            counter++;
+        }
+        if (node == eng->cur_node) {
+            return counter;
+        }
+    }
+}
+
+static int explicit_any_number(engine *eng, const Py_UCS4 *count_pattern, const Py_UCS4 *from_pattern, long *out) {
+    xslt_number_prefix *cache = &eng->explicit_any;
+    int repeated = cache->last != NULL && cache->count_pattern == count_pattern &&
+                   cache->from_pattern == from_pattern &&
+                   (count_pattern != NULL ||
+                    (cache->type == (int)eng->cur_node->type &&
+                     (eng->cur_node->type != TH_NODE_ELEMENT ||
+                      (cache->name_len == eng->cur_node->text_len &&
+                       memcmp(cache->name, eng->cur_node->text, (size_t)cache->name_len * sizeof(Py_UCS4)) == 0))));
+    if (!repeated) {
+        PyMem_Free(cache->positions.entries);
+        *cache = (xslt_number_prefix){.count_pattern = count_pattern,
+                                      .from_pattern = from_pattern,
+                                      .type = (int)eng->cur_node->type,
+                                      .name = eng->cur_node->text,
+                                      .name_len = eng->cur_node->text_len};
+        cache->value = unindexed_any_number(eng, &eng->number_count_match.matched, count_pattern != NULL,
+                                            &eng->number_from_match.matched, from_pattern != NULL);
+        cache->last = eng->cur_node;
+        *out = cache->value;
+        return 0;
+    }
+    if (cache->last == eng->cur_node) {
+        *out = cache->value;
+        return 0;
+    }
+    Py_ssize_t position = th_node_map_find(&cache->positions, eng->cur_node);
+    if (position != 0) {
+        *out = (long)(position - 1);
+        return 0;
+    }
+    long counter = cache->positions.entries == NULL ? 0 : cache->value;
+    th_node *node = cache->positions.entries == NULL ? eng->src_root : doc_next(cache->last);
+    for (;; node = doc_next(node)) {
+        if (from_pattern != NULL && match_set_has(&eng->number_from_match.matched, node, -1)) {
+            counter = 0;
+        }
+        if (number_counts(eng, &eng->number_count_match.matched, count_pattern != NULL, node)) {
+            counter++;
+        }
+        /* Unmatched nodes can number zero; reserve zero for absent map entries. */
+        if (th_node_map_insert(&cache->positions, node, counter + 1) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+            PyErr_NoMemory();                                               /* GCOVR_EXCL_LINE */
+            return fail_py(eng);                                            /* GCOVR_EXCL_LINE */
+        }
+        if (node == eng->cur_node) {
+            cache->last = node;
+            cache->value = counter;
+            *out = counter;
+            return 0;
+        }
+    }
+}
+
 static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     long values[64];
     Py_ssize_t nvalues = 0;
@@ -2570,6 +2894,8 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     const Py_UCS4 *value_expr = attr_lookup(eng->sheet_tree, instruction, "value", &value_len);
     match_set count_set = {0};
     match_set from_set = {0};
+    const match_set *count_matches = &count_set;
+    const match_set *from_matches = &from_set;
     int have_count = 0;
     int have_from = 0;
     if (value_expr != NULL) {
@@ -2596,39 +2922,36 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         /* Compilation validates the count and from patterns before a run. */
         if (count != NULL) {
             have_count = 1;
-            /* GCOVR_EXCL_BR_START */
-            if (build_matcher(eng, count, count_len, &count_set) < 0) {
-                match_set_free(&count_set); /* GCOVR_EXCL_LINE */
-                return -1;                  /* GCOVR_EXCL_LINE */
+            if (get_number_matcher(eng, count, count_len, &eng->number_count_match, &count_set, &count_matches) < 0) {
+                match_set_free(&count_set);
+                return -1;
             }
-            /* GCOVR_EXCL_BR_STOP */
         }
         if (from != NULL) {
             have_from = 1;
-            /* GCOVR_EXCL_BR_START */
-            if (build_matcher(eng, from, from_len, &from_set) < 0) {
-                match_set_free(&count_set); /* GCOVR_EXCL_LINE */
-                match_set_free(&from_set);  /* GCOVR_EXCL_LINE */
-                return -1;                  /* GCOVR_EXCL_LINE */
+            if (get_number_matcher(eng, from, from_len, &eng->number_from_match, &from_set, &from_matches) < 0) {
+                match_set_free(&count_set);
+                match_set_free(&from_set);
+                return -1;
             }
-            /* GCOVR_EXCL_BR_STOP */
         }
         Py_ssize_t level_len = 0;
         const Py_UCS4 *level = attr_lookup(eng->sheet_tree, instruction, "level", &level_len);
         if (level != NULL && ucs4_ascii_eq(level, level_len, "any")) {
             long counter = 0;
-            /* The current node is a descendant of the source root, so the walk always breaks at
-               it before the loop condition can see a NULL. */
-            for (th_node *node = eng->src_root; node != NULL; /* GCOVR_EXCL_BR_LINE */ node = doc_next(node)) {
-                if (have_from && match_set_has(&from_set, node, -1)) {
-                    counter = 0;
+            if (!have_count && !have_from) {
+                if (default_any_number(eng, &counter) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    return -1;                               /* GCOVR_EXCL_LINE */
                 }
-                if (number_counts(eng, &count_set, have_count, node)) {
-                    counter++;
+            } else if ((!have_count || count_matches == &eng->number_count_match.matched) &&
+                       (!have_from || from_matches == &eng->number_from_match.matched)) {
+                int status = explicit_any_number(eng, have_count ? eng->number_count_match.source : NULL,
+                                                 have_from ? eng->number_from_match.source : NULL, &counter);
+                if (status < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+                    return -1;    /* GCOVR_EXCL_LINE */
                 }
-                if (node == eng->cur_node) {
-                    break;
-                }
+            } else {
+                counter = unindexed_any_number(eng, count_matches, have_count, from_matches, have_from);
             }
             values[nvalues++] = counter;
         } else if (level != NULL && ucs4_ascii_eq(level, level_len, "multiple")) {
@@ -2639,31 +2962,31 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
                 if (depth == 64) { /* GCOVR_EXCL_BR_LINE: overflow guard for the chain buffer */
                     break;         /* GCOVR_EXCL_LINE */
                 }
-                if (have_from && match_set_has(&from_set, node, -1)) {
+                if (have_from && match_set_has(from_matches, node, -1)) {
                     break;
                 }
-                if (number_counts(eng, &count_set, have_count, node)) {
+                if (number_counts(eng, count_matches, have_count, node)) {
                     chain[depth++] = node;
                 }
             }
             for (Py_ssize_t index = depth - 1; index >= 0; index--) {
-                values[nvalues++] = level_number(eng, instruction, &count_set, have_count, chain[index]);
+                values[nvalues++] = level_number(eng, instruction, count_matches, have_count, chain[index]);
             }
         } else {
             /* single (the default): the nearest ancestor-or-self that matches count, bounded by
                the nearest from ancestor. */
             th_node *target = NULL;
             for (th_node *node = eng->cur_node; node != NULL; node = node->parent) {
-                if (have_from && match_set_has(&from_set, node, -1)) {
+                if (have_from && match_set_has(from_matches, node, -1)) {
                     break;
                 }
-                if (number_counts(eng, &count_set, have_count, node)) {
+                if (number_counts(eng, count_matches, have_count, node)) {
                     target = node;
                     break;
                 }
             }
             if (target != NULL) {
-                values[nvalues++] = level_number(eng, instruction, &count_set, have_count, target);
+                values[nvalues++] = level_number(eng, instruction, count_matches, have_count, target);
             }
         }
     }
@@ -2862,10 +3185,15 @@ static int do_call_template(engine *eng, th_node *instruction, th_node *out_pare
         return fail(eng, "xsl:call-template requires a name attribute");
     }
     xslt_named *target = NULL;
-    for (Py_ssize_t index = 0; index < eng->nnamed; index++) {
-        if (str_eq(eng->named[index].name, eng->named[index].name_len, name, name_len)) {
-            target = &eng->named[index];
-            break;
+    if (eng->named_index.capacity != 0) {
+        const Py_ssize_t position = name_index_find(&eng->named_index, name, name_len);
+        target = position == 0 ? NULL : &eng->named[position - 1];
+    } else {
+        for (Py_ssize_t index = 0; index < eng->nnamed; index++) {
+            if (str_eq(eng->named[index].name, eng->named[index].name_len, name, name_len)) {
+                target = &eng->named[index];
+                break;
+            }
         }
     }
     if (target == NULL) {
@@ -4232,6 +4560,11 @@ static PyObject *serialize_markup(engine *eng, th_node *root) {
 /* ---- engine lifecycle ----------------------------------------------------- */
 
 static void engine_clear(engine *eng) {
+    PyMem_Free(eng->dispatch);
+    match_set_free(&eng->number_count_match.matched);
+    match_set_free(&eng->number_from_match.matched);
+    PyMem_Free(eng->explicit_any.positions.entries);
+    PyMem_Free(eng->any_positions.entries);
     for (Py_ssize_t index = 0; index < eng->nrules; index++) {
         match_set_free(&eng->rules[index].matched);
     }
@@ -4241,6 +4574,10 @@ static void engine_clear(engine *eng) {
     }
     PyMem_Free(eng->keys);
     if (eng->owns_model) {
+        PyMem_Free(eng->named_index.entries);
+        PyMem_Free(eng->key_index.entries);
+        PyMem_Free(eng->attrset_index.entries);
+        PyMem_Free(eng->attrset_next);
         PyMem_Free(eng->named);
         PyMem_Free(eng->globals);
         PyMem_Free(eng->attrsets);
@@ -4280,6 +4617,9 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree)
     eng->src_tree = src_tree;
     eng->src_root = th_tree_document(src_tree);
     eng->out_tree = NULL;
+    eng->dispatch = NULL;
+    eng->dispatch_capacity = 0;
+    eng->dispatch_count = 0;
     eng->rules = NULL;
     eng->nrules = 0;
     eng->rules_cap = 0;
@@ -4297,6 +4637,13 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree)
     eng->ns_counter = 0;
     eng->gen_counter = 0;
     eng->depth = 0;
+    eng->number_count_match = (xslt_number_match){0};
+    eng->number_from_match = (xslt_number_match){0};
+    eng->explicit_any = (xslt_number_prefix){0};
+    eng->any_positions = (th_node_map){0};
+    eng->any_last = NULL;
+    eng->any_count = 0;
+    eng->any_type = -1;
     eng->number_memo_node = NULL;
     eng->number_memo_instruction = NULL;
     if (model->nrules > 0) {
@@ -5655,6 +6002,9 @@ PyObject *turbohtml_xslt_compile(PyObject *module, PyObject *args) {
     int status = copy_imports(module, compiled, imports_obj, &imports, &nimports);
     if (status == 0) { /* GCOVR_EXCL_BR_LINE: copy_imports fails only on allocation or an invalid parser result */
         status = analyze(&compiled->model, compiled->sheet_root, imports, nimports);
+    }
+    if (status == 0) {
+        status = build_name_indexes(&compiled->model);
     }
     for (Py_ssize_t index = 0; status == 0 && index < nimports; index++) {
         status = precompile_stylesheet(&compiled->model, imports[index]);

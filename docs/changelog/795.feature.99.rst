@@ -1,0 +1,1 @@
+Speed up :func:`CSS minification <turbohtml.clean.minify_css>` with many mergeable media blocks.

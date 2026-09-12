@@ -178,6 +178,12 @@ markdownify.
 The ``google_doc`` row reads the inline-CSS styling a Google Docs export carries (html2text's google_doc mode) and runs
 32 times faster; markdownify has no equivalent.
 
+.. bench-table::
+    :file: bench/markdown-runs.json
+
+.. bench-table::
+    :file: bench/markdown-wrap.json
+
 *****************
  Structured data
 *****************
@@ -255,6 +261,9 @@ trafilatura.
 .. bench-table::
     :file: bench/date-extraction.json
 
+.. bench-table::
+    :file: bench/date-tally.json
+
 ************
  Unescaping
 ************
@@ -284,6 +293,12 @@ scan; wherever markup appears, the state machine runs roughly eight to sixteen t
 .. bench-table::
     :file: bench/tokenizing.json
 
+.. bench-table::
+    :file: bench/sax-records.json
+
+.. bench-table::
+    :file: bench/sax-records-callback.json
+
 *********
  Parsing
 *********
@@ -308,6 +323,24 @@ lineage.
 
 .. bench-table::
     :file: bench/parsing.json
+
+.. bench-table::
+    :file: bench/parse-formatting.json
+
+.. bench-table::
+    :file: bench/parse-scope.json
+
+.. bench-table::
+    :file: bench/parse-afe.json
+
+.. bench-table::
+    :file: bench/parse-nul.json
+
+.. bench-table::
+    :file: bench/parse-foster.json
+
+.. bench-table::
+    :file: bench/parse-crlf.json
 
 ******************
  Fragment parsing
@@ -382,6 +415,30 @@ per-character Python loop, so it runs 16 times faster.
 .. bench-table::
     :file: bench/querying-6.json
 
+.. bench-table::
+    :file: bench/query-siblings.json
+
+.. bench-table::
+    :file: bench/query-parents.json
+
+.. bench-table::
+    :file: bench/form-data-fieldsets.json
+
+.. bench-table::
+    :file: bench/radio-group.json
+
+.. bench-table::
+    :file: bench/query-roots.json
+
+.. bench-table::
+    :file: bench/query-root-groups.json
+
+.. bench-table::
+    :file: bench/query-closest.json
+
+.. bench-table::
+    :file: bench/node-closest.json
+
 A text-content search runs through :meth:`~turbohtml.Node.find_all` with ``text=`` (a regex matched against each
 element's collected subtree text), raced against ``BeautifulSoup.find_all(string=...)`` and the equivalent text filters
 on lxml, parsel, and pyquery. When the ``text=`` filter is a plain string or a literal (no regex metacharacters,
@@ -444,6 +501,21 @@ repeated result includes any stylesheet analysis or XPath compilation left in th
 
 .. bench-table::
     :file: bench/xslt-reuse.json
+
+.. bench-table::
+    :file: bench/xslt-rules.json
+
+.. bench-table::
+    :file: bench/xslt-names.json
+
+.. bench-table::
+    :file: bench/xslt-names-compile.json
+
+.. bench-table::
+    :file: bench/xslt-number.json
+
+.. bench-table::
+    :file: bench/xslt-dense.json
 
 ************
  Node paths
@@ -630,6 +702,63 @@ does.
 .. bench-table::
     :file: bench/editing-6.json
 
+.. bench-table::
+    :file: bench/prune-shared.json
+
+.. bench-table::
+    :file: bench/normalize-dom.json
+
+.. bench-table::
+    :file: bench/range-boundary.json
+
+.. bench-table::
+    :file: bench/range-contained.json
+
+.. bench-table::
+    :file: bench/range-partial.json
+
+.. bench-table::
+    :file: bench/observe-registrations.json
+
+.. bench-table::
+    :file: bench/attribute-grow.json
+
+.. bench-table::
+    :file: bench/parse-xml-attrs.json
+
+.. bench-table::
+    :file: bench/parse-xml-append.json
+
+.. bench-table::
+    :file: bench/parse-xml-prefixes.json
+
+.. bench-table::
+    :file: bench/parse-xml-text.json
+
+.. bench-table::
+    :file: bench/parse-xml-values.json
+
+.. bench-table::
+    :file: bench/html-options.json
+
+.. bench-table::
+    :file: bench/text-options.json
+
+.. bench-table::
+    :file: bench/canonical-options.json
+
+.. bench-table::
+    :file: bench/token-attributes.json
+
+.. bench-table::
+    :file: bench/tokenize-attributes.json
+
+.. bench-table::
+    :file: bench/rewrite-attributes.json
+
+.. bench-table::
+    :file: bench/node-equals.json
+
 *******
  Links
 *******
@@ -726,6 +855,12 @@ comparison is output size, where turbohtml stays within a couple percent and com
 .. bench-table::
     :file: bench/css-minification.json
 
+.. bench-table::
+    :file: bench/css-rule-merges.json
+
+.. bench-table::
+    :file: bench/css-rule-conflicts.json
+
 ``csscompressor`` (the YUI port) and ``cssmin`` (its BSD descendant) rewrite values to their shortest form the way
 turbohtml does, but as pure-Python regex passes they turn quadratic on a large stylesheet and trail the C engine by tens
 to over four hundred times, ``cssmin`` and ``css-html-js-minify`` reaching roughly four seconds on the 745 kB
@@ -769,6 +904,27 @@ with the time to produce it; both ratios are against turbohtml.
 .. bench-table::
     :file: bench/js-minification.json
 
+.. bench-table::
+    :file: bench/js-sequences.json
+
+.. bench-table::
+    :file: bench/js-guards.json
+
+.. bench-table::
+    :file: bench/js-propagation.json
+
+.. bench-table::
+    :file: bench/js-single-use.json
+
+.. bench-table::
+    :file: bench/js-unlink.json
+
+.. bench-table::
+    :file: bench/js-var-initialization.json
+
+.. bench-table::
+    :file: bench/js-unused-declarations.json
+
 ********************
  Encoding detection
 ********************
@@ -791,6 +947,12 @@ score it and a CJK stream leaves several standing.
 
 .. bench-table::
     :file: bench/encoding-detection.json
+
+.. bench-table::
+    :file: bench/encoding-result.json
+
+.. bench-table::
+    :file: bench/encoding-result-stream.json
 
 *****************
  Legacy decoding
@@ -828,6 +990,180 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 
 .. bench-table::
     :file: bench/link-filtering.json
+
+.. bench-table::
+    :file: bench/links-external.json
+
+.. bench-table::
+    :file: bench/select-nth.json
+
+.. bench-table::
+    :file: bench/xpath-wide.json
+
+.. bench-table::
+    :file: bench/xpath-distinct.json
+
+.. bench-table::
+    :file: bench/xpath-set.json
+
+.. bench-table::
+    :file: bench/xpath-compare.json
+
+.. bench-table::
+    :file: bench/xpath-order.json
+
+.. bench-table::
+    :file: bench/xpath-translate.json
+
+.. bench-table::
+    :file: bench/xpath-replace.json
+
+.. bench-table::
+    :file: bench/xpath-concat.json
+
+.. bench-table::
+    :file: bench/xpath-id-nodes.json
+
+.. bench-table::
+    :file: bench/shadow-slot.json
+
+.. bench-table::
+    :file: bench/shadow-fallback.json
+
+.. bench-table::
+    :file: bench/shadow-assignment.json
+
+.. bench-table::
+    :file: bench/shadow.json
+
+.. bench-table::
+    :file: bench/validate-pattern.json
+
+.. bench-table::
+    :file: bench/validate-pattern-reuse.json
+
+.. bench-table::
+    :file: bench/compile-pattern.json
+
+.. bench-table::
+    :file: bench/validate-attributes.json
+
+.. bench-table::
+    :file: bench/validate-numeric-facets.json
+
+.. bench-table::
+    :file: bench/validate-facets.json
+
+.. bench-table::
+    :file: bench/compile-facets.json
+
+.. bench-table::
+    :file: bench/validate.json
+
+.. bench-table::
+    :file: bench/validate-rng.json
+
+.. bench-table::
+    :file: bench/validate-rng-reuse.json
+
+.. bench-table::
+    :file: bench/compile-rng-reuse.json
+
+.. bench-table::
+    :file: bench/computed-style.json
+
+.. bench-table::
+    :file: bench/computed-style-dense.json
+
+.. bench-table::
+    :file: bench/computed-style-deep.json
+
+.. bench-table::
+    :file: bench/computed-style-specificity.json
+
+.. bench-table::
+    :file: bench/computed-style-specificity-cold.json
+
+.. bench-table::
+    :file: bench/computed-style-filter.json
+
+.. bench-table::
+    :file: bench/computed-style-filter-cold.json
+
+.. bench-table::
+    :file: bench/computed-style-selectors.json
+
+.. bench-table::
+    :file: bench/computed-style-selectors-reverse.json
+
+.. bench-table::
+    :file: bench/microdata.json
+
+.. bench-table::
+    :file: bench/microdata-wide.json
+
+.. bench-table::
+    :file: bench/microdata-empty-scope.json
+
+.. bench-table::
+    :file: bench/microdata-itemref.json
+
+.. bench-table::
+    :file: bench/structured-empty.json
+
+.. bench-table::
+    :file: bench/article-wide.json
+
+.. bench-table::
+    :file: bench/article-deep.json
+
+.. bench-table::
+    :file: bench/syndication.json
+
+.. bench-table::
+    :file: bench/tables-spans.json
+
+.. bench-table::
+    :file: bench/path-wide.json
+
+.. bench-table::
+    :file: bench/path-xpath-wide.json
+
+.. bench-table::
+    :file: bench/path-cold.json
+
+.. bench-table::
+    :file: bench/path-xpath-cold.json
+
+.. bench-table::
+    :file: bench/path-one-cold.json
+
+.. bench-table::
+    :file: bench/path-xpath-one-cold.json
+
+.. bench-table::
+    :file: bench/path-class-edit.json
+
+.. bench-table::
+    :file: bench/normalize.json
+
+.. bench-table::
+    :file: bench/normalize-marks.json
+
+.. bench-table::
+    :file: bench/canonicalize.json
+
+.. bench-table::
+    :file: bench/canonicalize-attrs.json
+
+.. bench-table::
+    :file: bench/canonicalize-deep.json
+
+.. bench-table::
+    :file: bench/detect-language.json
+
+.. bench-table::
+    :file: bench/detect-language-long.json
 
 **************************
  DOM transformation costs
@@ -952,4 +1288,13 @@ already-linked tree. These operations can be stages in an application's cleanup 
     :file: bench/sanitize-node.json
 
 .. bench-table::
+    :file: bench/sanitize-attributes.json
+
+.. bench-table::
     :file: bench/linkify-node.json
+
+.. bench-table::
+    :file: bench/linkify-traversal.json
+
+.. bench-table::
+    :file: bench/startup.json

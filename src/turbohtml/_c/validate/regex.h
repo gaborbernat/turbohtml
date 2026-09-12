@@ -26,7 +26,7 @@ typedef struct {
 
 typedef struct {
     rrange *ranges;
-    int range_count;
+    Py_ssize_t range_count, range_cap;
     int builtins;
     int negate;
 } rclass;
@@ -49,7 +49,7 @@ typedef struct rstate {
     Py_UCS4 ch;
     rclass *cls;
     struct rstate *out, *out1;
-    unsigned gen;
+    size_t index;
 } rstate;
 
 typedef struct {
@@ -74,17 +74,27 @@ static rnode *rx_node(rparser *parser, int type) {
 static rnode *rx_parse_alt(rparser *parser);
 
 static int rx_range_push(rparser *parser, rclass *cls, Py_UCS4 lo, Py_UCS4 hi) {
-    rrange *grown = arena_alloc(parser->mem, (size_t)(cls->range_count + 1) * sizeof(rrange));
-    if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-        parser->failed = 1; /* GCOVR_EXCL_LINE */
-        return -1;          /* GCOVR_EXCL_LINE */
+    if (cls->range_count == cls->range_cap) {
+        size_t cap, bytes;
+        const int fits =
+            th_grow_cap((size_t)cls->range_count + 1, (size_t)cls->range_cap, 8, sizeof(rrange), &cap, &bytes);
+        if (!fits) {            /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+            parser->failed = 1; /* GCOVR_EXCL_LINE: allocation size overflow */
+            return -1;          /* GCOVR_EXCL_LINE: allocation size overflow */
+        }
+        rrange *grown = arena_alloc(parser->mem, bytes);
+        if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            parser->failed = 1; /* GCOVR_EXCL_LINE */
+            return -1;          /* GCOVR_EXCL_LINE */
+        }
+        if (cls->range_count > 0) {
+            memcpy(grown, cls->ranges, (size_t)cls->range_count * sizeof(rrange));
+        }
+        cls->ranges = grown;
+        cls->range_cap = (Py_ssize_t)cap;
     }
-    if (cls->range_count > 0) {
-        memcpy(grown, cls->ranges, (size_t)cls->range_count * sizeof(rrange));
-    }
-    grown[cls->range_count].lo = lo;
-    grown[cls->range_count].hi = hi;
-    cls->ranges = grown;
+    cls->ranges[cls->range_count].lo = lo;
+    cls->ranges[cls->range_count].hi = hi;
     cls->range_count++;
     return 0;
 }
@@ -329,47 +339,55 @@ static rnode *rx_parse_alt(rparser *parser) {
     return left;
 }
 
-static rstate *rx_state(arena *mem, int kind) {
-    rstate *state = arena_alloc(mem, sizeof(rstate));
-    if (state == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-        return NULL;     /* GCOVR_EXCL_LINE */
+typedef struct {
+    arena *mem;
+    size_t count;
+    int failed;
+} rcompiler;
+
+static rstate *rx_state(rcompiler *compiler, int kind) {
+    rstate *state = arena_alloc(compiler->mem, sizeof(rstate));
+    if (state == NULL) {      /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        compiler->failed = 1; /* GCOVR_EXCL_LINE */
+        return NULL;          /* GCOVR_EXCL_LINE */
     }
     memset(state, 0, sizeof(*state));
     state->kind = kind;
+    state->index = compiler->count++;
     return state;
 }
 
-static rstate *rx_compile(arena *mem, rnode *node, rstate *out);
+static rstate *rx_compile(rcompiler *compiler, rnode *node, rstate *out);
 
-static rstate *rx_compile_repeat(arena *mem, rnode *node, int rmin, int rmax, rstate *out) {
+static rstate *rx_compile_repeat(rcompiler *compiler, rnode *node, int rmin, int rmax, rstate *out) {
     if (rmin > 0) {
-        rstate *tail = rx_compile_repeat(mem, node, rmin - 1, rmax < 0 ? -1 : rmax - 1, out);
-        return tail == NULL ? NULL : rx_compile(mem, node->a, tail); /* GCOVR_EXCL_BR_LINE: NULL only on OOM */
+        rstate *tail = rx_compile_repeat(compiler, node, rmin - 1, rmax < 0 ? -1 : rmax - 1, out);
+        return tail == NULL ? NULL : rx_compile(compiler, node->a, tail); /* GCOVR_EXCL_BR_LINE: NULL only on OOM */
     }
     if (rmax < 0) {
-        rstate *split = rx_state(mem, RS_SPLIT);
+        rstate *split = rx_state(compiler, RS_SPLIT);
         if (split == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return NULL;     /* GCOVR_EXCL_LINE */
         }
         split->out1 = out;
-        split->out = rx_compile(mem, node->a, split);
+        split->out = rx_compile(compiler, node->a, split);
         return split;
     }
     if (rmax == 0) {
         return out;
     }
-    rstate *split = rx_state(mem, RS_SPLIT);
+    rstate *split = rx_state(compiler, RS_SPLIT);
     if (split == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
         return NULL;     /* GCOVR_EXCL_LINE */
     }
-    rstate *tail = rx_compile_repeat(mem, node, 0, rmax - 1, out);
+    rstate *tail = rx_compile_repeat(compiler, node, 0, rmax - 1, out);
     split->out1 = out;
-    split->out = tail == NULL ? NULL : rx_compile(mem, node->a, tail); /* GCOVR_EXCL_BR_LINE: NULL only on OOM */
+    split->out = tail == NULL ? NULL : rx_compile(compiler, node->a, tail); /* GCOVR_EXCL_BR_LINE: NULL only on OOM */
     return split;
 }
 
 /* Compile an AST node into an NFA fragment whose every exit flows to `out`. */
-static rstate *rx_compile(arena *mem, rnode *node, rstate *out) {
+static rstate *rx_compile(rcompiler *compiler, rnode *node, rstate *out) {
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on unforceable arena OOM */
         return NULL;    /* GCOVR_EXCL_LINE */
     }
@@ -379,7 +397,7 @@ static rstate *rx_compile(arena *mem, rnode *node, rstate *out) {
     case RN_CHAR:
     case RN_ANY:
     case RN_CLASS: {
-        rstate *state = rx_state(mem, RS_MATCH);
+        rstate *state = rx_state(compiler, RS_MATCH);
         if (state == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return NULL;     /* GCOVR_EXCL_LINE */
         }
@@ -390,54 +408,54 @@ static rstate *rx_compile(arena *mem, rnode *node, rstate *out) {
         return state;
     }
     case RN_CONCAT: {
-        rstate *tail = rx_compile(mem, node->b, out);
-        return tail == NULL ? NULL : rx_compile(mem, node->a, tail); /* GCOVR_EXCL_BR_LINE: NULL only on OOM */
+        rstate *tail = rx_compile(compiler, node->b, out);
+        return tail == NULL ? NULL : rx_compile(compiler, node->a, tail); /* GCOVR_EXCL_BR_LINE: NULL only on OOM */
     }
     case RN_ALT: {
-        rstate *split = rx_state(mem, RS_SPLIT);
+        rstate *split = rx_state(compiler, RS_SPLIT);
         if (split == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return NULL;     /* GCOVR_EXCL_LINE */
         }
-        split->out = rx_compile(mem, node->a, out);
-        split->out1 = rx_compile(mem, node->b, out);
+        split->out = rx_compile(compiler, node->a, out);
+        split->out1 = rx_compile(compiler, node->b, out);
         return split;
     }
     case RN_QUEST: {
-        rstate *split = rx_state(mem, RS_SPLIT);
+        rstate *split = rx_state(compiler, RS_SPLIT);
         if (split == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return NULL;     /* GCOVR_EXCL_LINE */
         }
-        split->out = rx_compile(mem, node->a, out);
+        split->out = rx_compile(compiler, node->a, out);
         split->out1 = out;
         return split;
     }
     case RN_STAR: {
-        rstate *split = rx_state(mem, RS_SPLIT);
+        rstate *split = rx_state(compiler, RS_SPLIT);
         if (split == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return NULL;     /* GCOVR_EXCL_LINE */
         }
         split->out1 = out;
-        split->out = rx_compile(mem, node->a, split);
+        split->out = rx_compile(compiler, node->a, split);
         return split;
     }
     case RN_PLUS: {
-        rstate *split = rx_state(mem, RS_SPLIT);
+        rstate *split = rx_state(compiler, RS_SPLIT);
         if (split == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return NULL;     /* GCOVR_EXCL_LINE */
         }
         split->out1 = out;
-        rstate *start = rx_compile(mem, node->a, split);
+        rstate *start = rx_compile(compiler, node->a, split);
         split->out = start;
         return start;
     }
     default:
-        return rx_compile_repeat(mem, node, node->rmin, node->rmax, out);
+        return rx_compile_repeat(compiler, node, node->rmin, node->rmax, out);
     }
 }
 
 static int rx_class_match(const rclass *cls, Py_UCS4 codepoint) {
     int inside = 0;
-    for (int index = 0; index < cls->range_count; index++) {
+    for (Py_ssize_t index = 0; index < cls->range_count; index++) {
         if (codepoint >= cls->ranges[index].lo && codepoint <= cls->ranges[index].hi) {
             inside = 1;
         }
@@ -476,58 +494,124 @@ static int rx_state_match(const rstate *state, Py_UCS4 codepoint) {
     return rx_class_match(state->cls, codepoint);
 }
 
+typedef struct rpattern {
+    const Py_UCS4 *text;
+    Py_ssize_t len;
+    rstate *start;
+    size_t count;
+    struct rpattern *next;
+} rpattern;
+
+static int regex_cache_add(th_schema *schema, const Py_UCS4 *text, Py_ssize_t len) {
+    for (rpattern *cached = schema->regex_patterns; cached != NULL; cached = cached->next) {
+        if (u_eq_u(text, len, cached->text, cached->len)) {
+            return 0;
+        }
+    }
+    rpattern *pattern = arena_alloc(&schema->mem, sizeof(*pattern));
+    if (pattern == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;         /* GCOVR_EXCL_LINE */
+    }
+    rparser parser = {text, len, 0, &schema->mem, 0};
+    rnode *ast = rx_parse_alt(&parser);
+    rcompiler compiler = {&schema->mem, 0, 0};
+    rstate *accept = rx_state(&compiler, RS_ACCEPT);
+    if (parser.failed || ast == NULL || accept == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;                                        /* GCOVR_EXCL_LINE */
+    }
+    rstate *start = rx_compile(&compiler, ast, accept);
+    if (start == NULL || compiler.failed) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;                          /* GCOVR_EXCL_LINE */
+    }
+    pattern->text = text;
+    pattern->len = len;
+    pattern->start = start;
+    pattern->count = compiler.count;
+    pattern->next = schema->regex_patterns;
+    schema->regex_patterns = pattern;
+    return 0;
+}
+
+static int regex_cache_schema(th_schema *schema, th_node *node) {
+    if (schema->kind == 0 && is_schema_el(schema, node, XSD_NS, "pattern")) {
+        const th_node_attr *value = attr_exact(schema->tree, node, "value", 5);
+        if (value != NULL) {
+            if (regex_cache_add(schema, value->value, value->value_len) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+                return -1;                                                     /* GCOVR_EXCL_LINE */
+            }
+        }
+    } else if (schema->kind != 0 && is_schema_el(schema, node, RNG_NS, "param")) {
+        const th_node_attr *name = attr_exact(schema->tree, node, "name", 4);
+        if (name != NULL && u_eq_ascii(name->value, name->value_len, "pattern")) {
+            Py_ssize_t len = 0;
+            const Py_UCS4 *text = element_text_raw(schema->tree, node, &len);
+            if (regex_cache_add(schema, text, len) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+                return -1;                                /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            if (regex_cache_schema(schema, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+                return -1;                               /* GCOVR_EXCL_LINE */
+            }
+        } else if (is_chardata(child) && child->text_len > 0) {
+            /* Lazy definitions must not realize shared schema spans during validation. */
+            if (th_node_realize_text(schema->tree, child) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;                                           /* GCOVR_EXCL_LINE */
+            }
+        }
+    }
+    return 0;
+}
+
 typedef struct {
-    rstate **items;
-    int len;
+    const rstate **items;
+    size_t len;
 } rlist;
 
-static void rx_add(rlist *list, rstate *state, unsigned gen) {
-    if (state->gen == gen) { /* every out-edge in a compiled fragment points at a real state, never NULL */
+static void rx_add(rlist *list, const rstate *state, size_t *visited, size_t gen) {
+    if (visited[state->index] == gen) {
         return;
     }
-    state->gen = gen;
+    visited[state->index] = gen;
     if (state->kind == RS_SPLIT) {
-        rx_add(list, state->out, gen);
-        rx_add(list, state->out1, gen);
+        rx_add(list, state->out, visited, gen);
+        rx_add(list, state->out1, visited, gen);
         return;
     }
     list->items[list->len++] = state;
 }
 
-/* Whether the whole [value, value+len) is matched by the pattern. */
-static int regex_full_match(arena *mem, const Py_UCS4 *pattern, Py_ssize_t pattern_len, const Py_UCS4 *value,
+static int regex_full_match(th_schema *schema, const Py_UCS4 *text, Py_ssize_t text_len, const Py_UCS4 *value,
                             Py_ssize_t len) {
-    rparser parser = {pattern, pattern_len, 0, mem, 0};
-    rnode *ast = rx_parse_alt(&parser);
-    rstate *accept = rx_state(mem, RS_ACCEPT);
-    if (parser.failed || ast == NULL || accept == NULL) { /* GCOVR_EXCL_BR_LINE: only on unforceable arena OOM */
-        return 1;                                         /* GCOVR_EXCL_LINE */
+    const rpattern *pattern = schema->regex_patterns;
+    while (!u_eq_u(text, text_len, pattern->text, pattern->len)) {
+        pattern = pattern->next;
     }
-    rstate *start = rx_compile(mem, ast, accept);
-    /* An NFA over N states visits at most N per step; two state lists of that size hold
-       every reachable state without a growth check. */
-    Py_ssize_t capacity = pattern_len * 4 + 8;
-    rstate **storage = arena_alloc(mem, (size_t)capacity * 2 * sizeof(rstate *));
-    if (start == NULL || storage == NULL) { /* GCOVR_EXCL_BR_LINE: only on unforceable arena OOM */
-        return 1;                           /* GCOVR_EXCL_LINE */
+    const rstate **storage = arena_alloc(&schema->mem, pattern->count * 2 * sizeof(rstate *));
+    size_t *visited = arena_alloc(&schema->mem, pattern->count * sizeof(size_t));
+    if (storage == NULL || visited == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return 1;                             /* GCOVR_EXCL_LINE */
     }
+    memset(visited, 0, pattern->count * sizeof(size_t));
     rlist current = {storage, 0};
-    rlist next = {storage + capacity, 0};
-    unsigned gen = 1;
-    rx_add(&current, start, gen);
+    rlist next = {storage + pattern->count, 0};
+    size_t gen = 1;
+    rx_add(&current, pattern->start, visited, gen);
     for (Py_ssize_t index = 0; index < len; index++) {
         gen++;
         next.len = 0;
-        for (int state = 0; state < current.len; state++) {
+        for (size_t state = 0; state < current.len; state++) {
             if (current.items[state]->kind == RS_MATCH && rx_state_match(current.items[state], value[index])) {
-                rx_add(&next, current.items[state]->out, gen);
+                rx_add(&next, current.items[state]->out, visited, gen);
             }
         }
         rlist swap = current;
         current = next;
         next = swap;
     }
-    for (int state = 0; state < current.len; state++) {
+    for (size_t state = 0; state < current.len; state++) {
         if (current.items[state]->kind == RS_ACCEPT) {
             return 1;
         }

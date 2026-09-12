@@ -89,13 +89,28 @@ def main() -> None:
         "BENCH_TARGET",
         "BENCH_OPERATION",
         "BENCH_OUT",
+        "BENCH_SKIP_CASES",
     ]
     stats: dict[str, dict[str, float | str]] = {}
-    for case_name, arg in operations.INPUTS[operation]():
+    skipped: set[int] = set(json.loads(os.environ.get("BENCH_SKIP_CASES", "[]"))) if args.worker else set()
+    os.environ["BENCH_SKIP_CASES"] = json.dumps(sorted(skipped))
+    task_index = 0
+    for case_index, (case_name, arg) in enumerate(operations.INPUTS[operation]()):
+        if case_index in skipped:
+            continue
         name = f"{operation}|{case_name}|{label}"
-        try:  # a stricter competitor parser (lightningcss rejects media queries the WHATWG rules recover) errors on
-            func.run(func.setup(arg)) if isinstance(func, Mutating) else func(arg)  # that one input, not the whole op
-        except Exception as exc:  # ruff:ignore[blind-except]  # record the thrown message so the table can name why the cell is empty
+        if args.worker_task is not None and task_index != args.worker_task:
+            # pyperf counts registrations after rejected cases have been removed.
+            _bench(runner, name, func, arg)
+            task_index += 1
+            continue
+        try:
+            func.run(func.setup(arg)) if isinstance(func, Mutating) else func(arg)
+        except Exception as exc:
+            if args.worker:
+                raise
+            skipped.add(case_index)
+            os.environ["BENCH_SKIP_CASES"] = json.dumps(sorted(skipped))
             stats[name] = {"error": " ".join(str(exc).split())[:200] or type(exc).__name__}
             continue
         if (result := _bench(runner, name, func, arg)) is not None and result.get_nvalue() > 1:
@@ -103,11 +118,14 @@ def main() -> None:
             if operation in operations.SIZE_OPS:  # deterministic output length, measured once beside the timing
                 entry["size"] = float(len(func(arg).encode("utf-8")))
             stats[name] = entry
+        task_index += 1
     if not args.worker:  # the pyperf manager, holding every value -- not a per-value worker
         if operation in operations.MEMORY_OPS:  # peak RSS from a fresh child, never a forked pyperf worker's timing run
             _record_memory(operation, label, stats)
         Path(os.environ["BENCH_OUT"]).write_text(json.dumps(stats), encoding="utf-8")
 
+
+__all__ = ["main"]
 
 if __name__ == "__main__":
     main()

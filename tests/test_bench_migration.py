@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
+
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "tools"))
@@ -111,3 +113,20 @@ def test_spread_aligns_with_every_variant(tmp_path: Path) -> None:
         },
     )
     assert feed["spread"] == [[None, 0.01, 0.02, 0.03]]
+
+
+@pytest.mark.parametrize("operation", ["minify", "minify-css", "minify-js", "minify-js-sequences"])
+def test_size_operations_keep_output_bytes_and_timing_spread(tmp_path: Path, operation: str) -> None:
+    feed: Final = _emit(
+        tmp_path,
+        {"beautifulsoup4": {operation: "competitor"}},
+        {
+            f"{operation}|sample|turbohtml": {"size": 10.0, "mean": 1.0, "cv": 0.1},
+            f"{operation}|sample|competitor": {"size": 20.0, "mean": 2.0, "cv": 0.2},
+        },
+    )
+    assert (feed["metrics"], feed["rows"], feed["spread"]) == (
+        ["size", "time"],
+        [["sample", 10.0, 1.0, 20.0, 2.0]],
+        [[None, None, 0.1, None, 0.2]],
+    )

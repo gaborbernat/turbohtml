@@ -1,0 +1,73 @@
+{
+  "label": "parse text beside a NUL",
+  "parties": [
+    "turbohtml",
+    "BeautifulSoup (html.parser)",
+    "BeautifulSoup (lxml)",
+    "selectolax",
+    "parsel",
+    "resiliparse",
+    "lxml",
+    "pyquery",
+    "html5lib",
+    "html5-parser"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1,000 paragraphs / early NUL",
+      7.107561307672465e-05,
+      "different text: retains U+0000 instead of dropping it",
+      "different text: replaces U+0000 with U+FFFD instead of dropping it",
+      0.00034250391196716614,
+      0.00025515722113595985,
+      8.000371353773516e-05,
+      "different text: replaces U+0000 with U+FFFD instead of dropping it",
+      "different text: replaces U+0000 with U+FFFD instead of dropping it",
+      0.008100832991476636,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ],
+    [
+      "1,000 paragraphs / no NUL",
+      7.09768120600529e-05,
+      0.005463147310365457,
+      0.003938554341099613,
+      0.000340797922171987,
+      0.00024864267005189806,
+      7.852359212089747e-05,
+      0.00023572905808274907,
+      0.000245551090574736,
+      0.008160153820062988,
+      "unavailable: html5-parser uses libxml2 2.9.13; installed lxml uses 2.14.6"
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.016635002923066876,
+      null,
+      null,
+      0.006181217517978504,
+      0.027130805023105102,
+      0.019058466495611163,
+      null,
+      null,
+      0.037673128407974085,
+      null
+    ],
+    [
+      null,
+      0.016115265561391097,
+      0.02594096349960786,
+      0.05678782186302336,
+      0.005939542494892826,
+      0.008099227544467104,
+      0.02530501479137543,
+      0.01939248896374532,
+      0.060711043535211826,
+      0.03317372609196954,
+      null
+    ]
+  ],
+  "notes": {}
+}

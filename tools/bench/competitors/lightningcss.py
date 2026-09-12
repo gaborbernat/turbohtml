@@ -12,4 +12,8 @@ def minify_css(css: str) -> str:
     return lightningcss.process_stylesheet(css, minify=True)
 
 
-OPERATIONS = {"minify-css": (minify_css, "lightningcss")}
+OPERATIONS = {
+    "minify-css": (minify_css, "lightningcss"),
+    "minify-css-merges": (minify_css, "lightningcss"),
+    "minify-css-conflicts": (minify_css, "lightningcss"),
+}

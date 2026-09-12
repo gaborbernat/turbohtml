@@ -1,0 +1,1 @@
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:difference()`` on large node sets.

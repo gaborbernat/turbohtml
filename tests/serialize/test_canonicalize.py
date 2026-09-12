@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
+from io import BytesIO
+from typing import Final, cast
 
-from turbohtml import Canonical, CData, Element, ProcessingInstruction, Text, parse
+import pytest
+from bench.operations import INPUTS
+
+from turbohtml import Canonical, CData, Element, Html, ProcessingInstruction, Text, parse
 
 
 def _one(markup: str, selector: str) -> Element:
@@ -342,3 +346,159 @@ def test_w3c_spec_example_pis_and_comments() -> None:
         ],
     )
     assert node.canonicalize() == b"<doc><?pi-without-data?><e1></e1><e2></e2></doc>"
+
+
+@pytest.mark.parametrize(
+    "size",
+    [
+        pytest.param(1, id="single"),
+        pytest.param(31, id="31-attrs"),
+        pytest.param(32, id="32-attrs"),
+        pytest.param(33, id="33-attrs"),
+        pytest.param(1_000, id="wide"),
+    ],
+)
+def test_canonicalize_orders_many_attributes(size: int) -> None:
+    element: Final[Element] = parse(
+        "<div " + " ".join(f'data-{index:05d}="{index}"' for index in range(size, 0, -1)) + "></div>"
+    ).select("div")[0]
+    assert (
+        element.canonicalize()
+        == ("<div " + " ".join(f'data-{index:05d}="{index}"' for index in range(1, size + 1)) + "></div>").encode()
+    )
+
+
+_XLINK: Final = ' xmlns:xlink="http://www.w3.org/1999/xlink"'
+_SVG: Final = ' xmlns="http://www.w3.org/2000/svg"'
+
+
+@pytest.mark.parametrize("exclusive", [False, True], ids=["inclusive", "exclusive"])
+@pytest.mark.parametrize(
+    ("children", "expected"),
+    [
+        pytest.param(
+            '<use xlink:href="a"/><use xlink:href="b"/>',
+            f'<use{_XLINK} xlink:href="a"></use><use{_XLINK} xlink:href="b"></use>',
+            id="empty-siblings",
+        ),
+        pytest.param(
+            '<g xlink:href="a"><use xlink:href="b"/></g><use xlink:href="c"/>',
+            f'<g{_XLINK} xlink:href="a"><use xlink:href="b"></use></g><use{_XLINK} xlink:href="c"></use>',
+            id="nested-binding-closes",
+        ),
+        pytest.param(
+            '<g xlink:href="a"><g><use xlink:href="b"/></g><use xlink:href="c"/></g>',
+            f'<g{_XLINK} xlink:href="a"><g><use xlink:href="b"></use></g><use xlink:href="c"></use></g>',
+            id="outer-binding-survives-inner-close",
+        ),
+        pytest.param(
+            '<g xlink:href="a">text<!--comment--><use/></g><g><use xlink:href="b"/></g>',
+            f'<g{_XLINK} xlink:href="a">text<use></use></g><g><use{_XLINK} xlink:href="b"></use></g>',
+            id="text-and-comment",
+        ),
+    ],
+)
+def test_canonicalize_sibling_scopes(children: str, expected: str, *, exclusive: bool) -> None:
+    node = parse(f"<svg>{children}</svg>").select_one("svg")
+    assert node is not None
+    assert node.canonicalize(Canonical(exclusive=exclusive)) == f"<svg{_SVG}>{expected}</svg>".encode()
+
+
+@pytest.mark.parametrize(
+    ("options", "apex_declaration", "child_declaration"),
+    [
+        pytest.param(Canonical(), _XLINK, "", id="inclusive"),
+        pytest.param(Canonical(exclusive=True), "", _XLINK, id="exclusive"),
+        pytest.param(Canonical(exclusive=True, inclusive_ns_prefixes=("xlink",)), _XLINK, _XLINK, id="forced-prefix"),
+    ],
+)
+def test_canonicalize_inherited_scope(options: Canonical, apex_declaration: str, child_declaration: str) -> None:
+    node = parse('<svg xlink:href="outer" xml:lang="en"><g><use xlink:href="inner"/></g></svg>').select_one("g")
+    assert node is not None
+    assert node.canonicalize(options) == (
+        f'<g{_SVG}{apex_declaration} xml:lang="en"><use{child_declaration} xlink:href="inner"></use></g>'.encode()
+    )
+
+
+def test_canonicalize_scope_after_attribute_mutation() -> None:
+    node = parse('<svg xlink:href="outer"><g><use xlink:href="inner"/></g></svg>').select_one("svg")
+    assert node is not None
+    node.canonicalize()
+    del node.attrs["xlink:href"]
+    assert node.canonicalize() == f'<svg{_SVG}><g><use{_XLINK} xlink:href="inner"></use></g></svg>'.encode()
+
+
+def test_canonicalize_shared_sparse_xlink_input() -> None:
+    source = INPUTS["canonicalize-deep"]()[1][1]
+    assert isinstance(source, str)
+    assert (
+        parse(source).canonicalize()
+        == (
+            "<html><head></head><body>"
+            f"<svg{_SVG}>" + f'<g><use{_XLINK} xlink:href="#x"></use>' * 150 + "</g>" * 150 + "</svg></body></html>"
+        ).encode()
+    )
+
+
+@pytest.mark.parametrize("case", [0, 1, 2], ids=["deep", "sparse-xlink", "shallow"])
+@pytest.mark.oracle
+def test_canonicalize_benchmark_html_parser_difference(case: int) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    source: Final = cast("str", INPUTS["canonicalize-deep"]()[case][1])
+    expected: Final = parse(source).canonicalize()
+    assert etree.tostring(etree.HTML(source), method="c14n") == (
+        expected
+        .replace(b"<head></head>", b"")
+        .replace(b' xmlns="http://www.w3.org/2000/svg"', b"")
+        .replace(b' xmlns:xlink="http://www.w3.org/1999/xlink"', b"")
+    )
+
+
+@pytest.mark.parametrize(
+    ("html", "exclusive", "with_comments"),
+    [
+        pytest.param("<p z=1 a=2>x&amp;y</p>", False, False, id="attr-order"),
+        pytest.param("<div><br><p class='a&b<c'>x&amp;<b>y</b></p></div>", False, False, id="mixed"),
+        pytest.param("<p title='a\tb\nc\rd'>t&lt;u&gt;v</p>", False, False, id="char-refs"),
+        pytest.param("<a> keep  the   spaces <b>y</b> here </a>", False, False, id="whitespace"),
+        pytest.param("<svg xlink:href=x><a xlink:title=t><rect/></a></svg>", False, False, id="foreign-xlink"),
+        pytest.param("<math><mi mathvariant=bold>x</mi></math>", False, False, id="mathml"),
+        pytest.param("<a><!--note--><b>y</b><!--tail--></a>", True, False, id="comments-dropped"),
+        pytest.param("<a><!--note--><b>y</b></a>", False, True, id="comments-kept"),
+        pytest.param("<p>caf\xe9 → \xa9</p>", False, False, id="non-ascii"),
+        pytest.param("<svg xlink:href=x><g><rect/></g></svg>", True, False, id="exclusive-doc"),
+    ],
+)
+@pytest.mark.oracle
+def test_whole_document_matches_lxml(html: str, *, exclusive: bool, with_comments: bool) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    tree: Final = parse(html)
+    ours: Final = tree.canonicalize(Canonical(exclusive=exclusive, with_comments=with_comments))
+    reparsed: Final = etree.parse(BytesIO(tree.serialize(Html(xml=True)).encode()))
+    sink: Final = BytesIO()
+    reparsed.write_c14n(sink, exclusive=exclusive, with_comments=with_comments)
+    assert ours == sink.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("selector", "xpath", "exclusive", "prefixes"),
+    [
+        pytest.param("g", ".//s:g", False, None, id="subtree-inclusive"),
+        pytest.param("g", ".//s:g", True, None, id="subtree-exclusive-drops-unused"),
+        pytest.param("g", ".//s:g", True, ["xlink"], id="subtree-exclusive-promotes-prefix"),
+        pytest.param("svg", ".//s:svg", True, None, id="subtree-exclusive-renders-on-user"),
+    ],
+)
+@pytest.mark.oracle
+def test_subtree_matches_lxml(selector: str, xpath: str, *, exclusive: bool, prefixes: list[str] | None) -> None:
+    etree: Final = pytest.importorskip("lxml.etree")
+    tree: Final = parse("<svg xlink:href=x><g><rect/></g></svg>")
+    node: Final = tree.select_one(selector)
+    assert node is not None
+    ours: Final = node.canonicalize(Canonical(exclusive=exclusive, inclusive_ns_prefixes=tuple(prefixes or ())))
+    root: Final = etree.fromstring(tree.serialize(Html(xml=True)).encode())
+    target: Final = root.find(
+        xpath, namespaces={"s": "http://www.w3.org/2000/svg", "m": "http://www.w3.org/1998/Math/MathML"}
+    )
+    theirs: Final = etree.tostring(target, method="c14n", exclusive=exclusive, inclusive_ns_prefixes=prefixes)
+    assert ours == theirs

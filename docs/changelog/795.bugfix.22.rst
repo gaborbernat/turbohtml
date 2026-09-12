@@ -1,0 +1,1 @@
+Propagate exceptions raised while looking up an object's ``__html__`` method during MarkupSafe-compatible escaping.

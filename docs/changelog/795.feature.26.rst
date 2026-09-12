@@ -1,0 +1,1 @@
+Speed up adding many attributes to an element.

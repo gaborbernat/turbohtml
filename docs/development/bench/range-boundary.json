@@ -1,0 +1,28 @@
+{
+  "label": "construct a Range at a child boundary",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 start",
+      6.759449509748568e-07
+    ],
+    [
+      "1000 end",
+      2.202308102520571e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      1.3137799027382797
+    ],
+    [
+      null,
+      0.13605356286596718
+    ]
+  ],
+  "notes": {}
+}

@@ -1,10 +1,15 @@
-"""Behavioral coverage of the HTML5 authoring-conformance checker, through the public API."""
-
 from __future__ import annotations
+
+import json
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - the conformance oracle runs the installed vnu.jar
+from pathlib import Path
+from typing import Final, NamedTuple
 
 import pytest
 
 from turbohtml import Element, parse
+from turbohtml._html import _conformance_check, _conformance_filter
 from turbohtml.conformance import ConformanceMessage, ConformanceReport, check, check_html
 
 CLEAN = '<html lang="en"><head><title>Doc</title></head><body><h1>Hi</h1></body></html>'
@@ -306,3 +311,81 @@ def test_conformance_report_type_is_named_tuple() -> None:
     report = check_html(CLEAN)
     assert isinstance(report, ConformanceReport)
     assert report == (True, ())
+
+
+def test_check_returns_the_verdict_with_the_findings() -> None:
+    valid, findings = _conformance_check(parse("<title>t</title><html lang=en><img>"))
+    assert (valid, [finding[0] for finding in findings]) == (False, ["img-missing-alt"])
+
+
+def test_check_is_valid_with_only_a_warning() -> None:
+    valid, findings = _conformance_check(parse("<title>t</title><html lang=en><section><p>x</p></section>"))
+    assert (valid, [finding[1] for finding in findings]) == (True, ["warning"])
+
+
+_ERROR = ConformanceMessage("img-missing-alt", "error", "m", 1, 0)
+_WARNING = ConformanceMessage("missing-lang", "warning", "m", 1, 0)
+
+
+def test_the_filter_keeps_only_the_named_severity_in_order() -> None:
+    assert _conformance_filter((_WARNING, _ERROR, _WARNING), "warning") == (_WARNING, _WARNING)
+
+
+class _Unlabelled(NamedTuple):
+    """A record whose severity is not a string, so it can never equal one."""
+
+    severity: int
+
+
+def test_the_filter_skips_a_message_whose_severity_is_not_a_str() -> None:
+    assert _conformance_filter((_Unlabelled(1), _ERROR), "error") == (_ERROR,)  # ty: ignore[invalid-argument-type]
+
+
+def test_the_filter_needs_a_severity_on_every_message() -> None:
+    with pytest.raises(AttributeError):
+        _conformance_filter((object(),), "error")  # ty: ignore[invalid-argument-type]  # the attribute read is the point
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(([_ERROR], "error"), id="messages-is-a-list"),
+        pytest.param(((_ERROR,), 1), id="severity-is-not-a-str"),
+    ],
+)
+def test_the_filter_rejects_bad_arguments(args: tuple[object, ...]) -> None:
+    with pytest.raises(TypeError):
+        _conformance_filter(*args)  # ty: ignore[invalid-argument-type]  # the argument check is the point
+
+
+def valid_doc(inner: str) -> str:
+    return f"<!DOCTYPE html><html lang=en><head><title>Doc</title></head><body>{inner}</body></html>"
+
+
+_VNU_CASES: Final = [
+    pytest.param(valid_doc("<h1>Heading</h1><p>text</p>"), id="conforming"),
+    pytest.param(valid_doc('<img src="x" alt="a cat">'), id="img-with-alt-conforming"),
+    pytest.param(valid_doc("<img src=x>"), id="img-missing-alt"),
+    pytest.param(valid_doc("<font>x</font>"), id="obsolete-element"),
+    pytest.param(valid_doc('<p align="center">x</p>'), id="obsolete-attribute"),
+    pytest.param(valid_doc('<span id="a"></span><span id="a"></span>'), id="duplicate-id"),
+    pytest.param(valid_doc('<div role="bogus">x</div>'), id="invalid-role"),
+    pytest.param("<!DOCTYPE html><html lang=en><head></head><body><p>x</p></body></html>", id="missing-title"),
+]
+
+
+@pytest.mark.parametrize("markup", _VNU_CASES)
+@pytest.mark.oracle
+def test_conformance_verdict_matches_vnu(markup: str) -> None:
+    jar: Final = Path(pytest.importorskip("vnujar").__file__).parent / "vnu.jar"
+    if (java := shutil.which("java")) is None or not jar.is_file():
+        pytest.skip("a JRE and vnu.jar are required")
+    completed: Final = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Java arguments and in-repository markup
+        [java, "-jar", str(jar), "--format", "json", "--stdin", "-"],
+        input=markup.encode(),
+        capture_output=True,
+        check=False,
+    )
+    assert check_html(markup).valid is not any(
+        message["type"] == "error" for message in json.loads(completed.stderr)["messages"]
+    )

@@ -1,0 +1,1 @@
+Speed up :class:`XSLT <turbohtml.transform.Transform>` numbering with static predicates and union patterns.

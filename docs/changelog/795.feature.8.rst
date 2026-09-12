@@ -1,0 +1,1 @@
+Speed up :meth:`microdata extraction <turbohtml.Document.microdata>` when referenced properties are already ordered.

@@ -16,4 +16,10 @@ def markdown(case: tuple[str, str]) -> None:
         markdownify.markdownify(text)
 
 
-OPERATIONS = {"markdown": (markdown, "markdownify")}
+def markdown_wrap(case: tuple[int, str]) -> str:
+    """Apply the requested width to the same short-word document as the core adapter."""
+    width, text = case
+    return markdownify.markdownify(text, wrap=True, wrap_width=width)
+
+
+OPERATIONS = {"markdown": (markdown, "markdownify"), "markdown-wrap": (markdown_wrap, "markdownify")}

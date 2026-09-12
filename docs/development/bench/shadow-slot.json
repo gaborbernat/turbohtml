@@ -1,0 +1,108 @@
+{
+  "label": "collect children assigned to a late shadow slot",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 preceding slots, 100 children",
+      1.6070630375490206e-06
+    ],
+    [
+      "1,000 preceding slots, 1,000 children",
+      1.541682332610132e-05
+    ],
+    [
+      "10,000 preceding slots, 10,000 children",
+      0.0002634555666494028
+    ],
+    [
+      "100 preceding slots, 0 children",
+      6.956088014486994e-08
+    ],
+    [
+      "1,000 preceding slots, 0 children",
+      8.093058000054517e-08
+    ],
+    [
+      "10,000 preceding slots, 0 children",
+      6.880846836754273e-08
+    ],
+    [
+      "100 preceding slots, 100 comments",
+      1.5137708423059356e-07
+    ],
+    [
+      "1,000 preceding slots, 1,000 comments",
+      9.260121243433635e-07
+    ],
+    [
+      "10,000 preceding slots, 10,000 comments",
+      1.5824553071297486e-05
+    ],
+    [
+      "100 preceding slots, 1 nonmatching child",
+      7.022599641063702e-08
+    ],
+    [
+      "1,000 preceding slots, 1 nonmatching child",
+      7.019179929142657e-08
+    ],
+    [
+      "10,000 preceding slots, 1 nonmatching child",
+      7.122281925712551e-08
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.007668656126441234
+    ],
+    [
+      null,
+      0.01176644677607851
+    ],
+    [
+      null,
+      0.09544568731214885
+    ],
+    [
+      null,
+      0.018255420721205586
+    ],
+    [
+      null,
+      0.1594825288224227
+    ],
+    [
+      null,
+      0.013622416272842133
+    ],
+    [
+      null,
+      0.03687135323248955
+    ],
+    [
+      null,
+      0.014682646740421183
+    ],
+    [
+      null,
+      0.07351588127225984
+    ],
+    [
+      null,
+      0.011947511145552984
+    ],
+    [
+      null,
+      0.022653546651759376
+    ],
+    [
+      null,
+      0.022509756397396104
+    ]
+  ],
+  "notes": {}
+}

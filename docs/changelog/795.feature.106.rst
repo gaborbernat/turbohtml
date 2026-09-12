@@ -1,0 +1,1 @@
+Speed up :func:`encoding detection <turbohtml.detect.detect>` of short inputs.

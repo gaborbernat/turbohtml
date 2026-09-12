@@ -10,6 +10,26 @@
       "markup (4 KiB)",
       3.8318818117962415e-05,
       0.0001288206666837747
+    ],
+    [
+      "wide text, one link",
+      7.720048197370488e-05,
+      "omits rel=\"nofollow\""
+    ],
+    [
+      "ASCII text, one link",
+      3.561011447648828e-05,
+      "omits rel=\"nofollow\""
+    ],
+    [
+      "wide text, no links",
+      7.013849462964573e-05,
+      0.0005766515712214944
+    ],
+    [
+      "1024 wide-text links",
+      0.0007390321506439552,
+      "omits rel=\"nofollow\""
     ]
   ],
   "spread": [
@@ -17,9 +37,29 @@
       null,
       0.027549034962003238,
       0.011040248017480233
+    ],
+    [
+      null,
+      0.01400169856216121,
+      null
+    ],
+    [
+      null,
+      0.025066538015657086,
+      null
+    ],
+    [
+      null,
+      0.02541032233009691,
+      0.004690499470641959
+    ],
+    [
+      null,
+      0.018782798523369726,
+      null
     ]
   ],
   "notes": {
-    "lxml-html-clean": "host exclusions disabled; URL/mailto linking but no bare email addresses"
+    "lxml-html-clean": "host exclusions disabled; autolink omits rel=\"nofollow\", so linked outputs differ"
   }
 }

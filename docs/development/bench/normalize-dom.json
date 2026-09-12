@@ -1,0 +1,68 @@
+{
+  "label": "merge adjacent text nodes",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1 adjacent text nodes / 4 characters",
+      3.651030059022749e-08
+    ],
+    [
+      "2 adjacent text nodes / 4 characters",
+      4.166950480962347e-08
+    ],
+    [
+      "10 adjacent text nodes / 4 characters",
+      7.043766731366455e-08
+    ],
+    [
+      "100 adjacent text nodes / 4 characters",
+      4.442302004766437e-07
+    ],
+    [
+      "1000 adjacent text nodes / 4 characters",
+      4.624538056911357e-06
+    ],
+    [
+      "100 adjacent text nodes / 256 characters",
+      2.5794220931629753e-06
+    ],
+    [
+      "1000 empty tail nodes",
+      1.246116668577694e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.006617645565865785
+    ],
+    [
+      null,
+      0.015062408773836211
+    ],
+    [
+      null,
+      0.01985618724934867
+    ],
+    [
+      null,
+      0.01654409473100616
+    ],
+    [
+      null,
+      0.061604650744105954
+    ],
+    [
+      null,
+      0.01425025608997499
+    ],
+    [
+      null,
+      0.022000692239367903
+    ]
+  ],
+  "notes": {}
+}

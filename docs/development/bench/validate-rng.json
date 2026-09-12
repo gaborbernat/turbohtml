@@ -1,0 +1,23 @@
+{
+  "label": "validate a document against a RELAX NG schema",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.RelaxNG"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "catalog RNG + doc",
+      0.0004241588457565134,
+      0.0005815496542102967
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.02221021193242464,
+      0.04344715996154836
+    ]
+  ],
+  "notes": {}
+}

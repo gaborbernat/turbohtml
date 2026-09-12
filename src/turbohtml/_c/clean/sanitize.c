@@ -1516,15 +1516,44 @@ static int apply_late_attribute_safety(sanitizer *s, th_node *element, PyObject 
     return 0;
 }
 
+static int compact_disallowed_attributes(sanitizer *s, th_node *element, PyObject *tag) {
+    Py_ssize_t kept = 0;
+    for (Py_ssize_t index = 0; index < element->attr_count; index++) {
+        th_node_attr *attr = &element->attrs[index];
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(s->tree, attr->name_atom, &name_len);
+        int allowed = is_event_attribute(name, name_len) ? 0 : attr_allowed(s, tag, name, name_len);
+        if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: attr_allowed only fails on allocation failure */
+            return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (allowed) {
+            if (kept != index) {
+                element->attrs[kept] = *attr;
+            }
+            kept++;
+        }
+    }
+    element->attr_count = kept;
+    return 0;
+}
+
 static int sanitize_attributes(sanitizer *s, th_node *element, PyObject *tag, int custom) {
+    int compacted = element->attr_count >= 32 && s->removed == NULL && s->attribute_filter == Py_None &&
+                    s->custom_attribute_check == Py_None && s->custom_element_check == Py_None;
+    /* The private tree has no observers or cached lookups before sanitization returns. */
+    if (compacted) {
+        if (compact_disallowed_attributes(s, element, tag) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
     Py_ssize_t index = 0;
     int late_written = 0;
     while (index < element->attr_count) {
         th_node_attr *attr = &element->attrs[index];
         Py_ssize_t name_len = 0;
-        const char *name = th_attr_name(s->tree, attr->name_atom, &name_len);
-        int drop = is_event_attribute(name, name_len);
-        if (!drop) {
+        const char *name = compacted ? NULL : th_attr_name(s->tree, attr->name_atom, &name_len);
+        int drop = !compacted && is_event_attribute(name, name_len);
+        if (!compacted && !drop) {
             int allowed = attr_allowed(s, tag, name, name_len);
             if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: attr_allowed only fails on allocation failure */
                 return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */

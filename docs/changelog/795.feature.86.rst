@@ -1,0 +1,1 @@
+Speed up :meth:`form-data collection <turbohtml.Element.form_data>` from deeply nested disabled fieldsets.

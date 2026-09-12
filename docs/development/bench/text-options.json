@@ -1,0 +1,28 @@
+{
+  "label": "render text with reused options",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "reused defaults",
+      5.021238061342359e-07
+    ],
+    [
+      "no options",
+      1.011185937945432e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.015369113333902397
+    ],
+    [
+      null,
+      0.02551832110583365
+    ]
+  ],
+  "notes": {}
+}

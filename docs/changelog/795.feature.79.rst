@@ -1,0 +1,1 @@
+Speed up :meth:`table extraction <turbohtml.Node.tables>` with large row and column spans.

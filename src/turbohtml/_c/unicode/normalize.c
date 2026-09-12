@@ -212,13 +212,49 @@ static Py_ssize_t decompose(int kind, const void *data, Py_ssize_t len, Py_UCS4 
     return at;
 }
 
-/* Put each maximal run of combining marks into canonical order: a stable insertion sort by combining class so equal
-   marks keep input order (Unicode canonical ordering, spec 3.11). */
-static void reorder(Py_UCS4 *seq, Py_ssize_t len) {
+/* Equal combining classes must retain input order (Unicode canonical ordering, spec 3.11). */
+static int reorder_run(Py_UCS4 *seq, Py_ssize_t len) {
+    Py_UCS4 *const ordered = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+    if (ordered == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;         /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    Py_ssize_t offsets[256] = {0};
+    for (Py_ssize_t index = 0; index < len; index++) {
+        offsets[ccc_of(seq[index])]++;
+    }
+    Py_ssize_t total = 0;
+    for (size_t klass = 0; klass < 256; klass++) {
+        const Py_ssize_t count = offsets[klass];
+        offsets[klass] = total;
+        total += count;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        ordered[offsets[ccc_of(seq[index])]++] = seq[index];
+    }
+    memcpy(seq, ordered, (size_t)len * sizeof(Py_UCS4));
+    PyMem_Free(ordered);
+    return 0;
+}
+
+static int reorder(Py_UCS4 *seq, Py_ssize_t len) {
+    Py_ssize_t run_start = 0;
     for (Py_ssize_t index = 1; index < len; index++) {
         Py_UCS4 cp = seq[index];
         uint8_t klass = ccc_of(cp);
         if (klass == 0) {
+            run_start = index + 1;
+            continue;
+        }
+        /* Stable counting avoids quadratic shifts in long, out-of-order mark runs. */
+        if (index - run_start >= 32 && ccc_of(seq[index - 1]) > klass) {
+            Py_ssize_t end = index + 1;
+            while (end < len && ccc_of(seq[end]) != 0) {
+                end++;
+            }
+            if (reorder_run(seq + run_start, end - run_start) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;                                           /* GCOVR_EXCL_LINE: allocation failure */
+            }
+            index = end - 1;
             continue;
         }
         Py_ssize_t back = index;
@@ -228,6 +264,7 @@ static void reorder(Py_UCS4 *seq, Py_ssize_t len) {
         }
         seq[back] = cp;
     }
+    return 0;
 }
 
 /* Recompose the ordered sequence in place: fold each unblocked combining mark into its starter (Hangul arithmetically,
@@ -290,7 +327,10 @@ static PyObject *normalize_full(int kind, const void *data, Py_ssize_t len, int 
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t count = decompose(kind, data, len, buf, compat);
-    reorder(buf, count);
+    if (reorder(buf, count) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyMem_Free(buf);           /* GCOVR_EXCL_LINE: allocation failure */
+        return PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation failure */
+    }
     if (form == TH_NFC || form == TH_NFKC) {
         count = compose(buf, count);
     }

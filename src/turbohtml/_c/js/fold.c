@@ -419,11 +419,14 @@ static int32_t merge_declarations(F *folder, int32_t first) {
         if (next >= 0 && nodes[idx].kind == JN_VAR && nodes[next].kind == JN_VAR &&
             nodes[idx].decl == nodes[next].decl) {
             int32_t tail = nodes[idx].a;
-            while (nodes[tail].next >= 0) {
-                tail = nodes[tail].next;
-            }
-            nodes[tail].next = nodes[next].a;
-            nodes[idx].next = nodes[next].next;
+            do {
+                while (nodes[tail].next >= 0) {
+                    tail = nodes[tail].next;
+                }
+                nodes[tail].next = nodes[next].a;
+                nodes[idx].next = nodes[next].next;
+                next = nodes[idx].next;
+            } while (next >= 0 && nodes[next].kind == JN_VAR && nodes[idx].decl == nodes[next].decl);
             folder->changed = 1;
             continue;
         }
@@ -859,8 +862,16 @@ static void merge_sequences(F *folder, int32_t first) {
                 continue;  /* GCOVR_EXCL_LINE */
             }
             prog->nodes[idx].a = seq;
+            int32_t tail = prog->nodes[seq].a;
+            while (prog->nodes[tail].next >= 0) {
+                tail = prog->nodes[tail].next;
+            }
             while ((next = prog->nodes[idx].next) >= 0 && mergeable_expr(prog, next)) {
-                seq_append(prog, seq, prog->nodes[next].a);
+                int32_t expr = prog->nodes[next].a;
+                prog->nodes[tail].next = prog->nodes[expr].kind == JN_SEQ ? prog->nodes[expr].a : expr;
+                while (prog->nodes[tail].next >= 0) {
+                    tail = prog->nodes[tail].next;
+                }
                 prog->nodes[idx].next = prog->nodes[next].next;
                 folder->changed = 1;
             }
@@ -918,37 +929,47 @@ static void merge_sequences(F *folder, int32_t first) {
     }
 }
 
-/* Fold a guard clause and the statement it guards into one conditional return:
-   `if(c) return a; return b;` becomes `return c ? a : b;`. The following statement is the implicit
-   else, and sequence-merging has already collapsed any run before it into that single return. The
-   loop repeats to a fixpoint so a chain `if(a)return x;if(b)return y;return z` cascades into
-   `return a?x:b?y:z`. */
 static void fold_if_return_chain(F *folder, int32_t first) {
     jm_program *prog = folder->prog;
-    for (int changed = 1; changed;) {
-        changed = 0;
-        for (int32_t idx = first; idx >= 0; idx = prog->nodes[idx].next) {
-            if (prog->nodes[idx].kind != JN_IF || prog->nodes[idx].c >= 0) {
-                continue;
-            }
-            int32_t then = branch_stmt(folder, prog->nodes[idx].b);
-            int32_t next = prog->nodes[idx].next;
-            if (then < 0 || prog->nodes[then].kind != JN_RETURN || prog->nodes[then].a < 0 || next < 0 ||
-                prog->nodes[next].kind != JN_RETURN || prog->nodes[next].a < 0) {
-                continue;
-            }
-            int32_t cond = make_cond(folder, prog->nodes[idx].a, prog->nodes[then].a, prog->nodes[next].a);
-            if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-                return;     /* GCOVR_EXCL_LINE */
-            }
-            prog->nodes[idx].kind = JN_RETURN;
-            prog->nodes[idx].a = cond;
-            prog->nodes[idx].b = -1;
-            prog->nodes[idx].c = -1;
-            prog->nodes[idx].next = prog->nodes[next].next;
-            changed = 1;
-            folder->changed = 1;
+    int32_t count = 0;
+    for (int32_t index = first; index >= 0; index = prog->nodes[index].next) {
+        count += prog->nodes[index].kind == JN_IF && prog->nodes[index].c < 0;
+    }
+    if (count == 0) {
+        return;
+    }
+    int32_t local[16];
+    int32_t *guards = count <= 16 ? local : jm_malloc((size_t)count * sizeof(int32_t));
+    if (guards == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int32_t written = 0;
+    for (int32_t index = first; index >= 0; index = prog->nodes[index].next) {
+        if (prog->nodes[index].kind == JN_IF && prog->nodes[index].c < 0) {
+            guards[written++] = index;
         }
+    }
+    for (int32_t position = count - 1; position >= 0; position--) {
+        int32_t index = guards[position];
+        int32_t then = branch_stmt(folder, prog->nodes[index].b);
+        int32_t next = prog->nodes[index].next;
+        if (then < 0 || prog->nodes[then].kind != JN_RETURN || prog->nodes[then].a < 0 || next < 0 ||
+            prog->nodes[next].kind != JN_RETURN || prog->nodes[next].a < 0) {
+            continue;
+        }
+        int32_t cond = make_cond(folder, prog->nodes[index].a, prog->nodes[then].a, prog->nodes[next].a);
+        if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            break;      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        prog->nodes[index].kind = JN_RETURN;
+        prog->nodes[index].a = cond;
+        prog->nodes[index].b = -1;
+        prog->nodes[index].c = -1;
+        prog->nodes[index].next = prog->nodes[next].next;
+        folder->changed = 1;
+    }
+    if (guards != local) {
+        jm_free(guards);
     }
 }
 
@@ -1381,12 +1402,16 @@ static void walk(F *folder, int32_t idx) {
     switch (node->kind) {
     case JN_UNARY:
         if (node->op == JT_NOT) {
+            const jm_node *operand = &folder->prog->nodes[node->a];
+            if (operand->kind == JN_NUM && operand->str_len == 1 &&
+                (operand->str[0] == '0' || operand->str[0] == '1')) {
+                return;
+            }
             int truth = pure_truthy(folder, node->a);
             if (truth >= 0) {
                 fold_boolean(folder, idx, !truth);
                 return;
             }
-            const jm_node *operand = &folder->prog->nodes[node->a];
             if (operand->kind == JN_BINARY && (operand->op == JT_EQ_EQ || operand->op == JT_NE ||
                                                operand->op == JT_EQ_EQ_EQ || operand->op == JT_NE_EQ)) {
                 /* !(a==b) and a!=b are the same boolean everywhere, not just in a test position

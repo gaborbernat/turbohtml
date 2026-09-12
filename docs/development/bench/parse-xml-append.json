@@ -1,0 +1,33 @@
+{
+  "label": "parse XML with distinct attribute names",
+  "parties": [
+    "turbohtml",
+    "lxml.etree"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1,000 attributes / value=a",
+      5.7123755525860057e-05,
+      7.987424182829273e-05
+    ],
+    [
+      "1 attribute / value=a",
+      3.5702437841678145e-07,
+      8.316973810096328e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.009716029738181305,
+      0.040238514337981715
+    ],
+    [
+      null,
+      0.021112397433787577,
+      0.027836216607728625
+    ]
+  ],
+  "notes": {}
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from typing import Final
 from urllib.parse import urljoin
 
 from pyquery import PyQuery
@@ -190,10 +191,50 @@ def _encode_inner(text: str) -> bytes:
     return _serialize_inner(text).encode()
 
 
+def _query_closest(case: tuple[int, bool]) -> PyQuery:
+    if case[1]:
+        unsupported: Final = "Pyquery closest retains duplicate ancestors for multiple roots"
+        raise NotImplementedError(unsupported)
+    return _query_parents_case(case).closest("main")
+
+
+def _query_parents(case: tuple[int, bool]) -> PyQuery:
+    return _query_parents_case(case).parent()
+
+
+@functools.cache
+def _query_parents_case(case: tuple[int, bool]) -> PyQuery:
+    count, shared = case
+    text: Final = "<main>" + "<p>x</p>" * count + "</main>" if shared else "<main><p>x</p></main>" * count
+    return PyQuery(text, parser="html")("p")
+
+
+def _query_siblings(case: tuple[int, bool]) -> PyQuery:
+    return _query_siblings_case(case).siblings()
+
+
+@functools.cache
+def _query_siblings_case(case: tuple[int, bool]) -> PyQuery:
+    count, all_selected = case
+    if all_selected:
+        unsupported: Final = "Pyquery siblings retains duplicates and uses a different result order for multiple roots"
+        raise NotImplementedError(unsupported)
+    return PyQuery("<main>" + "<p>x</p>" * count + "</main>", parser="html")("p").eq(0)
+
+
 OPERATIONS = {
+    "query-closest": (_query_closest, "pyquery"),
+    "query-parents": (_query_parents, "pyquery"),
+    "query-siblings": (_query_siblings, "pyquery"),
     "serialize-inner": (_serialize_inner, "pyquery"),
     "encode-inner": (_encode_inner, "pyquery"),
     "parse": (parse, "pyquery"),
+    "parse-formatting": (parse, "pyquery"),
+    "parse-foster": (parse, "pyquery"),
+    "parse-crlf": (parse, "pyquery"),
+    "parse-nul": (parse, "pyquery"),
+    "parse-afe": (parse, "pyquery"),
+    "parse-scope": (parse, "pyquery"),
     "find": (find, "pyquery"),
     "select": (select, "pyquery"),
     "find-text": (find_text, "pyquery"),

@@ -1,0 +1,46 @@
+{
+  "label": "change a radio group selection",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "document radios, index build and 64 changes",
+      3.165803360995293e-05
+    ],
+    [
+      "small form, one unindexed change",
+      1.3538285202230329e-06
+    ],
+    [
+      "one form among 256, index build and 64 changes",
+      0.00010453122655841677
+    ],
+    [
+      "eight changes with index invalidation",
+      1.5086418594970988e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01900906250242281
+    ],
+    [
+      null,
+      0.01921524041069647
+    ],
+    [
+      null,
+      0.016678666763577446
+    ],
+    [
+      null,
+      0.016359389031159428
+    ]
+  ],
+  "notes": {
+    "turbohtml": "Document and many-form cases include selection-index construction in the timed call; the mutation case rebuilds after each append. Parsing occurs in untimed setup."
+  }
+}

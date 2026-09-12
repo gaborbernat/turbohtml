@@ -1,0 +1,28 @@
+{
+  "label": "computed style for every element",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "styled page (3 kB)",
+      0.000676488649090364
+    ],
+    [
+      "styled page (11 kB)",
+      0.0031081519186651955
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.042936818218307006
+    ],
+    [
+      null,
+      0.08606913443595492
+    ]
+  ],
+  "notes": {}
+}

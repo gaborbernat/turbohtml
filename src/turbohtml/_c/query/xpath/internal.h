@@ -196,5 +196,6 @@ double to_number(struct th_tree *tree, const xp_result *value);
 /* The mutual recursion between the evaluator and the function library. */
 int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out);
 int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out);
+int xp_pattern_is_static(const xp_program *prog);
 
 #endif /* TURBOHTML_XPATH_INTERNAL_H */

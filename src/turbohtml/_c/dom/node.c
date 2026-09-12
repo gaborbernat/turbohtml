@@ -1388,7 +1388,7 @@ static int node_bool(PyObject *Py_UNUSED(self)) {
 
 static PyObject *node_repr(PyObject *self) {
     th_node *node = ((NodeObject *)self)->node;
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT: {
         PyObject *tag = ucs4_to_str(node->text, node->text_len);
         if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */

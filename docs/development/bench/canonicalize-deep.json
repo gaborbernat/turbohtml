@@ -1,0 +1,43 @@
+{
+  "label": "canonicalize deep trees with and without xlink attributes (c14n)",
+  "parties": [
+    "turbohtml",
+    "lxml method=c14n"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "deep tree (150 deep)",
+      1.5708761253563353e-05,
+      "different HTML infoset"
+    ],
+    [
+      "sparse xlink (150 deep)",
+      9.907305305271544e-06,
+      "different HTML infoset"
+    ],
+    [
+      "shallow ordinary",
+      2.5364455385664305e-07,
+      "different HTML infoset"
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01390137407846425,
+      null
+    ],
+    [
+      null,
+      0.019098772271180568,
+      null
+    ],
+    [
+      null,
+      0.020425949166036714,
+      null
+    ]
+  ],
+  "notes": {}
+}

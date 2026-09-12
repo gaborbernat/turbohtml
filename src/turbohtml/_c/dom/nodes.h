@@ -53,6 +53,7 @@ typedef struct {
 typedef struct {
     path_id_slot *slots;
     size_t mask; /* capacity - 1; capacity is a power of two */
+    uint64_t id_version;
     int ci;
 } path_id_map;
 
@@ -79,6 +80,7 @@ typedef struct {
     th_node **index_nodes;
     Py_ssize_t *index_offsets; /* th_tag_count + 2 entries; NULL until built */
     path_id_map *path_ids;     /* css_path id-occurrence map; NULL until first css_path */
+    void *path_positions;
     node_hash_overrides *hash_overrides;
     /* WHATWG encoding confidence: a byte-order mark, the encoding argument, or a <meta>
        declaration makes it certain; a prescan-free sniff leaves it a guess. Meaningless,
@@ -93,6 +95,7 @@ typedef struct {
     Py_ssize_t css_sheet_count;
     uint32_t css_sheet_attr_gen;
     int css_sheets_ready;
+    void *css_computed;
 } HandleObject;
 
 static inline Py_hash_t handle_node_hash(const HandleObject *handle, const th_node *node) {
@@ -250,7 +253,7 @@ static inline PyObject *str_from_accessor(Py_UCS4 *(*accessor)(th_tree *, th_nod
 }
 
 static inline PyObject *type_for_node(module_state *state, const th_node *node) {
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_DOCUMENT:
         return state->document_type;
     case TH_NODE_ELEMENT:
@@ -592,6 +595,7 @@ void handle_clear_css_cache(HandleObject *handle);
 /* Drop a handle's cached selector index and id map after a structural mutation. Lives in
    element.c beside the mutation bindings; query/methods.c calls it from prune/remove/strip. */
 void handle_drop_index(PyObject *handle_obj);
+void path_positions_free(void *positions);
 
 /* Encode an attribute-name str into a freshly allocated (PyMem_Free) UTF-8 buffer for a
    lookup on tree, folding case for HTML but not XML, or NULL with an exception set.
@@ -612,6 +616,7 @@ PyObject *node_xpath_iter(PyObject *self, PyObject *args, PyObject *kwds);
 PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds);
 PyObject *node_css_matches(PyObject *self, PyObject *arg);
 PyObject *node_css_closest(PyObject *self, PyObject *arg);
+int node_css_closest_borrowed(PyObject *self, PyObject *arg, th_node **found);
 PyObject *node_prune(PyObject *self, PyObject *arg);
 PyObject *node_remove(PyObject *self, PyObject *arg);
 PyObject *node_strip_tags(PyObject *self, PyObject *arg);

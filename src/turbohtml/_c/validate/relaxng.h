@@ -40,6 +40,7 @@ typedef struct nameclass {
 
 struct pattern {
     int type;
+    int nullable;
     pattern *p1, *p2;
     nameclass *nc;
     int def_index;
@@ -57,6 +58,10 @@ static pattern *pat_new(th_schema *schema, int type) {
     }
     memset(pattern, 0, sizeof(*pattern));
     pattern->type = type;
+    pattern->nullable =
+        type == P_REF || type == P_CHOICE || type == P_GROUP || type == P_INTERLEAVE || type == P_ONEMORE
+            ? -1
+            : type == P_EMPTY || type == P_TEXT;
     return pattern;
 }
 
@@ -67,6 +72,9 @@ static pattern *pat_binary(th_schema *schema, int type, pattern *p1, pattern *p2
     }
     node->p1 = p1;
     node->p2 = p2;
+    if (type != P_AFTER && p1->nullable >= 0 && p2->nullable >= 0) {
+        node->nullable = type == P_CHOICE ? p1->nullable || p2->nullable : p1->nullable && p2->nullable;
+    }
     return node;
 }
 
@@ -128,6 +136,7 @@ static pattern *pat_onemore(th_schema *schema, pattern *p1) {
         return schema->p_notallowed; /* GCOVR_EXCL_LINE */
     }
     node->p1 = p1;
+    node->nullable = p1->nullable;
     return node;
 }
 
@@ -582,10 +591,11 @@ static pattern *rng_resolve(th_schema *schema, int def_index) {
 /* ---- derivatives ---- */
 
 static int rng_nullable(th_schema *schema, pattern *p) {
+    /* Reference nullability depends on the active recursion guard. */
+    if (p->nullable >= 0) {
+        return p->nullable;
+    }
     switch (p->type) {
-    case P_EMPTY:
-    case P_TEXT:
-        return 1;
     case P_CHOICE:
         return rng_nullable(schema, p->p1) || rng_nullable(schema, p->p2);
     case P_GROUP:
@@ -593,7 +603,7 @@ static int rng_nullable(th_schema *schema, pattern *p) {
         return rng_nullable(schema, p->p1) && rng_nullable(schema, p->p2);
     case P_ONEMORE:
         return rng_nullable(schema, p->p1);
-    case P_REF: {
+    default: { /* P_REF is the remaining kind without cached nullability. */
         def_entry *entry = &schema->defines.items[p->def_index];
         if (entry->building) { /* a ref recursive without an element guard is not nullable */
             return 0;
@@ -603,8 +613,6 @@ static int rng_nullable(th_schema *schema, pattern *p) {
         entry->building = 0;
         return nullable;
     }
-    default:
-        return 0;
     }
 }
 
@@ -621,7 +629,7 @@ static int rng_datatype_ok(th_schema *schema, int datatype_id, facetset *facets,
         return 0;
     }
     for (Py_ssize_t index = 0; index < facets->pattern_count; index++) {
-        if (!regex_full_match(&schema->mem, facets->patterns[index].ptr, facets->patterns[index].len, norm, norm_len)) {
+        if (!regex_full_match(schema, facets->patterns[index].ptr, facets->patterns[index].len, norm, norm_len)) {
             return 0;
         }
     }
@@ -880,8 +888,13 @@ static pattern *rng_children_deriv(valctx *ctx, pattern *p, th_node *element) {
         if (child->type == TH_NODE_ELEMENT) {
             current = rng_child_element(ctx, current, child);
         } else if (is_chardata(child)) {
-            Py_ssize_t len = 0;
-            const Py_UCS4 *text = th_node_data(tree, child, &len);
+            Py_ssize_t len = child->text_len;
+            const Py_UCS4 *text = len == 0 ? EMPTY_UCS4 : th_node_realize_text(tree, child);
+            if (text == NULL) {              /* GCOVR_EXCL_BR_LINE: text realization allocation failure */
+                ctx->failed = 1;             /* GCOVR_EXCL_LINE */
+                PyErr_NoMemory();            /* GCOVR_EXCL_LINE */
+                return schema->p_notallowed; /* GCOVR_EXCL_LINE */
+            }
             if (!rng_is_whitespace(text, len)) {
                 current = rng_text_deriv(schema, current, text, len);
             }

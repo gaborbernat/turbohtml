@@ -1,0 +1,1 @@
+Speed up :meth:`canonical serialization <turbohtml.Node.serialize>` with explicit options.

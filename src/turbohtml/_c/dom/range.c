@@ -111,26 +111,6 @@ static th_node *split_data_node(th_tree *tree, th_node *node, Py_ssize_t offset)
     return tail;
 }
 
-/* A childless copy of an element (same tag, namespace, and attributes) in the same tree: deep-copy
-   then drop the children, reusing the tested copy primitive. NULL on allocation failure. */
-static th_node *shallow_clone(th_tree *tree, th_node *node) {
-    th_node *copy = th_tree_copy_node(tree, tree, node);
-    if (copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    while (copy->first_child != NULL) {
-        th_node_remove(copy->first_child);
-    }
-    return copy;
-}
-
-/* A node fully inside the range: its whole span sits strictly between the boundaries. */
-static int is_contained(th_node *node, th_node *start_node, Py_ssize_t start_offset, th_node *end_node,
-                        Py_ssize_t end_offset) {
-    return bp_compare(node, 0, start_node, start_offset) > 0 &&
-           bp_compare(node, node_length(node), end_node, end_offset) < 0;
-}
-
 /* A node straddling exactly one boundary (an inclusive ancestor of one endpoint but not the other). */
 static int is_partially_contained(th_node *node, th_node *start_node, th_node *end_node) {
     return is_inclusive_ancestor(node, start_node) != is_inclusive_ancestor(node, end_node);
@@ -151,9 +131,26 @@ static void adopt_fragment_children(th_node *parent, th_node *fragment) {
 static th_node **collect_contained(th_node *common, th_node *start_node, Py_ssize_t start_offset, th_node *end_node,
                                    Py_ssize_t end_offset, Py_ssize_t *out_count, int *error) {
     *error = 0;
+    Py_ssize_t from = start_offset;
+    if (start_node != common) {
+        th_node *child = start_node;
+        while (child->parent != common) {
+            child = child->parent;
+        }
+        from = node_index(child) + 1;
+    }
+    Py_ssize_t to = end_offset;
+    if (end_node != common) {
+        th_node *child = end_node;
+        while (child->parent != common) {
+            child = child->parent;
+        }
+        to = node_index(child);
+    }
     Py_ssize_t count = 0;
-    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling) {
-        if (is_contained(child, start_node, start_offset, end_node, end_offset)) {
+    Py_ssize_t position = 0;
+    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling, position++) {
+        if (position >= from && position < to) {
             count++;
         }
     }
@@ -168,8 +165,9 @@ static th_node **collect_contained(th_node *common, th_node *start_node, Py_ssiz
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t index = 0;
-    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling) {
-        if (is_contained(child, start_node, start_offset, end_node, end_offset)) {
+    position = 0;
+    for (th_node *child = common->first_child; child != NULL; child = child->next_sibling, position++) {
+        if (position >= from && position < to) {
             if (child->type == TH_NODE_DOCTYPE) {
                 PyErr_SetString(PyExc_ValueError, "cannot extract a range spanning a doctype");
                 PyMem_Free(nodes);
@@ -282,7 +280,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
             return NULL;                                                                     /* GCOVR_EXCL_LINE: OOM */
         }
     } else if (first != NULL) {
-        th_node *clone = shallow_clone(tree, first);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, first);
         if (clone == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -311,7 +309,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
             return NULL;                                              /* GCOVR_EXCL_LINE: OOM path */
         }
     } else if (last != NULL) {
-        th_node *clone = shallow_clone(tree, last);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, last);
         if (clone == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -366,7 +364,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         }
         th_node_append_child(fragment, piece);
     } else if (first != NULL) {
-        th_node *clone = shallow_clone(tree, first);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, first);
         if (clone == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -396,7 +394,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         }
         th_node_append_child(fragment, piece);
     } else if (last != NULL) {
-        th_node *clone = shallow_clone(tree, last);
+        th_node *clone = th_tree_copy_node_shallow(tree, tree, last);
         if (clone == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -433,7 +431,15 @@ static int validate_boundary(th_node *node, Py_ssize_t offset) {
         PyErr_SetString(PyExc_ValueError, "a boundary point cannot be inside a doctype");
         return -1;
     }
-    if (offset < 0 || offset > node_length(node)) {
+    Py_ssize_t remaining = offset;
+    if (is_char_data(node)) {
+        remaining = offset > node->text_len;
+    } else {
+        for (th_node *child = node->first_child; child != NULL && remaining > 0; child = child->next_sibling) {
+            remaining--;
+        }
+    }
+    if (offset < 0 || remaining > 0) {
         PyErr_SetString(PyExc_IndexError, "offset is out of range for the node");
         return -1;
     }

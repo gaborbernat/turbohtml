@@ -16,6 +16,7 @@
 
 #include "core/ascii.h"
 #include "core/common.h"
+#include "core/node_map.h"
 
 #include "core/vec.h"
 #include "tokenizer/binding.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
@@ -395,13 +396,9 @@ static int micro_id_index_find(micro_id_index *index, th_node *document, const P
 
 /* Push every id in root's itemref attribute onto `pending`, resolving each token to the first element carrying it (an
    unresolved token is skipped, per the spec). -1 only on the excluded allocation-failure path. */
-static int push_itemref_targets(micro_ctx *ctx, th_node *root, node_stack *pending) {
-    Py_ssize_t itemref = th_node_attr_find(ctx->tree, root, "itemref", 7);
-    if (itemref < 0 || root->attrs[itemref].value == NULL) {
-        return 0;
-    }
-    const Py_UCS4 *value = root->attrs[itemref].value;
-    Py_ssize_t value_len = root->attrs[itemref].value_len;
+static int push_itemref_targets(micro_ctx *ctx, const th_node_attr *itemref, node_stack *pending) {
+    const Py_UCS4 *const value = itemref->value;
+    const Py_ssize_t value_len = itemref->value_len;
     th_node *document = th_tree_document(ctx->tree);
     Py_ssize_t cursor = 0;
     while (cursor < value_len) {
@@ -444,26 +441,26 @@ static int push_element_children(th_node *parent, node_stack *pending) {
    item" algorithm: crawl root's descendants plus every element its itemref names, stopping at a nested itemscope
    (whose descendants belong to that nested item) and visiting each element at most once so an itemref cycle
    terminates. -1 only on the excluded allocation-failure path. */
-static int crawl_item_properties(micro_ctx *ctx, th_node *root, node_stack *results) {
-    node_stack memory = {NULL, 0, 0};
+static int crawl_item_properties(micro_ctx *ctx, th_node *root, const th_node_attr *itemref, node_stack *results) {
+    th_node_map memory = {0};
     node_stack pending = {NULL, 0, 0};
     int status = -1;
-    if (node_stack_push(&memory, root) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        goto done;                            /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (th_node_map_insert(&memory, root, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        goto done;                                  /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (push_element_children(root, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         goto done;                                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (push_itemref_targets(ctx, root, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        goto done;                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (push_itemref_targets(ctx, itemref, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        goto done;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     while (pending.len > 0) {
         th_node *current = pending.items[--pending.len];
-        if (node_stack_contains(&memory, current)) {
+        if (th_node_map_find(&memory, current) != 0) {
             continue; /* already crawled: a microdata error the spec skips */
         }
-        if (node_stack_push(&memory, current) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            goto done;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (th_node_map_insert(&memory, current, 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            goto done;                                     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         if (find_node_attr(current, TH_ATTR_ITEMSCOPE) == NULL) {
             if (push_element_children(current, &pending) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
@@ -481,7 +478,7 @@ static int crawl_item_properties(micro_ctx *ctx, th_node *root, node_stack *resu
     }
     status = 0;
 done:
-    PyMem_Free(memory.items);
+    PyMem_Free(memory.entries);
     PyMem_Free(pending.items);
     return status;
 }
@@ -495,9 +492,16 @@ static Py_ssize_t node_depth(th_node *node) {
     return depth;
 }
 
-/* Negative when `left` precedes `right` in document (pre-order) order, positive otherwise; never called with equal
-   nodes, so the ancestor-equal arm is the one-is-an-ancestor-of-the-other case. */
 static int node_before(th_node *left, th_node *right) {
+    if (left == right) { /* GCOVR_EXCL_BR_LINE: qsort may compare an entry with itself; collected nodes are unique */
+        return 0;        /* GCOVR_EXCL_LINE: platform-dependent qsort self-comparison */
+    }
+    if (left->next_sibling == right || left->first_child == right) {
+        return -1;
+    }
+    if (right->next_sibling == left || right->first_child == left) {
+        return 1;
+    }
     Py_ssize_t left_depth = node_depth(left);
     Py_ssize_t right_depth = node_depth(right);
     th_node *walk_left = left;
@@ -527,16 +531,93 @@ static int node_ptr_before(const void *left, const void *right) {
     return node_before(*(th_node *const *)left, *(th_node *const *)right);
 }
 
+static int sort_properties(node_stack *results) {
+    if (results->len < 2) {
+        return 0;
+    }
+    const int direction = node_before(results->items[0], results->items[1]);
+    for (Py_ssize_t index = 2; index < results->len; index++) {
+        if (node_before(results->items[index - 1], results->items[index]) != direction) {
+            if (results->len < 32) {
+                qsort(results->items, (size_t)results->len, sizeof(th_node *), node_ptr_before);
+                return 0;
+            }
+            th_node_map selected = {0};
+            for (Py_ssize_t property = 0; property < results->len; property++) {
+                /* GCOVR_EXCL_BR_START: allocation failure */
+                if (th_node_map_insert(&selected, results->items[property], 1) < 0) {
+                    PyMem_Free(selected.entries); /* GCOVR_EXCL_LINE */
+                    PyErr_NoMemory();             /* GCOVR_EXCL_LINE */
+                    return -1;                    /* GCOVR_EXCL_LINE */
+                }
+                /* GCOVR_EXCL_BR_STOP */
+            }
+            th_node *root = results->items[0];
+            while (root->parent != NULL) {
+                root = root->parent;
+            }
+            Py_ssize_t written = 0;
+            for (th_node *node = root; written < results->len; node = preorder_next(node, root)) {
+                if (th_node_map_find(&selected, node)) {
+                    results->items[written++] = node;
+                }
+            }
+            PyMem_Free(selected.entries);
+            return 0;
+        }
+    }
+    if (direction > 0) {
+        for (Py_ssize_t index = 0; index < results->len / 2; index++) {
+            th_node *const node = results->items[index];
+            results->items[index] = results->items[results->len - index - 1];
+            results->items[results->len - index - 1] = node;
+        }
+    }
+    return 0;
+}
+
+/* Without itemref, preorder visits each property once in tree order, so no visited set or sort is needed. */
+static int crawl_local_properties(th_node *root, node_stack *results) {
+    th_node *current = root->first_child;
+    while (current != NULL) {
+        if (current->type == TH_NODE_ELEMENT) {
+            const th_node_attr *const itemprop = find_node_attr(current, TH_ATTR_ITEMPROP);
+            if (itemprop != NULL && itemprop->value != NULL) {
+                if (node_stack_push(results, current) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                    return -1;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+            }
+            if (find_node_attr(current, TH_ATTR_ITEMSCOPE) == NULL && current->first_child != NULL) {
+                current = current->first_child;
+                continue;
+            }
+        }
+        while (current != root && current->next_sibling == NULL) {
+            current = current->parent;
+        }
+        current = current == root ? NULL : current->next_sibling;
+    }
+    return 0;
+}
+
 /* Crawl the properties of the item rooted at `element` into `properties`, in document (tree) order per the spec's
    final sort, each itemprop name mapping to its list of values. -1 only on the excluded allocation-failure path. */
 static int collect_properties(micro_ctx *ctx, th_node *element, PyObject *properties) {
     node_stack results = {NULL, 0, 0};
     int status = -1;
-    if (crawl_item_properties(ctx, element, &results) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        goto done;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    if (results.len > 1) {
-        qsort(results.items, (size_t)results.len, sizeof(th_node *), node_ptr_before);
+    const Py_ssize_t itemref = th_node_attr_find(ctx->tree, element, "itemref", 7);
+    if (itemref < 0 || element->attrs[itemref].value == NULL) {
+        if (crawl_local_properties(element, &results) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            goto done;                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    } else {
+        const int crawled = crawl_item_properties(ctx, element, &element->attrs[itemref], &results);
+        if (crawled < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            goto done;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (sort_properties(&results) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            goto done;                       /* GCOVR_EXCL_LINE */
+        }
     }
     for (Py_ssize_t index = 0; index < results.len; index++) {
         th_node *property = results.items[index];
@@ -1741,6 +1822,20 @@ PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyO
         Py_DECREF(snapshot);
         return NULL;
     }
+    int has_script = 0;
+    int has_meta = 0;
+    int has_microdata = 0;
+    th_node *const root = ((NodeObject *)snapshot)->node;
+    for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
+        if (node->type == TH_NODE_ELEMENT) {
+            has_script |= node->atom == TH_TAG_SCRIPT;
+            has_meta |= node->atom == TH_TAG_META;
+            has_microdata |= find_node_attr(node, TH_ATTR_ITEMSCOPE) != NULL;
+            if (has_script && has_meta && has_microdata) {
+                break;
+            }
+        }
+    }
     PyObject *sections = PyTuple_New(6);
     if (sections == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_DECREF(snapshot); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1748,12 +1843,12 @@ PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyO
         return NULL;         /* GCOVR_EXCL_LINE */
     }
     int failed =
-        tuple_set_or_fail(sections, 0, turbohtml_document_json_ld(snapshot, NULL)) < 0; /* GCOVR_EXCL_BR_LINE */
+        tuple_set_or_fail(sections, 0, has_script ? turbohtml_document_json_ld(snapshot, NULL) : PyList_New(0)) < 0;
     if (!failed) { /* GCOVR_EXCL_BR_LINE: JSON parsing returns a list */
-        failed = tuple_set_or_fail(sections, 1, gather_microdata(snapshot, base)) < 0;
+        failed = tuple_set_or_fail(sections, 1, has_microdata ? gather_microdata(snapshot, base) : PyList_New(0)) < 0;
     }
     if (!failed) {
-        failed = tuple_set_or_fail(sections, 2, gather_opengraph(snapshot, base)) < 0; /* GCOVR_EXCL_BR_LINE */
+        failed = tuple_set_or_fail(sections, 2, has_meta ? gather_opengraph(snapshot, base) : PyDict_New()) < 0;
     }
     if (!failed) { /* GCOVR_EXCL_BR_LINE: the previous dict build fails only on allocation */
         failed = tuple_set_or_fail(sections, 3, PyList_New(0)) < 0; /* GCOVR_EXCL_BR_LINE */
@@ -1762,7 +1857,7 @@ PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyO
         failed = tuple_set_or_fail(sections, 4, gather_rdfa(snapshot, base)) < 0;
     }
     if (!failed) {
-        failed = tuple_set_or_fail(sections, 5, gather_dublin_core(snapshot)) < 0; /* GCOVR_EXCL_BR_LINE */
+        failed = tuple_set_or_fail(sections, 5, has_meta ? gather_dublin_core(snapshot) : PyDict_New()) < 0;
     }
     Py_DECREF(snapshot);
     Py_XDECREF(base);

@@ -16,13 +16,14 @@
 
 #include <stdlib.h>
 
-/* One parsed (start, end, label) triple. label borrows the caller's reference;
-   the spans sequence outlives every call below. */
+/* Labels need owned references when the caller supplies a temporary iterable. */
 typedef struct {
     Py_ssize_t start;
     Py_ssize_t end;
     PyObject *label;
 } annotation_span;
+
+static void annotation_free_spans(annotation_span *items, Py_ssize_t count);
 
 /* Validate spans and copy it into a fresh array of annotation_span. Each item
    must be a (start:int, end:int, label:str) tuple whose offsets satisfy
@@ -46,27 +47,27 @@ static int annotation_parse_spans(PyObject *spans, Py_ssize_t text_len, annotati
         PyObject *item = PySequence_Fast_GET_ITEM(fast, index);
         if (!PyTuple_Check(item)) {
             PyErr_SetString(PyExc_TypeError, "each span must be a (start, end, label) tuple");
-            PyMem_Free(items);
+            annotation_free_spans(items, index);
             Py_DECREF(fast);
             return -1;
         }
         Py_ssize_t start, end;
         PyObject *label;
         if (!PyArg_ParseTuple(item, "nnU", &start, &end, &label)) {
-            PyMem_Free(items);
+            annotation_free_spans(items, index);
             Py_DECREF(fast);
             return -1;
         }
         if (start < 0 || end < start || end > text_len) {
             PyErr_Format(PyExc_ValueError, "span (%zd, %zd) is out of range for text of length %zd", start, end,
                          text_len);
-            PyMem_Free(items);
+            annotation_free_spans(items, index);
             Py_DECREF(fast);
             return -1;
         }
         items[index].start = start;
         items[index].end = end;
-        items[index].label = label;
+        items[index].label = Py_NewRef(label);
     }
     Py_DECREF(fast);
     *out_spans = items;
@@ -85,9 +86,9 @@ PyObject *turbohtml_annotation_surface(PyObject *Py_UNUSED(module), PyObject *ar
         return NULL;
     }
     PyObject *result = PyDict_New();
-    if (result == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(items); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (result == NULL) {                    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        annotation_free_spans(items, count); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (Py_ssize_t index = 0; index < count; index++) {
         PyObject *label = items[index].label;
@@ -119,12 +120,12 @@ PyObject *turbohtml_annotation_surface(PyObject *Py_UNUSED(module), PyObject *ar
             goto error;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    PyMem_Free(items);
+    annotation_free_spans(items, count);
     return result;
 error:                 /* GCOVR_EXCL_LINE: shared cleanup for the unreachable allocation-failure arms */
     Py_DECREF(result); /* GCOVR_EXCL_LINE: allocation-failure path */
-    PyMem_Free(items); /* GCOVR_EXCL_LINE: allocation-failure path */
-    return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    annotation_free_spans(items, count); /* GCOVR_EXCL_LINE: allocation-failure path */
+    return NULL;                         /* GCOVR_EXCL_LINE: allocation-failure path */
 }
 
 /* One tag boundary. rank holds the span's other endpoint (an open's is the end,
@@ -208,9 +209,9 @@ PyObject *turbohtml_annotation_tags(PyObject *Py_UNUSED(module), PyObject *args)
         return NULL;
     }
     annotation_event *events = PyMem_Calloc((size_t)(count > 0 ? 2 * count : 1), sizeof(annotation_event));
-    if (events == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(items);       /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (events == NULL) {                    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        annotation_free_spans(items, count); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory();             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t out_len = text_len;
     Py_UCS4 maxchar = PyUnicode_MAX_CHAR_VALUE(text);
@@ -226,10 +227,10 @@ PyObject *turbohtml_annotation_tags(PyObject *Py_UNUSED(module), PyObject *args)
     }
     qsort(events, (size_t)(2 * count), sizeof(annotation_event), annotation_event_cmp);
     PyObject *out = PyUnicode_New(out_len, th_str_maxchar(maxchar));
-    if (out == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(events); /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(items);  /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (out == NULL) {                       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(events);                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        annotation_free_spans(items, count); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t cursor = 0, written = 0;
     for (Py_ssize_t index = 0; index < 2 * count; index++) {
@@ -244,6 +245,13 @@ PyObject *turbohtml_annotation_tags(PyObject *Py_UNUSED(module), PyObject *args)
         th_copy_characters(out, written, text, cursor, text_len - cursor);
     }
     PyMem_Free(events);
-    PyMem_Free(items);
+    annotation_free_spans(items, count);
     return out;
+}
+
+static void annotation_free_spans(annotation_span *items, Py_ssize_t count) {
+    for (Py_ssize_t index = 0; index < count; index++) {
+        Py_DECREF(items[index].label);
+    }
+    PyMem_Free(items);
 }

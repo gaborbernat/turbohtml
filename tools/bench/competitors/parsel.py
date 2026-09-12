@@ -23,7 +23,7 @@ _TRANSLATOR = HTMLTranslator()
 @functools.cache
 def _parsed(text: str) -> Selector:
     """Return a document parsed once, cached so the read-path operations time only the query."""
-    return Selector(text=text)
+    return Selector(text=text, namespaces={"str": "http://exslt.org/strings"})
 
 
 def parse(text: str) -> None:
@@ -152,6 +152,10 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
 }
 
 
+def _xpath_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).xpath(case[0])
+
+
 def xpath(case: tuple[str, str]) -> None:
     """Evaluate one XPath feature class with parsel's lxml-backed engine, by case kind."""
     kind, text = case
@@ -182,6 +186,12 @@ OPERATIONS = {
     "serialize-inner": (_serialize_inner, "parsel"),
     "encode-inner": (_encode_inner, "parsel"),
     "parse": (parse, "parsel"),
+    "parse-formatting": (parse, "parsel"),
+    "parse-foster": (parse, "parsel"),
+    "parse-crlf": (parse, "parsel"),
+    "parse-nul": (parse, "parsel"),
+    "parse-afe": (parse, "parsel"),
+    "parse-scope": (parse, "parsel"),
     "find": (find, "parsel"),
     "select": (select, "parsel"),
     "select-has": (select_has, "parsel"),
@@ -196,4 +206,11 @@ OPERATIONS = {
     "path-xpath": (path_xpath, "parsel"),
     "translate": (translate, "parsel"),
     "xpath": (xpath, "parsel"),
+    "xpath-distinct": (_xpath_scaling, "parsel"),
+    "xpath-set": (_xpath_scaling, "parsel"),
+    "xpath-compare": (_xpath_scaling, "parsel"),
+    "xpath-order": (_xpath_scaling, "parsel"),
+    "xpath-translate": (_xpath_scaling, "parsel"),
+    "xpath-concat": (_xpath_scaling, "parsel"),
+    "xpath-id-nodes": (_xpath_scaling, "parsel"),
 }

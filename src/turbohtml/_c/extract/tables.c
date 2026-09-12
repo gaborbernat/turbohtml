@@ -3,7 +3,7 @@
 
    A table is read into a dense cell grid: every <tr> belonging to the table (rows inside a nested table are excluded,
    they belong to that table) contributes its <td>/<th> cells left to right, and a rowspan or colspan fills each spanned
-   slot with a copy of the cell's text so the result is rectangular and a scraper never has to resolve spans by hand.
+   slot with the cell's text so the result is rectangular and a scraper never has to resolve spans by hand.
    rows() returns the grid as list[list[str]]; records() keys the first row as the header over the rest as list[dict];
    tables() returns rows() for every table in the subtree, nested tables included as their own entries.
 
@@ -24,17 +24,16 @@
    alone; clamping keeps the allocation bounded while leaving every realistic span exact. */
 #define TABLE_SPAN_LIMIT 1000
 
-/* One grid slot: a copy of the cell's trimmed text (NULL for an empty cell), present once a cell or a span reaches it.
- */
-typedef struct {
-    Py_UCS4 *text;
+typedef struct grid_text {
     Py_ssize_t len;
-    int present;
-} grid_cell;
+    PyObject *value;
+    struct grid_text *next;
+    Py_UCS4 data[];
+} grid_text;
 
 /* One grid row, its cells grown on demand as cells and colspans reach further right. */
 typedef struct {
-    grid_cell *cells;
+    grid_text **cells;
     Py_ssize_t width;
     Py_ssize_t cap;
 } grid_row;
@@ -43,15 +42,19 @@ typedef struct {
 typedef struct {
     grid_row *rows;
     Py_ssize_t row_count;
+    grid_text *texts;
 } table_grid;
 
 static void free_grid(table_grid *grid) {
     for (Py_ssize_t row = 0; row < grid->row_count; row++) {
         grid_row *current = &grid->rows[row];
-        for (Py_ssize_t col = 0; col < current->cap; col++) {
-            PyMem_Free(current->cells[col].text);
-        }
         PyMem_Free(current->cells);
+    }
+    while (grid->texts != NULL) {
+        grid_text *text = grid->texts;
+        grid->texts = text->next;
+        Py_XDECREF(text->value);
+        PyMem_Free(text);
     }
     PyMem_Free(grid->rows);
     grid->rows = NULL;
@@ -100,18 +103,16 @@ static int ensure_columns(grid_row *row, Py_ssize_t needed) {
     }
     size_t cap;
     size_t bytes;
-    int grew = th_grow_cap((size_t)needed, (size_t)row->cap, 8, sizeof(grid_cell), &cap, &bytes);
+    int grew = th_grow_cap((size_t)needed, (size_t)row->cap, 8, sizeof(grid_text *), &cap, &bytes);
     if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a table no allocation could hold */
         return -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
     }
-    grid_cell *cells = PyMem_Realloc(row->cells, bytes);
+    grid_text **cells = PyMem_Realloc(row->cells, bytes);
     if (cells == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (Py_ssize_t index = row->cap; index < (Py_ssize_t)cap; index++) {
-        cells[index].text = NULL;
-        cells[index].len = 0;
-        cells[index].present = 0;
+        cells[index] = NULL;
     }
     row->cells = cells;
     row->cap = (Py_ssize_t)cap;
@@ -119,8 +120,8 @@ static int ensure_columns(grid_row *row, Py_ssize_t needed) {
 }
 
 /* Place a row's <td>/<th> cells into the grid, honoring spans: each cell takes the next free column, and a rowspan or
-   colspan fills every covered slot with a fresh copy of the trimmed cell text. group_remaining is the number of rows
-   from row_index to the end of this row's row group (thead/tbody/tfoot), the stop point for a rowspan=0 cell. -1 on
+   colspan shares one text snapshot across its covered slots. group_remaining is the number of rows from row_index to
+   the end of this row's row group (thead/tbody/tfoot), the stop point for a rowspan=0 cell. -1 on
    allocation failure. */
 static int fill_row(th_tree *tree, table_grid *grid, Py_ssize_t row_index, th_node *tr, Py_ssize_t group_remaining) {
     Py_ssize_t column = 0;
@@ -129,7 +130,7 @@ static int fill_row(th_tree *tree, table_grid *grid, Py_ssize_t row_index, th_no
             continue;
         }
         grid_row *home = &grid->rows[row_index];
-        while (column < home->cap && home->cells[column].present) {
+        while (column < home->cap && home->cells[column] != NULL) {
             column++;
         }
         Py_ssize_t colspan = parse_span(child, TH_ATTR_COLSPAN);
@@ -156,33 +157,24 @@ static int fill_row(th_tree *tree, table_grid *grid, Py_ssize_t row_index, th_no
         while (end > start && is_space(raw[end - 1])) {
             end--;
         }
+        grid_text *text = PyMem_Malloc(sizeof(grid_text) + (size_t)(end - start) * sizeof(Py_UCS4));
+        if (text == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyMem_Free(raw); /* GCOVR_EXCL_LINE: allocation failure */
+            return -1;       /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        *text = (grid_text){end - start, NULL, grid->texts};
+        memcpy(text->data, &raw[start], (size_t)(end - start) * sizeof(Py_UCS4));
+        PyMem_Free(raw);
+        grid->texts = text;
         for (Py_ssize_t row_offset = 0; row_offset < rowspan; row_offset++) {
             grid_row *target = &grid->rows[row_index + row_offset];
             if (ensure_columns(target, column + colspan) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                PyMem_Free(raw);                                /* GCOVR_EXCL_LINE: allocation-failure path */
-                return -1;                                      /* GCOVR_EXCL_LINE: allocation-failure path */
+                return -1;                                      /* GCOVR_EXCL_LINE: allocation failure */
             }
             for (Py_ssize_t col_offset = 0; col_offset < colspan; col_offset++) {
-                grid_cell *slot = &target->cells[column + col_offset];
-                if (slot->present) { /* an overlapping span already wrote here; the later cell wins */
-                    PyMem_Free(slot->text);
-                }
-                slot->present = 1;
-                slot->len = end - start;
-                slot->text = NULL;
-                if (end > start) {
-                    slot->text = PyMem_Malloc((size_t)(end - start) * sizeof(Py_UCS4));
-                    if (slot->text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-                        slot->present = 0;    /* GCOVR_EXCL_LINE: allocation-failure path */
-                        slot->len = 0;        /* GCOVR_EXCL_LINE: allocation-failure path */
-                        PyMem_Free(raw);      /* GCOVR_EXCL_LINE: allocation-failure path */
-                        return -1;            /* GCOVR_EXCL_LINE: allocation-failure path */
-                    }
-                    memcpy(slot->text, &raw[start], (size_t)(end - start) * sizeof(Py_UCS4));
-                }
+                target->cells[column + col_offset] = text;
             }
         }
-        PyMem_Free(raw);
         column += colspan;
     }
     return 0;
@@ -268,6 +260,7 @@ static int build_grid_locked(th_tree *tree, th_node *table, table_grid *grid) {
     Py_ssize_t cap = 0;
     grid->rows = NULL;
     grid->row_count = 0;
+    grid->texts = NULL;
     if (collect_table_rows(table, &rows, &count, &cap) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         PyMem_Free(rows);                                     /* GCOVR_EXCL_LINE: allocation-failure path */
         return -1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -313,10 +306,17 @@ static Py_ssize_t grid_width(const table_grid *grid) {
 
 /* The text at (row, col) as a str: the trimmed cell text, or "" for an empty or never-filled slot. */
 static PyObject *cell_to_str(const grid_row *row, Py_ssize_t col) {
-    if (col < row->width && row->cells[col].present && row->cells[col].text != NULL) {
-        return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, row->cells[col].text, row->cells[col].len);
+    if (col >= row->width || row->cells[col] == NULL) {
+        return PyUnicode_FromString("");
     }
-    return PyUnicode_FromString("");
+    grid_text *text = row->cells[col];
+    if (text->value == NULL) {
+        text->value = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, text->data, text->len);
+        if (text->value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return NULL;           /* GCOVR_EXCL_LINE: allocation failure */
+        }
+    }
+    return Py_NewRef(text->value);
 }
 
 /* Build list[list[str]] from the snapshot: every row padded to the table width. */
@@ -424,7 +424,7 @@ static th_node *next_in_subtree(th_node *current, th_node *root) {
 
 /* Element.rows() -> list[list[str]]. Snapshot the table under the per-tree lock, then materialize the grid. */
 PyObject *turbohtml_element_table_rows(PyObject *owner, th_tree *tree, th_node *table) {
-    table_grid grid = {NULL, 0};
+    table_grid grid = {0};
     int failed;
     PyObject *handle = turbohtml_node_handle(owner);
     (void)handle;                      /* only the per-tree lock on free-threaded builds; a no-op argument otherwise */
@@ -438,7 +438,7 @@ PyObject *turbohtml_element_table_rows(PyObject *owner, th_tree *tree, th_node *
 
 /* Element.records() -> list[dict[str, str]]. Same snapshot, keyed by the first row. */
 PyObject *turbohtml_element_table_records(PyObject *owner, th_tree *tree, th_node *table) {
-    table_grid grid = {NULL, 0};
+    table_grid grid = {0};
     int failed;
     PyObject *handle = turbohtml_node_handle(owner);
     (void)handle;                      /* only the per-tree lock on free-threaded builds; a no-op argument otherwise */

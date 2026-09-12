@@ -152,6 +152,12 @@ def links_absolutize(tree: HTMLTree) -> None:
 
 OPERATIONS = {
     "parse": (parse, "resiliparse"),
+    "parse-formatting": (parse, "resiliparse"),
+    "parse-foster": (parse, "resiliparse"),
+    "parse-crlf": (parse, "resiliparse"),
+    "parse-nul": (parse, "resiliparse"),
+    "parse-afe": (parse, "resiliparse"),
+    "parse-scope": (parse, "resiliparse"),
     "text-render": (text_render, "resiliparse"),
     "text-main": (text_main, "resiliparse"),
     "find": (find, "resiliparse"),
@@ -161,6 +167,7 @@ OPERATIONS = {
     "serialize": (serialize, "resiliparse"),
     "navigate": (navigate, "resiliparse"),
     "encoding": (encoding, "resiliparse"),
+    "encoding-result": (encoding, "resiliparse"),
     "extract-attr": (extract_attr, "resiliparse"),
     "extract-text": (extract_text, "resiliparse"),
     "links-extract": (links_extract, "resiliparse"),

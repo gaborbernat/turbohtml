@@ -41,7 +41,7 @@ static void serialize_node_line(sbuf *out, th_tree *tree, th_node *node, int dep
     for (int index = 0; index < depth; index++) {
         sbuf_puts(out, "  ");
     }
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_DOCTYPE:
         sbuf_puts(out, "<!DOCTYPE ");
         sbuf_put_ucs4(out, node->text, node->text_len);
@@ -205,7 +205,7 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         }
         return node->first_child;
     }
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT:
         ser_open_tag(out, tree, node, opts);
         if (opts->xml) {
@@ -364,7 +364,7 @@ static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, t
         }
         return node->first_child;
     }
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT: {
         ser_open_tag(out, tree, node, opts->out);
         if (opts->out->xml) {

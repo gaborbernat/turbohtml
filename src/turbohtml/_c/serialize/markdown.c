@@ -110,20 +110,21 @@ typedef struct {
     Py_ssize_t ref_cap;
     int started;          /* has any block content been emitted yet */
     int line_has_content; /* real content past the prefix/marker on the current line */
-    int column;           /* visible width on the current line, for word wrapping */
-    int space_pending;    /* a collapsed-away whitespace run is owed one space */
-    int pending_word;     /* code points in the word the owed space precedes, for greedy wrapping */
-    int no_wrap;          /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
-    int inline_only;      /* >0 inside link text: a block flattens to inline, never opens a line */
-    int in_cell;          /* inside a table cell: a pipe is escaped as it is written, a block turns into HTML */
-    int drop_space;       /* swallow the next pending space (block/inline start) without emitting */
-    int pending_loose;    /* the previous block wants a blank line after it */
-    int suppress_break;   /* the next block attaches to the current (list marker) line */
-    int tight;            /* inside a list item: inline runs do not add blank lines */
-    int list_depth;       /* nesting depth of the current list, for bullet cycling */
-    int g_bold;           /* google_doc: a CSS font-weight bold is in force from an ancestor */
-    int g_italic;         /* google_doc: a CSS font-style italic is in force from an ancestor */
-    int failed;           /* a reference buffer allocation failed */
+    Py_ssize_t line_start;
+    Py_ssize_t line_checked;
+    int space_pending;  /* a collapsed-away whitespace run is owed one space */
+    int pending_word;   /* code points in the word the owed space precedes, for greedy wrapping */
+    int no_wrap;        /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
+    int inline_only;    /* >0 inside link text: a block flattens to inline, never opens a line */
+    int in_cell;        /* inside a table cell: a pipe is escaped as it is written, a block turns into HTML */
+    int drop_space;     /* swallow the next pending space (block/inline start) without emitting */
+    int pending_loose;  /* the previous block wants a blank line after it */
+    int suppress_break; /* the next block attaches to the current (list marker) line */
+    int tight;          /* inside a list item: inline runs do not add blank lines */
+    int list_depth;     /* nesting depth of the current list, for bullet cycling */
+    int g_bold;         /* google_doc: a CSS font-weight bold is in force from an ancestor */
+    int g_italic;       /* google_doc: a CSS font-style italic is in force from an ancestor */
+    int failed;         /* a reference buffer allocation failed */
 } md_ctx;
 
 /* Emit a configured option string, which may hold non-ASCII (a typographic
@@ -190,14 +191,15 @@ static void md_newline(md_ctx *ctx) {
     ctx->drop_space = 1;
 }
 
-/* Visible width of the current (unfinished) output line: the code points since
-   the last newline, which already include the continuation prefix. */
 static Py_ssize_t md_line_column(md_ctx *ctx) {
-    Py_ssize_t start = ctx->out.len;
-    while (start > 0 && ctx->out.data[start - 1] != '\n') {
-        start--;
+    for (Py_ssize_t cursor = ctx->out.len; cursor > ctx->line_checked; cursor--) {
+        if (ctx->out.data[cursor - 1] == '\n') {
+            ctx->line_start = cursor;
+            break;
+        }
     }
-    return ctx->out.len - start;
+    ctx->line_checked = ctx->out.len;
+    return ctx->out.len - ctx->line_start;
 }
 
 /* Emit the one space a collapsed whitespace run owes, unless it falls at a line
@@ -389,13 +391,13 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
             index++;
             continue;
         }
-        /* the upcoming word's code-point count tells md_flush_space whether the
-           owed space should become a wrap break before the word is laid down */
-        Py_ssize_t word_end = index;
-        while (word_end < len && !is_space(text[word_end])) {
-            word_end++;
+        if (ctx->space_pending && !ctx->drop_space && ctx->opt->wrap_width > 0 && ctx->no_wrap == 0) {
+            Py_ssize_t word_end = index;
+            while (word_end < len && !is_space(text[word_end])) {
+                word_end++;
+            }
+            ctx->pending_word = (int)(word_end - index);
         }
-        ctx->pending_word = (int)(word_end - index);
         md_before_visible(ctx);
         if (!ctx->line_has_content && ch >= '0' && ch <= '9') {
             Py_ssize_t consumed = md_escape_line_number(ctx, text, index, len);
@@ -1234,7 +1236,8 @@ static PyObject *md_children_markdown(md_ctx *ctx, th_node *node) {
     sbuf saved_out = ctx->out;
     sbuf saved_prefix = ctx->prefix;
     md_pending *saved_pending = ctx->pending;
-    int saved_started = ctx->started, saved_line = ctx->line_has_content, saved_column = ctx->column;
+    int saved_started = ctx->started, saved_line = ctx->line_has_content;
+    Py_ssize_t saved_line_start = ctx->line_start, saved_line_checked = ctx->line_checked;
     int saved_space = ctx->space_pending, saved_drop = ctx->drop_space, saved_loose = ctx->pending_loose;
     int saved_suppress = ctx->suppress_break, saved_tight = ctx->tight, saved_list_depth = ctx->list_depth;
     int saved_bold = ctx->g_bold, saved_italic = ctx->g_italic, saved_inline = ctx->inline_only;
@@ -1243,7 +1246,8 @@ static PyObject *md_children_markdown(md_ctx *ctx, th_node *node) {
     ctx->pending = NULL;
     ctx->started = 0;
     ctx->line_has_content = 0;
-    ctx->column = 0;
+    ctx->line_start = 0;
+    ctx->line_checked = 0;
     ctx->space_pending = 0;
     ctx->drop_space = 1;
     ctx->pending_loose = 0;
@@ -1270,7 +1274,8 @@ static PyObject *md_children_markdown(md_ctx *ctx, th_node *node) {
     ctx->pending = saved_pending;
     ctx->started = saved_started;
     ctx->line_has_content = saved_line;
-    ctx->column = saved_column;
+    ctx->line_start = saved_line_start;
+    ctx->line_checked = saved_line_checked;
     ctx->space_pending = saved_space;
     ctx->drop_space = saved_drop;
     ctx->pending_loose = saved_loose;

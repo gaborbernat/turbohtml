@@ -61,11 +61,20 @@ struct th_tree {
     th_node *document;
     th_node **open; /* stack of open elements */
     Py_ssize_t open_len;
+    uint64_t stack_version, scope_version;
+    uint16_t scope_atom;
+    int scope_result;
     Py_ssize_t open_cap;
     Py_ssize_t max_depth; /* peak open-element nesting seen while parsing; a cheap O(1)
                              lower bound on element depth that gates the :has() subtree memo */
     th_node **afe;        /* active formatting elements; NULL entry is a scope marker */
     Py_ssize_t afe_len;
+    th_node *merged_text_node;
+    size_t merged_text_capacity;
+    Py_ssize_t afe_stack_hint;
+    uint64_t *afe_hashes;
+    size_t afe_hash_count, afe_hash_capacity;
+    int afe_hash_valid;
     Py_ssize_t afe_cap;
     th_node *head;          /* the <head> element once inserted */
     th_node *fragment_root; /* the html root in fragment parsing; NULL otherwise */
@@ -104,6 +113,8 @@ struct th_tree {
     uint32_t attr_rec_count;
     uint32_t attr_rec_cap;
     uint32_t *attr_slots; /* slot -> record index + 1; 0 marks an empty slot */
+    uint64_t attr_version;
+    uint64_t id_version;
     uint32_t attr_slot_mask;
     /* Encoding declarations from <meta> elements, in document order, so a bytes parse
        can run the WHATWG "changing the encoding while parsing" step once the tree is
@@ -268,7 +279,7 @@ static inline th_node *node_new(th_tree *tree, enum th_node_type type) {
     if (located) {
         *node_loc(node) = NULL; /* filled by insert_element when the element has a source tag */
     }
-    node->type = type;
+    node->type = (uint8_t)type;
     node->atom = TH_TAG_UNKNOWN;
     return node;
 }

@@ -1,0 +1,20 @@
+{
+  "label": "linkify with callbacks",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "wide text, two callbacks",
+      0.000126930007665275
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.024510942560004276
+    ]
+  ],
+  "notes": {}
+}

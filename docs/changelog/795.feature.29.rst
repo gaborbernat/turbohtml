@@ -1,0 +1,1 @@
+Speed up repeated default :class:`XSLT <turbohtml.transform.Transform>` sibling numbering.

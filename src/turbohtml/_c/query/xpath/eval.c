@@ -311,6 +311,12 @@ static Py_ssize_t node_depth(struct th_node *node) {
 /* Negative when x precedes y in document (pre-order); positive otherwise. Never
    called with x == y. */
 static int node_before(struct th_node *left, struct th_node *right) {
+    if (left->next_sibling == right || left->first_child == right) {
+        return -1;
+    }
+    if (right->next_sibling == left || right->first_child == left) {
+        return 1;
+    }
     Py_ssize_t dx = node_depth(left);
     Py_ssize_t dy = node_depth(right);
     struct th_node *walk_left = left;
@@ -363,7 +369,13 @@ static void sort_unique(xp_nodeset *ns) {
     if (ns->len < 2) {
         return;
     }
-    qsort(ns->items, (size_t)ns->len, sizeof(xp_item), item_cmp);
+    /* Forward axes already produce tree order; preserve it without sorting again. */
+    for (Py_ssize_t index = 1; index < ns->len; index++) {
+        if (item_cmp(&ns->items[index - 1], &ns->items[index]) > 0) {
+            qsort(ns->items, (size_t)ns->len, sizeof(xp_item), item_cmp);
+            break;
+        }
+    }
     Py_ssize_t write_pos = 1;
     for (Py_ssize_t read_pos = 1; read_pos < ns->len; read_pos++) {
         if (ns->items[read_pos].node != ns->items[write_pos - 1].node ||
@@ -551,7 +563,7 @@ static int format_number(double value, Py_UCS4 **out, Py_ssize_t *out_len) {
         len = snprintf(buf, sizeof(buf), "NaN");
     } else if (isinf(value)) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isinf macro */
         len = snprintf(buf, sizeof(buf), "%s", value < 0 ? "-Infinity" : "Infinity");
-    } else if (value == (double)(long long)value && fabs(value) < 1e15) {
+    } else if (fabs(value) < 1e15 && value == (double)(long long)value) {
         len = snprintf(buf, sizeof(buf), "%lld", (long long)value);
     } else {
         len = decimal_expand(value, buf);
@@ -804,17 +816,9 @@ static int cmp_scalar(struct th_tree *tree, int op, const xp_result *left, const
         } else if (left->kind == XP_NUMBER || right->kind == XP_NUMBER) {
             eq = to_number(tree, left) == to_number(tree, right);
         } else {
-            Py_ssize_t la;
-            Py_ssize_t lb;
-            Py_UCS4 *sa = to_string(tree, left, &la);
-            Py_UCS4 *sb = to_string(tree, right, &lb);
-            if (sa == NULL || sb == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-                eq = 0;                     /* GCOVR_EXCL_LINE */
-            } else {                        /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
-                eq = la == lb && memcmp(sa, sb, (size_t)la * sizeof(Py_UCS4)) == 0;
-            }
-            PyMem_Free(sa);
-            PyMem_Free(sb);
+            eq = left->string_len == right->string_len &&
+                 (left->string_len == 0 ||
+                  memcmp(left->string, right->string, (size_t)left->string_len * sizeof(Py_UCS4)) == 0);
         }
         return op == XN_EQ ? eq : !eq;
     }
@@ -843,6 +847,11 @@ static int item_as_string(struct th_tree *tree, xp_item item, xp_result *out) {
     return 0;
 }
 
+static int compare_equal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result);
+static int compare_unequal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result);
+static int compare_ordered_sets(struct th_tree *tree, int op, const xp_nodeset *left, const xp_nodeset *right,
+                                int *result);
+
 static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *second, int *result) {
     int a_ns = first->kind == XP_NODESET;
     int b_ns = second->kind == XP_NODESET;
@@ -859,6 +868,15 @@ static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *se
     xp_nodeset *right = b_ns ? &second->nodes : NULL;
     *result = 0;
     if (a_ns && b_ns) {
+        if (op == XN_EQ && left->len >= 16 && right->len >= 16) {
+            return compare_equal_sets(tree, left, right, result);
+        }
+        if (op == XN_NE && left->len > 0 && right->len > 0) {
+            return compare_unequal_sets(tree, left, right, result);
+        }
+        if (op != XN_EQ && op != XN_NE && left->len >= 16 && right->len >= 16) {
+            return compare_ordered_sets(tree, op, left, right, result);
+        }
         for (Py_ssize_t index = 0; index < left->len && !*result; index++) {
             xp_result si;
             if (item_as_string(tree, left->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
@@ -890,15 +908,171 @@ static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *se
     return 0;
 }
 
-/* Merge b'text items into arg_node (taking ownership of b'text storage on success). */
-static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
-    for (Py_ssize_t index = 0; index < source->len; index++) {
-        if (ns_push(target, source->items[index].node, source->items[index].attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                                                   /* GCOVR_EXCL_LINE */
+static PyObject *comparison_string(struct th_tree *tree, xp_item item);
+
+static int compare_equal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result) {
+    if (left->items[0].node == right->items[0].node && left->items[0].attr == right->items[0].attr) {
+        *result = 1;
+        return 0;
+    }
+    PyObject *first = comparison_string(tree, left->items[0]);
+    if (first == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;       /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    PyObject *seen = PySet_New(NULL);
+    if (seen == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure */
+        Py_DECREF(first); /* GCOVR_EXCL_LINE: allocation failure */
+        return -1;        /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    int rc = 0;
+    for (Py_ssize_t index = 0; index < right->len; index++) {
+        PyObject *text = comparison_string(tree, right->items[index]);
+        if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = -1;        /* GCOVR_EXCL_LINE: allocation failure */
+            break;          /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        *result = PyObject_RichCompareBool(first, text, Py_EQ);
+        if (*result) {
+            Py_DECREF(text);
+            break;
+        }
+        rc = PySet_Add(seen, text);
+        Py_DECREF(text);
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            break;    /* GCOVR_EXCL_LINE: allocation failure */
         }
     }
-    xp_nodeset_free(source);
+    Py_DECREF(first);
+    if (rc == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        for (Py_ssize_t index = 1; index < left->len && !*result; index++) {
+            PyObject *text = comparison_string(tree, left->items[index]);
+            if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                rc = -1;        /* GCOVR_EXCL_LINE: allocation failure */
+                break;          /* GCOVR_EXCL_LINE: allocation failure */
+            }
+            *result = PySet_Contains(seen, text);
+            Py_DECREF(text);
+        }
+    }
+    Py_DECREF(seen);
+    return rc;
+}
+
+static PyObject *comparison_string(struct th_tree *tree, xp_item item) {
+    Py_ssize_t len;
+    Py_UCS4 *text = item_string(tree, item, &len);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    PyObject *value = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, text, len);
+    PyMem_Free(text);
+    return value;
+}
+
+/* Inequality is existential too: it is false only when both nonempty sets contain one shared value. */
+static int compare_unequal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result) {
+    xp_result first;
+    if (item_as_string(tree, left->items[0], &first) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                          /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    const xp_nodeset *sets[] = {right, left};
+    int rc = 0;
+    for (size_t side = 0; side < 2 && !*result; side++) {
+        for (Py_ssize_t index = (Py_ssize_t)side; index < sets[side]->len && !*result; index++) {
+            xp_result next;
+            const int converted = item_as_string(tree, sets[side]->items[index], &next);
+            if (converted < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                rc = -1;         /* GCOVR_EXCL_LINE: allocation failure */
+                break;           /* GCOVR_EXCL_LINE: allocation failure */
+            }
+            *result = cmp_scalar(tree, XN_NE, &first, &next);
+            xp_result_free(&next);
+        }
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            break;    /* GCOVR_EXCL_LINE: allocation failure */
+        }
+    }
+    xp_result_free(&first);
+    return rc;
+}
+
+static int comparison_number(struct th_tree *tree, xp_item item, double *number);
+static int comparison_extreme(struct th_tree *tree, const xp_nodeset *nodes, int minimum, double *value);
+
+static int compare_ordered_sets(struct th_tree *tree, int op, const xp_nodeset *left, const xp_nodeset *right,
+                                int *result) {
+    xp_result first = {.kind = XP_NUMBER};
+    xp_result second = {.kind = XP_NUMBER};
+    const int first_rc = comparison_number(tree, left->items[0], &first.number);
+    const int second_rc = comparison_number(tree, right->items[0], &second.number);
+    if (first_rc < 0 || second_rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                       /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    *result = cmp_scalar(tree, op, &first, &second);
+    if (*result) {
+        return 0;
+    }
+    const int less = op == XN_LT || op == XN_LE;
+    const int left_rc = comparison_extreme(tree, left, less, &first.number);
+    const int right_rc = comparison_extreme(tree, right, !less, &second.number);
+    if (left_rc < 0 || right_rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                     /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    *result = cmp_scalar(tree, op, &first, &second);
+    return 0;
+}
+
+static int comparison_number(struct th_tree *tree, xp_item item, double *number) {
+    xp_result text;
+    if (item_as_string(tree, item, &text) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                               /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    *number = to_number(tree, &text);
+    xp_result_free(&text);
+    return 0;
+}
+
+/* A matching pair exists iff the corresponding extrema compare true; NaNs cannot supply a match. */
+static int comparison_extreme(struct th_tree *tree, const xp_nodeset *nodes, int minimum, double *value) {
+    for (Py_ssize_t index = 1; index < nodes->len; index++) {
+        double number;
+        if (comparison_number(tree, nodes->items[index], &number) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                                   /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        const int missing = isnan(*value); /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
+        if (missing || (minimum ? number < *value : number > *value)) {
+            *value = number;
+        }
+    }
+    return 0;
+}
+
+static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
+    /* Extension functions can return unordered nodes and duplicates. */
     sort_unique(target);
+    sort_unique(source);
+    xp_nodeset merged = {0};
+    Py_ssize_t left = 0;
+    Py_ssize_t right = 0;
+    while (left < target->len || right < source->len) {
+        const xp_item *item;
+        if (left == target->len) {
+            item = &source->items[right++];
+        } else if (right == source->len) {
+            item = &target->items[left++];
+        } else {
+            const int order = item_cmp(&target->items[left], &source->items[right]);
+            item = order <= 0 ? &target->items[left++] : &source->items[right];
+            right += order >= 0;
+        }
+        if (ns_push(&merged, item->node, item->attr) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            xp_nodeset_free(&merged);                       /* GCOVR_EXCL_LINE: allocation failure */
+            return -1;                                      /* GCOVR_EXCL_LINE: allocation failure */
+        }
+    }
+    xp_nodeset_free(target);
+    xp_nodeset_free(source);
+    *target = merged;
     return 0;
 }
 
@@ -1010,6 +1184,7 @@ static int eval_expr_inner(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_
         }
         if (nodeset_union(&left.nodes, &right.nodes) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             xp_result_free(&left);                          /* GCOVR_EXCL_LINE */
+            xp_result_free(&right);                         /* GCOVR_EXCL_LINE: allocation failure */
             return -1;                                      /* GCOVR_EXCL_LINE */
         }
         *out = left;

@@ -583,6 +583,7 @@ static void handle_dealloc(PyObject *self) {
     PyMem_Free(handle->index_nodes);
     PyMem_Free(handle->hash_overrides);
     path_id_map_free(handle->path_ids);
+    path_positions_free(handle->path_positions);
     th_tree_free(handle->tree);
     Py_XDECREF(handle->source);
     Py_XDECREF(handle->encoding);
@@ -1842,7 +1843,7 @@ static PyObject *node_children_list(PyObject *self) {
 /* The pickle payload for this node: the leaf data, the element tag and attribute
    dict, the doctype identifiers, or the document's own markup. */
 static PyObject *node_pickle_data(PyObject *self, th_node *node) {
-    switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_TEXT:
     case TH_NODE_COMMENT:
     case TH_NODE_CDATA:

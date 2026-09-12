@@ -40,10 +40,12 @@ static inline int ms_ctz64(uint64_t value) {
 #define MS_BLOCK 8
 #define MS_ONES 0x0101010101010101ULL
 #define MS_HIGHS 0x8080808080808080ULL
+#define MS_LOWS 0x7F7F7F7F7F7F7F7FULL
 
 static inline uint64_t ms_hasbyte(uint64_t word, uint8_t byte) {
     uint64_t lanes = word ^ (MS_ONES * byte);
-    return (lanes - MS_ONES) & ~lanes & MS_HIGHS;
+    /* Counting requires exact lanes; subtraction borrows into adjacent bytes. */
+    return ~(((lanes & MS_LOWS) + MS_LOWS) | lanes | MS_LOWS) & MS_HIGHS;
 }
 
 /* Each matching lane's high bit; summed by shifting to the low bit and folding. */
@@ -262,6 +264,9 @@ PyObject *turbohtml_markup_escape(PyObject *module, PyObject *s) {
         PyObject *result = markup_wrap(markup_type, text);
         Py_DECREF(text);
         return result;
+    }
+    if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        return NULL;
     }
     PyErr_Clear();
     PyObject *text = PyObject_Str(s);

@@ -2,6 +2,7 @@
    find/select/xpath/regex query plus structural-mutation bindings. */
 
 #include "dom/nodes.h"
+#include "core/node_map.h"
 
 #include "core/vec.h" /* th_grow_cap overflow-safe buffer growth */
 
@@ -767,7 +768,8 @@ static PyObject *element_get_checked(PyObject *self, void *Py_UNUSED(closure)) {
 
 /* Remove the checked flag from the other same-name radios in the radio's owning
    form (nearest ancestor form, else the document), enforcing group exclusivity. */
-static void clear_radio_group(th_tree *tree, th_node *radio) {
+static void clear_radio_group(HandleObject *handle, th_node *radio) {
+    th_tree *tree = handle->tree;
     const th_node_attr *name = find_node_attr(radio, TH_ATTR_NAME);
     if (name == NULL || name->value == NULL || name->value_len == 0) {
         return;
@@ -781,7 +783,11 @@ static void clear_radio_group(th_tree *tree, th_node *radio) {
         }
     }
     th_node *scope = form != NULL ? form : root;
-    for (th_node *node = preorder_next(scope, scope); node != NULL; node = preorder_next(node, scope)) {
+    const int indexed = scope == root && handle->index_built && handle_index_usable(handle, root);
+    Py_ssize_t cursor = indexed ? handle->index_offsets[TH_TAG_INPUT] : 0;
+    const Py_ssize_t end = indexed ? handle->index_offsets[TH_TAG_INPUT + 1] : 0;
+    for (th_node *node = indexed ? handle->index_nodes[cursor] : preorder_next(scope, scope); node != NULL;
+         node = indexed ? (++cursor < end ? handle->index_nodes[cursor] : NULL) : preorder_next(node, scope)) {
         if (node == radio || node->atom != TH_TAG_INPUT || !input_type_is(node, "radio")) {
             continue;
         }
@@ -813,7 +819,7 @@ static int element_set_checked(PyObject *self, PyObject *value, void *Py_UNUSED(
     if (on) {
         rc = th_node_attr_set(tree, node, "checked", 7, NULL, 0, 0);
         if (rc >= 0 && input_type_is(node, "radio")) { /* GCOVR_EXCL_BR_LINE: attr_set only fails on OOM */
-            clear_radio_group(tree, node);
+            clear_radio_group((HandleObject *)((NodeObject *)self)->handle, node);
         }
     } else {
         th_node_attr_del(tree, node, "checked", 7);
@@ -822,16 +828,18 @@ static int element_set_checked(PyObject *self, PyObject *value, void *Py_UNUSED(
     return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on OOM */
 }
 
-/* Whether control sits inside fieldset's first legend child, the subtree a disabled
-   fieldset does not disable. */
-static int control_in_first_legend(th_node *fieldset, th_node *control) {
-    th_node *legend = NULL;
+static th_node *fieldset_first_legend(th_node *fieldset) {
     for (th_node *child = fieldset->first_child; child != NULL; child = child->next_sibling) {
         if (child->atom == TH_TAG_LEGEND) {
-            legend = child;
-            break;
+            return child;
         }
     }
+    return NULL;
+}
+
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
+static int control_in_first_legend(th_node *fieldset, th_node *control) {
+    th_node *legend = fieldset_first_legend(fieldset);
     if (legend == NULL) {
         return 0;
     }
@@ -842,6 +850,7 @@ static int control_in_first_legend(th_node *fieldset, th_node *control) {
     }
     return 0;
 }
+#endif
 
 /* Whether a control is barred from submission: its own disabled attribute, or a
    disabling fieldset between it and the form. */
@@ -849,13 +858,20 @@ static int control_disabled(th_node *control, th_node *form) {
     if (find_node_attr(control, TH_ATTR_DISABLED) != NULL) {
         return 1;
     }
-    /* form is always an ancestor (collect_control only walks its descendants), so the walk stops there */
+    /* CPython 3.12+ defers collection callbacks until this C call returns. */
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
     for (th_node *ancestor = control->parent; ancestor != form; ancestor = ancestor->parent) {
+        if (ancestor == NULL) {
+            return 1;
+        }
         if (ancestor->atom == TH_TAG_FIELDSET && find_node_attr(ancestor, TH_ATTR_DISABLED) != NULL &&
             !control_in_first_legend(ancestor, control)) {
             return 1;
         }
     }
+#else
+    (void)form;
+#endif
     return 0;
 }
 
@@ -946,14 +962,28 @@ PyDoc_STRVAR(form_data_doc, "form_data()\n--\n\n"
                             "by containment in the form.\n\n"
                             ":returns: the (name, value) pairs in document order.");
 
-/* The next node after current's whole subtree within root, skipping its descendants;
-   current is always a descendant of root, so the climb reaches root before NULL. */
-static th_node *after_subtree_within(th_node *current, th_node *root) {
-    while (current != root) {
-        if (current->next_sibling != NULL) {
+static th_node *next_form_control(th_node *current, th_node *form) {
+    if (current->atom == TH_TAG_FIELDSET && find_node_attr(current, TH_ATTR_DISABLED) != NULL) {
+        th_node *legend = fieldset_first_legend(current);
+        if (legend != NULL) {
+            return legend;
+        }
+    } else if (current->atom != TH_TAG_TEMPLATE && current->first_child != NULL) {
+        return current->first_child;
+    }
+    while (current != form) {
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
+        if (current == NULL) {
+            return NULL;
+        }
+#endif
+        th_node *parent = current->parent;
+        /* Pair allocation can run callbacks, so re-read fieldset state before skipping siblings. */
+        if (current->next_sibling != NULL && !(current->atom == TH_TAG_LEGEND && parent->atom == TH_TAG_FIELDSET &&
+                                               find_node_attr(parent, TH_ATTR_DISABLED) != NULL)) {
             return current->next_sibling;
         }
-        current = current->parent;
+        current = parent;
     }
     return NULL;
 }
@@ -971,15 +1001,13 @@ static PyObject *element_form_data(PyObject *self, PyObject *Py_UNUSED(ignored))
     }
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    th_node *control = preorder_next(node, node);
+    th_node *control = next_form_control(node, node);
     while (control != NULL) {
         if (collect_control(tree, node, control, pairs) < 0) { /* GCOVR_EXCL_BR_LINE: fails only on OOM */
             error = 1;                                         /* GCOVR_EXCL_LINE: allocation-failure path */
             break;                                             /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        /* A template's contents live in a separate inert fragment; those controls have
-           no form owner, so skip the subtree instead of descending (WHATWG §4.10.3). */
-        control = control->atom == TH_TAG_TEMPLATE ? after_subtree_within(control, node) : preorder_next(control, node);
+        control = next_form_control(control, node);
     }
     Py_END_CRITICAL_SECTION();
     if (error) {          /* GCOVR_EXCL_BR_LINE: error is set only on an allocation failure */
@@ -1072,6 +1100,8 @@ void handle_drop_index(PyObject *handle_obj) {
     handle->index_built = 0;
     path_id_map_free(handle->path_ids);
     handle->path_ids = NULL;
+    path_positions_free(handle->path_positions);
+    handle->path_positions = NULL;
 }
 
 PyDoc_STRVAR(element_doc, "An element node: a tag, a namespace, attributes, and child nodes.\n\n"
@@ -1452,7 +1482,7 @@ static uint64_t path_id_hash(const Py_UCS4 *value, Py_ssize_t len, int ci) {
    many elements carry it, so the anchor test is an O(id-length) probe instead of a
    whole-document scan. ci folds id case the way the quirks-mode id selector does.
    Returns the map (the caller caches it) or NULL on allocation failure. */
-static path_id_map *path_id_map_build(th_node *document, int ci) {
+static path_id_map *path_id_map_build(th_tree *tree, th_node *document) {
     Py_ssize_t id_count = 0;
     for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
         const th_node_attr *id = node->type == TH_NODE_ELEMENT ? find_node_attr(node, TH_ATTR_ID) : NULL;
@@ -1474,6 +1504,8 @@ static path_id_map *path_id_map_build(th_node *document, int ci) {
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     map->mask = capacity - 1;
+    map->id_version = th_tree_id_version(tree);
+    const int ci = th_tree_quirks(tree);
     map->ci = ci;
     for (th_node *node = document->first_child; node != NULL; node = preorder_next(node, document)) {
         const th_node_attr *id = node->type == TH_NODE_ELEMENT ? find_node_attr(node, TH_ATTR_ID) : NULL;
@@ -1508,19 +1540,44 @@ static int path_id_unique(const path_id_map *map, const Py_UCS4 *value, Py_ssize
     return map->slots[slot].count == 1;
 }
 
-/* The 1-based position of node among its same-type element siblings, setting
-   *needs_index when more than one such sibling exists so the position disambiguates
-   it. Scans preceding siblings once (their count is the position), and only scans
-   following siblings when node is the first, mirroring libxml2's xmlGetNodePath. */
-static int path_step_index(th_node *node, int *needs_index) {
-    int index = 1;
-    for (th_node *sibling = node->prev_sibling; sibling != NULL; sibling = sibling->prev_sibling) {
-        if (sibling->type == TH_NODE_ELEMENT && sel_same_type(node, sibling)) {
-            index++;
+void path_positions_free(void *positions) {
+    th_node_map *const map = positions;
+    if (map != NULL) {
+        PyMem_Free(map->entries);
+        PyMem_Free(map);
+    }
+}
+
+static int path_step_index(HandleObject *handle, th_node *node, int *needs_index) {
+    th_node_map *map = handle->path_positions;
+    if (map == NULL) {
+        map = PyMem_Calloc(1, sizeof(*map));
+        if (map == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;     /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        handle->path_positions = map;
+    }
+    Py_ssize_t value = th_node_map_find(map, node);
+    if (value == 0) {
+        th_node *previous = node->prev_sibling;
+        while (previous != NULL && (previous->type != TH_NODE_ELEMENT || !sel_same_type(node, previous))) {
+            previous = previous->prev_sibling;
+        }
+        value = previous == NULL ? 1 : th_node_map_find(map, previous) + 1;
+        if (previous != NULL && value == 1) {
+            value = 2;
+            for (th_node *sibling = previous->prev_sibling; sibling != NULL; sibling = sibling->prev_sibling) {
+                if (sibling->type == TH_NODE_ELEMENT && sel_same_type(node, sibling)) {
+                    value++;
+                }
+            }
+        }
+        if (th_node_map_insert(map, node, value) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                  /* GCOVR_EXCL_LINE: allocation failure */
         }
     }
-    *needs_index = index > 1 ? 1 : !sel_no_sibling(node, 1, 1);
-    return index;
+    *needs_index = value > 1 || !sel_no_sibling(node, 1, 1);
+    return (int)value;
 }
 
 /* Snapshot the element ancestor chain, node first up to the topmost element
@@ -1562,8 +1619,12 @@ static PyObject *element_css_path(PyObject *self, PyObject *Py_UNUSED(ignored)) 
     th_tree *tree = handle_obj->tree;
     th_node *document = th_tree_document(tree);
     Py_ssize_t count = path_collect_chain(node, &chain);
+    if (handle_obj->path_ids != NULL && handle_obj->path_ids->id_version != th_tree_id_version(tree)) {
+        path_id_map_free(handle_obj->path_ids);
+        handle_obj->path_ids = NULL;
+    }
     if (document != NULL && handle_obj->path_ids == NULL) {
-        handle_obj->path_ids = path_id_map_build(document, th_tree_quirks(tree));
+        handle_obj->path_ids = path_id_map_build(tree, document);
     }
     if (count < 0 || (document != NULL && handle_obj->path_ids == NULL)) { /* GCOVR_EXCL_BR_LINE: alloc failure */
         error = 1;                                                         /* GCOVR_EXCL_LINE: alloc-failure */
@@ -1592,7 +1653,11 @@ static PyObject *element_css_path(PyObject *self, PyObject *Py_UNUSED(ignored)) 
             } else {
                 path_put_ucs4(&buf, element->text, element->text_len);
                 int needs_index;
-                int sibling_index = path_step_index(element, &needs_index);
+                int sibling_index = path_step_index(handle_obj, element, &needs_index);
+                if (sibling_index < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    error = 1;           /* GCOVR_EXCL_LINE: allocation failure */
+                    break;               /* GCOVR_EXCL_LINE: allocation failure */
+                }
                 if (needs_index) {
                     path_puts(&buf, ":nth-of-type(");
                     path_put_int(&buf, sibling_index);
@@ -1634,7 +1699,11 @@ static PyObject *element_xpath_path(PyObject *self, PyObject *Py_UNUSED(ignored)
             path_puts(&buf, "/");
             path_put_ucs4(&buf, element->text, element->text_len);
             int needs_index;
-            int sibling_index = path_step_index(element, &needs_index);
+            int sibling_index = path_step_index((HandleObject *)((NodeObject *)self)->handle, element, &needs_index);
+            if (sibling_index < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                error = 1;           /* GCOVR_EXCL_LINE: allocation failure */
+                break;               /* GCOVR_EXCL_LINE: allocation failure */
+            }
             if (needs_index) {
                 path_puts(&buf, "[");
                 path_put_int(&buf, sibling_index);

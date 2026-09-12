@@ -1,0 +1,23 @@
+{
+  "label": "compile inherited facet metadata",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "four-level derived type",
+      4.951191752944339e-06,
+      1.4229321264262277e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.007012032059504464,
+      0.07329105848895837
+    ]
+  ],
+  "notes": {}
+}

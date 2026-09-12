@@ -824,7 +824,8 @@ static int facet_check(valctx *ctx, th_node *node, const facetset *facets, const
         report(ctx, node, "facet", "value length %zd exceeds maxLength %d", len, facets->max_length);
         ok = 0;
     }
-    if (dt_is_numeric(facets->base_id)) {
+    if (dt_is_numeric(facets->base_id) && (facets->has_min_inclusive || facets->has_max_inclusive ||
+                                           facets->has_min_exclusive || facets->has_max_exclusive)) {
         double number = dt_to_double(value, len);
         if (facets->has_min_inclusive && number < facets->min_inclusive) {
             report(ctx, node, "facet", "value is below minInclusive");
@@ -869,8 +870,7 @@ static int facet_check(valctx *ctx, th_node *node, const facetset *facets, const
         }
     }
     for (Py_ssize_t index = 0; index < facets->pattern_count; index++) {
-        if (!regex_full_match(&ctx->schema->mem, facets->patterns[index].ptr, facets->patterns[index].len, value,
-                              len)) {
+        if (!regex_full_match(ctx->schema, facets->patterns[index].ptr, facets->patterns[index].len, value, len)) {
             report(ctx, node, "facet", "value does not match the required pattern");
             ok = 0;
         }

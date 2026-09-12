@@ -7,10 +7,17 @@ every individual rule and option is pinned with an explicit expected string.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Final
+
 import pytest
 
 from turbohtml import Element, Formatter, Html, Minify, Text, parse, parse_fragment
 from turbohtml.clean import CSSMinify
+
+if TYPE_CHECKING:
+    from wpt_tree_corpus import WptHtmlTreeCorpus
+from turbohtml.clean import JSMinify, minify
+from turbohtml.clean import Minify as CleanMinify
 
 
 def frag(
@@ -667,3 +674,282 @@ def test_minify_css_is_idempotent_and_reparse_safe(source: str) -> None:
     layout = Minify(minify_css=CSSMinify())
     once = parse(source).serialize(Html(layout=layout))
     assert parse(once).serialize(Html(layout=layout)) == once
+
+
+def _plain_roundtrips(source: str) -> bool:
+    once = parse(source).serialize()
+    return once == parse(once).serialize()
+
+
+def _minify_idempotent(source: str, layout: Minify) -> bool:
+    once = parse(source).serialize(Html(layout=layout))
+    return once == parse(once).serialize(Html(layout=layout))
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [pytest.param(Minify(), id="default"), pytest.param(Minify(minify_css=CSSMinify()), id="minify-css")],
+)
+def test_minify_idempotent_over_tree_construction(wpt_html_tree_corpus: WptHtmlTreeCorpus, layout: Minify) -> None:
+    # only the subset the plain serializer round-trips can be asked of the minifier;
+    # the rest are inherently non-idempotent adoption-agency reconstructions
+    failures = [
+        f"{case['file']}: {data!r}\n  once:    {parse(data).serialize(Html(layout=layout))!r}\n"
+        f"  reparse: {parse(parse(data).serialize(Html(layout=layout))).serialize(Html(layout=layout))!r}"
+        for case in wpt_html_tree_corpus["cases"]
+        if case["context"] is None and case["scripting"] is not True
+        for data in [case["data"]]
+        if _plain_roundtrips(data) and not _minify_idempotent(data, layout)
+    ]
+    assert not failures, f"{len(failures)} non-idempotent\n\n" + "\n\n".join(failures[:5])
+
+
+def test_minify_idempotent_over_large_document() -> None:
+    # a large well-formed document exercises every transform at scale (whitespace,
+    # optional tags, attribute unquoting, comment stripping) past the serialization
+    # buffer's growth, where the per-snippet suite stays small
+    section = (
+        "<section id='s{i}'>\n"
+        "  <h2>Heading {i} &amp; more</h2>\n"
+        "  <p class='lead'>Some   prose with    spaces and a <a href='/x{i}'>link</a> here.</p>\n"
+        "  <ul>\n    <li>one</li>\n    <li>two</li>\n  </ul>\n"
+        "  <!-- note {i} -->\n"
+        "  <table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>\n"
+        "</section>\n"
+    )
+    big = (
+        "<!doctype html><html><head><title>Big</title></head><body>\n"
+        + "".join(section.format(i=index) for index in range(500))
+        + "</body></html>"
+    )
+    layout = Minify()
+    once = parse(big).serialize(Html(layout=layout))
+    assert once == parse(once).serialize(Html(layout=layout))
+    assert len(once) < len(parse(big).serialize())  # minification actually shrinks the document
+
+
+_SCRIPT = "function f(){ var longName = 1 + 2 ; return longName }"
+
+
+def script(source: str, minify_js: JSMinify | None = None) -> str:
+    """Serialize source as the single child of a <script> under Minify(minify_js=...),
+    returning just the script element so the assertion is the minified (or verbatim) body."""
+    out = parse_fragment(f"<script>{source}</script>", "div").serialize(Html(layout=Minify(minify_js=minify_js)))
+    assert out.startswith("<div><script>")
+    assert out.endswith("</script></div>")
+    return out[len("<div>") : -len("</div>")]
+
+
+def test_scripts_untouched_without_minify_js() -> None:
+    # the default Minify leaves JavaScript exactly as written
+    assert script(_SCRIPT) == f"<script>{_SCRIPT}</script>"
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        pytest.param(JSMinify(), "function f(){return 3}", id="full"),
+        pytest.param(JSMinify(mangle=False), "function f(){var longName=3;return longName}", id="no-mangle"),
+        pytest.param(JSMinify(fold=False), "function f(){return 1+2}", id="no-fold"),
+        pytest.param(
+            JSMinify(mangle=False, fold=False), "function f(){var longName=1+2;return longName}", id="ws-only"
+        ),
+    ],
+)
+def test_minify_js_passes_thread_through(options: JSMinify, expected: str) -> None:
+    assert script(_SCRIPT, minify_js=options) == f"<script>{expected}</script>"
+
+
+@pytest.mark.parametrize(
+    "script_type",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("text/javascript", id="text-javascript"),
+        pytest.param("application/javascript", id="application-javascript"),
+        pytest.param("MODULE", id="module-uppercase"),
+        pytest.param("application/x-javascript", id="x-javascript-mid-list"),
+        pytest.param("text/javascript1.5", id="versioned"),
+    ],
+)
+def test_javascript_types_are_minified(script_type: str) -> None:
+    # top-level names are global, so they are kept; the JS pass still runs, visible as the
+    # collapsed whitespace (a non-JS type would leave the spaces, see the test below). The
+    # empty case pins type="" (an explicit empty type is still a classic script).
+    source = f'<script type="{script_type}">var topLevel = 1 + 2</script>'
+    out = parse_fragment(source, "div").serialize(Html(layout=Minify(minify_js=JSMinify())))
+    assert "var topLevel=3" in out
+
+
+@pytest.mark.parametrize(
+    "script_type",
+    [
+        pytest.param("application/json", id="json"),
+        pytest.param("importmap", id="importmap"),
+        pytest.param("text/html", id="template"),
+        pytest.param("speculationrules", id="speculationrules"),
+    ],
+)
+def test_non_javascript_types_pass_through(script_type: str) -> None:
+    # a non-JS payload that happens to be valid JS (an array literal) must still be left
+    # byte-for-byte: minifying JSON as JS could change quoting or numbers and break it
+    body = "[1,    2,    3]"
+    source = f'<script type="{script_type}">{body}</script>'
+    out = parse_fragment(source, "div").serialize(Html(layout=Minify(minify_js=JSMinify())))
+    assert body in out
+
+
+def test_unparseable_script_emitted_verbatim() -> None:
+    # the JS parser cannot handle this; the script falls back to its original bytes rather
+    # than breaking the surrounding document
+    assert script("function( broken", minify_js=JSMinify()) == "<script>function( broken</script>"
+
+
+def test_empty_script_is_unchanged() -> None:
+    assert script("", minify_js=JSMinify()) == "<script></script>"
+
+
+def test_other_rawtext_elements_are_not_touched() -> None:
+    # style is raw text too, but never JavaScript: minify_js must not reach it
+    source = "<style>a  {  color : red  }</style>"
+    out = parse_fragment(source, "div").serialize(Html(layout=Minify(minify_js=JSMinify())))
+    assert "a  {  color : red  }" in out
+
+
+def test_each_script_in_a_document_is_minified() -> None:
+    source = "<script>var aaa = 1</script><script>var bbb = 2</script>"
+    out = parse_fragment(source, "div").serialize(Html(layout=Minify(minify_js=JSMinify())))
+    assert out == "<div><script>var aaa=1</script><script>var bbb=2</script></div>"
+
+
+def test_minified_script_is_idempotent() -> None:
+    once = script(_SCRIPT, minify_js=JSMinify())
+    assert script("function f(){var a=1+2;return a}", minify_js=JSMinify()) == once
+
+
+def test_minify_js_defaults_off() -> None:
+    assert Minify().minify_js is None
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(JSMinify(), id="mangle-fold"),
+        pytest.param(JSMinify(mangle=False), id="no-mangle"),
+        pytest.param(JSMinify(fold=False), id="no-fold"),
+        pytest.param(JSMinify(mangle=False, fold=False), id="neither"),
+    ],
+)
+def test_minify_js_getter_round_trips(config: JSMinify) -> None:
+    # rebuild every mangle/fold combination so the getter's two toggle branches both run
+    assert Minify(minify_js=config).minify_js == config
+
+
+def test_minify_js_none_is_explicit_off() -> None:
+    assert Minify(minify_js=None).minify_js is None
+
+
+@pytest.mark.parametrize(
+    ("options", "text"),
+    [
+        pytest.param(None, "minify_js=None", id="off"),
+        pytest.param(JSMinify(), "minify_js=JSMinify(mangle=True, fold=True)", id="on"),
+        pytest.param(JSMinify(fold=False), "minify_js=JSMinify(mangle=True, fold=False)", id="on-no-fold"),
+        pytest.param(JSMinify(mangle=False), "minify_js=JSMinify(mangle=False, fold=True)", id="on-no-mangle"),
+    ],
+)
+def test_minify_repr_includes_minify_js(options: JSMinify | None, text: str) -> None:
+    assert repr(Minify(minify_js=options)).endswith(f", {text}, minify_css=None)")
+
+
+def test_minify_equality_accounts_for_minify_js() -> None:
+    assert Minify(minify_js=JSMinify()) == Minify(minify_js=JSMinify())
+    assert Minify(minify_js=JSMinify()) != Minify()
+    assert Minify(minify_js=JSMinify(fold=False)) != Minify(minify_js=JSMinify())
+
+
+def test_minify_hash_distinguishes_minify_js() -> None:
+    assert hash(Minify(minify_js=JSMinify())) != hash(Minify())
+    assert hash(Minify(minify_js=JSMinify())) == hash(Minify(minify_js=JSMinify()))
+
+
+def test_minify_js_rejects_non_jsminify() -> None:
+    with pytest.raises(TypeError, match="minify_js must be a JSMinify or None"):
+        Minify(minify_js=123)  # ty: ignore[invalid-argument-type]  # wrong type on purpose, to test the guard
+
+
+_DOC = "<html><head><title>Hi</title></head><body><p class='lead'>one</p>  <p>two</p><!--note--></body></html>"
+
+
+def test_minify_collapses_whitespace_and_omits_tags() -> None:
+    assert minify(_DOC) == "<title>Hi</title><p class=lead>one</p> <p>two"
+
+
+def test_minify_none_matches_default_options() -> None:
+    assert minify(_DOC) == minify(_DOC, Minify())
+
+
+def test_clean_reexports_minify_config() -> None:
+    assert CleanMinify is Minify
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        pytest.param(Minify(omit_optional_tags=False), True, id="keep-optional-tags"),
+        pytest.param(Minify(collapse_whitespace=False), True, id="keep-whitespace"),
+        pytest.param(Minify(unquote_attributes=False), True, id="keep-quotes"),
+        pytest.param(Minify(strip_comments=False), True, id="keep-comments"),
+    ],
+)
+def test_minify_options_thread_through(options: Minify, *, expected: bool) -> None:
+    assert (minify(_DOC, options) != minify(_DOC)) is expected
+
+
+def test_minify_keep_comments_retains_comment() -> None:
+    assert "<!--note-->" in minify(_DOC, Minify(strip_comments=False))
+
+
+def test_minify_keep_optional_tags_retains_html_and_body() -> None:
+    out = minify(_DOC, Minify(omit_optional_tags=False))
+    assert out.startswith("<html><head>")
+    assert "<body>" in out
+
+
+def test_minify_keep_quotes_retains_attribute_quotes() -> None:
+    assert 'class="lead"' in minify(_DOC, Minify(unquote_attributes=False))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(_DOC, id="document"),
+        pytest.param("<pre>  keep   spaces  </pre>", id="preformatted"),
+        pytest.param("<p>one</p><script>let x = 1 + 2;</script>", id="raw-text"),
+        pytest.param("<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>", id="table"),
+        pytest.param("<!doctype html><html><body><p>x</p></body></html>", id="doctyped"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_minify_is_idempotent(source: str) -> None:
+    once = minify(source)
+    assert minify(once) == once
+
+
+def test_minify_shrinks_documents() -> None:
+    big = "<!doctype html><html><body>" + "<p class='x'>  text  </p>\n" * 200 + "</body></html>"
+    assert len(minify(big)) < len(big)
+
+
+@pytest.mark.parametrize(
+    ("tag", "sibling"),
+    [
+        pytest.param("rt", "rt", id="ruby-text"),
+        pytest.param("rt", "rp", id="ruby-parenthesis"),
+        pytest.param("optgroup", "optgroup", id="option-group"),
+    ],
+)
+@pytest.mark.parametrize("inner", [False, True], ids=["outer", "inner"])
+def test_minify_detached_root_bounds_scope(tag: str, sibling: str, *, inner: bool) -> None:
+    root: Final = Element("div", children=[Element(tag, children=[Text("a")]), Element(sibling, children=[Text("b")])])
+    content: Final = f"<{tag}>a</{tag}><{sibling}>b"
+    assert root.serialize(Html(layout=Minify()), inner=inner) == (content if inner else f"<div>{content}</div>")

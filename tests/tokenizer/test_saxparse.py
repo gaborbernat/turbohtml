@@ -14,7 +14,7 @@ import gc
 import sys
 import weakref
 from types import GeneratorType
-from typing import cast
+from typing import Final, cast
 
 import pytest
 
@@ -304,3 +304,25 @@ def test_handler_exception_in_end_stops_the_parse() -> None:
         sax_parse("<p>x</p><div>y</div>", handler)
     # the implied <head> closes before <p> opens, so it precedes the raise
     assert handler.closed == ["head", "p"]
+
+
+@pytest.mark.parametrize(
+    ("index", "expected"),
+    [
+        pytest.param(0, Doctype("html", None, None), id="doctype"),
+        pytest.param(5, StartElement("p", (("id", "x"),)), id="start"),
+        pytest.param(6, Characters("hi"), id="characters"),
+        pytest.param(7, Comment("c"), id="comment"),
+        pytest.param(8, ProcessingInstruction("pi", "data"), id="instruction"),
+        pytest.param(9, EndElement("p"), id="end"),
+    ],
+)
+def test_iter_events_record_types(index: int, expected: SaxEvent) -> None:
+    event: Final = list(iter_events("<!DOCTYPE html><p id=x>hi<!--c--><?pi data?></p>"))[index]
+    assert (type(event), event) == (type(expected), expected)
+
+
+def test_iter_events_defers_argument_error() -> None:
+    events: Final = iter_events(cast("str", b"<p>"))
+    with pytest.raises(TypeError, match="must be str"):
+        next(events)

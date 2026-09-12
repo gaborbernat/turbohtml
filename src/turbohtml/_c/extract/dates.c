@@ -21,6 +21,7 @@
 
 #include "core/ascii.h"
 #include "core/common.h"
+#include "core/vec.h"
 
 #include "dom/nodes.h"
 #include "tokenizer/binding.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
@@ -1188,16 +1189,24 @@ static int dates_json_node(PyObject *node, const int *low, const int *high, int 
     return 0;
 }
 
-/* The text stage's tally: how often each in-window date recurs across the visible text, keyed by the ordinal
-   year * 10000 + month * 100 + day so a tie breaks by comparing keys. */
+typedef struct {
+    int key;
+    int count;
+} date_count;
+
 typedef struct {
     const int *low;
     const int *high;
-    int *keys;
-    int *counts;
-    Py_ssize_t size;
-    Py_ssize_t capacity;
+    date_count *slots;
+    size_t size;
+    size_t capacity;
 } date_tally;
+
+static size_t date_slot(int key, size_t capacity) {
+    uint32_t hash = (uint32_t)key * 0x9E3779B1u;
+    hash ^= hash >> 16;
+    return hash & (capacity - 1);
+}
 
 static int tally_date(void *context, int year, int month, int day) {
     date_tally *tally = context;
@@ -1205,42 +1214,56 @@ static int tally_date(void *context, int year, int month, int day) {
         return 0;
     }
     int key = year * 10000 + month * 100 + day;
-    for (Py_ssize_t index = 0; index < tally->size; index++) {
-        if (tally->keys[index] == key) {
-            tally->counts[index]++;
-            return 0;
+    if (tally->capacity > 0) {
+        size_t slot = date_slot(key, tally->capacity);
+        while (tally->slots[slot].key != 0) {
+            if (tally->slots[slot].key == key) {
+                tally->slots[slot].count++;
+                return 0;
+            }
+            slot = (slot + 1) & (tally->capacity - 1);
         }
     }
-    if (tally->size == tally->capacity) {
-        Py_ssize_t grown = tally->capacity == 0 ? 16 : tally->capacity * 2;
-        int *keys = PyMem_Realloc(tally->keys, (size_t)grown * sizeof(*keys));
-        if (keys == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (tally->size >= tally->capacity / 2) {
+        size_t capacity;
+        size_t bytes;
+        /* GCOVR_EXCL_BR_START: allocation-size overflow */
+        if (!th_grow_cap(tally->capacity + 1, tally->capacity, 32, sizeof(date_count), &capacity, &bytes)) {
+            /* GCOVR_EXCL_BR_STOP */
+            return -1; /* GCOVR_EXCL_LINE: size overflow cannot fit in memory */
         }
-        tally->keys = keys;
-        int *counts = PyMem_Realloc(tally->counts, (size_t)grown * sizeof(*counts));
-        if (counts == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        date_count *slots = PyMem_Calloc(capacity, sizeof(date_count));
+        if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        tally->counts = counts;
-        tally->capacity = grown;
+        for (size_t index = 0; index < tally->capacity; index++) {
+            if (tally->slots[index].key == 0) {
+                continue;
+            }
+            size_t slot = date_slot(tally->slots[index].key, capacity);
+            while (slots[slot].key != 0) {
+                slot = (slot + 1) & (capacity - 1);
+            }
+            slots[slot] = tally->slots[index];
+        }
+        PyMem_Free(tally->slots);
+        tally->slots = slots;
+        tally->capacity = capacity;
     }
-    tally->keys[tally->size] = key;
-    tally->counts[tally->size] = 1;
+    size_t slot = date_slot(key, tally->capacity);
+    while (tally->slots[slot].key != 0) {
+        slot = (slot + 1) & (tally->capacity - 1);
+    }
+    tally->slots[slot] = (date_count){key, 1};
     tally->size++;
     return 0;
 }
 
-/* Does the tallied date at `index` beat the one at `best`: more occurrences, or as many and earlier when a
-   publication date is wanted, later otherwise? */
-static int tally_prefers(const date_tally *tally, Py_ssize_t index, Py_ssize_t best, int want) {
-    if (tally->counts[index] != tally->counts[best]) {
-        return tally->counts[index] > tally->counts[best];
+static int tally_prefers(const date_count *candidate, const date_count *best, int want) {
+    if (candidate->count != best->count) {
+        return candidate->count > best->count;
     }
-    if (want == META_PUBLISHED) {
-        return tally->keys[index] < tally->keys[best];
-    }
-    return tally->keys[index] > tally->keys[best];
+    return want == META_PUBLISHED ? candidate->key < best->key : candidate->key > best->key;
 }
 
 /* The extensive last resort: the date that recurs most across the body's visible text. Boilerplate pages carry no
@@ -1250,7 +1273,7 @@ static int tally_prefers(const date_tally *tally, Py_ssize_t index, Py_ssize_t b
    on allocation failure. */
 static int dates_text_stage(th_tree *tree, th_node *root, const int *low, const int *high, int current_year, int want,
                             date_pick *pick) {
-    date_tally tally = {low, high, NULL, NULL, 0, 0};
+    date_tally tally = {low, high, NULL, 0, 0};
     int status = 0;
     for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
         if (node->type != TH_NODE_ELEMENT || node->atom != TH_TAG_BODY) {
@@ -1272,18 +1295,17 @@ static int dates_text_stage(th_tree *tree, th_node *root, const int *low, const 
         goto done;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (tally.size > 0) {
-        Py_ssize_t best = 0;
-        for (Py_ssize_t index = 1; index < tally.size; index++) {
-            if (tally_prefers(&tally, index, best, want)) {
-                best = index;
+        date_count best = {0, 0};
+        for (size_t index = 0; index < tally.capacity; index++) {
+            if (tally.slots[index].key != 0 && tally_prefers(&tally.slots[index], &best, want)) {
+                best = tally.slots[index];
             }
         }
-        int key = tally.keys[best];
+        int key = best.key;
         pick_offer(pick, DATE_ROLE_GENERIC, key / 10000, key / 100 % 100, key % 100, want);
     }
 done:
-    PyMem_Free(tally.keys);
-    PyMem_Free(tally.counts);
+    PyMem_Free(tally.slots);
     return status;
 }
 

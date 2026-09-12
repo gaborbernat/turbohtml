@@ -9,10 +9,13 @@ its minified form under Node and asserts identical output.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess  # ruff:ignore[suspicious-subprocess-import]
+from typing import Final
 
 import pytest
+from bench.operations import INPUTS
 
 from turbohtml.clean import JSMinify, minify_js
 
@@ -22,6 +25,11 @@ _NODE = shutil.which("node")
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        pytest.param("x=!0", "x=!0", id="canonical-true"),
+        pytest.param("x=!1", "x=!1", id="canonical-false"),
+        pytest.param("x=!2", "x=!1", id="noncanonical-number"),
+        pytest.param("x=!10", "x=!1", id="multidigit-number"),
+        pytest.param("x=!!0", "x=!1", id="nested-not"),
         pytest.param("x=true", "x=!0", id="true"),
         pytest.param("x=false", "x=!1", id="false"),
         pytest.param("x=a?true:false", "x=a?!0:!1", id="ternary"),
@@ -336,13 +344,18 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             id="propagation-skips-other-shorthand",
         ),
         pytest.param(
+            "function f(){var x=1;return[{external},x,x]}",
+            "function f(){return[{external},1,1]}",
+            id="propagation-keeps-unbound-shorthand",
+        ),
+        pytest.param(
             "function f(){var a=1,b=g();return function(){return a+a+b}}",
             "function f(){var a=g();return function(){return 2+a}}",
             id="propagation-unlinks-first-declarator",
         ),
         pytest.param(
             "function f(){var q=g(),a=1,z=h();return function(){return a+a+q+z}}",
-            "function f(){var b=g(),a=h();return function(){return 2+b+a}}",
+            "function f(){var c=g(),a=1,b=h();return function(){return a+a+c+b}}",
             id="propagation-unlinks-middle-declarator",
         ),
         pytest.param(
@@ -354,6 +367,16 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             id="regex-not-in-next-expr-kept",
         ),
         pytest.param(
+            "function f(){var r=/a/;return c?r.test(s):g()}",
+            "function f(){return c?/a/.test(s):g()}",
+            id="regex-into-ternary-consquent",
+        ),
+        pytest.param(
+            "function f(){var r=/a/;return c?g():r.test(s)}",
+            "function f(){return c?g():/a/.test(s)}",
+            id="regex-into-ternary-alt",
+        ),
+        pytest.param(
             "function f(){var r=/a/;throw g(w);function g(x){return r.test(x)}}",
             "function f(){var a=/a/;throw function(b){return a.test(b)}(w)}",
             id="regex-next-throw-without-read-kept",
@@ -362,6 +385,11 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             "function f(){q=r;var r=/a/;throw w}", "function f(){q=a;var a=/a/;throw w}", id="regex-pre-decl-read-kept"
         ),
         pytest.param("function f(){q=r;var r=/a/}", "function f(){q=a;var a=/a/}", id="regex-last-statement-kept"),
+        pytest.param(
+            "function f(){var r=/a/;g();label:h();return r.test(s)}",
+            "function f(){var a=/a/;g();a:h();return a.test(s)}",
+            id="regex-past-labeled-statement-kept",
+        ),
         pytest.param(
             "function f(){var r=/a/;switch(c){case 1:return r.test(s)}}",
             "function f(){var a=/a/;switch(c){case 1:return a.test(s)}}",
@@ -373,13 +401,23 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             id="regex-past-if-kept",
         ),
         pytest.param(
+            "function f(){var r=/a/;for(;c;)g(r.test(s));}",
+            "function f(){for(var a=/a/;c;)g(a.test(s))}",
+            id="regex-into-for-loop-body",
+        ),
+        pytest.param(
+            "function f(){var r=/a/;for(;c;h(r.test(s)));}",
+            "function f(){for(var a=/a/;c;h(a.test(s)));}",
+            id="regex-into-for-loop-update",
+        ),
+        pytest.param(
             "function f(){var x=1;return function(){return{k:x,m:x}}}",
             "function f(){return function(){return{k:1,m:1}}}",
             id="propagation-into-plain-props",
         ),
         pytest.param(
             "function f(){var {q}=o,x=1;return function(){return x+x+q}}",
-            "function f(){var {q:a}=o;return function(){return 2+a}}",
+            "function f(){var {q:b}=o,a=1;return function(){return a+a+b}}",
             id="propagation-skips-destructuring-sibling",
         ),
         pytest.param(
@@ -425,6 +463,11 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
             "function f(){var r=/a/;while(c)h();return r.test(s)}",
             "function f(){for(var a=/a/;c;)h();return a.test(s)}",
             id="regex-past-loop-kept",
+        ),
+        pytest.param(
+            "function f(c){var r=/a/;return c?1:r}",
+            "function f(a){return a?1:/a/}",
+            id="regex-conditional-alternate",
         ),
         # a non-literal single use collapses only when its declaration immediately precedes the use as a
         # whole `return`/`throw` value (nothing runs between, no closure captures it); otherwise it stays
@@ -771,6 +814,20 @@ def _run(code: str) -> str:
     "snippet",
     [
         pytest.param("console.log(true,false,!true,typeof undefined,void 0===undefined)", id="literals"),
+        pytest.param(
+            "function f(){const x=1,z=2;const inner=x=>[x,z,z];return[x,x,{x},inner(5),z]}"
+            "console.log(JSON.stringify(f()))",
+            id="propagation-plan-shadowing",
+        ),
+        pytest.param(
+            "const trace=[];function f(g){const x=1;g(x);let y=2;y++;return[x,x,y]}"
+            "console.log(JSON.stringify([f(x=>trace.push(x)),trace]))",
+            id="propagation-plan-assignment-order",
+        ),
+        pytest.param(
+            "const external=9;function f(){const x=1;return[{x,external},x,x]}console.log(JSON.stringify(f()))",
+            id="propagation-plan-shorthand",
+        ),
         pytest.param("console.log([true,false,undefined].map(x=>x===void 0))", id="array"),
         pytest.param("var o={true:1,undefined:2};console.log(o.true,o.undefined)", id="keys-not-folded"),
         pytest.param("(function(undefined){console.log(undefined)})(7)", id="shadowed-undefined"),
@@ -964,3 +1021,262 @@ def test_string_truthiness_reads_value(source: str, expected: str) -> None:
 def test_concat_matches_node(source: str) -> None:
     minified = minify_js(f"x={source}").removeprefix("x=")
     assert _run(f"console.log(({source}))") == _run(f"console.log(({minified}))")
+
+
+@pytest.mark.parametrize("count", [1, 17, 512], ids=["single", "heap", "long"])
+def test_guard_chain_growth_preserves_return_order(count: int) -> None:
+    source: Final = (
+        "function f(x){" + "".join(f"if(x==={index})return g({index});" for index in range(count)) + "return g(-1)}"
+    )
+    expected: Final = "function f(a){return " + "".join(f"a==={index}?g({index}):" for index in range(count)) + "g(-1)}"
+    assert minify_js(source) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "function f(){if(a){while(b)g()}else{while(c)h()}if(d)return 1;return 2}",
+            "function f(){if(a)for(;b;)g();else for(;c;)h();return d?1:2}",
+            id="preserve-else",
+        ),
+        pytest.param(
+            "function f(){if(a)while(b)g();if(c)return 1;return 2}",
+            "function f(){if(a)for(;b;)g();return c?1:2}",
+            id="preserve-loop",
+        ),
+        pytest.param("function f() { if (a) return g(); }", "function f(){if(a)return g()}", id="last-guard"),
+        pytest.param("function f(){if(a)return 1;return}", "function f(){if(a)return 1}", id="void-return"),
+    ],
+)
+def test_guard_chain_growth_preserves_unfolded_statements(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
+@pytest.mark.parametrize("count", [2, 1000], ids=["small", "long"])
+@pytest.mark.parametrize("nested", [False, True], ids=["calls", "sequences"])
+def test_sequence_growth_preserves_call_order(count: int, *, nested: bool) -> None:
+    expressions: Final = [f"f({index}),g({index})" if nested else f"f({index})" for index in range(count)]
+    assert minify_js(";".join(expressions)) == ",".join(expressions)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "function f(n){switch(n){case 1:const x=1;return x;case 2:return[x,x]}}"
+            "try{f(2)}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-switch-skips-initialization",
+        ),
+        pytest.param(
+            "function f(n){switch(n){case 1:const x=1;return 0;case 2:return x}}"
+            "try{f(2)}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-switch-skips-single-initialization",
+        ),
+        pytest.param(
+            "function f(n){switch(n){case 1:const x=1;case 2:return[x,x]}}console.log(JSON.stringify(f(1)))",
+            "[1,1]\n",
+            id="declarator-switch-fallthrough-initialization",
+        ),
+        pytest.param(
+            "function f(){g();const x=1;function g(){return[x,x]}}try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-capture-called-before-initialization",
+        ),
+        pytest.param(
+            "function f(){g();const x=1;function g(){return x}}try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-single-capture-called-before-initialization",
+        ),
+        pytest.param(
+            "function f(){g();const x=1;function g(){return[x,x]}return[x,x]}"
+            "try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-mixed-capture-scopes",
+        ),
+        pytest.param(
+            "function f(){const y=g(),x=1;function g(){return[x,x]}return y}"
+            "try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-capture-called-in-earlier-initializer",
+        ),
+        pytest.param(
+            "function f(){const y=g(),x=1;function g(){return x}return y}try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-single-capture-called-in-earlier-initializer",
+        ),
+        pytest.param(
+            "function f(){const x=1;return(()=>[x,x])()}console.log(JSON.stringify(f()))",
+            "[1,1]\n",
+            id="declarator-capture-after-first-initializer",
+        ),
+        pytest.param(
+            "function f(){const x=y,y=1;return[x]}try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-single-read-tdz",
+        ),
+        pytest.param(
+            "function f(){const result=[x,x];var x=1;return result}console.log(JSON.stringify(f()))",
+            "[null,null]\n",
+            id="declarator-var-hoisting",
+        ),
+        pytest.param(
+            "function f(){function g(){return[x,x]}const x=1;return g()}console.log(JSON.stringify(f()))",
+            "[1,1]\n",
+            id="declarator-capture-before-initialization",
+        ),
+        pytest.param(
+            "function f(){var x=1,x;return[x,x]}console.log(JSON.stringify(f()))",
+            "[1,1]\n",
+            id="declarator-first-repeated-target",
+        ),
+        pytest.param(
+            "function f(){var x=1;var x;return[x,x]}console.log(JSON.stringify(f()))",
+            "[1,1]\n",
+            id="declarator-later-bare-statement",
+        ),
+        pytest.param(
+            "function f(){var x=1,x=2;return[x,x]}console.log(JSON.stringify(f()))",
+            "[2,2]\n",
+            id="declarator-reinitialization",
+        ),
+        pytest.param(
+            "function f(){const x=1,{y}={y:2},z=3;return[()=>[x,y,z],x,z]}"
+            "const result=f();console.log(JSON.stringify([result[0](),result.slice(1)]))",
+            "[[1,2,3],[1,3]]\n",
+            id="declarator-destructuring-capture",
+        ),
+        pytest.param(
+            "function f(){const x=y,y=1;return[y,y]}try{f()}catch(error){console.log(error.name)}",
+            "ReferenceError\n",
+            id="declarator-tdz",
+        ),
+        pytest.param(
+            "const trace=[];function f(g){const x=1,y=g(2),z=3;return[{x,z},x,z,y]}"
+            "console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            '[[{"x":1,"z":3},1,3,2],[2]]\n',
+            id="declarator-side-effect-order-shorthand",
+        ),
+        pytest.param(
+            "function f(){var y=g(),x=1;function g(){return x}return y}console.log(JSON.stringify(f()))",
+            "undefined\n",
+            id="captured-var-before-initialization",
+        ),
+        pytest.param(
+            "function f(flag,text){const pattern=/x/;return flag?text:pattern.test(text)}"
+            "console.log(JSON.stringify([f(true,'x'),f(false,'x'),f(false,'y')]))",
+            '["x",true,false]\n',
+            id="regex-conditional-alternate",
+        ),
+        pytest.param(
+            "function f(g){const a=g(1),b=2,{c}={c:g(3)},d=4,e=g(5);return[a,b,b,c,d,d,e]}"
+            "const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            "[[1,2,2,3,4,4,5],[1,3,5]]\n",
+            id="propagation-retains-destructuring-order",
+        ),
+        pytest.param(
+            "function f(g){const dead=0,keep=g(1),a=2,b=3;return[keep,a,b]}"
+            "const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            "[[1,2,3],[1]]\n",
+            id="predecessors-after-dead-head",
+        ),
+        pytest.param(
+            "function f(g){const a=1,{keep}={keep:g(2)},b=3;return[a,keep,b]}"
+            "const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))",
+            "[[1,2,3],[2]]\n",
+            id="predecessors-around-destructuring",
+        ),
+        pytest.param(
+            "const trace=[];function mark(x){trace.push(x);return x}"
+            "var first=mark(1);var second=mark(2);var third;for(var fourth=mark(3);false;);"
+            "console.log(JSON.stringify([trace,first,second,third,fourth]))",
+            "[[1,2,3],1,2,null,3]\n",
+            id="merge-declarations-before-for-init",
+        ),
+        pytest.param(
+            "const trace=[];function mark(x){trace.push(x);return x}"
+            "let first=mark(1);let second=mark(2);const third=mark(3);const fourth=mark(4);"
+            "console.log(JSON.stringify([trace,first,second,third,fourth]))",
+            "[[1,2,3,4],1,2,3,4]\n",
+            id="merge-declarations-stops-at-kind-change",
+        ),
+        pytest.param(
+            "const trace=[];function mark(x){trace.push(x);return{x}}"
+            "const {x:first}=mark(1);const {x:second}=mark(2);const {x:third}=mark(3);"
+            "console.log(JSON.stringify([trace,first,second,third]))",
+            "[[1,2,3],1,2,3]\n",
+            id="merge-declarations-keeps-destructuring-order",
+        ),
+        pytest.param(
+            "var first=console.log(1);var second=console.log(2)",
+            "1\n2\n",
+            id="merge-declarations-at-end",
+        ),
+    ],
+)
+def test_declaration_reads_preserve_behavior(source: str, expected: str) -> None:
+    assert (_run(source), _run(minify_js(source))) == (expected, expected)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(("case", "count"), [(0, 256), (1, 256), (2, 1)], ids=["grouped", "separate", "single"])
+def test_single_use_initializers_preserve_call_order(case: int, count: int) -> None:
+    source: Final = INPUTS["minify-js-single-use"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = list(range(count))
+    assert _run(minify_js(program)) == json.dumps([expected, expected], separators=(",", ":")) + "\n"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(("case", "count"), [(0, 256), (1, 256), (2, 1)], ids=["grouped", "separate", "single"])
+def test_propagation_unlink_preserves_call_order(case: int, count: int) -> None:
+    source: Final = INPUTS["minify-js-unlink"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = (
+        json.dumps(
+            [[value for index in range(count) for value in (index, index % 10, index % 10)], list(range(count))],
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    assert (_run(program), _run(minify_js(program))) == (expected, expected)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(
+    ("case", "count", "early"),
+    [
+        pytest.param(0, 256, False, id="many"),
+        pytest.param(1, 1, False, id="one"),
+        pytest.param(2, 256, True, id="early"),
+    ],
+)
+def test_var_initialization_benchmark_order(case: int, count: int, *, early: bool) -> None:
+    source: Final = INPUTS["minify-js-var-initialization"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = (
+        json.dumps(
+            [[None] * count, [None] * count]
+            if early
+            else [[value for index in range(count) for value in (index, index % 10)], list(range(count))],
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    assert (_run(program), _run(minify_js(program))) == (expected, expected)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(("case", "count"), [pytest.param(0, 256, id="many"), pytest.param(1, 1, id="one")])
+def test_unused_declarators_preserve_call_order(case: int, count: int) -> None:
+    source: Final = INPUTS["minify-js-unused-declarations"]()[case][1]
+    assert isinstance(source, str)
+    program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
+    expected: Final = json.dumps([[], list(range(count))], separators=(",", ":")) + "\n"
+    assert (_run(program), _run(minify_js(program))) == (expected, expected)

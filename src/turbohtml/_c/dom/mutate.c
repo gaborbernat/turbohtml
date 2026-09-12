@@ -224,14 +224,12 @@ static void mark_start_dirty(th_tree *tree, th_node *node) {
     }
 }
 
-/* Upsert an attribute by name: replace the value of the existing attribute with
-   that atom, or append a new slot (growing the arena array by one). has_value 0
-   stores a valueless attribute; an empty value stays distinct from valueless.
-   Returns 0, or -1 on allocation failure. */
-int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
-                     Py_ssize_t value_len, int has_value) {
+static int node_attr_store(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                           Py_ssize_t value_len, int has_value, int append) {
+    tree->attr_version++;
     mark_start_dirty(tree, node);
     uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
+    tree->id_version += atom == TH_ATTR_ID;
     Py_UCS4 *owned = NULL;
     if (has_value) {
         owned = arena_alloc(tree, (value_len ? value_len : 1) * (Py_ssize_t)sizeof(Py_UCS4));
@@ -240,7 +238,7 @@ int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
         }
         memcpy(owned, value, (size_t)value_len * sizeof(Py_UCS4));
     }
-    Py_ssize_t existing = th_node_attr_find(tree, node, name, name_len);
+    Py_ssize_t existing = append ? -1 : th_node_attr_find(tree, node, name, name_len);
     if (existing >= 0) {
         th_mo_attr_changed(tree, node, atom, node->attrs[existing].value, node->attrs[existing].value_len, 1);
     } else {
@@ -251,19 +249,42 @@ int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
         node->attrs[existing].value_len = has_value ? value_len : 0;
         return 0;
     }
-    th_node_attr *grown = arena_alloc(tree, (node->attr_count + 1) * (Py_ssize_t)sizeof(th_node_attr));
-    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    size_t capacity = node->attr_capacity_shift ? (size_t)1 << node->attr_capacity_shift : 0;
+    if ((size_t)node->attr_count >= capacity) {
+        size_t bytes;
+        int fits = th_grow_cap((size_t)node->attr_count + 1, capacity, 2, sizeof(th_node_attr), &capacity, &bytes);
+        if (!fits || bytes > PY_SSIZE_T_MAX) { /* GCOVR_EXCL_BR_LINE: allocation-size overflow */
+            PyErr_NoMemory();                  /* GCOVR_EXCL_LINE: allocation-size overflow */
+            return -1;                         /* GCOVR_EXCL_LINE: allocation-size overflow */
+        }
+        th_node_attr *grown = arena_alloc(tree, (Py_ssize_t)bytes);
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (node->attr_count > 0) {
+            memcpy(grown, node->attrs, (size_t)node->attr_count * sizeof(th_node_attr));
+        }
+        node->attrs = grown;
+        node->attr_capacity_shift = 0;
+        for (size_t slots = capacity; slots > 1; slots >>= 1) {
+            node->attr_capacity_shift++;
+        }
     }
-    if (node->attr_count > 0) {
-        memcpy(grown, node->attrs, (size_t)node->attr_count * sizeof(th_node_attr));
-    }
-    grown[node->attr_count].name_atom = atom;
-    grown[node->attr_count].value = owned;
-    grown[node->attr_count].value_len = has_value ? value_len : 0;
-    node->attrs = grown;
+    node->attrs[node->attr_count].name_atom = atom;
+    node->attrs[node->attr_count].value = owned;
+    node->attrs[node->attr_count].value_len = has_value ? value_len : 0;
     node->attr_count++;
     return 0;
+}
+
+int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                     Py_ssize_t value_len, int has_value) {
+    return node_attr_store(tree, node, name, name_len, value, value_len, has_value, 0);
+}
+
+int th_node_attr_append(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                        Py_ssize_t value_len, int has_value) {
+    return node_attr_store(tree, node, name, name_len, value, value_len, has_value, 1);
 }
 
 /* Replace a node's character data with a copy of len code points (an empty buffer
@@ -321,6 +342,7 @@ Py_ssize_t th_node_attr_find(th_tree *tree, th_node *node, const char *name, Py_
 }
 
 int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len) {
+    tree->attr_version++;
     Py_ssize_t index = th_node_attr_find(tree, node, name, name_len);
     if (index < 0) {
         return 0;
@@ -328,6 +350,7 @@ int th_node_attr_del(th_tree *tree, th_node *node, const char *name, Py_ssize_t 
     mark_start_dirty(tree, node);
     th_mo_attr_changed(tree, node, node->attrs[index].name_atom, node->attrs[index].value, node->attrs[index].value_len,
                        1);
+    tree->id_version += node->attrs[index].name_atom == TH_ATTR_ID;
     for (Py_ssize_t shift = index; shift + 1 < node->attr_count; shift++) {
         node->attrs[shift] = node->attrs[shift + 1];
     }
@@ -415,30 +438,91 @@ static int attr_value_equal(const th_node_attr *left, const th_node_attr *right)
            (left->value_len == 0 || memcmp(left->value, right->value, (size_t)left->value_len * sizeof(Py_UCS4)) == 0);
 }
 
-/* Whether two elements carry the same attribute set, order-independent per the DOM.
-   An element's attribute names are unique, so a name match is the sole candidate and
-   its value settles the pair. */
+static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right,
+                               Py_ssize_t start);
+
 static int attrs_equal(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right) {
     if (left->attr_count != right->attr_count) {
         return 0;
     }
+    int can_index = left->attr_count >= 32 &&
+                    /* GCOVR_EXCL_BR_START: allocation size overflow */
+                    (size_t)left->attr_count <= SIZE_MAX / (4 * sizeof(Py_ssize_t));
+    /* GCOVR_EXCL_BR_STOP */
+    Py_ssize_t comparisons = 0;
     for (Py_ssize_t index = 0; index < left->attr_count; index++) {
         const th_node_attr *want = &left->attrs[index];
-        int found = 0;
-        for (Py_ssize_t other = 0; other < right->attr_count; other++) {
+        Py_ssize_t other = 0;
+        for (; other < right->attr_count; other++) {
             if (attr_name_equal(left_tree, want, right_tree, &right->attrs[other])) {
                 if (!attr_value_equal(want, &right->attrs[other])) {
                     return 0;
                 }
-                found = 1;
                 break;
             }
         }
-        if (!found) {
+        if (other == right->attr_count) {
             return 0;
+        }
+        if (can_index) {
+            comparisons += other + 1;
+            if (comparisons >= left->attr_count * 2 && index + 1 < left->attr_count) {
+                can_index = 0;
+                const int indexed = attrs_equal_indexed(left_tree, left, right_tree, right, index + 1);
+                if (indexed >= 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    return indexed;
+                }
+            } /* GCOVR_EXCL_LINE: allocation failure fallback */
         }
     }
     return 1;
+}
+
+static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right,
+                               Py_ssize_t start) {
+    size_t capacity = 64;
+    while (capacity < (size_t)right->attr_count * 2) {
+        capacity *= 2;
+    }
+    Py_ssize_t *slots = PyMem_Calloc(capacity, sizeof(Py_ssize_t));
+    if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: fall back to the allocation-free comparison */
+    }
+    for (Py_ssize_t index = 0; index < right->attr_count; index++) {
+        size_t slot = ((size_t)right->attrs[index].name_atom * 2654435761U) & (capacity - 1);
+        while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != right->attrs[index].name_atom) {
+            slot = (slot + 1) & (capacity - 1);
+        }
+        /* Constructors can retain duplicate normalized names; equality uses their first value. */
+        if (slots[slot] == 0) {
+            slots[slot] = index + 1;
+        }
+    }
+    int equal = 1;
+    uint32_t previous_atom = UINT32_MAX;
+    size_t slot = 0;
+    for (Py_ssize_t index = start; index < left->attr_count; index++) {
+        const th_node_attr *want = &left->attrs[index];
+        uint32_t atom = want->name_atom;
+        if (atom != previous_atom) {
+            previous_atom = atom;
+            if (left_tree != right_tree) {
+                Py_ssize_t name_len;
+                const char *name = th_attr_name(left_tree, atom, &name_len);
+                atom = th_attr_lookup(right_tree, name, name_len);
+            }
+            slot = ((size_t)atom * 2654435761U) & (capacity - 1);
+            while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != atom) {
+                slot = (slot + 1) & (capacity - 1);
+            }
+        }
+        if (slots[slot] == 0 || !attr_value_equal(want, &right->attrs[slots[slot] - 1])) {
+            equal = 0;
+            break;
+        }
+    }
+    PyMem_Free(slots);
+    return equal;
 }
 
 /* Whether two nodes' own character data match, realizing a borrowed text span first. */
@@ -455,7 +539,7 @@ static int node_data_equals(th_tree *left_tree, th_node *left, th_tree *right_tr
     if (left->type != right->type) {
         return 0;
     }
-    switch (left->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+    switch ((enum th_node_type)left->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_ELEMENT:
         if (left->ns != right->ns) {
             return 0;
@@ -536,7 +620,7 @@ int th_node_equals(th_tree *left_tree, th_node *left, th_tree *right_tree, th_no
 }
 
 /* Copy one node without its children, materializing borrowed text and re-interning per-tree attribute atoms. */
-static th_node *copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node) {
+th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node) {
     th_node *node = node_new(dest, src_node->type);
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -589,7 +673,7 @@ static th_node *copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node
 }
 
 static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_node) {
-    th_node *root = copy_node_shallow(dest, src, src_node);
+    th_node *root = th_tree_copy_node_shallow(dest, src, src_node);
     if (root == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -598,7 +682,7 @@ static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_no
     for (;;) {
         if (from->first_child != NULL) {
             from = from->first_child;
-            th_node *child = copy_node_shallow(dest, src, from);
+            th_node *child = th_tree_copy_node_shallow(dest, src, from);
             if (child == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
             }
@@ -614,7 +698,7 @@ static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_no
             return root;
         }
         from = from->next_sibling;
-        th_node *sibling = copy_node_shallow(dest, src, from);
+        th_node *sibling = th_tree_copy_node_shallow(dest, src, from);
         if (sibling == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -629,7 +713,7 @@ static th_node *copy_node_at(th_tree *dest, th_tree *src, th_node *src_node, int
     if (depth == TH_COPY_RECURSION_LIMIT) {
         return copy_node_iterative(dest, src, src_node);
     }
-    th_node *node = copy_node_shallow(dest, src, src_node);
+    th_node *node = th_tree_copy_node_shallow(dest, src, src_node);
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -671,19 +755,37 @@ static void normalize_children(th_tree *tree, th_node *root) {
                 child = next;
                 continue;
             }
-            while (next != NULL && next->type == TH_NODE_TEXT) {
-                th_node *after = next->next_sibling;
-                if (next->text_len > 0) {
-                    Py_ssize_t merged_len = child->text_len + next->text_len;
-                    Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
-                    if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                        return;           /* GCOVR_EXCL_LINE: allocation-failure path */
-                    }
-                    memcpy(merged, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
-                    memcpy(merged + child->text_len, need_text(tree, next), (size_t)next->text_len * sizeof(Py_UCS4));
-                    child->text = merged;
-                    child->text_len = merged_len;
+            th_node *end = next;
+            Py_ssize_t merged_len = child->text_len;
+            while (end != NULL && end->type == TH_NODE_TEXT) {
+                th_node *after = end->next_sibling;
+                if (end->text_len == 0) {
+                    th_node_remove(end);
+                } else {
+                    merged_len += end->text_len;
                 }
+                end = after;
+            }
+            next = child->next_sibling;
+            if (merged_len > child->text_len) {
+                Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
+                if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                    return;           /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                Py_ssize_t offset = 0;
+                for (th_node *part = child; part != end; part = part->next_sibling) {
+                    const Py_UCS4 *text = need_text(tree, part);
+                    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: text realization fails only on allocation failure */
+                        return;         /* GCOVR_EXCL_LINE: allocation-failure path */
+                    }
+                    memcpy(merged + offset, text, (size_t)part->text_len * sizeof(Py_UCS4));
+                    offset += part->text_len;
+                }
+                child->text = merged;
+                child->text_len = merged_len;
+            }
+            while (next != end) {
+                th_node *after = next->next_sibling;
                 th_node_remove(next);
                 next = after;
             }

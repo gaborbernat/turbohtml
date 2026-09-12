@@ -98,10 +98,11 @@ enum th_ns {
 };
 
 struct th_node {
-    enum th_node_type type;
-    uint16_t atom;     /* TH_TAG_* for elements, else TH_TAG_UNKNOWN */
-    uint8_t tag_flags; /* category bitmask from the atom table */
-    uint8_t ns;        /* enum th_ns: HTML / SVG / MathML */
+    uint8_t type;
+    uint8_t attr_capacity_shift; /* zero for exact-sized or shared arrays */
+    uint16_t atom;               /* TH_TAG_* for elements, else TH_TAG_UNKNOWN */
+    uint8_t tag_flags;           /* category bitmask from the atom table */
+    uint8_t ns;                  /* enum th_ns: HTML / SVG / MathML */
     th_node *parent;
     th_node *first_child;
     th_node *last_child;
@@ -271,6 +272,9 @@ th_node *th_tree_build_shell(th_tree *tree, const Py_UCS4 *lang, Py_ssize_t lang
    it valueless. Returns 0, or -1 on allocation failure. */
 int th_node_attr_set(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
                      Py_ssize_t value_len, int has_value);
+/* The caller has already established that this attribute name is absent. */
+int th_node_attr_append(th_tree *tree, th_node *node, const char *name, Py_ssize_t name_len, const Py_UCS4 *value,
+                        Py_ssize_t value_len, int has_value);
 
 /* An element's attribute array and count; (NULL, 0) for every non-element node. */
 static inline Py_ssize_t th_node_attributes(const th_node *node, th_node_attr **attrs) {
@@ -321,6 +325,7 @@ Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree);
 
 int th_node_contains(th_node *ancestor, th_node *node);
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
+th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node);
 th_tree *th_tree_copy_document(th_tree *src);
 
 /* Whether two subtrees are structurally equal: same node type, and for an element the
@@ -390,6 +395,8 @@ th_node *th_tree_document(th_tree *tree);
    resolved as absent may now exist: a monotonic generation for invalidating a
    cached compiled selector whose attribute atoms were resolved against the tree. */
 uint32_t th_tree_attr_generation(const th_tree *tree);
+uint64_t th_tree_attr_version(const th_tree *tree);
+uint64_t th_tree_id_version(const th_tree *tree);
 
 /* The WHATWG parse errors collected during the parse, in document order, and
    their count via *out_count. The array (and its static code strings) lives as

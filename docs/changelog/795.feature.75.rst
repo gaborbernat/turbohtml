@@ -1,0 +1,1 @@
+Speed up :func:`computed styles <turbohtml.cssom.computed_style>` for complex selector alternatives.

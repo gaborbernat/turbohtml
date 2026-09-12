@@ -1,0 +1,2 @@
+Keep :class:`RELAX NG <turbohtml.validate.RelaxNG>` definition state separate between concurrent validations using the
+same schema.

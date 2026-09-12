@@ -1,0 +1,1 @@
+Speed up XML parsing of attributes with many namespace prefixes.

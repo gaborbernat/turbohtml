@@ -1,0 +1,1 @@
+Speed up :func:`Unicode normalization <turbohtml.detect.normalize>` of long combining-mark sequences.

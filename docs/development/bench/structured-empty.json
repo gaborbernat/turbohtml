@@ -1,0 +1,36 @@
+{
+  "label": "extract metadata from an unannotated tree",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "100 elements",
+      1.0989334471863306e-05
+    ],
+    [
+      "1,000 elements",
+      0.00011145991491048334
+    ],
+    [
+      "10,000 elements",
+      0.0009535963980548938
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.08794203003005761
+    ],
+    [
+      null,
+      0.24177545074459292
+    ],
+    [
+      null,
+      0.08255524507830936
+    ]
+  ],
+  "notes": {}
+}

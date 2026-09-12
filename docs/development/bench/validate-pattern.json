@@ -1,0 +1,43 @@
+{
+  "label": "validate growing regex character classes",
+  "parties": [
+    "turbohtml",
+    "lxml.etree.XMLSchema"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "32 character alternatives",
+      1.252776322265466e-06,
+      1.380558630141119e-06
+    ],
+    [
+      "256 character alternatives",
+      1.5013822121545672e-06,
+      1.6701320419088007e-06
+    ],
+    [
+      "2,048 character alternatives",
+      5.517689472374817e-06,
+      3.731607769926389e-06
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.4233385745018848,
+      0.1132024932496771
+    ],
+    [
+      null,
+      0.027107324723437666,
+      0.09783525748549618
+    ],
+    [
+      null,
+      0.012822867692215661,
+      0.02543318874818224
+    ]
+  ],
+  "notes": {}
+}

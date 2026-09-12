@@ -1,0 +1,1 @@
+Speed up queries combining many detached roots.

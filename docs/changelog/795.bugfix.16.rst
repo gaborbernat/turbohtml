@@ -1,0 +1,1 @@
+Prevent extra unwritten bytes in escaped output when escapable characters occupy adjacent byte positions.

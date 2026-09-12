@@ -29,6 +29,15 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "canonicalize-deep": {
+        "lxml method=c14n": "HTML parsing omits the empty head element and SVG/xlink namespace declarations",
+    },
+    "transform-number": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-dense": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
     "sanitize-node": {
         "lxml-html-clean": "blocklist policy rather than turbohtml's allowlist; not security equivalence"
     },
@@ -126,5 +135,29 @@ NOTES: Final[dict[str, dict[str, str]]] = {
     },
 }
 NOTES["navigate"] = {"resiliparse": NOTES["text-content"]["resiliparse"]}
+NOTES.update({
+    operation: {
+        **dict.fromkeys(
+            ("esbuild", "terser", "tdewolff"), "runs a fresh command per call, including process startup and pipe I/O"
+        ),
+        **dict.fromkeys(
+            ("rjsmin", "jsmin", "css-html-js-minify"),
+            "removes whitespace and comments; does not perform declaration or expression compression",
+        ),
+    }
+    for operation in ("minify-js-unlink", "minify-js-unused-declarations", "minify-js-var-initialization")
+})
+NOTES.update({
+    operation: {
+        **dict.fromkeys(
+            ("esbuild", "tdewolff"), "runs a fresh command per call, including process startup and pipe I/O"
+        ),
+        **dict.fromkeys(
+            ("rcssmin", "cssmin", "css-html-js-minify"),
+            "removes whitespace and comments; does not merge rules",
+        ),
+    }
+    for operation in ("minify-css-merges", "minify-css-conflicts")
+})
 
 __all__ = ["NOTES"]

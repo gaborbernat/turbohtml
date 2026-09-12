@@ -1,0 +1,1 @@
+Fix memory leaks when schema validation reads text and CDATA nodes.

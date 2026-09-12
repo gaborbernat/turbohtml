@@ -801,11 +801,99 @@ static int css_bodies_conflict(const css_buf *pool, Py_ssize_t a_off, Py_ssize_t
     return 0;
 }
 
+typedef struct {
+    Py_ssize_t start;
+    Py_ssize_t length;
+    const char *longhands;
+    int all;
+} css_property_summary;
+
+typedef struct {
+    Py_ssize_t offset;
+    Py_ssize_t length;
+    css_property_summary *properties;
+    Py_ssize_t count;
+    int opaque;
+} css_body_summary;
+
+static int css_summarize_body(const css_buf *pool, Py_ssize_t offset, Py_ssize_t length, css_body_summary *summary) {
+    if (summary->length == length && summary->offset == offset) {
+        return 1;
+    }
+    css_free(summary->properties);
+    *summary = (css_body_summary){0};
+    summary->opaque = css_body_is_opaque(pool->data + offset, length);
+    if (!summary->opaque) {
+        Py_ssize_t position = 0;
+        Py_ssize_t start = 0;
+        Py_ssize_t end = 0;
+        size_t capacity = 0;
+        while (css_body_next_prop(pool->data + offset, length, &position, &start, &end)) {
+            if ((size_t)summary->count == capacity) {
+                size_t bytes;
+                int grew = th_grow_cap(capacity + 1, capacity, 8, sizeof(*summary->properties), &capacity, &bytes);
+                if (!grew) {  /* GCOVR_EXCL_BR_LINE: capacity overflow cannot fit in memory */
+                    return 0; /* GCOVR_EXCL_LINE: capacity overflow */
+                }
+                css_property_summary *properties = css_realloc(summary->properties, bytes);
+                if (properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    return 0;             /* GCOVR_EXCL_LINE: allocation failure */
+                }
+                summary->properties = properties;
+            }
+            const css_char *name = pool->data + offset + start;
+            summary->properties[summary->count++] = (css_property_summary){
+                start, end - start, css_longhand_list(name, end - start), css_run_ieq(name, end - start, "all")};
+        }
+    }
+    summary->offset = offset;
+    summary->length = length;
+    return 1;
+}
+
+static int css_summaries_conflict(const css_buf *pool, const rule_item *first, const rule_item *second,
+                                  css_body_summary *left, css_body_summary *right) {
+    /* GCOVR_EXCL_BR_START: allocation failure */
+    if (!css_summarize_body(pool, first->body_off, first->body_len, left) ||
+        !css_summarize_body(pool, second->body_off, second->body_len, right)) {
+        /* GCOVR_EXCL_BR_STOP */
+        /* GCOVR_EXCL_START: allocation failure fallback */
+        return css_bodies_conflict(pool, first->body_off, first->body_len, second->body_off, second->body_len);
+        /* GCOVR_EXCL_STOP */
+    }
+    if (left->opaque || right->opaque) {
+        return 1;
+    }
+    for (Py_ssize_t outer = 0; outer < left->count; outer++) {
+        const css_property_summary *left_property = &left->properties[outer];
+        const css_char *left_name = pool->data + first->body_off + left_property->start;
+        for (Py_ssize_t inner = 0; inner < right->count; inner++) {
+            const css_property_summary *right_property = &right->properties[inner];
+            const css_char *right_name = pool->data + second->body_off + right_property->start;
+            if (left_property->all || right_property->all ||
+                (left_property->length == right_property->length &&
+                 memcmp(left_name, right_name, (size_t)left_property->length * sizeof(css_char)) == 0)) {
+                return 1;
+            }
+            const int left_covers_right =
+                left_property->longhands != NULL &&
+                css_prop_in_list(right_name, right_property->length, left_property->longhands);
+            const int right_covers_left = right_property->longhands != NULL &&
+                                          css_prop_in_list(left_name, left_property->length, right_property->longhands);
+            if (left_covers_right || right_covers_left) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 /* Merge qualified rules: same selector -> combine declaration bodies; identical body -> combine selectors into a list.
    A rule may merge with an earlier one across intervening rules, but only while every rule between them sets no
    property the moved body sets (so the cascade cannot change); an opaque node (a bang comment) or a conflicting rule
    ends the reach. Consecutive @media blocks with an identical prelude fold into one wrapper. */
 static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baseline) {
+    css_body_summary *summaries = NULL;
     uint32_t stack_hashes[1024];
     uint32_t *hashes = NULL;
     size_t hash_cap = 0;
@@ -820,36 +908,43 @@ static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baselin
             memset(hashes, 0, hash_cap * sizeof(uint32_t));
         }
     }
-    Py_ssize_t media_prev = -1;
-    Py_ssize_t media_prev_prelude = 0;
     for (Py_ssize_t index = 0; index < items->len; index++) {
         rule_item *it = &items->items[index];
         if (!it->is_rule) {
-            /* every non-rule item carries text (the push guard drops empty rules), so text_len is always positive */
             Py_ssize_t prelude = css_media_prelude_len(pool->data + it->text_off, it->text_len, it->at_statement);
             if (prelude < 0) {
-                media_prev = -1;
                 continue;
             }
-            if (media_prev >= 0 && media_prev_prelude == prelude &&
-                memcmp(pool->data + items->items[media_prev].text_off, pool->data + it->text_off, (size_t)prelude) ==
-                    0) {
-                /* drop the previous block's trailing '}' and this block's "@media ...{" prelude, fusing the bodies */
-                rule_item *target = &items->items[media_prev];
-                css_buf merged = {NULL, 0, 0, 0};
-                cbuf_put_run(&merged, pool->data + target->text_off, target->text_len - 1);
-                cbuf_put_run(&merged, pool->data + it->text_off + prelude, it->text_len - prelude);
-                target->text_off = pool_run(pool, merged.data, merged.len);
-                target->text_len = merged.len;
-                cbuf_free(&merged);
-                it->dropped = 1;
+            Py_ssize_t end = index + 1;
+            Py_ssize_t length = it->text_len;
+            while (end < items->len) {
+                rule_item *next = &items->items[end];
+                if (next->is_rule ||
+                    css_media_prelude_len(pool->data + next->text_off, next->text_len, next->at_statement) != prelude ||
+                    memcmp(pool->data + it->text_off, pool->data + next->text_off, (size_t)prelude) != 0) {
+                    break;
+                }
+                length += next->text_len - prelude - 1;
+                end++;
+            }
+            if (end == index + 1) {
                 continue;
             }
-            media_prev = index;
-            media_prev_prelude = prelude;
+            css_buf merged = {NULL, 0, 0, 0};
+            cbuf_reserve(&merged, length);
+            cbuf_put_run(&merged, pool->data + it->text_off, it->text_len - 1);
+            for (Py_ssize_t next = index + 1; next < end; next++) {
+                rule_item *item = &items->items[next];
+                cbuf_put_run(&merged, pool->data + item->text_off + prelude, item->text_len - prelude - 1);
+                item->dropped = 1;
+            }
+            cbuf_putc(&merged, '}');
+            it->text_off = pool_run(pool, merged.data, merged.len);
+            it->text_len = merged.len;
+            cbuf_free(&merged);
+            index = end - 1;
             continue;
         }
-        media_prev = -1;
         uint32_t selector_hash = css_rule_hash(pool, it->sel_off, it->sel_len);
         uint32_t body_hash = css_rule_hash(pool, it->body_off, it->body_len);
         if (hashes != NULL && !css_rule_hash_seen(hashes, hash_cap - 1, selector_hash) &&
@@ -877,18 +972,48 @@ static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baselin
                 break;
             }
             if (rule_run_eq(pool, target->body_off, target->body_len, it->body_off, it->body_len)) {
+                Py_ssize_t end = index + 1;
+                Py_ssize_t length = target->sel_len + 1 + it->sel_len;
+                /* An intervening live rule could claim a later selector before this target does. */
+                if (back == index - 1) {
+                    while (end < items->len) {
+                        rule_item *next = &items->items[end];
+                        /* A selector list might equal the growing target and take the body-merge path. */
+                        if (!next->is_rule || memchr(pool->data + next->sel_off, ',', (size_t)next->sel_len) != NULL ||
+                            !rule_run_eq(pool, target->body_off, target->body_len, next->body_off, next->body_len)) {
+                            break;
+                        }
+                        length += 1 + next->sel_len;
+                        end++;
+                    }
+                }
                 css_buf selector = {NULL, 0, 0, 0};
+                cbuf_reserve(&selector, length);
                 cbuf_put_run(&selector, pool->data + target->sel_off, target->sel_len);
-                cbuf_putc(&selector, ',');
-                cbuf_put_run(&selector, pool->data + it->sel_off, it->sel_len);
+                for (Py_ssize_t next = index; next < end; next++) {
+                    rule_item *item = &items->items[next];
+                    cbuf_putc(&selector, ',');
+                    cbuf_put_run(&selector, pool->data + item->sel_off, item->sel_len);
+                    item->dropped = 1;
+                }
                 target->sel_off = pool_run(pool, selector.data, selector.len);
                 target->sel_len = selector.len;
                 cbuf_free(&selector);
-                it->dropped = 1;
+                index = end - 1;
                 merged = target;
                 break;
             }
-            if (css_bodies_conflict(pool, target->body_off, target->body_len, it->body_off, it->body_len)) {
+            if (summaries == NULL && items->len >= 32) {
+                summaries = css_malloc((size_t)items->len * sizeof(*summaries));
+                if (summaries != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure uses the direct scan */
+                    memset(summaries, 0, (size_t)items->len * sizeof(*summaries));
+                }
+            }
+            const int conflict =
+                summaries == NULL
+                    ? css_bodies_conflict(pool, target->body_off, target->body_len, it->body_off, it->body_len)
+                    : css_summaries_conflict(pool, target, it, &summaries[back], &summaries[index]);
+            if (conflict) {
                 break;
             }
         }
@@ -900,6 +1025,12 @@ static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items, int baselin
             css_rule_hash_add(hashes, hash_cap - 1, selector_hash);
             css_rule_hash_add(hashes, hash_cap - 1, body_hash);
         }
+    }
+    if (summaries != NULL) {
+        for (Py_ssize_t index = 0; index < items->len; index++) {
+            css_free(summaries[index].properties);
+        }
+        css_free(summaries);
     }
     if (hashes != NULL && hashes != stack_hashes) {
         css_free(hashes);

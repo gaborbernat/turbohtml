@@ -1,0 +1,1 @@
+Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:has-same-node()`` on large node sets.

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import functools
 import re
+import subprocess
+import sys
 from collections import deque
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final, cast
@@ -16,6 +18,7 @@ from typing import TYPE_CHECKING, Final, cast
 import turbohtml
 from bench.timing import Mutating
 from turbohtml import Markdown as _Markdown
+from turbohtml import Range as _Range
 from turbohtml import clean as _clean
 from turbohtml import query as _query
 from turbohtml.build import E
@@ -26,6 +29,7 @@ from turbohtml.conformance import check as _check_conformance
 from turbohtml.convert import css_specificity as _css_specificity
 from turbohtml.convert import css_to_xpath as _css_to_xpath
 from turbohtml.cssom import computed_style as _computed_style
+from turbohtml.detect import EncodingDetector as _EncodingDetector
 from turbohtml.detect import detect as _detect_encoding
 from turbohtml.detect import detect_language as _detect_language
 from turbohtml.detect import normalize as _normalize
@@ -42,6 +46,7 @@ from turbohtml.query import escape_identifier as _escape_identifier
 from turbohtml.rewrite import Element as _RewriteElement
 from turbohtml.rewrite import rewrite as _rewrite
 from turbohtml.saxparse import SaxHandler as _SaxHandler
+from turbohtml.saxparse import iter_events as _iter_events
 from turbohtml.saxparse import sax_parse as _sax_parse
 from turbohtml.transform import Transform as _Transform
 from turbohtml.treebuild import parse_into as _parse_into
@@ -54,6 +59,9 @@ if TYPE_CHECKING:
     from turbohtml import Node
 
 _SANITIZER = _clean.Sanitizer(_clean.Policy.relaxed())
+_SANITIZER_ATTRIBUTES: Final = _clean.Sanitizer(
+    _clean.Policy(tags=frozenset({"p"}), attribute_prefixes=frozenset({"data-"}))
+)
 _SANITIZER_TEMPLATES = _clean.Sanitizer(replace(_clean.Policy.relaxed(), strip_template_markers=True))
 _SANITIZER_STYLES = _clean.Sanitizer(
     replace(
@@ -185,6 +193,32 @@ def shadow(count: int) -> None:
     _ = list(host.flattened_children)
 
 
+def _shadow_slot(case: tuple[int, str]) -> None:
+    _slotted(case).assigned_nodes()
+
+
+@functools.cache
+def _slotted(case: tuple[int, str]) -> turbohtml.Element:
+    host: Final[turbohtml.Element] = turbohtml.Element("div")
+    host.set_inner_html(case[1])
+    root: Final[turbohtml.ShadowRoot] = host.attach_shadow("open")
+    root.set_inner_html('<slot name="unused"></slot>' * case[0] + '<slot name="target"></slot>')
+    return root.select('slot[name="target"]')[0]
+
+
+def startup(mode: str) -> str:
+    """Include interpreter startup so cached imports cannot hide wheel initialization costs."""
+    return subprocess.run(
+        [sys.executable, "-c", "import turbohtml; print(turbohtml.__version__)"]
+        if mode == "import"
+        else [sys.executable, "-m", "turbohtml", "minify"],
+        input="<p>a  b</p><!-- c -->",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
 def parse(text: str) -> None:
     """Parse a whole document into a navigable tree through turbohtml.parse()."""
     turbohtml.parse(text)
@@ -260,6 +294,33 @@ def tokenize(text: str) -> None:
         pass
 
 
+def _render_options_setup(case: tuple[str, bool]) -> Callable[[], str | bytes]:
+    node: Final = turbohtml.Element("p", children=[turbohtml.Text("x")])
+    kind, supplied = case
+    if kind == "html":
+        return functools.partial(node.serialize, turbohtml.Html()) if supplied else node.serialize
+    if kind == "text":
+        return functools.partial(node.to_text, turbohtml.PlainText()) if supplied else node.to_text
+    return functools.partial(node.canonicalize, turbohtml.Canonical()) if supplied else node.canonicalize
+
+
+def _render_options(render: Callable[[], str | bytes]) -> str | bytes:
+    return render()
+
+
+def _token_attribute_setup(text: str) -> turbohtml.Token:
+    return next(iter(turbohtml.tokenize(text)))
+
+
+def _token_attributes(token: turbohtml.Token) -> list[tuple[str, str]] | None:
+    return token.attrs
+
+
+def _tokenize_attributes(text: str) -> None:
+    for token in turbohtml.tokenize(text):
+        _ = token.attrs
+
+
 @functools.cache
 def _parsed(text: str) -> turbohtml.Document:
     """Return a document parsed once, cached so the read-path operations time only the query."""
@@ -307,11 +368,39 @@ def select_has(text: str) -> None:
     _parsed(text).select(_HAS)
 
 
+def _select_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).select(case[0])
+
+
+_XPATH_REPLACE_DOCUMENT: Final = turbohtml.parse("<p></p>")
+
+
+def _xpath_replace(case: tuple[str, str, str, str]) -> str | list[turbohtml.Element | str]:
+    text, search, replacement, _expected = case
+    return _XPATH_REPLACE_DOCUMENT.xpath(
+        "str:replace($text, $search, $replacement)", text=text, search=search, replacement=replacement
+    )
+
+
+def _xpath_scaling(case: tuple[str, str]) -> None:
+    _parsed(case[1]).xpath(case[0])
+
+
 def computed_style(text: str) -> None:
     """Resolve the CSSOM computed style of every element in the parsed, styled document."""
     for node in _parsed(text).descendants:
         if isinstance(node, turbohtml.Element):
             _computed_style(node)
+
+
+def _computed_style_reverse(text: str) -> None:
+    for node in reversed(tuple(_parsed(text).descendants)):
+        if isinstance(node, turbohtml.Element):
+            _computed_style(node)
+
+
+def _computed_style_first(text: str) -> None:
+    _computed_style(turbohtml.parse(text).select("div")[0])
 
 
 def match(text: str) -> None:
@@ -552,6 +641,11 @@ def sanitize(text: str) -> None:
     _SANITIZER.sanitize(text)
 
 
+def sanitize_attributes(text: str) -> None:
+    """Reuse the policy to isolate attribute handling from sanitizer construction."""
+    _SANITIZER_ATTRIBUTES.sanitize(text)
+
+
 def sanitize_templates(text: str) -> None:
     """Sanitize with SAFE_FOR_TEMPLATES on, collapsing template markers as the C walk keeps each node."""
     _SANITIZER_TEMPLATES.sanitize(text)
@@ -691,6 +785,18 @@ def markdown(case: tuple[str, str]) -> None:
         _whole(text).to_markdown()
 
 
+def markdown_wrap(case: tuple[int, str]) -> None:
+    """Reuse the tree and options to exclude their construction from wrapping measurements."""
+    config, document = _markdown_wrap_case(case)
+    document.to_markdown(config)
+
+
+@functools.cache
+def _markdown_wrap_case(case: tuple[int, str]) -> tuple[_Markdown, turbohtml.Document]:
+    width, source = case
+    return _Markdown(wrapping=_Markdown.Wrapping(width=width)), _whole(source)
+
+
 def markdown_google(text: str) -> None:
     """Convert a Google Docs export to Markdown with turbohtml's google_doc mode."""
     _whole(text).to_markdown(_Markdown.google_doc())
@@ -798,6 +904,10 @@ def sax(text: str) -> None:
     _sax_parse(text, _SaxCounter())
 
 
+def _sax_records(text: str) -> None:
+    deque(_iter_events(text), maxlen=0)
+
+
 class _Node:
     """A compact tree node a turbohtml.treebuild builder materializes: a tag and its children, no navigable Node."""
 
@@ -862,31 +972,52 @@ def rewrite(text: str) -> None:
     )
 
 
-def rewrite_attributes(text: str) -> None:
-    """Add 1,000 distinct custom attributes in one streaming handler."""
-    _rewrite(text, elements=(("x", _rewrite_attributes),))
+def rewrite_attributes(case: tuple[int, str]) -> None:
+    """Exclude attribute-name preparation from steady-state timing."""
+    _rewrite(case[1], elements=(("x", _rewrite_attribute_handler(case[0])),))
 
 
-def _rewrite_attributes(element: _RewriteElement) -> None:
-    for name in _REWRITE_ATTR_NAMES:
-        element.set_attribute(name, "x")
+@functools.cache
+def _rewrite_attribute_handler(count: int) -> Callable[[_RewriteElement], None]:
+    names: Final = tuple(f"a{index}" for index in range(count))
 
+    def add(element: _RewriteElement) -> None:
+        for name in names:
+            element.set_attribute(name, "x")
 
-_REWRITE_ATTR_NAMES: Final[tuple[str, ...]] = tuple(f"a{index}" for index in range(1_000))
+    return add
 
 
 def css_path(text: str) -> None:
-    """Generate the unique CSS selector that re-finds every element with turbohtml's css_path."""
-    for node in _parsed(text).descendants:
+    """Exclude parsing from CSS path timing."""
+    _css_paths(_parsed(text))
+
+
+def _css_paths(document: turbohtml.Document) -> None:
+    for node in document.descendants:
         if isinstance(node, turbohtml.Element):
             node.css_path()
 
 
 def xpath_path(text: str) -> None:
-    """Generate the positional XPath that re-finds every element with turbohtml's xpath_path."""
-    for node in _parsed(text).descendants:
+    """Exclude parsing from XPath path timing."""
+    _xpath_paths(_parsed(text))
+
+
+def _xpath_paths(document: turbohtml.Document) -> None:
+    for node in document.descendants:
         if isinstance(node, turbohtml.Element):
             node.xpath_path()
+
+
+def _last_path_element(text: str) -> turbohtml.Element:
+    return turbohtml.parse(text).select("li")[-1]
+
+
+def _css_paths_after_class_edits(document: turbohtml.Document) -> None:
+    for node in document.select("li"):
+        node.attrs["class"] = "marked"
+        node.css_path()
 
 
 @functools.cache
@@ -907,11 +1038,11 @@ def _xslt_compiled(sheet: str, source: str) -> tuple[_Transform, turbohtml.Docum
     return _Transform(turbohtml.parse_xml(sheet)), turbohtml.parse_xml(source)
 
 
-def transform(case: tuple[str, str]) -> None:
+def transform(case: tuple[str, str]) -> str:
     """Apply a compiled XSLT 1.0 stylesheet to a parsed source document with turbohtml.transform."""
     sheet, source = case
     compiled, document = _xslt_compiled(sheet, source)
-    compiled(document)
+    return compiled(document)
 
 
 def transform_reuse(case: tuple[str, str]) -> None:
@@ -998,6 +1129,12 @@ def stream(text: str) -> None:
     parser.close()
 
 
+def _encoding_stream(data: bytes) -> None:
+    detector: Final = _EncodingDetector()
+    detector.feed(data)
+    detector.close()
+
+
 def encoding(data: bytes) -> None:
     """Detect a byte stream's character encoding with turbohtml's C sniffing pipeline."""
     _detect_encoding(data)
@@ -1012,6 +1149,29 @@ def decode(case: tuple[str, bytes]) -> None:
 def detect_language(text: str) -> None:
     """Detect a string's natural language with turbohtml's trigram scorer."""
     _detect_language(text)
+
+
+def _set_attributes(case: tuple[turbohtml.Element, tuple[str, ...]]) -> None:
+    attrs: Final = case[0].attrs
+    for name in case[1]:
+        attrs[name] = "after"
+
+
+def _attribute_tree(case: tuple[int, bool]) -> tuple[turbohtml.Element, tuple[str, ...]]:
+    root: Final = turbohtml.Element("div")
+    names: Final = tuple(f"data-{index}" for index in range(case[0]))
+    if case[1]:
+        for name in names:
+            root.attrs[name] = "before"
+    return root, names
+
+
+def _normalization_tree(case: tuple[int, str]) -> turbohtml.Element:
+    root: Final = turbohtml.Element("p")
+    if not case[1]:
+        root.append(turbohtml.Text("word"))
+    root.extend(turbohtml.Text(case[1]) for _ in range(case[0]))
+    return root
 
 
 def normalize(text: str) -> None:
@@ -1059,18 +1219,291 @@ def links_external(text: str) -> None:
     _extract_links(text, "https://www.example.co.uk/", external_only=True)
 
 
+def _node_equals(case: tuple[int, str]) -> bool:
+    left, right = _equality_pair(*case)
+    return left.equals(right)
+
+
+@functools.cache
+def _equality_pair(count: int, variant: str) -> tuple[turbohtml.Element, turbohtml.Element]:
+    if variant == "duplicates":
+        duplicates: Final = {
+            "".join(
+                letter.upper() if mask & (1 << index) else letter for index, letter in enumerate("abcdefghij")
+            ): "same"
+            for mask in range(count - 3)
+        }
+        anchors: Final = {"first": "1", "second": "2", "third": "3"}
+        return turbohtml.Element("div", anchors | duplicates), turbohtml.Element("div", duplicates | anchors)
+    left: Final = turbohtml.Element("div")
+    right: Final = turbohtml.Element("div")
+    right.attrs["data-seed"] = ""
+    del right.attrs["data-seed"]
+    names: Final = [f"data-{index}" for index in range(count)]
+    for name in names:
+        left.attrs[name] = "é水😀"
+    order: Final = names[count // 2 :] + names[: count // 2] if variant == "rotated" else names
+    for name in reversed(order) if variant == "reversed" else order:
+        right.attrs[name] = "é水😀"
+    if variant == "early-value":
+        right.attrs[names[0]] = "different"
+    elif variant == "late-value":
+        right.attrs[names[-1]] = "different"
+    elif variant == "disjoint":
+        del right.attrs[names[-1]]
+        right.attrs["data-missing"] = "é水😀"
+    return left, right
+
+
+def _radio_group_setup(case: tuple[int, int, int, str]) -> Callable[[], tuple[bool, ...]]:
+    padding, forms, repeats, mode = case
+    tag: Final = "section" if mode in {"document", "mutate"} else "form"
+    markup: Final = f"<{tag}>" + "<input type=radio name=choice>" * 16 + "<div></div>" * padding + f"</{tag}>"
+    document: Final = turbohtml.parse(markup * forms)
+    form: Final = cast("turbohtml.Element", document.children[0].children[-1].children[0])
+    radios: Final = [node for node in form.children if isinstance(node, turbohtml.Element) and node.tag == "input"]
+
+    def run() -> tuple[bool, ...]:
+        if mode in {"document", "select"}:
+            document.select("input")
+        for index in range(repeats):
+            if mode == "mutate":
+                form.append(turbohtml.Element("i"))
+                document.select("input")
+            radios[index % len(radios)].checked = True
+        return tuple(node.checked for node in radios)
+
+    return run
+
+
+def _run_radio_group(run: Callable[[], tuple[bool, ...]]) -> tuple[bool, ...]:
+    return run()
+
+
+def _range_boundary_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.extend(turbohtml.Element("i") for _ in range(count))
+    offset: Final = count if variant == "end" else 0
+
+    def run() -> None:
+        _Range(root, offset)
+
+    return run
+
+
+def _run_prepared(run: Callable[[], None]) -> None:
+    run()
+
+
+def _range_contained_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.extend(turbohtml.Element("i") for _ in range(count))
+    boundary: Final = _Range(root)
+    boundary.set_end(root, count)
+
+    def run() -> None:
+        if variant == "extract":
+            boundary.extract_contents()
+        else:
+            boundary.clone_contents()
+
+    return run
+
+
+def _range_partial_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.set_inner_html("<section>abcdef" + "<i></i>" * count + "</section>tail")
+    selected: Final = root.children[0].children[0]
+    boundary: Final = _Range(root)
+    boundary.set_start(root, 0)
+    boundary.set_end(selected, 3)
+
+    def run() -> None:
+        if variant == "extract":
+            boundary.extract_contents()
+        else:
+            boundary.clone_contents()
+
+    return run
+
+
+def _observe_registrations_setup(case: tuple[int, str]) -> Callable[[], None]:
+    count, variant = case
+    root: Final = turbohtml.Element("div")
+    root.set_inner_html("<div>" * 100 + "target" + "</div>" * 100 + "<span></span>" * count)
+    target: Final = root.select("div")[-1]
+    observer: Final = turbohtml.MutationObserver()
+    for watched in root.select("span"):
+        observer.observe(watched, child_list=variant == "wrong-kind", attributes=variant != "wrong-kind", subtree=True)
+    if variant == "match":
+        observer.observe(root, attributes=True, subtree=True)
+
+    def run() -> None:
+        target.attrs["data-change"] = "changed"
+        observer.take_records()
+
+    return run
+
+
+def _shadow_fallback_setup(case: tuple[int, str]) -> Callable[[], None]:
+    host: Final = turbohtml.Element("div")
+    shadow: Final = host.attach_shadow("open")
+    shadow.set_inner_html("<slot>" + "<slot>fallback</slot>" * case[0] + "</slot>")
+    first: Final = shadow.select("slot")[0]
+
+    def run() -> None:
+        first.assigned_nodes(flatten=True)
+
+    return run
+
+
+def _shadow_assignment_setup(case: tuple[int, str]) -> Callable[[], None]:
+    host: Final = turbohtml.Element("div")
+    host.set_inner_html("".join(f'<i slot="name-{index}">{index}</i>' for index in range(case[0])))
+    shadow: Final = host.attach_shadow("open")
+    shadow.set_inner_html("".join(f'<slot name="name-{index}">fallback</slot>' for index in range(case[0])))
+
+    def run() -> None:
+        _ = host.flattened_children
+
+    return run
+
+
+def _prune_shared_setup(case: tuple[int, int]) -> turbohtml.Element:
+    depth, matches = case
+    root: Final = turbohtml.Element("main")
+    root.set_inner_html("<section>" * depth + "<b>keep</b><i>drop</i>" * matches + "</section>" * depth)
+    return root
+
+
+def _prune_shared(root: turbohtml.Element) -> None:
+    root.prune("b")
+
+
+def _query_roots(case: tuple[int, str]) -> None:
+    _query_root_case(case).find("i")
+
+
+@functools.cache
+def _query_root_case(case: tuple[int, str]) -> _Query:
+    count, order = case
+    nodes = turbohtml.parse("<main>" + "<div><i>x</i></div>" * count + "</main>").select("div")
+    if order == "reversed":
+        nodes.reverse()
+    elif order == "shuffled":
+        nodes = nodes[::2] + nodes[1::2]
+    return _Query(nodes)
+
+
+def _query_closest(case: tuple[int, bool]) -> None:
+    _query_parents_case(case).closest("main")
+
+
+def _node_closest(case: tuple[int, bool]) -> None:
+    _query_parents_case(case)[0].closest("main")
+
+
+def _query_parents(case: tuple[int, bool]) -> None:
+    _query_parents_case(case).parent()
+
+
+@functools.cache
+def _query_parents_case(case: tuple[int, bool]) -> _Query:
+    count, shared = case
+    text: Final = "<main>" + "<p>x</p>" * count + "</main>" if shared else "<main><p>x</p></main>" * count
+    return _Query(text)("p")
+
+
+def _query_siblings(case: tuple[int, bool]) -> None:
+    _query_siblings_case(case).siblings()
+
+
+@functools.cache
+def _query_siblings_case(case: tuple[int, bool]) -> _Query:
+    count, all_selected = case
+    selected: Final = _Query("<main>" + "<p>x</p>" * count + "</main>")("p")
+    return selected if all_selected else selected.eq(0)
+
+
+def _form_data_fieldsets(text: str) -> list[tuple[str, str]]:
+    return _form_data_case(text).form_data()
+
+
+@functools.cache
+def _form_data_case(text: str) -> turbohtml.Element:
+    return turbohtml.parse(text).select("form")[0]
+
+
+def _query_root_groups(case: tuple[str, int]) -> _Query:
+    return _query_root_group_case(case).find("p")
+
+
+@functools.cache
+def _query_root_group_case(case: tuple[str, int]) -> _Query:
+    kind, count = case
+    if kind == "documents":
+        roots = [turbohtml.parse(f"<main><p>{index}</p></main>").select("main")[0] for index in range(count)]
+    else:
+        roots = turbohtml.parse("".join(f"<main><p>{index}</p></main>" for index in range(count))).select("main")
+        if kind == "detached":
+            for root in roots:
+                root.extract()
+    return _Query(roots)
+
+
 OPERATIONS: dict[str, tuple[object, str]] = {
+    "query-root-groups": (_query_root_groups, "turbohtml"),
+    "radio-group": (Mutating(_radio_group_setup, _run_radio_group), "turbohtml"),
+    "form-data-fieldsets": (_form_data_fieldsets, "turbohtml"),
+    "query-closest": (_query_closest, "turbohtml"),
+    "query-roots": (_query_roots, "turbohtml"),
+    "node-closest": (_node_closest, "turbohtml"),
+    "query-parents": (_query_parents, "turbohtml"),
+    "query-siblings": (_query_siblings, "turbohtml"),
+    "prune-shared": (Mutating(_prune_shared_setup, _prune_shared), "turbohtml"),
+    "shadow-assignment": (Mutating(_shadow_assignment_setup, _run_prepared), "turbohtml"),
+    "shadow-fallback": (Mutating(_shadow_fallback_setup, _run_prepared), "turbohtml"),
+    "observe-registrations": (Mutating(_observe_registrations_setup, _run_prepared), "turbohtml"),
+    "range-boundary": (Mutating(_range_boundary_setup, _run_prepared), "turbohtml"),
+    "range-contained": (Mutating(_range_contained_setup, _run_prepared), "turbohtml"),
+    "range-partial": (Mutating(_range_partial_setup, _run_prepared), "turbohtml"),
+    "node-equals": (_node_equals, "turbohtml"),
     "build": (build, "turbohtml"),
     "build-e": (build_e, "turbohtml"),
     "construct": (construct, "turbohtml"),
     "emit": (emit, "turbohtml"),
     "shadow": (shadow, "turbohtml"),
+    "shadow-slot": (_shadow_slot, "turbohtml"),
+    "startup": (startup, "turbohtml"),
     "parse": (parse, "turbohtml"),
+    "parse-formatting": (parse, "turbohtml"),
+    "parse-foster": (parse, "turbohtml"),
+    "parse-crlf": (parse, "turbohtml"),
+    "parse-nul": (parse, "turbohtml"),
+    "parse-afe": (parse, "turbohtml"),
+    "parse-scope": (parse, "turbohtml"),
     "parse-dense": (parse, "turbohtml"),
     "parse-xml": (parse_xml, "turbohtml"),
+    "parse-xml-attrs": (parse_xml, "turbohtml"),
+    "parse-xml-append": (parse_xml, "turbohtml"),
+    "parse-xml-values": (parse_xml, "turbohtml"),
+    "parse-xml-text": (parse_xml, "turbohtml"),
+    "parse-xml-prefixes": (parse_xml, "turbohtml"),
     "parse-xml-names": (parse_xml, "turbohtml"),
     "validate": (validate, "turbohtml"),
     "validate-rng": (validate_rng, "turbohtml"),
+    "validate-rng-reuse": (validate_rng, "turbohtml"),
+    "compile-rng-reuse": (compile_rng, "turbohtml"),
+    "validate-facets": (validate, "turbohtml"),
+    "validate-attributes": (validate, "turbohtml"),
+    "validate-numeric-facets": (validate, "turbohtml"),
+    "compile-facets": (_XMLSchema, "turbohtml"),
+    "validate-pattern-reuse": (validate, "turbohtml"),
+    "compile-pattern": (_XMLSchema, "turbohtml"),
+    "validate-pattern": (validate, "turbohtml"),
     "compile-rng": (compile_rng, "turbohtml"),
     "parse-scripting": (parse_scripting, "turbohtml"),
     "parse-locations": (parse_locations, "turbohtml"),
@@ -1079,11 +1512,33 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "escape": (escape, "turbohtml"),
     "unescape": (unescape, "turbohtml"),
     "tokenize": (tokenize, "turbohtml"),
+    "html-options": (Mutating(_render_options_setup, _render_options), "turbohtml"),
+    "text-options": (Mutating(_render_options_setup, _render_options), "turbohtml"),
+    "canonical-options": (Mutating(_render_options_setup, _render_options), "turbohtml"),
+    "token-attributes": (Mutating(_token_attribute_setup, _token_attributes), "turbohtml"),
+    "tokenize-attributes": (_tokenize_attributes, "turbohtml"),
     "find": (find, "turbohtml"),
     "find-cold": (Mutating(_find_cold_setup, _find_cold), "turbohtml"),
     "select": (select, "turbohtml"),
     "select-has": (select_has, "turbohtml"),
+    "select-nth": (_select_scaling, "turbohtml"),
+    "xpath-wide": (_xpath_scaling, "turbohtml"),
+    "xpath-distinct": (_xpath_scaling, "turbohtml"),
+    "xpath-set": (_xpath_scaling, "turbohtml"),
+    "xpath-compare": (_xpath_scaling, "turbohtml"),
+    "xpath-translate": (_xpath_scaling, "turbohtml"),
+    "xpath-replace": (_xpath_replace, "turbohtml"),
+    "xpath-concat": (_xpath_scaling, "turbohtml"),
+    "xpath-id-nodes": (_xpath_scaling, "turbohtml"),
+    "xpath-order": (_xpath_scaling, "turbohtml"),
+    "computed-style-deep": (computed_style, "turbohtml"),
     "computed-style": (computed_style, "turbohtml"),
+    "computed-style-selectors": (computed_style, "turbohtml"),
+    "computed-style-selectors-reverse": (_computed_style_reverse, "turbohtml"),
+    "computed-style-filter": (computed_style, "turbohtml"),
+    "computed-style-filter-cold": (_computed_style_first, "turbohtml"),
+    "computed-style-specificity": (computed_style, "turbohtml"),
+    "computed-style-specificity-cold": (_computed_style_first, "turbohtml"),
     "computed-style-dense": (computed_style, "turbohtml"),
     "match": (match, "turbohtml"),
     "find-text": (find_text, "turbohtml"),
@@ -1108,6 +1563,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "conformance": (conformance, "turbohtml"),
     "serialize-xml": (serialize_xml, "turbohtml"),
     "canonicalize": (canonicalize, "turbohtml"),
+    "canonicalize-attrs": (canonicalize, "turbohtml"),
     "canonicalize-deep": (canonicalize, "turbohtml"),
     "lossless-serialize": (Mutating(_parse_source_locations, lossless_serialize), "turbohtml"),
     "minify": (minify, "turbohtml"),
@@ -1128,6 +1584,9 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "socialcard": (socialcard, "turbohtml"),
     "structured": (structured, "turbohtml"),
     "microdata": (microdata, "turbohtml"),
+    "microdata-wide": (microdata, "turbohtml"),
+    "microdata-empty-scope": (microdata, "turbohtml"),
+    "structured-empty": (structured, "turbohtml"),
     "microdata-itemref": (microdata, "turbohtml"),
     "syndication": (syndication, "turbohtml"),
     "sanitize": (sanitize, "turbohtml"),
@@ -1135,6 +1594,7 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "sanitize-named-props": (sanitize_named_props, "turbohtml"),
     "sanitize-report": (sanitize_report, "turbohtml"),
     "sanitize-node": (Mutating(turbohtml.parse_fragment, sanitize_node), "turbohtml"),
+    "sanitize-attributes": (sanitize_attributes, "turbohtml"),
     "sanitize-styles": (sanitize_styles, "turbohtml"),
     "sanitize-transform": (sanitize_transform, "turbohtml"),
     "sanitize-custom-elements": (sanitize_custom_elements, "turbohtml"),
@@ -1149,14 +1609,22 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "phone-parse": (phone_parse, "turbohtml"),
     "phone-format": (phone_format, "turbohtml"),
     "normalize": (normalize, "turbohtml"),
+    "normalize-dom": (Mutating(_normalization_tree, turbohtml.Element.normalize), "turbohtml"),
+    "attribute-grow": (Mutating(_attribute_tree, _set_attributes), "turbohtml"),
+    "normalize-marks": (normalize, "turbohtml"),
     "escape-identifier": (escape_identifier, "turbohtml"),
     "idna": (idna, "turbohtml"),
     "markdown": (markdown, "turbohtml"),
+    "markdown-wrap": (markdown_wrap, "turbohtml"),
     "markdown-google": (markdown_google, "turbohtml"),
     "tables": (tables, "turbohtml"),
     "tables-wide": (tables, "turbohtml"),
+    "tables-spans": (tables, "turbohtml"),
     "article": (article, "turbohtml"),
+    "article-wide": (article, "turbohtml"),
+    "article-deep": (article, "turbohtml"),
     "boilerplate": (boilerplate, "turbohtml"),
+    "date-tally": (date, "turbohtml"),
     "date": (date, "turbohtml"),
     "text-render": (text_render, "turbohtml"),
     "text-collapsed": (text_collapsed, "turbohtml"),
@@ -1167,26 +1635,52 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "extract-url": (extract_url, "turbohtml"),
     "htmlparser": (htmlparser, "turbohtml"),
     "sax": (sax, "turbohtml"),
+    "sax-records": (_sax_records, "turbohtml"),
+    "sax-records-callback": (sax, "turbohtml"),
     "treebuild": (treebuild, "turbohtml"),
     "rewrite": (rewrite, "turbohtml"),
     "rewrite-attributes": (rewrite_attributes, "turbohtml"),
     "path": (css_path, "turbohtml"),
     "path-xpath": (xpath_path, "turbohtml"),
+    "path-wide": (css_path, "turbohtml"),
+    "path-xpath-wide": (xpath_path, "turbohtml"),
+    "path-cold": (Mutating(turbohtml.parse, _css_paths), "turbohtml"),
+    "path-xpath-cold": (Mutating(turbohtml.parse, _xpath_paths), "turbohtml"),
+    "path-one-cold": (Mutating(_last_path_element, turbohtml.Element.css_path), "turbohtml"),
+    "path-xpath-one-cold": (Mutating(_last_path_element, turbohtml.Element.xpath_path), "turbohtml"),
+    "path-class-edit": (Mutating(turbohtml.parse, _css_paths_after_class_edits), "turbohtml"),
     "translate": (translate, "turbohtml"),
     "specificity": (specificity, "turbohtml"),
     "xpath": (xpath, "turbohtml"),
     "xpath-id": (xpath_id, "turbohtml"),
     "transform": (transform, "turbohtml"),
     "transform-compile": (transform_compile, "turbohtml"),
+    "transform-names-compile": (transform_compile, "turbohtml"),
     "transform-reuse": (transform_reuse, "turbohtml"),
     "transform-sort": (transform, "turbohtml"),
     "transform-dense": (transform, "turbohtml"),
+    "transform-number": (transform, "turbohtml"),
+    "transform-rules": (transform, "turbohtml"),
+    "transform-names": (transform, "turbohtml"),
     "minify-css": (minify_css, "turbohtml"),
+    "minify-css-conflicts": (minify_css, "turbohtml"),
+    "minify-css-merges": (minify_css, "turbohtml"),
     "minify-js": (minify_js, "turbohtml"),
+    "minify-js-integers": (minify_js, "turbohtml"),
+    "minify-js-sequences": (minify_js, "turbohtml"),
+    "minify-js-guards": (minify_js, "turbohtml"),
+    "minify-js-propagation": (minify_js, "turbohtml"),
+    "minify-js-single-use": (minify_js, "turbohtml"),
+    "minify-js-unlink": (minify_js, "turbohtml"),
+    "minify-js-unused-declarations": (minify_js, "turbohtml"),
+    "minify-js-var-initialization": (minify_js, "turbohtml"),
     "stream": (stream, "turbohtml"),
+    "encoding-result": (encoding, "turbohtml"),
+    "encoding-result-stream": (_encoding_stream, "turbohtml"),
     "encoding": (encoding, "turbohtml"),
     "decode": (decode, "turbohtml"),
     "detect-language": (detect_language, "turbohtml"),
+    "detect-language-long": (detect_language, "turbohtml"),
     "urls-clean": (urls_clean, "turbohtml"),
     "links-filter": (links_filter, "turbohtml"),
     "links-external": (links_external, "turbohtml"),

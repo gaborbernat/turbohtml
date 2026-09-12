@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import re
+from typing import Final
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Comment, UnicodeDammit
@@ -280,7 +281,38 @@ def _strip_comments(soup: BeautifulSoup) -> None:
         comment.extract()
 
 
+def _node_equals(case: tuple[int, str]) -> bool:
+    left, right = _equality_pair(*case)
+    return left == right
+
+
+@functools.cache
+def _equality_pair(count: int, variant: str) -> tuple[Tag, Tag]:
+    if variant == "duplicates":
+        message: Final = "constructor does not normalize case variants to duplicate attribute names"
+        raise ValueError(message)
+    left: Final = BeautifulSoup("", "html.parser").new_tag("div")
+    right: Final = BeautifulSoup("", "html.parser").new_tag("div")
+    right.attrs["data-seed"] = ""
+    del right.attrs["data-seed"]
+    names: Final = [f"data-{index}" for index in range(count)]
+    for name in names:
+        left.attrs[name] = "é水😀"
+    order: Final = names[count // 2 :] + names[: count // 2] if variant == "rotated" else names
+    for name in reversed(order) if variant == "reversed" else order:
+        right.attrs[name] = "é水😀"
+    if variant == "early-value":
+        right.attrs[names[0]] = "different"
+    elif variant == "late-value":
+        right.attrs[names[-1]] = "different"
+    elif variant == "disjoint":
+        del right.attrs[names[-1]]
+        right.attrs["data-missing"] = "é水😀"
+    return left, right
+
+
 OPERATIONS = {
+    "node-equals": (_node_equals, "BeautifulSoup (html.parser)"),
     "collapse-whitespace": (Mutating(_fresh, _collapse_whitespace), "BeautifulSoup (html.parser)"),
     "transform-tree": (Mutating(_fresh, _transform_tree), "BeautifulSoup (html.parser)"),
     "serialize-inner": (_serialize_inner, "BeautifulSoup (html.parser)"),
@@ -289,6 +321,12 @@ OPERATIONS = {
     "encode-inner-indent": (_encode_inner_indent, "BeautifulSoup (html.parser)"),
     "strip-comments": (Mutating(_fresh, _strip_comments), "BeautifulSoup (html.parser)"),
     "parse": (parse, "BeautifulSoup (html.parser)"),
+    "parse-formatting": (parse, "BeautifulSoup (html.parser)"),
+    "parse-foster": (parse, "BeautifulSoup (html.parser)"),
+    "parse-crlf": (parse, "BeautifulSoup (html.parser)"),
+    "parse-nul": (parse, "BeautifulSoup (html.parser)"),
+    "parse-afe": (parse, "BeautifulSoup (html.parser)"),
+    "parse-scope": (parse, "BeautifulSoup (html.parser)"),
     "build": (build, "BeautifulSoup (html.parser)"),
     "construct": (construct, "BeautifulSoup (html.parser)"),
     "emit": (emit, "BeautifulSoup (html.parser)"),
@@ -305,6 +343,7 @@ OPERATIONS = {
     "strip-tags": (strip_tags, "BeautifulSoup (html.parser)"),
     "rewrite": (rewrite, "BeautifulSoup (html.parser)"),
     "encoding": (encoding, "BeautifulSoup (html.parser)"),
+    "encoding-result": (encoding, "BeautifulSoup (html.parser)"),
     "edit": (Mutating(_fresh, edit), "BeautifulSoup (html.parser)"),
     "set-html": (Mutating(_fresh, set_html), "BeautifulSoup (html.parser)"),
     "set-text": (Mutating(_fresh, set_text), "BeautifulSoup (html.parser)"),

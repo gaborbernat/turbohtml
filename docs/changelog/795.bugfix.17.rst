@@ -1,0 +1,1 @@
+Avoid crashes and stale results when selector-cache cleanup callbacks move or modify the queried node.

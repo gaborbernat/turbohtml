@@ -7,34 +7,49 @@
   "metrics": [],
   "rows": [
     [
-      "rows (10 rows)",
+      "extract table grids — rows (10 rows)",
       9.430758169652146e-06,
       0.000575312147399624
     ],
     [
-      "records (10 rows)",
+      "extract table grids — records (10 rows)",
       9.617418512538242e-06,
       0.0007507434892583357
     ],
     [
-      "rows (100 rows)",
+      "extract table grids — rows (100 rows)",
       6.778334891066606e-05,
       0.0017844444995110582
     ],
     [
-      "records (100 rows)",
+      "extract table grids — records (100 rows)",
       7.699985258587579e-05,
       0.0021928724224835605
     ],
     [
-      "rows (1000 rows)",
+      "extract table grids — rows (1000 rows)",
       0.0007329701337918474,
       0.012315525197967267
     ],
     [
-      "records (1000 rows)",
+      "extract table grids — records (1000 rows)",
       0.0007686716439062972,
       0.013339182718482334
+    ],
+    [
+      "extract repeated table span text — rows / 128 columns / 4096 text characters",
+      3.769692189337093e-06,
+      "omits the header row"
+    ],
+    [
+      "extract repeated table span text — rows / 1 columns / 16 text characters",
+      1.2319756304002283e-06,
+      "omits the header row"
+    ],
+    [
+      "extract repeated table span text — records / 128 columns / 4096 text characters",
+      4.297431860796527e-06,
+      "renames duplicate headers"
     ]
   ],
   "spread": [
@@ -67,7 +82,26 @@
       null,
       0.11857860115991552,
       0.09468311152836278
+    ],
+    [
+      null,
+      0.017716170978074992,
+      null
+    ],
+    [
+      null,
+      0.01628643728875579,
+      null
+    ],
+    [
+      null,
+      0.010979440957128606,
+      null
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "6": "read_html consumes header rows and renames duplicate columns; these outputs differ",
+    "7": "read_html consumes header rows and renames duplicate columns; these outputs differ",
+    "8": "read_html consumes header rows and renames duplicate columns; these outputs differ"
+  }
 }

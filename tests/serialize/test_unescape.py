@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import html
+import json
 import random
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
 import turbohtml
 
-CASES = [
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from _pytest.mark.structures import ParameterSet
+
+CASES: Final = [
     pytest.param("no character references", "no character references", id="no-refs"),
     pytest.param("&\n&\t& &&", "&\n&\t& &&", id="bare-amp"),
     pytest.param("&0 &9 &a &0; &9; &a;", "&0 &9 &a &0; &9; &a;", id="amp-then-alnum"),
@@ -41,6 +49,24 @@ CASES = [
     pytest.param("&#x!", "&#x!", id="hex-non-digit-char"),
     pytest.param("&#x1F600;", "\U0001f600", id="numeric-astral-non-surrogate"),
 ]
+
+
+def _entity_cases() -> Iterator[ParameterSet]:
+    for filename in ("entities.test", "namedEntities.test", "numericEntities.test"):
+        for case in json.loads(
+            (Path(__file__).parents[1] / "html5lib-tests" / "tokenizer" / filename).read_text(encoding="utf-8")
+        )["tests"]:
+            if all(token[0] == "Character" for token in case["output"]):
+                yield pytest.param(
+                    case["input"],
+                    html.unescape(case["input"]),
+                    id=f"{filename.removesuffix('.test')}:{case['description']}",
+                )
+
+
+@pytest.mark.parametrize(("text", "expected"), tuple(_entity_cases()))
+def test_unescape_matches_html5lib(text: str, expected: str) -> None:
+    assert turbohtml.unescape(text) == expected
 
 
 @pytest.mark.parametrize(("text", "expected"), CASES)

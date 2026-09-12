@@ -99,6 +99,10 @@ typedef struct {
 } xml_nsdecl;
 
 typedef struct {
+    Py_ssize_t start, end, colon, declaration;
+} xml_attr_span;
+
+typedef struct {
     th_tree *tree;
     int kind;
     const void *data;
@@ -109,7 +113,7 @@ typedef struct {
     Py_ssize_t stack_len, stack_cap;
     xml_nsdecl *ns; /* in-scope prefix declarations */
     Py_ssize_t ns_len, ns_cap;
-    Py_ssize_t *attr_spans; /* flattened (start, end) name ranges of the current tag's attributes */
+    xml_attr_span *attr_spans;
     Py_ssize_t attr_spans_len, attr_spans_cap;
     Py_UCS4 *scratch; /* reusable buffer for entity-expanded text/attribute runs */
     Py_ssize_t scratch_len, scratch_cap;
@@ -509,6 +513,23 @@ static int consume_text(xml_parser *parser) {
     Py_ssize_t start = parser->pos;
     Py_ssize_t scan = start;
     int needs_build = 0;
+    if (parser->kind == PyUnicode_1BYTE_KIND) {
+        while (scan + 8 <= parser->length) {
+            uint64_t word;
+            memcpy(&word, (const uint8_t *)parser->data + scan, sizeof(word));
+            const uint64_t ones = UINT64_C(0x0101010101010101);
+            const uint64_t controls = word & UINT64_C(0xE0E0E0E0E0E0E0E0);
+            const uint64_t markup = word ^ (ones * '<');
+            const uint64_t reference = word ^ (ones * '&');
+            const uint64_t bracket = word ^ (ones * ']');
+            if ((((controls - ones) & ~controls) | ((markup - ones) & ~markup) | ((reference - ones) & ~reference) |
+                 ((bracket - ones) & ~bracket)) &
+                UINT64_C(0x8080808080808080)) {
+                break;
+            }
+            scan += 8;
+        }
+    }
     while (scan < parser->length && cp(parser, scan) != '<') {
         Py_UCS4 ch = cp(parser, scan);
         if (!is_xml_char(ch)) {
@@ -1001,6 +1022,36 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
     Py_UCS4 quote = cp(parser, parser->pos);
     parser->pos++; /* past the opening quote */
     parser->scratch_len = 0;
+    if (parser->kind == PyUnicode_1BYTE_KIND) {
+        const uint8_t *bytes = parser->data;
+        Py_ssize_t end = parser->pos;
+        while (end < parser->length && bytes[end] >= 0x20 && bytes[end] != quote && bytes[end] != '<' &&
+               bytes[end] != '&') {
+            end++;
+        }
+        const Py_ssize_t length = end - parser->pos;
+        if (length > parser->scratch_cap) {
+            size_t capacity, size;
+            const int fits =
+                th_grow_cap((size_t)length, (size_t)parser->scratch_cap, 64, sizeof(Py_UCS4), &capacity, &size);
+            if (!fits) {                  /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                parser->tree->failed = 1; /* GCOVR_EXCL_LINE */
+                return -1;                /* GCOVR_EXCL_LINE */
+            }
+            Py_UCS4 *grown = PyMem_Realloc(parser->scratch, size);
+            if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure */
+                parser->tree->failed = 1; /* GCOVR_EXCL_LINE */
+                return -1;                /* GCOVR_EXCL_LINE */
+            }
+            parser->scratch = grown;
+            parser->scratch_cap = (Py_ssize_t)capacity;
+        }
+        for (Py_ssize_t index = 0; index < length; index++) {
+            parser->scratch[index] = bytes[parser->pos + index];
+        }
+        parser->scratch_len = length;
+        parser->pos = end;
+    }
     while (parser->pos < parser->length && cp(parser, parser->pos) != quote) {
         Py_UCS4 ch = cp(parser, parser->pos);
         if (ch == '<') {
@@ -1050,13 +1101,13 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
         record(parser, "xml-duplicate-attribute", name_start);
         return -1;
     }
-    int stored = th_node_attr_set(parser->tree, element, name, u8_len, parser->scratch, parser->scratch_len, 1);
-    if (stored < 0) { /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on allocation */
+    int stored = th_node_attr_append(parser->tree, element, name, u8_len, parser->scratch, parser->scratch_len, 1);
+    if (stored < 0) { /* GCOVR_EXCL_BR_LINE: th_node_attr_append only fails on allocation */
         return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (parser->attr_spans_len == parser->attr_spans_cap) {
         Py_ssize_t cap = parser->attr_spans_cap ? parser->attr_spans_cap * 2 : 16;
-        Py_ssize_t *grown = PyMem_Realloc(parser->attr_spans, (size_t)cap * sizeof(Py_ssize_t));
+        xml_attr_span *grown = PyMem_Realloc(parser->attr_spans, (size_t)cap * sizeof(xml_attr_span));
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             return -1;                /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1064,8 +1115,7 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
         parser->attr_spans = grown;
         parser->attr_spans_cap = cap;
     }
-    parser->attr_spans[parser->attr_spans_len++] = name_start;
-    parser->attr_spans[parser->attr_spans_len++] = name_end;
+    parser->attr_spans[parser->attr_spans_len++] = (xml_attr_span){name_start, name_end, 0, -1};
     return consume_namespace_decl(parser, name_start, name_end, depth);
 }
 
@@ -1155,9 +1205,9 @@ static int consume_start_tag(xml_parser *parser) {
     if (check_qname_prefix(parser, name_start, name_end) < 0) {
         return -1;
     }
-    for (Py_ssize_t index = 0; index < parser->attr_spans_len; index += 2) {
-        Py_ssize_t attr_start = parser->attr_spans[index];
-        Py_ssize_t attr_end = parser->attr_spans[index + 1];
+    for (Py_ssize_t index = 0; index < parser->attr_spans_len; index++) {
+        Py_ssize_t attr_start = parser->attr_spans[index].start;
+        Py_ssize_t attr_end = parser->attr_spans[index].end;
         if (starts_with(parser, attr_start, "xmlns:") || name_equals(parser, attr_start, attr_end, "xmlns")) {
             continue; /* the declaration itself, not a prefix use */
         }
@@ -1165,31 +1215,31 @@ static int consume_start_tag(xml_parser *parser) {
             return -1;
         }
     }
-    /* expanded-name uniqueness: no two attributes may share a local name and namespace URI,
-       even through different prefixes bound to the same URI (Namespaces in XML 1.0 5.3) */
-    for (Py_ssize_t index = 0; index < parser->attr_spans_len; index += 2) {
-        Py_ssize_t colon = 0;
-        Py_ssize_t decl = attr_ns_index(parser, parser->attr_spans[index], parser->attr_spans[index + 1], &colon);
-        if (decl < 0) {
+    for (Py_ssize_t index = 0; index < parser->attr_spans_len; index++) {
+        xml_attr_span *span = &parser->attr_spans[index];
+        span->declaration = attr_ns_index(parser, span->start, span->end, &span->colon);
+    }
+    /* Resolve after declarations and prefix validation to preserve error precedence. */
+    for (Py_ssize_t index = 0; index < parser->attr_spans_len; index++) {
+        const xml_attr_span *span = &parser->attr_spans[index];
+        if (span->declaration < 0) {
             continue;
         }
-        Py_ssize_t local_start = colon + 1;
-        Py_ssize_t local_len = parser->attr_spans[index + 1] - local_start;
-        const xml_nsdecl *decl_ns = &parser->ns[decl];
-        for (Py_ssize_t other = 0; other < index; other += 2) {
-            Py_ssize_t other_colon = 0;
-            Py_ssize_t other_decl =
-                attr_ns_index(parser, parser->attr_spans[other], parser->attr_spans[other + 1], &other_colon);
-            if (other_decl < 0) {
+        const Py_ssize_t local_start = span->colon + 1;
+        const Py_ssize_t local_len = span->end - local_start;
+        const xml_nsdecl *decl_ns = &parser->ns[span->declaration];
+        for (Py_ssize_t other = 0; other < index; other++) {
+            const xml_attr_span *previous = &parser->attr_spans[other];
+            if (previous->declaration < 0) {
                 continue;
             }
-            Py_ssize_t other_local_len = parser->attr_spans[other + 1] - (other_colon + 1);
-            const xml_nsdecl *other_ns = &parser->ns[other_decl];
-            int same_uri = decl_ns->uri_len == other_ns->uri_len &&
-                           memcmp(decl_ns->uri, other_ns->uri, (size_t)decl_ns->uri_len * sizeof(Py_UCS4)) == 0;
+            const Py_ssize_t other_local_len = previous->end - (previous->colon + 1);
+            const xml_nsdecl *other_ns = &parser->ns[previous->declaration];
+            const int same_uri = decl_ns->uri_len == other_ns->uri_len &&
+                                 memcmp(decl_ns->uri, other_ns->uri, (size_t)decl_ns->uri_len * sizeof(Py_UCS4)) == 0;
             if (same_uri && local_len == other_local_len &&
-                local_names_equal(parser, local_start, other_colon + 1, local_len)) {
-                record(parser, "xml-duplicate-attribute", parser->attr_spans[index]);
+                local_names_equal(parser, local_start, previous->colon + 1, local_len)) {
+                record(parser, "xml-duplicate-attribute", span->start);
                 return -1;
             }
         }

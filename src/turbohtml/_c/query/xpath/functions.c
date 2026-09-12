@@ -172,27 +172,104 @@ static int normalize_space(const Py_UCS4 *text, Py_ssize_t len, xp_result *out) 
     return 0;
 }
 
+typedef struct {
+    Py_UCS4 character;
+    Py_ssize_t position;
+} translate_entry;
+
+static size_t translate_slot(const translate_entry *entries, size_t mask, Py_UCS4 character);
+
 static int translate(const Py_UCS4 *text, Py_ssize_t slen, const Py_UCS4 *from, Py_ssize_t flen, const Py_UCS4 *to,
                      Py_ssize_t tlen, xp_result *out) {
     Py_UCS4 *buf = PyMem_Malloc((size_t)slen * sizeof(Py_UCS4));
     if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;     /* GCOVR_EXCL_LINE */
     }
+    if (slen < 64) {
+        Py_ssize_t write_pos = 0;
+        for (Py_ssize_t index = 0; index < slen; index++) {
+            Py_ssize_t from_index = 0;
+            while (from_index < flen && from[from_index] != text[index]) {
+                from_index++;
+            }
+            if (from_index >= flen) {
+                buf[write_pos++] = text[index];
+            } else if (from_index < tlen) {
+                buf[write_pos++] = to[from_index];
+            }
+        }
+        result_string(out, buf, write_pos);
+        return 0;
+    }
+    translate_entry *entries = NULL;
+    size_t capacity = 0;
+    size_t scan_budget = (size_t)flen * 2;
     Py_ssize_t write_pos = 0;
-    for (Py_ssize_t index = 0; index < slen; index++) {
+    Py_ssize_t index = 0;
+    Py_UCS4 previous = 0xFFFFFFFF;
+    Py_UCS4 replacement = 0;
+    int emit_previous = 0;
+    for (; index < slen; index++) {
+        if (text[index] == previous) {
+            if (emit_previous) {
+                buf[write_pos++] = replacement;
+            }
+            continue;
+        }
         Py_ssize_t from_index = 0;
         while (from_index < flen && from[from_index] != text[index]) {
             from_index++;
         }
-        if (from_index >= flen) {
-            buf[write_pos++] = text[index];
-        } else if (from_index < tlen) {
-            buf[write_pos++] = to[from_index];
+        if (from_index >= 8 && flen >= 16 && slen - index > 16) {
+            if ((size_t)from_index < scan_budget) {
+                scan_budget -= (size_t)from_index;
+            } else {
+                size_t bytes;
+                const int fits = th_grow_cap((size_t)flen * 2, 0, 32, sizeof(*entries), &capacity, &bytes);
+                if (!fits) {         /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+                    PyMem_Free(buf); /* GCOVR_EXCL_LINE: allocation size overflow */
+                    return -1;       /* GCOVR_EXCL_LINE: allocation size overflow */
+                }
+                entries = PyMem_Calloc(1, bytes);
+                if (entries == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    PyMem_Free(buf);   /* GCOVR_EXCL_LINE: allocation failure */
+                    return -1;         /* GCOVR_EXCL_LINE: allocation failure */
+                }
+                for (Py_ssize_t position = 0; position < flen; position++) {
+                    const size_t slot = translate_slot(entries, capacity - 1, from[position]);
+                    if (entries[slot].position == 0) {
+                        entries[slot] = (translate_entry){from[position], position + 1};
+                    }
+                }
+                break;
+            }
         }
-        /* else: in `from` but past the end of `to`, so the character is removed */
+        previous = text[index];
+        emit_previous = from_index >= flen || from_index < tlen;
+        if (emit_previous) {
+            replacement = from_index >= flen ? text[index] : to[from_index];
+            buf[write_pos++] = replacement;
+        }
     }
+    for (; index < slen; index++) {
+        const Py_ssize_t position = entries[translate_slot(entries, capacity - 1, text[index])].position;
+        if (position == 0) {
+            buf[write_pos++] = text[index];
+        } else if (position <= tlen) {
+            buf[write_pos++] = to[position - 1];
+        }
+    }
+    PyMem_Free(entries);
     result_string(out, buf, write_pos);
     return 0;
+}
+
+static size_t translate_slot(const translate_entry *entries, size_t mask, Py_UCS4 character) {
+    size_t slot = ((size_t)character * 2654435761u) & mask;
+    while (entries[slot].position != 0 && entries[slot].character != character) {
+        slot = (slot + 1) & mask;
+    }
+    return slot;
 }
 
 static int substring(struct th_tree *tree, xp_result *args, int argc, xp_result *out) {
@@ -417,6 +494,7 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
     out->kind = XP_NODESET;
     Py_UCS4 *list = NULL;
     Py_ssize_t list_len = 0;
+    size_t capacity = 0;
     if (arg->kind == XP_NODESET) {
         for (Py_ssize_t index = 0; index < arg->nodes.len; index++) {
             Py_ssize_t each;
@@ -425,13 +503,30 @@ static int eval_id(xp_ctx *ctx, xp_result *arg, xp_result *out) {
                 PyMem_Free(list); /* GCOVR_EXCL_LINE */
                 return -1;        /* GCOVR_EXCL_LINE */
             }
-            Py_UCS4 *grown = PyMem_Realloc(list, (size_t)(list_len + each + 1) * sizeof(Py_UCS4));
-            if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
-                PyMem_Free(text); /* GCOVR_EXCL_LINE */
-                PyMem_Free(list); /* GCOVR_EXCL_LINE */
-                return -1;        /* GCOVR_EXCL_LINE */
+            const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
+            if ((size_t)each + 1 > limit - (size_t)list_len) { /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(text);                              /* GCOVR_EXCL_LINE */
+                PyMem_Free(list);                              /* GCOVR_EXCL_LINE */
+                return -1;                                     /* GCOVR_EXCL_LINE */
             }
-            list = grown;
+            const size_t needed = (size_t)list_len + (size_t)each + 1;
+            if (needed > capacity) {
+                size_t bytes;
+                /* GCOVR_EXCL_BR_START: alloc */
+                if (!th_grow_cap(needed, capacity, 64, sizeof(Py_UCS4), &capacity, &bytes)) {
+                    PyMem_Free(text); /* GCOVR_EXCL_LINE */
+                    PyMem_Free(list); /* GCOVR_EXCL_LINE */
+                    return -1;        /* GCOVR_EXCL_LINE */
+                }
+                /* GCOVR_EXCL_BR_STOP */
+                Py_UCS4 *grown = PyMem_Realloc(list, bytes);
+                if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+                    PyMem_Free(text); /* GCOVR_EXCL_LINE */
+                    PyMem_Free(list); /* GCOVR_EXCL_LINE */
+                    return -1;        /* GCOVR_EXCL_LINE */
+                }
+                list = grown;
+            }
             list[list_len++] = ' ';
             memcpy(list + list_len, text, (size_t)each * sizeof(Py_UCS4));
             list_len += each;
@@ -501,7 +596,13 @@ static PyObject *exslt_pattern(struct th_tree *tree, xp_result *pattern_arg, xp_
             if (letter == 'g') {
                 *global = 1;
             } else if (letter == 'i' || letter == 'm' || letter == 's' || letter == 'x') {
-                inline_flags[flag_count++] = letter;
+                Py_ssize_t flag_index = 0;
+                while (flag_index < flag_count && inline_flags[flag_index] != letter) {
+                    flag_index++;
+                }
+                if (flag_index == flag_count) {
+                    inline_flags[flag_count++] = letter;
+                }
             }
         }
         PyMem_Free(flags);
@@ -794,16 +895,49 @@ static int fn_replace(struct th_tree *tree, xp_result *args, int argc, xp_result
     return 0;
 }
 
-/* The EXSLT set functions (set:). */
-/* The node-set arguments arrive in document order and duplicate-free (every
-   node-set the engine builds is sorted_unique), so the results below preserve that
-   order by copying in place and never need a re-sort. */
+typedef struct {
+    const xp_nodeset *nodes;
+    xp_item *slots;
+    size_t mask;
+} xp_membership;
 
-/* Whether the same node-set member -- the identical node pointer and attribute
-   index -- appears anywhere in `other`. */
-static int item_in_nodeset(const xp_nodeset *other, xp_item probe) {
-    for (Py_ssize_t index = 0; index < other->len; index++) {
-        if (other->items[index].node == probe.node && other->items[index].attr == probe.attr) {
+static size_t membership_slot(const xp_membership *table, xp_item item) {
+    const uintptr_t address = (uintptr_t)item.node;
+    size_t slot = ((address >> 4) ^ (address >> 13) ^ (size_t)item.attr) & table->mask;
+    while (table->slots[slot].node != NULL &&
+           (table->slots[slot].node != item.node || table->slots[slot].attr != item.attr)) {
+        slot = (slot + 1) & table->mask;
+    }
+    return slot;
+}
+
+static int membership_build(xp_membership *table, Py_ssize_t probes) {
+    if (probes < 16 || table->nodes->len < 16) {
+        return 0;
+    }
+    size_t capacity, bytes;
+    const int fits = th_grow_cap((size_t)table->nodes->len * 2, 0, 32, sizeof(xp_item), &capacity, &bytes);
+    if (!fits) {   /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+        return -1; /* GCOVR_EXCL_LINE: allocation size overflow */
+    }
+    table->slots = PyMem_Calloc(1, bytes);
+    if (table->slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;              /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    table->mask = capacity - 1;
+    for (Py_ssize_t index = 0; index < table->nodes->len; index++) {
+        const xp_item item = table->nodes->items[index];
+        table->slots[membership_slot(table, item)] = item;
+    }
+    return 0;
+}
+
+static int item_in_nodeset(const xp_membership *table, xp_item probe) {
+    if (table->slots != NULL) {
+        return table->slots[membership_slot(table, probe)].node != NULL;
+    }
+    for (Py_ssize_t index = 0; index < table->nodes->len; index++) {
+        if (table->nodes->items[index].node == probe.node && table->nodes->items[index].attr == probe.attr) {
             return 1;
         }
     }
@@ -817,16 +951,20 @@ static int set_filter(const xp_result *args, int want_present, xp_result *out) {
     memset(out, 0, sizeof(*out));
     out->kind = XP_NODESET;
     const xp_nodeset *first = &args[0].nodes;
-    const xp_nodeset *second = &args[1].nodes;
+    xp_membership table = {&args[1].nodes, NULL, 0};
+    if (membership_build(&table, first->len) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                  /* GCOVR_EXCL_LINE: allocation failure */
+    }
     int rc = 0;
     for (Py_ssize_t index = 0; index < first->len; index++) {
         xp_item member = first->items[index];
-        if (item_in_nodeset(second, member) == want_present) {
+        if (item_in_nodeset(&table, member) == want_present) {
             if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 rc = -1;                                              /* GCOVR_EXCL_LINE */
             } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         }
     }
+    PyMem_Free(table.slots);
     if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
         xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
     } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
@@ -835,16 +973,26 @@ static int set_filter(const xp_result *args, int want_present, xp_result *out) {
 
 /* set:has-same-node: true when any member of the first node-set is also a member of
    the second. */
-static void set_has_same_node(const xp_result *args, xp_result *out) {
+static int set_has_same_node(const xp_result *args, xp_result *out) {
     const xp_nodeset *first = &args[0].nodes;
-    const xp_nodeset *second = &args[1].nodes;
-    for (Py_ssize_t index = 0; index < first->len; index++) {
-        if (item_in_nodeset(second, first->items[index])) {
+    xp_membership table = {&args[1].nodes, NULL, 0};
+    if (first->len > 0 && item_in_nodeset(&table, first->items[0])) {
+        result_bool(out, 1);
+        return 0;
+    }
+    if (membership_build(&table, first->len) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                  /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    for (Py_ssize_t index = 1; index < first->len; index++) {
+        if (item_in_nodeset(&table, first->items[index])) {
+            PyMem_Free(table.slots);
             result_bool(out, 1);
-            return;
+            return 0;
         }
     }
+    PyMem_Free(table.slots);
     result_bool(out, 0);
+    return 0;
 }
 
 /* set:distinct: the first member, in document order, of every distinct string-value. */
@@ -852,6 +1000,16 @@ static int set_distinct(struct th_tree *tree, const xp_result *arg, xp_result *o
     memset(out, 0, sizeof(*out));
     out->kind = XP_NODESET;
     const xp_nodeset *nodes = &arg->nodes;
+    if (nodes->len == 0) {
+        return 0;
+    }
+    if (nodes->len == 1) {
+        return ns_push(&out->nodes, nodes->items[0].node, nodes->items[0].attr);
+    }
+    PyObject *seen = PySet_New(NULL);
+    if (seen == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;      /* GCOVR_EXCL_LINE: allocation failure */
+    }
     int rc = 0;
     for (Py_ssize_t index = 0; index < nodes->len; index++) {
         Py_ssize_t candidate_len;
@@ -860,34 +1018,27 @@ static int set_distinct(struct th_tree *tree, const xp_result *arg, xp_result *o
             rc = -1;             /* GCOVR_EXCL_LINE */
             break;               /* GCOVR_EXCL_LINE */
         }
-        int duplicate = 0;
-        for (Py_ssize_t earlier = 0; earlier < index; earlier++) {
-            Py_ssize_t earlier_len;
-            Py_UCS4 *earlier_text = item_string(tree, nodes->items[earlier], &earlier_len);
-            if (earlier_text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
-                rc = -1;                /* GCOVR_EXCL_LINE */
-                break;                  /* GCOVR_EXCL_LINE */
-            }
-            if (earlier_len == candidate_len &&
-                memcmp(earlier_text, candidate, (size_t)candidate_len * sizeof(Py_UCS4)) == 0) {
-                duplicate = 1;
-            }
-            PyMem_Free(earlier_text);
-            if (duplicate) {
-                break;
-            }
-        }
+        PyObject *text = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, candidate, candidate_len);
         PyMem_Free(candidate);
+        if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = -1;        /* GCOVR_EXCL_LINE: allocation failure */
+            break;          /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        const Py_ssize_t previous = PySet_GET_SIZE(seen);
+        rc = PySet_Add(seen, text);
+        Py_DECREF(text);
         if (rc < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             break;    /* GCOVR_EXCL_LINE */
         }
-        if (!duplicate) {
+        if (PySet_GET_SIZE(seen) != previous) {
             xp_item member = nodes->items[index];
             if (ns_push(&out->nodes, member.node, member.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 rc = -1;                                              /* GCOVR_EXCL_LINE */
+                break;                                                /* GCOVR_EXCL_LINE: allocation failure */
             } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         }
     }
+    Py_DECREF(seen);
     if (rc < 0) {                     /* GCOVR_EXCL_BR_LINE: alloc */
         xp_nodeset_free(&out->nodes); /* GCOVR_EXCL_LINE */
     } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
@@ -943,6 +1094,7 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
     const xp_nodeset *nodes = &arg->nodes;
     Py_UCS4 *buf = NULL;
     Py_ssize_t total = 0;
+    size_t capacity = 0;
     for (Py_ssize_t index = 0; index < nodes->len; index++) {
         Py_ssize_t part_len;
         Py_UCS4 *part = item_string(tree, nodes->items[index], &part_len);
@@ -950,14 +1102,33 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
             PyMem_Free(buf); /* GCOVR_EXCL_LINE */
             return -1;       /* GCOVR_EXCL_LINE */
         }
-        Py_UCS4 *grown = PyMem_Realloc(buf, (size_t)(total + part_len) * sizeof(Py_UCS4));
-        if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
-            PyMem_Free(part); /* GCOVR_EXCL_LINE */
-            PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
-            return -1;        /* GCOVR_EXCL_LINE */
+        const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
+        if ((size_t)part_len > limit - (size_t)total) { /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(part);                           /* GCOVR_EXCL_LINE */
+            PyMem_Free(buf);                            /* GCOVR_EXCL_LINE */
+            return -1;                                  /* GCOVR_EXCL_LINE */
         }
-        buf = grown;
-        memcpy(buf + total, part, (size_t)part_len * sizeof(Py_UCS4));
+        const size_t needed = (size_t)total + (size_t)part_len;
+        if (needed > capacity) {
+            size_t bytes;
+            /* GCOVR_EXCL_BR_START: allocation sizes cannot reach the overflow limit */
+            if (!th_grow_cap(needed, capacity, 64, sizeof(Py_UCS4), &capacity, &bytes)) {
+                PyMem_Free(part); /* GCOVR_EXCL_LINE */
+                PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
+                return -1;        /* GCOVR_EXCL_LINE */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+            Py_UCS4 *grown = PyMem_Realloc(buf, bytes);
+            if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(part); /* GCOVR_EXCL_LINE */
+                PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
+                return -1;        /* GCOVR_EXCL_LINE */
+            }
+            buf = grown;
+        }
+        if (part_len > 0) {
+            memcpy(buf + total, part, (size_t)part_len * sizeof(Py_UCS4));
+        }
         total += part_len;
         PyMem_Free(part);
     }
@@ -989,17 +1160,30 @@ static int str_replace(struct th_tree *tree, const xp_result *args, xp_result *o
     }
     Py_ssize_t count = 0;
     Py_ssize_t scan = 0;
-    while (search_len > 0 && scan + search_len <= src_len) {
-        if (memcmp(src + scan, search, (size_t)search_len * sizeof(Py_UCS4)) == 0) {
-            count++;
-            scan += search_len;
-        } else {
-            scan++;
-        }
+    Py_ssize_t found;
+    while (search_len > 0 && (found = ucs4_find(src + scan, src_len - scan, search, search_len)) >= 0) {
+        count++;
+        scan += found + search_len;
     }
-    Py_ssize_t out_len = src_len + count * (repl_len - search_len);
-    Py_UCS4 *buf = PyMem_Malloc((size_t)out_len * sizeof(Py_UCS4));
-    if (buf == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+    if (count == 0) {
+        PyMem_Free(search);
+        PyMem_Free(repl);
+        result_string(out, src, src_len);
+        return 0;
+    }
+    const size_t retained = (size_t)(src_len - count * search_len);
+    const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
+    /* GCOVR_EXCL_BR_START: allocation-size overflow */
+    if (retained > limit || (size_t)repl_len > (limit - retained) / (size_t)count) {
+        /* GCOVR_EXCL_BR_STOP */
+        PyMem_Free(src);    /* GCOVR_EXCL_LINE: allocation size overflow */
+        PyMem_Free(search); /* GCOVR_EXCL_LINE: allocation size overflow */
+        PyMem_Free(repl);   /* GCOVR_EXCL_LINE: allocation size overflow */
+        return -1;          /* GCOVR_EXCL_LINE: allocation size overflow */
+    }
+    const Py_ssize_t out_len = (Py_ssize_t)(retained + (size_t)count * (size_t)repl_len);
+    Py_UCS4 *buf = PyMem_Malloc((size_t)(out_len > 0 ? out_len : 1) * sizeof(Py_UCS4));
+    if (buf == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
         PyMem_Free(src);    /* GCOVR_EXCL_LINE */
         PyMem_Free(search); /* GCOVR_EXCL_LINE */
         PyMem_Free(repl);   /* GCOVR_EXCL_LINE */
@@ -1007,16 +1191,15 @@ static int str_replace(struct th_tree *tree, const xp_result *args, xp_result *o
     }
     Py_ssize_t read = 0;
     Py_ssize_t write = 0;
-    while (read < src_len) {
-        if (search_len > 0 && read + search_len <= src_len &&
-            memcmp(src + read, search, (size_t)search_len * sizeof(Py_UCS4)) == 0) {
-            memcpy(buf + write, repl, (size_t)repl_len * sizeof(Py_UCS4));
-            write += repl_len;
-            read += search_len;
-        } else {
-            buf[write++] = src[read++];
-        }
+    while ((found = ucs4_find(src + read, src_len - read, search, search_len)) >= 0) {
+        memcpy(buf + write, src + read, (size_t)found * sizeof(Py_UCS4));
+        write += found;
+        memcpy(buf + write, repl, (size_t)repl_len * sizeof(Py_UCS4));
+        write += repl_len;
+        read += found + search_len;
     }
+    memcpy(buf + write, src + read, (size_t)(src_len - read) * sizeof(Py_UCS4));
+    write += src_len - read;
     PyMem_Free(src);
     PyMem_Free(search);
     PyMem_Free(repl);
@@ -1352,6 +1535,18 @@ static const xp_func_sig *func_signature(const xn *fn) {
     return NULL;
 }
 
+/* Numbering uses a fixed source root. Builtins that read external state must remain uncached. */
+int xp_pattern_is_static(const xp_program *prog) {
+    for (int32_t index = 0; index < prog->count; index++) {
+        const xn *node = &prog->nodes[index];
+        if (node->kind == XN_VAR || (node->kind == XN_STEP && node->prefix_len != 0) ||
+            (node->kind == XN_FUNC && func_signature(node) == NULL)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* A fresh Python str of the called function's name, for an error message. */
 static PyObject *function_name(const xn *fn) {
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, fn->str, fn->str_len);
@@ -1519,7 +1714,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
         } else if (func_is(fn, "set:intersection")) {
             rc = set_filter(args, 1, out);
         } else if (func_is(fn, "set:has-same-node")) {
-            set_has_same_node(args, out);
+            rc = set_has_same_node(args, out);
         } else {
             rc = set_split(args, func_is(fn, "set:leading"), out);
         }

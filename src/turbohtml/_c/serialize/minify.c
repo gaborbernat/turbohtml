@@ -336,10 +336,9 @@ static int mini_is_comment_like(th_node *node) {
    element or any foreign ancestor bounds the search. rt/rp only imply-close a preceding
    sibling inside a ruby, optgroup only inside a select; outside that scope a following
    rt/rp/optgroup start tag reparents into the element instead, so its end tag must stay.
-   node itself is never a boundary (it is one of rt/rp/optgroup), so the walk starts at
-   its parent, which the caller's node != root guard keeps non-NULL. */
+   A detached serialization root can end the ancestor chain without a document. */
 static int mini_in_scope(const th_node *node, uint16_t atom) {
-    for (const th_node *up = node->parent; up->type == TH_NODE_ELEMENT; up = up->parent) {
+    for (const th_node *up = node->parent; up != NULL && up->type == TH_NODE_ELEMENT; up = up->parent) {
         if (up->ns == TH_NS_HTML && up->atom == atom) {
             return 1;
         }
@@ -573,7 +572,7 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
         0; /* whether the last byte emitted is a folded space, so a space across a stripped comment is dropped */
     while (1) {
         th_node *descend = NULL;
-        switch (node->type) { /* GCOVR_EXCL_BR_LINE: th_node_type is exhaustive; the implicit default is unreachable */
+        switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
         case TH_NODE_ELEMENT:
             last_was_space = 0;
             /* An outer call requests the root's tags even when HTML permits omission;

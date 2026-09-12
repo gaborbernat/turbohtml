@@ -10,8 +10,10 @@ are integer row counts; the rest are HTML strings or corpus documents.
 
 from __future__ import annotations
 
+import string
 import unicodedata
 from dataclasses import dataclass
+from datetime import date, timedelta
 from textwrap import dedent
 from typing import TYPE_CHECKING, Final
 
@@ -55,9 +57,10 @@ _STRUCTURED_PAGE = dedent("""\
       </div>
     </body>""")
 
+_MICRODATA_REFS: Final[str] = " ".join(f"r{index}" for index in range(1_000))
 _MICRODATA_ITEMREF: Final = (
     '<div itemscope itemref="'
-    + " ".join(f"r{index}" for index in range(1_000))
+    + _MICRODATA_REFS
     + '"></div>'
     + "<i></i>" * 4_000
     + "".join(f"<meta id=r{index} itemprop=p content=x>" for index in range(1_000))
@@ -260,24 +263,70 @@ class Operation:
 
 # The minify operations shrink their input, so their tables carry an output-size column alongside time. Their
 # functions return the minified text; the worker records its byte length once (deterministic) beside the timing.
-SIZE_OPS: Final[frozenset[str]] = frozenset({"minify", "minify-css", "minify-js"})
+SIZE_OPS: Final[frozenset[str]] = frozenset({
+    "minify",
+    "minify-css",
+    "minify-css-conflicts",
+    "minify-css-merges",
+    "minify-js",
+    "minify-js-integers",
+    "minify-js-sequences",
+    "minify-js-guards",
+    "minify-js-propagation",
+    "minify-js-single-use",
+    "minify-js-unlink",
+    "minify-js-unused-declarations",
+    "minify-js-var-initialization",
+})
 
 # Peak RSS runs in a fresh process so allocator reuse from pyperf's timed loops cannot hide the retained tree or buffer.
-MEMORY_OPS: Final[frozenset[str]] = frozenset({"find-cold", "parse-dense", "rewrite"})
+MEMORY_OPS: Final[frozenset[str]] = frozenset({
+    "attribute-grow",
+    "find-cold",
+    "parse-dense",
+    "parse-xml-attrs",
+    "rewrite",
+})
 
 
 OPERATIONS: dict[str, Operation] = {
+    "radio-group": Operation("change a radio group selection", "us"),
+    "form-data-fieldsets": Operation("collect form controls around disabled fieldsets", "us"),
     "build": Operation("build a list (constructors)", "us"),
     "build-e": Operation("build a list (terse builders)", "us"),
     "construct": Operation("construct N elements (no serialize)", "us"),
     "emit": Operation("emit a built tree", "us"),
     "shadow": Operation("attach a shadow tree with slots and flatten", "us"),
+    "shadow-slot": Operation("collect children assigned to a late shadow slot", "us"),
+    "shadow-assignment": Operation("flatten uniquely named shadow slots", "us"),
+    "shadow-fallback": Operation("flatten nested fallback slots", "us"),
+    "startup": Operation("start a fresh Python process", "ms"),
     "parse": Operation("parse to a tree", "us"),
+    "parse-formatting": Operation("parse under a formatting ancestor", "us"),
+    "parse-foster": Operation("parse foster-parented text", "us"),
+    "parse-crlf": Operation("parse normalized newlines", "us"),
+    "parse-nul": Operation("parse text beside a NUL", "us"),
+    "parse-afe": Operation("parse nested formatting attributes", "us"),
+    "parse-scope": Operation("parse ignored block end tags", "us"),
     "parse-dense": Operation("parse a node-dense document", "ms"),
     "parse-xml": Operation("parse XML to a tree", "us"),
+    "parse-xml-append": Operation("parse XML with distinct attribute names", "us"),
+    "parse-xml-attrs": Operation("parse XML with growing attribute counts", "us"),
+    "parse-xml-values": Operation("parse XML attribute values", "us"),
+    "parse-xml-text": Operation("parse XML text runs", "us"),
+    "parse-xml-prefixes": Operation("parse XML namespace attributes", "us"),
     "parse-xml-names": Operation("parse growing XML names", "ms"),
     "validate": Operation("validate a document against an XSD schema", "us"),
     "validate-rng": Operation("validate a document against a RELAX NG schema", "us"),
+    "validate-rng-reuse": Operation("validate repeated RELAX NG content models", "us"),
+    "compile-rng-reuse": Operation("compile repeated RELAX NG content models", "us"),
+    "validate-attributes": Operation("validate XSD attribute declarations", "us"),
+    "validate-numeric-facets": Operation("validate numeric values with optional bounds", "us"),
+    "validate-facets": Operation("validate inherited facet metadata", "us"),
+    "compile-facets": Operation("compile inherited facet metadata", "us"),
+    "validate-pattern-reuse": Operation("validate repeated pattern facets", "us"),
+    "compile-pattern": Operation("compile pattern facets", "us"),
+    "validate-pattern": Operation("validate growing regex character classes", "us"),
     "compile-rng": Operation("compile a RELAX NG schema", "us"),
     "parse-scripting": Operation("parse to a tree (scripting on)", "us"),
     "parse-locations": Operation("parse to a tree (source locations)", "us"),
@@ -286,10 +335,45 @@ OPERATIONS: dict[str, Operation] = {
     "escape": Operation("escape", "us"),
     "unescape": Operation("unescape", "us"),
     "tokenize": Operation("tokenize", "us"),
+    "html-options": Operation("serialize with reused options", "us"),
+    "text-options": Operation("render text with reused options", "us"),
+    "canonical-options": Operation("canonicalize with reused options", "us"),
+    "token-attributes": Operation("read token attributes", "us"),
+    "tokenize-attributes": Operation("tokenize and read attributes", "us"),
     "find": Operation("find every anchor", "us"),
     "find-cold": Operation("query a cold 10,000-element tree", "us"),
     "select": Operation("select div a[href]", "us"),
     "select-has": Operation("select div:has(a)", "us"),
+    "select-nth": Operation("select sibling positions in wide trees", "ms"),
+    "xpath-wide": Operation("order XPath results in wide trees", "ms"),
+    "xpath-distinct": Operation("deduplicate XPath string values", "us"),
+    "xpath-set": Operation("compare XPath node-set membership", "us"),
+    "xpath-compare": Operation("compare XPath values", "us"),
+    "node-equals": Operation("compare element attributes", "us"),
+    "xpath-id-nodes": Operation("resolve XPath ID argument nodes", "us"),
+    "xpath-replace": Operation("replace XPath string literals", "us"),
+    "xpath-concat": Operation("concatenate XPath node strings", "us"),
+    "xpath-translate": Operation("translate XPath characters", "us"),
+    "xpath-order": Operation("compare numeric XPath node sets", "us"),
+    "computed-style-deep": Operation("compute styles through nested ancestors", "ms"),
+    "microdata-wide": Operation("extract properties from one wide item", "ms"),
+    "microdata-empty-scope": Operation("traverse an item without properties", "ms"),
+    "structured-empty": Operation("extract metadata from an unannotated tree", "ms"),
+    "article-wide": Operation("score many article candidates", "ms"),
+    "article-deep": Operation("score nested article candidates", "us"),
+    "path-wide": Operation("build CSS paths for wide sibling lists", "ms"),
+    "path-xpath-wide": Operation("build XPath paths for wide sibling lists", "ms"),
+    "path-cold": Operation("build CSS paths on a fresh tree", "ms"),
+    "path-xpath-cold": Operation("build XPath paths on a fresh tree", "ms"),
+    "path-one-cold": Operation("build one CSS path on a fresh tree", "us"),
+    "path-xpath-one-cold": Operation("build one XPath path on a fresh tree", "us"),
+    "path-class-edit": Operation("build CSS paths after class edits", "ms"),
+    "computed-style-filter": Operation("reject CSS rules before traversal predicates", "ms"),
+    "computed-style-filter-cold": Operation("compile CSS predicate order and resolve one element", "ms"),
+    "computed-style-specificity": Operation("compute styles across matching selector alternatives", "ms"),
+    "computed-style-specificity-cold": Operation("compile styles and resolve the first element", "ms"),
+    "computed-style-selectors": Operation("reuse computed-style selector matches", "ms"),
+    "computed-style-selectors-reverse": Operation("compute styles in reverse document order", "ms"),
     "computed-style": Operation("computed style for every element", "us"),
     "computed-style-dense": Operation("computed style over a property-dense sheet", "us"),
     "match": Operation("match each anchor against div a[href]", "us"),
@@ -315,7 +399,8 @@ OPERATIONS: dict[str, Operation] = {
     "conformance": Operation("check HTML5 authoring conformance", "us"),
     "serialize-xml": Operation("serialize a parsed tree to XML", "us"),
     "canonicalize": Operation("canonicalize a parsed tree (c14n)", "us"),
-    "canonicalize-deep": Operation("canonicalize a deep xlink-free tree (c14n)", "us"),
+    "canonicalize-attrs": Operation("canonicalize an element with many attributes", "ms"),
+    "canonicalize-deep": Operation("canonicalize deep trees with and without xlink attributes (c14n)", "us"),
     "lossless-serialize": Operation("edit then re-emit untouched bytes (to_source)", "us"),
     "minify": Operation("minify a document", "us"),
     "edit": Operation("tag every link rel=nofollow", "us"),
@@ -325,23 +410,35 @@ OPERATIONS: dict[str, Operation] = {
     "set-html": Operation("replace body inner HTML", "us"),
     "set-text": Operation("replace body text", "us"),
     "observe": Operation("observe a subtree through many edits", "us"),
+    "query-root-groups": Operation("select descendants across connected root groups", "us"),
+    "query-roots": Operation("select within ordered root groups", "us"),
+    "query-closest": Operation("collect closest matching ancestors", "us"),
+    "node-closest": Operation("find a node's closest matching ancestor", "us"),
+    "query-parents": Operation("collect selected nodes' parents", "us"),
+    "query-siblings": Operation("collect selected nodes' siblings", "us"),
+    "prune-shared": Operation("prune shared ancestors", "us"),
+    "observe-registrations": Operation("reject unrelated observer registrations", "us"),
     "navigate": Operation("walk every descendant", "us"),
     "treewalk": Operation("walk every element (TreeWalker)", "us"),
     "chain": Operation("fluent jQuery-style chain", "us"),
     "range-clone": Operation("clone a Range over the body", "us"),
+    "range-boundary": Operation("construct a Range at a child boundary", "us"),
+    "range-contained": Operation("clone a Range of complete children", "us"),
+    "range-partial": Operation("clone a Range with a partial element", "us"),
     "links-extract": Operation("extract every link", "us"),
     "links-absolutize": Operation("absolutize every link", "us"),
     "links-rewrite": Operation("rewrite every link", "us"),
     "socialcard": Operation("social-card extraction", "us"),
     "structured": Operation("structured-data extraction", "us"),
     "microdata": Operation("Microdata item extraction", "us"),
-    "microdata-itemref": Operation("resolve 1,000 Microdata item references", "ms"),
+    "microdata-itemref": Operation("resolve Microdata item references", "ms"),
     "syndication": Operation("RSS/Atom feed parsing", "us"),
     "sanitize": Operation("sanitize", "us"),
     "sanitize-templates": Operation("sanitize (template-safe)", "us"),
     "sanitize-named-props": Operation("sanitize (named-prop isolation)", "us"),
     "sanitize-report": Operation("sanitize with audit trail", "us"),
     "sanitize-node": Operation("sanitize a parsed tree", "us"),
+    "sanitize-attributes": Operation("sanitize attribute allowlists", "us"),
     "sanitize-styles": Operation("sanitize (style allowlist)", "us"),
     "sanitize-transform": Operation("sanitize (tag transform)", "us"),
     "sanitize-custom-elements": Operation("sanitize (custom elements)", "us"),
@@ -355,12 +452,15 @@ OPERATIONS: dict[str, Operation] = {
     "phone": Operation("detect phone numbers in text", "us"),
     "phone-parse": Operation("parse held phone numbers", "us"),
     "phone-format": Operation("format phone numbers", "us"),
+    "markdown-wrap": Operation("wrap short Markdown words", "us"),
     "markdown": Operation("HTML to Markdown", "us"),
     "markdown-google": Operation("Google Docs export to Markdown", "us"),
     "tables": Operation("extract table grids", "us"),
     "tables-wide": Operation("extract a wide table grid", "us"),
+    "tables-spans": Operation("extract repeated table span text", "us"),
     "article": Operation("article extraction", "us"),
     "boilerplate": Operation("paragraph boilerplate classification", "us"),
+    "date-tally": Operation("score visible date candidates", "us"),
     "date": Operation("publication-date extraction", "us"),
     "text-render": Operation("layout-aware text", "us"),
     "text-collapsed": Operation("collapsed word stream", "us"),
@@ -371,9 +471,11 @@ OPERATIONS: dict[str, Operation] = {
     "extract-url": Operation("extract URL hints", "us"),
     "htmlparser": Operation("feed and dispatch a page", "us"),
     "sax": Operation("SAX parse a page (no tree)", "us"),
+    "sax-records": Operation("iterate typed SAX records", "us"),
+    "sax-records-callback": Operation("dispatch SAX callbacks", "us"),
     "treebuild": Operation("parse into a custom tree (no DOM)", "us"),
     "rewrite": Operation("streaming rewrite a page (no tree)", "us"),
-    "rewrite-attributes": Operation("add 1,000 custom attributes", "us"),
+    "rewrite-attributes": Operation("add custom attributes", "us"),
     "path": Operation("css_path for every element", "us"),
     "path-xpath": Operation("xpath_path for every element", "us"),
     "translate": Operation("CSS selector to XPath 1.0", "us"),
@@ -385,19 +487,46 @@ OPERATIONS: dict[str, Operation] = {
     "transform-reuse": Operation("apply one compiled 300-template stylesheet ten times", "us"),
     "transform-sort": Operation("XSLT sort node sets", "ms"),
     "transform-dense": Operation("XSLT transform an instruction-dense sheet", "us"),
+    "transform-names-compile": Operation("compile XSLT declaration indexes", "us"),
+    "transform-names": Operation("resolve XSLT declaration names", "us"),
+    "transform-rules": Operation("dispatch XSLT template rules", "us"),
+    "transform-number": Operation("XSLT number nodes", "us"),
     "minify-css": Operation("minify CSS", "us"),
+    "minify-css-conflicts": Operation("merge CSS rules across disjoint declarations", "us"),
+    "minify-css-merges": Operation("batch CSS rule merges", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
+    "minify-js-integers": Operation("print JavaScript integer arrays", "us"),
+    "minify-js-unlink": Operation("remove mixed JavaScript declarators", "us"),
+    "minify-js-unused-declarations": Operation("remove unused JavaScript declarators", "us"),
+    "minify-js-var-initialization": Operation("check JavaScript var initialization order", "us"),
+    "minify-js-sequences": Operation("minify expression sequences", "us"),
+    "minify-js-propagation": Operation("propagate repeated JavaScript literal reads", "us"),
+    "minify-js-single-use": Operation("check single-use JavaScript initializers", "us"),
+    "minify-js-guards": Operation("minify guard return chains", "us"),
     "stream": Operation("push-parse a page in chunks", "us"),
+    "encoding-result": Operation("construct the winning encoding result", "us"),
+    "encoding-result-stream": Operation("construct the streamed encoding result", "us"),
     "encoding": Operation("detect a byte stream's encoding", "us"),
     "decode": Operation("decode a legacy byte stream", "us"),
     "normalize": Operation("normalize text to Unicode NFC", "us"),
+    "normalize-dom": Operation("merge adjacent text nodes", "ns"),
+    "attribute-grow": Operation("set element attributes", "us"),
+    "normalize-marks": Operation("normalize long combining-mark runs", "ms"),
     "detect-language": Operation("detect a text's natural language", "us"),
+    "detect-language-long": Operation("count trigrams in long prose", "ms"),
     "escape-identifier": Operation("escape 1,000 raw CSS identifiers", "us"),
     "idna": Operation("normalize 4,100 URLs with Unicode hosts", "ms"),
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
     "links-filter": Operation("extract filtered page links", "us"),
     "links-external": Operation("extract links outside the base site", "ms"),
 }
+
+
+def _sax_record_cases() -> tuple[tuple[str, object], ...]:
+    return (
+        ("4,096 small elements", "<!DOCTYPE html>" + "<p>x</p>" * 4096),
+        ("one small element", "<p>x</p>"),
+    )
 
 
 def _parse_cases() -> tuple[tuple[str, object], ...]:
@@ -433,6 +562,58 @@ def _readpath_cases() -> tuple[tuple[str, object], ...]:
     label, relative, encoding = corpus.CORPUS_FILES[5]  # whatwg spec (235 kB), the large content page
     pages.append((label, corpus.corpus_text(relative, encoding)))
     return tuple(pages)
+
+
+def _radio_group_cases() -> tuple[tuple[str, tuple[int, int, int, str]], ...]:
+    return (
+        ("document radios, index build and 64 changes", (4096, 1, 64, "document")),
+        ("small form, one unindexed change", (0, 1, 1, "plain")),
+        ("one form among 256, index build and 64 changes", (0, 256, 64, "select")),
+        ("eight changes with index invalidation", (256, 1, 8, "mutate")),
+    )
+
+
+def _form_data_fieldset_cases() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            label,
+            "<form>"
+            + opening
+            + "<div>" * depth
+            + "".join(f'<input name="n{index}" value="v{index}">' for index in range(count))
+            + "</div>" * depth
+            + closing
+            + '<input name="tail" value="ok"></form>',
+        )
+        for label, opening, closing, depth, count in (
+            ("disabled / 2,048 controls / depth 64", "<fieldset disabled>", "</fieldset>", 64, 2_048),
+            (
+                "first legend / 2,048 disabled controls / depth 64",
+                '<fieldset disabled><legend><input name="allowed" value="yes"></legend>',
+                "</fieldset>",
+                64,
+                2_048,
+            ),
+            ("enabled / 2,048 controls / depth 64", "<fieldset>", "</fieldset>", 64, 2_048),
+            ("plain / 4 controls", "", "", 0, 4),
+        )
+    )
+
+
+def _computed_style_selector_cases() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            label,
+            f"<!doctype html><style>div{{color:blue}}div{selector}{{color:red}}</style>"
+            + ("<div>" * count + leaf + "</div>" * count if nested else "<div></div>" * count),
+        )
+        for label, selector, count, nested, leaf in (
+            ("deep missing :has / 512 elements", ":has(.hit)", 512, True, "<span></span>"),
+            ("deep matching :has / 512 elements", ":has(.hit)", 512, True, '<span class="hit"></span>'),
+            ("wide :nth-child / 4,096 elements", ":nth-child(odd)", 4_096, False, ""),
+            ("shallow :has / 8 elements", ":has(.hit)", 8, True, '<span class="hit"></span>'),
+        )
+    )
 
 
 def _deep_tree(depth: int, leaves: int) -> str:
@@ -552,6 +733,7 @@ _LINKIFY_TRAVERSAL_CASES: Final[tuple[tuple[str, tuple[str, str]], ...]] = (
         ("callbacks", '<a href="https://kept.example">kept</a> https://example.com ' * 200),
     ),
     ("2,000 nodes without text", ("default", "<div></div>" * 2_000)),
+    ("wide text, two callbacks", ("callbacks", "<p>" + "😀 " * 32_768 + "https://example.com</p>")),
 )
 
 _FIND_COLD_BODY: Final[str] = "<span>x</span>" * 10_000
@@ -646,6 +828,45 @@ def _table_html(data_rows: int) -> str:
     return f"<table>{header}{body}</table>"
 
 
+def _css_merge_inputs() -> tuple[tuple[str, str], ...]:
+    return (
+        *(
+            (
+                f"{count} identical media blocks",
+                "".join(f"@media screen{{.a{index}{{color:red}}}}" for index in range(count)),
+            )
+            for count in (10, 100, 1_000)
+        ),
+        *(
+            (f"{count} identical declaration bodies", "".join(f".a{index}{{color:red}}" for index in range(count)))
+            for count in (10, 100, 1_000)
+        ),
+        (
+            "100 alternating media preludes",
+            "".join(f"@media {'screen' if index % 2 else 'print'}{{.a{index}{{color:red}}}}" for index in range(100)),
+        ),
+        ("100 rules with comment barriers", "/*!keep*/".join(f".a{index}{{color:red}}" for index in range(100))),
+    )
+
+
+def _css_conflict_inputs() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            f"{repeats} rule pairs, {properties} properties, {value_length} value bytes",
+            (
+                ".a{"
+                + ";".join(f"--a{index}:f({'x' * value_length})" for index in range(properties))
+                + "}"
+                + ".b{"
+                + ";".join(f"--b{index}:f({'y' * value_length})" for index in range(properties))
+                + "}"
+            )
+            * repeats,
+        )
+        for repeats, properties, value_length in ((32, 32, 128), (32, 32, 1), (1, 2, 1))
+    )
+
+
 def _article_page(paragraphs: int) -> str:
     """Build a full page -- navigation, a scored article of ``paragraphs`` paragraphs, and a footer."""
     head = (
@@ -661,6 +882,37 @@ def _article_page(paragraphs: int) -> str:
     )
     article = f"<article class=post><h1>Comets</h1>{para * paragraphs}</article>"
     return f"{head}{nav}{article}<footer><p>Copyright notice, all rights reserved here.</p></footer></body></html>"
+
+
+_FILTER_STYLED_PAGES: Final = tuple(
+    (
+        f"256 rules / 128 parent-child pairs / {label}",
+        "<style>"
+        + (selector + "{color:red}") * 256
+        + "div{color:blue}</style>"
+        + '<div class="hit"><span></span></div>' * 128,
+    )
+    for label, selector in (
+        ("irrelevant pseudo-first", ":has(span).missing"),
+        ("matching pseudo-first", ":has(span).hit"),
+        ("irrelevant class-first", ".missing:has(span)"),
+    )
+)
+
+
+_SPECIFICITY_STYLED_PAGES: Final = tuple(
+    (
+        f"256 rules / 128 elements / {label}",
+        "<style>" + (selector + "{color:red}") * 256 + "</style>" + '<div class="hit"></div>' * 128,
+    )
+    for label, selector in (
+        (
+            "nested alternatives",
+            ":is(.hit," + ",".join(f"#absent{index}" for index in range(32)) + "):where(.hit),#missing",
+        ),
+        ("ordinary alternatives", ".hit,#missing"),
+    )
+)
 
 
 _STYLE_SHEET = dedent("""\
@@ -839,6 +1091,187 @@ def _transform_dense_cases() -> tuple[tuple[str, object], ...]:
     return (("instruction-dense (200 nodes)", (_XSLT_DENSE_SHEET, _XSLT_DENSE_SOURCE)),)
 
 
+def _transform_name_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"{count} unused declarations per kind, 256 calls",
+            (
+                '<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">'
+                '<xsl:output method="xml" omit-xml-declaration="yes"/>'
+                + "".join(
+                    f'<xsl:template name="unused{index}"/>'
+                    f'<xsl:key name="unused{index}" match="unused" use="@value"/>'
+                    f'<xsl:attribute-set name="unused{index}"/>'
+                    for index in range(count)
+                )
+                + '<xsl:key name="target" match="p" use="@value"/>'
+                '<xsl:attribute-set name="target"><xsl:attribute name="marker">hit</xsl:attribute></xsl:attribute-set>'
+                '<xsl:template name="target"><item xsl:use-attribute-sets="target">'
+                "<xsl:value-of select=\"count(key('target','v'))\"/></item></xsl:template>"
+                '<xsl:template match="/"><out>'
+                + '<xsl:call-template name="target"/>' * 256
+                + "</out></xsl:template></xsl:stylesheet>",
+                '<root><p value="v"/></root>',
+            ),
+        )
+        for count in (256, 1)
+    )
+
+
+def _transform_number_cases() -> tuple[tuple[str, object], ...]:
+    return (
+        tuple(
+            (
+                (
+                    f"{rows:,} {'sibling' if rows == 1 else 'siblings'} / "
+                    f"{instructions} {'instruction' if instructions == 1 else 'instructions'} / {order}"
+                ),
+                (
+                    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                    '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root/n">'
+                    + ('<xsl:sort select="@id" data-type="number" order="descending"/>' if order == "reverse" else "")
+                    + "<xsl:number/><xsl:text>:</xsl:text>" * instructions
+                    + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
+                    "<root>" + "".join(f'<n id="{index}"/>' for index in range(1, rows + 1)) + "</root>",
+                ),
+            )
+            for rows, instructions, order in (
+                (200, 1, "forward"),
+                (200, 8, "forward"),
+                (2_000, 1, "forward"),
+                (2_000, 8, "forward"),
+                (1, 8, "forward"),
+                (200, 8, "reverse"),
+                (200, 0, "forward"),
+            )
+        )
+        + _transform_any_number_cases()
+        + _transform_pattern_number_cases()
+        + _transform_number_prefix_cases()
+    )
+
+
+def _transform_any_number_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"any: {rows:,} {'node' if rows == 1 else 'nodes'} / {variant}",
+            (
+                '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root/*'
+                + ("[last()]" if variant == "last-only" else "")
+                + '">'
+                + ('<xsl:sort select="@id" data-type="number" order="descending"/>' if variant == "reverse" else "")
+                + (
+                    '<xsl:number level="any"'
+                    + (' count="p"' if variant == "explicit-count" else "")
+                    + "/><xsl:text>:</xsl:text>"
+                )
+                * (8 if variant == "repeated" else 1)
+                + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
+                "<root>"
+                + "".join(
+                    ("text<!--gap-->" if variant == "mixed-nodes" else "")
+                    + f'<{"q" if variant == "alternating" and index % 2 == 0 else "p"} id="{index}"/>'
+                    for index in range(1, rows + 1)
+                )
+                + "</root>",
+            ),
+        )
+        for rows, variant in (
+            (32, "forward"),
+            (1_024, "forward"),
+            (1_024, "reverse"),
+            (1_024, "last-only"),
+            (1_024, "alternating"),
+            (1_024, "mixed-nodes"),
+            (1, "repeated"),
+            (1_024, "explicit-count"),
+            (2, "forward"),
+            (8, "forward"),
+        )
+    )
+
+
+def _transform_pattern_number_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"any: {rows:,} {'node' if rows == 1 else 'nodes'} / {variant}",
+            (
+                '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                '<xsl:output method="text"/><xsl:template match="/"><xsl:for-each select="root//p">'
+                + (
+                    '<xsl:sort select="@id" data-type="number" order="descending"/>'
+                    if variant == "count-reverse"
+                    else ""
+                )
+                + (
+                    f'<xsl:number level="any" count="{pattern}"'
+                    + (' from="section"' if variant == "count-from-sections" else "")
+                    + "/><xsl:text>:</xsl:text>"
+                )
+                * (8 if variant == "count-repeated" else 1)
+                + "<xsl:text>|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>",
+                "<root>"
+                + "".join(
+                    ("<section>" if variant == "count-from-sections" and index % 64 == 1 else "")
+                    + f'<p id="{index}" cat="{index % 2}"/>'
+                    + ("</section>" if variant == "count-from-sections" and index % 64 == 0 else "")
+                    for index in range(1, rows + 1)
+                )
+                + "</root>",
+            ),
+        )
+        for rows, pattern, variant in (
+            (1, "p", "count-single-call"),
+            (1, "p[true()]", "predicate-single-call"),
+            (1, "p|q", "union-single-call"),
+            (1_024, "p[true()]", "count-predicate"),
+            (1_024, "p[@cat=current()/@cat]", "count-current"),
+            (1_024, "p", "count-from-sections"),
+            (1_024, "p", "count-reverse"),
+            (1_024, "p", "count-repeated"),
+            (1_024, "*", "count-wildcard"),
+            (1_024, "missing", "count-empty"),
+        )
+    )
+
+
+def _transform_number_prefix_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (
+            f"any: 1,024 nodes / {variant}",
+            (
+                (
+                    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                    '<xsl:output method="text"/><xsl:template match="/">'
+                    f'<xsl:for-each select="{select}"><xsl:number level="any" {attributes}/>'
+                    "<xsl:text>:|</xsl:text></xsl:for-each></xsl:template></xsl:stylesheet>"
+                ),
+                "<root>"
+                + "".join(
+                    ("<section>" if sections and index % 64 == 1 else "")
+                    + f'<{"q" if alternating and index % 2 == 0 else "p"} id="{index}"/>'
+                    + ("</section>" if sections and index % 64 == 0 else "")
+                    for index in range(1, 1_025)
+                )
+                + "</root>",
+            ),
+        )
+        for variant, select, attributes, sections, alternating in (
+            ("count-last-only", "root/p[last()]", 'count="p"', False, False),
+            ("count-from-last-only", "(root/section/p)[last()]", 'count="p" from="section"', True, False),
+            ("from-sections-alternating", "root/section/*", 'from="section"', True, True),
+        )
+    )
+
+
+def _token_attribute_cases() -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (f"{count} attributes", f"<p {' '.join(f'a{index}={index}' for index in range(count))}>")
+        for count in (100, 0, 1, 10)
+    )
+
+
 def _tokenize_cases() -> tuple[tuple[str, object], ...]:
     """Return synthetic and corpus documents for the tokenization table."""
     corpus_cases = tuple(
@@ -980,15 +1413,249 @@ def _language_cases() -> tuple[tuple[str, object], ...]:
     )
 
 
+def _wide_path_cases() -> tuple[tuple[str, str], ...]:
+    return tuple((f"{size:,} siblings", f"<ul>{'<li>value</li>' * size}</ul>") for size in (100, 1_000, 10_000))
+
+
+def _validate_rng_reuse_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return (
+        *(
+            (
+                f"{width} {kind} fields across {rows} rows",
+                (
+                    '<element xmlns="http://relaxng.org/ns/structure/1.0" name="root"><oneOrMore>'
+                    '<element name="row">'
+                    f"<{kind}>"
+                    + "".join(
+                        f'<optional><element name="field{index}"><text/></element></optional>' for index in range(width)
+                    )
+                    + '<element name="value"><text/></element>'
+                    + f"</{kind}>"
+                    + "</element></oneOrMore></element>",
+                    "<root>" + "<row><value>text</value></row>" * rows + "</root>",
+                ),
+            )
+            for kind, width, rows in (("group", 128, 64), ("interleave", 32, 64), ("group", 4, 4))
+        ),
+        (
+            "16 recursive nodes",
+            (
+                (
+                    '<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><ref name="node"/></start>'
+                    '<define name="node"><element name="node"><optional><ref name="node"/></optional>'
+                    "</element></define></grammar>"
+                ),
+                "<node>" * 16 + "</node>" * 16,
+            ),
+        ),
+    )
+
+
+def _validate_numeric_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            label,
+            (
+                (
+                    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                    '<xs:element name="root"><xs:complexType><xs:sequence>'
+                    '<xs:element name="value" minOccurs="0" maxOccurs="unbounded"><xs:simpleType>'
+                    f'<xs:restriction base="xs:{kind}">{facets}</xs:restriction>'
+                    "</xs:simpleType></xs:element></xs:sequence></xs:complexType></xs:element></xs:schema>"
+                ),
+                "<root>" + "<value>1234567890.1234567890123456789012</value>" * count + "</root>",
+            ),
+        )
+        for label, kind, count, facets in (
+            ("64 decimals without bounds", "decimal", 64, ""),
+            (
+                "64 decimals with bounds",
+                "decimal",
+                64,
+                '<xs:minInclusive value="0"/><xs:maxInclusive value="100000000000000000000"/>',
+            ),
+            ("one decimal without bounds", "decimal", 1, ""),
+            ("64 strings without bounds", "string", 64, ""),
+        )
+    )
+
+
+def _validate_attribute_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            f"{size:,} attributes",
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="root"><xs:complexType>'
+                + "".join(f'<xs:attribute name="item{index}" type="xs:string"/>' for index in range(size))
+                + "</xs:complexType></xs:element></xs:schema>",
+                "<root " + " ".join(f'item{index}="value"' for index in reversed(range(size))) + "/>",
+            ),
+        )
+        for size in (512, 4)
+    )
+
+
+def _validate_pattern_reuse_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            label,
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                '<xs:simpleType name="item"><xs:restriction base="xs:string">'
+                + facets
+                + '</xs:restriction></xs:simpleType><xs:element name="root"><xs:complexType><xs:sequence>'
+                '<xs:element name="value" type="item" maxOccurs="unbounded"/>'
+                "</xs:sequence></xs:complexType></xs:element></xs:schema>",
+                "<root>" + "<value>abc123</value>" * 1000 + "</root>",
+            ),
+        )
+        for label, facets in (
+            ("1000 values, two patterns", '<xs:pattern value="[a-z]+[0-9]+"/><xs:pattern value="(abc|def)[0-9]+"/>'),
+            ("1000 values, no patterns", ""),
+        )
+    )
+
+
+def _validate_facet_cases() -> tuple[tuple[str, tuple[str, str]], ...]:
+    return tuple(
+        (
+            label,
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                + declarations
+                + '<xs:element name="root"><xs:complexType><xs:sequence>'
+                f'<xs:element name="value" type="{type_name}" maxOccurs="unbounded"/>'
+                "</xs:sequence></xs:complexType></xs:element></xs:schema>",
+                "<root>" + "<value>abc123</value>" * 1000 + "</root>",
+            ),
+        )
+        for label, type_name, declarations in (
+            (
+                "1000 values, four-level derived type",
+                "item",
+                (
+                    '<xs:simpleType name="base"><xs:restriction base="xs:token">'
+                    '<xs:minLength value="3"/><xs:maxLength value="12"/></xs:restriction></xs:simpleType>'
+                    '<xs:simpleType name="middle"><xs:restriction base="base">'
+                    '<xs:pattern value="[a-z]+[0-9]+"/></xs:restriction></xs:simpleType>'
+                    '<xs:simpleType name="choice"><xs:restriction base="middle">'
+                    '<xs:enumeration value="abc123"/><xs:enumeration value="def456"/></xs:restriction></xs:simpleType>'
+                    '<xs:simpleType name="item"><xs:restriction base="choice">'
+                    '<xs:maxLength value="9"/></xs:restriction></xs:simpleType>'
+                ),
+            ),
+            ("1000 values, builtin string", "xs:string", ""),
+        )
+    )
+
+
+def _encoding_result_cases() -> tuple[tuple[str, bytes], ...]:
+    return (
+        ("short ambiguous legacy bytes", "déjà vu, bientôt à Paris".encode("cp1252")),
+        ("short ASCII", b"A short plain message"),
+        ("UTF-8 byte-order mark", b"\xef\xbb\xbfhello"),
+    )
+
+
 INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
+    "startup": lambda: (("fresh import and version", "import"), ("fresh CLI minification", "minify")),
+    "radio-group": _radio_group_cases,
+    "form-data-fieldsets": _form_data_fieldset_cases,
     "build": lambda: _ROWS,
     "build-e": lambda: _ROWS,
     "construct": lambda: _ROWS,
     "emit": lambda: _ROWS,
     "shadow": lambda: _ROWS,
+    "shadow-slot": lambda: (
+        *(
+            (f"{size:,} preceding slots, {size if markup else 0:,} {kind}", (size, markup * size))
+            for kind, markup in (
+                ("children", '<span slot="target">value</span>'),
+                ("children", ""),
+                ("comments", "<!--value-->"),
+            )
+            for size in (100, 1_000, 10_000)
+        ),
+        *(
+            (f"{size:,} preceding slots, 1 nonmatching child", (size, '<span slot="unused">value</span>'))
+            for size in (100, 1_000, 10_000)
+        ),
+    ),
     "parse": _parse_cases,
+    "parse-foster": lambda: tuple(
+        (
+            f"{count:,} table rows / fostered text runs",
+            "<div><table>" + "a<tr><td>cell</td></tr>" * count + "</table></div>",
+        )
+        for count in (1024, 1)
+    ),
+    "parse-crlf": lambda: tuple(
+        (
+            f"1,000 paragraphs / {label}",
+            f"<p>{'a' * 80}{newline}</p>" * 1000,
+        )
+        for label, newline in (("CRLF", "\r\n"), ("LF", "\n"))
+    ),
+    "parse-nul": lambda: tuple(
+        (
+            f"1,000 paragraphs / {label}",
+            f"<p>{first}</p>" + f"<p>{'a' * 80}</p>" * 999,
+        )
+        for label, first in (("early NUL", "first\0a"), ("no NUL", "a" * 80))
+    ),
+    "parse-afe": lambda: tuple(
+        (
+            f"256 b elements / {variant} attributes",
+            "".join(f'<b title="{index if variant == "distinct" else "same"}">' for index in range(256))
+            + "a"
+            + "</b>" * 256,
+        )
+        for variant in ("distinct", "identical")
+    ),
+    "parse-scope": lambda: (
+        (
+            "256 spans / 1,000 ignored address end tags",
+            "<div>" + "<span>" * 256 + "a" + "</address>" * 1000 + "a" + "</span>" * 256 + "</div>",
+        ),
+    ),
+    "parse-formatting": lambda: tuple(
+        (
+            f"{depth} spans / 1,000 samp elements",
+            "<b>" + "<span>" * depth + "<samp>a</samp>" * 1000 + "</span>" * depth + "</b>",
+        )
+        for depth in (256, 0)
+    ),
     "parse-dense": lambda: (("2.6 MB / 200k nodes", "<div><span>x</span></div>" * 100_000),),
     "parse-xml": lambda: (("catalog XML", _XML_DOC),),
+    "parse-xml-attrs": lambda: tuple(
+        (f"{count} attributes", "<root " + " ".join(f'a{index}="value"' for index in range(count)) + "/>")
+        for count in (1, 10, 100, 1_000)
+    ),
+    "parse-xml-append": lambda: tuple(
+        (f"{label} / value=a", "<root " + " ".join(f'a{index}="a"' for index in range(count)) + "/>")
+        for count, label in ((1_000, "1,000 attributes"), (1, "1 attribute"))
+    ),
+    "parse-xml-values": lambda: (
+        ("64 KiB clean value", '<root value="' + "a" * 65536 + '"/>'),
+        ("64 KiB reference-rich source", '<root value="' + "a&amp;b " * 8192 + '"/>'),
+        ("five value characters", '<root value="hello"/>'),
+    ),
+    "parse-xml-text": lambda: (
+        ("64 KiB clean text", "<root>" + "a" * 65536 + "</root>"),
+        ("64 KiB reference-rich source", "<root>" + "a&amp;b " * 8192 + "</root>"),
+        ("five text characters", "<root>hello</root>"),
+    ),
+    "parse-xml-prefixes": lambda: tuple(
+        (
+            f"{count} prefixes and attributes",
+            "<root "
+            + " ".join(f'xmlns:p{index}="urn:{index}"' for index in range(count))
+            + " "
+            + " ".join(f'p{index}:value="x"' for index in range(count))
+            + "/>",
+        )
+        for count in (128, 1)
+    ),
     "parse-xml-names": lambda: (
         (
             "1k growing attributes",
@@ -1000,6 +1667,58 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("1,024 global declarations", (_VALIDATE_GLOBAL_XSD, _VALIDATE_GLOBAL_DOC)),
     ),
     "validate-rng": lambda: (("catalog RNG + doc", (_VALIDATE_RNG, _VALIDATE_DOC)),),
+    "validate-rng-reuse": _validate_rng_reuse_cases,
+    "compile-rng-reuse": lambda: tuple((label, case[0]) for label, case in _validate_rng_reuse_cases()[::2]),
+    "validate-facets": lambda: (
+        *_validate_facet_cases(),
+        (
+            "1000 attributes, four-level derived type",
+            (
+                _validate_facet_cases()[0][1][0].replace(
+                    '<xs:element name="value" type="item" maxOccurs="unbounded"/>',
+                    '<xs:element name="value" maxOccurs="unbounded"><xs:complexType>'
+                    '<xs:attribute name="data" type="item"/></xs:complexType></xs:element>',
+                ),
+                "<root>" + '<value data="abc123"/>' * 1000 + "</root>",
+            ),
+        ),
+        (
+            "one value, four-level derived type",
+            (_validate_facet_cases()[0][1][0], "<root><value>abc123</value></root>"),
+        ),
+    ),
+    "validate-attributes": lambda: (
+        *_validate_attribute_cases(),
+        ("512 declarations, one attribute", (_validate_attribute_cases()[0][1][0], '<root item0="value"/>')),
+        (
+            "one declaration, 512 attributes",
+            (
+                (
+                    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="root">'
+                    '<xs:complexType><xs:attribute name="item0" type="xs:string"/></xs:complexType>'
+                    "</xs:element></xs:schema>"
+                ),
+                _validate_attribute_cases()[0][1][1],
+            ),
+        ),
+    ),
+    "validate-numeric-facets": _validate_numeric_facet_cases,
+    "compile-facets": lambda: (("four-level derived type", _validate_facet_cases()[0][1][0]),),
+    "validate-pattern-reuse": _validate_pattern_reuse_cases,
+    "compile-pattern": lambda: (("two pattern facets", _validate_pattern_reuse_cases()[0][1][0]),),
+    "validate-pattern": lambda: tuple(
+        (
+            f"{size:,} character alternatives",
+            (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="value">'
+                '<xs:simpleType><xs:restriction base="xs:string"><xs:pattern value="['
+                + "".join(chr(0x400 + index) for index in range(size))
+                + ']"/></xs:restriction></xs:simpleType></xs:element></xs:schema>',
+                f"<value>{chr(0x400 + size - 1)}</value>",
+            ),
+        )
+        for size in (32, 256, 2_048)
+    ),
     "compile-rng": lambda: (("catalog grammar", _VALIDATE_RNG), ("1,024 definitions", _COMPILE_RNG)),
     "parse-scripting": _readpath_cases,  # the real pages carry <noscript>, so the scripting rawtext path runs
     "parse-locations": _readpath_cases,  # real attribute-dense pages exercise the per-attribute span stamping
@@ -1008,17 +1727,55 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "escape": corpus.escape_cases,
     "unescape": corpus.unescape_cases,
     "tokenize": _tokenize_cases,
+    "html-options": lambda: (("reused defaults", ("html", True)), ("no options", ("html", False))),
+    "text-options": lambda: (("reused defaults", ("text", True)), ("no options", ("text", False))),
+    "canonical-options": lambda: (("reused defaults", ("canonical", True)), ("no options", ("canonical", False))),
+    "token-attributes": _token_attribute_cases,
+    "tokenize-attributes": lambda: _token_attribute_cases()[:1],
     "edit": _readpath_cases,
     "class-edit": _readpath_cases,
     "strip-remove": _readpath_cases,
     "strip-tags": _readpath_cases,
     "set-html": _readpath_cases,
     "set-text": _readpath_cases,
+    "shadow-assignment": lambda: (("1000 unique", (1_000, "unique")), ("1 unique", (1, "unique"))),
+    "shadow-fallback": lambda: (("1000 wide", (1_000, "wide")), ("1 wide", (1, "wide"))),
     "observe": _readpath_cases,
+    "query-root-groups": lambda: (
+        ("2,048 detached roots", ("detached", 2_048)),
+        ("2,048 connected roots", ("connected", 2_048)),
+        ("4 connected roots", ("connected", 4)),
+        ("512 documents", ("documents", 512)),
+    ),
+    "query-roots": lambda: tuple(
+        (f"{count} {order} roots", (count, order))
+        for count, order in ((512, "reversed"), (512, "shuffled"), (512, "sorted"), (4, "reversed"))
+    ),
+    "query-closest": lambda: (
+        ("1024 children, shared ancestor", (1024, True)),
+        ("1024 children, distinct ancestors", (1024, False)),
+    ),
+    "node-closest": lambda: (("one child, cached selector", (1, True)),),
+    "query-parents": lambda: (
+        ("1024 children, shared parent", (1024, True)),
+        ("1024 children, distinct parents", (1024, False)),
+    ),
+    "query-siblings": lambda: (
+        ("1024 siblings, all selected", (1024, True)),
+        ("1024 siblings, one selected", (1024, False)),
+    ),
+    "prune-shared": lambda: (("depth128,1024matches", (128, 1024)), ("depth128,1match", (128, 1))),
+    "observe-registrations": lambda: (
+        ("1000 wrong-kind", (1_000, "wrong-kind")),
+        ("1000 unrelated", (1_000, "unrelated")),
+    ),
     "navigate": _readpath_cases,
     "treewalk": _readpath_cases,
     "chain": _readpath_cases,
     "range-clone": _readpath_cases,
+    "range-boundary": lambda: (("1000 start", (1_000, "start")), ("1000 end", (1_000, "end"))),
+    "range-contained": lambda: (("1000 clone", (1_000, "clone")), ("1 clone", (1, "clone"))),
+    "range-partial": lambda: (("1000 clone", (1_000, "clone")), ("1 clone", (1, "clone"))),
     "links-extract": _readpath_cases,
     "links-absolutize": _readpath_cases,
     "links-rewrite": _readpath_cases,
@@ -1026,6 +1783,226 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "find-cold": lambda: _FIND_COLD_CASES,
     "select": _readpath_cases,
     "select-has": _readpath_cases,
+    "select-nth": lambda: tuple(
+        (f"{selector} ({size:,} siblings)", (selector, f"<ul>{'<li class=x>value</li>' * size}</ul>"))
+        for selector in ("li:nth-child(odd)", "li:nth-child(odd of .x)")
+        for size in (100, 1_000, 10_000)
+    ),
+    "xpath-wide": lambda: tuple(
+        (f"{expression} ({size:,} siblings)", (expression, f"<ul>{'<li>value</li>' * size}</ul>"))
+        for expression in ("//li", "//li | //ul")
+        for size in (100, 1_000, 10_000)
+    ),
+    "xpath-distinct": lambda: (
+        *(
+            (
+                f"{size:,} nodes, {unique} values",
+                (
+                    "set:distinct(//li)",
+                    "<ul>" + "".join(f"<li>value-{index % unique}</li>" for index in range(size)) + "</ul>",
+                ),
+            )
+            for size in (100, 1_000, 10_000)
+            for unique in (1, 10, size)
+        ),
+        ("0 nodes, 0 values", ("set:distinct(//li)", "<ul></ul>")),
+        ("1 node, 1 value", ("set:distinct(//li)", "<ul><li>value</li></ul>")),
+    ),
+    "xpath-compare": lambda: (
+        tuple(
+            (
+                f"{operation}, {size:,} nodes per set",
+                (
+                    f"//li {operation} //b",
+                    "<main><ul>"
+                    + "<li>a</li>" * size
+                    + "</ul><section>"
+                    + f"<b>{'b' if operation == '=' else 'a'}</b>" * size
+                    + "</section></main>",
+                ),
+            )
+            for operation in ("=", "!=")
+            for size in (10, 100, 1_000, 2_000)
+        )
+        + tuple(
+            (
+                f"scalar equality, {size:,} characters",
+                ("string(//li) = string(//b)", "<ul><li>" + "a" * size + "</li></ul><b>" + "a" * size + "</b>"),
+            )
+            for size in (32, 32_768)
+        )
+        + (("first-node equality, 1,000 nodes", ("//li = //li", "<ul>" + "<li>a</li>" * 1_000 + "</ul>")),)
+    ),
+    "xpath-order": lambda: ((
+        *tuple(
+            (
+                f"{operation}, {size:,} nodes per set",
+                (
+                    f"//li {operation} //b",
+                    "<main><ul>"
+                    + f"<li>{2 if operation.startswith('<') else 1}</li>" * size
+                    + "</ul><section>"
+                    + f"<b>{1 if operation.startswith('<') else 2}</b>" * size
+                    + "</section></main>",
+                ),
+            )
+            for operation in ("<", "<=", ">", ">=")
+            for size in (10, 100, 1000)
+        ),
+        (
+            "first-pair match, 1,000 nodes",
+            ("//li < //b", "<ul>" + "<li>1</li>" * 1000 + "</ul><section>" + "<b>2</b>" * 1000 + "</section>"),
+        ),
+    )),
+    "node-equals": lambda: tuple(
+        (f"{count:,} attribute{'s' if count != 1 else ''}, {variant}", (count, variant))
+        for count, variant in (
+            (1, "aligned"),
+            (10, "aligned"),
+            (31, "aligned"),
+            (32, "aligned"),
+            (100, "aligned"),
+            (1000, "aligned"),
+            (100, "reversed"),
+            (1000, "reversed"),
+            (1000, "early-value"),
+            (100, "late-value"),
+            (100, "disjoint"),
+            (100, "rotated"),
+            (1003, "duplicates"),
+        )
+    ),
+    "xpath-id-nodes": lambda: tuple(
+        (
+            label,
+            (
+                "id(//i)/@id",
+                '<main><b id="first"></b><b id="second"></b>'
+                + ("<i>" + " second first second " * repetitions + "</i>") * count
+                + "</main>",
+            ),
+        )
+        for count, repetitions, label in (
+            (10_000, 1, "10,000 ID argument nodes"),
+            (10, 1_000, "10 long ID argument nodes"),
+        )
+    ),
+    "xpath-replace": lambda: (
+        (
+            "KMP sparse matches",
+            (("a" * 4096 + "b" + "a" * 64 + "x") * 8, "a" * 64 + "b" + "a" * 64, "X", ("a" * 4032 + "Xx") * 8),
+        ),
+        ("short ASCII", ("A short paragraph", "a", "A", "A short pArAgrAph")),
+    ),
+    "xpath-concat": lambda: tuple(
+        (
+            f"{count:,} nodes, {length} characters",
+            ("str:concat(//i)", "<main>" + ("<i>" + "a" * length + "</i>") * count + "</main>"),
+        )
+        for count, length in ((10_000, 32), (10, 32_768))
+    ),
+    "xpath-translate": lambda: ((
+        *tuple(
+            (
+                f"{size:,} map characters, 32 KiB text",
+                (
+                    "translate(string(//p), '" + "".join(chr(256 + index) for index in range(size)) + "', '')",
+                    "<p>" + "z" * 32768 + "</p>",
+                ),
+            )
+            for size in (32, 128, 512)
+        ),
+        (
+            "ASCII case folding, short text",
+            (
+                "translate(string(//p), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')",
+                "<p>A Short TITLE</p>",
+            ),
+        ),
+        *tuple(
+            (
+                label,
+                (f"translate(string(//p), '{source}', '{target}')", f"<p>{content}</p>"),
+            )
+            for label, source, target, content in (
+                ("early match, 32 KiB text", string.ascii_lowercase, string.ascii_uppercase, "a" * 32768),
+                ("duplicate map, 32 KiB text", "a" * 512, "b", "a" * 32768),
+                ("long map, 64 character text", "a" * 8192, "b", "a" * 64),
+                ("second entry, 32 KiB text", string.ascii_lowercase, string.ascii_uppercase, "b" * 32768),
+                ("ASCII cycling", string.ascii_lowercase, string.ascii_uppercase, string.ascii_lowercase * 1260),
+                (
+                    "Unicode cycling",
+                    "".join(chr(256 + index) for index in range(128)),
+                    "",
+                    "".join(chr(256 + index) for index in range(256)) * 128,
+                ),
+            )
+        ),
+    )),
+    "xpath-set": lambda: (
+        tuple(
+            (
+                f"{operation}, {size:,} nodes per set",
+                (
+                    f"set:{operation}(//li, //b)",
+                    "<main><ul>" + "<li></li>" * size + "</ul><section>" + "<b></b>" * size + "</section></main>",
+                ),
+            )
+            for operation in ("intersection", "difference", "has-same-node")
+            for size in (10, 100, 1_000, 10_000)
+        )
+        + tuple(
+            (
+                f"first-node overlap, {size:,} nodes",
+                ("set:has-same-node(//li, //li)", "<ul>" + "<li></li>" * size + "</ul>"),
+            )
+            for size in (10, 100, 1_000, 10_000)
+        )
+    ),
+    "computed-style-deep": lambda: tuple(
+        (f"{depth} ancestors", f"<style>div {{ color:red }}</style>{'<div>' * depth}x{'</div>' * depth}")
+        for depth in (10, 100, 500)
+    ),
+    "path-wide": _wide_path_cases,
+    "path-xpath-wide": _wide_path_cases,
+    "path-cold": _wide_path_cases,
+    "path-xpath-cold": _wide_path_cases,
+    "path-one-cold": _wide_path_cases,
+    "path-xpath-one-cold": _wide_path_cases,
+    "path-class-edit": _wide_path_cases,
+    "microdata-wide": lambda: tuple(
+        (f"{size:,} properties", "<div itemscope>" + "<span itemprop=name>x</span>" * size + "</div>")
+        for size in (100, 1_000, 10_000)
+    ),
+    "microdata-empty-scope": lambda: tuple(
+        (f"{size:,} elements", f"<div itemscope>{'<span>x</span>' * size}</div>") for size in (100, 1_000, 10_000)
+    ),
+    "structured-empty": lambda: tuple(
+        (f"{size:,} elements", f"<div>{'<span>x</span>' * size}</div>") for size in (100, 1_000, 10_000)
+    ),
+    "article-wide": lambda: tuple(
+        (
+            f"{size:,} candidates",
+            "<div>"
+            + ("<section><p>" + "A sentence with enough text to score. " * 3 + "</p></section>") * size
+            + "</div>",
+        )
+        for size in (100, 1_000, 10_000)
+    ),
+    "article-deep": lambda: tuple(
+        (
+            f"{depth} nested candidates",
+            ("<div><p>" + "A sentence with enough prose, and a clause, to score. " * 3 + "</p>") * depth
+            + "</div>" * depth,
+        )
+        for depth in (10, 100, 500)
+    ),
+    "computed-style-filter": lambda: _FILTER_STYLED_PAGES,
+    "computed-style-filter-cold": lambda: _FILTER_STYLED_PAGES,
+    "computed-style-selectors": _computed_style_selector_cases,
+    "computed-style-selectors-reverse": _computed_style_selector_cases,
+    "computed-style-specificity": lambda: _SPECIFICITY_STYLED_PAGES,
+    "computed-style-specificity-cold": lambda: _SPECIFICITY_STYLED_PAGES,
     "computed-style": lambda: (("styled page (3 kB)", _styled_page(8)), ("styled page (11 kB)", _styled_page(40))),
     "computed-style-dense": lambda: (("dense sheet (9 kB)", _dense_styled_page(20)),),
     "match": _readpath_cases,
@@ -1051,7 +2028,21 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "conformance": _readpath_cases,
     "serialize-xml": _readpath_cases,
     "canonicalize": _readpath_cases,
-    "canonicalize-deep": lambda: (("deep tree (150 deep)", _deep_tree(150, 3)),),
+    "canonicalize-attrs": lambda: tuple(
+        (
+            f"{size:,} attributes",
+            "<div " + " ".join(f'data-{index:05d}="x"' for index in range(size, 0, -1)) + "></div>",
+        )
+        for size in (100, 1_000, 10_000)
+    ),
+    "canonicalize-deep": lambda: (
+        ("deep tree (150 deep)", _deep_tree(150, 3)),
+        (
+            "sparse xlink (150 deep)",
+            "<svg>" + ('<g><use xlink:href="#x"/>' * 150) + "</g>" * 150 + "</svg>",
+        ),
+        ("shallow ordinary", "<main><p>plain text</p><div id=a>more text</div></main>"),
+    ),
     "lossless-serialize": _readpath_cases,
     "minify": _readpath_cases,
     "socialcard": lambda: (
@@ -1060,8 +2051,42 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "structured": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
     "microdata": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
-    "microdata-itemref": lambda: (("references after 4,000 nodes", _MICRODATA_ITEMREF),),
-    "syndication": lambda: (("rss 30 items", _FEED_XML),),
+    "microdata-itemref": lambda: (
+        ("references after 4,000 nodes", _MICRODATA_ITEMREF),
+        (
+            "reversed references",
+            _MICRODATA_ITEMREF.replace(_MICRODATA_REFS, " ".join(f"r{index}" for index in range(999, -1, -1)), 1),
+        ),
+        (
+            "interleaved references",
+            _MICRODATA_ITEMREF.replace(
+                _MICRODATA_REFS, " ".join(f"r{index}" for offset in (0, 1) for index in range(offset, 1_000, 2)), 1
+            ),
+        ),
+        (
+            "4 shuffled references",
+            '<div itemscope itemref="r0 r2 r1 r3"></div>'
+            + "".join(f'<meta id=r{index} itemprop=p content="{index}">' for index in range(4)),
+        ),
+    ),
+    "syndication": lambda: (
+        ("rss 30 items", _FEED_XML),
+        (
+            "rss 30 items / 128 extensions each",
+            _FEED_XML.replace("<item>", "<item>" + "<extension>x</extension>" * 128),
+        ),
+        (
+            "atom 30 entries",
+            '<feed xmlns="http://www.w3.org/2005/Atom"><title>Example</title>'
+            + "".join(
+                f'<entry><title>Entry {index}</title><link href="https://example.com/{index}"/>'
+                f"<id>urn:{index}</id><updated>2026-07-06</updated><summary>Summary {index}</summary>"
+                "<content>Full body</content><author><name>Writer</name></author></entry>"
+                for index in range(30)
+            )
+            + "</feed>",
+        ),
+    ),
     "sanitize": lambda: (
         ("comment", "<p>Thanks for the <a href='http://example.com'>link</a>! <script>evil()</script></p>"),
         ("post 4 KiB", _SANITIZE_POST * 20),
@@ -1070,6 +2095,11 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "sanitize-named-props": lambda: (("clobbering 4 KiB", _SANITIZE_NAMED * 11),),
     "sanitize-report": lambda: (("post 4 KiB", _SANITIZE_POST * 20),),
     "sanitize-node": lambda: (("post 4 KiB", _SANITIZE_POST * 20),),
+    "sanitize-attributes": lambda: (
+        ("1024 rejected attributes", "<p " + " ".join(f'a{index}="x"' for index in range(1_024)) + ">x</p>"),
+        ("1024 allowed attributes", "<p " + " ".join(f'data-{index}="x"' for index in range(1_024)) + ">x</p>"),
+        ("four allowed attributes", '<p data-a="x" data-b="x" data-c="x" data-d="x">x</p>'),
+    ),
     "sanitize-styles": lambda: (("styled 4 KiB", _SANITIZE_STYLES * 20),),
     "sanitize-transform": lambda: (("legacy 4 KiB", _SANITIZE_LEGACY * 13),),
     "sanitize-custom-elements": lambda: (("custom 4 KiB", _SANITIZE_CUSTOM * 11),),
@@ -1082,7 +2112,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("join (escapes operands)", ("join", _MARKUP_JOIN_PARTS)),
     ),
     "linkify": lambda: _LINKIFY_CASES,
-    "linkify-node": lambda: (("markup (4 KiB)", _LINKIFY_CASES[2][1]),),
+    "linkify-node": lambda: (
+        ("markup (4 KiB)", _LINKIFY_CASES[2][1]),
+        ("wide text, one link", "<p>" + "😀 " * 32_768 + "https://example.com</p>"),
+        ("ASCII text, one link", "<p>" + "a " * 32_768 + "https://example.com</p>"),
+        ("wide text, no links", "<p>" + "😀 " * 32_768 + "</p>"),
+        ("1024 wide-text links", "<p>" + "😀 https://example.com " * 1_024 + "</p>"),
+    ),
     "linkify-traversal": lambda: _LINKIFY_TRAVERSAL_CASES,
     "detect": lambda: (
         ("find comment (1 link, 1 email)", ("find", _LINKIFY_CASES[0][1])),
@@ -1110,6 +2146,12 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("list (4 KiB)", ("default", _MARKDOWN_LIST)),
         ("table (4 KiB)", ("default", _MARKDOWN_TABLE)),
         ("configured (4 KiB)", ("configured", _MARKDOWN_CONFIGURED)),
+        ("8192 asterisks", ("escaped", "<p>" + "*" * 8192 + "</p>")),
+        ("8192 letters", ("escaped", "<p>" + "a" * 8192 + "</p>")),
+    ),
+    "markdown-wrap": lambda: (
+        ("10000 words, width8192", (8192, "<p>" + "aa " * 10_000 + "</p>")),
+        ("10000 words, width80", (80, "<p>" + "aa " * 10_000 + "</p>")),
     ),
     "markdown-google": lambda: (("google_doc (4 KiB)", _MARKDOWN_GOOGLE),),
     "tables": lambda: (
@@ -1120,9 +2162,32 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("rows (1000 rows)", ("rows", _table_html(1_000))),
         ("records (1000 rows)", ("records", _table_html(1_000))),
     ),
+    "tables-spans": lambda: tuple(
+        (
+            f"{kind} / {span} columns / {size} text characters",
+            (
+                kind,
+                "<table><tr><th colspan="
+                + str(span)
+                + ">header</th></tr><tr><td colspan="
+                + str(span)
+                + ">"
+                + "x" * size
+                + "</td></tr></table>",
+            ),
+        )
+        for kind, span, size in (("rows", 128, 4096), ("rows", 1, 16), ("records", 128, 4096))
+    ),
     "tables-wide": lambda: (("10k columns", ("rows", "<table><tr>" + "<td>x</td>" * 10_000 + "</tr></table>")),),
     "article": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
     "boilerplate": lambda: (("post (4 KiB)", _article_page(16)), ("longform (16 KiB)", _article_page(72))),
+    "date-tally": lambda: (
+        (
+            "1000 distinct visible dates",
+            "<p>" + " ".join((date(2000, 1, 1) + timedelta(days=index)).isoformat() for index in range(1000)) + "</p>",
+        ),
+        ("1000 repeated visible dates", "<p>" + "2000-01-01 " * 1000 + "</p>"),
+    ),
     "date": lambda: (
         ("post (4 KiB)", _article_page(16)),
         ("longform (16 KiB)", _article_page(72)),
@@ -1140,9 +2205,11 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     ),
     "htmlparser": _readpath_cases,
     "sax": _readpath_cases,
+    "sax-records": _sax_record_cases,
+    "sax-records-callback": _sax_record_cases,
     "treebuild": _readpath_cases,
     "rewrite": _readpath_cases,
-    "rewrite-attributes": lambda: (("1,000 new names", "<x></x>"),),
+    "rewrite-attributes": lambda: (("1,000 new names", (1000, "<x></x>")), ("one new name", (1, "<x></x>"))),
     "path": _readpath_cases,
     "path-xpath": _readpath_cases,
     "translate": lambda: _TRANSLATE_CASES,
@@ -1154,13 +2221,159 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "transform-reuse": _transform_compile_cases,
     "transform-sort": _transform_sort_cases,
     "transform-dense": _transform_dense_cases,
+    "transform-names": _transform_name_cases,
+    "transform-names-compile": lambda: (_transform_name_cases()[0],),
+    "transform-rules": lambda: tuple(
+        (
+            f"128 unmatched templates, 1,024 nodes, {passes} passes",
+            (
+                '<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">'
+                '<xsl:output method="text"/>'
+                + "".join(f'<xsl:template match="unused{index}" priority="0"/>' for index in range(128))
+                + '<xsl:template match="/">'
+                + '<xsl:apply-templates select="root/p"/>' * passes
+                + '</xsl:template><xsl:template match="p" priority="-1">'
+                '<xsl:value-of select="@id"/><xsl:text>|</xsl:text></xsl:template></xsl:stylesheet>',
+                "<root>" + "".join(f'<p id="{index}"/>' for index in range(1, 1_025)) + "</root>",
+            ),
+        )
+        for passes in (8, 1)
+    ),
+    "transform-number": _transform_number_cases,
     "minify-css": _minify_cases,
+    "minify-css-conflicts": _css_conflict_inputs,
+    "minify-css-merges": _css_merge_inputs,
     "minify-js": _minify_js_cases,
+    "minify-js-integers": lambda: tuple(
+        (
+            f"{count} integers / {label}",
+            "x=[" + ",".join(str((index + 1) * scale + offset) for index in range(count)) + "]",
+        )
+        for count, scale, offset, label in (
+            (4096, 10, 1, "no trailing zeros"),
+            (4096, 1000, 0, "three trailing zeros"),
+            (1, 10, 1, "no trailing zeros"),
+        )
+    ),
+    "minify-js-var-initialization": lambda: tuple(
+        (
+            f"{count} var pairs / {'read before initialization' if early else 'read after initialization'}",
+            "function f(g){var "
+            + ",".join(
+                f"keep{index}=g({'value' + str(index) if early else str(index)}),value{index}={index % 10}"
+                for index in range(count)
+            )
+            + ";return["
+            + ",".join(f"keep{index}" if early else f"keep{index},value{index}" for index in range(count))
+            + "]}",
+        )
+        for count, early in ((256, False), (1, False), (256, True))
+    ),
+    "minify-js-single-use": lambda: tuple(
+        (
+            f"{count} call initializers / {layout}",
+            "function f(g){"
+            + (
+                "const " + ",".join(f"v{index}=g({index})" for index in range(count)) + ";"
+                if layout == "one declaration"
+                else "".join(f"const v{index}=g({index});" for index in range(count))
+            )
+            + "return["
+            + ",".join(f"v{index}" for index in range(count))
+            + "]}",
+        )
+        for count, layout in ((256, "one declaration"), (256, "separate declarations"), (1, "one declaration"))
+    ),
+    "minify-js-unused-declarations": lambda: tuple(
+        (
+            f"{count} unused retained/literal pairs",
+            "function f(g){const "
+            + ",".join(f"keep{index}=g({index}),value{index}={index % 10}" for index in range(count))
+            + ";return[]}",
+        )
+        for count in (256, 1)
+    ),
+    "minify-js-unlink": lambda: tuple(
+        (
+            f"{count} retained/literal pairs / {layout}",
+            "function f(g){"
+            "const "
+            + ("," if layout == "one declaration" else ";const ").join(
+                f"keep{index}=g({index}),value{index}={index % 10}" for index in range(count)
+            )
+            + ";return["
+            + ",".join(f"keep{index},value{index},value{index}" for index in range(count))
+            + "]}",
+        )
+        for count, layout in ((256, "one declaration"), (256, "separate declarations"), (1, "one declaration"))
+    ),
+    "minify-js-propagation": lambda: tuple(
+        (
+            f"{count} literal bindings / {layout}",
+            "function f(g){"
+            + (
+                "".join(f"const v{index}={index % 10};g(v{index});" for index in range(count))
+                if layout == "interleaved declarations"
+                else "const "
+                + ",".join(f"v{index}={index % 10}" for index in range(count))
+                + ";"
+                + "".join(f"g(v{index});" for index in range(count))
+            )
+            + "return["
+            + ",".join(f"v{index},v{index}" for index in range(count))
+            + "]}",
+        )
+        for count, layout in (
+            (256, "interleaved declarations"),
+            (1, "interleaved declarations"),
+            (256, "one declaration"),
+        )
+    ),
+    "minify-js-guards": lambda: tuple(
+        (
+            f"{count} guard returns",
+            "function f(x){"
+            + "".join(f"if(x==={index})return g({index});" for index in range(count))
+            + "return g(-1)}",
+        )
+        for count in (512, 1)
+    ),
+    "minify-js-sequences": lambda: tuple(
+        (f"{count} expression statements", ";".join(f"f({index})" for index in range(count))) for count in (1000, 2)
+    ),
     "stream": _readpath_cases,
+    "encoding-result": _encoding_result_cases,
+    "encoding-result-stream": _encoding_result_cases,
     "encoding": _encoding_cases,
     "decode": _decode_cases,
     "normalize": _normalize_cases,
+    "normalize-dom": lambda: (
+        *(
+            (f"{count} adjacent text nodes / {len(text)} characters", (count, text))
+            for count, text in (
+                (1, "text"),
+                (2, "text"),
+                (10, "text"),
+                (100, "text"),
+                (1_000, "text"),
+                (100, "text" * 64),
+            )
+        ),
+        ("1000 empty tail nodes", (1_000, "")),
+    ),
+    "attribute-grow": lambda: tuple(
+        (f"{count} {'existing' if existing else 'new'} attributes", (count, existing))
+        for existing in (False, True)
+        for count in (1, 10, 100, 1_000)
+    ),
+    "normalize-marks": lambda: tuple(
+        (f"{size:,} combining marks", "a" + "\u0315" * (size // 2) + "\u0300" * (size // 2))
+        for size in (100, 1_000, 10_000)
+    ),
     "detect-language": _language_cases,
+    "detect-language-long": lambda: tuple(
+        (f"english book ({size} KiB)", corpus.corpus("war-and-peace/2600.txt", size << 10)) for size in (1, 64, 1_024)
+    ),
     "escape-identifier": lambda: (
         (
             "mixed shapes (1,000)",
@@ -1180,5 +2393,8 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),
     ),
     "links-filter": _readpath_cases,
-    "links-external": lambda: (("900 mixed-site links", _EXTERNAL_LINKS_HTML),),
+    "links-external": lambda: (
+        ("900 mixed-site links", _EXTERNAL_LINKS_HTML),
+        ("900 mixed-site links / 64 subdomains", _EXTERNAL_LINKS_HTML.replace("https://", "https://" + "s." * 64)),
+    ),
 }

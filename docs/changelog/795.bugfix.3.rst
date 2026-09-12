@@ -1,0 +1,2 @@
+Release temporary validation buffers after each call when reusing an :class:`XSD <turbohtml.validate.XMLSchema>` or
+RELAX NG schema.

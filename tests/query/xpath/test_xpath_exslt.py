@@ -22,11 +22,18 @@ from __future__ import annotations
 
 import math
 import re
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from bench.ci import benchmarks
+from bench.core import OPERATIONS
 
 import turbohtml
-from turbohtml import Element
+from turbohtml import Document, Element, parse, parse_xml
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 HTML = (
     "<html><body>"
@@ -325,3 +332,105 @@ def test_date_invalid_is_nan(doc: turbohtml.Node, expr: str) -> None:
 )
 def test_date_leap_year(doc: turbohtml.Node, expr: str, *, expected: bool) -> None:
     assert doc.xpath(expr) is expected
+
+
+@pytest.mark.parametrize("unique", [pytest.param(1, id="identical"), pytest.param(64, id="many-values")])
+def test_distinct_retains_first_occurrences(unique: int) -> None:
+    document: Final[Document] = parse_xml(
+        "<root>" + "".join(f'<item id="{index}">value-{index % unique}</item>' for index in range(256)) + "</root>"
+    )
+    assert document.xpath("set:distinct(//item)/@id") == [str(index) for index in range(unique)]
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param('<item id="a"/><item id="b"/>', ["a"], id="empty"),
+        pytest.param('<item id="a">é😀</item><item id="b">é😀</item>', ["a"], id="unicode"),
+        pytest.param('<item id="a">a<b>b</b></item><item id="b">ab</item>', ["a"], id="descendants"),
+        pytest.param("", [], id="empty-set"),
+        pytest.param('<item id="a">one</item>', ["a"], id="singleton"),
+    ],
+)
+def test_distinct_string_values(content: str, expected: list[str]) -> None:
+    assert parse_xml(f"<root>{content}</root>").xpath("set:distinct(//item)/@id") == expected
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param('<item a="é" b="😀"/><item a="é" b=""/>', ["é", "😀", ""], id="duplicates"),
+        pytest.param('<item a="é"/>', ["é"], id="singleton"),
+    ],
+)
+def test_distinct_attribute_values(content: str, expected: list[str]) -> None:
+    assert parse_xml(f"<root>{content}</root>").xpath("set:distinct(//item/@*)") == expected
+
+
+@pytest.mark.parametrize(
+    "count", [pytest.param(0, id="empty"), pytest.param(1, id="one"), pytest.param(1000, id="many")]
+)
+@pytest.mark.parametrize(
+    ("markup", "text"),
+    [pytest.param("", "", id="empty-values"), pytest.param("é<b>界</b>😀", "é界😀", id="descendant-text")],
+)
+def test_concat_node_strings(count: int, markup: str, text: str) -> None:
+    document: Final = parse("<main>" + f"<i>{markup}</i>" * count + "</main>")
+    assert document.xpath("str:concat(//i)") == text * count
+
+
+@pytest.mark.parametrize(
+    ("text", "search", "replacement", "expected"),
+    [
+        pytest.param("a" * 32768, "a" * 64 + "b" + "a" * 64, "X", "a" * 32768, id="kmp-miss"),
+        pytest.param(
+            ("a" * 4096 + "b" + "a" * 64 + "x") * 8,
+            "a" * 64 + "b" + "a" * 64,
+            "X",
+            ("a" * 4032 + "Xx") * 8,
+            id="kmp-sparse",
+        ),
+        pytest.param("a" * 32768, "a", "bb", "bb" * 32768, id="dense-one-character"),
+        pytest.param("A short paragraph", "a", "A", "A short pArAgrAph", id="short-ascii"),
+        pytest.param("abababa", "aba", "X", "XbX", id="non-overlapping"),
+        pytest.param("abcabc", "abc", "", "", id="delete-all"),
+        pytest.param("abc", "", "X", "abc", id="empty-search"),
+        pytest.param("", "a", "X", "", id="empty-input"),
+        pytest.param("", "", "X", "", id="both-empty"),
+        pytest.param("abc", "abcd", "X", "abc", id="longer-search"),
+        pytest.param("a\x00ba\x00b", "\x00b", "X", "aXaX", id="nul-search"),
+        pytest.param("abab", "b", "\x00", "a\x00a\x00", id="nul-replacement"),
+        pytest.param("a\x00a", "a", "\x00", "\x00\x00\x00", id="nul-retained-gap"),
+        pytest.param("a\x00b", "", "X", "a\x00b", id="nul-empty-search"),
+        pytest.param("é界😀é界😀", "界😀", "水", "é水é水", id="unicode-widths"),
+        pytest.param("e\u0301", "é", "X", "e\u0301", id="no-normalization"),
+        pytest.param("a'b\"a", "'", '"', 'a"b"a', id="quoted-bindings"),
+    ],
+)
+def test_replace_bound_literals(text: str, search: str, replacement: str, expected: str) -> None:
+    document: Final = parse("<p></p>")
+    assert (
+        document.xpath("str:replace($text, $search, $replacement)", text=text, search=search, replacement=replacement)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "length"),
+    [
+        pytest.param("xpath-concat", 320_000, id="many-short-nodes"),
+        pytest.param("xpath-concat-long", 327_680, id="few-long-nodes"),
+    ],
+)
+def test_concat_benchmark_output(name: str, length: int) -> None:
+    _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
+    expression, source = cast("tuple[str, str]", load())
+    assert parse(source).xpath(expression) == "a" * length
+
+
+@pytest.mark.parametrize("name", ["xpath-replace", "xpath-replace-short"])
+def test_replace_benchmark_output(name: str) -> None:
+    _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
+    case = cast("tuple[str, str, str, str]", load())
+    operation = cast("Callable[[tuple[str, str, str, str]], str]", OPERATIONS["xpath-replace"][0])
+    assert operation(case) == case[3]

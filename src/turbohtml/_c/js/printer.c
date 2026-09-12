@@ -634,24 +634,20 @@ static void print_number(St *st, const jm_node *node) {
             zeros++;
         }
         Py_ssize_t head = len - zeros;
-        if (head == 0) { /* the literal 0 */
+        if (head == 0 || zeros < 3) { /* an exponent needs at least two characters */
             put_run(st, buf, len);
             return;
         }
         char digits[8];
         int digit_len = snprintf(digits, sizeof(digits), "%lld", (long long)zeros);
-        if (zeros >= 1 && head + 1 + digit_len < len) { /* <head>e<zeros> is shorter */
-            for (Py_ssize_t index = 0; index < head; index++) {
-                out[out_len++] = buf[index];
-            }
-            out[out_len++] = 'e';
-            for (int index = 0; index < digit_len; index++) {
-                out[out_len++] = (Py_UCS4)(unsigned char)digits[index];
-            }
-            put_run(st, out, out_len);
-            return;
+        for (Py_ssize_t index = 0; index < head; index++) {
+            out[out_len++] = buf[index];
         }
-        put_run(st, buf, len);
+        out[out_len++] = 'e';
+        for (int index = 0; index < digit_len; index++) {
+            out[out_len++] = (Py_UCS4)(unsigned char)digits[index];
+        }
+        put_run(st, out, out_len);
         return;
     }
     Py_ssize_t istart = 0;

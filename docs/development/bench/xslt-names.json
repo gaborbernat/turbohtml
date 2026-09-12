@@ -1,0 +1,32 @@
+{
+  "label": "resolve XSLT declaration names",
+  "parties": [
+    "turbohtml",
+    "lxml.etree"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 unused declarations per kind, 256 calls",
+      0.0001588747638948007,
+      0.0003326757052036555
+    ],
+    [
+      "1 unused declarations per kind, 256 calls",
+      0.00015709549293963694,
+      0.00012355011941356982
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.01462071255275305,
+      0.011105530901518156
+    ],
+    [
+      null,
+      0.019210531412796186,
+      0.020899069201990715
+    ]
+  ]
+}

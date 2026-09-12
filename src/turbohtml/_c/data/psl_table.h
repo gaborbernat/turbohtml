@@ -14,6 +14,8 @@ typedef struct {
     uint8_t kind;
 } th_psl_entry;
 
+enum { TH_PSL_MAX_LABELS = 7 };
+
 static const int th_psl_count = 8788;
 static const th_psl_entry th_psl_table[] = {
     {"*.001.test.code-builder-stg.platform.salesforce.com", 51u, 7u, 1u},

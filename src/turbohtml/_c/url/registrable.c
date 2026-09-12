@@ -97,7 +97,7 @@ static Py_ssize_t public_suffix_labels(const Py_UCS4 *host, Py_ssize_t host_len,
        a plain assignment is enough to keep the longest without a max() guard whose shorter arm is then unreachable. */
     Py_ssize_t best_normal = 0;
     Py_ssize_t best_exception = 0;
-    for (Py_ssize_t take = 1; take <= count; take++) {
+    for (Py_ssize_t take = 1; take <= count && take <= TH_PSL_MAX_LABELS; take++) {
         Py_ssize_t start = label_start[count - take];
         if (take == 1) {
             if (is_iana_tld(host + start, host_len - start)) {

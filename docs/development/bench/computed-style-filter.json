@@ -1,0 +1,36 @@
+{
+  "label": "reject CSS rules before traversal predicates",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "256 rules / 128 parent-child pairs / irrelevant pseudo-first",
+      0.0021574416667135667
+    ],
+    [
+      "256 rules / 128 parent-child pairs / matching pseudo-first",
+      0.003617814537574304
+    ],
+    [
+      "256 rules / 128 parent-child pairs / irrelevant class-first",
+      0.0021809460708633803
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.014378387937297768
+    ],
+    [
+      null,
+      0.012130290987524462
+    ],
+    [
+      null,
+      0.016659458556591733
+    ]
+  ],
+  "notes": {}
+}

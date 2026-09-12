@@ -1,0 +1,1 @@
+Prevent repeated descendant ``:has()`` queries from growing retained cache memory without new entries.

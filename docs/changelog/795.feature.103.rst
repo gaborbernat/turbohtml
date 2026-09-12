@@ -1,0 +1,1 @@
+Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation of decimals without numeric bounds.

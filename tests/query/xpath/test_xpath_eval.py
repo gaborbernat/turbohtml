@@ -23,6 +23,22 @@ from turbohtml import Document, Element, XPath, XPathString
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from types import SimpleNamespace
+from operator import ge, gt, le, lt
+from typing import TYPE_CHECKING, Final
+
+from turbohtml import parse_xml
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+from turbohtml import parse
+
+if TYPE_CHECKING:
+    from types import SimpleNamespace
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator
+
 
 HTML = (
     "<!doctype html><html><head><title>T</title></head><body>"
@@ -688,3 +704,493 @@ def test_deep_operator_spine_raises_instead_of_overflowing(doc: turbohtml.Node, 
 
 def test_moderately_nested_expression_still_evaluates(doc: turbohtml.Node) -> None:
     assert doc.xpath("(" * 100 + "1 + 1" + ")" * 100) == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        pytest.param(("2",) * 32, ("1",) * 32, id="descending"),
+        pytest.param(("1",) * 32, ("2",) * 32, id="ascending"),
+        pytest.param(("2",) * 32, ("2",) * 32, id="equal"),
+        pytest.param(("2",) * 31 + ("0",), ("1",) * 32, id="late-left-minimum"),
+        pytest.param(("1",) * 31 + ("3",), ("2",) * 32, id="late-left-maximum"),
+        pytest.param(("2",) * 32, ("1",) * 31 + ("3",), id="late-right-maximum"),
+        pytest.param(("1",) * 32, ("2",) * 31 + ("0",), id="late-right-minimum"),
+        pytest.param(("NaN",) * 32, ("1",) * 32, id="left-nan"),
+        pytest.param(("1",) * 32, ("NaN",) * 32, id="right-nan"),
+        pytest.param(("NaN", "1") * 16, ("NaN", "2") * 16, id="nan-and-numbers"),
+        pytest.param(("1", "NaN") * 16, ("2", "NaN") * 16, id="numbers-and-nan"),
+        pytest.param(("-0",) * 16, ("0",) * 16, id="signed-zero"),
+        pytest.param(("2",) * 15, ("1",) * 16, id="small-left"),
+        pytest.param(("2",) * 16, ("1",) * 15, id="small-right"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("operation", "compare"),
+    [
+        pytest.param("<", lt, id="lt"),
+        pytest.param("<=", le, id="le"),
+        pytest.param(">", gt, id="gt"),
+        pytest.param(">=", ge, id="ge"),
+    ],
+)
+def test_numeric_node_set_comparison(
+    left: tuple[str, ...], right: tuple[str, ...], operation: str, compare: Callable[[float, float], bool]
+) -> None:
+    document: Final = parse_xml(
+        "<root>"
+        + "".join(f"<left>{value}</left>" for value in left)
+        + "".join(f"<right>{value}</right>" for value in right)
+        + "</root>"
+    )
+    assert document.xpath(f"//left {operation} //right") is any(
+        compare(float(first), float(second)) for first in left for second in right
+    )
+
+
+@pytest.mark.parametrize("size", [pytest.param(size, id=str(size)) for size in (0, 1, 15, 16, 17, 32, 64)])
+@pytest.mark.parametrize(
+    "operation", [pytest.param("intersection", id="intersection"), pytest.param("difference", id="difference")]
+)
+def test_set_filter_preserves_nodes(size: int, operation: str) -> None:
+    document: Final = parse_xml(
+        "<root>" + "".join(f'<item id="{index}">same</item>' for index in range(size)) + "</root>"
+    )
+    assert document.xpath(f"set:{operation}(//item, //item[position() mod 2 = 0])/@id") == [
+        str(index) for index in range(size) if (index % 2 == 1) == (operation == "intersection")
+    ]
+
+
+@pytest.mark.parametrize(
+    "operation", [pytest.param("intersection", id="intersection"), pytest.param("difference", id="difference")]
+)
+def test_set_filter_distinguishes_attributes(operation: str) -> None:
+    document: Final = parse_xml("<root>" + '<item a="same" b="same"/>' * 64 + "</root>")
+    assert document.xpath(f"set:{operation}(//item/@*, //item/@a)") == ["same"] * 64
+
+
+@pytest.mark.parametrize("size", [pytest.param(size, id=str(size)) for size in (0, 1, 15, 16, 17, 64)])
+@pytest.mark.parametrize(
+    ("right", "overlap"),
+    [pytest.param("//right/item", False, id="disjoint"), pytest.param("//item", True, id="first-overlap")],
+)
+def test_sets_share_a_node(size: int, right: str, *, overlap: bool) -> None:
+    document: Final = parse_xml(f"<root><left>{'<item/>' * size}</left><right>{'<item/>' * size}</right></root>")
+    assert document.xpath(f"set:has-same-node(//left/item, {right})") is (overlap and size > 0)
+
+
+def test_sets_share_a_later_node() -> None:
+    document: Final = parse_xml("<root>" + "<item/>" * 64 + "</root>")
+    assert document.xpath("set:has-same-node(//item, //item[position() > 32])") is True
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        pytest.param("unordered(//li) | //ul", id="left-extension"),
+        pytest.param("//ul | unordered(//li)", id="right-extension"),
+        pytest.param("unordered(//li) | unordered(//li)", id="both-extensions"),
+    ],
+)
+def test_union_orders_extension_results(expression: str) -> None:
+    document: Final[Document] = parse("<ul>" + "".join(f"<li>{index}</li>" for index in range(100)) + "</ul>")
+    assert document.xpath(expression, extensions={(None, "unordered"): _unordered}) == document.select(
+        "ul, li" if "//ul" in expression else "li"
+    )
+
+
+def _unordered(_context: SimpleNamespace, nodes: list[Element]) -> list[Element]:
+    return [*reversed(nodes), nodes[0]]
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        pytest.param((), (), (False, False), id="empty"),
+        pytest.param(("a",) * 16, (), (False, False), id="empty-right"),
+        pytest.param((), ("a",) * 16, (False, False), id="empty-left"),
+        pytest.param(("a",) * 15, ("b",) * 16, (False, True), id="small-left"),
+        pytest.param(("a",) * 16, ("b",) * 15, (False, True), id="small-right"),
+        pytest.param(("a",) * 16, ("b",) * 16, (False, True), id="disjoint"),
+        pytest.param(("a",) * 32, ("a",) * 32, (True, False), id="equal"),
+        pytest.param(("a",) * 31 + ("b",), ("c",) * 31 + ("b",), (True, True), id="late-match"),
+        pytest.param(("a",) * 31 + ("b",), ("a",) * 32, (True, True), id="unequal-left"),
+        pytest.param(("a",) * 32, ("a",) * 31 + ("b",), (True, True), id="unequal-right"),
+        pytest.param(("",) * 16, ("",) * 16, (True, False), id="empty-strings"),
+        pytest.param(("é",) * 16, ("e\u0301",) * 16, (False, True), id="no-normalization"),
+        pytest.param(("雪𐀀",) * 16, ("雪𐀀",) * 16, (True, False), id="wide-unicode"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("operation", "index"), [pytest.param("=", 0, id="equal"), pytest.param("!=", 1, id="unequal")]
+)
+def test_node_set_value_comparison(
+    left: tuple[str, ...], right: tuple[str, ...], expected: tuple[bool, bool], operation: str, index: int
+) -> None:
+    document: Final = parse_xml(
+        "<root>"
+        + "".join(f"<left>{value}</left>" for value in left)
+        + "".join(f"<right>{value}</right>" for value in right)
+        + "</root>"
+    )
+    assert document.xpath(f"//left {operation} //right") is expected[index]
+
+
+def test_comparison_uses_attribute_values() -> None:
+    document: Final = parse_xml("<root>" + '<item left="same" right="same"/>' * 32 + "</root>")
+    assert document.xpath("//item/@left = //item/@right") is True
+
+
+def test_comparison_uses_descendant_text() -> None:
+    document: Final = parse_xml("<root>" + "<left>a<b>b</b>c</left><right>abc</right>" * 32 + "</root>")
+    assert document.xpath("//left = //right") is True
+
+
+@pytest.mark.parametrize(
+    "selection", [pytest.param("//item", id="elements"), pytest.param("//item/@value", id="attributes")]
+)
+def test_comparison_same_nodes(selection: str) -> None:
+    document: Final = parse_xml("<root>" + '<item value="same">same</item>' * 32 + "</root>")
+    assert document.xpath(f"{selection} = {selection}") is True
+
+
+VARIABLE_HTML = (
+    "<html><body>"
+    "<table><tr id='r1'><td>a</td><td>b</td></tr><tr id='r2'><td>c</td></tr></table>"
+    "<p id='a'>one</p><p id='b'>two</p><p id='c'>three</p>"
+    "</body></html>"
+)
+
+
+def variable_tags(result: list[Element | str]) -> list[str]:
+    return [node.tag if isinstance(node, Element) else node for node in result]
+
+
+def ids(result: list[Element | str]) -> list[str | None]:
+    return [node.attr("id") for node in result if isinstance(node, Element)]
+
+
+@pytest.fixture
+def variable_doc() -> turbohtml.Node:
+    return turbohtml.parse(VARIABLE_HTML)
+
+
+@pytest.mark.parametrize(
+    ("expr", "kwargs", "expected"),
+    [
+        pytest.param("//p[@id=$want]", {"want": "b"}, ["p"], id="string-in-predicate"),
+        pytest.param("//p[position()=$n]", {"n": 2}, ["p"], id="int-in-predicate"),
+        pytest.param("//p[$keep]", {"keep": True}, ["p", "p", "p"], id="bool-true"),
+        pytest.param("//p[$keep]", {"keep": False}, [], id="bool-false"),
+        pytest.param("//p[@id=$a or @id=$b]", {"a": "a", "b": "c"}, ["p", "p"], id="two-variables"),
+    ],
+)
+def test_variable_node_set(
+    variable_doc: turbohtml.Node, expr: str, kwargs: dict[str, str | int | float | bool], expected: list[str]
+) -> None:
+    assert variable_tags(variable_doc.xpath(expr, **kwargs)) == expected  # ty: ignore[invalid-argument-type]  # variables unpacked as a dict
+
+
+@pytest.mark.parametrize(
+    ("expr", "kwargs", "expected"),
+    [
+        pytest.param("$s", {"s": "hi"}, "hi", id="string-value"),
+        pytest.param("$s", {"s": ""}, "", id="empty-string-value"),
+        pytest.param("$n", {"n": 7}, 7.0, id="int-value"),
+        pytest.param("$n", {"n": 2.5}, 2.5, id="float-value"),
+        pytest.param("$n", {"n": -1}, -1.0, id="minus-one-is-a-value-not-an-error"),
+        pytest.param("$b", {"b": True}, True, id="bool-value"),
+        pytest.param("$a + $b", {"a": 2, "b": 3}, 5.0, id="arithmetic"),
+        pytest.param("count(//p) = $n", {"n": 3}, True, id="compared-to-count"),
+    ],
+)
+def test_variable_scalar(
+    variable_doc: turbohtml.Node, expr: str, kwargs: dict[str, str | int | float | bool], expected: object
+) -> None:
+    assert variable_doc.xpath(expr, **kwargs) == expected  # ty: ignore[invalid-argument-type]  # variables unpacked as a dict
+
+
+def test_unbound_variable_without_any_binding(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(ValueError, match="unbound variable"):
+        variable_doc.xpath("$missing")
+
+
+def test_unbound_variable_with_other_bindings_present_length_differs(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(ValueError, match="unbound variable"):
+        variable_doc.xpath("$missing", other="x")
+
+
+def test_unbound_variable_same_length_different_name(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(ValueError, match="unbound variable"):
+        variable_doc.xpath("$abc", xyz="v")
+
+
+def test_unsupported_variable_type(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(TypeError, match="an iterable of elements"):
+        variable_doc.xpath("//p[@id=$x]", x=[1, 2])  # ty: ignore[invalid-argument-type]  # ints are not elements
+
+
+def test_unsupported_type_after_a_valid_binding_frees_the_partial(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(TypeError, match="an iterable of elements"):
+        variable_doc.xpath("$good", good="x", bad=[1])  # ty: ignore[invalid-argument-type]  # the second binding is unsupported
+
+
+def test_integer_too_large_for_a_double(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(OverflowError):
+        variable_doc.xpath("$n", n=10**400)
+
+
+def test_missing_expression_argument(variable_doc: turbohtml.Node) -> None:
+    with pytest.raises(TypeError):
+        variable_doc.xpath()  # ty: ignore[missing-argument]  # the no-argument path raises at the C boundary
+
+
+def test_variable_through_xpath_iter(variable_doc: turbohtml.Node) -> None:
+    items = [node for node in variable_doc.xpath_iter("//p[@id=$w]", w="a") if isinstance(node, Element)]
+    assert [node.tag for node in items] == ["p"]
+
+
+def test_variable_through_xpath_one(variable_doc: turbohtml.Node) -> None:
+    result = variable_doc.xpath_one("//p[@id=$w]", w="c")
+    assert isinstance(result, Element)
+    assert result.text == "three"
+
+
+def query(node: turbohtml.Node, expression: str) -> list[Element]:
+    return [item for item in node.xpath(expression) if isinstance(item, Element)]
+
+
+def reversed_with_duplicate(node: turbohtml.Node) -> list[Element]:
+    paragraphs = query(node, "//p")
+    return [paragraphs[1], paragraphs[0], paragraphs[1]]
+
+
+@pytest.mark.parametrize(
+    ("expr", "make_kwargs", "expected_ids"),
+    [
+        pytest.param(
+            "$start//tr",
+            lambda document: {"start": query(document, "//table")[0]},
+            ["r1", "r2"],
+            id="single-element-feeds-a-descendant-step",
+        ),
+        pytest.param(
+            "$rows",
+            lambda document: {"rows": query(document, "//tr")},
+            ["r1", "r2"],
+            id="node-set-returned-directly-as-a-list",
+        ),
+        pytest.param(
+            "$rows | //p",
+            lambda document: {"rows": query(document, "//tr")},
+            ["r1", "r2", "a", "b", "c"],
+            id="union-with-a-node-set",
+        ),
+        pytest.param(
+            "//tr[. = $first]",
+            lambda document: {"first": query(document, "//tr[@id='r1']")},
+            ["r1"],
+            id="predicate-references-a-node-set",
+        ),
+        pytest.param(
+            "$items",
+            lambda document: {"items": reversed_with_duplicate(document)},
+            ["a", "b"],
+            id="normalized-to-document-order-without-duplicates",
+        ),
+        pytest.param(
+            "$items",
+            lambda document: {"items": query(document, "//section")},
+            [],
+            id="empty-node-set",
+        ),
+    ],
+)
+def test_node_set_variable_resolves_to_elements(
+    variable_doc: turbohtml.Node,
+    expr: str,
+    make_kwargs: Callable[[turbohtml.Node], dict[str, Element | list[Element]]],
+    expected_ids: list[str],
+) -> None:
+    assert ids(variable_doc.xpath(expr, **make_kwargs(variable_doc))) == expected_ids  # ty: ignore[invalid-argument-type]  # variables unpacked as a dict
+
+
+def test_node_set_variable_feeds_a_path_step(variable_doc: turbohtml.Node) -> None:
+    assert variable_tags(variable_doc.xpath("$rows/td", rows=query(variable_doc, "//tr"))) == ["td", "td", "td"]
+
+
+@pytest.mark.parametrize(
+    ("query_expr", "expected"),
+    [
+        pytest.param("//p", 3.0, id="count-over-a-populated-node-set"),
+        pytest.param("//section", 0.0, id="count-over-an-empty-node-set"),
+    ],
+)
+def test_count_over_a_node_set_variable(variable_doc: turbohtml.Node, query_expr: str, expected: float) -> None:
+    assert variable_doc.xpath("count($items)", items=query(variable_doc, query_expr)) == pytest.approx(expected)
+
+
+def test_node_set_variable_through_xpath_iter(variable_doc: turbohtml.Node) -> None:
+    cells = [
+        node
+        for node in variable_doc.xpath_iter("$rows/td", rows=query(variable_doc, "//tr"))
+        if isinstance(node, Element)
+    ]
+    assert [node.tag for node in cells] == ["td", "td", "td"]
+
+
+def test_node_set_variable_through_xpath_one(variable_doc: turbohtml.Node) -> None:
+    first = variable_doc.xpath_one("$rows", rows=query(variable_doc, "//tr"))
+    assert isinstance(first, Element)
+    assert first.attr("id") == "r1"
+
+
+def foreign_nodes() -> list[Element]:
+    other = turbohtml.parse("<html><body><span id='x'>elsewhere</span></body></html>")
+    return query(other, "//span")
+
+
+def yield_then_raise(node: turbohtml.Node) -> Iterator[Element]:
+    yield query(node, "//p")[0]
+    msg = "boom"
+    raise RuntimeError(msg)
+
+
+@pytest.mark.parametrize(
+    ("make_items", "exc", "match"),
+    [
+        pytest.param(lambda _document: foreign_nodes(), ValueError, "different tree", id="node-from-a-different-tree"),
+        pytest.param(yield_then_raise, RuntimeError, "boom", id="iterable-raises-partway"),
+    ],
+)
+def test_node_set_variable_rejects_bad_node_sets(
+    variable_doc: turbohtml.Node,
+    make_items: Callable[[turbohtml.Node], Iterable[Element]],
+    exc: type[Exception],
+    match: str,
+) -> None:
+    with pytest.raises(exc, match=match):
+        variable_doc.xpath("$items", items=make_items(variable_doc))
+
+
+@pytest.mark.parametrize(
+    "make_items",
+    [
+        pytest.param(
+            lambda document: [query(document, "//p")[0], "not-an-element"], id="non-element-inside-an-iterable"
+        ),
+        pytest.param(lambda _document: None, id="non-iterable-non-scalar-value"),
+    ],
+)
+def test_node_set_variable_rejects_unsupported_values(
+    variable_doc: turbohtml.Node, make_items: Callable[[turbohtml.Node], object]
+) -> None:
+    with pytest.raises(TypeError, match="an iterable of elements"):
+        variable_doc.xpath("$items", items=make_items(variable_doc))  # ty: ignore[invalid-argument-type]  # deliberately wrong value type
+
+
+_LXML_DOCS: Final = {
+    "article": (
+        "<!doctype html><html><head><title>T</title></head><body>"
+        '<main><article id="a1"><h2>One</h2><p>p1</p><p class="lead">p2</p></article>'
+        '<article id="a2"><h2>Two</h2><p>p3</p></article></main>'
+        '<nav><ul><li><a href="/x">x</a></li><li><a href="/y">y</a></li></ul></nav>'
+        "</body></html>"
+    ),
+    "table": (
+        "<!doctype html><html><head></head><body><table><thead>"
+        "<tr><th>H1</th><th>H2</th></tr></thead><tbody>"
+        "<tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>"
+        "</tbody></table></body></html>"
+    ),
+}
+
+_LXML_EXPRS: Final = [
+    "//p",
+    "//a",
+    "//a/@href",
+    "//p/text()",
+    "//h2/text()",
+    "/html/body//p",
+    "//article",
+    "//article/p",
+    "//article/h2",
+    "//main/article",
+    "//*",
+    "//div//span",
+    "//nav//a/@href",
+    "//td",
+    "//tr/td",
+    "//table//th/text()",
+    "//thead/tr/th",
+    "descendant::li",
+    "//ul/li/a",
+    "/html/head/title/text()",
+    "//body/*",
+    "//p[1]",
+    "//p[2]",
+    "//p[last()]",
+    "//article/p[1]",
+    "//li[position()=2]",
+    "//li[position()<3]",
+    "//li[position()>1]",
+    "//p[@class]",
+    "//p[@class='lead']",
+    "//a[@href='/x']",
+    "//article[@id='a2']/p",
+    "//article[h2]",
+    "//*[contains(@class,'lea')]",
+    "//th[text()='H1']",
+    "(//p)[1]",
+    "(//p)[last()]",
+    "//tr/td[1]",
+    "//tr/td[last()]",
+    "//p[position()=last()]",
+    "//main/following::nav",
+    "//nav/preceding::article",
+    "//article[1]/following::h2",
+    "//article[2]/preceding::h2",
+    "//h2/following::p",
+    "//td/following::td",
+    "//tbody/preceding::th",
+    "//thead/following::td",
+    "//p | //h2",
+    "//th | //td",
+    "count(//p)",
+    "count(//li)",
+    "count(//article)",
+    "string(//title)",
+    "//p[count(//article)=2]",
+    "boolean(//p)",
+    "boolean(//zzz)",
+    "count(//namespace::*)",
+    "name(//body/namespace::*)",
+    "string(//body/namespace::*)",
+    "//article[position()=1]/h2/text()",
+]
+
+
+@pytest.mark.parametrize("expr", _LXML_EXPRS, ids=lambda expr: expr)
+@pytest.mark.parametrize("doc_name", list(_LXML_DOCS), ids=list(_LXML_DOCS))
+@pytest.mark.oracle
+def test_matches_lxml(doc_name: str, expr: str) -> None:
+    lxml_html: Final = pytest.importorskip("lxml.html")
+    html: Final = _LXML_DOCS[doc_name]
+    ours: Final = turbohtml.parse(html).xpath(expr)
+    theirs: Final = lxml_html.document_fromstring(html).xpath(expr)
+    if isinstance(ours, list):
+        assert _normalize_lxml(ours) == _normalize_lxml(theirs)
+    else:
+        assert ours == theirs
+
+
+@pytest.mark.oracle
+def _normalize_lxml(result: Iterable[object]) -> list[str]:
+    out: Final[list[str]] = []
+    for item in result:
+        if isinstance(item, str):
+            out.append(item)
+        else:
+            tag: Final = getattr(item, "tag", None)
+            out.append(tag if isinstance(tag, str) else f"<{type(item).__name__}>")
+    return out

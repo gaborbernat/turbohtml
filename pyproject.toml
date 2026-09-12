@@ -92,6 +92,7 @@ test = [
   "meson>=1.11.1",
   "meson-python>=0.20",
   "ninja>=1.13",
+  "pyperf>=2.10",
   "pytest>=9.1.1",
   "pytest-codspeed>=5.0.3",     # the benchmark fixture powers the CodSpeed CI gate; a no-op timer without --codspeed
   "pytest-cov>=7.1",
@@ -169,7 +170,6 @@ bench = [
   "pandas>=3.0.3",
   "parsel>=1.11",
   "phonenumbers>=9.0.38",
-  "pyperf>=2.10",
   "pyquery>=2.0.1",
   "rcssmin>=1.2.2",
   "readabilipy>=0.3",
@@ -374,31 +374,20 @@ ini_options.addopts = [
   "--ignore=tests/html5lib-tests",                    # vendored conformance data, not our test modules
   "--import-mode=importlib",                          # tests mirror the source tree in nested dirs without __init__.py
 ]
+ini_options.markers = [ "oracle: requires optional competitor dependencies" ]
 ini_options.filterwarnings = [
   "error",
 ]
 
 [tool.coverage]
-# The differential suites diff against oracle libraries that are bench, not test, dependencies
-# (lxml additionally ships no wheels for 3.15, the free-threaded builds, or Windows), so each
-# module importorskips itself where its oracle is absent; measuring them would make the gate
-# environment-dependent. They still run and validate wherever the oracle installs (the dev env).
+# Optional competitors lack wheels on parts of the test matrix. Exclude their checks
+# from portable coverage; the oracle marker scopes exclusions within consolidated modules.
 run.omit = [
   "tests/benchmarks/*",                                # run only under --codspeed (the CI benchmark job), never in the coverage run
-  "tests/clean/test_sanitizer_xml_differential.py",
   "tests/conformance/test_c14n_conformance.py",        # runs only in the dedicated conformance env; the matrix deselects tests/conformance
   "tests/conformance/test_cssom_jsdom_conformance.py", # differential oracle: skips when the node/jsdom toolchain is absent
   "tests/conformance/test_dom_jsdom_differential.py",
   "tests/conformance/test_xml_conformance.py",
-  "tests/convert/test_css_to_xpath_differential.py",
-  "tests/convert/test_transform_differential.py",
-  "tests/dom/test_parse_xml_differential.py",
-  "tests/dom/test_treebuild_differential.py",
-  "tests/query/match/test_soupsieve_differential.py",
-  "tests/query/xpath/test_xpath_differential.py",
-  "tests/serialize/test_c14n_differential.py",
-  "tests/validate/test_conformance_differential.py",   # differential oracle: skips when html5validator/vnu.jar or a JRE is absent
-  "tests/validate/test_schema_differential.py",
 ]
 run.parallel = true
 run.plugins = [
@@ -415,6 +404,7 @@ paths.source = [
   "**/src",
   "**\\src",
 ]
+report.exclude_also = [ '@pytest\.mark\.oracle' ]
 html.show_contexts = true
 html.skip_covered = false
 # covdefaults omits */__main__.py by default; the CLI lives there, so gate it like the rest

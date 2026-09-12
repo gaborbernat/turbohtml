@@ -1,0 +1,1 @@
+Speed up closest-ancestor queries over overlapping selections.

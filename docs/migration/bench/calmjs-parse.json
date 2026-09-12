@@ -12,7 +12,7 @@
     [
       "underscore 1.13 (67 kB)",
       19297.0,
-      0.0027241270076956425,
+      0.0011963492404296024,
       20857.0,
       0.15384521183053343
     ],
@@ -26,7 +26,7 @@
     [
       "jquery 3.7 (279 kB)",
       87776.0,
-      0.013604465262081552,
+      0.006392547226763175,
       93214.0,
       0.7261410345769642
     ],
@@ -36,13 +36,104 @@
       0.012807822041092246,
       77024.0,
       0.6785401353360309
+    ],
+    [
+      "minify expression sequences — 1000 expression statements",
+      6889.0,
+      0.00033447680128422994,
+      6890.0,
+      0.061532582008900744
+    ],
+    [
+      "minify expression sequences — 2 expression statements",
+      9.0,
+      1.1670079966237997e-06,
+      10.0,
+      0.0009810183156635807
+    ],
+    [
+      "minify guard return chains — 512 guard returns",
+      7487.0,
+      0.00028438259536566575,
+      12608.0,
+      0.06321570966392756
+    ],
+    [
+      "minify guard return chains — 1 guard returns",
+      38.0,
+      1.8137537852661958e-06,
+      49.0,
+      0.0011015658401447581
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / interleaved declarations",
+      2327,
+      0.00023127182887492382,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 1 literal bindings / interleaved declarations",
+      32,
+      2.090794373129275e-06,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "propagate repeated JavaScript literal reads — 256 literal bindings / one declaration",
+      2327,
+      0.0001890878458690774,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / one declaration",
+      3142,
+      0.00012956246737303446,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "check single-use JavaScript initializers — 256 call initializers / separate declarations",
+      3142,
+      0.0002017888859351539,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "check single-use JavaScript initializers — 1 call initializers / one declaration",
+      37,
+      1.5377683748892442e-06,
+      "ES5 parser rejects const",
+      "ES5 parser rejects const"
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read after initialization",
+      3652,
+      0.00022982708333074697,
+      5191.0,
+      0.03897750491742045
+    ],
+    [
+      "check JavaScript var initialization order — 1 var pairs / read after initialization",
+      37,
+      2.0490305150981195e-06,
+      42.0,
+      0.0010633084645936227
+    ],
+    [
+      "check JavaScript var initialization order — 256 var pairs / read before initialization",
+      4274,
+      0.00022446345478025856,
+      4277.0,
+      0.03349665277055465
     ]
   ],
   "spread": [
     [
       null,
       null,
-      0.026761011286501026,
+      0.027870460547941123,
       null,
       0.04021033690817729
     ],
@@ -56,7 +147,7 @@
     [
       null,
       null,
-      0.0186267125301896,
+      0.012701740472871384,
       null,
       0.0984415803234985
     ],
@@ -66,7 +157,102 @@
       0.022467493597760506,
       null,
       0.06493109954770923
+    ],
+    [
+      null,
+      null,
+      0.13592681347012278,
+      null,
+      0.20566608006343967
+    ],
+    [
+      null,
+      null,
+      0.02651579899818408,
+      null,
+      0.0937574630812805
+    ],
+    [
+      null,
+      null,
+      0.011033915942673642,
+      null,
+      0.15048294160513465
+    ],
+    [
+      null,
+      null,
+      0.040253606681332654,
+      null,
+      0.021326748049291796
+    ],
+    [
+      null,
+      null,
+      0.06472300088548513,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.014250806891917947,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.020548051634025788,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.008277346590370604,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.014445758522265546,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.016991173127781586,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      0.010652664523775333,
+      null,
+      0.0498671089424858
+    ],
+    [
+      null,
+      null,
+      0.019888882536445274,
+      null,
+      0.015425530496553068
+    ],
+    [
+      null,
+      null,
+      0.01132166475402571,
+      null,
+      0.0474552197325009
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "8": "ES5 parser rejects the const declarations in these inputs",
+    "9": "ES5 parser rejects the const declarations in these inputs",
+    "10": "ES5 parser rejects the const declarations in these inputs"
+  }
 }

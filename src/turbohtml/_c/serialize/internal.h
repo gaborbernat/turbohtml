@@ -407,10 +407,8 @@ static inline int ser_needs_leading_newline(th_tree *tree, th_node *node) {
     if (node->atom != TH_TAG_PRE && node->atom != TH_TAG_TEXTAREA && node->atom != TH_TAG_LISTING) {
         return 0;
     }
-    /* a text node always carries at least one code point (the builder never
-       inserts an empty one), so reading the first character here is safe */
     th_node *first = node->first_child;
-    return first != NULL && first->type == TH_NODE_TEXT && need_text(tree, first)[0] == '\n';
+    return first != NULL && first->type == TH_NODE_TEXT && first->text_len > 0 && need_text(tree, first)[0] == '\n';
 }
 
 /* ASCII case-insensitive compare of a UCS-4 attribute value against a lowercase

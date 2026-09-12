@@ -1,0 +1,28 @@
+{
+  "label": "start a fresh Python process",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "fresh import and version",
+      0.03338237607482976
+    ],
+    [
+      "fresh CLI minification",
+      0.04546697987728597
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.007717039980444783
+    ],
+    [
+      null,
+      0.04431299124336295
+    ]
+  ],
+  "notes": {}
+}

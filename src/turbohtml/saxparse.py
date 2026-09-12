@@ -25,12 +25,12 @@ the reserved ``xml`` and ``xml-stylesheet`` targets remain comments.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
 from ._html import _sax_dispatch, _sax_events
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 __all__ = [
     "Characters",
@@ -126,7 +126,7 @@ class ProcessingInstruction(NamedTuple):
 SaxEvent = StartElement | EndElement | Characters | Comment | Doctype | ProcessingInstruction
 """The union of every event :func:`iter_events` yields."""
 
-_EVENTS: tuple[type[SaxEvent], ...] = (
+_EVENTS: Final[tuple[Callable[..., SaxEvent], ...]] = (
     StartElement,
     EndElement,
     Characters,
@@ -145,8 +145,8 @@ def iter_events(html: str) -> Iterator[SaxEvent]:
         :class:`Doctype`/:class:`ProcessingInstruction` records in document order.
     :raises TypeError: if ``html`` is not a str.
     """
-    for kind, *fields in _sax_events(html):
-        yield _EVENTS[cast("int", kind) - 1]._make(fields)
+    for event in _sax_events(html):
+        yield _EVENTS[cast("int", event[0]) - 1](*event[1:])
 
 
 def sax_parse(html: str, handler: SaxHandler) -> None:

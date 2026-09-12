@@ -14,6 +14,15 @@ meson.add_dist_script('tools/prune_dist.py')
 
 py = import('python').find_installation(pure: false)
 
+py.install_sources(
+    configure_file(
+        output: '_version.py',
+        command: [py, files('tools/generate_version.py'), '--write', '@OUTPUT@', '--version', meson.project_version()],
+    ),
+    'src/turbohtml/_version.pyi',
+    subdir: 'turbohtml',
+)
+
 # Strip the shipped object's local .symtab at link time. The release wheels pass -Dstrip=true, but meson-python
 # packages straight from the build directory and never runs the install-time strip that option drives, so we do
 # it in the link instead. extension_module already defaults to -fvisibility=hidden (only PyInit__html stays

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 import cchardet
 
 REQUIREMENTS = ("faust-cchardet>=2.1.19",)
@@ -12,4 +14,14 @@ def encoding(data: bytes) -> None:
     cchardet.detect(data)
 
 
-OPERATIONS = {"encoding": (encoding, "faust-cchardet")}
+def _encoding_stream(data: bytes) -> None:
+    detector: Final = cchardet.UniversalDetector()
+    detector.feed(data)
+    detector.close()
+
+
+OPERATIONS = {
+    "encoding-result-stream": (_encoding_stream, "faust-cchardet"),
+    "encoding": (encoding, "faust-cchardet"),
+    "encoding-result": (encoding, "faust-cchardet"),
+}

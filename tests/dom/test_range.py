@@ -1,8 +1,7 @@
-"""The DOM Range and StaticRange APIs: boundary points, comparison, and content operations."""
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import sys
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -904,3 +903,83 @@ def test_static_range_rejects_doctype_end() -> None:
     doc = parse("<!doctype html><html></html>")
     with pytest.raises(ValueError, match="doctype"):
         StaticRange(_found(doc, "html"), 0, _doctype(doc), 0)
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        pytest.param(Text("é😀"), id="text"),
+        pytest.param(Comment("é😀"), id="comment"),
+        pytest.param(CData("é😀"), id="cdata"),
+        pytest.param(Element("div", children=[Element("i"), Element("b")]), id="element"),
+    ],
+)
+@pytest.mark.parametrize("offset", [0, 2], ids=["start", "end"])
+def test_boundary_endpoint(container: Node, offset: int) -> None:
+    boundary: Final = Range(container, offset)
+    assert (boundary.start_container, boundary.start_offset, boundary.end_container, boundary.end_offset) == (
+        container,
+        offset,
+        container,
+        offset,
+    )
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        pytest.param(Text("é😀"), id="text"),
+        pytest.param(Comment("é😀"), id="comment"),
+        pytest.param(CData("é😀"), id="cdata"),
+        pytest.param(Element("div", children=[Element("i"), Element("b")]), id="element"),
+    ],
+)
+@pytest.mark.parametrize(
+    "offset", [-sys.maxsize - 1, -1, 3, sys.maxsize], ids=["minimum", "negative", "past", "maximum"]
+)
+def test_boundary_rejects_invalid_offset(container: Node, offset: int) -> None:
+    with pytest.raises(IndexError, match="out of range"):
+        Range(container, offset)
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        pytest.param(Text("é😀"), id="text"),
+        pytest.param(Comment("é😀"), id="comment"),
+        pytest.param(CData("é😀"), id="cdata"),
+    ],
+)
+def test_select_character_data_contents(container: Node) -> None:
+    boundary: Final = Range(container)
+    boundary.select_node_contents(container)
+    assert (boundary.start_offset, boundary.end_offset) == (0, 2)
+
+
+@pytest.mark.parametrize(
+    ("offset", "expected"), [pytest.param(0, 1, id="before-child"), pytest.param(1, -1, id="after-child")]
+)
+def test_compare_descendant_with_ancestor_boundary(offset: int, expected: int) -> None:
+    child: Final = Text("abc")
+    parent: Final = Element("div", children=[child])
+    assert Range(child, 1).compare_boundary_points(Range.START_TO_START, Range(parent, offset)) == expected
+
+
+@pytest.mark.parametrize("extract", [False, True], ids=["clone", "extract"])
+def test_range_contained_interval(*, extract: bool) -> None:
+    root: Final = Element("div")
+    root.set_inner_html("".join(f"<i>{index}</i>" for index in range(100)))
+    boundary: Final = Range(root, 10)
+    boundary.set_end(root, 90)
+    result: Final = boundary.extract_contents() if extract else boundary.clone_contents()
+    assert result.html == "".join(f"<i>{index}</i>" for index in range(10, 90))
+
+
+@pytest.mark.parametrize("extract", [False, True], ids=["clone", "extract"])
+def test_range_partial_excludes_siblings(*, extract: bool) -> None:
+    root: Final = Element("div")
+    root.set_inner_html('<section data-x="é水😀">abcdef' + "<i></i>" * 100 + "</section>tail")
+    boundary: Final = Range(root)
+    boundary.set_end(root.children[0].children[0], 3)
+    result: Final = boundary.extract_contents() if extract else boundary.clone_contents()
+    assert result.html == '<section data-x="é水😀">abc</section>'

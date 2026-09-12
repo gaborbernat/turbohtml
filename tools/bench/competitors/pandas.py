@@ -19,4 +19,4 @@ def tables(case: tuple[str, str]) -> None:
         pd.read_html(io.StringIO(text), header=0)[0].to_dict("records")
 
 
-OPERATIONS = {"tables": (tables, "pandas")}
+OPERATIONS = {"tables": (tables, "pandas"), "tables-spans": (tables, "pandas")}

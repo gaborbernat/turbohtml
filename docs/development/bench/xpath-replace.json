@@ -1,0 +1,27 @@
+{
+  "label": "replace XPath string literals",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "KMP sparse matches",
+      8.390052016882995e-05
+    ],
+    [
+      "short ASCII",
+      5.540523737431376e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.007785779696246009
+    ],
+    [
+      null,
+      0.024922954267254837
+    ]
+  ]
+}

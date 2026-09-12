@@ -33,7 +33,6 @@
 static const char XSD_NS[] = "http://www.w3.org/2001/XMLSchema";
 static const char XSD_DT_NS[] = "http://www.w3.org/2001/XMLSchema-datatypes";
 static const char RNG_NS[] = "http://relaxng.org/ns/structure/1.0";
-static const char XML_URI[] = "http://www.w3.org/XML/1998/namespace";
 
 /* Schema compilation and instance validation still have recursive grammar walks. Preflight the tree far enough below
    the smallest supported thread stack that those walks cannot exhaust it. */
@@ -172,12 +171,10 @@ static const th_node_attr *attr_exact(th_tree *tree, th_node *node, const char *
     return NULL;
 }
 
-/* The constant xml-prefix namespace as UCS4, widened once; every later call reuses the filled buffer. */
 static const Py_UCS4 *xml_namespace_uri(void) {
-    static Py_UCS4 xml_uri[sizeof(XML_URI)];
-    for (Py_ssize_t index = 0; index < (Py_ssize_t)sizeof(XML_URI) - 1; index++) {
-        xml_uri[index] = (Py_UCS4)(unsigned char)XML_URI[index];
-    }
+    static const Py_UCS4 xml_uri[] = {'h', 't', 't', 'p', ':', '/', '/', 'w', 'w', 'w', '.', 'w', '3',
+                                      '.', 'o', 'r', 'g', '/', 'X', 'M', 'L', '/', '1', '9', '9', '8',
+                                      '/', 'n', 'a', 'm', 'e', 's', 'p', 'a', 'c', 'e', 0};
     return xml_uri;
 }
 
@@ -185,7 +182,7 @@ static void resolve_ns(th_tree *tree, th_node *node, const Py_UCS4 *prefix, Py_s
                        Py_ssize_t *uri_len) {
     if (prefix_len == 3 && u_eq_ascii(prefix, 3, "xml")) {
         *uri = xml_namespace_uri();
-        *uri_len = sizeof(XML_URI) - 1;
+        *uri_len = sizeof("http://www.w3.org/XML/1998/namespace") - 1;
         return;
     }
     for (th_node *walk = node; walk != NULL; walk = walk->parent) {
@@ -381,7 +378,8 @@ static const char *name_utf8(const Py_UCS4 *name, Py_ssize_t len, char *buf, siz
 static const Py_UCS4 *element_text_raw(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         if (is_chardata(child)) {
-            return th_node_data(tree, child, out_len);
+            *out_len = child->text_len;
+            return child->text_len == 0 ? EMPTY_UCS4 : th_node_realize_text(tree, child);
         }
     } /* GCOVR_EXCL_LINE: llvm miscredits this loop-exit brace when the element has no text child */
     *out_len = 0;
@@ -480,6 +478,9 @@ typedef struct th_schema {
     /* every schema element node's resolved qname, sorted by node pointer for is_schema_el */
     sqname_entry *sqnames;
     Py_ssize_t sqname_count;
+    struct rpattern *regex_patterns;
+    struct xfacet_entry *facet_entries;
+    size_t facet_count, facet_cap;
 } th_schema;
 
 /* Look up a schema element node's precomputed qname. schema_build_qname_cache enters every
@@ -728,9 +729,14 @@ static const Py_UCS4 *element_text(valctx *ctx, th_node *element, Py_ssize_t *ou
     }
     Py_ssize_t offset = 0;
     for (th_node *child = element->first_child; child != NULL; child = child->next_sibling) {
-        if (is_chardata(child)) {
-            Py_ssize_t data_len = 0;
-            const Py_UCS4 *data = th_node_data(ctx->tree, child, &data_len);
+        if (is_chardata(child) && child->text_len > 0) {
+            const Py_UCS4 *data = th_node_realize_text(ctx->tree, child);
+            if (data == NULL) {    /* GCOVR_EXCL_BR_LINE: text realization allocation failure */
+                ctx->failed = 1;   /* GCOVR_EXCL_LINE */
+                PyErr_NoMemory();  /* GCOVR_EXCL_LINE */
+                *out_len = 0;      /* GCOVR_EXCL_LINE */
+                return EMPTY_UCS4; /* GCOVR_EXCL_LINE */
+            }
             memcpy(buffer + offset, data, (size_t)child->text_len * sizeof(Py_UCS4));
             offset += child->text_len;
         }
@@ -826,6 +832,10 @@ PyObject *turbohtml_schema_compile(PyObject *module, PyObject *args) {
         schema_free(schema);
         return NULL;
     }
+    if (regex_cache_schema(schema, schema->root) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        schema_free(schema);                            /* GCOVR_EXCL_LINE */
+        return PyErr_NoMemory();                        /* GCOVR_EXCL_LINE */
+    }
     PyObject *capsule = PyCapsule_New(schema, CAPSULE_NAME, capsule_destructor);
     if (capsule == NULL) {   /* GCOVR_EXCL_BR_LINE: capsule creation failure is unforceable */
         schema_free(schema); /* GCOVR_EXCL_LINE */
@@ -852,7 +862,19 @@ PyObject *turbohtml_schema_validate(PyObject *module, PyObject *args) {
     if (errors == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE */
     }
-    valctx ctx = {errors, tree, schema, {NULL, 0, 0}, 0};
+    /* Validation buffers and lazy RELAX NG definitions must not outlive this call or mutate a shared schema. */
+    th_schema local = *schema;
+    local.mem = (arena){0};
+    if (local.defines.len > 0) {
+        const size_t bytes = (size_t)local.defines.len * sizeof(def_entry);
+        local.defines.items = arena_alloc(&local.mem, bytes);
+        if (local.defines.items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(errors);             /* GCOVR_EXCL_LINE: allocation failure */
+            return PyErr_NoMemory();       /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        memcpy(local.defines.items, schema->defines.items, bytes);
+    }
+    valctx ctx = {errors, tree, &local, {NULL, 0, 0}, 0};
     th_node *root = node->type == TH_NODE_DOCUMENT ? document_root(tree) : node;
     Py_BEGIN_CRITICAL_SECTION(turbohtml_node_handle(node_obj));
     if (root == NULL) { /* GCOVR_EXCL_BR_LINE: parse_xml rejects a rootless document, so the shim never passes one */
@@ -866,6 +888,7 @@ PyObject *turbohtml_schema_validate(PyObject *module, PyObject *args) {
     }
     Py_END_CRITICAL_SECTION();
     PyMem_Free(ctx.path.data);
+    arena_free(&local.mem);
     if (ctx.failed) {
         Py_DECREF(errors);
         return NULL;

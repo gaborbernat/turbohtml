@@ -1,0 +1,96 @@
+{
+  "label": "remove unused JavaScript declarators",
+  "parties": [
+    "turbohtml",
+    "jsmin",
+    "tdewolff",
+    "rjsmin",
+    "css-html-js-minify",
+    "terser",
+    "esbuild"
+  ],
+  "metrics": [
+    "size",
+    "time"
+  ],
+  "rows": [
+    [
+      "256 unused retained/literal pairs",
+      2427,
+      0.00016929657807243832,
+      6355.0,
+      0.0007390604814645485,
+      3706.0,
+      0.004572835245683867,
+      6355.0,
+      5.219959178267194e-06,
+      6355.0,
+      0.0004406808700575008,
+      1706.0,
+      0.057717062598870446,
+      3708.0,
+      0.03118673541660731
+    ],
+    [
+      "1 unused retained/literal pairs",
+      36,
+      1.8480759069442835e-06,
+      49.0,
+      6.9958663938033775e-06,
+      40.0,
+      0.0042631203061318955,
+      49.0,
+      1.329792421141581e-07,
+      49.0,
+      4.960346897557126e-06,
+      29.0,
+      0.04568533331621438,
+      41.0,
+      0.03073983823414892
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      null,
+      0.011445727274730836,
+      null,
+      0.012823820436350684,
+      null,
+      0.008287469693776606,
+      null,
+      0.003855542008876688,
+      null,
+      0.0034510175943867935,
+      null,
+      0.021693311081415128,
+      null,
+      0.01683965925429996
+    ],
+    [
+      null,
+      null,
+      0.015329064744613447,
+      null,
+      0.02841219184327094,
+      null,
+      0.02966281481161883,
+      null,
+      0.010159208915974218,
+      null,
+      0.010651168307133783,
+      null,
+      0.011481663278783241,
+      null,
+      0.014341918148196053
+    ]
+  ],
+  "notes": {
+    "jsmin": "removes whitespace and comments; does not perform declaration or expression compression",
+    "tdewolff": "runs a fresh command per call, including process startup and pipe I/O",
+    "rjsmin": "removes whitespace and comments; does not perform declaration or expression compression",
+    "css-html-js-minify": "removes whitespace and comments; does not perform declaration or expression compression",
+    "terser": "runs a fresh command per call, including process startup and pipe I/O",
+    "esbuild": "runs a fresh command per call, including process startup and pipe I/O"
+  }
+}

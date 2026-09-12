@@ -153,10 +153,12 @@ static inline uint64_t block_special_mask(const uint8_t *block, int quote) {
 
 #define SWAR_ONES 0x0101010101010101ULL
 #define SWAR_HIGHS 0x8080808080808080ULL
+#define SWAR_LOWS 0x7F7F7F7F7F7F7F7FULL
 
 static inline uint64_t swar_hasbyte(uint64_t word, uint8_t byte) {
     uint64_t lanes = word ^ (SWAR_ONES * byte);
-    return (lanes - SWAR_ONES) & ~lanes & SWAR_HIGHS;
+    /* Counting requires exact lanes; subtraction borrows into adjacent bytes. */
+    return ~(((lanes & SWAR_LOWS) + SWAR_LOWS) | lanes | SWAR_LOWS) & SWAR_HIGHS;
 }
 
 /* The has-byte mask sets only each matching lane's high bit, so shifting it to

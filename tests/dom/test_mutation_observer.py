@@ -1,9 +1,7 @@
-"""Synchronous mutation observation: MutationObserver records over the Node/Element mutation API."""
-
 from __future__ import annotations
 
 import gc
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -606,3 +604,19 @@ def test_non_str_attribute_filter_is_rejected(attribute_filter: list[object]) ->
 def test_non_iterable_attribute_filter_is_rejected() -> None:
     with pytest.raises(TypeError):
         MutationObserver().observe(_div(), attributes=True, attribute_filter=5)  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize("attributes", [False, True], ids=["wrong-kind", "unrelated"])
+def test_observer_overlap_keeps_old_value(*, attributes: bool) -> None:
+    root: Final = Element("div")
+    root.set_inner_html('<section><p data-x="before"></p></section>' + "<span></span>" * 100)
+    observer: Final = MutationObserver()
+    for node in root.select("span"):
+        observer.observe(node, child_list=not attributes, attributes=attributes, subtree=True)
+    observer.observe(root, attributes=True, subtree=True)
+    observer.observe(root.select("section")[0], attributes=True, attribute_old_value=True, subtree=True)
+    target: Final = root.select("p")[0]
+    target.attrs["data-x"] = "after"
+    assert [(record.target, record.attribute_name, record.old_value) for record in observer.take_records()] == [
+        (target, "data-x", "before")
+    ]

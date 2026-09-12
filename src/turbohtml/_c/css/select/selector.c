@@ -1295,15 +1295,46 @@ static int sel_sibling_index(th_node *node, int from_end, int of_type) {
    :nth-child(... of S) selector list (from the end when from_end), or 0 when node
    itself does not match S, so a non-matching element is never selected. */
 static int sel_nth_of_index(th_node *node, int from_end, const sel_simple *simple, const sel_ctx *ctx) {
-    if (!sel_matches_alts(node, simple->sub, simple->sub_count, ctx)) {
-        return 0;
-    }
     int index = 1;
     for (th_node *sibling = from_end ? node->next_sibling : node->prev_sibling; sibling != NULL;
          sibling = from_end ? sibling->next_sibling : sibling->prev_sibling) {
         if (sibling->type == TH_NODE_ELEMENT && sel_matches_alts(sibling, simple->sub, simple->sub_count, ctx)) {
             index++;
         }
+    }
+    return index;
+}
+
+/* Query walks advance through siblings, so the previous position avoids recounting their shared prefix. */
+static int sel_nth_index(th_node *node, int from_end, int of_type, const sel_simple *simple, const sel_ctx *ctx) {
+    if (simple->sub != NULL && !sel_matches_alts(node, simple->sub, simple->sub_count, ctx)) {
+        return 0;
+    }
+    if (ctx->nth_memo != NULL) {
+        const sel_nth_memo previous = *ctx->nth_memo;
+        if (previous.simple == simple && previous.scope == ctx->scope && previous.node->parent == node->parent &&
+            (!of_type || sel_same_type(previous.node, node))) {
+            if (previous.node == node) {
+                return previous.index;
+            }
+            int distance = 0;
+            for (th_node *sibling = previous.node->next_sibling; sibling != NULL; sibling = sibling->next_sibling) {
+                if (sibling->type == TH_NODE_ELEMENT && (!of_type || sel_same_type(node, sibling)) &&
+                    (simple->sub == NULL || sel_matches_alts(sibling, simple->sub, simple->sub_count, ctx))) {
+                    distance++;
+                }
+                if (sibling == node) {
+                    const int index = previous.index + (from_end ? -distance : distance);
+                    *ctx->nth_memo = (sel_nth_memo){node, ctx->scope, simple, index};
+                    return index;
+                }
+            }
+        }
+    }
+    const int index = simple->sub == NULL ? sel_sibling_index(node, from_end, of_type)
+                                          : sel_nth_of_index(node, from_end, simple, ctx);
+    if (ctx->nth_memo != NULL) {
+        *ctx->nth_memo = (sel_nth_memo){node, ctx->scope, simple, index};
     }
     return index;
 }
@@ -1761,20 +1792,20 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, const sel_c
         return sel_no_sibling(node, 0, 1) && sel_no_sibling(node, 1, 1);
     case PSEUDO_NTH_CHILD:
         if (simple->sub != NULL) {
-            int of_index = sel_nth_of_index(node, 0, simple, ctx);
+            int of_index = sel_nth_index(node, 0, 0, simple, ctx);
             return of_index != 0 && sel_nth_matches(simple->nth_a, simple->nth_b, of_index);
         }
-        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 0));
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_nth_index(node, 0, 0, simple, ctx));
     case PSEUDO_NTH_LAST_CHILD:
         if (simple->sub != NULL) {
-            int of_index = sel_nth_of_index(node, 1, simple, ctx);
+            int of_index = sel_nth_index(node, 1, 0, simple, ctx);
             return of_index != 0 && sel_nth_matches(simple->nth_a, simple->nth_b, of_index);
         }
-        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 0));
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_nth_index(node, 1, 0, simple, ctx));
     case PSEUDO_NTH_OF_TYPE:
-        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 0, 1));
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_nth_index(node, 0, 1, simple, ctx));
     case PSEUDO_NTH_LAST_OF_TYPE:
-        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_sibling_index(node, 1, 1));
+        return sel_nth_matches(simple->nth_a, simple->nth_b, sel_nth_index(node, 1, 1, simple, ctx));
     /* §6.6 the scoping root: the element the query was rooted at, or, when the root is
        the document (or a fragment), the document element, as :root resolves to */
     case PSEUDO_SCOPE:
@@ -2064,11 +2095,10 @@ static int sel_has_memo_get(const sel_has_memo *memo, const sel_complex *rel, co
     return 1;
 }
 
-/* Insert a (rel, node) slot, assuming no matching key is present (the caller only
-   inserts after a get miss), so the found slot is the empty one it belongs in. */
 static void sel_has_memo_insert(sel_has_memo *memo, const sel_complex *rel, const th_node *node, unsigned char result) {
-    memo->slots[sel_has_memo_find(memo, rel, node)] = (sel_has_slot){rel, node, result};
-    memo->count++;
+    sel_has_slot *slot = &memo->slots[sel_has_memo_find(memo, rel, node)];
+    memo->count += slot->rel == NULL;
+    *slot = (sel_has_slot){rel, node, result};
 }
 
 /* Grow (or first-allocate) the table to the next power of two and rehash. On
@@ -2274,7 +2304,7 @@ static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, t
 static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, const sel_ctx *ctx) {
     /* inside a :has() relative selector the scope element is the anchor, so a written
        :scope resolves to it rather than the outer query root (Selectors-4 §6.6.2, #431) */
-    sel_ctx scoped = {ctx->tree, anchor, ctx->quirks, ctx->has_memo};
+    sel_ctx scoped = {ctx->tree, anchor, ctx->quirks, ctx->has_memo, ctx->nth_memo};
     for (int index = 0; index < count; index++) {
         const sel_complex *rel = &alts[index];
         int subject = rel->count - 1;
@@ -2322,7 +2352,7 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
 /* scope is the element :scope matches: the node the query was rooted at. A single
    test builds a throwaway context with no :has() memo (nothing to amortize over). */
 int selector_matches(th_node *node, const sel_compiled *compiled, th_node *scope) {
-    sel_ctx ctx = {compiled->tree, scope, compiled->quirks, NULL};
+    sel_ctx ctx = {compiled->tree, scope, compiled->quirks, NULL, NULL};
     return sel_matches_alts(node, compiled->alts, compiled->count, &ctx);
 }
 

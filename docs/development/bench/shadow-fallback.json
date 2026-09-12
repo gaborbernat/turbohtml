@@ -1,0 +1,28 @@
+{
+  "label": "flatten nested fallback slots",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "1000 wide",
+      2.3857616633904398e-05
+    ],
+    [
+      "1 wide",
+      5.240528480499051e-07
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.015500644883287392
+    ],
+    [
+      null,
+      0.16595053127994885
+    ]
+  ],
+  "notes": {}
+}

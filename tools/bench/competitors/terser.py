@@ -14,4 +14,13 @@ def minify_js(source: str) -> str:
     ).stdout
 
 
-OPERATIONS = {"minify-js": (minify_js, "terser")}
+OPERATIONS = {
+    "minify-js-guards": (minify_js, "terser"),
+    "minify-js-propagation": (minify_js, "terser"),
+    "minify-js-var-initialization": (minify_js, "terser"),
+    "minify-js-unused-declarations": (minify_js, "terser"),
+    "minify-js-unlink": (minify_js, "terser"),
+    "minify-js-single-use": (minify_js, "terser"),
+    "minify-js-sequences": (minify_js, "terser"),
+    "minify-js": (minify_js, "terser"),
+}

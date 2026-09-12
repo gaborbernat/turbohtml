@@ -22,4 +22,16 @@ def minify_css(css: str) -> str:
     return _run(["--minify", "--loader=css"], css)
 
 
-OPERATIONS = {"minify-js": (minify_js, "esbuild"), "minify-css": (minify_css, "esbuild")}
+OPERATIONS = {
+    "minify-js-guards": (minify_js, "esbuild"),
+    "minify-js-propagation": (minify_js, "esbuild"),
+    "minify-js-var-initialization": (minify_js, "esbuild"),
+    "minify-js-unused-declarations": (minify_js, "esbuild"),
+    "minify-js-unlink": (minify_js, "esbuild"),
+    "minify-js-single-use": (minify_js, "esbuild"),
+    "minify-js-sequences": (minify_js, "esbuild"),
+    "minify-js": (minify_js, "esbuild"),
+    "minify-css": (minify_css, "esbuild"),
+    "minify-css-merges": (minify_css, "esbuild"),
+    "minify-css-conflicts": (minify_css, "esbuild"),
+}

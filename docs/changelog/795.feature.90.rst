@@ -1,0 +1,1 @@
+Speed up :func:`JavaScript literal propagation <turbohtml.clean.minify_js>` within large multi-binding declarations.

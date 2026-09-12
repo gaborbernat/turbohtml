@@ -1,0 +1,44 @@
+{
+  "label": "select descendants across connected root groups",
+  "parties": [
+    "turbohtml"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "2,048 detached roots",
+      6.645712554700366e-05
+    ],
+    [
+      "2,048 connected roots",
+      0.0060919894103183955
+    ],
+    [
+      "4 connected roots",
+      3.376937786588504e-07
+    ],
+    [
+      "512 documents",
+      3.3044480020786673e-05
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.011225471070375186
+    ],
+    [
+      null,
+      0.024895717232152982
+    ],
+    [
+      null,
+      0.06935294827995615
+    ],
+    [
+      null,
+      0.02729337674834538
+    ]
+  ],
+  "notes": {}
+}
