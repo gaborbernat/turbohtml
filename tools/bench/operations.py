@@ -524,6 +524,7 @@ OPERATIONS: dict[str, Operation] = {
     "urls-clean": Operation("clean and normalize 100 URLs", "us"),
     "links-filter": Operation("extract filtered page links", "us"),
     "links-external": Operation("extract links outside the base site", "ms"),
+    "serialize-attributes": Operation("serialize HTML attribute order", "us"),
 }
 
 
@@ -2465,5 +2466,25 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "links-external": lambda: (
         ("900 mixed-site links", _EXTERNAL_LINKS_HTML),
         ("900 mixed-site links / 64 subdomains", _EXTERNAL_LINKS_HTML.replace("https://", "https://" + "s." * 64)),
+    ),
+    "serialize-attributes": lambda: tuple(
+        (
+            f"{count} attributes, {order}, sorting {sorting}",
+            (
+                "<div "
+                + " ".join(
+                    f'a{index:04d}="value"'
+                    for index in (reversed(range(count)) if order == "reversed" else range(count))
+                )
+                + ">text</div>",
+                sorting,
+            ),
+        )
+        for count, order, sorting in (
+            (1024, "reversed", True),
+            (1024, "sorted", True),
+            (8, "reversed", True),
+            (1024, "reversed", False),
+        )
     ),
 }

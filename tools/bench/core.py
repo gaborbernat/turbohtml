@@ -440,6 +440,10 @@ def serialize(text: str) -> None:
     _ = _parsed(text).html
 
 
+def _serialize_attributes(case: tuple[str, bool]) -> str:
+    return _parsed(case[0]).serialize(turbohtml.Html(sort_attributes=case[1]))
+
+
 def _parse_inner(text: str) -> str:
     return turbohtml.parse(text).find_all("body")[0].serialize(inner=True)
 
@@ -1698,4 +1702,5 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "urls-clean": (urls_clean, "turbohtml"),
     "links-filter": (links_filter, "turbohtml"),
     "links-external": (links_external, "turbohtml"),
+    "serialize-attributes": (_serialize_attributes, "turbohtml"),
 }

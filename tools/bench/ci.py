@@ -358,6 +358,10 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "minify-js-names": ("minify-js-names", 0),
     "minify-js-names-single-character": ("minify-js-names", 2),
     "minify-js-names-multiple-characters": ("minify-js-names", 3),
+    "serialize-attributes": ("serialize-attributes", 0),
+    "serialize-attributes-sorted": ("serialize-attributes", 1),
+    "serialize-attributes-small": ("serialize-attributes", 2),
+    "serialize-attributes-unsorted": ("serialize-attributes", 3),
 }
 
 

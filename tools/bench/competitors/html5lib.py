@@ -37,6 +37,12 @@ def serialize(text: str) -> None:
     html5lib.serialize(_parsed(text))
 
 
+def _serialize_attributes(case: tuple[str, bool]) -> str:
+    return html5lib.serialize(
+        _parsed(case[0]), alphabetical_attributes=case[1], omit_optional_tags=False, quote_attr_values="always"
+    )
+
+
 def navigate(text: str) -> None:
     """Walk every node with html5lib's etree TreeWalker token stream."""
     for _token in _WALKER(_parsed(text)):
@@ -129,4 +135,5 @@ OPERATIONS = {
     "tokenize": (tokenize, "html5lib"),
     "serialize": (serialize, "html5lib"),
     "navigate": (navigate, "html5lib"),
+    "serialize-attributes": (_serialize_attributes, "html5lib"),
 }
