@@ -2486,6 +2486,16 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
             )
             for kind, key in (("plain", "key"), ("escaped", "%6Bey"))
         ),
+        *tuple(
+            (f"normalize 100 URLs, {name}", ("normalize", ("https://example.org/" + path,) * 100))
+            for name, path in (
+                ("8 KiB undotted paths", "a" * 8192),
+                ("short undotted paths", "products/item"),
+                ("8 KiB paths with parent segments", "a" * 8192 + "/../item"),
+                ("8 KiB paths with encoded parent segments", "a" * 8192 + "/%2e%2e/item"),
+                ("8 KiB paths with file extensions", "a" * 8192 + ".html"),
+            )
+        ),
     ),
     "links-filter": _readpath_cases,
     "links-external": lambda: (

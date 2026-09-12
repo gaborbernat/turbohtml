@@ -368,6 +368,11 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "minify-css-unicode-ranges-small": ("minify-css", len(corpus.STYLESHEETS)),
     "minify-css-unicode-ranges-sorted": ("minify-css", len(corpus.STYLESHEETS) + 1),
     "minify-css-unicode-ranges-reversed": ("minify-css", len(corpus.STYLESHEETS) + 2),
+    "urls-clean-undotted-path": ("urls-clean", 4),
+    "urls-clean-short-path": ("urls-clean", 5),
+    "urls-clean-parent-path": ("urls-clean", 6),
+    "urls-clean-encoded-parent-path": ("urls-clean", 7),
+    "urls-clean-extension-path": ("urls-clean", 8),
 }
 
 
