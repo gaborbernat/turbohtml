@@ -499,7 +499,7 @@ OPERATIONS: dict[str, Operation] = {
     "minify-css-conflicts": Operation("merge CSS rules across disjoint declarations", "us"),
     "minify-css-merges": Operation("batch CSS rule merges", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
-    "minify-js-names": Operation("rename JavaScript function parameters", "us"),
+    "minify-js-names": Operation("minify JavaScript with function parameters", "us"),
     "minify-js-integers": Operation("print JavaScript integer arrays", "us"),
     "minify-js-unlink": Operation("remove mixed JavaScript declarators", "us"),
     "minify-js-unused-declarations": Operation("remove unused JavaScript declarators", "us"),
