@@ -66,6 +66,10 @@ def _find_attr_presence(case: tuple[str, bool]) -> None:
     _parsed(case[0])("p[data-x]" if case[1] else "p:not([data-x])")
 
 
+def _select_relative(case: tuple[str, str]) -> None:
+    _parsed(case[1])(case[0])
+
+
 def text_content(text: str) -> None:
     """Collect the body's visible text with pyquery's text()."""
     _parsed(text)("body").text()
@@ -245,6 +249,7 @@ OPERATIONS = {
     "parse-scope": (parse, "pyquery"),
     "find": (find, "pyquery"),
     "select": (select, "pyquery"),
+    "select-relative": (_select_relative, "pyquery"),
     "find-text": (find_text, "pyquery"),
     "find-text-exact": (_find_text_exact, "pyquery"),
     "find-attr-presence": (_find_attr_presence, "pyquery"),

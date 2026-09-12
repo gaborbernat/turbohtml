@@ -73,6 +73,10 @@ def _find_attr_presence(case: tuple[str, bool]) -> None:
     _parsed(case[0]).find_all("p", attrs={"data-x": case[1]})
 
 
+def _select_relative(case: tuple[str, str]) -> None:
+    _parsed(case[1]).select(case[0])
+
+
 def text_content(text: str) -> None:
     """Collect the document's visible text with BeautifulSoup's get_text()."""
     _parsed(text).get_text()
@@ -270,6 +274,7 @@ OPERATIONS = {
     "parse-scope": (parse, "BeautifulSoup (lxml)"),
     "find": (find, "BeautifulSoup (lxml)"),
     "select": (select, "BeautifulSoup (lxml)"),
+    "select-relative": (_select_relative, "BeautifulSoup (lxml)"),
     "select-has": (select_has, "BeautifulSoup (lxml)"),
     "find-text": (find_text, "BeautifulSoup (lxml)"),
     "find-text-exact": (_find_text_exact, "BeautifulSoup (lxml)"),

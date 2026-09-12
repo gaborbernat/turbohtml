@@ -35,6 +35,10 @@ def select_has(text: str) -> None:
     _HAS.select(_parsed(text))
 
 
+def _select_relative(case: tuple[str, str]) -> None:
+    soupsieve.select(case[0], _parsed(case[1]))
+
+
 def match(text: str) -> None:
     """Test every anchor against a compiled soupsieve selector with its per-element match."""
     for anchor in _parsed(text).find_all("a"):
@@ -51,6 +55,7 @@ OPERATIONS = {
     "escape-identifier": (escape_identifier, "soupsieve"),
     "find": (find, "soupsieve"),
     "select": (select, "soupsieve"),
+    "select-relative": (_select_relative, "soupsieve"),
     "select-has": (select_has, "soupsieve"),
     "match": (match, "soupsieve"),
 }

@@ -345,6 +345,7 @@ OPERATIONS: dict[str, Operation] = {
     "select": Operation("select div a[href]", "us"),
     "select-has": Operation("select div:has(a)", "us"),
     "select-nth": Operation("select sibling positions in wide trees", "ms"),
+    "select-relative": Operation("select child and sibling relationships", "us"),
     "xpath-wide": Operation("order XPath results in wide trees", "ms"),
     "xpath-distinct": Operation("deduplicate XPath string values", "us"),
     "xpath-set": Operation("compare XPath node-set membership", "us"),
@@ -1785,6 +1786,27 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "find-cold": lambda: _FIND_COLD_CASES,
     "select": _readpath_cases,
     "select-has": _readpath_cases,
+    "select-relative": lambda: (
+        *tuple(
+            (
+                f"{size} nested elements, {relative}",
+                (f"div:has({relative})", "<div>" * size + "<a></a>" + "</div>" * size),
+            )
+            for size in (8, 100)
+            for relative in ("> a", "+ a", "~ a", "a")
+        ),
+        *tuple(
+            (
+                f"64 siblings with {depth} descendants, {relative}",
+                (
+                    f"section:has({relative})",
+                    ("<section>" + "<div>" * depth + "<a></a>" + "</div>" * depth + "</section>") * 64,
+                ),
+            )
+            for depth in (0, 64)
+            for relative in ("+ a", "~ a", "+ section a")
+        ),
+    ),
     "select-nth": lambda: tuple(
         (f"{selector} ({size:,} siblings)", (selector, f"<ul>{'<li class=x>value</li>' * size}</ul>"))
         for selector in ("li:nth-child(odd)", "li:nth-child(odd of .x)")

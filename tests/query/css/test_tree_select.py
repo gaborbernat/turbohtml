@@ -1811,3 +1811,26 @@ def test_nth_positions_across_query_orders(selector: str, expected: list[str]) -
 def test_nth_positions_in_individual_matches(selector: str, expected: list[bool]) -> None:
     document: Final[Document] = parse("<ul><li>a</li><li>b</li><li>c</li></ul>")
     assert [element.matches(selector) for element in document.select("li")] == expected
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected"),
+    [
+        pytest.param("> .hit", ["later"], id="direct-child"),
+        pytest.param("+ .hit", ["middle"], id="adjacent-sibling"),
+        pytest.param("~ .hit", ["anchor", "middle"], id="following-siblings"),
+        pytest.param("> .missing, + .hit", ["middle"], id="alternative-after-miss"),
+        pytest.param("+ .missing, ~ .hit", ["anchor", "middle"], id="later-sibling-alternative"),
+        pytest.param("> :is(.hit, .absent)", ["later"], id="nested-predicate"),
+        pytest.param("> :scope", [], id="scope-is-anchor"),
+        pytest.param("+ section .hit", ["middle"], id="complex-sibling-descendant"),
+        pytest.param(".hit", ["anchor", "later"], id="descendant-control"),
+    ],
+)
+def test_has_relative_axis_ignores_text_and_deeper_matches(relative: str, expected: list[str]) -> None:
+    document: Final = parse(
+        '<main><section id="anchor"><div><b class="hit"></b></div></section>'
+        'text<!-- gap --><section id="middle"></section>more<!-- gap -->'
+        '<section id="later" class="hit"><b class="hit"></b></section></main>'
+    )
+    assert [node.attrs["id"] for node in document.select(f"section:has({relative})")] == expected

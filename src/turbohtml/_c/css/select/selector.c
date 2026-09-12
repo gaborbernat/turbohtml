@@ -2308,13 +2308,22 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
     for (int index = 0; index < count; index++) {
         const sel_complex *rel = &alts[index];
         int subject = rel->count - 1;
-        /* the common shape -- a single descendant compound like :has(a) -- reduces to
-           "the anchor's subtree contains an element matching the compound", which is
-           independent of the anchor (no leading sibling reach, no :scope), so the
-           memoized subtree walk collapses the quadratic per-anchor re-scan */
         char lead_combinator = rel->compounds[0].combinator;
-        if (scoped.has_memo != NULL && rel->count == 1 && lead_combinator != '>' && lead_combinator != '+' &&
-            lead_combinator != '~' && !sel_rel_uses_scope(rel)) {
+        if (rel->count == 1 && (lead_combinator == '>' || lead_combinator == '+' || lead_combinator == '~')) {
+            th_node *candidate =
+                lead_combinator == '>' ? sel_first_element_child(anchor) : sel_next_element_sibling(anchor);
+            for (; candidate != NULL; candidate = sel_next_element_sibling(candidate)) {
+                if (sel_match_compound(candidate, &rel->compounds[0], &scoped)) {
+                    return 1;
+                }
+                if (lead_combinator == '+') {
+                    break;
+                }
+            }
+            continue;
+        }
+        /* Reuse anchor-independent subtree results for descendant compounds without :scope. */
+        if (scoped.has_memo != NULL && rel->count == 1 && !sel_rel_uses_scope(rel)) {
             if (sel_has_desc(anchor, rel, &rel->compounds[0], &scoped, 0)) {
                 return 1;
             }

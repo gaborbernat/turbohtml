@@ -130,6 +130,10 @@ def select_has(text: str) -> None:
     _parsed(text).cssselect("div:has(a)")
 
 
+def _select_relative(case: tuple[str, str]) -> None:
+    _parsed(case[1]).cssselect(case[0])
+
+
 def text_content(text: str) -> None:
     """Collect the document's visible text with lxml's text_content method."""
     _parsed(text).text_content()
@@ -508,6 +512,7 @@ OPERATIONS = {
     "emit": (emit, "lxml"),
     "find": (find, "lxml"),
     "select": (select, "lxml"),
+    "select-relative": (_select_relative, "lxml"),
     "select-has": (select_has, "lxml"),
     "text-content": (text_content, "lxml"),
     "serialize": (serialize, "lxml"),
