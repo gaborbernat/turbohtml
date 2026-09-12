@@ -143,7 +143,7 @@ PyObject *th_url_percent_decode_obj(PyObject *arg) {
     }
     int kind = PyUnicode_KIND(arg);
     const void *data = PyUnicode_DATA(arg);
-    size_t span = (size_t)(len > 0 ? len : 1);
+    size_t span = (size_t)len;
     Py_UCS4 *out = PyMem_Malloc(span * sizeof(Py_UCS4)); /* decoding never grows the code-point count */
     unsigned char *run = PyMem_Malloc(span);
     if (out == NULL || run == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
