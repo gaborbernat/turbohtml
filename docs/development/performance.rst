@@ -374,6 +374,9 @@ benchmark records hit positions and misses. It measures uncapped and limited col
 .. bench-table::
     :file: bench/querying.json
 
+.. bench-table::
+    :file: bench/find-attr-presence.json
+
 ``select`` runs the CSS selector ``div a[href]`` (turbohtml's :meth:`~turbohtml.Node.select`, resiliparse's and
 selectolax's ``css``, lxml's `cssselect <https://github.com/scrapy/cssselect>`_, parsel's ``css``, pyquery, and
 BeautifulSoup's `soupsieve <https://github.com/facelessuser/soupsieve>`_). Because turbohtml compiles the selector
@@ -395,6 +398,9 @@ and child relationships, so the relational lookup keeps the same interned-atom c
 
 .. bench-table::
     :file: bench/querying-3.json
+
+.. bench-table::
+    :file: bench/select-relative.json
 
 Per-element matching runs each anchor on the page through a compiled ``div a[href]`` matcher -- the shape a soupsieve
 port hits through :mod:`turbohtml.query` and its :meth:`Matcher.match <turbohtml.query.Matcher.match>` -- raced against
@@ -449,6 +455,9 @@ per-element Python path.
 
 .. bench-table::
     :file: bench/querying-4.json
+
+.. bench-table::
+    :file: bench/find-text-exact.json
 
 :func:`turbohtml.convert.css_specificity` weighs a selector list's ``(a, b, c)`` specificity, raced against `cssselect
 <https://github.com/scrapy/cssselect>`_'s ``Selector.specificity()``, the computation lxml, parsel, and pyquery inherit.

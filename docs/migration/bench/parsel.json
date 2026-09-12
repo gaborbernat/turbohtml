@@ -815,6 +815,126 @@
       "parse normalized newlines — 1,000 paragraphs / LF",
       6.902340084025127e-05,
       0.00025395493697336253
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, > a",
+      1.3716231768897322e-07,
+      5.778931824925356e-06
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, + a",
+      1.0634855087306623e-07,
+      5.501672742861767e-06
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, ~ a",
+      1.0396692166440384e-07,
+      5.161547131630566e-06
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, a",
+      2.75903463520244e-07,
+      9.61660872178527e-06
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, > a",
+      7.350393537534453e-07,
+      1.3547553161667262e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, + a",
+      5.4232264878884e-07,
+      1.2503139492044587e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, ~ a",
+      5.569513905623324e-07,
+      1.2038354440117397e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, a",
+      7.0380978106262164e-06,
+      7.633549835380411e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, + a",
+      4.937684009072759e-07,
+      0.00019421607779198288
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, ~ a",
+      3.6733269113871834e-06,
+      1.6311294994390362e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, + a",
+      4.704167318643944e-07,
+      0.00021218542481922972
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, ~ a",
+      3.673354255440131e-06,
+      3.3779582561047995e-05
+    ],
+    [
+      "find by exact descendant text — flat matches",
+      1.4690237243542015e-05,
+      0.0006643642717184169
+    ],
+    [
+      "find by exact descendant text — nested matches",
+      8.89418835943919e-06,
+      7.73172964064391e-05
+    ],
+    [
+      "find by exact descendant text — nested short expectation",
+      4.023554698899072e-06,
+      6.33472036402812e-05
+    ],
+    [
+      "find by exact descendant text — wide early mismatch",
+      4.484175682624898e-06,
+      3.607434586191024e-05
+    ],
+    [
+      "find by exact descendant text — wide match",
+      8.056526180411083e-06,
+      4.016809928468016e-05
+    ],
+    [
+      "find by exact descendant text — wide late mismatch",
+      8.000991591927686e-06,
+      3.8336283409989846e-05
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 0 characters, True",
+      1.2640129943027508e-05,
+      0.0007022129987035441
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 0 characters, False",
+      1.2647480427100769e-05,
+      0.0007447062711586719
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 16 characters, True",
+      1.27604090304582e-05,
+      0.0007515838481898148
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 16 characters, False",
+      1.2828146627915279e-05,
+      0.0007513856878631486
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 4,096 characters, True",
+      1.2975858458238084e-05,
+      0.0007032598189956237
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 4,096 characters, False",
+      1.3493356943191278e-05,
+      0.0007466209039345509
     ]
   ],
   "spread": [
@@ -1627,6 +1747,126 @@
       null,
       0.016147480479929033,
       0.014605653616033025
+    ],
+    [
+      null,
+      0.006046464131388455,
+      0.014787112041472894
+    ],
+    [
+      null,
+      0.04503354190917728,
+      0.007987800782227387
+    ],
+    [
+      null,
+      0.013121850886605424,
+      0.007814943670387159
+    ],
+    [
+      null,
+      0.023177210169237943,
+      0.017407965244868557
+    ],
+    [
+      null,
+      0.0033841621368544106,
+      0.006855841623652431
+    ],
+    [
+      null,
+      0.0021999738059158063,
+      0.013351652302878499
+    ],
+    [
+      null,
+      0.00885809882079824,
+      0.00940531306360587
+    ],
+    [
+      null,
+      0.003979668524453845,
+      0.012747377555260998
+    ],
+    [
+      null,
+      0.08189413088945173,
+      0.014498416063355979
+    ],
+    [
+      null,
+      0.003935711107769224,
+      0.014875477032977766
+    ],
+    [
+      null,
+      0.014601068059953346,
+      0.013317975445120847
+    ],
+    [
+      null,
+      0.0023455771289046974,
+      0.013935148641333965
+    ],
+    [
+      null,
+      0.008659806103811094,
+      0.011249265117013645
+    ],
+    [
+      null,
+      0.007067030939820829,
+      0.012089785674762911
+    ],
+    [
+      null,
+      0.010348432713303905,
+      0.020095893669466295
+    ],
+    [
+      null,
+      0.005821206440689632,
+      0.01566018193470023
+    ],
+    [
+      null,
+      0.01072243526310074,
+      0.06442393415713478
+    ],
+    [
+      null,
+      0.0195943474549261,
+      0.009605871030865352
+    ],
+    [
+      null,
+      0.015248411925326322,
+      0.012903598816456476
+    ],
+    [
+      null,
+      0.0053736422012449275,
+      0.008541704416278975
+    ],
+    [
+      null,
+      0.0049666751470003,
+      0.09804847763753556
+    ],
+    [
+      null,
+      0.010631080814880348,
+      0.01858914296802742
+    ],
+    [
+      null,
+      0.00613265630514539,
+      0.020035747872302813
+    ],
+    [
+      null,
+      0.030940447832905362,
+      0.02373400511635982
     ]
   ],
   "row_notes": {

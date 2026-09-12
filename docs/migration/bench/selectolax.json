@@ -565,6 +565,76 @@
       "parse normalized newlines — 1,000 paragraphs / LF",
       6.902340084025127e-05,
       0.0003418709800674454
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, > a",
+      1.3716231768897322e-07,
+      2.556807463231318e-06
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, + a",
+      1.0634855087306623e-07,
+      2.4408636631889635e-06
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, ~ a",
+      1.0396692166440384e-07,
+      2.4097852181862813e-06
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, a",
+      2.75903463520244e-07,
+      3.310457978855652e-06
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, > a",
+      7.350393537534453e-07,
+      7.102343246856435e-06
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, + a",
+      5.4232264878884e-07,
+      6.486105390261325e-06
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, ~ a",
+      5.569513905623324e-07,
+      6.248234852771854e-06
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, a",
+      7.0380978106262164e-06,
+      3.4109373302726453e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, + a",
+      4.937684009072759e-07,
+      6.108681253872798e-06
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, ~ a",
+      3.6733269113871834e-06,
+      1.2828534873203049e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, + section a",
+      1.8995156277531085e-06,
+      1.3259644013885463e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, + a",
+      4.704167318643944e-07,
+      6.415100943968355e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, ~ a",
+      3.673354255440131e-06,
+      7.053149583195288e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, + section a",
+      2.8263910053283325e-05,
+      8.950772771261957e-05
     ]
   ],
   "spread": [
@@ -1127,6 +1197,76 @@
       null,
       0.016147480479929033,
       0.004893267592069136
+    ],
+    [
+      null,
+      0.006046464131388455,
+      0.024303931960409406
+    ],
+    [
+      null,
+      0.04503354190917728,
+      0.014478172661708647
+    ],
+    [
+      null,
+      0.013121850886605424,
+      0.015189187685878078
+    ],
+    [
+      null,
+      0.023177210169237943,
+      0.023000782087066705
+    ],
+    [
+      null,
+      0.0033841621368544106,
+      0.014088100325275112
+    ],
+    [
+      null,
+      0.0021999738059158063,
+      0.010742732644417705
+    ],
+    [
+      null,
+      0.00885809882079824,
+      0.013930408499090802
+    ],
+    [
+      null,
+      0.003979668524453845,
+      0.0030882605337262895
+    ],
+    [
+      null,
+      0.08189413088945173,
+      0.015993934967207166
+    ],
+    [
+      null,
+      0.003935711107769224,
+      0.010607225299268129
+    ],
+    [
+      null,
+      0.020498069164485495,
+      0.03739501041598575
+    ],
+    [
+      null,
+      0.014601068059953346,
+      0.0194151223080623
+    ],
+    [
+      null,
+      0.0023455771289046974,
+      0.01241215532068544
+    ],
+    [
+      null,
+      0.009596670480034384,
+      0.01204370683678427
     ]
   ],
   "row_notes": {

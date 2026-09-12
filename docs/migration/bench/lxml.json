@@ -38,18 +38,18 @@
     ],
     [
       "construct N elements (no serialize) — 100 rows",
-      4.288681538374325e-05,
-      9.604643921553209e-05
+      4.092893560425637e-05,
+      9.575969447913242e-05
     ],
     [
       "construct N elements (no serialize) — 1k rows",
-      0.0004355111897590784,
-      0.000955145454478649
+      0.0004236443270807892,
+      0.0009651497689446842
     ],
     [
       "construct N elements (no serialize) — 10k rows",
-      0.0043399677733759745,
-      0.009755156041743854
+      0.004218289170239586,
+      0.009474672087283883
     ],
     [
       "emit a built tree — 100 rows",
@@ -1655,6 +1655,126 @@
       "validate numeric values with optional bounds — 64 strings without bounds",
       1.7064670816087833e-05,
       1.0044044835429607e-05
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, > a",
+      1.3716231768897322e-07,
+      1.3581776921493352e-05
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, + a",
+      1.0634855087306623e-07,
+      1.4722000100183171e-05
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, ~ a",
+      1.0396692166440384e-07,
+      1.3785711935554446e-05
+    ],
+    [
+      "select child and sibling relationships — 8 nested elements, a",
+      2.75903463520244e-07,
+      1.4137288838848386e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, > a",
+      7.350393537534453e-07,
+      2.169836085622971e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, + a",
+      5.4232264878884e-07,
+      2.1758631807718604e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, ~ a",
+      5.569513905623324e-07,
+      2.060276625570623e-05
+    ],
+    [
+      "select child and sibling relationships — 100 nested elements, a",
+      7.0380978106262164e-06,
+      5.145949978668796e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, + a",
+      4.937684009072759e-07,
+      0.00020756266254314445
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 0 descendants, ~ a",
+      3.6733269113871834e-06,
+      2.5135931257599015e-05
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, + a",
+      4.704167318643944e-07,
+      0.0002277833592264263
+    ],
+    [
+      "select child and sibling relationships — 64 siblings with 64 descendants, ~ a",
+      3.673354255440131e-06,
+      4.272336409864389e-05
+    ],
+    [
+      "find by exact descendant text — flat matches",
+      1.4690237243542015e-05,
+      0.00026911498370433645
+    ],
+    [
+      "find by exact descendant text — nested matches",
+      8.89418835943919e-06,
+      4.2421886846000234e-05
+    ],
+    [
+      "find by exact descendant text — nested short expectation",
+      4.023554698899072e-06,
+      6.119884064522314e-05
+    ],
+    [
+      "find by exact descendant text — wide early mismatch",
+      4.484175682624898e-06,
+      3.4174374050621736e-05
+    ],
+    [
+      "find by exact descendant text — wide match",
+      8.056526180411083e-06,
+      3.523550583395263e-05
+    ],
+    [
+      "find by exact descendant text — wide late mismatch",
+      8.000991591927686e-06,
+      3.506196255405788e-05
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 0 characters, True",
+      1.2640129943027508e-05,
+      0.00031470915382669773
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 0 characters, False",
+      1.2647480427100769e-05,
+      0.00036238695607456367
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 16 characters, True",
+      1.27604090304582e-05,
+      0.00031086960848369927
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 16 characters, False",
+      1.2828146627915279e-05,
+      0.0003503458993539728
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 4,096 characters, True",
+      1.2975858458238084e-05,
+      0.0003142602406948451
+    ],
+    [
+      "find by attribute presence — 1,000 attributes, 4,096 characters, False",
+      1.3493356943191278e-05,
+      0.0003505390761423162
     ]
   ],
   "spread": [
@@ -1690,18 +1810,18 @@
     ],
     [
       null,
-      0.02944875019031374,
-      0.03767578123040454
+      0.019002385112791096,
+      0.042894598372049536
     ],
     [
       null,
-      0.024838279255060405,
-      0.020972531016407975
+      0.01434471194553435,
+      0.0326752561538221
     ],
     [
       null,
-      0.0409794960756543,
-      0.015366599297755084
+      0.019514760998070327,
+      0.022418487825082246
     ],
     [
       null,
@@ -3307,6 +3427,126 @@
       null,
       0.011918319189185697,
       0.024331157228953685
+    ],
+    [
+      null,
+      0.006046464131388455,
+      0.006005238924169778
+    ],
+    [
+      null,
+      0.04503354190917728,
+      0.01529063278450851
+    ],
+    [
+      null,
+      0.013121850886605424,
+      0.018542929659792814
+    ],
+    [
+      null,
+      0.023177210169237943,
+      0.014153560059233038
+    ],
+    [
+      null,
+      0.0033841621368544106,
+      0.02590889284570418
+    ],
+    [
+      null,
+      0.0021999738059158063,
+      0.019211460421880325
+    ],
+    [
+      null,
+      0.00885809882079824,
+      0.01932058376050176
+    ],
+    [
+      null,
+      0.003979668524453845,
+      0.022625637858138904
+    ],
+    [
+      null,
+      0.08189413088945173,
+      0.01187352843655278
+    ],
+    [
+      null,
+      0.003935711107769224,
+      0.01676873794096937
+    ],
+    [
+      null,
+      0.014601068059953346,
+      0.027821880898948766
+    ],
+    [
+      null,
+      0.0023455771289046974,
+      0.009561236978062387
+    ],
+    [
+      null,
+      0.008659806103811094,
+      0.011444598855450839
+    ],
+    [
+      null,
+      0.007067030939820829,
+      0.02745551717372793
+    ],
+    [
+      null,
+      0.010348432713303905,
+      0.020813678054620584
+    ],
+    [
+      null,
+      0.005821206440689632,
+      0.01761265376360765
+    ],
+    [
+      null,
+      0.01072243526310074,
+      0.011341716190415421
+    ],
+    [
+      null,
+      0.0195943474549261,
+      0.008260746851354537
+    ],
+    [
+      null,
+      0.015248411925326322,
+      0.02449566588982236
+    ],
+    [
+      null,
+      0.0053736422012449275,
+      0.04074946454601625
+    ],
+    [
+      null,
+      0.0049666751470003,
+      0.032793817957308014
+    ],
+    [
+      null,
+      0.010631080814880348,
+      0.011900521821297043
+    ],
+    [
+      null,
+      0.00613265630514539,
+      0.03788734516025972
+    ],
+    [
+      null,
+      0.030940447832905362,
+      0.017727758136390187
     ]
   ],
   "row_notes": {
