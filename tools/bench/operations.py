@@ -2260,7 +2260,22 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "rewrite-attributes": lambda: (("1,000 new names", (1000, "<x></x>")), ("one new name", (1, "<x></x>"))),
     "path": _readpath_cases,
     "path-xpath": _readpath_cases,
-    "translate": lambda: _TRANSLATE_CASES,
+    "translate": lambda: (
+        *_TRANSLATE_CASES,
+        *tuple(
+            (f"{count} {kind} literals", ",".join([selector] * count))
+            for count in (1, 16, 128)
+            for kind, selector in (
+                ("ID", "#identifier"),
+                ("equality", '[data-x="value"]'),
+                ("long equality", '[data-x="' + "value" * 32 + '"]'),
+                ("mixed quotes", r'[data-x="it\27 s\22 x"]'),
+                ("case folded", '[data-x="VALUE" i]'),
+                ("class token", ".identifier"),
+                ("dash match", '[data-x|="en"]'),
+            )
+        ),
+    ),
     "specificity": lambda: _TRANSLATE_CASES,
     "xpath": _xpath_cases,
     "xpath-id": lambda: (("1,000 ids among 5,000 elements", _XPATH_ID_DOC),),

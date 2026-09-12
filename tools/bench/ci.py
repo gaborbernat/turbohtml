@@ -362,6 +362,9 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "serialize-attributes-sorted": ("serialize-attributes", 1),
     "serialize-attributes-small": ("serialize-attributes", 2),
     "serialize-attributes-unsorted": ("serialize-attributes", 3),
+    "translate-id-literals": ("translate", 19),
+    "translate-long-literals": ("translate", 21),
+    "translate-class-literals": ("translate", 24),
 }
 
 
