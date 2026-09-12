@@ -1288,8 +1288,18 @@ def _tokenize_cases() -> tuple[tuple[str, object], ...]:
 
 
 def _minify_cases() -> tuple[tuple[str, object], ...]:
-    """Return the real-world stylesheets the CSS-minify suite runs over (fetched and cached on first use)."""
-    return tuple((name, corpus.large_text(filename, url)) for name, filename, url in corpus.STYLESHEETS)
+    return (
+        *((name, corpus.large_text(filename, url)) for name, filename, url in corpus.STYLESHEETS),
+        *(
+            (
+                f"{count} {'reversed' if reverse else 'sorted'} Unicode ranges",
+                "@font-face{unicode-range:"
+                + ",".join(f"U+{index * 2:X}" for index in (reversed(range(count)) if reverse else range(count)))
+                + "}",
+            )
+            for count, reverse in ((8, True), (1024, False), (1024, True))
+        ),
+    )
 
 
 def _minify_js_cases() -> tuple[tuple[str, object], ...]:

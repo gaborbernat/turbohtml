@@ -365,6 +365,9 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "translate-id-literals": ("translate", 19),
     "translate-long-literals": ("translate", 21),
     "translate-class-literals": ("translate", 24),
+    "minify-css-unicode-ranges-small": ("minify-css", len(corpus.STYLESHEETS)),
+    "minify-css-unicode-ranges-sorted": ("minify-css", len(corpus.STYLESHEETS) + 1),
+    "minify-css-unicode-ranges-reversed": ("minify-css", len(corpus.STYLESHEETS) + 2),
 }
 
 

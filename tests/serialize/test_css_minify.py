@@ -901,3 +901,27 @@ def _merge_fixture_cascade(source: str, media: str = "all") -> dict[tuple[str, s
             assert re.fullmatch(r"\.[ab][0-9]*", selector)
             result.setdefault((media, selector), {}).update(declarations)
     return result
+
+
+@pytest.mark.parametrize("count", [8, 64, 65, 1024])
+@pytest.mark.parametrize("reverse", [False, True], ids=["sorted", "reversed"])
+def test_minify_css_unicode_range_order(count: int, *, reverse: bool) -> None:
+    ranges: Final = [f"U+{index * 2:X}" for index in range(count)]
+    source: Final = ",".join(reversed(ranges) if reverse else ranges)
+    assert minify_css("@font-face{unicode-range:" + source + "}") == (
+        "@font-face{unicode-range:" + ",".join(ranges) + "}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("ranges", "expected"),
+    [
+        pytest.param(("U+108-11F", "U+100-10F"), "U+100-11F", id="overlapping"),
+        pytest.param(("U+110-11F", "U+100-10F"), "U+100-11F", id="adjacent"),
+        pytest.param(("U+1??", "U+100-17F", "U+100-1FF"), "U+1??", id="wildcard-and-equal-starts"),
+    ],
+)
+def test_minify_css_unicode_range_union(ranges: tuple[str, ...], expected: str) -> None:
+    assert minify_css("@font-face{unicode-range:" + ",".join(ranges * 40) + "}") == (
+        "@font-face{unicode-range:" + expected + "}"
+    )
