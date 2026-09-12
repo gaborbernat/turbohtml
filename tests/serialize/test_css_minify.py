@@ -806,6 +806,11 @@ def test_minify_css_disjoint_rule_benchmark(case: int) -> None:
             "a{--first:1;--mine:2}b{--other:url(data:image/png;base64,AAAA)}",
             id="url-semicolon",
         ),
+        pytest.param(
+            "a{color:red}b{width:1px}a{margin:0}",
+            "a{color:red;margin:0}b{width:1px}",
+            id="incoming-shorthand-unrelated-barrier",
+        ),
     ],
 )
 def test_minify_css_large_rule_conflict_barriers(source: str, expected: str) -> None:
