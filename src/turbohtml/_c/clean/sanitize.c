@@ -1236,16 +1236,21 @@ static int sanitize_style_body(sanitizer *s, th_node *element) {
     return status;
 }
 
-/* SAFE_FOR_TEMPLATES. A template engine (Angular, Vue, Mustache, EJS, ERB) evaluates {{ }}, ${ }, and <% %> in the
-   strings it later renders, so a sanitized value that still carries one can re-inject once the output is fed through
-   that engine. Copy `in` to `out` -- caller-sized to `len`, since a run only ever shrinks -- replacing every such run,
-   its opening delimiter through the nearest matching close (or through the end when the run is left unclosed), with a
-   single space, matching DOMPurify's SAFE_FOR_TEMPLATES. Returns the written length and sets *changed when a run was
-   collapsed, so a caller rewrites the node only when the value held a marker. */
-static Py_ssize_t strip_template_markers(const Py_UCS4 *in, Py_ssize_t len, Py_UCS4 *out, int *changed) {
-    Py_ssize_t write = 0;
-    *changed = 0;
-    Py_ssize_t read = 0;
+static Py_ssize_t template_start(const Py_UCS4 *data, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index + 1 < len; index++) {
+        if (((data[index] == '{' || data[index] == '$') && data[index + 1] == '{') ||
+            (data[index] == '<' && data[index + 1] == '%')) {
+            return index;
+        }
+    }
+    return len;
+}
+
+/* Template engines can evaluate markers after sanitization; collapse runs through their nearest close. */
+static Py_ssize_t strip_template_markers(const Py_UCS4 *in, Py_ssize_t len, Py_UCS4 *out, Py_ssize_t start) {
+    memcpy(out, in, (size_t)start * sizeof(Py_UCS4));
+    Py_ssize_t write = start;
+    Py_ssize_t read = start;
     while (read < len) {
         Py_UCS4 opener = in[read];
         Py_UCS4 next = read + 1 < len ? in[read + 1] : 0;
@@ -1279,27 +1284,24 @@ static Py_ssize_t strip_template_markers(const Py_UCS4 *in, Py_ssize_t len, Py_U
             }
         }
         out[write++] = ' ';
-        *changed = 1;
         read = scan;
     }
     return write;
 }
 
-/* Collapse the template markers in one kept attribute's value, rewriting it in place when SAFE_FOR_TEMPLATES is on and
-   the value held a marker. Returns 0, or -1 on allocation failure. */
 static int strip_attr_templates(sanitizer *s, th_node *element, th_node_attr *attr) {
-    Py_UCS4 *out = PyMem_Malloc((size_t)(attr->value_len > 0 ? attr->value_len : 1) * sizeof(Py_UCS4));
+    Py_ssize_t start = template_start(attr->value, attr->value_len);
+    if (start == attr->value_len) {
+        return 0;
+    }
+    Py_UCS4 *out = PyMem_Malloc((size_t)attr->value_len * sizeof(Py_UCS4));
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    int changed = 0;
-    Py_ssize_t out_len = strip_template_markers(attr->value, attr->value_len, out, &changed);
-    int status = 0;
-    if (changed) {
-        Py_ssize_t name_len = 0;
-        const char *name = th_attr_name(s->tree, attr->name_atom, &name_len);
-        status = th_node_attr_set(s->tree, element, name, name_len, out, out_len, 1);
-    }
+    Py_ssize_t out_len = strip_template_markers(attr->value, attr->value_len, out, start);
+    Py_ssize_t name_len = 0;
+    const char *name = th_attr_name(s->tree, attr->name_atom, &name_len);
+    int status = th_node_attr_set(s->tree, element, name, name_len, out, out_len, 1);
     PyMem_Free(out);
     return status;
 }
@@ -1991,27 +1993,25 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enu
     return status;
 }
 
-/* Rewrite one text node in place with its template markers collapsed, when SAFE_FOR_TEMPLATES is on and the node held a
-   marker. Returns 0, or -1 on allocation failure. */
 static int strip_text_templates(sanitizer *s, th_node *node) {
-    Py_ssize_t len = 0;
-    Py_UCS4 *data = th_node_data(s->tree, node, &len);
+    if (node->text_len < 2) {
+        return 0;
+    }
+    const Py_UCS4 *data = th_node_realize_text(s->tree, node);
     if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    Py_UCS4 *out = PyMem_Malloc((size_t)len * sizeof(Py_UCS4)); /* a text node carries >= 1 point, so len >= 1 */
-    if (out == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(data); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return -1;        /* GCOVR_EXCL_LINE */
+    Py_ssize_t start = template_start(data, node->text_len);
+    if (start == node->text_len) {
+        return 0;
     }
-    int changed = 0;
-    Py_ssize_t out_len = strip_template_markers(data, len, out, &changed);
-    int status = 0;
-    if (changed) {
-        status = th_node_set_data(s->tree, node, out, out_len);
+    Py_UCS4 *out = PyMem_Malloc((size_t)node->text_len * sizeof(Py_UCS4));
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    Py_ssize_t out_len = strip_template_markers(data, node->text_len, out, start);
+    int status = th_node_set_data(s->tree, node, out, out_len);
     PyMem_Free(out);
-    PyMem_Free(data);
     return status;
 }
 

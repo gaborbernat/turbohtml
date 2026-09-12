@@ -2467,18 +2467,34 @@ _SANITIZER_TEMPLATES_ON = Policy(
         pytest.param("<p>a$</p>", "<p>a$</p>", id="dollar-at-end-of-text-kept"),
         pytest.param("<p>a&lt;</p>", "<p>a&lt;</p>", id="lt-at-end-of-text-kept"),
         pytest.param("<p>{{a}}{{b}}</p>", "<p>  </p>", id="two-runs-collapse-independently"),
+        pytest.param("<p>café {{x}} fin</p>", "<p>café   fin</p>", id="latin1-marker"),
+        pytest.param("<p>東京 ${x} fin</p>", "<p>東京   fin</p>", id="bmp-marker"),
+        pytest.param("<p>😀 &lt;%x%&gt; fin</p>", "<p>😀   fin</p>", id="astral-marker"),
+        pytest.param("<p>東京 {x} 😀 $x</p>", "<p>東京 {x} 😀 $x</p>", id="wide-false-openers"),
+        pytest.param("<p>" + "plain " * 100 + "{{x}}</p>", "<p>" + "plain " * 100 + " </p>", id="late-marker"),
     ],
 )
 def test_templates_text_run_collapses(fragment: str, expected: str) -> None:
     assert sanitize(fragment, _SANITIZER_TEMPLATES_ON) == expected
 
 
-def test_templates_attribute_value_with_marker_collapses() -> None:
-    assert sanitize('<a href="/x" title="{{t}}">k</a>', _SANITIZER_TEMPLATES_ON) == '<a href="/x" title=" ">k</a>'
-
-
-def test_templates_attribute_value_without_marker_unchanged() -> None:
-    assert sanitize('<a href="/x" title="plain">k</a>', _SANITIZER_TEMPLATES_ON) == '<a href="/x" title="plain">k</a>'
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("{{t}}", " ", id="marker"),
+        pytest.param("plain", "plain", id="plain"),
+        pytest.param("", "", id="empty"),
+        pytest.param("$", "$", id="single-opener"),
+        pytest.param("café {{t}} fin", "café   fin", id="latin1-marker"),
+        pytest.param("東京 ${t} fin", "東京   fin", id="bmp-marker"),
+        pytest.param("😀 {{t", "😀  ", id="astral-unclosed"),
+        pytest.param("東京 {x} 😀 $x", "東京 {x} 😀 $x", id="wide-false-openers"),
+    ],
+)
+def test_templates_attribute_value(value: str, expected: str) -> None:
+    assert sanitize(f'<a href="/x" title="{value}">k</a>', _SANITIZER_TEMPLATES_ON) == (
+        f'<a href="/x" title="{expected}">k</a>'
+    )
 
 
 def test_templates_valueless_attribute_survives() -> None:
