@@ -415,6 +415,16 @@ def find_text(text: str) -> None:
     _parsed(text).find_all(text=_FIND_TEXT_PATTERN)
 
 
+def find_text_exact(case: tuple[str, str]) -> None:
+    """Reuse the parsed tree to isolate exact descendant-text matching."""
+    _parsed(case[0]).find_all("div", text=case[1])
+
+
+def find_attr_presence(case: tuple[str, bool]) -> None:
+    """Reuse the parsed tree to isolate presence checks from parsing attribute values."""
+    _parsed(case[0]).find_all("p", attrs={"data-x": case[1]})
+
+
 def find_text_overlap(text: str) -> None:
     """Exercise the overlap that makes a naive literal substring scan quadratic."""
     _parsed(text).find(text=_FIND_TEXT_OVERLAP_PATTERN)
@@ -1542,6 +1552,8 @@ OPERATIONS: dict[str, tuple[object, str]] = {
     "computed-style-dense": (computed_style, "turbohtml"),
     "match": (match, "turbohtml"),
     "find-text": (find_text, "turbohtml"),
+    "find-text-exact": (find_text_exact, "turbohtml"),
+    "find-attr-presence": (find_attr_presence, "turbohtml"),
     "find-text-overlap": (find_text_overlap, "turbohtml"),
     "text-content": (text_content, "turbohtml"),
     "serialize": (serialize, "turbohtml"),

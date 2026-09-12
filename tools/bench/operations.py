@@ -378,6 +378,8 @@ OPERATIONS: dict[str, Operation] = {
     "computed-style-dense": Operation("computed style over a property-dense sheet", "us"),
     "match": Operation("match each anchor against div a[href]", "us"),
     "find-text": Operation("find by text content", "us"),
+    "find-text-exact": Operation("find by exact descendant text", "us"),
+    "find-attr-presence": Operation("find by attribute presence", "us"),
     "find-text-overlap": Operation("find by overlapping literal regex", "us"),
     "text-content": Operation("collect visible text", "us"),
     "parse-inner": Operation("parse and serialize body children", "us"),
@@ -2007,6 +2009,22 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "computed-style-dense": lambda: (("dense sheet (9 kB)", _dense_styled_page(20)),),
     "match": _readpath_cases,
     "find-text": _readpath_cases,
+    "find-text-exact": lambda: (
+        ("flat matches", ("<div>needle</div>" * 1_000, "needle")),
+        ("nested matches", ("<div>" * 100 + "needle" + "</div>" * 100, "needle")),
+        ("nested short expectation", ("<div>" * 100 + "x" * 10_000 + "</div>" * 100, "needle")),
+        ("wide early mismatch", ("<div>x" + "<b>needle</b>" * 1_000 + "</div>", "y" + "needle" * 1_000)),
+        ("wide match", ("<div>" + "<b>needle</b>" * 1_000 + "</div>", "needle" * 1_000)),
+        ("wide late mismatch", ("<div>" + "<b>needle</b>" * 1_000 + "</div>", "needle" * 999 + "needlx")),
+    ),
+    "find-attr-presence": lambda: tuple(
+        (
+            f"1,000 attributes, {size:,} characters, {present}",
+            (f'<p data-x="{"x" * size}">present</p><p>absent</p>' * 1_000, present),
+        )
+        for size in (0, 16, 4_096)
+        for present in (True, False)
+    ),
     "find-text-overlap": lambda: (("100 KiB overlapping miss", f"<p>{'a' * 100_000}</p>"),),
     "text-content": _readpath_cases,
     "serialize": _readpath_cases,
@@ -2091,7 +2109,12 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("comment", "<p>Thanks for the <a href='http://example.com'>link</a>! <script>evil()</script></p>"),
         ("post 4 KiB", _SANITIZE_POST * 20),
     ),
-    "sanitize-templates": lambda: (("templated 4 KiB", _SANITIZE_TEMPLATES * 20),),
+    "sanitize-templates": lambda: (
+        ("templated 4 KiB", _SANITIZE_TEMPLATES * 20),
+        ("plain 64 KiB text", "<p>" + "Plain text " * 6_000 + "</p>"),
+        ("plain 64 KiB attribute", '<a title="' + "Plain text " * 6_000 + '">label</a>'),
+        ("late template in 64 KiB text", "<p>" + "Plain text " * 6_000 + "{{value}}</p>"),
+    ),
     "sanitize-named-props": lambda: (("clobbering 4 KiB", _SANITIZE_NAMED * 11),),
     "sanitize-report": lambda: (("post 4 KiB", _SANITIZE_POST * 20),),
     "sanitize-node": lambda: (("post 4 KiB", _SANITIZE_POST * 20),),

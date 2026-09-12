@@ -51,6 +51,14 @@ def find_text(text: str) -> None:
     _parsed(text).xpath('//*[contains(., "test")]')
 
 
+def _find_text_exact(case: tuple[str, str]) -> None:
+    _parsed(case[0]).xpath("//div[string(.) = $expected]", expected=case[1])
+
+
+def _find_attr_presence(case: tuple[str, bool]) -> None:
+    _parsed(case[0]).xpath("//p[@data-x]" if case[1] else "//p[not(@data-x)]")
+
+
 def text_content(text: str) -> None:
     """Collect the document's visible text with an XPath text() sweep that skips script/style."""
     _parsed(text).xpath("//body//text()[not(ancestor::script or ancestor::style)]").getall()
@@ -196,6 +204,8 @@ OPERATIONS = {
     "select": (select, "parsel"),
     "select-has": (select_has, "parsel"),
     "find-text": (find_text, "parsel"),
+    "find-text-exact": (_find_text_exact, "parsel"),
+    "find-attr-presence": (_find_attr_presence, "parsel"),
     "text-content": (text_content, "parsel"),
     "serialize": (serialize, "parsel"),
     "links-extract": (links_extract, "parsel"),

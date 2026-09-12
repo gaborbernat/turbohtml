@@ -7,7 +7,7 @@ import re
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Comment
-from bs4.element import AttributeValueList, NavigableString, Tag
+from bs4.element import AttributeValueList, CData, NavigableString, Script, Stylesheet, Tag, TemplateString
 
 from bench.timing import Mutating
 from bench.tree_text import PRESERVE_TAGS, SPACE_RUN
@@ -59,6 +59,18 @@ def select_has(text: str) -> None:
 def find_text(text: str) -> None:
     """Collect every matching string with BeautifulSoup's find_all(string=...)."""
     _parsed(text).find_all(string=_FIND_TEXT_PATTERN)
+
+
+def _find_text_exact(case: tuple[str, str]) -> None:
+    _ = [
+        node
+        for node in _parsed(case[0]).find_all("div")
+        if node.get_text(types=(NavigableString, CData, Script, Stylesheet, TemplateString)) == case[1]
+    ]
+
+
+def _find_attr_presence(case: tuple[str, bool]) -> None:
+    _parsed(case[0]).find_all("p", attrs={"data-x": case[1]})
 
 
 def text_content(text: str) -> None:
@@ -260,6 +272,8 @@ OPERATIONS = {
     "select": (select, "BeautifulSoup (lxml)"),
     "select-has": (select_has, "BeautifulSoup (lxml)"),
     "find-text": (find_text, "BeautifulSoup (lxml)"),
+    "find-text-exact": (_find_text_exact, "BeautifulSoup (lxml)"),
+    "find-attr-presence": (_find_attr_presence, "BeautifulSoup (lxml)"),
     "text-content": (text_content, "BeautifulSoup (lxml)"),
     "serialize": (serialize, "BeautifulSoup (lxml)"),
     "class-edit": (class_edit, "BeautifulSoup (lxml)"),

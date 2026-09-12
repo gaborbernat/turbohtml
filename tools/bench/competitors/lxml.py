@@ -250,6 +250,14 @@ def find_text(text: str) -> None:
     _parsed(text).xpath('//*[contains(., "test")]')
 
 
+def _find_text_exact(case: tuple[str, str]) -> None:
+    _parsed(case[0]).xpath("//div[string(.) = $expected]", expected=case[1])
+
+
+def _find_attr_presence(case: tuple[str, bool]) -> None:
+    _parsed(case[0]).xpath("//p[@data-x]" if case[1] else "//p[not(@data-x)]")
+
+
 def socialcard(text: str) -> None:
     """Read every meta property and content off a freshly parsed tree, lxml's take on card extraction."""
     for meta in lxml_html.document_fromstring(text).cssselect("meta"):
@@ -522,6 +530,8 @@ OPERATIONS = {
     "links-rewrite": (links_rewrite, "lxml"),
     "links-filter": (links_filter, "lxml"),
     "find-text": (find_text, "lxml"),
+    "find-text-exact": (_find_text_exact, "lxml"),
+    "find-attr-presence": (_find_attr_presence, "lxml"),
     "socialcard": (socialcard, "lxml"),
     "extract-url": (extract_url, "lxml"),
     "path": (getpath, "lxml getpath"),
