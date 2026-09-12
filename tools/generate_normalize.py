@@ -206,14 +206,21 @@ def _self_check(
     """Reconstruct all four forms from the generated tables and confirm they match unicodedata for every code point."""
     compose = {(first, second): composed for first, second, composed in pairs}
     nfkd = {**canonical, **compatibility}
-    maps: dict[_Form, dict[int, list[int]]] = {"NFC": canonical, "NFD": canonical, "NFKC": nfkd, "NFKD": nfkd}
     for code in _code_points():
         char = chr(code)
-        for form, decomp_map in maps.items():
-            seq = _reference_decompose(char, decomp_map)
-            _reference_reorder(seq, combining)
-            if form in {"NFC", "NFKC"}:
-                seq = _reference_compose(seq, combining, compose)
+        canonical_seq: Final = _reference_decompose(char, canonical)
+        _reference_reorder(canonical_seq, combining)
+        compatibility_seq = canonical_seq
+        if code in compatibility:
+            compatibility_seq = _reference_decompose(char, nfkd)
+            _reference_reorder(compatibility_seq, combining)
+        forms: Final[tuple[tuple[_Form, list[int]], ...]] = (
+            ("NFC", _reference_compose(canonical_seq, combining, compose)),
+            ("NFD", canonical_seq),
+            ("NFKC", _reference_compose(compatibility_seq, combining, compose)),
+            ("NFKD", compatibility_seq),
+        )
+        for form, seq in forms:
             if "".join(chr(point) for point in seq) != unicodedata.normalize(form, char):
                 msg = f"self-check failed for U+{code:04X} {form}"
                 raise SystemExit(msg)
