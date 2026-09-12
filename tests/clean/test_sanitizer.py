@@ -2471,6 +2471,7 @@ _SANITIZER_TEMPLATES_ON = Policy(
         pytest.param("<p>東京 ${x} fin</p>", "<p>東京   fin</p>", id="bmp-marker"),
         pytest.param("<p>😀 &lt;%x%&gt; fin</p>", "<p>😀   fin</p>", id="astral-marker"),
         pytest.param("<p>東京 {x} 😀 $x</p>", "<p>東京 {x} 😀 $x</p>", id="wide-false-openers"),
+        pytest.param("<p>{{t}}{x} $x &lt;x</p>", "<p> {x} $x &lt;x</p>", id="false-openers-after-marker"),
         pytest.param("<p>" + "plain " * 100 + "{{x}}</p>", "<p>" + "plain " * 100 + " </p>", id="late-marker"),
     ],
 )

@@ -1824,6 +1824,7 @@ def test_nth_positions_in_individual_matches(selector: str, expected: list[bool]
         pytest.param("> :is(.hit, .absent)", ["later"], id="nested-predicate"),
         pytest.param("> :scope", [], id="scope-is-anchor"),
         pytest.param("+ section .hit", ["middle"], id="complex-sibling-descendant"),
+        pytest.param("~ section .hit", ["anchor", "middle"], id="complex-following-sibling-descendant"),
         pytest.param(".hit", ["anchor", "later"], id="descendant-control"),
     ],
 )
