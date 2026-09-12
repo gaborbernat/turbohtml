@@ -872,11 +872,15 @@ static int css_summaries_conflict(const css_buf *pool, const rule_item *first, c
             const css_char *right_name = pool->data + second->body_off + right_property->start;
             if (left_property->all || right_property->all ||
                 (left_property->length == right_property->length &&
-                 memcmp(left_name, right_name, (size_t)left_property->length * sizeof(css_char)) == 0) ||
-                (left_property->longhands != NULL &&
-                 css_prop_in_list(right_name, right_property->length, left_property->longhands)) ||
-                (right_property->longhands != NULL &&
-                 css_prop_in_list(left_name, left_property->length, right_property->longhands))) {
+                 memcmp(left_name, right_name, (size_t)left_property->length * sizeof(css_char)) == 0)) {
+                return 1;
+            }
+            const int left_covers_right =
+                left_property->longhands != NULL &&
+                css_prop_in_list(right_name, right_property->length, left_property->longhands);
+            const int right_covers_left = right_property->longhands != NULL &&
+                                          css_prop_in_list(left_name, left_property->length, right_property->longhands);
+            if (left_covers_right || right_covers_left) {
                 return 1;
             }
         }
