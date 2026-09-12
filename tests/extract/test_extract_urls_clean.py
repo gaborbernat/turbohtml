@@ -305,6 +305,24 @@ def test_normalize_spec_behaviors(url: str, expected: str) -> None:
         pytest.param("http://test.org/?gclid=1&page=2", "http://test.org/?page=2", id="clid-suffix-family"),
         pytest.param("http://test.org/?%75tm_source=1", "http://test.org/", id="percent-encoded-tracker-name"),
         pytest.param("http://test.net/foo?testid=1", "http://test.net/foo?testid=1", id="id-inside-word-kept"),
+        pytest.param(
+            "http://test.org/?café=1",
+            "http://test.org/?caf%C3%A9=1",
+            id="unescaped-latin1-key",
+        ),
+        pytest.param(
+            "http://test.org/?東京=1",
+            "http://test.org/?%E6%9D%B1%E4%BA%AC=1",
+            id="unescaped-bmp-key",
+        ),
+        pytest.param(
+            "http://test.org/?😀=1",
+            "http://test.org/?%F0%9F%98%80=1",
+            id="unescaped-astral-key",
+        ),
+        pytest.param("http://test.org/?café%61=1", "http://test.org/?caf%C3%A9%61=1", id="escaped-latin1-key"),
+        pytest.param("http://test.org/?東%61京=1", "http://test.org/?%E6%9D%B1%61%E4%BA%AC=1", id="escaped-bmp-key"),
+        pytest.param("http://test.org/?😀%61=1", "http://test.org/?%F0%9F%98%80%61=1", id="escaped-astral-key"),
         pytest.param("http://test.org/?refresh=1", "http://test.org/?refresh=1", id="ref-inside-word-kept"),
         pytest.param(
             "http://test.net/foo.html?testid=1&post=abc&page=2",

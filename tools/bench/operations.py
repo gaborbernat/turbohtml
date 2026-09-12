@@ -2436,6 +2436,13 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "urls-clean": lambda: (
         ("clean 100 URLs", ("clean", _URL_BATCH)),
         ("normalize 100 URLs", ("normalize", _URL_BATCH)),
+        *tuple(
+            (
+                f"normalize 100 URLs, 100 {kind} query keys",
+                ("normalize", ("https://example.org/?" + "&".join(f"{key}{index}=1" for index in range(100)),) * 100),
+            )
+            for kind, key in (("plain", "key"), ("escaped", "%6Bey"))
+        ),
     ),
     "links-filter": _readpath_cases,
     "links-external": lambda: (

@@ -138,6 +138,9 @@ static int decode_flush(const unsigned char *run, Py_ssize_t run_len, Py_UCS4 *o
    code point (even a lone surrogate) survives unencoded. */
 PyObject *th_url_percent_decode_obj(PyObject *arg) {
     Py_ssize_t len = PyUnicode_GET_LENGTH(arg);
+    if (PyUnicode_FindChar(arg, '%', 0, len, 1) == -1) {
+        return Py_NewRef(arg);
+    }
     int kind = PyUnicode_KIND(arg);
     const void *data = PyUnicode_DATA(arg);
     size_t span = (size_t)(len > 0 ? len : 1);

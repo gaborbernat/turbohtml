@@ -171,6 +171,8 @@ _RESIZED: dict[str, tuple[str, Callable[[], object]]] = {
     "decode": ("decode-gb18030-ranges", lambda: INPUTS["decode"]()[1][1]),
 }
 _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
+    "urls-clean-plain-query": ("urls-clean", 2),
+    "urls-clean-escaped-query": ("urls-clean", 3),
     "select-relative-child": ("select-relative", 4),
     "select-relative-sibling": ("select-relative", 11),
     "find-text-exact-nested": ("find-text-exact", 2),
