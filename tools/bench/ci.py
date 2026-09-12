@@ -355,6 +355,9 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "sanitize-templates-plain": ("sanitize-templates", 1),
     "sanitize-templates-attribute": ("sanitize-templates", 2),
     "sanitize-templates-late": ("sanitize-templates", 3),
+    "minify-js-names": ("minify-js-names", 0),
+    "minify-js-names-single-character": ("minify-js-names", 2),
+    "minify-js-names-multiple-characters": ("minify-js-names", 3),
 }
 
 

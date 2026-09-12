@@ -270,6 +270,7 @@ SIZE_OPS: Final[frozenset[str]] = frozenset({
     "minify-css-merges",
     "minify-js",
     "minify-js-integers",
+    "minify-js-names",
     "minify-js-sequences",
     "minify-js-guards",
     "minify-js-propagation",
@@ -498,6 +499,7 @@ OPERATIONS: dict[str, Operation] = {
     "minify-css-conflicts": Operation("merge CSS rules across disjoint declarations", "us"),
     "minify-css-merges": Operation("batch CSS rule merges", "us"),
     "minify-js": Operation("minify a JS library", "ms"),
+    "minify-js-names": Operation("rename JavaScript function parameters", "us"),
     "minify-js-integers": Operation("print JavaScript integer arrays", "us"),
     "minify-js-unlink": Operation("remove mixed JavaScript declarators", "us"),
     "minify-js-unused-declarations": Operation("remove unused JavaScript declarators", "us"),
@@ -2289,6 +2291,21 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "minify-css-conflicts": _css_conflict_inputs,
     "minify-css-merges": _css_merge_inputs,
     "minify-js": _minify_js_cases,
+    "minify-js-names": lambda: (
+        *tuple(
+            (
+                f"{count} live parameters",
+                "function transform("
+                + ",".join(f"argument{index}" for index in range(count))
+                + "){return ["
+                + ",".join(f"argument{index}" for index in range(count))
+                + "]}",
+            )
+            for count in (8, 32, 54, 80)
+        ),
+        ("free-name conflicts", "function transform(value){return value+a+b+c}"),
+        ("no local bindings", "console.log(document.title)"),
+    ),
     "minify-js-integers": lambda: tuple(
         (
             f"{count} integers / {label}",
