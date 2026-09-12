@@ -386,6 +386,11 @@ def test_fold_keeps_unreachable_that_hoists(source: str) -> None:
         ),
         pytest.param("function f(){q=r;var r=/a/}", "function f(){q=a;var a=/a/}", id="regex-last-statement-kept"),
         pytest.param(
+            "function f(){var r=/a/;g();label:h();return r.test(s)}",
+            "function f(){var a=/a/;g();a:h();return a.test(s)}",
+            id="regex-past-labeled-statement-kept",
+        ),
+        pytest.param(
             "function f(){var r=/a/;switch(c){case 1:return r.test(s)}}",
             "function f(){var a=/a/;switch(c){case 1:return a.test(s)}}",
             id="regex-into-switch-kept",

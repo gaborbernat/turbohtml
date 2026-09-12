@@ -204,6 +204,18 @@ def test_compile_accepts_the_bounds() -> None:
     )
 
 
+def test_phone_parse_handles_a_native_candidate() -> None:
+    config = _phone_config_compile(_SPEC)
+    found = _phone_parse(config, "Call 650-253-0000")
+    assert found is not None
+    assert (found.country_code, found.national_number, found.region, found.type) == (
+        1,
+        "6502530000",
+        "US",
+        PhoneType.FIXED_LINE_OR_MOBILE,
+    )
+
+
 _NEEDS_GC_COLLECT: Final = pytest.mark.skipif(
     sys.implementation.name == "pypy", reason="PyPy frees a cycle on its own schedule, not on gc.collect()"
 )

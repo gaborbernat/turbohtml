@@ -1676,6 +1676,12 @@ def test_acceptance_case() -> None:
     assert LinkDetector(phones=_US).find("Call 650-253-0000")[0].phone is not None
 
 
+def test_linkify_matches_a_within_text_phone_number() -> None:
+    assert linkify("Please call +1 (650) 253-0000 now", Linkify(phones=_US)) == (
+        'Please call <a href="tel:+16502530000">+1 (650) 253-0000</a> now'
+    )
+
+
 def test_a_reused_linker_and_one_without_phones() -> None:
     with_phones = Linker(Linkify(phones=_US))
     plain = Linker()

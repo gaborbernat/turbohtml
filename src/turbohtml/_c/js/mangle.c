@@ -1199,8 +1199,14 @@ static int subtree_contains(jm_program *prog, int32_t idx, int32_t target) {
         return 1;
     }
     const jm_node *node = &prog->nodes[idx];
+    /* d is only ever populated on JN_FOR (loop body) and JN_TRY (finally block); the sole caller
+       (read_sees_initialized) only reaches here once target's scope has been confirmed to match the
+       declaration's own scope, but a for-loop body and a try's finally are themselves a deeper scope,
+       so a target actually inside one would already have failed that check -- chain_contains(d) can
+       only ever return false here. */
     return chain_contains(prog, node->a, target) || chain_contains(prog, node->b, target) ||
-           chain_contains(prog, node->c, target) || chain_contains(prog, node->d, target);
+           chain_contains(prog, node->c, target) || /* GCOVR_EXCL_BR_LINE: true outcome is unreachable */
+           chain_contains(prog, node->d, target);
 }
 
 static int chain_contains(jm_program *prog, int32_t first, int32_t target) {

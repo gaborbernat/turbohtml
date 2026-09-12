@@ -184,6 +184,11 @@ _NEWLY = CSSMinify(baseline=2021)
             id="no-merge-longhand-blocks-shorthand",
         ),
         pytest.param(
+            "a{margin:0}b{margin-top:1px}a{margin:2px}",
+            "a{margin:0}b{margin-top:1px}a{margin:2px}",
+            id="no-merge-shorthand-vs-longhand-blocks",
+        ),
+        pytest.param(
             "a{color:red}b{all:unset}a{font-size:2px}",
             "a{color:red}b{all:unset}a{font-size:2px}",
             id="no-merge-across-all",
