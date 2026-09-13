@@ -497,6 +497,12 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "date-temporal-small": ("date", 6),
     "date-temporal-numeric": ("date", 7),
     "date-temporal-written": ("date", 8),
+    "text-content-short-descendants": ("text-content", len(corpus.REAL_PAGES) + 1),
+    "text-content-large-descendant": ("text-content", len(corpus.REAL_PAGES) + 2),
+    "text-content-tiny-descendant": ("text-content", len(corpus.REAL_PAGES) + 3),
+    "text-content-latin1-descendant": ("text-content", len(corpus.REAL_PAGES) + 4),
+    "text-content-bmp-descendant": ("text-content", len(corpus.REAL_PAGES) + 5),
+    "text-content-astral-descendant": ("text-content", len(corpus.REAL_PAGES) + 6),
 }
 
 

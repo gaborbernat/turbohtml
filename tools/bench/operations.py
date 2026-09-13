@@ -2361,7 +2361,15 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         for present in (True, False)
     ),
     "find-text-overlap": lambda: (("100 KiB overlapping miss", f"<p>{'a' * 100_000}</p>"),),
-    "text-content": _readpath_cases,
+    "text-content": lambda: (
+        *_readpath_cases(),
+        ("4,096 short Text descendants", "<main>" + "<span>a</span>" * 4096 + "</main>"),
+        ("one Text descendant (256 KiB)", "<main>" + "a" * (256 << 10) + "</main>"),
+        ("tiny Text descendant", "<p>text</p>"),
+        ("Latin-1 Text descendant (16 Ki chars)", "<p>" + "é" * 16_384 + "</p>"),
+        ("BMP Text descendant (16 Ki chars)", "<p>" + "雪" * 16_384 + "</p>"),
+        ("astral Text descendant (16 Ki chars)", "<p>" + "😀" * 16_384 + "</p>"),
+    ),
     "serialize": _readpath_cases,
     "parse-inner": _readpath_cases,
     "parse-inner-encode": _readpath_cases,

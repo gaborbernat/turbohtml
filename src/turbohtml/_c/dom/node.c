@@ -520,7 +520,7 @@ static PyObject *node_get_stripped_strings(PyObject *self, void *Py_UNUSED(closu
 PyObject *node_get_text(PyObject *self, void *Py_UNUSED(closure)) {
     PyObject *result;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    result = str_from_accessor(th_node_text, tree_of(self), ((NodeObject *)self)->node);
+    result = th_node_text_string(tree_of(self), ((NodeObject *)self)->node);
     Py_END_CRITICAL_SECTION();
     return result;
 }
