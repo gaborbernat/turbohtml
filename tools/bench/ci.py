@@ -503,6 +503,14 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "text-content-latin1-descendant": ("text-content", len(corpus.REAL_PAGES) + 4),
     "text-content-bmp-descendant": ("text-content", len(corpus.REAL_PAGES) + 5),
     "text-content-astral-descendant": ("text-content", len(corpus.REAL_PAGES) + 6),
+    "treebuild-data": ("treebuild", len(corpus.REAL_PAGES) + 1),
+    "treebuild-data-comments": ("treebuild", len(corpus.REAL_PAGES) + 2),
+    "treebuild-data-latin1": ("treebuild", len(corpus.REAL_PAGES) + 3),
+    "treebuild-data-bmp": ("treebuild", len(corpus.REAL_PAGES) + 4),
+    "treebuild-data-astral": ("treebuild", len(corpus.REAL_PAGES) + 5),
+    "treebuild-data-normalized": ("treebuild", len(corpus.REAL_PAGES) + 6),
+    "treebuild-data-entities": ("treebuild", len(corpus.REAL_PAGES) + 7),
+    "treebuild-data-small": ("treebuild", len(corpus.REAL_PAGES) + 8),
 }
 
 

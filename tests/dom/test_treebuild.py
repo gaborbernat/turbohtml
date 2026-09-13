@@ -103,17 +103,23 @@ def test_element_carries_html_namespace_and_attribute_pairs() -> None:
     assert paragraph.payload == ("p", HTML_NS, (("class", "x"), ("disabled", None)))
 
 
-def test_text_node_payload() -> None:
-    body = build("<p>hello</p>").children[0].children[1]
+@pytest.mark.parametrize(
+    "data",
+    ["hello", "café", "水", "😀", "before\nnext", "a&b"],
+    ids=["ascii", "latin1", "bmp", "astral", "newline", "entity"],
+)
+def test_text_node_payload(data: str) -> None:
+    body = build(f"<p>{data.replace('&', '&amp;')}</p>").children[0].children[1]
     text = body.children[0].children[0]
     assert text.kind == "text"
-    assert text.payload == ("hello",)
+    assert text.payload == (data,)
 
 
-def test_comment_node_payload() -> None:
-    body = build("<body><!--note--></body>").children[0].children[1]
+@pytest.mark.parametrize("data", ["note", "", "café", "水", "😀"], ids=["ascii", "empty", "latin1", "bmp", "astral"])
+def test_comment_node_payload(data: str) -> None:
+    body = build(f"<body><!--{data}--></body>").children[0].children[1]
     assert body.children[0].kind == "comment"
-    assert body.children[0].payload == ("note",)
+    assert body.children[0].payload == (data,)
 
 
 def test_processing_instruction_is_distinct_from_comment() -> None:
@@ -427,3 +433,14 @@ def _attr_value(value: str | list[str] | None) -> str:
     if isinstance(value, list):
         return " ".join(value)
     return value or ""
+
+
+def test_builder_can_reenter_while_copying_text() -> None:
+    root: Final = parse_into("<p>outer 水 😀</p>", _ReentrantRecorder())
+    assert root.children[0].children[1].children[0].children[0].payload == ("outer 水 😀",)
+
+
+class _ReentrantRecorder(Recorder):
+    def create_text(self, data: str) -> Built:
+        assert build("<p>inner</p>").children[0].children[1].children[0].children[0].payload == ("inner",)
+        return super().create_text(data)

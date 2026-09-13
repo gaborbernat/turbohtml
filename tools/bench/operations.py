@@ -2663,7 +2663,18 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "sax": _readpath_cases,
     "sax-records": _sax_record_cases,
     "sax-records-callback": _sax_record_cases,
-    "treebuild": _readpath_cases,
+    "treebuild": lambda: (
+        *_readpath_cases(),
+        ("32 ASCII text nodes, 32 KiB each", "<main>" + ("<p>" + "a" * 32768 + "</p>") * 32 + "</main>"),
+        ("32 comments, 2 KiB each", "<body>" + ("<!--" + "a" * 2048 + "-->") * 32 + "</body>"),
+        *(
+            (f"{label} text, 65,536 characters", "<p>" + character * 65536 + "</p>")
+            for label, character in (("Latin-1", "é"), ("BMP", "水"), ("astral", "😀"))
+        ),
+        ("normalized newlines, 64 KiB", "<p>" + "a\r\n" * 21845 + "</p>"),
+        ("entity text, 64 KiB", "<p>" + "a&amp;" * 10922 + "</p>"),
+        ("small text and empty comment", "<p>x</p><!---->"),
+    ),
     "rewrite": _readpath_cases,
     "rewrite-attributes": lambda: (("1,000 new names", (1000, "<x></x>")), ("one new name", (1, "<x></x>"))),
     "path": _readpath_cases,

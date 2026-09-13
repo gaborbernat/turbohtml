@@ -18,7 +18,7 @@
 #include "tokenizer/binding.h"
 
 #include "core/vec.h"
-#include "dom/tree.h"
+#include "dom/tree_internal.h"
 
 /* The namespace URI create_element receives, indexed by enum th_ns
    (TH_NS_HTML / TH_NS_SVG / TH_NS_MATHML). */
@@ -69,9 +69,15 @@ static int builder_bind(PyObject *sink, builder *methods) {
     return 0;
 }
 
-/* A node's own character data (text/comment/doctype-name) as a str, realizing a
-   zero-copy span on the way. NULL with an exception set on allocation failure. */
 static PyObject *node_str(th_tree *tree, th_node *node) {
+    /* Builder callbacks cannot mutate this private parse tree. */
+    if (node->type != TH_NODE_DOCTYPE) {
+        if (text_is_span(node)) {
+            const char *data = (const char *)tree->data + text_span_offset(node) * tree->kind;
+            return PyUnicode_FromKindAndData(tree->kind, data, node->text_len);
+        }
+        return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, node->text, node->text_len);
+    }
     Py_ssize_t len;
     Py_UCS4 *data = th_node_data(tree, node, &len);
     if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */

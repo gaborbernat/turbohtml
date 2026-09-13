@@ -1,0 +1,1 @@
+Speed up :func:`~turbohtml.treebuild.parse_into` by avoiding temporary text copies.
