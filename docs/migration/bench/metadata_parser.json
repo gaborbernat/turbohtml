@@ -8,26 +8,29 @@
   "rows": [
     [
       "head",
-      1.825606561182506e-06,
+      1.6371414407837885e-06,
       9.902861703399897e-05
     ],
     [
       "article 8 KiB",
-      2.1861982114993832e-05,
+      2.237302314019492e-05,
       0.002231772083632677
     ]
   ],
   "spread": [
     [
       null,
-      0.01412679757154096,
+      0.024163395539074976,
       0.016052098616314115
     ],
     [
       null,
-      0.010300801302048027,
+      0.004701463761076492,
       0.0254309534022347
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "0": "returns empty metadata for the distinct-field, Twitter-only and repeated-head inputs",
+    "1": "returns empty metadata for the distinct-field, Twitter-only and repeated-head inputs"
+  }
 }

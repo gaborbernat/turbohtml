@@ -32,6 +32,16 @@ NOTES: Final[dict[str, dict[str, str]]] = {
     "xpath-concat": {
         "parsel": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
     },
+    "socialcard": {
+        **dict.fromkeys(
+            ("BeautifulSoup (html.parser)", "BeautifulSoup (lxml)", "lxml", "selectolax", "pyquery", "resiliparse"),
+            "reads property/content attributes without building an OpenGraph result",
+        ),
+        "metadata_parser": "returns empty metadata for the distinct-field, Twitter-only and repeated-head inputs",
+        "goose3": "runs full article extraction; repeated properties become lists, not last-value dictionary entries",
+        "extruct": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+        "opengraph": "adds scrape and _url fields to the extracted OpenGraph mapping",
+    },
     "detect-language": {
         "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, "
         "and the input limit is raised to process the full text; confidence scores use a different model",
@@ -171,11 +181,20 @@ NOTES: Final[dict[str, dict[str, str]]] = {
             "links at all, so that timing is the cost of finding nothing"
         ),
     },
-    "date": dict.fromkeys(
-        ("htmldate", "trafilatura"),
-        "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of "
-        "finding the date turbohtml reports",
-    ),
+    "structured": {
+        "extruct": "retains 512 mixed-social property pairs; turbohtml stores last values and Twitter fields",
+    },
+    "date": {
+        **dict.fromkeys(
+            ("goose3", "news-please", "newspaper3k"),
+            "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+        ),
+        **dict.fromkeys(
+            ("htmldate", "trafilatura"),
+            "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the "
+            "100-candidate case, so that timing measures finding nothing",
+        ),
+    },
     "text-annotation-rules": {
         "inscriptis": (
             "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order "

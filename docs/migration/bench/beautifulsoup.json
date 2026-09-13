@@ -513,13 +513,13 @@
     ],
     [
       "social-card extraction — head",
-      1.825606561182506e-06,
+      1.6371414407837885e-06,
       6.766473547751654e-05,
       7.065546675733003e-05
     ],
     [
       "social-card extraction — article 8 KiB",
-      2.1861982114993832e-05,
+      2.237302314019492e-05,
       0.0021527969829548965,
       0.0015378619796895994
     ],
@@ -1727,13 +1727,13 @@
     ],
     [
       null,
-      0.01412679757154096,
+      0.024163395539074976,
       0.01266201868418031,
       0.01435977617880528
     ],
     [
       null,
-      0.010300801302048027,
+      0.004701463761076492,
       0.011490047027798463,
       0.015728680365517743
     ],
@@ -2486,6 +2486,8 @@
     "198": "10,000-sibling cases exceed the sampling budget; no timings collected",
     "199": "10,000-sibling cases exceed the sampling budget; no timings collected",
     "200": "10,000-sibling cases exceed the sampling budget; no timings collected",
-    "201": "10,000-sibling cases exceed the sampling budget; no timings collected"
+    "201": "10,000-sibling cases exceed the sampling budget; no timings collected",
+    "84": "reads property/content attributes without building an OpenGraph result",
+    "85": "reads property/content attributes without building an OpenGraph result"
   }
 }

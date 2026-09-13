@@ -36,6 +36,60 @@
       0.00877185786581928,
       0.002589482204257365,
       7.32439337885656e-05
+    ],
+    [
+      "early temporal ISO date, 36 KiB text",
+      1.0491536048817807e-05,
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06"
+    ],
+    [
+      "late temporal ISO date, 36 KiB text",
+      2.4270665901345485e-05,
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06"
+    ],
+    [
+      "temporal text without dates, 36 KiB",
+      0.0035919474806481353,
+      0.003461894203307262,
+      6.765724346754116e-05,
+      0.008869748709306199,
+      0.0004904852833078621,
+      0.00022739597538172043
+    ],
+    [
+      "single temporal ISO date",
+      2.0656929568356e-06,
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06"
+    ],
+    [
+      "early temporal numeric date, 36 KiB text",
+      2.4303271392985455e-05,
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06"
+    ],
+    [
+      "early temporal written date, 36 KiB text",
+      6.109777999085964e-05,
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06",
+      "No date found; turbohtml returns 2024-05-06"
     ]
   ],
   "spread": [
@@ -65,10 +119,67 @@
       0.04277533338146369,
       0.013182086495236387,
       0.058992245979526695
+    ],
+    [
+      null,
+      0.022628881172036035,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      null,
+      0.003724043936179232,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      null,
+      0.01238570704891151,
+      0.023926681705484426,
+      0.06523183083822687,
+      0.0318376770940678,
+      0.007834508653644162,
+      0.06390916222904154
+    ],
+    [
+      null,
+      0.02052522558020646,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      null,
+      0.002790749949207219,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      null,
+      0.0040656544389460645,
+      null,
+      null,
+      null,
+      null,
+      null
     ]
   ],
   "notes": {
-    "htmldate": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
-    "trafilatura": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports"
+    "goose3": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+    "htmldate": "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the 100-candidate case, so that timing measures finding nothing",
+    "news-please": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+    "newspaper3k": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+    "trafilatura": "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the 100-candidate case, so that timing measures finding nothing"
   }
 }

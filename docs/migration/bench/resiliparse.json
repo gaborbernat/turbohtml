@@ -283,12 +283,12 @@
     ],
     [
       "social-card extraction — head",
-      1.825606561182506e-06,
+      1.6371414407837885e-06,
       6.7310612994475605e-06
     ],
     [
       "social-card extraction — article 8 KiB",
-      2.1861982114993832e-05,
+      2.237302314019492e-05,
       3.9791826942803254e-05
     ],
     [
@@ -825,12 +825,12 @@
     ],
     [
       null,
-      0.01412679757154096,
+      0.024163395539074976,
       0.04410118583677716
     ],
     [
       null,
-      0.010300801302048027,
+      0.004701463761076492,
       0.013942445430744325
     ],
     [
@@ -1097,6 +1097,8 @@
     "39": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
     "40": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
     "41": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
-    "42": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree"
+    "42": "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so it collects text from a smaller tree",
+    "55": "reads property/content attributes without building an OpenGraph result",
+    "56": "reads property/content attributes without building an OpenGraph result"
   }
 }

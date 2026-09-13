@@ -229,6 +229,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "transform-tree": "transform-tree",
     "whitespace-roundtrip": "whitespace-roundtrip",
     "structured-data": "structured",
+    "socialcard": "socialcard",
     "tables": "tables",
     "tables-spans": "tables-spans",
     "text-content": "text-content",

@@ -199,10 +199,17 @@ The ``google_doc`` row reads the inline-CSS styling a Google Docs export carries
 toolkit it succeeds, extracting JSON-LD, Microdata, and OpenGraph from a product page that carries all three. Both start
 from the raw HTML string, so each parses first; extruct builds an lxml tree and runs a separate extractor per syntax,
 where turbohtml parses to the WHATWG tree and gathers every format in one C walk, handing back the typed
-:class:`~turbohtml.StructuredData` record. The single pass runs roughly nine to eleven times faster.
+:class:`~turbohtml.StructuredData` record.
 
 .. bench-table::
     :file: bench/structured-data.json
+
+Standalone :meth:`~turbohtml.Document.opengraph` extracts OpenGraph properties without the other structured-data
+formats. These cases include many distinct fields, Twitter-only metadata and repeated properties. All adapters start
+with HTML; the comparison notes distinguish complete metadata extraction from attribute scans.
+
+.. bench-table::
+    :file: bench/socialcard.json
 
 ********
  Tables
