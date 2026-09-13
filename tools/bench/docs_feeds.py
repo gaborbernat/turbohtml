@@ -76,6 +76,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "radio-group": "radio-group",
     "sax-records": "sax-records",
     "sax-records-callback": "sax-records-callback",
+    "treebuild": "treebuild",
     "query-siblings": "query-siblings",
     "prune-shared": "prune-shared",
     "observe-registrations": "observe-registrations",

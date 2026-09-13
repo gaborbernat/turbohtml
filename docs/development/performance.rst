@@ -910,6 +910,18 @@ parser, which never crosses into Python per tag.
 .. bench-table::
     :file: bench/html-parser-adapter.json
 
+**********************
+ Custom tree builders
+**********************
+
+:func:`turbohtml.treebuild.parse_into` invokes a Python builder that creates a small custom tree. Timing includes
+parsing, builder creation, node callbacks, and child attachment. The builder retains tags and children while discarding
+text values, attributes, and namespaces after their callbacks. Cases cover saved pages, character data, empty elements,
+and mixed HTML, SVG, and MathML namespaces. No competitor adapter implements this custom-tree workload.
+
+.. bench-table::
+    :file: bench/treebuild.json
+
 ******************
  CSS minification
 ******************
