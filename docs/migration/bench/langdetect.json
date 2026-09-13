@@ -1,0 +1,113 @@
+{
+  "label": "operation",
+  "parties": [
+    "turbohtml",
+    "langdetect"
+  ],
+  "metrics": [],
+  "rows": [
+    [
+      "detect a text's natural language — english book (64 KiB)",
+      0.0003865597398468405,
+      0.0575868297892157
+    ],
+    [
+      "detect a text's natural language — cyrillic prose (4 KiB)",
+      3.402186843951919e-05,
+      0.005336712460727237
+    ],
+    [
+      "detect a text's natural language — hangul prose (4 KiB)",
+      8.966868485913438e-05,
+      0.0041053364772475716
+    ],
+    [
+      "count trigrams in long prose — english book (1 KiB)",
+      3.560916302565905e-05,
+      0.0009275164108354753
+    ],
+    [
+      "count trigrams in long prose — english book (64 KiB)",
+      0.000378245361162044,
+      0.055650237831287086
+    ],
+    [
+      "count trigrams in long prose — english book (1024 KiB)",
+      0.005930355362579576,
+      7.612579819280654
+    ],
+    [
+      "count trigrams in long prose — synthetic: 17,576 distinct three-letter words",
+      0.0006394463021782334,
+      0.06897900515468791
+    ],
+    [
+      "count trigrams in long prose — synthetic: 125 distinct three-letter words",
+      1.5341942675680304e-05,
+      0.0023475361901243255
+    ],
+    [
+      "count trigrams in long prose — repeated English sentence (2,048 copies)",
+      0.0002658496972192855,
+      0.11255243727161239
+    ]
+  ],
+  "spread": [
+    [
+      null,
+      0.022879346076110436,
+      0.029770070930856124
+    ],
+    [
+      null,
+      0.011504141639604422,
+      0.007451323325256111
+    ],
+    [
+      null,
+      0.09300861854505464,
+      0.02279513962549995
+    ],
+    [
+      null,
+      0.03796746900780336,
+      0.002964351719026178
+    ],
+    [
+      null,
+      0.03151019721252945,
+      0.010011295014632295
+    ],
+    [
+      null,
+      0.017188547250174765,
+      0.013988975257223207
+    ],
+    [
+      null,
+      0.03927941555525936,
+      0.011601992948666498
+    ],
+    [
+      null,
+      0.00869219075438994,
+      0.00804119108494619
+    ],
+    [
+      null,
+      0.05005386702868267,
+      0.01608037206974096
+    ]
+  ],
+  "row_notes": {
+    "0": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; confidence scores use a different model",
+    "1": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; confidence scores use a different model",
+    "2": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; confidence scores use a different model",
+    "3": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; synthetic word combinations produce different language rankings and confidence scores and do not measure accuracy",
+    "4": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; synthetic word combinations produce different language rankings and confidence scores and do not measure accuracy",
+    "5": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; synthetic word combinations produce different language rankings and confidence scores and do not measure accuracy",
+    "6": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; synthetic word combinations produce different language rankings and confidence scores and do not measure accuracy",
+    "7": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; synthetic word combinations produce different language rankings and confidence scores and do not measure accuracy",
+    "8": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; synthetic word combinations produce different language rankings and confidence scores and do not measure accuracy"
+  }
+}

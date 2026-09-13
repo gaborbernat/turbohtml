@@ -613,8 +613,15 @@ The ``collapsed`` row turns layout guessing off: turbohtml joins the :attr:`~tur
 stream against html-text's ``extract_text(guess_layout=False)``, 17 times faster; inscriptis and resiliparse have no
 comparable collapsed mode. The ``main`` row strips page boilerplate first, :meth:`~turbohtml.Node.main_text` against
 resiliparse's ``extract_plain_text(main_content=True)``, four times faster. The ``annotated`` row labels matching
-elements with spans through :meth:`~turbohtml.Node.to_annotated_text` against inscriptis's ``get_annotated_text``, 75
+elements with spans through :meth:`~turbohtml.Node.to_annotated_text` against inscriptis's ``get_annotated_text``, 38
 times faster; html-text and resiliparse have no annotation surface, so they sit out that row.
+
+Annotation-rule workloads vary rule count, matching tags, wildcard rules and document size. They include mostly
+irrelevant rules, broad matches, interleaved labels and small documents. turbohtml renders a cached tree; inscriptis
+parses the HTML during each call. Rule dictionaries and inscriptis configurations are prepared before timing.
+
+.. bench-table::
+    :file: bench/text-annotation-rules.json
 
 *****************
  Tree navigation
@@ -1228,6 +1235,11 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 
 .. bench-table::
     :file: bench/canonicalize-deep.json
+
+Natural-language detection compares :func:`turbohtml.detect.detect_language` with langdetect on the same strings. The
+long-input table includes book excerpts, repeated prose and explicitly labeled synthetic three-letter combinations.
+Synthetic rows measure processing cost, not detection accuracy. Predictions and confidence scores remain
+library-specific; the comparison notes describe differences.
 
 .. bench-table::
     :file: bench/detect-language.json

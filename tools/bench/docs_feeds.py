@@ -232,6 +232,7 @@ TABLES: Final[dict[str, str | Combined]] = {
     "tables": "tables",
     "tables-spans": "tables-spans",
     "text-content": "text-content",
+    "text-annotation-rules": "text-annotation-rules",
     "tokenizing": "tokenize",
     "tree-navigation": "navigate",
     "xslt": "transform",

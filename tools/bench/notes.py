@@ -173,6 +173,12 @@ NOTES: Final[dict[str, dict[str, str]]] = {
         "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of "
         "finding the date turbohtml reports",
     ),
+    "text-annotation-rules": {
+        "inscriptis": (
+            "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order "
+            "differ from turbohtml, so the outputs are not interchangeable"
+        ),
+    },
     "text-content": {
         "resiliparse": (
             "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so "

@@ -1,36 +1,45 @@
 {
   "label": "detect a text's natural language",
   "parties": [
-    "turbohtml"
+    "turbohtml",
+    "langdetect"
   ],
   "metrics": [],
   "rows": [
     [
       "english book (64 KiB)",
-      0.0009561749788190354
+      0.0003865597398468405,
+      0.0575868297892157
     ],
     [
       "cyrillic prose (4 KiB)",
-      4.089246015534324e-05
+      3.402186843951919e-05,
+      0.005336712460727237
     ],
     [
       "hangul prose (4 KiB)",
-      8.966868485913438e-05
+      8.966868485913438e-05,
+      0.0041053364772475716
     ]
   ],
   "spread": [
     [
       null,
-      0.32631582420616667
+      0.022879346076110436,
+      0.029770070930856124
     ],
     [
       null,
-      0.052645100397907214
+      0.011504141639604422,
+      0.007451323325256111
     ],
     [
       null,
-      0.09300861854505464
+      0.09300861854505464,
+      0.02279513962549995
     ]
   ],
-  "notes": {}
+  "notes": {
+    "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, and the input limit is raised to process the full text; confidence scores use a different model"
+  }
 }

@@ -18,8 +18,43 @@
     ],
     [
       "annotated layout text — annotated (4 KiB)",
-      1.0666409806366536e-05,
+      8.21313075386835e-06,
       0.0003139191487472696
+    ],
+    [
+      "annotated layout text by rule distribution — 49 mostly irrelevant rules, 1,000 spans",
+      0.00011989102180602156,
+      0.0022292272666769954
+    ],
+    [
+      "annotated layout text by rule distribution — 49 wildcard rules, 1,000 spans",
+      0.00583303330919686,
+      0.034617800348011464
+    ],
+    [
+      "annotated layout text by rule distribution — 49 matching tag rules, 1,000 spans",
+      0.005813991318670257,
+      0.03366158243928415
+    ],
+    [
+      "annotated layout text by rule distribution — 49 mostly irrelevant rules, one span",
+      1.596658441904708e-06,
+      1.0597366337350422e-05
+    ],
+    [
+      "annotated layout text by rule distribution — three rules, 1,000 spans",
+      0.0001140767245904802,
+      0.0022303442923051384
+    ],
+    [
+      "annotated layout text by rule distribution — interleaved wildcard rules, alternating tags",
+      0.0001954874133313448,
+      0.0028030845802883655
+    ],
+    [
+      "annotated layout text by rule distribution — eight rules, one span",
+      8.662603689183849e-07,
+      1.083928489838589e-05
     ]
   ],
   "spread": [
@@ -35,9 +70,52 @@
     ],
     [
       null,
-      0.01987784372812354,
+      0.008509240358553858,
       0.0437664506698881
+    ],
+    [
+      null,
+      0.027785088185223173,
+      0.013542514789783437
+    ],
+    [
+      null,
+      0.025269640847294012,
+      0.06268536390380083
+    ],
+    [
+      null,
+      0.010704769920791817,
+      0.0437911167507887
+    ],
+    [
+      null,
+      0.03660778151384874,
+      0.015675819503195996
+    ],
+    [
+      null,
+      0.013504681819835548,
+      0.007148796476566439
+    ],
+    [
+      null,
+      0.007778844960213115,
+      0.023216683379489515
+    ],
+    [
+      null,
+      0.016561749224529642,
+      0.018652066706734246
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "3": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable",
+    "4": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable",
+    "5": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable",
+    "6": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable",
+    "7": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable",
+    "8": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable",
+    "9": "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order differ from turbohtml, so the outputs are not interchangeable"
+  }
 }
