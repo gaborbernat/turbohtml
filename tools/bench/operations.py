@@ -2417,8 +2417,25 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
     "socialcard": lambda: (
         ("head", _SOCIAL_HEAD),
         ("article 8 KiB", f"{_SOCIAL_HEAD}<body>{'<p>filler text</p>' * 400}</body>"),
+        (
+            "1,024 OpenGraph properties",
+            "<head>"
+            + "".join(f'<meta property="og:field{index}" content="value{index}">' for index in range(1_024))
+            + "</head>",
+        ),
+        (
+            "1,024 Twitter properties",
+            "<head>"
+            + "".join(f'<meta name="twitter:field{index}" content="value{index}">' for index in range(1_024))
+            + "</head>",
+        ),
+        ("mixed duplicate properties", _SOCIAL_HEAD * 128),
     ),
-    "structured": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
+    "structured": lambda: (
+        ("product", _STRUCTURED_PAGE),
+        ("catalog 8 KiB", _STRUCTURED_PAGE * 12),
+        ("mixed social properties", _SOCIAL_HEAD * 128),
+    ),
     "microdata": lambda: (("product", _STRUCTURED_PAGE), ("catalog 8 KiB", _STRUCTURED_PAGE * 12)),
     "microdata-itemref": lambda: (
         ("references after 4,000 nodes", _MICRODATA_ITEMREF),

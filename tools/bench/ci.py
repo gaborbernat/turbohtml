@@ -487,6 +487,10 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "xpath-concat-small": ("xpath-concat", 2),
     "xpath-concat-nested": ("xpath-concat", 3),
     "xpath-concat-mixed": ("xpath-concat", 4),
+    "socialcard-many-properties": ("socialcard", 2),
+    "socialcard-twitter-only": ("socialcard", 3),
+    "socialcard-mixed-properties": ("socialcard", 4),
+    "structured-social-properties": ("structured", 2),
 }
 
 

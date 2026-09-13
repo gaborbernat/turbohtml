@@ -629,11 +629,35 @@ def test_opengraph_function_base_url_omitted_is_verbatim() -> None:
         pytest.param('<meta property="x" content="y">', {}, id="property-shorter-than-prefix"),
         pytest.param('<meta charset="utf-8">', {}, id="no-property-or-name"),
         pytest.param('<meta property name content="x">', {}, id="both-valueless"),
+        pytest.param(
+            '<meta property="twitter:title" name="og:title" content="P">',
+            {},
+            id="twitter-property-prevents-og-name-fallback",
+        ),
+        pytest.param('<meta property="og:" content="empty">', {"": "empty"}, id="empty-property"),
+        pytest.param('<meta property="og:標題" content="日本語">', {"標題": "日本語"}, id="unicode-property"),
+        pytest.param('<meta property="OG:title" content="upper">', {}, id="prefix-case-sensitive"),
         pytest.param("<p>not a meta</p>", {}, id="no-meta"),
     ],
 )
 def test_opengraph_document_method(html: str, expected: dict[str, str]) -> None:
     assert parse(html).opengraph() == expected
+
+
+@pytest.mark.parametrize("combined", [pytest.param(False, id="standalone"), pytest.param(True, id="combined")])
+def test_opengraph_duplicate_preserves_insertion_order(*, combined: bool) -> None:
+    document: Final = parse(
+        '<meta property="og:title" content="first"><meta name="twitter:card" content="summary">'
+        '<meta property="og:type" content="article"><meta property="og:title" content="last">'
+    )
+    if combined:
+        assert list(document.structured_data().opengraph.items()) == [
+            ("og:title", "last"),
+            ("twitter:card", "summary"),
+            ("og:type", "article"),
+        ]
+    else:
+        assert list(document.opengraph().items()) == [("title", "last"), ("type", "article")]
 
 
 def test_opengraph_returns_record() -> None:
@@ -713,6 +737,13 @@ def test_opengraph_drops_twitter_url_valued_key(key: str) -> None:
 )
 def test_opengraph_resolution_cases(html: str, expected: dict[str, str]) -> None:
     assert parse(html).opengraph(base_url=_OPENGRAPH_BASE) == expected
+
+
+def test_opengraph_ignores_malformed_twitter_url() -> None:
+    document: Final = parse(
+        '<meta property="twitter:image" content="http://[bad"><meta property="og:title" content="T">'
+    )
+    assert document.opengraph(base_url=_OPENGRAPH_BASE) == {"title": "T"}
 
 
 def test_opengraph_base_href_refines_base_url() -> None:
