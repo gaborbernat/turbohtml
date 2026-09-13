@@ -43,6 +43,7 @@ enum {
 
 typedef struct {
     PyObject *slots[M_COUNT];
+    PyObject *namespaces[3];
 } builder;
 
 static const char *const METHOD_NAMES[M_COUNT] = {
@@ -53,9 +54,15 @@ static void builder_release(builder *methods) {
     for (int index = 0; index < M_COUNT; index++) {
         Py_XDECREF(methods->slots[index]);
     }
+    for (int index = 0; index < 3; index++) {
+        Py_XDECREF(methods->namespaces[index]);
+    }
 }
 
 static int builder_bind(PyObject *sink, builder *methods) {
+    for (int index = 0; index < 3; index++) {
+        methods->namespaces[index] = NULL;
+    }
     for (int index = 0; index < M_COUNT; index++) {
         methods->slots[index] = NULL;
     }
@@ -136,20 +143,21 @@ static PyObject *make_handle(th_tree *tree, th_node *node, builder *methods) {
         if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *namespace = PyUnicode_FromString(NS_URIS[node->ns]);
-        if (namespace == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            Py_DECREF(tag);      /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyObject **namespace = &methods->namespaces[node->ns];
+        if (*namespace == NULL) {
+            *namespace = PyUnicode_FromString(NS_URIS[node->ns]);
+            if (*namespace == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                Py_DECREF(tag);       /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
         }
         PyObject *attrs = attrs_tuple(tree, node);
-        if (attrs == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            Py_DECREF(tag);       /* GCOVR_EXCL_LINE: allocation-failure path */
-            Py_DECREF(namespace); /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(tag);  /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *handle = PyObject_CallFunctionObjArgs(methods->slots[M_CREATE_ELEMENT], tag, namespace, attrs, NULL);
+        PyObject *handle = PyObject_CallFunctionObjArgs(methods->slots[M_CREATE_ELEMENT], tag, *namespace, attrs, NULL);
         Py_DECREF(tag);
-        Py_DECREF(namespace);
         Py_DECREF(attrs);
         return handle;
     }

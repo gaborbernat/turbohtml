@@ -511,6 +511,10 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "treebuild-data-normalized": ("treebuild", len(corpus.REAL_PAGES) + 6),
     "treebuild-data-entities": ("treebuild", len(corpus.REAL_PAGES) + 7),
     "treebuild-data-small": ("treebuild", len(corpus.REAL_PAGES) + 8),
+    "treebuild-elements": ("treebuild", len(corpus.REAL_PAGES) + 9),
+    "treebuild-tiny": ("treebuild", len(corpus.REAL_PAGES) + 10),
+    "treebuild-foreign": ("treebuild", len(corpus.REAL_PAGES) + 11),
+    "treebuild-callbacks": ("treebuild", len(corpus.REAL_PAGES) + 12),
 }
 
 

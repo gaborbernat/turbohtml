@@ -2674,6 +2674,18 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ("normalized newlines, 64 KiB", "<p>" + "a\r\n" * 21845 + "</p>"),
         ("entity text, 64 KiB", "<p>" + "a&amp;" * 10922 + "</p>"),
         ("small text and empty comment", "<p>x</p><!---->"),
+        ("10,000 empty elements", "<main>" + "<i></i>" * 10_000 + "</main>"),
+        ("tiny custom tree", "<p>x</p>"),
+        (
+            "mixed foreign namespaces",
+            "<main>"
+            + "<svg><foreignObject><p>x</p></foreignObject><circle/></svg><math><mi>x</mi></math>" * 1_000
+            + "</main>",
+        ),
+        (
+            "text and comment callbacks",
+            "<!DOCTYPE html><main>" + '<p class="x">text<!--comment--></p>' * 1_000 + "</main>",
+        ),
     ),
     "rewrite": _readpath_cases,
     "rewrite-attributes": lambda: (("1,000 new names", (1000, "<x></x>")), ("one new name", (1, "<x></x>"))),

@@ -139,6 +139,32 @@ def test_svg_and_mathml_carry_their_foreign_namespace() -> None:
     assert math.children[0].payload[1] == MATHML_NS
 
 
+def test_namespace_values_survive_builder_reentry() -> None:
+    recorder: Final = _NamespaceRecorder()
+    root: Final = parse_into("<svg><foreignObject><p>outer</p></foreignObject><circle/></svg>", recorder)
+    svg: Final = root.children[0].children[1].children[0]
+    assert recorder.nested is not None
+    math: Final = recorder.nested.children[0].children[1].children[0]
+    assert (
+        svg.payload[1],
+        svg.children[0].payload[1],
+        svg.children[0].children[0].payload[1],
+        svg.children[1].payload[1],
+        math.payload[1],
+        math.children[0].payload[1],
+    ) == (SVG_NS, SVG_NS, HTML_NS, SVG_NS, MATHML_NS, MATHML_NS)
+
+
+class _NamespaceRecorder(Recorder):
+    def __init__(self) -> None:
+        self.nested: Built | None = None
+
+    def create_element(self, name: str, namespace: str, attrs: tuple[tuple[str, str | None], ...]) -> Built:
+        if name == "svg":
+            self.nested = parse_into("<math><mi>inner</mi></math>", self)
+        return super().create_element(name, namespace, attrs)
+
+
 def test_template_content_is_appended_under_the_template() -> None:
     body = build("<body><template><b>t</b></template></body>").children[0].children[1]
     template = body.children[0]
@@ -279,8 +305,14 @@ class _RaisingBuilder(Recorder):
         "append",
     ],
 )
-def test_a_builder_method_that_raises_propagates(method: str) -> None:
-    markup = "<!DOCTYPE html><body>text<!--c--><?pi?></body>"
+@pytest.mark.parametrize(
+    "markup",
+    [
+        pytest.param("<!DOCTYPE html><body>text<!--c--><?pi?></body>", id="html"),
+        pytest.param("<!DOCTYPE html><svg><circle/></svg><math><mi>x</mi></math><!--c--><?pi?>", id="foreign"),
+    ],
+)
+def test_a_builder_method_that_raises_propagates(method: str, markup: str) -> None:
     with pytest.raises(ValueError, match=f"boom in {method}"):
         parse_into(markup, _RaisingBuilder(method))
 
