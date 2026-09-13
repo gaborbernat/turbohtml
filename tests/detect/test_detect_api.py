@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import string
 from itertools import islice, product
 from typing import Final, cast
 
@@ -386,6 +387,44 @@ def test_a_long_passage_stays_confident() -> None:
         "and tomorrow's designs promise capabilities their earnest inventors can scarcely begin to describe aloud."
     )
     assert detect_language(passage) == LanguageMatch("eng", 1.0, "Latin", "English")
+
+
+@pytest.mark.parametrize(
+    ("word_count", "expected"),
+    [
+        pytest.param(128, LanguageMatch("cym", 1.0, "Latin", "Welsh"), id="below-cap"),
+        pytest.param(1024, LanguageMatch("aka", 0.1691861256901001, "Latin", "Akan"), id="above-cap"),
+        pytest.param(4096, LanguageMatch("cym", 1.0, "Latin", "Welsh"), id="many-ties"),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True], ids=["forward", "reverse"])
+def test_language_trigram_ties_ignore_word_order(word_count: int, expected: LanguageMatch, *, reverse: bool) -> None:
+    words: Final = tuple("".join(word) for word in islice(product(string.ascii_lowercase, repeat=3), word_count))
+    assert detect_language("  ".join(reversed(words) if reverse else words)) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param(
+            "  ".join("".join(word) for word in product(string.ascii_lowercase, repeat=3)),
+            LanguageMatch("sna", 0.1332846056280532, "Latin", "Shona"),
+            id="distinct-trigrams",
+        ),
+        pytest.param(
+            "  ".join("".join(word) for word in product("abcde", repeat=3)),
+            LanguageMatch("cym", 1.0, "Latin", "Welsh"),
+            id="few-trigrams",
+        ),
+        pytest.param(
+            "the quick brown fox jumps over the lazy dog. " * 2048,
+            LanguageMatch("eng", 1.0, "Latin", "English"),
+            id="repeated-trigrams",
+        ),
+    ],
+)
+def test_language_trigram_ranking(text: str, expected: LanguageMatch) -> None:
+    assert detect_language(text) == expected
 
 
 def test_distance_saturates_on_an_adversarial_text() -> None:

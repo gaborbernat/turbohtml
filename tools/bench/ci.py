@@ -481,6 +481,9 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "text-annotation-rules-few": ("text-annotation-rules", 4),
     "text-annotation-rules-interleaved": ("text-annotation-rules", 5),
     "text-annotation-rules-threshold": ("text-annotation-rules", 6),
+    "language-trigrams-distinct": ("detect-language-long", 3),
+    "language-trigrams-small": ("detect-language-long", 4),
+    "language-trigrams-repetitive": ("detect-language-long", 5),
 }
 
 

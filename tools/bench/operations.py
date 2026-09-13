@@ -14,6 +14,7 @@ import string
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
+from itertools import product
 from textwrap import dedent
 from typing import TYPE_CHECKING, Final
 
@@ -2817,8 +2818,19 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         for size in (100, 1_000, 10_000)
     ),
     "detect-language": _language_cases,
-    "detect-language-long": lambda: tuple(
-        (f"english book ({size} KiB)", corpus.corpus("war-and-peace/2600.txt", size << 10)) for size in (1, 64, 1_024)
+    "detect-language-long": lambda: (
+        *(
+            (f"english book ({size} KiB)", corpus.corpus("war-and-peace/2600.txt", size << 10))
+            for size in (1, 64, 1_024)
+        ),
+        *(
+            (
+                f"synthetic: {width**3:,} distinct three-letter words",
+                "  ".join("".join(word) for word in product(string.ascii_lowercase[:width], repeat=3)),
+            )
+            for width in (26, 5)
+        ),
+        ("repeated English sentence (2,048 copies)", "the quick brown fox jumps over the lazy dog. " * 2048),
     ),
     "escape-identifier": lambda: (
         (

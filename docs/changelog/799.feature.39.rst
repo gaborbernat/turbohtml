@@ -1,0 +1,1 @@
+Select only the highest-ranked trigrams when :func:`~turbohtml.detect.detect_language` scores text.

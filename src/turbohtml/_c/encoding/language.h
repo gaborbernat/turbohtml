@@ -117,6 +117,25 @@ static int th_lang_cmp_ranked(const void *left, const void *right) {
     return (a->key < b->key) - (a->key > b->key);
 }
 
+/* The least valuable retained trigram stays at the root, using the same
+   count/key ordering as the final ranking. */
+static void th_lang_trigram_sift(th_lang_ranked_trigram *ranked, size_t count, size_t index) {
+    th_lang_ranked_trigram value = ranked[index];
+    size_t child = index * 2 + 1;
+    while (child < count) {
+        if (child + 1 < count && th_lang_cmp_ranked(&ranked[child + 1], &ranked[child]) > 0) {
+            child++;
+        }
+        if (th_lang_cmp_ranked(&value, &ranked[child]) >= 0) {
+            break;
+        }
+        ranked[index] = ranked[child];
+        index = child;
+        child = index * 2 + 1;
+    }
+    ranked[index] = value;
+}
+
 static size_t th_lang_trigram_slot(const th_lang_ranked_trigram *table, size_t capacity, uint64_t key) {
     uint64_t hash = (key ^ (key >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
     hash = (hash ^ (hash >> 27)) * UINT64_C(0x94d049bb133111eb);
@@ -188,8 +207,19 @@ static Py_ssize_t th_lang_text_trigrams(int kind, const void *data, Py_ssize_t l
             ranked[position++] = ranked[index];
         }
     }
-    qsort(ranked, (size_t)unique, sizeof(th_lang_ranked_trigram), th_lang_cmp_ranked);
     Py_ssize_t kept = unique < (Py_ssize_t)TH_LANG_TEXT_TRIGRAMS_SIZE ? unique : (Py_ssize_t)TH_LANG_TEXT_TRIGRAMS_SIZE;
+    if (unique > kept) {
+        for (size_t index = (size_t)kept / 2; index > 0; index--) {
+            th_lang_trigram_sift(ranked, (size_t)kept, index - 1);
+        }
+        for (Py_ssize_t index = kept; index < unique; index++) {
+            if (th_lang_cmp_ranked(&ranked[index], &ranked[0]) < 0) {
+                ranked[0] = ranked[index];
+                th_lang_trigram_sift(ranked, (size_t)kept, 0);
+            }
+        }
+    }
+    qsort(ranked, (size_t)kept, sizeof(th_lang_ranked_trigram), th_lang_cmp_ranked);
     for (Py_ssize_t index = 0; index < kept; index++) {
         ranked[index].count = (uint32_t)index; /* the rank replaces the occurrence count */
     }

@@ -29,6 +29,15 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "detect-language": {
+        "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, "
+        "and the input limit is raised to process the full text; confidence scores use a different model",
+    },
+    "detect-language-long": {
+        "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, "
+        "and the input limit is raised to process the full text; synthetic word combinations produce different "
+        "language rankings and confidence scores and do not measure accuracy",
+    },
     "urls-clean": {"courlan": "retains Unicode hostnames instead of encoding them with IDNA"},
     "select-nth": {
         "BeautifulSoup (html.parser)": "10,000-sibling cases exceed the sampling budget; no timings collected",
