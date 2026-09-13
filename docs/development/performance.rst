@@ -598,9 +598,10 @@ mutation) now answers that test in O(1), so ``css_path`` keeps pace with the pos
 The ``text`` suite collects the visible text two ways. First, the raw text join off a pre-parsed tree, the ``get_text``
 pass: turbohtml's :attr:`~turbohtml.Node.text` property concatenates every descendant text run, against lxml's
 ``text_content()``, resiliparse's node text, selectolax's ``text()``, BeautifulSoup's ``get_text()``, and parsel's and
-pyquery's text extraction. turbohtml gathers the runs in one C walk into a buffer reserved up front, so it stays level
-with lxml and resiliparse, leads selectolax by 6.6 to 9.3 times and BeautifulSoup by 5.5 to 7.5, and runs 99 to 145
-times ahead of parsel, which boxes each match in a wrapper first. pyquery trails by 33 to 57 times.
+pyquery's text extraction. On the four real documents, turbohtml leads lxml by 1.5 to 2.0 times, resiliparse by 1.4 to
+2.1 times, selectolax by 10 to 16 times and BeautifulSoup by 8.5 to 12.4 times. Parsel returns separate text strings
+without joining them; its timings are 151 to 255 times higher, while pyquery's are 52 to 103 times higher. Additional
+cases cover many short runs, one long run, tiny text and Latin-1, BMP and astral characters.
 
 .. bench-table::
     :file: bench/text-content.json
@@ -862,10 +863,7 @@ selectolax land near or just ahead on extraction while turbohtml pulls away on t
 Pulling values out of a document, the idioms the parsel, pyquery, and w3lib migrations center on. First, reading every
 matched node's ``@href`` and visible text off a pre-parsed page: turbohtml selects once and reads
 :meth:`~turbohtml.Element.attr` and :attr:`~turbohtml.Node.text` off each node, against resiliparse, lxml, selectolax,
-parsel, and pyquery selecting and reading, and BeautifulSoup. turbohtml compiles the selector once and reads interned
-atoms, where the others re-translate the CSS per call or box every match in a wrapper object, so it leads resiliparse by
-two to six times, lxml and selectolax by five to seventeen times, parsel and pyquery by twenty to seventy times, and
-BeautifulSoup by up to 260 times.
+parsel, and pyquery selecting and reading, and BeautifulSoup.
 
 .. bench-table::
     :file: bench/extraction.json

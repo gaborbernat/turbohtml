@@ -123,22 +123,22 @@
     ],
     [
       "collect visible text — daring fireball (10 kB)",
-      2.628542792167584e-06,
+      1.726507028602479e-06,
       0.00029569839155859273
     ],
     [
       "collect visible text — ars technica (56 kB)",
-      1.3523651548534113e-05,
+      8.818541625525237e-06,
       0.0013329409186250512
     ],
     [
       "collect visible text — mozilla blog (95 kB)",
-      2.186032063870395e-05,
+      1.6836218084866534e-05,
       0.003182836258019961
     ],
     [
       "collect visible text — whatwg spec (235 kB)",
-      8.368112857700301e-05,
+      4.726010218310724e-05,
       0.012057314666283977
     ],
     [
@@ -203,22 +203,22 @@
     ],
     [
       "extract text per match — daring fireball (10 kB)",
-      3.4386826609870505e-06,
+      2.356617609796293e-06,
       9.480372786185853e-05
     ],
     [
       "extract text per match — ars technica (56 kB)",
-      8.73383119722367e-06,
+      5.612442229481947e-06,
       0.0001932303535928289
     ],
     [
       "extract text per match — mozilla blog (95 kB)",
-      1.4629863759552109e-05,
+      8.647442725144098e-06,
       0.0002857991061091525
     ],
     [
       "extract text per match — whatwg spec (235 kB)",
-      1.4630846669897815e-05,
+      9.721350358186479e-06,
       0.0003377339750916993
     ],
     [
@@ -1055,6 +1055,36 @@
       "concatenate XPath node strings — mixed nodes and attributes",
       1.5864628283660902e-05,
       3.900360194108998e-05
+    ],
+    [
+      "collect visible text — 4,096 short Text descendants",
+      1.263131269505872e-05,
+      0.007834034079375366
+    ],
+    [
+      "collect visible text — one Text descendant (256 KiB)",
+      2.888353814493409e-05,
+      2.4742076467039926e-05
+    ],
+    [
+      "collect visible text — tiny Text descendant",
+      8.439071808030718e-08,
+      7.292775669280142e-06
+    ],
+    [
+      "collect visible text — Latin-1 Text descendant (16 Ki chars)",
+      1.7945577314530208e-06,
+      2.397461616728454e-05
+    ],
+    [
+      "collect visible text — BMP Text descendant (16 Ki chars)",
+      1.9026723950451203e-06,
+      2.944360689601429e-05
+    ],
+    [
+      "collect visible text — astral Text descendant (16 Ki chars)",
+      2.273537794472702e-06,
+      3.492220218959119e-05
     ]
   ],
   "spread": [
@@ -1175,22 +1205,22 @@
     ],
     [
       null,
-      0.012441408611845218,
+      0.016122630775452614,
       0.011863153144738459
     ],
     [
       null,
-      0.008090294692882173,
+      0.013343117303871551,
       0.007254723348578527
     ],
     [
       null,
-      0.008613510271660421,
+      0.013183863526580197,
       0.016542878235094267
     ],
     [
       null,
-      0.008197886275080108,
+      0.011289263519976833,
       0.015084340455599747
     ],
     [
@@ -1255,22 +1285,22 @@
     ],
     [
       null,
-      0.04117689872132874,
+      0.020652478279308554,
       0.03147186500222947
     ],
     [
       null,
-      0.03313607719950356,
+      0.023955880361958906,
       0.07341711135521371
     ],
     [
       null,
-      0.15064561933990006,
+      0.054432153274647316,
       0.10510857293565441
     ],
     [
       null,
-      0.06924096557794722,
+      0.05906567539011922,
       0.05761745031125985
     ],
     [
@@ -2107,6 +2137,36 @@
       null,
       0.011703258130617674,
       0.011951148788591827
+    ],
+    [
+      null,
+      0.02253638814726071,
+      0.01941242600374983
+    ],
+    [
+      null,
+      0.014065356470422239,
+      0.020072717567822487
+    ],
+    [
+      null,
+      0.015305599806628578,
+      0.019093070887090797
+    ],
+    [
+      null,
+      0.028107770129741538,
+      0.0030388438606917026
+    ],
+    [
+      null,
+      0.01914409199944166,
+      0.008041650763384669
+    ],
+    [
+      null,
+      0.012152912395178213,
+      0.00979383108213924
     ]
   ],
   "row_notes": {
@@ -2122,6 +2182,16 @@
     "150": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
     "207": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
     "208": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
-    "209": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing"
+    "209": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    "23": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "24": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "25": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "26": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "210": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "211": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "212": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "213": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "214": "returns separate body text strings, excluding script/style; joining them is outside timing",
+    "215": "returns separate body text strings, excluding script/style; joining them is outside timing"
   }
 }

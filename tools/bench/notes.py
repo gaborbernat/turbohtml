@@ -202,6 +202,8 @@ NOTES: Final[dict[str, dict[str, str]]] = {
         ),
     },
     "text-content": {
+        "parsel": "returns separate body text strings, excluding script/style; joining them is outside timing",
+        "pyquery": "collects body or fragment-root text with pyquery's whitespace handling",
         "resiliparse": (
             "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so "
             "it collects text from a smaller tree"

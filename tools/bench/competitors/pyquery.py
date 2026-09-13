@@ -71,8 +71,10 @@ def _select_relative(case: tuple[str, str]) -> None:
 
 
 def text_content(text: str) -> None:
-    """Collect the body's visible text with pyquery's text()."""
-    _parsed(text)("body").text()
+    """Collect visible text from the body or fragment root."""
+    document: Final = _parsed(text)
+    body: Final = document("body")
+    (body or document).text()
 
 
 def serialize(text: str) -> None:
