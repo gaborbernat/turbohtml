@@ -1086,6 +1086,9 @@ lxml trails by 1.3 to 2.1 times, selectolax by 1.6 to 3.5, parsel and pyquery by
 .. bench-table::
     :file: bench/xpath-replace.json
 
+XPath string concatenation includes many short values, a few long values, nested text and mixed elements, attributes and
+comments. Each library queries a cached parsed tree; parsing stays outside timing.
+
 .. bench-table::
     :file: bench/xpath-concat.json
 

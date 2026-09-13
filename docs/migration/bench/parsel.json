@@ -753,12 +753,12 @@
     ],
     [
       "concatenate XPath node strings — 10,000 nodes, 32 characters",
-      0.0005025375868475142,
+      0.00016334846314218035,
       0.00035559515536078836
     ],
     [
       "concatenate XPath node strings — 10 nodes, 32768 characters",
-      0.00013009689546379378,
+      9.707069242873938e-05,
       5.2980478149796305e-05
     ],
     [
@@ -1040,6 +1040,21 @@
       "select sibling positions in wide trees — li:nth-child(odd) (10,000 siblings)",
       0.00012419139263405063,
       0.24968303825395802
+    ],
+    [
+      "concatenate XPath node strings — 10 nodes, 32 characters",
+      4.596288865066356e-07,
+      6.597286651791971e-06
+    ],
+    [
+      "concatenate XPath node strings — 10 nested nodes, 32768 characters",
+      0.00011718958201830294,
+      5.340083996922355e-05
+    ],
+    [
+      "concatenate XPath node strings — mixed nodes and attributes",
+      1.5864628283660902e-05,
+      3.900360194108998e-05
     ]
   ],
   "spread": [
@@ -1790,12 +1805,12 @@
     ],
     [
       null,
-      0.095427170677467,
+      0.010305320219799161,
       0.02700556118263957
     ],
     [
       null,
-      0.020504204355920024,
+      0.006040536051309516,
       0.013206369119195507
     ],
     [
@@ -2077,6 +2092,21 @@
       null,
       0.026028702535503465,
       0.015255452135638607
+    ],
+    [
+      null,
+      0.025455136617421107,
+      0.011007715382472319
+    ],
+    [
+      null,
+      0.037020409447206526,
+      0.012003544964660273
+    ],
+    [
+      null,
+      0.011703258130617674,
+      0.011951148788591827
     ]
   ],
   "row_notes": {
@@ -2087,6 +2117,11 @@
     "137": "joins escaped child output then encodes UTF-8",
     "138": "joins escaped child output then encodes UTF-8",
     "139": "joins escaped child output then encodes UTF-8",
-    "140": "joins escaped child output then encodes UTF-8"
+    "140": "joins escaped child output then encodes UTF-8",
+    "149": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    "150": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    "207": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    "208": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    "209": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing"
   }
 }

@@ -29,6 +29,9 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "xpath-concat": {
+        "parsel": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    },
     "detect-language": {
         "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, "
         "and the input limit is raised to process the full text; confidence scores use a different model",
