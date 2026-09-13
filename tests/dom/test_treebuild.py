@@ -105,8 +105,17 @@ def test_element_carries_html_namespace_and_attribute_pairs() -> None:
 
 @pytest.mark.parametrize(
     "data",
-    ["hello", "café", "水", "😀", "before\nnext", "a&b"],
-    ids=["ascii", "latin1", "bmp", "astral", "newline", "entity"],
+    [
+        pytest.param("hello", id="ascii"),
+        pytest.param("café", id="latin1"),
+        pytest.param("水", id="bmp"),
+        pytest.param("😀", id="astral"),
+        pytest.param("before\nnext", id="newline"),
+        pytest.param("a&b", id="entity"),
+        pytest.param("\ud800", id="high-surrogate"),
+        pytest.param("\udfff", id="low-surrogate"),
+        pytest.param("\ud83d\ude00", id="surrogate-pair"),
+    ],
 )
 def test_text_node_payload(data: str) -> None:
     body = build(f"<p>{data.replace('&', '&amp;')}</p>").children[0].children[1]

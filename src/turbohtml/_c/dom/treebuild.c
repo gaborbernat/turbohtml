@@ -81,7 +81,7 @@ static PyObject *node_str(th_tree *tree, th_node *node) {
     if (node->type != TH_NODE_DOCTYPE) {
         if (text_is_span(node)) {
             const char *data = (const char *)tree->data + text_span_offset(node) * tree->kind;
-            return PyUnicode_FromKindAndData(tree->kind, data, node->text_len);
+            return th_str_from_kind(tree->kind, data, node->text_len);
         }
         return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, node->text, node->text_len);
     }
