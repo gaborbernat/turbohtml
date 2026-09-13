@@ -2218,13 +2218,26 @@ INPUTS: dict[str, Callable[[], tuple[tuple[str, object], ...]]] = {
         ),
         ("short ASCII", ("A short paragraph", "a", "A", "A short pArAgrAph")),
     ),
-    "xpath-concat": lambda: tuple(
+    "xpath-concat": lambda: ((
+        *tuple(
+            (
+                f"{count:,} nodes, {length} characters",
+                ("str:concat(//i)", "<main>" + ("<i>" + "a" * length + "</i>") * count + "</main>"),
+            )
+            for count, length in ((10000, 32), (10, 32768), (10, 32))
+        ),
         (
-            f"{count:,} nodes, {length} characters",
-            ("str:concat(//i)", "<main>" + ("<i>" + "a" * length + "</i>") * count + "</main>"),
-        )
-        for count, length in ((10_000, 32), (10, 32_768))
-    ),
+            "10 nested nodes, 32768 characters",
+            ("str:concat(//i)", "<main>" + ("<i><b>" + "a" * 32768 + "</b></i>") * 10 + "</main>"),
+        ),
+        (
+            "mixed nodes and attributes",
+            (
+                "str:concat(//i | //i/@* | //comment())",
+                "<main>" + '<i a="attribute">text<b>nested</b><!--comment--></i>' * 100 + "</main>",
+            ),
+        ),
+    )),
     "xpath-translate": lambda: ((
         *tuple(
             (

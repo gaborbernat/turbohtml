@@ -484,6 +484,9 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "language-trigrams-distinct": ("detect-language-long", 3),
     "language-trigrams-small": ("detect-language-long", 4),
     "language-trigrams-repetitive": ("detect-language-long", 5),
+    "xpath-concat-small": ("xpath-concat", 2),
+    "xpath-concat-nested": ("xpath-concat", 3),
+    "xpath-concat-mixed": ("xpath-concat", 4),
 }
 
 

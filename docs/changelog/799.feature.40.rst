@@ -1,0 +1,1 @@
+Avoid temporary text copies when :meth:`~turbohtml.Node.xpath` concatenates node strings.
