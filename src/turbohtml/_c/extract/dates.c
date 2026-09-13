@@ -548,12 +548,12 @@ PyObject *turbohtml_date_scan(PyObject *Py_UNUSED(module), PyObject *args) {
     Py_RETURN_NONE;
 }
 
-/* A visitor for scan_every_date: one calendar-valid date, returning -1 to stop the sweep with an error. */
+/* Visitors return positive to stop after a match, negative on allocation failure. */
 typedef int (*date_visitor)(void *context, int year, int month, int day);
 
 /* Every ISO, day-month-year, and written-out date in the text, each pattern swept independently over the whole
    text and reported in that order. A match whose calendar is impossible is skipped but still advances the scan
-   past its span, the way re.finditer does. Returns -1 when the visitor did. */
+   past its span, the way re.finditer does. Propagates a nonzero visitor result. */
 static int scan_every_date(const void *data, int kind, Py_ssize_t len, int current_year, date_visitor visit,
                            void *context) {
     int year, month, day;
@@ -561,8 +561,11 @@ static int scan_every_date(const void *data, int kind, Py_ssize_t len, int curre
     Py_ssize_t pos = 0;
     while (pos < len) {
         if (iso_at(data, kind, len, pos, &year, &month, &day, &end)) {
-            if (ymd_valid(year, month, day) && visit(context, year, month, day) < 0) { /* GCOVR_EXCL_BR_LINE */
-                return -1;                                                             /* GCOVR_EXCL_LINE */
+            if (ymd_valid(year, month, day)) {
+                int status = visit(context, year, month, day);
+                if (status != 0) {
+                    return status;
+                }
             }
             pos = end;
         } else {
@@ -576,8 +579,9 @@ static int scan_every_date(const void *data, int kind, Py_ssize_t len, int curre
             dmy_at(data, kind, len, pos, &raw_day, &raw_month, &raw_year, &end)) {
             int resolved_year = correct_year(raw_year, current_year);
             if (dmy_resolve(raw_day, raw_month, resolved_year, &month, &day)) {
-                if (visit(context, resolved_year, month, day) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                    return -1;                                       /* GCOVR_EXCL_LINE */
+                int status = visit(context, resolved_year, month, day);
+                if (status != 0) {
+                    return status;
                 }
             }
             pos = end;
@@ -597,8 +601,11 @@ static int scan_every_date(const void *data, int kind, Py_ssize_t len, int curre
             pos++;
             continue;
         }
-        if (ymd_valid(year, month, day) && visit(context, year, month, day) < 0) { /* GCOVR_EXCL_BR_LINE */
-            return -1;                                                             /* GCOVR_EXCL_LINE */
+        if (ymd_valid(year, month, day)) {
+            int status = visit(context, year, month, day);
+            if (status != 0) {
+                return status;
+            }
         }
         pos = end;
     }
@@ -1041,13 +1048,11 @@ typedef struct {
 
 static int first_date(void *context, int year, int month, int day) {
     first_date_hit *hit = context;
-    if (!hit->found) {
-        hit->found = 1;
-        hit->year = year;
-        hit->month = month;
-        hit->day = day;
-    }
-    return 0;
+    hit->found = 1;
+    hit->year = year;
+    hit->month = month;
+    hit->day = day;
+    return 1;
 }
 
 /* The class/id/itemprop vocabulary of the temporal-markup stage, drawn from htmldate's but kept to the

@@ -491,6 +491,12 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "socialcard-twitter-only": ("socialcard", 3),
     "socialcard-mixed-properties": ("socialcard", 4),
     "structured-social-properties": ("structured", 2),
+    "date-temporal-early": ("date", 3),
+    "date-temporal-late": ("date", 4),
+    "date-temporal-missing": ("date", 5),
+    "date-temporal-small": ("date", 6),
+    "date-temporal-numeric": ("date", 7),
+    "date-temporal-written": ("date", 8),
 }
 
 

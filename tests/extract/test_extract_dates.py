@@ -443,6 +443,27 @@ def test_the_json_ld_stage_walks_the_decoded_blocks(block: str, expected: str | 
         pytest.param(
             '<span id="date-updated">2016-01-17</span>', PublicationDate("2016-01-17", "time"), id="id-modified"
         ),
+        pytest.param(
+            "<time>January 2, 2015 then 03/04/2014 then 2016-01-18</time>",
+            PublicationDate("2016-01-18", "time"),
+            id="iso-pattern-priority",
+        ),
+        pytest.param(
+            "<time>January 2, 2015 then 03/04/2014 then 04/05/2013</time>",
+            PublicationDate("2014-04-03", "time"),
+            id="numeric-pattern-priority",
+        ),
+        pytest.param(
+            "<time>January 2, 2015 then February 3, 2014</time>",
+            PublicationDate("2015-01-02", "time"),
+            id="first-written-date",
+        ),
+        pytest.param(
+            "<time>2016-02-30 then 2016-01-19</time>",
+            PublicationDate("2016-01-19", "time"),
+            id="invalid-calendar-before-match",
+        ),
+        pytest.param("<time>1990-01-01 then 2016-01-20</time>", None, id="first-outside-window"),
     ],
 )
 def test_the_time_stage_reads_marked_elements(html: str, expected: PublicationDate | None) -> None:
