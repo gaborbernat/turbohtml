@@ -1,2 +1,0 @@
-Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` that removes declarations from long statement
-lists.

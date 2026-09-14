@@ -1,1 +1,0 @@
-Stop temporal text scanning after the first valid date in :func:`~turbohtml.extract.dates`.

@@ -1,1 +1,0 @@
-Avoid temporary function-rendering buffers in :func:`~turbohtml.clean.minify_css`.

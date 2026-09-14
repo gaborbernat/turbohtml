@@ -1,2 +1,0 @@
-Separate multi-level :class:`XSLT <turbohtml.transform.Transform>` numbers with periods when the format contains no
-separator token.

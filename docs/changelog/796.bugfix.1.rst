@@ -1,1 +1,0 @@
-Preserve the input node type in :func:`~turbohtml.clean.sanitize_node` annotations.

@@ -1,1 +1,0 @@
-Avoid intermediate metadata copies in :meth:`~turbohtml.Document.opengraph`.

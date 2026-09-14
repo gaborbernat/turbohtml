@@ -7,6 +7,254 @@
 .. towncrier release notes start
 
 *********************
+ v1.9.0 (2026-09-14)
+*********************
+
+Features - 1.9.0
+================
+
+- Add native DOM whitespace collapse, comment removal, and ordered transformation composition. Serialize subtree
+  children with ``inner=True`` on ``serialize``, ``encode``, and ``serialize_iter``. (:issue:`791`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of long guard-return sequences. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of declarations with single-use initializers.
+  (:issue:`795`)
+- Speed up descendant ``:has()`` selectors on nested elements. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of libraries containing boolean literals.
+  (:issue:`795`)
+- Speed up :meth:`canonical serialization <turbohtml.Node.serialize>` with explicit options. (:issue:`795`)
+- Speed up importing turbohtml from an installed wheel. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``translate()`` with large character maps. (:issue:`795`)
+- Speed up sanitization of elements with many rejected attributes. (:issue:`795`)
+- Speed up :class:`XSLT <turbohtml.transform.Transform>` numbering with explicit element, wildcard or document-root
+  patterns. (:issue:`795`)
+- Speed up XML parsing of long text without character references. (:issue:`795`)
+- Speed up HTML parsing with deeply nested formatting elements. (:issue:`795`)
+- Speed up repeated :func:`computed-style <turbohtml.cssom.computed_style>` lookups on an unchanged tree. (:issue:`795`)
+- Speed up HTML parsing with repeated scope checks in nested structures. (:issue:`795`)
+- Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation with inherited simple-type facets. (:issue:`795`)
+- Speed up repeated named-slot assignment queries on wide shadow roots. (:issue:`795`)
+- Speed up :func:`CSS minification <turbohtml.clean.minify_css>` with long conflicting declaration values.
+  (:issue:`795`)
+- Speed up parent queries over selections with shared parents. (:issue:`795`)
+- Speed up :meth:`HTML serialization <turbohtml.Node.serialize>` with explicit options. (:issue:`795`)
+- Speed up XML parsing of attributes with many namespace prefixes. (:issue:`795`)
+- Speed up generation of the :func:`Unicode normalization <turbohtml.detect.normalize>` tables. (:issue:`795`)
+- Speed up :meth:`form-data collection <turbohtml.Element.form_data>` from deeply nested disabled fieldsets.
+  (:issue:`795`)
+- Speed up :func:`language detection <turbohtml.detect.detect_language>` on text with many distinct trigrams.
+  (:issue:`795`)
+- Speed up queries combining many roots supplied out of document order. (:issue:`795`)
+- Speed up :meth:`article extraction <turbohtml.Node.article>` from deeply nested content. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` equality comparisons between node sets. (:issue:`795`)
+- Speed up positional CSS queries over wide sibling lists. (:issue:`795`)
+- Speed up repeated default :class:`XSLT <turbohtml.transform.Transform>` ``level="any"`` numbering. (:issue:`795`)
+- Speed up :func:`computed-style <turbohtml.cssom.computed_style>` matching of class-qualified selectors. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` inequality comparisons between node sets. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``str:replace()`` with sparse matches of long strings. (:issue:`795`)
+- Speed up HTML parsing of long text with carriage returns. (:issue:`795`)
+- Speed up HTML parsing that merges text around tables. (:issue:`795`)
+- Speed up :meth:`Markdown wrapping <turbohtml.Node.to_markdown>` of long lines. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of mixed retained and removable declarations.
+  (:issue:`795`)
+- Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation of elements with many instance attributes.
+  (:issue:`795`)
+- Speed up :class:`RELAX NG <turbohtml.validate.RelaxNG>` validation of optional groups and interleaves. (:issue:`795`)
+- Speed up :meth:`microdata extraction <turbohtml.Document.microdata>` when referenced properties are already ordered.
+  (:issue:`795`)
+- Speed up closest-ancestor queries over overlapping selections. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:intersection()`` on large node sets. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` that removes declarations from long statement
+  lists. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``id()`` when its argument contains many short nodes. (:issue:`795`)
+- Speed up streaming rewrites that add many attributes to a start tag. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``str:concat()`` over many short text nodes. (:issue:`795`)
+- Speed up compilation of schema patterns with large character classes. (:issue:`795`)
+- Speed up external-link extraction from URLs with many subdomains. (:issue:`795`)
+- Speed up flattening nested shadow-slot assignments. (:issue:`795`)
+- Speed up :class:`XSLT <turbohtml.transform.Transform>` applications with many template rules. (:issue:`795`)
+- Speed up :meth:`canonical serialization <turbohtml.Node.serialize>` of deeply nested trees with xlink attributes.
+  (:issue:`795`)
+- Speed up :func:`JavaScript literal propagation <turbohtml.clean.minify_js>` within large multi-binding declarations.
+  (:issue:`795`)
+- Speed up :meth:`plain-text serialization <turbohtml.Node.to_text>` with explicit options. (:issue:`795`)
+- Speed up repeated default :class:`XSLT <turbohtml.transform.Transform>` sibling numbering. (:issue:`795`)
+- Speed up adding many attributes to an element. (:issue:`795`)
+- Speed up :func:`CSS minification <turbohtml.clean.minify_css>` with many rules sharing declaration bodies.
+  (:issue:`795`)
+- Speed up mutations observed only for unrelated event kinds. (:issue:`795`)
+- Speed up repeated element path generation on an unchanged tree. (:issue:`795`)
+- Speed up :meth:`table extraction <turbohtml.Node.tables>` with large row and column spans. (:issue:`795`)
+- Speed up :func:`Unicode normalization <turbohtml.detect.normalize>` of long combining-mark sequences. (:issue:`795`)
+- Speed up cloning partially selected :class:`Range <turbohtml.Range>` ancestors. (:issue:`795`)
+- Speed up serialization of elements with large attribute sets. (:issue:`795`)
+- Speed up publication-date extraction from text containing many distinct dates. (:issue:`795`)
+- Speed up pruning selections that share matching ancestors. (:issue:`795`)
+- Speed up shadow-slot assignment queries on hosts with many children. (:issue:`795`)
+- Speed up :meth:`DOM normalization <turbohtml.Element.normalize>` of empty text nodes. (:issue:`795`)
+- Speed up reading attributes from tokens with many attributes. (:issue:`795`)
+- Speed up :class:`Range <turbohtml.Range>` operations on fully contained sibling intervals. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of long expression sequences. (:issue:`795`)
+- Speed up :class:`XSLT <turbohtml.transform.Transform>` numbering with static predicates and union patterns.
+  (:issue:`795`)
+- Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation of values with named-type facets. (:issue:`795`)
+- Speed up :class:`XSLT <turbohtml.transform.Transform>` stylesheets with repeated numbering patterns. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` that merges long declaration lists.
+  (:issue:`795`)
+- Speed up :func:`computed styles <turbohtml.cssom.computed_style>` for complex selector alternatives. (:issue:`795`)
+- Speed up repeated validation with schema patterns. (:issue:`795`)
+- Speed up queries combining many detached roots. (:issue:`795`)
+- Speed up :meth:`Markdown conversion <turbohtml.Node.to_markdown>` of long runs of punctuation. (:issue:`795`)
+- Speed up :meth:`Node.equals() <turbohtml.Node.equals>` for elements with many attributes. (:issue:`795`)
+- Speed up :meth:`article extraction <turbohtml.Node.article>` from pages with many content candidates. (:issue:`795`)
+- Speed up XML parsing of elements with many distinct attributes. (:issue:`795`)
+- Speed up queries spanning many documents. (:issue:`795`)
+- Speed up JavaScript initialization-order checks across many variable pairs. (:issue:`795`)
+- Speed up explicit :class:`XSLT <turbohtml.transform.Transform>` numbering across repeated source-node visits.
+  (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:difference()`` on large node sets. (:issue:`795`)
+- Speed up :func:`JavaScript literal propagation <turbohtml.clean.minify_js>` across many interleaved declarations.
+  (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ordered numeric comparisons between node sets. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` of integer arrays. (:issue:`795`)
+- Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation of elements with many declared attributes.
+  (:issue:`795`)
+- Speed up :class:`Range <turbohtml.Range>` operations whose boundary is near the start of a sibling list.
+  (:issue:`795`)
+- Speed up iteration over :func:`SAX element records <turbohtml.saxparse.iter_events>`. (:issue:`795`)
+- Speed up :func:`encoding detection <turbohtml.detect.detect>` of short inputs. (:issue:`795`)
+- Speed up repeated document-wide radio-group updates. (:issue:`795`)
+- Speed up XML parsing of long attribute values without character references. (:issue:`795`)
+- Speed up :class:`XSD <turbohtml.validate.XMLSchema>` validation of decimals without numeric bounds. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:distinct()`` on large node sets. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` equality comparisons of long strings. (:issue:`795`)
+- Speed up :meth:`DOM normalization <turbohtml.Element.normalize>` of adjacent text nodes. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``set:has-same-node()`` on large node sets. (:issue:`795`)
+- Speed up HTML parsing with many active formatting elements. (:issue:`795`)
+- Speed up sibling queries over selections with shared parents. (:issue:`795`)
+- Speed up :meth:`microdata extraction <turbohtml.Document.microdata>` with repeated item references. (:issue:`795`)
+- Speed up :meth:`microdata extraction <turbohtml.Document.microdata>` when properties are local to their item.
+  (:issue:`795`)
+- Speed up HTML parsing of long text containing isolated NUL characters. (:issue:`795`)
+- Speed up :func:`feed extraction <turbohtml.extract.feed>` from entries with extension fields. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` unions of results already in document order. (:issue:`795`)
+- Speed up :func:`CSS minification <turbohtml.clean.minify_css>` with many mergeable media blocks. (:issue:`795`)
+- Speed up :func:`JavaScript minification <turbohtml.clean.minify_js>` with interleaved unused bindings. (:issue:`795`)
+- Speed up :func:`DOM linkification <turbohtml.clean.linkify_node>` of long non-ASCII text. (:issue:`795`)
+- Speed up :class:`XSLT <turbohtml.transform.Transform>` applications with many named declarations. (:issue:`795`)
+- Speed up :meth:`XPath <turbohtml.Node.xpath>` ``translate()`` on text with repeated characters. (:issue:`795`)
+- Speed up :class:`streaming encoding detection <turbohtml.detect.EncodingDetector>` of short inputs. (:issue:`795`)
+- Speed up :meth:`structured-data extraction <turbohtml.Document.structured_data>` from documents without metadata.
+  (:issue:`795`)
+- Skip repeated NUL scans in :class:`~turbohtml.IncrementalParser`. (:issue:`799`)
+- Speed up :func:`~turbohtml.treebuild.parse_into` by reusing namespace strings within each parse. (:issue:`799`)
+- Avoid repeated duplicate scans when :class:`~turbohtml.transform.Transform` indexes XSLT keys. (:issue:`799`)
+- Avoid shifting existing variable bindings when :class:`~turbohtml.transform.Transform` enters and leaves scopes.
+  (:issue:`799`)
+- Speed up escaping disallowed tags with many attributes in :class:`~turbohtml.clean.Sanitizer`. (:issue:`799`)
+- Skip disqualified encoding candidates in :class:`~turbohtml.detect.EncodingDetector`. (:issue:`799`)
+- Speed up :attr:`~turbohtml.Node.text` by determining string width while collecting text. (:issue:`799`)
+- Speed up text emission in :class:`~turbohtml.transform.Transform`. (:issue:`799`)
+- Reduce rule matching work in :meth:`~turbohtml.Node.to_annotated_text` with many annotation rules. (:issue:`799`)
+- Speed up :func:`~turbohtml.conformance.check` on nested sections without headings. (:issue:`799`)
+- Speed up exact text filters in :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all`. (:issue:`799`)
+- Speed up :class:`~turbohtml.Element` construction. (:issue:`799`)
+- Speed up template-safe :func:`~turbohtml.clean.sanitize`. (:issue:`799`)
+- Speed up Unicode range sorting in :func:`~turbohtml.clean.minify_css`. (:issue:`799`)
+- Skip impossible composition lookups in :func:`~turbohtml.detect.normalize`. (:issue:`799`)
+- Avoid redundant string copies and integer conversions in :class:`~turbohtml.transform.Transform` numeric sorting.
+  (:issue:`799`)
+- Select only the highest-ranked trigrams when :func:`~turbohtml.detect.detect_language` scores text. (:issue:`799`)
+- Avoid temporary text copies when :meth:`~turbohtml.Node.xpath` concatenates node strings. (:issue:`799`)
+- Speed up zero terms with large exponents in :func:`~turbohtml.clean.minify_css`. (:issue:`799`)
+- Speed up boolean attribute filters in :meth:`~turbohtml.Node.find` and :meth:`~turbohtml.Node.find_all`.
+  (:issue:`799`)
+- Avoid temporary function-rendering buffers in :func:`~turbohtml.clean.minify_css`. (:issue:`799`)
+- Avoid rescanning ASCII hosts in :func:`~turbohtml.extract.normalize_url`. (:issue:`799`)
+- Speed up unescaped query keys in :func:`~turbohtml.extract.normalize_url`. (:issue:`799`)
+- Speed up dot-segment handling in :func:`~turbohtml.extract.normalize_url`. (:issue:`799`)
+- Speed up child and sibling ``:has()`` selectors in :meth:`~turbohtml.Node.select`. (:issue:`799`)
+- Speed up :func:`~turbohtml.clean.sanitize` when checking allowed attribute prefixes. (:issue:`799`)
+- Use indexed country-code lookup when formatting and validating :class:`~turbohtml.clean.PhoneNumber`. (:issue:`799`)
+- Speed up phone table generation. (:issue:`799`)
+- Speed up Unicode normalization table generation. (:issue:`799`)
+- Skip unused attribute-name conversions in :class:`~turbohtml.clean.Sanitizer` prefix checks. (:issue:`799`)
+- Reuse namespace declarations for consecutive copies of a literal element in :class:`~turbohtml.transform.Transform`.
+  (:issue:`799`)
+- Speed up literal conversion in :func:`~turbohtml.convert.css_to_xpath`. (:issue:`799`)
+- Skip unchanged prefixes in :func:`~turbohtml.detect.normalize`. (:issue:`799`)
+- Index Unicode digit ranges when parsing :class:`~turbohtml.clean.PhoneNumber`. (:issue:`799`)
+- Reuse each form's first submit control when matching ``:default`` in :meth:`~turbohtml.Node.select`. (:issue:`799`)
+- Stop temporal text scanning after the first valid date in :func:`~turbohtml.extract.dates`. (:issue:`799`)
+- Reuse adjacent sibling positions in :meth:`~turbohtml.Node.select` nth selectors. (:issue:`799`)
+- Use direct UTF decoders when :func:`~turbohtml.parse` reads UTF-8 or UTF-16 bytes. (:issue:`799`)
+- Speed up single-character renaming in :func:`~turbohtml.clean.minify_js`. (:issue:`799`)
+- Speed up named-entity serialization with :class:`~turbohtml.Html`. (:issue:`799`)
+- Avoid intermediate metadata copies in :meth:`~turbohtml.Document.opengraph`. (:issue:`799`)
+- Speed up :func:`~turbohtml.treebuild.parse_into` by avoiding temporary text copies. (:issue:`799`)
+- Speed up attribute sorting with :class:`~turbohtml.Html` for elements with many attributes. (:issue:`799`)
+- Speed up :meth:`~turbohtml.validate.RelaxNG.is_valid` and :meth:`~turbohtml.validate.XMLSchema.is_valid` for invalid
+  documents. (:issue:`799`)
+- Use direct combining-class lookup for common marks in :func:`~turbohtml.detect.normalize`. (:issue:`799`)
+
+Bug fixes - 1.9.0
+=================
+
+- Avoid crashes when minifying detached subtrees containing adjacent ruby annotations or option groups. (:issue:`795`)
+- Avoid crashes and stale results when selector-cache cleanup callbacks move or modify the queried node. (:issue:`795`)
+- Preserve JavaScript initialization errors when a closure reads a ``let`` or ``const`` binding before initialization.
+  (:issue:`795`)
+- Protect Query parent, child and sibling traversal against concurrent mutation of the same tree on free-threaded
+  Python. (:issue:`795`)
+- Separate multi-level :class:`XSLT <turbohtml.transform.Transform>` numbers with periods when the format contains no
+  separator token. (:issue:`795`)
+- Avoid invalid integer conversions when formatting large :meth:`XPath <turbohtml.Node.xpath>` numbers. (:issue:`795`)
+- Fix memory leaks when schema validation reads text and CDATA nodes. (:issue:`795`)
+- Keep unrelated benchmark inputs out of each timing worker's setup and report invalid inputs as errors. (:issue:`795`)
+- Fix crashes when annotation exporters consume generators that yield temporary labels. (:issue:`795`)
+- Keep a captured JavaScript ``var`` undefined when an earlier initializer invokes its closure. (:issue:`795`)
+- Preserve JavaScript initialization errors when a switch-case jump skips a binding's initializer. (:issue:`795`)
+- Release temporary validation buffers after each call when reusing an :class:`XSD <turbohtml.validate.XMLSchema>` or
+  RELAX NG schema. (:issue:`795`)
+- Keep :class:`RELAX NG <turbohtml.validate.RelaxNG>` definition state separate between concurrent validations using the
+  same schema. (:issue:`795`)
+- Preserve JavaScript initialization errors when a ``let`` or ``const`` binding is read before its initializer.
+  (:issue:`795`)
+- Release temporary text buffers after :func:`boilerplate extraction <turbohtml.extract.boilerplate>`. (:issue:`795`)
+- Avoid concurrent writes to shared schema text during :class:`RELAX NG <turbohtml.validate.RelaxNG>` validation.
+  (:issue:`795`)
+- Prevent repeated descendant ``:has()`` queries from growing retained cache memory without new entries. (:issue:`795`)
+- Prevent extra unwritten bytes in escaped output when escapable characters occupy adjacent byte positions.
+  (:issue:`795`)
+- Handle empty leading text nodes when serializing ``pre``, ``textarea`` and ``listing`` elements. (:issue:`795`)
+- Avoid crashes during :meth:`form-data collection <turbohtml.Element.form_data>` when a garbage-collection callback
+  detaches a control's ancestor. (:issue:`795`)
+- Include the ``of`` selector list when calculating ``:nth-child()`` and ``:nth-last-child()`` specificity.
+  (:issue:`795`)
+- Propagate exceptions raised while looking up an object's ``__html__`` method during MarkupSafe-compatible escaping.
+  (:issue:`795`)
+- Preserve JavaScript variable behavior when duplicate declarations include an uninitialized declaration. (:issue:`795`)
+- Prevent buffer overruns when :meth:`XPath <turbohtml.Node.xpath>` regular-expression flags contain repeated letters.
+  (:issue:`795`)
+- Avoid concurrent writes while resolving the reserved ``xml`` namespace during schema validation. (:issue:`795`)
+- Preserve the receiver type in :meth:`~turbohtml.Node.strip_tags` annotations. (:issue:`796`)
+- Preserve the receiver type in :meth:`~turbohtml.Node.unwrap` annotations. (:issue:`796`)
+- Preserve the receiver type in :meth:`~turbohtml.Node.prune` annotations. (:issue:`796`)
+- Preserve the input node type in :func:`~turbohtml.clean.strip_comments_node` annotations. (:issue:`796`)
+- Preserve the receiver type in :meth:`~turbohtml.Node.extract` annotations. (:issue:`796`)
+- Preserve the input node type in :func:`~turbohtml.clean.sanitize_node` annotations. (:issue:`796`)
+- Preserve the wrapper type in :meth:`~turbohtml.Range.surround_contents` annotations. (:issue:`796`)
+- Preserve the input node type in :func:`~turbohtml.clean.sanitize_report_node` annotations. (:issue:`796`)
+- Preserve the input node type in :func:`~turbohtml.clean.linkify_node` annotations. (:issue:`796`)
+- Preserve the receiver type in :meth:`~turbohtml.Node.remove` annotations. (:issue:`796`)
+- Infer :func:`~turbohtml.clean.transform_node` results from the input and callback types. (:issue:`796`)
+- Preserve the input node type in :func:`~turbohtml.clean.collapse_whitespace_node` annotations. (:issue:`796`)
+- Preserve prefix encoding errors when sanitizing attributes without exact-name rules. (:issue:`799`)
+- Preserve numeric mantissas longer than 128 digits in :func:`~turbohtml.clean.minify_css`. (:issue:`799`)
+- Prevent numeric exponent overflow in :func:`~turbohtml.clean.minify_css`. (:issue:`799`)
+- Preserve benchmark notes for libraries that use different labels across operations in migration tables. (:issue:`799`)
+- Bound decimal expansion of exponent notation in :func:`~turbohtml.clean.minify_css`. (:issue:`799`)
+
+*********************
  v1.8.0 (2026-09-08)
 *********************
 

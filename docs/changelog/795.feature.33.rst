@@ -1,1 +1,0 @@
-Speed up explicit :class:`XSLT <turbohtml.transform.Transform>` numbering across repeated source-node visits.

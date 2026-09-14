@@ -1,1 +1,0 @@
-Preserve JavaScript initialization errors when a switch-case jump skips a binding's initializer.

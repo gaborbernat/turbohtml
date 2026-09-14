@@ -1,1 +1,0 @@
-Speed up escaping disallowed tags with many attributes in :class:`~turbohtml.clean.Sanitizer`.

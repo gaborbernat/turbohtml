@@ -1,1 +1,0 @@
-Speed up single-character renaming in :func:`~turbohtml.clean.minify_js`.

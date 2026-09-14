@@ -1,1 +1,0 @@
-Speed up :attr:`~turbohtml.Node.text` by determining string width while collecting text.

@@ -1,1 +1,0 @@
-Speed up HTML parsing of long text with carriage returns.

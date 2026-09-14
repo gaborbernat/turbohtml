@@ -1,1 +1,0 @@
-Speed up :func:`~turbohtml.conformance.check` on nested sections without headings.

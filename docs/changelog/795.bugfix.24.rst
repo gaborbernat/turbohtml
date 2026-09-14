@@ -1,1 +1,0 @@
-Include the ``of`` selector list when calculating ``:nth-child()`` and ``:nth-last-child()`` specificity.

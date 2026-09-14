@@ -1,1 +1,0 @@
-Handle empty leading text nodes when serializing ``pre``, ``textarea`` and ``listing`` elements.

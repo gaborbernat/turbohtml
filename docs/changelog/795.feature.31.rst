@@ -1,2 +1,0 @@
-Speed up :class:`XSLT <turbohtml.transform.Transform>` numbering with explicit element, wildcard or document-root
-patterns.

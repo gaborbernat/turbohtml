@@ -1,1 +1,0 @@
-Preserve the wrapper type in :meth:`~turbohtml.Range.surround_contents` annotations.

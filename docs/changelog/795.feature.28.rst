@@ -1,1 +1,0 @@
-Speed up :meth:`Node.equals() <turbohtml.Node.equals>` for elements with many attributes.

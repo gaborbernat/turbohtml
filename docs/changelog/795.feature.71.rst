@@ -1,1 +1,0 @@
-Speed up external-link extraction from URLs with many subdomains.

@@ -1,1 +1,0 @@
-Speed up repeated :func:`computed-style <turbohtml.cssom.computed_style>` lookups on an unchanged tree.

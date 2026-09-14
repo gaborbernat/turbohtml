@@ -1,1 +1,0 @@
-Speed up XML parsing of long text without character references.

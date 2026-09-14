@@ -1,1 +1,0 @@
-Skip unused attribute-name conversions in :class:`~turbohtml.clean.Sanitizer` prefix checks.

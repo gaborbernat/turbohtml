@@ -1,1 +1,0 @@
-Preserve JavaScript initialization errors when a ``let`` or ``const`` binding is read before its initializer.

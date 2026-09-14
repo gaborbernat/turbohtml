@@ -1,1 +1,0 @@
-Speed up :class:`XSLT <turbohtml.transform.Transform>` stylesheets with repeated numbering patterns.

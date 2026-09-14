@@ -1,1 +1,0 @@
-Speed up sanitization of elements with many rejected attributes.

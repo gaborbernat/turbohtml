@@ -1,1 +1,0 @@
-Keep a captured JavaScript ``var`` undefined when an earlier initializer invokes its closure.
