@@ -18,7 +18,7 @@
 #include "tokenizer/binding.h"
 
 #include "core/vec.h"
-#include "dom/tree.h"
+#include "dom/tree_internal.h"
 
 /* The namespace URI create_element receives, indexed by enum th_ns
    (TH_NS_HTML / TH_NS_SVG / TH_NS_MATHML). */
@@ -43,6 +43,7 @@ enum {
 
 typedef struct {
     PyObject *slots[M_COUNT];
+    PyObject *namespaces[3];
 } builder;
 
 static const char *const METHOD_NAMES[M_COUNT] = {
@@ -53,9 +54,15 @@ static void builder_release(builder *methods) {
     for (int index = 0; index < M_COUNT; index++) {
         Py_XDECREF(methods->slots[index]);
     }
+    for (int index = 0; index < 3; index++) {
+        Py_XDECREF(methods->namespaces[index]);
+    }
 }
 
 static int builder_bind(PyObject *sink, builder *methods) {
+    for (int index = 0; index < 3; index++) {
+        methods->namespaces[index] = NULL;
+    }
     for (int index = 0; index < M_COUNT; index++) {
         methods->slots[index] = NULL;
     }
@@ -69,9 +76,15 @@ static int builder_bind(PyObject *sink, builder *methods) {
     return 0;
 }
 
-/* A node's own character data (text/comment/doctype-name) as a str, realizing a
-   zero-copy span on the way. NULL with an exception set on allocation failure. */
 static PyObject *node_str(th_tree *tree, th_node *node) {
+    /* Builder callbacks cannot mutate this private parse tree. */
+    if (node->type != TH_NODE_DOCTYPE) {
+        if (text_is_span(node)) {
+            const char *data = (const char *)tree->data + text_span_offset(node) * tree->kind;
+            return th_str_from_kind(tree->kind, data, node->text_len);
+        }
+        return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, node->text, node->text_len);
+    }
     Py_ssize_t len;
     Py_UCS4 *data = th_node_data(tree, node, &len);
     if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -130,20 +143,21 @@ static PyObject *make_handle(th_tree *tree, th_node *node, builder *methods) {
         if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *namespace = PyUnicode_FromString(NS_URIS[node->ns]);
-        if (namespace == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            Py_DECREF(tag);      /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyObject **namespace = &methods->namespaces[node->ns];
+        if (*namespace == NULL) {
+            *namespace = PyUnicode_FromString(NS_URIS[node->ns]);
+            if (*namespace == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                Py_DECREF(tag);       /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
         }
         PyObject *attrs = attrs_tuple(tree, node);
-        if (attrs == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            Py_DECREF(tag);       /* GCOVR_EXCL_LINE: allocation-failure path */
-            Py_DECREF(namespace); /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (attrs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_DECREF(tag);  /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        PyObject *handle = PyObject_CallFunctionObjArgs(methods->slots[M_CREATE_ELEMENT], tag, namespace, attrs, NULL);
+        PyObject *handle = PyObject_CallFunctionObjArgs(methods->slots[M_CREATE_ELEMENT], tag, *namespace, attrs, NULL);
         Py_DECREF(tag);
-        Py_DECREF(namespace);
         Py_DECREF(attrs);
         return handle;
     }

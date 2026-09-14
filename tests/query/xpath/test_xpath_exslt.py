@@ -29,7 +29,7 @@ from bench.ci import benchmarks
 from bench.core import OPERATIONS
 
 import turbohtml
-from turbohtml import Document, Element, parse, parse_xml
+from turbohtml import Document, Element, Text, parse, parse_xml
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -377,6 +377,41 @@ def test_distinct_attribute_values(content: str, expected: list[str]) -> None:
 def test_concat_node_strings(count: int, markup: str, text: str) -> None:
     document: Final = parse("<main>" + f"<i>{markup}</i>" * count + "</main>")
     assert document.xpath("str:concat(//i)") == text * count
+
+
+def test_concat_valueless_attribute() -> None:
+    assert parse('<i a b="value"></i>').xpath("str:concat(//i/@*)") == "value"
+
+
+@pytest.mark.parametrize("text", [pytest.param("", id="empty"), pytest.param("é界😀", id="nonempty")])
+def test_concat_constructed_text_child(text: str) -> None:
+    element: Final = Element("i", None, [Text(text)])
+    assert element.xpath("str:concat(.)") == text
+
+
+@pytest.mark.parametrize(
+    ("markup", "expression", "expected"),
+    [
+        pytest.param("<root><i>é界😀</i><i>second</i></root>", "str:concat(//i)", "é界😀second", id="single-text"),
+        pytest.param('<root><i a="é" b="界"/></root>', "str:concat(//i/@*)", "é界", id="attributes"),
+        pytest.param('<root><i a="" b="界"/></root>', "str:concat(//i/@*)", "界", id="empty-attribute"),
+        pytest.param("<root><!----><!--界--></root>", "str:concat(//comment())", "界", id="empty-comment"),
+        pytest.param("<root>é<i>界</i>😀</root>", "str:concat(//text())", "é界😀", id="text-nodes"),
+        pytest.param("<root><!--é--><!--界--></root>", "str:concat(//comment())", "é界", id="comments"),
+        pytest.param("<root>é<i>界</i>😀</root>", "str:concat(/)", "é界😀", id="document"),
+        pytest.param("<root><i>é<b>界</b>😀</i></root>", "str:concat(//i)", "é界😀", id="descendants"),
+        pytest.param("<root><i><b>界</b></i></root>", "str:concat(//i)", "界", id="single-element-child"),
+        pytest.param("<root><i><!--ignored-->é</i></root>", "str:concat(//i)", "é", id="comment-before-text"),
+        pytest.param("<root><i>é<!--ignored--></i></root>", "str:concat(//i)", "é", id="comment-after-text"),
+        pytest.param("<root><i/><i/></root>", "str:concat(//i)", "", id="empty-elements"),
+        pytest.param("<root/>", "str:concat(//absent)", "", id="empty-set"),
+        pytest.param(
+            "<root/>", "str:concat(/*/namespace::xml)", "http://www.w3.org/XML/1998/namespace", id="xml-namespace"
+        ),
+    ],
+)
+def test_concat_item_string_values(markup: str, expression: str, expected: str) -> None:
+    assert parse_xml(markup).xpath(expression) == expected
 
 
 @pytest.mark.parametrize(

@@ -29,8 +29,61 @@ _BUILDER: Final = (
 )
 
 NOTES: Final[dict[str, dict[str, str]]] = {
+    "xpath-concat": {
+        "parsel": "returns a SelectorList wrapping the scalar string; calling get() to unwrap it is outside timing",
+    },
+    "socialcard": {
+        **dict.fromkeys(
+            ("BeautifulSoup (html.parser)", "BeautifulSoup (lxml)", "lxml", "selectolax", "pyquery", "resiliparse"),
+            "reads property/content attributes without building an OpenGraph result",
+        ),
+        "metadata_parser": "returns empty metadata for the distinct-field, Twitter-only and repeated-head inputs",
+        "goose3": "runs full article extraction; repeated properties become lists, not last-value dictionary entries",
+        "extruct": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+        "opengraph": "adds scrape and _url fields to the extracted OpenGraph mapping",
+    },
+    "detect-language": {
+        "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, "
+        "and the input limit is raised to process the full text; confidence scores use a different model",
+    },
+    "detect-language-long": {
+        "langdetect": "returns ranked ISO 639-1 probabilities without a script; profiles are reused, seed is fixed, "
+        "and the input limit is raised to process the full text; synthetic word combinations produce different "
+        "language rankings and confidence scores and do not measure accuracy",
+    },
+    "urls-clean": {"courlan": "retains Unicode hostnames instead of encoding them with IDNA"},
+    "select-nth": {
+        "BeautifulSoup (html.parser)": "10,000-sibling cases exceed the sampling budget; no timings collected",
+        "BeautifulSoup (lxml)": "10,000-sibling cases exceed the sampling budget; no timings collected",
+        "soupsieve": "10,000-sibling cases exceed the sampling budget; no timings collected",
+    },
+    "encoding-chunks": {
+        "chardet": "misidentifies the two long Japanese inputs as ISO-8859-1; confidence and encoding labels differ",
+        "faust-cchardet": "decoded text matches all four inputs; confidence and encoding labels differ",
+    },
+    "stream": {
+        "lxml": "libxml2 produces different trees for the four real-page inputs; only the six generated inputs match",
+    },
     "canonicalize-deep": {
         "lxml method=c14n": "HTML parsing omits the empty head element and SVG/xlink namespace declarations",
+    },
+    "transform-sort": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-text": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-key": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-scope": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-namespaces": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
+    },
+    "transform-namespaces-once": {
+        "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
     },
     "transform-number": {
         "lxml.etree": "returns an XSLT result tree; conversion to a Python string is outside timing",
@@ -40,6 +93,9 @@ NOTES: Final[dict[str, dict[str, str]]] = {
     },
     "sanitize-node": {
         "lxml-html-clean": "blocklist policy rather than turbohtml's allowlist; not security equivalence"
+    },
+    "sanitize-attributes": {
+        "DOMPurify": "includes Node startup and pipe I/O; not in-process JavaScript engine timing",
     },
     "linkify-node": {"lxml-html-clean": "host exclusions disabled; URL/mailto linking but no bare email addresses"},
     "collapse-whitespace": {
@@ -110,6 +166,9 @@ NOTES: Final[dict[str, dict[str, str]]] = {
     },
     "build-e": dict.fromkeys(("simple-html", "markyp", "yattag", "htbuilder", "htpy", "fast-html"), _BUILDER),
     "construct": dict.fromkeys(("simple-html", "markyp", "htbuilder", "htpy"), _BUILDER),
+    "phone-construct": {
+        "phonenumbers": "valid construction with region and type checks; excludes invalid-input exception behavior",
+    },
     "decode": {
         "stdlib": (
             "decodes with the nearest CPython codec under errors=replace, which is not the WHATWG decoder of that "
@@ -122,12 +181,29 @@ NOTES: Final[dict[str, dict[str, str]]] = {
             "links at all, so that timing is the cost of finding nothing"
         ),
     },
-    "date": dict.fromkeys(
-        ("htmldate", "trafilatura"),
-        "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of "
-        "finding the date turbohtml reports",
-    ),
+    "structured": {
+        "extruct": "retains 512 mixed-social property pairs; turbohtml stores last values and Twitter fields",
+    },
+    "date": {
+        **dict.fromkeys(
+            ("goose3", "news-please", "newspaper3k"),
+            "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+        ),
+        **dict.fromkeys(
+            ("htmldate", "trafilatura"),
+            "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the "
+            "100-candidate case, so that timing measures finding nothing",
+        ),
+    },
+    "text-annotation-rules": {
+        "inscriptis": (
+            "parses and annotates HTML with a cached ParserConfig; inline whitespace, span offsets and label order "
+            "differ from turbohtml, so the outputs are not interchangeable"
+        ),
+    },
     "text-content": {
+        "parsel": "returns separate body text strings, excluding script/style; joining them is outside timing",
+        "pyquery": "collects body or fragment-root text with pyquery's whitespace handling",
         "resiliparse": (
             "reports about 11% fewer elements than every other parser here (876 against 989 on the mozilla page), so "
             "it collects text from a smaller tree"

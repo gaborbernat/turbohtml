@@ -35,6 +35,11 @@
       "main-content text — main (4 KiB)",
       7.358195418897632e-06,
       0.008281803166634441
+    ],
+    [
+      "publication-date extraction — temporal text without dates, 36 KiB",
+      0.0035919474806481353,
+      0.008869748709306199
     ]
   ],
   "spread": [
@@ -67,7 +72,17 @@
       null,
       0.045501129435955946,
       0.034291817606264
+    ],
+    [
+      null,
+      0.01238570704891151,
+      0.0318376770940678
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "2": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+    "3": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+    "4": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06",
+    "6": "runs article extraction; misses visible <time> dates that turbohtml reports as 2024-05-06"
+  }
 }

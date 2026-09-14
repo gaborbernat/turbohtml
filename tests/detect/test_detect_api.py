@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import string
 from itertools import islice, product
 from typing import Final, cast
 
@@ -388,6 +389,44 @@ def test_a_long_passage_stays_confident() -> None:
     assert detect_language(passage) == LanguageMatch("eng", 1.0, "Latin", "English")
 
 
+@pytest.mark.parametrize(
+    ("word_count", "expected"),
+    [
+        pytest.param(128, LanguageMatch("cym", 1.0, "Latin", "Welsh"), id="below-cap"),
+        pytest.param(1024, LanguageMatch("aka", 0.1691861256901001, "Latin", "Akan"), id="above-cap"),
+        pytest.param(4096, LanguageMatch("cym", 1.0, "Latin", "Welsh"), id="many-ties"),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True], ids=["forward", "reverse"])
+def test_language_trigram_ties_ignore_word_order(word_count: int, expected: LanguageMatch, *, reverse: bool) -> None:
+    words: Final = tuple("".join(word) for word in islice(product(string.ascii_lowercase, repeat=3), word_count))
+    assert detect_language("  ".join(reversed(words) if reverse else words)) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param(
+            "  ".join("".join(word) for word in product(string.ascii_lowercase, repeat=3)),
+            LanguageMatch("sna", 0.1332846056280532, "Latin", "Shona"),
+            id="distinct-trigrams",
+        ),
+        pytest.param(
+            "  ".join("".join(word) for word in product("abcde", repeat=3)),
+            LanguageMatch("cym", 1.0, "Latin", "Welsh"),
+            id="few-trigrams",
+        ),
+        pytest.param(
+            "the quick brown fox jumps over the lazy dog. " * 2048,
+            LanguageMatch("eng", 1.0, "Latin", "English"),
+            id="repeated-trigrams",
+        ),
+    ],
+)
+def test_language_trigram_ranking(text: str, expected: LanguageMatch) -> None:
+    assert detect_language(text) == expected
+
+
 def test_distance_saturates_on_an_adversarial_text() -> None:
     # a long block of high-frequency nonsense trigrams pushes the real-language trigrams appended after it to
     # the tail of the frequency ranking, so their rank displacement drives one candidate's distance past the
@@ -610,6 +649,28 @@ def test_chunked_feeds_equal_a_one_shot_detect() -> None:
     assert detector.done
 
 
+@pytest.mark.parametrize(
+    ("prefix", "expected"),
+    [
+        pytest.param(
+            b"\xdf",
+            EncodingMatch("windows-1251", 0.2236681958618107, "Russian", codec="whatwg-windows-1251"),
+            id="disqualified-logical-hebrew",
+        ),
+        pytest.param(
+            b" ",
+            EncodingMatch("windows-1255", 0.2454175152749491, "Hebrew", codec="whatwg-windows-1255"),
+            id="surviving-logical-hebrew",
+        ),
+    ],
+)
+def test_streamed_hebrew_keeps_its_punctuation_tiebreak(prefix: bytes, expected: EncodingMatch) -> None:
+    detector: Final = EncodingDetector()
+    detector.feed(prefix)
+    detector.feed(("שלום! " * 16 + "!שלום").encode("iso-8859-8"))
+    assert detector.close() == expected
+
+
 def test_a_leading_bom_finishes_the_stream_early() -> None:
     detector = EncodingDetector()
     detector.feed(b"\xef\xbb\xbf")
@@ -690,6 +751,8 @@ _SAMPLES = [
     pytest.param(b"plain ascii only", id="ascii"),
     pytest.param("中文简体测试".encode("gbk"), id="gbk"),
     pytest.param("日本語のテキスト".encode("shift_jis"), id="shift_jis"),
+    pytest.param("日本語のテキスト and a longer plain ASCII suffix".encode("shift_jis"), id="shift-jis-before-ascii"),
+    pytest.param(b"\x81\n" + b"plain ASCII suffix " * 4, id="unmapped-byte-before-ascii"),
     pytest.param("한국어 텍스트".encode("euc-kr"), id="euc-kr"),
     pytest.param("中文字元測試".encode("big5"), id="big5"),
     pytest.param("Příliš žluťoučký kůň".encode("windows-1250"), id="windows-1250"),

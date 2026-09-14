@@ -1089,6 +1089,35 @@ static int set_split(const xp_result *args, int want_before, xp_result *out) {
 
 /* The EXSLT string functions (str:). */
 
+static int concat_item_view(th_tree *tree, xp_item item, const Py_UCS4 **part, Py_ssize_t *len, Py_UCS4 **owned) {
+    *owned = NULL;
+    if (item.attr == -2) {
+        *owned = item_string(tree, item, len);
+    } else if (item.attr >= 0) {
+        const th_node_attr *attr = &item.node->attrs[item.attr];
+        *part = attr->value;
+        *len = attr->value == NULL ? 0 : attr->value_len;
+        return 0;
+    } else {
+        th_node *node = item.node;
+        if (node->type == TH_NODE_ELEMENT && node->first_child != NULL && node->first_child->next_sibling == NULL &&
+            node->first_child->type == TH_NODE_TEXT) {
+            node = node->first_child;
+        }
+        if (node->type == TH_NODE_TEXT || node->type == TH_NODE_COMMENT) {
+            *len = node->text_len;
+            *part = *len == 0 ? NULL : th_node_realize_text(tree, node);
+            if (*len != 0 && *part == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                return -1;                    /* GCOVR_EXCL_LINE: allocation failure */
+            }
+            return 0;
+        }
+        *owned = th_node_text(tree, node, len);
+    }
+    *part = *owned;
+    return *owned == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+}
+
 /* str:concat(node-set): the string-values of every member joined in document order. */
 static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out) {
     const xp_nodeset *nodes = &arg->nodes;
@@ -1097,14 +1126,15 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
     size_t capacity = 0;
     for (Py_ssize_t index = 0; index < nodes->len; index++) {
         Py_ssize_t part_len;
-        Py_UCS4 *part = item_string(tree, nodes->items[index], &part_len);
-        if (part == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
-            PyMem_Free(buf); /* GCOVR_EXCL_LINE */
-            return -1;       /* GCOVR_EXCL_LINE */
+        Py_UCS4 *owned;
+        const Py_UCS4 *part;
+        if (concat_item_view(tree, nodes->items[index], &part, &part_len, &owned) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            PyMem_Free(buf);                                                             /* GCOVR_EXCL_LINE */
+            return -1;                                                                   /* GCOVR_EXCL_LINE */
         }
         const size_t limit = (size_t)PY_SSIZE_T_MAX / sizeof(Py_UCS4);
         if ((size_t)part_len > limit - (size_t)total) { /* GCOVR_EXCL_BR_LINE: alloc */
-            PyMem_Free(part);                           /* GCOVR_EXCL_LINE */
+            PyMem_Free(owned);                          /* GCOVR_EXCL_LINE */
             PyMem_Free(buf);                            /* GCOVR_EXCL_LINE */
             return -1;                                  /* GCOVR_EXCL_LINE */
         }
@@ -1113,16 +1143,16 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
             size_t bytes;
             /* GCOVR_EXCL_BR_START: allocation sizes cannot reach the overflow limit */
             if (!th_grow_cap(needed, capacity, 64, sizeof(Py_UCS4), &capacity, &bytes)) {
-                PyMem_Free(part); /* GCOVR_EXCL_LINE */
-                PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
-                return -1;        /* GCOVR_EXCL_LINE */
+                PyMem_Free(owned); /* GCOVR_EXCL_LINE */
+                PyMem_Free(buf);   /* GCOVR_EXCL_LINE */
+                return -1;         /* GCOVR_EXCL_LINE */
             }
             /* GCOVR_EXCL_BR_STOP */
             Py_UCS4 *grown = PyMem_Realloc(buf, bytes);
-            if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: alloc */
-                PyMem_Free(part); /* GCOVR_EXCL_LINE */
-                PyMem_Free(buf);  /* GCOVR_EXCL_LINE */
-                return -1;        /* GCOVR_EXCL_LINE */
+            if (grown == NULL) {   /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(owned); /* GCOVR_EXCL_LINE */
+                PyMem_Free(buf);   /* GCOVR_EXCL_LINE */
+                return -1;         /* GCOVR_EXCL_LINE */
             }
             buf = grown;
         }
@@ -1130,7 +1160,7 @@ static int str_concat(struct th_tree *tree, const xp_result *arg, xp_result *out
             memcpy(buf + total, part, (size_t)part_len * sizeof(Py_UCS4));
         }
         total += part_len;
-        PyMem_Free(part);
+        PyMem_Free(owned);
     }
     if (buf == NULL) { /* an empty node-set, or only empty string-values */
         buf = ucs4_dup(NULL, 0);

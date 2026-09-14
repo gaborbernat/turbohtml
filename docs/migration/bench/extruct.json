@@ -8,46 +8,95 @@
   "rows": [
     [
       "social-card extraction — head",
-      1.825606561182506e-06,
+      1.6371414407837885e-06,
       2.0375432325655158e-05
     ],
     [
       "social-card extraction — article 8 KiB",
-      2.1861982114993832e-05,
+      2.237302314019492e-05,
       8.89704504298076e-05
     ],
     [
       "structured-data extraction — product",
-      1.0841712434247105e-05,
+      6.0712570627193445e-06,
       9.722358925046137e-05
     ],
     [
       "structured-data extraction — catalog 8 KiB",
-      9.890150273956048e-05,
+      5.962114624935566e-05,
       0.0008416651037502258
+    ],
+    [
+      "social-card extraction — 1,024 OpenGraph properties",
+      0.00018019057896860127,
+      0.0011496970464577316
+    ],
+    [
+      "social-card extraction — 1,024 Twitter properties",
+      0.00010993975140157393,
+      0.0005991552325970891
+    ],
+    [
+      "social-card extraction — mixed duplicate properties",
+      0.00014086051756597348,
+      0.001001175646858125
+    ],
+    [
+      "structured-data extraction — mixed social properties",
+      0.00018380654580596456,
+      0.0011251880149150868
     ]
   ],
   "spread": [
     [
       null,
-      0.01412679757154096,
+      0.024163395539074976,
       0.015115244708820513
     ],
     [
       null,
-      0.010300801302048027,
+      0.004701463761076492,
       0.022060751757744374
     ],
     [
       null,
-      0.12059569487412335,
+      0.015921396106953343,
       0.13147216518934368
     ],
     [
       null,
-      0.08685419343880059,
+      0.01666399167527829,
       0.08712593639007091
+    ],
+    [
+      null,
+      0.08874189628280753,
+      0.024496349880583582
+    ],
+    [
+      null,
+      0.0068774349035082664,
+      0.022505159868739286
+    ],
+    [
+      null,
+      0.010887075479064178,
+      0.01129807531423557
+    ],
+    [
+      null,
+      0.007278012430049827,
+      0.01107098796559001
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "0": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+    "1": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+    "4": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+    "5": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+    "6": "retains 512 repeated-head property pairs; turbohtml returns four dictionary entries",
+    "2": "retains 512 mixed-social property pairs; turbohtml stores last values and Twitter fields",
+    "3": "retains 512 mixed-social property pairs; turbohtml stores last values and Twitter fields",
+    "7": "retains 512 mixed-social property pairs; turbohtml stores last values and Twitter fields"
+  }
 }

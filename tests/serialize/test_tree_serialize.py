@@ -13,6 +13,7 @@ import pytest
 
 from turbohtml import (
     Canonical,
+    CData,
     Comment,
     Doctype,
     Element,
@@ -48,6 +49,52 @@ def test_text_concatenates_descendant_character_data(
     find: Callable[[str, str], Element], html: str, selector: str, expected: str
 ) -> None:
     assert find(html, selector).text == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("ascii", id="ascii"),
+        pytest.param("café", id="latin1"),
+        pytest.param("雪", id="bmp"),
+        pytest.param("😀", id="supplementary"),
+        pytest.param("\U00100000\U000f0000", id="or-exceeds-unicode-range"),
+        pytest.param("\ufeff\ufffe", id="bom-and-noncharacter"),
+        pytest.param("\ud800", id="lone-surrogate"),
+        pytest.param("\ud800\udc00", id="surrogate-pair"),
+        pytest.param("a\x00b", id="embedded-nul"),
+    ],
+)
+@pytest.mark.parametrize("wrapped", [False, True], ids=["text-root", "element-root"])
+def test_text_preserves_unicode(text: str, *, wrapped: bool) -> None:
+    child: Final = Text(text)
+    root: Final = Element("p", children=[child]) if wrapped else child
+    assert root.text == text
+
+
+@pytest.mark.parametrize(
+    ("node", "expected"),
+    [
+        pytest.param(CData("ignored"), "", id="cdata-root"),
+        pytest.param(Element("p", children=[CData("ignored"), Text("visible")]), "visible", id="cdata-child"),
+    ],
+)
+def test_text_ignores_cdata(node: Node, expected: str) -> None:
+    assert node.text == expected
+
+
+def test_text_subnode_excludes_siblings() -> None:
+    root: Final = Element("main", children=[Text("before"), Element("p", children=[Text("inside")]), Text("after")])
+    paragraph: Final = root.find("p")
+    assert paragraph is not None
+    assert paragraph.text == "inside"
+
+
+def test_text_ascii_flag_ignores_non_text_data() -> None:
+    root: Final = Element("p", children=[Comment("😀"), CData("雪"), Text("ascii")])
+    result: Final = root.text
+    assert (result, result.isascii()) == ("ascii", True)
 
 
 @pytest.mark.parametrize(
@@ -903,6 +950,20 @@ def test_default_formatter_keeps_non_ascii_literal() -> None:
         ),
         pytest.param("<p>ab12</p>", "p", Formatter.NAMED_ENTITIES, "<p>ab12</p>", id="named-keeps-unnamed"),
         pytest.param(
+            "<p>é&amp;😀\u03b1a</p>",
+            "p",
+            Formatter.NAMED_ENTITIES,
+            "<p>&eacute;&amp;😀&alpha;a</p>",
+            id="named-mixed-text",
+        ),
+        pytest.param(
+            '<p title="é&amp;😀\u03b1a">x</p>',
+            "p",
+            Formatter.NAMED_ENTITIES,
+            '<p title="&eacute;&amp;😀&alpha;a">x</p>',
+            id="named-mixed-attribute",
+        ),
+        pytest.param(
             "<p>a&lt;b&gt;c&quot;d&amp;e</p>",
             "p",
             Formatter.NAMED_ENTITIES,
@@ -1214,11 +1275,16 @@ def test_sort_attributes_orders_prefix_names(attrs: dict[str, str], expected: st
     assert Element("x", attrs).serialize(Html(sort_attributes=True)) == expected
 
 
-def test_sort_attributes_beyond_stack_buffer_uses_heap() -> None:
-    names: Final = [f"a{index:02d}" for index in range(70)]
-    element: Final = Element("x", dict.fromkeys(reversed(names), ""))
-    expected: Final = "<x " + " ".join(f'{name}=""' for name in names) + "></x>"
-    assert element.serialize(Html(sort_attributes=True)) == expected
+@pytest.mark.parametrize("count", [8, 64, 65, 1024])
+@pytest.mark.parametrize("reverse", [False, True], ids=["sorted", "reversed"])
+@pytest.mark.parametrize("xml", [False, True], ids=["html", "xml"])
+@pytest.mark.parametrize("encode", [False, True], ids=["serialize", "encode"])
+def test_sort_attributes_by_width(count: int, *, reverse: bool, xml: bool, encode: bool) -> None:
+    names: Final = sorted(f"a{index}" for index in range(count))
+    element: Final = Element("x", dict.fromkeys(reversed(names) if reverse else names, ""), children=[Text("x")])
+    options: Final = Html(xml=xml, sort_attributes=True)
+    result: Final = element.encode(options=options).decode() if encode else element.serialize(options)
+    assert result == "<x " + " ".join(f'{name}=""' for name in names) + ">x</x>"
 
 
 def test_sort_attributes_composes_with_indent() -> None:

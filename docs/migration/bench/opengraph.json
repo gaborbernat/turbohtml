@@ -8,26 +8,62 @@
   "rows": [
     [
       "head",
-      1.825606561182506e-06,
+      1.6371414407837885e-06,
       0.000172416276778146
     ],
     [
       "article 8 KiB",
-      2.1861982114993832e-05,
+      2.237302314019492e-05,
       0.00368950944084645
+    ],
+    [
+      "1,024 OpenGraph properties",
+      0.00018019057896860127,
+      0.014050585040725613
+    ],
+    [
+      "1,024 Twitter properties",
+      0.00010993975140157393,
+      0.01354136325486858
+    ],
+    [
+      "mixed duplicate properties",
+      0.00014086051756597348,
+      0.015251139777925951
     ]
   ],
   "spread": [
     [
       null,
-      0.01412679757154096,
+      0.024163395539074976,
       0.012025221003446863
     ],
     [
       null,
-      0.010300801302048027,
+      0.004701463761076492,
       0.024326554863590765
+    ],
+    [
+      null,
+      0.08874189628280753,
+      0.01901468632492268
+    ],
+    [
+      null,
+      0.0068774349035082664,
+      0.012407817023382658
+    ],
+    [
+      null,
+      0.010887075479064178,
+      0.03781717305113856
     ]
   ],
-  "row_notes": {}
+  "row_notes": {
+    "0": "adds scrape and _url fields to the extracted OpenGraph mapping",
+    "1": "adds scrape and _url fields to the extracted OpenGraph mapping",
+    "2": "adds scrape and _url fields to the extracted OpenGraph mapping",
+    "3": "adds scrape and _url fields to the extracted OpenGraph mapping",
+    "4": "adds scrape and _url fields to the extracted OpenGraph mapping"
+  }
 }

@@ -35,6 +35,11 @@
       "main-content text — main (4 KiB)",
       7.358195418897632e-06,
       0.0006081054684348904
+    ],
+    [
+      "publication-date extraction — temporal text without dates, 36 KiB",
+      0.0035919474806481353,
+      0.00022739597538172043
     ]
   ],
   "spread": [
@@ -67,11 +72,17 @@
       null,
       0.045501129435955946,
       0.09149282207360948
+    ],
+    [
+      null,
+      0.01238570704891151,
+      0.06390916222904154
     ]
   ],
   "row_notes": {
-    "2": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
-    "3": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports",
-    "4": "returns no date for the 100-candidate case, so its timing there is the cost of giving up rather than of finding the date turbohtml reports"
+    "2": "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the 100-candidate case, so that timing measures finding nothing",
+    "3": "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the 100-candidate case, so that timing measures finding nothing",
+    "4": "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the 100-candidate case, so that timing measures finding nothing",
+    "6": "misses visible <time> dates turbohtml finds (2024-05-06); also returns no date for the 100-candidate case, so that timing measures finding nothing"
   }
 }

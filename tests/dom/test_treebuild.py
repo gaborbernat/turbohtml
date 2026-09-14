@@ -103,17 +103,32 @@ def test_element_carries_html_namespace_and_attribute_pairs() -> None:
     assert paragraph.payload == ("p", HTML_NS, (("class", "x"), ("disabled", None)))
 
 
-def test_text_node_payload() -> None:
-    body = build("<p>hello</p>").children[0].children[1]
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param("hello", id="ascii"),
+        pytest.param("café", id="latin1"),
+        pytest.param("水", id="bmp"),
+        pytest.param("😀", id="astral"),
+        pytest.param("before\nnext", id="newline"),
+        pytest.param("a&b", id="entity"),
+        pytest.param("\ud800", id="high-surrogate"),
+        pytest.param("\udfff", id="low-surrogate"),
+        pytest.param("\ud83d\ude00", id="surrogate-pair"),
+    ],
+)
+def test_text_node_payload(data: str) -> None:
+    body = build(f"<p>{data.replace('&', '&amp;')}</p>").children[0].children[1]
     text = body.children[0].children[0]
     assert text.kind == "text"
-    assert text.payload == ("hello",)
+    assert text.payload == (data,)
 
 
-def test_comment_node_payload() -> None:
-    body = build("<body><!--note--></body>").children[0].children[1]
+@pytest.mark.parametrize("data", ["note", "", "café", "水", "😀"], ids=["ascii", "empty", "latin1", "bmp", "astral"])
+def test_comment_node_payload(data: str) -> None:
+    body = build(f"<body><!--{data}--></body>").children[0].children[1]
     assert body.children[0].kind == "comment"
-    assert body.children[0].payload == ("note",)
+    assert body.children[0].payload == (data,)
 
 
 def test_processing_instruction_is_distinct_from_comment() -> None:
@@ -131,6 +146,32 @@ def test_svg_and_mathml_carry_their_foreign_namespace() -> None:
     assert svg.children[0].payload[1] == SVG_NS
     assert math.payload[1] == MATHML_NS
     assert math.children[0].payload[1] == MATHML_NS
+
+
+def test_namespace_values_survive_builder_reentry() -> None:
+    recorder: Final = _NamespaceRecorder()
+    root: Final = parse_into("<svg><foreignObject><p>outer</p></foreignObject><circle/></svg>", recorder)
+    svg: Final = root.children[0].children[1].children[0]
+    assert recorder.nested is not None
+    math: Final = recorder.nested.children[0].children[1].children[0]
+    assert (
+        svg.payload[1],
+        svg.children[0].payload[1],
+        svg.children[0].children[0].payload[1],
+        svg.children[1].payload[1],
+        math.payload[1],
+        math.children[0].payload[1],
+    ) == (SVG_NS, SVG_NS, HTML_NS, SVG_NS, MATHML_NS, MATHML_NS)
+
+
+class _NamespaceRecorder(Recorder):
+    def __init__(self) -> None:
+        self.nested: Built | None = None
+
+    def create_element(self, name: str, namespace: str, attrs: tuple[tuple[str, str | None], ...]) -> Built:
+        if name == "svg":
+            self.nested = parse_into("<math><mi>inner</mi></math>", self)
+        return super().create_element(name, namespace, attrs)
 
 
 def test_template_content_is_appended_under_the_template() -> None:
@@ -273,8 +314,14 @@ class _RaisingBuilder(Recorder):
         "append",
     ],
 )
-def test_a_builder_method_that_raises_propagates(method: str) -> None:
-    markup = "<!DOCTYPE html><body>text<!--c--><?pi?></body>"
+@pytest.mark.parametrize(
+    "markup",
+    [
+        pytest.param("<!DOCTYPE html><body>text<!--c--><?pi?></body>", id="html"),
+        pytest.param("<!DOCTYPE html><svg><circle/></svg><math><mi>x</mi></math><!--c--><?pi?>", id="foreign"),
+    ],
+)
+def test_a_builder_method_that_raises_propagates(method: str, markup: str) -> None:
     with pytest.raises(ValueError, match=f"boom in {method}"):
         parse_into(markup, _RaisingBuilder(method))
 
@@ -427,3 +474,14 @@ def _attr_value(value: str | list[str] | None) -> str:
     if isinstance(value, list):
         return " ".join(value)
     return value or ""
+
+
+def test_builder_can_reenter_while_copying_text() -> None:
+    root: Final = parse_into("<p>outer 水 😀</p>", _ReentrantRecorder())
+    assert root.children[0].children[1].children[0].children[0].payload == ("outer 水 😀",)
+
+
+class _ReentrantRecorder(Recorder):
+    def create_text(self, data: str) -> Built:
+        assert build("<p>inner</p>").children[0].children[1].children[0].children[0].payload == ("inner",)
+        return super().create_text(data)

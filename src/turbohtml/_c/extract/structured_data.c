@@ -750,13 +750,14 @@ static const th_node_attr *social_meta_attr(th_tree *tree, th_node *node) {
 /* Map every <meta property=og:*> / <meta name=twitter:*> key to its content value (last occurrence wins). A URL-valued
    key's content is absolutized against `base` when the caller passed one (base is NULL otherwise, leaving every value
    verbatim). NULL only on the excluded allocation-failure path. */
-static PyObject *gather_opengraph(PyObject *self, PyObject *base) {
+static PyObject *gather_opengraph(PyObject *self, PyObject *base, int strip_prefix) {
     PyObject *result = PyDict_New();
     if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_tree *tree = tree_of(self);
     th_node *root = ((NodeObject *)self)->node;
+    Py_ssize_t key_offset = strip_prefix ? 3 : 0;
     int failed = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     for (th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
@@ -764,10 +765,10 @@ static PyObject *gather_opengraph(PyObject *self, PyObject *base) {
             continue;
         }
         const th_node_attr *key_attr = social_meta_attr(tree, node);
-        if (key_attr == NULL) {
+        if (key_attr == NULL || (strip_prefix && !ucs4_has_prefix(key_attr->value, key_attr->value_len, "og:", 3))) {
             continue;
         }
-        PyObject *key = ucs4_to_str(key_attr->value, key_attr->value_len);
+        PyObject *key = ucs4_to_str(key_attr->value + key_offset, key_attr->value_len - key_offset);
         if (key == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             failed = 1;    /* GCOVR_EXCL_LINE: allocation-failure path */
             break;         /* GCOVR_EXCL_LINE */
@@ -1721,48 +1722,10 @@ static PyObject *snapshot_document(PyObject *self) {
     return wrap_fresh_tree_node(state_of(self), snapshot_tree, th_tree_document(snapshot_tree));
 }
 
-/* Build the OpenGraph record Document.opengraph() returns from the og:/twitter: <meta> map the shared walk gathers:
-   keep only the og: keys, strip that prefix (og:title -> "title"), drop the twitter: keys, and wrap the result in the
-   registered OpenGraph mapping type. NULL only on the excluded allocation-failure path (or with an exception set on a
-   bad base_url the caller passed). */
 static PyObject *build_opengraph_record(PyObject *self, PyObject *base) {
-    PyObject *tags = gather_opengraph(self, base);
-    if (tags == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    PyObject *og_prefix = PyUnicode_FromStringAndSize("og:", 3);
-    PyObject *properties = PyDict_New();
-    if (og_prefix == NULL || properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        Py_XDECREF(og_prefix);                     /* GCOVR_EXCL_LINE: allocation-failure path */
-        Py_XDECREF(properties);                    /* GCOVR_EXCL_LINE */
-        Py_DECREF(tags);                           /* GCOVR_EXCL_LINE */
-        return NULL;                               /* GCOVR_EXCL_LINE */
-    }
-    Py_ssize_t position = 0;
-    PyObject *key = NULL;
-    PyObject *value = NULL;
-    int failed = 0;
-    while (PyDict_Next(tags, &position, &key, &value)) {
-        if (PyUnicode_Tailmatch(key, og_prefix, 0, PyUnicode_GET_LENGTH(key), -1) <= 0) {
-            continue; /* a twitter: key: OpenGraph carries only the og: properties */
-        }
-        PyObject *stripped = PyUnicode_Substring(key, 3, PyUnicode_GET_LENGTH(key));
-        if (stripped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            failed = 1;         /* GCOVR_EXCL_LINE: allocation-failure path */
-            break;              /* GCOVR_EXCL_LINE */
-        }
-        int set_failed = PyDict_SetItem(properties, stripped, value) < 0;
-        Py_DECREF(stripped);
-        if (set_failed) { /* GCOVR_EXCL_BR_LINE: insert fails only on unforceable allocation */
-            failed = 1;   /* GCOVR_EXCL_LINE: allocation-failure path */
-            break;        /* GCOVR_EXCL_LINE */
-        }
-    }
-    Py_DECREF(og_prefix);
-    Py_DECREF(tags);
-    if (failed) {              /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        Py_DECREF(properties); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;           /* GCOVR_EXCL_LINE */
+    PyObject *properties = gather_opengraph(self, base, 1);
+    if (properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *record = PyObject_CallOneArg(state_of(self)->opengraph_type, properties);
     Py_DECREF(properties);
@@ -1848,7 +1811,7 @@ PyObject *turbohtml_document_structured_data(PyObject *self, PyObject *args, PyO
         failed = tuple_set_or_fail(sections, 1, has_microdata ? gather_microdata(snapshot, base) : PyList_New(0)) < 0;
     }
     if (!failed) {
-        failed = tuple_set_or_fail(sections, 2, has_meta ? gather_opengraph(snapshot, base) : PyDict_New()) < 0;
+        failed = tuple_set_or_fail(sections, 2, has_meta ? gather_opengraph(snapshot, base, 0) : PyDict_New()) < 0;
     }
     if (!failed) { /* GCOVR_EXCL_BR_LINE: the previous dict build fails only on allocation */
         failed = tuple_set_or_fail(sections, 3, PyList_New(0)) < 0; /* GCOVR_EXCL_BR_LINE */

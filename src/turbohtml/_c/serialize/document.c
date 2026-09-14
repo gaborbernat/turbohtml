@@ -566,6 +566,59 @@ Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     return sbuf_finish(&out, out_len);
 }
 
+PyObject *th_node_text_string(th_tree *tree, th_node *root) {
+    sbuf snapshot = {NULL, 0, 0, 0};
+    Py_UCS4 bits = 0;
+    th_node *first = root->type == TH_NODE_TEXT ? root : root->first_child;
+    for (th_node *node = first; node != NULL; node = text_preorder_next(node, root)) {
+        if (node->type != TH_NODE_TEXT || node->text_len == 0) {
+            continue;
+        }
+        const Py_UCS4 *text = need_text(tree, node);
+        if (text == NULL ||                                   /* GCOVR_EXCL_BR_LINE: allocation failure or overflow */
+            node->text_len > PY_SSIZE_T_MAX - snapshot.len) { /* GCOVR_EXCL_BR_LINE: allocation failure or overflow */
+            PyMem_Free(snapshot.data);                        /* GCOVR_EXCL_LINE: allocation failure or overflow */
+            return PyErr_NoMemory();                          /* GCOVR_EXCL_LINE: allocation failure or overflow */
+        }
+        sbuf_reserve(&snapshot, node->text_len);
+        if (snapshot.failed) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            PyMem_Free(snapshot.data); /* GCOVR_EXCL_LINE: allocation failure */
+            return PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation failure */
+        }
+        Py_UCS4 *destination = snapshot.data + snapshot.len;
+        for (Py_ssize_t index = 0; index < node->text_len; index++) {
+            Py_UCS4 character = text[index];
+            destination[index] = character;
+            bits |= character;
+        }
+        snapshot.len += node->text_len;
+    }
+    Py_UCS4 maxchar = bits <= 0x7F ? 0x7F : bits <= 0xFF ? 0xFF : bits <= 0xFFFF ? 0xFFFF : 0x10FFFF;
+    PyObject *result = PyUnicode_New(snapshot.len, th_str_maxchar(maxchar));
+    if (result == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        PyMem_Free(snapshot.data); /* GCOVR_EXCL_LINE: allocation failure */
+        return NULL;               /* GCOVR_EXCL_LINE: allocation failure */
+    }
+    int kind = PyUnicode_KIND(result);
+    if (kind == PyUnicode_1BYTE_KIND) {
+        Py_UCS1 *destination = PyUnicode_1BYTE_DATA(result);
+        for (Py_ssize_t index = 0; index < snapshot.len; index++) {
+            destination[index] = (Py_UCS1)snapshot.data[index];
+        }
+#ifndef PYPY_VERSION
+    } else if (kind == PyUnicode_2BYTE_KIND) {
+        Py_UCS2 *destination = PyUnicode_2BYTE_DATA(result);
+        for (Py_ssize_t index = 0; index < snapshot.len; index++) {
+            destination[index] = (Py_UCS2)snapshot.data[index];
+        }
+#endif
+    } else {
+        memcpy(PyUnicode_4BYTE_DATA(result), snapshot.data, (size_t)snapshot.len * sizeof(Py_UCS4));
+    }
+    PyMem_Free(snapshot.data);
+    return result;
+}
+
 /* Copy every descendant Text node's code points of node into buf at pos, realizing
    zero-copy spans on the way; the caller sizes buf to the subtree's text length.
    The find(text=) C scan reuses one buffer across candidates so no per-node str is
