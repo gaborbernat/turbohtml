@@ -29,8 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # meson project() derives the version from git history
           persist-credentials: false
+      # meson derives the package version from git, so a base run on a release tag reports 1.9.0 while the pull
+      # request CodSpeed diffs against it reports 1.9.0.dev2+g9bbf223. That string reaches the benchmark process
+      # through the install metadata it reads at startup, and the extra bytes shift the heap addresses that follow,
+      # moving the simulated cache misses of benchmarks the change does not touch. One tag on HEAD gives both one
+      # version.
+      - name: 📌 Pin the package version
+        run: git tag 0.0.0
       - name: ⬇️ Install benchmark data
         run: git submodule update --init --depth 1 tools/html5lib-python tools/bench-data/war-and-peace
       - name: 🔄 Install uv
@@ -83,4 +89,14 @@ jobs:
         with:
           exclude-allocations: true
           mode: simulation
-          run: .tox/codspeed/bin/python -m pytest tests/benchmarks --codspeed
+          # The runner hands the job's whole environment to the benchmark process, and a pull request run carries
+          # different GITHUB_* values than the push run CodSpeed diffs it against. Python copies that environment into
+          # os.environ at startup, so the extra bytes shift the heap the way the version string does. Keep the
+          # variables the process reads and drop the rest.
+          run: |
+            keep=()
+            for name in PATH GLIBC_TUNABLES PYTHONHASHSEED PYTHONMALLOC PYTHON_PERF_JIT_SUPPORT \
+              CODSPEED_ENV CODSPEED_PROFILE_FOLDER CODSPEED_RUNNER_MODE; do
+              [[ -v $name ]] && keep+=("$name=${!name}")
+            done
+            exec env -i "${keep[@]}" .tox/codspeed/bin/python -m pytest tests/benchmarks --codspeed
