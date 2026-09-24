@@ -57,6 +57,10 @@ static PyObject *node_copy_impl(PyObject *self) {
     }
     th_tree_set_xml(tree, th_tree_is_xml(tree_of(self)));
     NodeObject *source = (NodeObject *)self;
+    if (source->node->type == TH_NODE_DOCUMENT) {
+        /* the document mode decides quirks-mode selector matching, so a copied document keeps it */
+        th_tree_set_quirks(tree, th_tree_quirks(tree_of(self)));
+    }
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION(source->handle);
     copy = th_tree_copy_node(tree, tree_of(self), source->node);
