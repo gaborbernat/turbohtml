@@ -928,10 +928,6 @@ def _run(code: str) -> str:
         # unreachable-tail cut: a terminator that is the last statement, and a tail that hoists
         pytest.param("(function(){function f(){console.log('x');return 1}console.log(f())})()", id="terminator-last"),
         pytest.param("(function(){function f(){return 1;var x}console.log(f())})()", id="tail-hoists-kept"),
-        pytest.param(
-            "var s='a" + chr(0x2028) + "b'+'" + chr(0x2029) + "';console.log(s.length,s.charCodeAt(1),s.charCodeAt(3))",
-            id="string-line-separators",
-        ),
     ],
 )
 def test_folding_preserves_behavior(snippet: str) -> None:
@@ -1025,6 +1021,12 @@ def test_string_truthiness_reads_value(source: str, expected: str) -> None:
 def test_concat_matches_node(source: str) -> None:
     minified = minify_js(f"x={source}").removeprefix("x=")
     assert _run(f"console.log(({source}))") == _run(f"console.log(({minified}))")
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_raw_line_separators_in_strings_match_node() -> None:
+    snippet: Final = "var s='a" + _LS + "b'+'" + _PS + "';console.log(s.length,s.charCodeAt(1),s.charCodeAt(3))"
+    assert _run(snippet) == _run(minify_js(snippet))
 
 
 @pytest.mark.parametrize("count", [1, 17, 512], ids=["single", "heap", "long"])
