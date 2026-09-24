@@ -1286,3 +1286,54 @@ def test_unused_declarators_preserve_call_order(case: int, count: int) -> None:
     program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
     expected: Final = json.dumps([[], list(range(count))], separators=(",", ":")) + "\n"
     assert (_run(program), _run(minify_js(program))) == (expected, expected)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "function f(a){a=2;return arguments[0]}", "function f(a){return a=2,arguments[0]}", id="store-then-read"
+        ),
+        pytest.param(
+            "function f(a){a=2;return()=>arguments}", "function f(a){return a=2,()=>arguments}", id="arrow-read"
+        ),
+        pytest.param(
+            "function f(a){var a=2;return arguments}", "function f(a){var a=2;return arguments}", id="var-redeclared"
+        ),
+        pytest.param(
+            "function f(a){(a=g(),a);return arguments}",
+            "function f(a){return a=g(),arguments}",
+            id="assign-then-read-sequence",
+        ),
+        pytest.param(
+            "function f(a){a=2;return function(){return arguments}}",
+            "function f(a){return function(){return arguments}}",
+            id="nested-function-own-arguments",
+        ),
+        pytest.param(
+            "function f(a){var arguments;a=2;return arguments}",
+            "function f(b){var a;return a}",
+            id="local-named-arguments",
+        ),
+        pytest.param("arguments;function f(a){a=2}", "arguments;function f(a){}", id="top-level-arguments"),
+        pytest.param(
+            "function f(a){var b=1;return arguments}", "function f(a){return arguments}", id="local-var-still-dropped"
+        ),
+    ],
+)
+def test_arguments_keeps_parameter_stores(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        pytest.param("console.log(function(a){a=2;return arguments[0]}(1))", id="store-then-read"),
+        pytest.param("console.log(function(a,b){b=3;return[].slice.call(arguments)}(1,2))", id="second-parameter"),
+        pytest.param("console.log(function(a){a=2;return(()=>arguments[0])()}(1))", id="arrow-read"),
+        pytest.param("console.log(function(a){var a=2;return arguments[0]}(1))", id="var-redeclared"),
+    ],
+)
+def test_arguments_alias_preserves_behavior(snippet: str) -> None:
+    assert _run(snippet) == _run(minify_js(snippet))
