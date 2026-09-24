@@ -25,8 +25,12 @@ void handle_clear_caches(HandleObject *handle) {
 
 /* The tag atom every alternative of compiled selects as its subject (rightmost
    compound), or TH_TAG_UNKNOWN when the subjects differ or any is not a plain
-   type selector. Such a selector can enumerate just that atom's index bucket. */
+   type selector. Such a selector can enumerate just that atom's index bucket. An XML
+   tree files every element under TH_TAG_UNKNOWN, so its selectors never use the index. */
 static uint16_t selector_subject_atom(const sel_compiled *compiled) {
+    if (th_tree_is_xml(compiled->tree)) {
+        return TH_TAG_UNKNOWN;
+    }
     uint16_t atom = TH_TAG_UNKNOWN;
     for (int alt = 0; alt < compiled->count; alt++) {
         const sel_complex *complex = &compiled->alts[alt];
