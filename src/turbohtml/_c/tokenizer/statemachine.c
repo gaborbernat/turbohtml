@@ -531,6 +531,7 @@ static void compact_input(th_tokenizer *self) {
     self->pos -= keep_from;
     self->slice_start = 0;
     self->mark_pos -= keep_from;
+    self->tok.src_off -= keep_from; /* a token under construction stamped its '<' before the reclaim */
 }
 
 void th_tok_feed(th_tokenizer *self, int kind, const void *data, Py_ssize_t length) {
