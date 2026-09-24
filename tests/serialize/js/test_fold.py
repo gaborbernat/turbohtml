@@ -1023,6 +1023,12 @@ def test_concat_matches_node(source: str) -> None:
     assert _run(f"console.log(({source}))") == _run(f"console.log(({minified}))")
 
 
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_raw_line_separators_in_strings_match_node() -> None:
+    snippet: Final = "var s='a" + _LS + "b'+'" + _PS + "';console.log(s.length,s.charCodeAt(1),s.charCodeAt(3))"
+    assert _run(snippet) == _run(minify_js(snippet))
+
+
 @pytest.mark.parametrize("count", [1, 17, 512], ids=["single", "heap", "long"])
 def test_guard_chain_growth_preserves_return_order(count: int) -> None:
     source: Final = (
