@@ -2220,6 +2220,28 @@ static PyObject *register_subtype(PyObject *module, PyType_Spec *spec, PyObject 
     return type;
 }
 
+/* Register type as a collections.abc.MutableMapping: the attrs view implements the whole interface, so
+   isinstance(element.attrs, MutableMapping) holds. collections.abc always imports and provides the class, so the
+   failure paths are unreachable. */
+static int register_mutable_mapping(PyObject *type) {
+    PyObject *abc = PyImport_ImportModule("collections.abc");
+    if (abc == NULL) { /* GCOVR_EXCL_BR_LINE */
+        return -1;     /* GCOVR_EXCL_LINE */
+    }
+    PyObject *mutable_mapping = PyObject_GetAttrString(abc, "MutableMapping");
+    Py_DECREF(abc);
+    if (mutable_mapping == NULL) { /* GCOVR_EXCL_BR_LINE */
+        return -1;                 /* GCOVR_EXCL_LINE */
+    }
+    PyObject *registered = PyObject_CallMethod(mutable_mapping, "register", "O", type);
+    Py_DECREF(mutable_mapping);
+    if (registered == NULL) { /* GCOVR_EXCL_BR_LINE */
+        return -1;            /* GCOVR_EXCL_LINE */
+    }
+    Py_DECREF(registered);
+    return 0;
+}
+
 int tree_register(PyObject *module, module_state *state) {
     /* allocation failure cannot be forced from a test */
     if (build_namespace_enum(module, state) < 0) { /* GCOVR_EXCL_BR_LINE */
@@ -2279,6 +2301,12 @@ int tree_register(PyObject *module, module_state *state) {
         state->serialize_iter_type == NULL ||                              /* GCOVR_EXCL_BR_LINE */
         state->handle_type == NULL || state->attrs_type == NULL) {         /* GCOVR_EXCL_BR_LINE */
         return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (PyModule_AddObjectRef(module, "_Attrs", state->attrs_type) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+        return -1;                                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (register_mutable_mapping(state->attrs_type) < 0) { /* GCOVR_EXCL_BR_LINE: see the helper */
+        return -1;                                         /* GCOVR_EXCL_LINE: import-failure path */
     }
     state->node_type = PyType_FromModuleAndSpec(module, &node_spec, NULL);
     if (state->node_type == NULL || PyModule_AddObjectRef(module, "Node", state->node_type) < 0) { /* GCOVR_EXCL_BR_LINE

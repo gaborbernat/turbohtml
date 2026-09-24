@@ -274,19 +274,219 @@ static PyObject *attrs_get(PyObject *self, PyObject *args) {
     return Py_NewRef(fallback);
 }
 
-static PyObject *attrs_repr(PyObject *self) {
+/* A snapshot dict of the attributes, in source order. */
+static PyObject *attrs_to_dict(PyObject *self) {
     PyObject *items = attrs_collect(self, ATTRS_ITEMS);
     if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *mapping = PyObject_CallFunctionObjArgs((PyObject *)&PyDict_Type, items, NULL);
+    PyObject *mapping = PyDict_New();
+    if (mapping != NULL && PyDict_MergeFromSeq2(mapping, items, 1) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+        Py_CLEAR(mapping);                                                /* GCOVR_EXCL_LINE: OOM path */
+    }
     Py_DECREF(items);
-    if (mapping == NULL) { /* GCOVR_EXCL_BR_LINE: dict() over a name/value list cannot fail */
-        return NULL;       /* GCOVR_EXCL_LINE: alloc-failure path */
+    return mapping;
+}
+
+static PyObject *attrs_repr(PyObject *self) {
+    PyObject *mapping = attrs_to_dict(self);
+    if (mapping == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *repr = PyObject_Repr(mapping);
     Py_DECREF(mapping);
     return repr;
+}
+
+static PyObject *attrs_copy(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    return attrs_to_dict(self);
+}
+
+/* Remove the attribute at index and return its value; the caller holds the tree lock. */
+static PyObject *attrs_take(th_tree *tree, th_node *node, Py_ssize_t index) {
+    PyObject *value = attr_value_obj(&node->attrs[index]);
+    Py_ssize_t name_len;
+    const char *name = th_attr_name(tree, node->attrs[index].name_atom, &name_len);
+    th_node_attr_del(tree, node, name, name_len);
+    return value;
+}
+
+static PyObject *attrs_pop(PyObject *self, PyObject *args) {
+    PyObject *key;
+    PyObject *fallback = NULL;
+    if (!PyArg_ParseTuple(args, "O|O:pop", &key, &fallback)) {
+        return NULL;
+    }
+    PyObject *result = NULL;
+    if (PyUnicode_Check(key)) {
+        Py_ssize_t len;
+        char *name = attr_key_utf8(tree_of(self), key, &len);
+        if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here */
+            return NULL;    /* GCOVR_EXCL_LINE: unreachable */
+        }
+        th_node *node = ((AttrsObject *)self)->node;
+        /* one critical section, so another thread cannot remove the attribute between the read and the delete */
+        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+        Py_ssize_t index = find_attr_index(tree_of(self), node, name, len);
+        if (index >= 0) {
+            result = attrs_take(tree_of(self), node, index);
+        }
+        Py_END_CRITICAL_SECTION();
+        PyMem_Free(name);
+    }
+    if (result != NULL) {
+        return result;
+    }
+    if (fallback != NULL) {
+        return Py_NewRef(fallback);
+    }
+    PyErr_SetObject(PyExc_KeyError, key);
+    return NULL;
+}
+
+static PyObject *attrs_popitem(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((AttrsObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    PyObject *name = NULL;
+    PyObject *value = NULL;
+    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    if (node->attr_count > 0) {
+        Py_ssize_t last = node->attr_count - 1;
+        name = attr_name_obj(tree, &node->attrs[last]);
+        value = attrs_take(tree, node, last);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (name == NULL) {
+        PyErr_SetString(PyExc_KeyError, "popitem(): attributes are empty");
+        return NULL;
+    }
+    PyObject *pair = PyTuple_Pack(2, name, value);
+    Py_DECREF(name);
+    Py_DECREF(value);
+    return pair;
+}
+
+static PyObject *attrs_clear(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    th_node *node = ((AttrsObject *)self)->node;
+    th_tree *tree = tree_of(self);
+    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    while (node->attr_count > 0) {
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, node->attrs[node->attr_count - 1].name_atom, &name_len);
+        th_node_attr_del(tree, node, name, name_len);
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_RETURN_NONE;
+}
+
+static PyObject *attrs_setdefault(PyObject *self, PyObject *args) {
+    PyObject *key;
+    PyObject *fallback = Py_None;
+    if (!PyArg_ParseTuple(args, "O|O:setdefault", &key, &fallback)) {
+        return NULL;
+    }
+    PyObject *existing = attrs_subscript(self, key);
+    if (existing != NULL || !PyErr_ExceptionMatches(PyExc_KeyError)) {
+        return existing;
+    }
+    PyErr_Clear();
+    if (attrs_ass_subscript(self, key, fallback) < 0) {
+        return NULL;
+    }
+    return Py_NewRef(fallback);
+}
+
+/* Assign every pair of other (a mapping, or an iterable of pairs) and then of kwds, the way dict.update does. The
+   pairs are gathered into a dict first, so a malformed argument fails before any attribute changes. */
+static int attrs_merge(PyObject *self, PyObject *other, PyObject *kwds) {
+    PyObject *pairs = PyDict_New();
+    if (pairs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int rc = 0;
+    if (other != NULL) {
+        rc = PyObject_HasAttrString(other, "keys") ? PyDict_Merge(pairs, other, 1)
+                                                   : PyDict_MergeFromSeq2(pairs, other, 1);
+    }
+    if (rc == 0 && kwds != NULL) {
+        rc = PyDict_Merge(pairs, kwds, 1);
+    }
+    PyObject *key;
+    PyObject *value;
+    Py_ssize_t position = 0;
+    while (rc == 0 && PyDict_Next(pairs, &position, &key, &value)) {
+        rc = attrs_ass_subscript(self, key, value);
+    }
+    Py_DECREF(pairs);
+    return rc;
+}
+
+static PyObject *attrs_update(PyObject *self, PyObject *args, PyObject *kwds) {
+    PyObject *other = NULL;
+    if (!PyArg_UnpackTuple(args, "update", 0, 1, &other) || attrs_merge(self, other, kwds) < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+/* Whether obj is an attrs view; the dealloc slot identifies the type without the module state. */
+static int is_attrs(PyObject *obj) {
+    return Py_TYPE(obj)->tp_dealloc == attrs_dealloc;
+}
+
+/* Whether obj is a mapping for comparison and |: a dict, a view, or any object with keys(), the test dict.update
+   applies to its argument. */
+static int is_mapping(PyObject *obj) {
+    return PyDict_Check(obj) || is_attrs(obj) || PyObject_HasAttrString(obj, "keys");
+}
+
+/* A dict snapshot of obj: the attributes for an attrs view, else dict(obj). */
+static PyObject *mapping_to_dict(PyObject *obj) {
+    if (is_attrs(obj)) {
+        return attrs_to_dict(obj);
+    }
+    return PyObject_CallOneArg((PyObject *)&PyDict_Type, obj);
+}
+
+static PyObject *attrs_richcompare(PyObject *self, PyObject *other, int op) {
+    if (op != Py_EQ && op != Py_NE) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!is_mapping(other)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    PyObject *left = attrs_to_dict(self);
+    PyObject *right = left == NULL ? NULL : mapping_to_dict(other); /* GCOVR_EXCL_BR_LINE: left is NULL on OOM only */
+    PyObject *result = right == NULL ? NULL : PyObject_RichCompare(left, right, op);
+    Py_XDECREF(left);
+    Py_XDECREF(right);
+    return result;
+}
+
+/* attrs | mapping and mapping | attrs return a new dict, as dict | dict does; the view itself is unchanged. */
+static PyObject *attrs_or(PyObject *left, PyObject *right) {
+    if (!is_mapping(left) || !is_mapping(right)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    PyObject *merged = mapping_to_dict(left);
+    PyObject *extra = merged == NULL ? NULL : mapping_to_dict(right);
+    int rc = extra == NULL ? -1 : PyDict_Update(merged, extra);
+    Py_XDECREF(extra);
+    if (rc < 0) {
+        Py_XDECREF(merged);
+        return NULL;
+    }
+    return merged;
+}
+
+static PyObject *attrs_inplace_or(PyObject *self, PyObject *other) {
+    if (!is_mapping(other)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (attrs_merge(self, other, NULL) < 0) {
+        return NULL;
+    }
+    return Py_NewRef(self);
 }
 
 static PyMethodDef attrs_methods[] = {
@@ -294,6 +494,14 @@ static PyMethodDef attrs_methods[] = {
     {"keys", attrs_keys, METH_NOARGS, "keys() -> the attribute names in source order"},
     {"values", attrs_values, METH_NOARGS, "values() -> the attribute values in source order"},
     {"items", attrs_items, METH_NOARGS, "items() -> the (name, value) pairs in source order"},
+    {"pop", attrs_pop, METH_VARARGS, "pop(name[, default]) -> remove the attribute and return its value"},
+    {"popitem", attrs_popitem, METH_NOARGS, "popitem() -> remove and return the last (name, value) pair"},
+    {"setdefault", attrs_setdefault, METH_VARARGS,
+     "setdefault(name, default=None) -> the value, setting default first when absent"},
+    {"update", (PyCFunction)(void (*)(void))attrs_update, METH_VARARGS | METH_KEYWORDS,
+     "update([other], **pairs) -> set every pair of other and then of pairs"},
+    {"clear", attrs_clear, METH_NOARGS, "clear() -> remove every attribute"},
+    {"copy", attrs_copy, METH_NOARGS, "copy()\n--\n\nReturn a dict snapshot of the attributes."},
     {NULL, NULL, 0, NULL},
 };
 
@@ -306,6 +514,10 @@ static PyType_Slot attrs_slots[] = {
     {Py_sq_contains, attrs_contains},
     {Py_tp_iter, attrs_iter},
     {Py_tp_methods, attrs_methods},
+    {Py_tp_richcompare, attrs_richcompare},
+    {Py_tp_hash, PyObject_HashNotImplemented},
+    {Py_nb_or, attrs_or},
+    {Py_nb_inplace_or, attrs_inplace_or},
     TH_SEALED_END,
 };
 
