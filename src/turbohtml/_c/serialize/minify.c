@@ -356,7 +356,7 @@ static int mini_in_scope(const th_node *node, uint16_t atom) {
    "No more content in the parent" is just next == NULL: the parent's own close (or
    its omission) reconstructs the element, so dropping the end tag stays round-trip
    safe even when the parent is a document or template content node. */
-static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next) {
+static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next, int quirks) {
     int last = next == NULL;
     uint16_t na =
         (next != NULL && next->type == TH_NODE_ELEMENT && next->ns == TH_NS_HTML) ? next->atom : TH_TAG_UNKNOWN;
@@ -386,7 +386,8 @@ static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next) {
     case TH_TAG_TH:
         return na == TH_TAG_TD || na == TH_TAG_TH || last;
     case TH_TAG_P:
-        return mini_is_p_follow(na) ||
+        /* a quirks-mode <table> nests inside an open <p> instead of closing it */
+        return (mini_is_p_follow(na) && !(quirks && na == TH_TAG_TABLE)) ||
                (last && node->parent->ns == TH_NS_HTML && !mini_p_parent_excluded(node->parent->atom));
     case TH_TAG_HTML:
     case TH_TAG_BODY:
@@ -403,12 +404,13 @@ static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next) {
    trailing path, or is the following sibling, since the reparse would then
    reconstruct it across the boundary. The expensive trailing-path walk is deferred
    until the cheap rule has already accepted the element. */
-static int mini_omit_end_tag(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatting_depth) {
+static int mini_omit_end_tag(th_tree *tree, th_node *node, const th_minify_opts *opts, int formatting_depth,
+                             int quirks) {
     if (node->ns != TH_NS_HTML || formatting_depth > 0) {
         return 0;
     }
     th_node *next = mini_next_content(node, opts->strip_comments);
-    if (!mini_end_tag_rule(tree, node, next)) {
+    if (!mini_end_tag_rule(tree, node, next, quirks)) {
         return 0;
     }
     /* the rule only fires when next is empty or a specific non-formatting element, so a
@@ -559,6 +561,73 @@ static int mini_emit_style_css(sbuf *out, th_tree *tree, th_node *node, int base
     return 1;
 }
 
+/* Whether the minified bytes reparse in quirks mode: the source tree was parsed in
+   it (mini_emit_doctype keeps it so), or a document's doctype is quirky or missing.
+   An API-built tree defaults to no-quirks, but its doctype decides the reparse. */
+static int mini_reparses_quirks(th_tree *tree, th_node *root) {
+    if (th_tree_quirks(tree)) {
+        return 1;
+    }
+    if (root->type != TH_NODE_DOCUMENT) {
+        return 0;
+    }
+    for (th_node *child = root->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_DOCTYPE) {
+            return th_doctype_is_quirky(child);
+        }
+    }
+    return 1;
+}
+
+/* Write one quoted doctype identifier, leaving it unclosed when abrupt: a `>`
+   inside the literal ends the doctype and forces quirks mode. A parsed identifier
+   never holds the quote that delimited it, so the other quote fits one holding `"`. */
+static void mini_emit_doctype_id(sbuf *out, const Py_UCS4 *id, Py_ssize_t len, int abrupt) {
+    Py_UCS4 quote = '"';
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (id[index] == '"') {
+            quote = '\'';
+        }
+    }
+    sbuf_putc(out, ' ');
+    sbuf_putc(out, quote);
+    sbuf_put_ucs4(out, id, len);
+    if (!abrupt) {
+        sbuf_putc(out, quote);
+    }
+}
+
+/* Write the doctype with its public and system identifiers. The fragment
+   serialization keeps only the name, but the identifiers pick the document mode:
+   dropping a quirky one reparses the page in no-quirks mode, where a <table> closes
+   the open <p> the quirks parse nested it in. A doctype whose malformed source
+   forced quirks mode gets the same effect from the shortest malformed spelling:
+   its last identifier left unclosed, or a stray character after the name. */
+static void mini_emit_doctype(sbuf *out, th_tree *tree, th_node *node) {
+    int force = th_tree_quirks(tree) && !th_doctype_is_quirky(node);
+    sbuf_puts(out, "<!DOCTYPE ");
+    sbuf_put_ucs4(out, node->text, doctype_name_len(node));
+    const Py_UCS4 *public_id;
+    const Py_UCS4 *system_id;
+    Py_ssize_t public_len;
+    Py_ssize_t system_len;
+    if (!th_node_doctype_ids(node, &public_id, &public_len, &system_id, &system_len)) {
+        sbuf_puts(out, force ? " x>" : ">");
+        return;
+    }
+    int has_system = (node->tag_flags & TH_DOCTYPE_HAS_SYSTEM) != 0;
+    if (node->tag_flags & TH_DOCTYPE_HAS_PUBLIC) {
+        sbuf_puts(out, " PUBLIC");
+        mini_emit_doctype_id(out, public_id, public_len, force && !has_system);
+    } else {
+        sbuf_puts(out, " SYSTEM");
+    }
+    if (has_system) {
+        mini_emit_doctype_id(out, system_id, system_len, force);
+    }
+    sbuf_putc(out, '>');
+}
+
 /* Minified outer serialization. The walk is iterative like serialize_compact,
    descending through first_child and ascending through parent pointers, with a
    preserve counter so text inside pre/textarea/listing skips whitespace
@@ -570,6 +639,7 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
     int formatting = 0;
     int last_was_space =
         0; /* whether the last byte emitted is a folded space, so a space across a stripped comment is dropped */
+    int quirks = mini_reparses_quirks(tree, root);
     while (1) {
         th_node *descend = NULL;
         switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
@@ -615,8 +685,8 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                     formatting++;
                 }
                 descend = node->first_child;
-            } else if (!(st->inner && node == root) &&
-                       !(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
+            } else if (!(st->inner && node == root) && !(opts->omit_optional_tags && node != root &&
+                                                         mini_omit_end_tag(tree, node, opts, formatting, quirks))) {
                 ser_close_tag(out, node);
             }
             break;
@@ -638,9 +708,7 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
             break; /* a stripped comment emits nothing, so last_was_space carries across it */
         case TH_NODE_DOCTYPE:
             last_was_space = 0;
-            sbuf_puts(out, "<!DOCTYPE ");
-            sbuf_put_ucs4(out, node->text, doctype_name_len(node));
-            sbuf_putc(out, '>');
+            mini_emit_doctype(out, tree, node);
             break;
         case TH_NODE_PI:
             last_was_space = 0;
@@ -678,8 +746,8 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                 if (node->tag_flags & TH_TAG_FORMATTING) {
                     formatting--;
                 }
-                if (!(st->inner && node == root) &&
-                    !(opts->omit_optional_tags && node != root && mini_omit_end_tag(tree, node, opts, formatting))) {
+                if (!(st->inner && node == root) && !(opts->omit_optional_tags && node != root &&
+                                                      mini_omit_end_tag(tree, node, opts, formatting, quirks))) {
                     ser_close_tag(out, node);
                     last_was_space = 0;
                 }
