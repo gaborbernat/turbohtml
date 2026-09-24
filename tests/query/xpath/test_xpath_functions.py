@@ -79,6 +79,15 @@ def doc() -> turbohtml.Node:
         pytest.param("number(false())", 0.0, id="number-false"),
         pytest.param("number(' -2.50 ')", -2.5, id="number-whitespace"),
         pytest.param("number('.5')", 0.5, id="number-leading-dot"),
+        # numbers convert to the nearest double, as Python's float() does
+        pytest.param("0.49999999999999994 < 0.5", True, id="literal-just-below-half"),
+        pytest.param("number('0.49999999999999994') < 0.5", True, id="number-just-below-half"),
+        pytest.param("number('0.009221885624698875')", 0.009221885624698875, id="number-seventeen-digits"),
+        pytest.param("1.7976931348623157", 1.7976931348623157, id="literal-seventeen-digits"),
+        pytest.param("number('9007199254740993')", 9007199254740992.0, id="number-past-2-pow-53-ties-to-even"),
+        pytest.param("12345678901234567890", 12345678901234567890.0, id="literal-past-2-pow-53"),
+        pytest.param("number('0.0000000000000000000000000000001')", 1e-31, id="number-past-22-fraction-digits"),
+        pytest.param("string(number(string(0.1 + 0.2))) = string(0.1 + 0.2)", True, id="string-number-round-trip"),
         pytest.param("number(//li)", 1.0, id="number-nodeset"),
         pytest.param("5 - 2", 3.0, id="subtraction"),
         # string functions
