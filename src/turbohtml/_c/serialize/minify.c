@@ -640,6 +640,10 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
     int last_was_space =
         0; /* whether the last byte emitted is a folded space, so a space across a stripped comment is dropped */
     int quirks = mini_reparses_quirks(tree, root);
+    /* The parser reads everything after a <plaintext> start tag as its text, so a
+       parsed plaintext element ends the document: its end tag, and every ancestor's
+       after it, would reparse as literal text. EOF closes them all instead. */
+    int after_plaintext = 0;
     while (1) {
         th_node *descend = NULL;
         switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
@@ -672,7 +676,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                         sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
                     }
                 }
-                if (!(st->inner && node == root)) {
+                if (node->atom == TH_TAG_PLAINTEXT) {
+                    after_plaintext = 1;
+                } else if (!(st->inner && node == root)) {
                     ser_close_tag(out, node);
                 }
                 break;
@@ -746,8 +752,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                 if (node->tag_flags & TH_TAG_FORMATTING) {
                     formatting--;
                 }
-                if (!(st->inner && node == root) && !(opts->omit_optional_tags && node != root &&
-                                                      mini_omit_end_tag(tree, node, opts, formatting, quirks))) {
+                if (!after_plaintext && !(st->inner && node == root) &&
+                    !(opts->omit_optional_tags && node != root &&
+                      mini_omit_end_tag(tree, node, opts, formatting, quirks))) {
                     ser_close_tag(out, node);
                     last_was_space = 0;
                 }
