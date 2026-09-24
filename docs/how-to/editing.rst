@@ -161,6 +161,21 @@ parent), while ``"afterbegin"`` and ``"beforeend"`` add them as the first or las
 
     <a href="/new" class="btn primary">go</a>
 
+The view is a full :class:`~collections.abc.MutableMapping`, so the dict methods work as well: ``update`` merges several
+attributes at once, ``pop`` removes one and hands back its value, and ``copy`` or ``attrs | other`` give a plain
+``dict`` snapshot that no longer tracks the element:
+
+.. testcode::
+
+    link.attrs.update({"rel": "next"}, title="Next page")
+    print(link.attrs.pop("class"), link.html)
+    print(link.attrs == {"href": "/new", "rel": ["next"], "title": "Next page"})
+
+.. testoutput::
+
+    ['btn', 'primary'] <a href="/new" rel="next" title="Next page">go</a>
+    True
+
 ***************************
  Edit an element's classes
 ***************************
