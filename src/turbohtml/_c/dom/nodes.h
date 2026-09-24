@@ -647,6 +647,11 @@ PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored));
    th_node to link. Defined in element.c; shadow.c reuses it for ShadowRoot.append. */
 th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj);
 
+/* Raise the first well-formedness error of an XML fragment parse (the parse error parse_xml raises), shifting a
+   first-line column left by the length of the wrapper start tag so it counts from the fragment's own start. Frees
+   tree and returns -1 when it raised; returns 0 when the parse was well-formed. */
+int raise_xml_fragment_error(module_state *state, th_tree *tree, Py_ssize_t start_len);
+
 /* Shadow DOM bindings (dom/shadow.c): attach_shadow / shadow_root / slot assignment /
    flattened traversal, plus the ShadowRoot type. */
 PyObject *element_attach_shadow(PyObject *self, PyObject *args, PyObject *kwds);

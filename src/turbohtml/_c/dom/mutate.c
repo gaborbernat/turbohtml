@@ -626,6 +626,75 @@ int th_node_equals(th_tree *left_tree, th_node *left, th_tree *right_tree, th_no
     }
 }
 
+/* The ASCII-lowercased atom for an attribute name stored in tree, re-interned when folding changes it. Returns
+   TH_ATTR_UNKNOWN on allocation failure. */
+static uint32_t fold_attr_atom(th_tree *tree, uint32_t atom) {
+    Py_ssize_t name_len;
+    const char *name = th_attr_name(tree, atom, &name_len);
+    Py_ssize_t first_upper = 0;
+    while (first_upper < name_len && !(name[first_upper] >= 'A' && name[first_upper] <= 'Z')) {
+        first_upper++;
+    }
+    if (first_upper == name_len) {
+        return atom;
+    }
+    char *folded = PyMem_Malloc((size_t)name_len);
+    if (folded == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return TH_ATTR_UNKNOWN; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    for (Py_ssize_t index = 0; index < name_len; index++) {
+        char ch = name[index];
+        folded[index] = ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
+    }
+    uint32_t folded_atom = th_attr_intern_utf8(tree, folded, name_len);
+    PyMem_Free(folded);
+    return folded_atom;
+}
+
+/* Rewrite a copied element for a tree of the other kind. An XML tree keeps every element as an unknown atom under its
+   spelled name, so an HTML element moving in drops the atom that made it raw text (a <script> would otherwise
+   serialize "a<b" unescaped). An HTML tree stores and matches HTML element and attribute names in ASCII lowercase, and
+   an XML tree's elements all carry the HTML namespace, so an XML element moving in is folded, keeping the first of two
+   attributes that fold to one name, as the HTML tokenizer does. Returns 0, or -1 on allocation failure. */
+static int convert_element_kind(th_tree *dest, th_node *node) {
+    if (dest->xml) {
+        node->atom = TH_TAG_UNKNOWN;
+        node->tag_flags = th_tag_flags(TH_TAG_UNKNOWN);
+        return 0;
+    }
+    char ascii[64];
+    int is_ascii = node->text_len <= (Py_ssize_t)sizeof(ascii);
+    for (Py_ssize_t index = 0; index < node->text_len; index++) {
+        if (node->text[index] >= 'A' && node->text[index] <= 'Z') {
+            node->text[index] += 32;
+        }
+        if (node->text[index] >= 0x80) {
+            is_ascii = 0;
+        } else if (is_ascii) {
+            ascii[index] = (char)node->text[index];
+        }
+    }
+    node->atom = is_ascii ? th_tag_lookup(ascii, node->text_len) : TH_TAG_UNKNOWN;
+    node->tag_flags = th_tag_flags(node->atom);
+    Py_ssize_t kept = 0;
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        uint32_t atom = fold_attr_atom(dest, node->attrs[index].name_atom);
+        if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_ssize_t earlier = 0;
+        while (earlier < kept && node->attrs[earlier].name_atom != atom) {
+            earlier++;
+        }
+        if (earlier == kept) {
+            node->attrs[kept] = node->attrs[index];
+            node->attrs[kept++].name_atom = atom;
+        }
+    }
+    node->attr_count = kept;
+    return 0;
+}
+
 /* Copy one node without its children, materializing borrowed text and re-interning per-tree attribute atoms. */
 th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node) {
     th_node *node = node_new(dest, src_node->type);
@@ -736,6 +805,30 @@ static th_node *copy_node_at(th_tree *dest, th_tree *src, th_node *src_node, int
 
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
     return copy_node_at(dest, src, src_node, 0);
+}
+
+th_node *th_tree_adopt_copy(th_tree *dest, th_tree *src, th_node *src_node) {
+    th_node *copy = th_tree_copy_node(dest, src, src_node);
+    if (copy == NULL || src->xml == dest->xml) { /* GCOVR_EXCL_BR_LINE: the copy is NULL on OOM only */
+        return copy;
+    }
+    th_node *node = copy;
+    for (;;) {
+        if (node->type == TH_NODE_ELEMENT && convert_element_kind(dest, node) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            return NULL; /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (node->first_child != NULL) {
+            node = node->first_child;
+            continue;
+        }
+        while (node != copy && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        if (node == copy) {
+            return copy;
+        }
+        node = node->next_sibling;
+    }
 }
 
 /* Copy a document into an independent tree while its caller holds the source-tree lock. */

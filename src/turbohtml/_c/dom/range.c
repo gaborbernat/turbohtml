@@ -927,7 +927,7 @@ static th_node *adopt(RangeObject *range, PyObject *child_obj) {
 #endif
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION2(range->start_handle, source_handle);
-    copy = th_tree_copy_node(dest_tree, child_tree, child->node);
+    copy = th_tree_adopt_copy(dest_tree, child_tree, child->node);
     if (copy != NULL && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         handle_add_hash_override((HandleObject *)range->start_handle, copy,
                                  handle_node_hash((HandleObject *)source_handle, child->node)) == 0) {

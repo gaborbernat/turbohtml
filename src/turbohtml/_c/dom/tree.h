@@ -326,6 +326,9 @@ Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree);
 
 int th_node_contains(th_tree *tree, th_node *ancestor, th_node *node);
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
+/* th_tree_copy_node for a node the DOM moves into dest (adoption): between an XML and an HTML tree the copied elements
+   also take dest's naming rules, see convert_element_kind. */
+th_node *th_tree_adopt_copy(th_tree *dest, th_tree *src, th_node *src_node);
 th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node);
 th_tree *th_tree_copy_document(th_tree *src);
 

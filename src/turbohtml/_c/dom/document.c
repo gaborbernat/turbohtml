@@ -672,6 +672,15 @@ static int strict_raise(module_state *state, th_tree *tree, int strict, PyObject
     return -1;
 }
 
+int raise_xml_fragment_error(module_state *state, th_tree *tree, Py_ssize_t start_len) {
+    Py_ssize_t count;
+    th_parse_error *errors = (th_parse_error *)th_tree_errors(tree, &count);
+    if (count > 0 && errors[0].line == 1) {
+        errors[0].col -= start_len;
+    }
+    return strict_raise(state, tree, 1, NULL);
+}
+
 /* The encoding the document's <meta> elements declare, or NULL when none of them resolves.
    The first label naming a supported encoding decides; an unsupported one falls through to
    the next, the way the prescan's own lookup does. */
