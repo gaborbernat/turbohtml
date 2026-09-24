@@ -71,12 +71,16 @@ def test_boolean_argument_round_trips(doc: turbohtml.Node) -> None:
 
 
 def test_context_node_is_the_current_element(doc: turbohtml.Node) -> None:
-    nodes = [n for n in doc.xpath("//a[context_tag()='a']", extensions=EXTENSIONS) if isinstance(n, Element)]
+    result = doc.xpath("//a[context_tag()='a']", extensions=EXTENSIONS)
+    assert isinstance(result, list)
+    nodes = [n for n in result if isinstance(n, Element)]
     assert [n.text for n in nodes] == ["one", "two"]
 
 
 def test_extension_in_a_predicate(doc: turbohtml.Node) -> None:
-    nodes = [n for n in doc.xpath("//a[count_nodes(.) = 1]", extensions=EXTENSIONS) if isinstance(n, Element)]
+    result = doc.xpath("//a[count_nodes(.) = 1]", extensions=EXTENSIONS)
+    assert isinstance(result, list)
+    nodes = [n for n in result if isinstance(n, Element)]
     assert [n.text for n in nodes] == ["one", "two"]
 
 
@@ -209,7 +213,7 @@ def raise_partway(_context: SimpleNamespace, nodes: list[Element]) -> Iterator[E
 
 
 _OTHER_DOCUMENT = turbohtml.parse("<p>elsewhere</p>")
-_STRANGER = next(node for node in _OTHER_DOCUMENT.xpath("//p") if isinstance(node, Element))
+_STRANGER = next(node for node in _OTHER_DOCUMENT.xpath_iter("//p") if isinstance(node, Element))
 
 
 def steal(_context: SimpleNamespace) -> Element:

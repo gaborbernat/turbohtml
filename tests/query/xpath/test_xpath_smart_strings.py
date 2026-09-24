@@ -20,25 +20,30 @@ def doc() -> turbohtml.Node:
     return turbohtml.parse(HTML)
 
 
+def first(result: object) -> object:
+    assert isinstance(result, list)
+    return result[0]
+
+
 def test_default_is_a_plain_string(doc: turbohtml.Node) -> None:
-    result = doc.xpath("//a/@href")[0]
+    result = first(doc.xpath("//a/@href"))
     assert type(result) is str
     assert result == "/x"
 
 
 def test_smart_strings_false_is_a_plain_string(doc: turbohtml.Node) -> None:
-    result = doc.xpath("//a/@href", smart_strings=False)[0]
+    result = first(doc.xpath("//a/@href", smart_strings=False))
     assert type(result) is str
 
 
 def test_a_plain_variable_keyword_does_not_enable_smart_strings(doc: turbohtml.Node) -> None:
     # kwargs present but no smart_strings key: the result stays a plain str.
-    result = doc.xpath("//a[@href=$h]/@href", h="/x")[0]
+    result = first(doc.xpath("//a[@href=$h]/@href", h="/x"))
     assert type(result) is str
 
 
 def test_smart_attribute_remembers_its_element(doc: turbohtml.Node) -> None:
-    result = doc.xpath("//a/@href", smart_strings=True)[0]
+    result = first(doc.xpath("//a/@href", smart_strings=True))
     assert isinstance(result, XPathString)
     assert result == "/x"
     assert result.is_attribute is True
@@ -51,7 +56,7 @@ def test_smart_attribute_remembers_its_element(doc: turbohtml.Node) -> None:
 
 
 def test_smart_text_remembers_its_element(doc: turbohtml.Node) -> None:
-    result = doc.xpath("//a/text()", smart_strings=True)[0]
+    result = first(doc.xpath("//a/text()", smart_strings=True))
     assert isinstance(result, XPathString)
     assert result == "link"
     assert result.is_text is True
@@ -62,7 +67,7 @@ def test_smart_text_remembers_its_element(doc: turbohtml.Node) -> None:
 
 def test_smart_strings_alongside_a_variable(doc: turbohtml.Node) -> None:
     # smart_strings is consumed as an option; h is still bound as a $variable.
-    result = doc.xpath("//a[@href=$h]/@href", h="/x", smart_strings=True)[0]
+    result = first(doc.xpath("//a[@href=$h]/@href", h="/x", smart_strings=True))
     assert isinstance(result, XPathString)
     assert result.getparent().tag == "a"
 
