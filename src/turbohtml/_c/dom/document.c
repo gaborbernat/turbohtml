@@ -2125,7 +2125,7 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
        contents) must land as a child rather than be spliced */
     th_node *parent = ((NodeObject *)node)->node;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(children); index++) {
-        th_node *child = adopt_into((NodeObject *)node, parent, PyList_GET_ITEM(children, index));
+        th_node *child = adopt_child((NodeObject *)node, parent, PyList_GET_ITEM(children, index));
         if (child == NULL) {
             Py_DECREF(node);
             return NULL;
@@ -2264,8 +2264,9 @@ static PyObject *register_subtype(PyObject *module, PyType_Spec *spec, PyObject 
     if (type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *tuple =
-        match_arg2 != NULL ? Py_BuildValue("(ss)", match_arg1, match_arg2) : Py_BuildValue("(s)", match_arg1);
+    PyObject *tuple = match_arg1 == NULL   ? PyTuple_New(0)
+                      : match_arg2 != NULL ? Py_BuildValue("(ss)", match_arg1, match_arg2)
+                                           : Py_BuildValue("(s)", match_arg1);
     /* allocation failure cannot be forced from a test */
     if (tuple == NULL || PyObject_SetAttrString(type, "__match_args__", tuple) < 0) { /* GCOVR_EXCL_BR_LINE */
         Py_XDECREF(tuple); /* GCOVR_EXCL_LINE: alloc-failure path */
@@ -2381,7 +2382,14 @@ int tree_register(PyObject *module, module_state *state) {
     state->pi_type = register_subtype(module, &pi_spec, state->node_type, "ProcessingInstruction", "target", "data");
     state->cdata_type = register_subtype(module, &cdata_spec, state->node_type, "CData", "data", NULL);
     state->document_type = register_subtype(module, &document_spec, state->node_type, "Document", "root", NULL);
-    state->shadow_root_type = register_subtype(module, &shadow_root_spec, state->node_type, "ShadowRoot", "mode", NULL);
+    state->document_fragment_type =
+        register_subtype(module, &document_fragment_spec, state->node_type, "DocumentFragment", NULL, NULL);
+    if (state->document_fragment_type == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return -1;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    /* a ShadowRoot is a DocumentFragment with a host (DOM), so it inherits append() and the fragment insertion */
+    state->shadow_root_type =
+        register_subtype(module, &shadow_root_spec, state->document_fragment_type, "ShadowRoot", "mode", NULL);
     /* allocation failure cannot be forced from a test */
     if (state->element_type == NULL || state->text_type == NULL || /* GCOVR_EXCL_BR_LINE */
         /* allocation failure cannot be forced from a test */

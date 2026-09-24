@@ -269,10 +269,7 @@ static inline PyObject *type_for_node(module_state *state, const th_node *node) 
     case TH_NODE_CDATA:
         return state->cdata_type;
     case TH_NODE_CONTENT:
-        if ((node->tag_flags & TH_SHADOW_ROOT) != 0) {
-            return state->shadow_root_type; /* a shadow root, not a template's content fragment */
-        }
-        break; /* a template's content fragment wraps as the bare Node */
+        return (node->tag_flags & TH_SHADOW_ROOT) != 0 ? state->shadow_root_type : state->document_fragment_type;
     }
     return state->node_type;
 }
@@ -645,8 +642,22 @@ PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored));
 
 /* Prepare child_obj to become a child of dest_parent in anchor's tree, returning the
    th_node to link. Defined in element.c; shadow.c reuses it for ShadowRoot.append. */
-th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj);
-Py_ssize_t import_foreign_nodes(PyObject *dest_handle, PyObject *const *nodes, Py_ssize_t count);
+/* One pass importing every node argument in nodes (owned references, such as a list's items) that lives outside
+   dest_handle's tree: a node is deep-copied in and its wrapper re-pointed at the copy; a DocumentFragment's children
+   are copied into a new local fragment that replaces the argument, and the source fragment is emptied. Non-nodes and
+   Documents are left for the caller to reject. Returns how many it imported, or -1 on allocation failure. Importing
+   suspends the caller's critical section, so a caller that relinks around tree state it reads must repeat the pass
+   until it imports nothing. */
+Py_ssize_t import_foreign_nodes(PyObject *dest_handle, PyObject **nodes, Py_ssize_t count);
+
+/* Prepare child_obj to become a child of dest_parent in anchor's tree, returning the th_node to link: a node of the
+   same tree moves in place and one of another tree is imported. NULL with a TypeError on a non-node or a Document.
+   Defined in element.c; document.c reuses it to link a rebuilt pickle child. */
+th_node *adopt_child(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj);
+
+/* Append child (a node, or a DocumentFragment whose children move in) as the last child of self: append() on an
+   element, a DocumentFragment, and a ShadowRoot. */
+PyObject *node_append_child(PyObject *self, PyObject *child);
 
 /* Raise the first well-formedness error of an XML fragment parse (the parse error parse_xml raises), shifting a
    first-line column left by the length of the wrapper start tag so it counts from the fragment's own start. Frees
@@ -661,6 +672,7 @@ PyObject *element_assigned_nodes(PyObject *self, PyObject *args, PyObject *kwds)
 PyObject *element_assigned_elements(PyObject *self, PyObject *args, PyObject *kwds);
 PyObject *node_get_assigned_slot(PyObject *self, void *closure);
 PyObject *node_get_flattened_children(PyObject *self, void *closure);
+extern PyType_Spec document_fragment_spec;
 extern PyType_Spec shadow_root_spec;
 
 extern PyType_Spec walker_spec;

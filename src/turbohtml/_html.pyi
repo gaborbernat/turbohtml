@@ -18,6 +18,9 @@ from ._stubs.dom import (
     Document as Document,
 )
 from ._stubs.dom import (
+    DocumentFragment as DocumentFragment,
+)
+from ._stubs.dom import (
     Element as Element,
 )
 from ._stubs.dom import (

@@ -52,6 +52,13 @@ clone is always a standalone tree. :mod:`python:pickle` rebuilds that same struc
 serializing and reparsing: a document keeps its doctype identifiers, quirks mode, and adjacent text nodes, a template
 keeps its contents, a shadow root comes back attached to its host, and no node claims a source position it never had.
 
+Every insertion method follows the DOM insert algorithm for a :class:`~turbohtml.DocumentFragment`: the fragment is
+never linked itself; its children move in its place, in order, and it is left empty. A fragment from another tree has
+its children copied in and removed at the source, so a :class:`~turbohtml.ShadowRoot`, which is a fragment with a host,
+stays attached to that host while its children leave. The whole call -- every argument, every fragment's children -- is
+checked for cycles and against the DOM hierarchy rules before any node moves, so a rejected insertion leaves the tree as
+it was.
+
 Subtree copy, cross-tree adoption, equality, and :meth:`~turbohtml.Element.normalize` use parent-linked loops. Their
 results remain complete until allocation fails. The HTML parser's construction limit does not constrain these mutations.
 

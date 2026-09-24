@@ -13,6 +13,7 @@ from turbohtml import (
     Comment,
     Doctype,
     Document,
+    DocumentFragment,
     Element,
     IncrementalParser,
     Namespace,
@@ -61,12 +62,10 @@ def test_repr(html: str, expected: str) -> None:
     assert repr(node) == expected
 
 
-def test_template_content_is_a_bare_node(find: Callable[[str, str], Element]) -> None:
+def test_template_content_is_a_document_fragment(find: Callable[[str, str], Element]) -> None:
     template = find("<template>inner</template>", "template")
     (content,) = template.children
-    assert type(content) is Node
-    assert repr(content) == "Node()"
-    assert content.text == "inner"
+    assert (type(content), repr(content), content.text) == (DocumentFragment, "DocumentFragment()", "inner")
 
 
 @pytest.mark.parametrize(

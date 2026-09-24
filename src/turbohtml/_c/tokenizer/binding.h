@@ -51,7 +51,8 @@ typedef struct {
     PyObject *pi_type;                /* ProcessingInstruction */
     PyObject *cdata_type;             /* CData */
     PyObject *document_type;          /* Document */
-    PyObject *shadow_root_type;       /* ShadowRoot (a shadow tree's document-fragment-like root) */
+    PyObject *document_fragment_type; /* DocumentFragment (a parentless container of nodes) */
+    PyObject *shadow_root_type;       /* ShadowRoot (the DocumentFragment rooting a shadow tree) */
     PyObject *parser_type;            /* IncrementalParser (push parse to a tree) */
     PyObject *parse_error_type;       /* ParseError (a collected WHATWG parse error) */
     PyObject *parse_error_exc;        /* HTMLParseError (raised by parse(strict=True)) */
