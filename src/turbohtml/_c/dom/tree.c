@@ -2211,7 +2211,7 @@ static th_node *insert_implicit(th_tree *tree, uint16_t atom, uint8_t flags) {
     node->text = (Py_UCS4 *)th_tag_wide_name(atom);
     node->text_len = th_tag_table[atom - 1].name_len;
     node->atom = atom;
-    node->tag_flags = flags;
+    node->tag_flags = flags | TH_ELEM_IMPLIED;
     th_node *parent, *before;
     insertion_location(tree, &parent, &before);
     node_insert_before(parent, node, before);
@@ -3217,7 +3217,8 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
         }
         if (atom == TH_TAG_P) {
             if (!has_in_button_scope(tree, TH_TAG_P)) {
-                insert_implicit(tree, TH_TAG_P, TH_TAG_SPECIAL); /* empty p, immediately closed */
+                /* an empty p that the stray </p> itself closes */
+                insert_implicit(tree, TH_TAG_P, TH_TAG_SPECIAL | TH_ELEM_CLOSED_BY_END_TAG);
             } else {
                 generate_implied_end_tags(tree, TH_TAG_P);
                 pop_until_atom(tree, TH_TAG_P);
@@ -3315,7 +3316,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
         if (atom == TH_TAG_BR) {
             /* </br> acts as a <br> start tag (attributes dropped) */
             reconstruct_afe(tree);
-            insert_implicit(tree, TH_TAG_BR, TH_TAG_SPECIAL);
+            insert_implicit(tree, TH_TAG_BR, TH_TAG_SPECIAL | TH_ELEM_CLOSED_BY_END_TAG);
             tree->frameset_ok = 0;
             return TH_DRAIN_NEXT;
         }

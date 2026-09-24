@@ -1823,16 +1823,20 @@ static void hoist_children(th_node *element) {
 
 /* Replace a disallowed element with its escaped start tag, its already-sanitized children, and its escaped end tag. */
 static int escape_element(sanitizer *s, th_node *element) {
-    PyObject *opening = open_tag(s, element);
-    if (opening == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    /* Only reproduce a start tag the source actually wrote: the tbody a bare
+       `<table><tr>` implies has none, so escaping must not fabricate one. */
+    if (!(element->tag_flags & TH_ELEM_IMPLIED)) {
+        PyObject *opening = open_tag(s, element);
+        if (opening == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        th_node *open_node = make_text(s, opening);
+        Py_DECREF(opening);
+        if (open_node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        th_node_insert_before(element->parent, open_node, element);
     }
-    th_node *open_node = make_text(s, opening);
-    Py_DECREF(opening);
-    if (open_node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    th_node_insert_before(element->parent, open_node, element);
     hoist_children(element);
     /* Only reproduce an end tag the source actually wrote: a void element or an
        unclosed one (`<name of movie>`, `I love <sarcasm> this`) carries no close
@@ -1987,7 +1991,8 @@ static int apply_transform(sanitizer *s, th_node *element, PyObject **tag) {
     }
     element->atom = th_tag_lookup(canonical_target, target_utf8_len);
     PyMem_Free(canonical_target);
-    element->tag_flags = (uint8_t)(th_tag_flags(element->atom) | (element->tag_flags & TH_ELEM_CLOSED_BY_END_TAG));
+    element->tag_flags =
+        (uint8_t)(th_tag_flags(element->atom) | (element->tag_flags & (TH_ELEM_CLOSED_BY_END_TAG | TH_ELEM_IMPLIED)));
     PyObject *added_name, *added_value;
     Py_ssize_t pos = 0;
     while (PyDict_Next(PyTuple_GET_ITEM(entry, 1), &pos, &added_name, &added_value)) {
