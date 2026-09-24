@@ -323,7 +323,7 @@ struct th_observer ***th_tree_observers_ptr(th_tree *tree);
 Py_ssize_t *th_tree_observer_count_ptr(th_tree *tree);
 Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree);
 
-int th_node_contains(th_node *ancestor, th_node *node);
+int th_node_contains(th_tree *tree, th_node *ancestor, th_node *node);
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
 th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node);
 th_tree *th_tree_copy_document(th_tree *src);
