@@ -652,6 +652,10 @@ def test_surround_contents_rejects_partial_non_text() -> None:
     [
         pytest.param(lambda doc: doc, id="document"),
         pytest.param(_doctype, id="doctype"),
+        pytest.param(lambda _: Text("x"), id="text"),
+        pytest.param(lambda _: Comment("x"), id="comment"),
+        pytest.param(lambda _: CData("x"), id="cdata"),
+        pytest.param(lambda _: ProcessingInstruction("x", "y"), id="processing-instruction"),
     ],
 )
 def test_surround_contents_rejects_bad_wrapper_type(wrapper: Callable[[Document], Node]) -> None:
@@ -659,8 +663,18 @@ def test_surround_contents_rejects_bad_wrapper_type(wrapper: Callable[[Document]
     div = _by_id(doc, "a")
     boundary = Range(div, 0)
     boundary.set_end(div, 1)
-    with pytest.raises(ValueError, match="document, doctype, or fragment"):
+    with pytest.raises(ValueError, match="must be an element"):
         boundary.surround_contents(wrapper(doc))
+
+
+def test_surround_contents_rejecting_a_text_wrapper_keeps_the_contents() -> None:
+    doc = parse("<p id=a>one<b>two</b>three</p>")
+    paragraph = _by_id(doc, "a")
+    boundary = Range(paragraph, 1)
+    boundary.set_end(paragraph, 3)
+    with pytest.raises(ValueError, match="must be an element"):
+        boundary.surround_contents(Text("x"))
+    assert paragraph.html == '<p id="a">one<b>two</b>three</p>'
 
 
 def test_surround_contents_rejects_fragment_wrapper() -> None:
@@ -671,7 +685,7 @@ def test_surround_contents_rejects_fragment_wrapper() -> None:
     fragment = snapshot.clone_contents()
     boundary = Range(div, 0)
     boundary.set_end(div, 1)
-    with pytest.raises(ValueError, match="fragment"):
+    with pytest.raises(ValueError, match="must be an element"):
         boundary.surround_contents(fragment)
 
 
