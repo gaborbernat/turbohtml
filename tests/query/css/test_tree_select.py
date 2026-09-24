@@ -1772,6 +1772,23 @@ def test_xml_selectors_are_case_sensitive(selector: str, tags: list[str]) -> Non
     assert _select_xml(selector) == tags
 
 
+# the HTML case-insensitive attribute-value set (type, lang, rel, ...) is an HTML-document
+# rule; an XML tree compares every attribute value exactly unless the selector says i
+@pytest.mark.parametrize(
+    ("selector", "tags"),
+    [
+        pytest.param("[type=checkbox]", [], id="ci-set-name-exact"),
+        pytest.param("[type=CheckBox]", ["input"], id="ci-set-name-same-case"),
+        pytest.param("[type=checkbox i]", ["input"], id="explicit-i-flag"),
+        pytest.param("[type*=checkbox]", [], id="substring-operator"),
+        pytest.param(f"[rel*={'a' * 70}]", [], id="long-overlapping-substring"),
+    ],
+)
+def test_xml_attribute_values_ignore_the_html_case_insensitive_set(selector: str, tags: list[str]) -> None:
+    root = _root('<r><input type="CheckBox" rel="' + "A" * 80 + '"/></r>')
+    assert [element.tag for element in root.select(selector)] == tags
+
+
 def test_xml_matches_is_case_sensitive() -> None:
     child = _root("<Root><child/></Root>").select_one("child")
     assert child is not None
