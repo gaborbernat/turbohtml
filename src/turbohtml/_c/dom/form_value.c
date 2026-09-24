@@ -12,7 +12,6 @@
 #include "dom/form_value.h"
 #include "core/ascii.h"
 
-#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -307,12 +306,14 @@ static int parse_float_rules(const Py_UCS4 *text, Py_ssize_t len, double *out) {
         }
     }
     literal[used] = '\0';
-    double value = PyOS_string_to_double(literal, NULL, NULL);
+    /* an explicit OverflowError keeps CPython and PyPy alike: PyPy raises one even when asked not to */
+    double value = PyOS_string_to_double(literal, NULL, PyExc_OverflowError);
     PyMem_Free(literal);
-    if (value == -1.0 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: a well-formed literal fails only on OOM */
-        return -1;                           /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    if (fabs(value) > DBL_MAX) {
+    if (PyErr_Occurred()) {
+        if (!PyErr_ExceptionMatches(PyExc_OverflowError)) { /* GCOVR_EXCL_BR_LINE: anything else is an OOM */
+            return -1;                                      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyErr_Clear(); /* past the double range, which the spec's rounding step reports as an error */
         return 0;
     }
     *out = value == 0.0 ? 0.0 : value; /* the spec's number set has no negative zero */
