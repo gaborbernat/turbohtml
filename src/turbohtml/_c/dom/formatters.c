@@ -372,8 +372,10 @@ static PyObject *indent_repr(PyObject *self) {
 }
 
 PyDoc_STRVAR(indent_doc, "Indent(indent=2)\n--\n\n"
-                         "A serialize(layout=...)/encode(layout=...) mode that pretty-prints. It adds\n"
-                         "whitespace, so unlike the compact default it does not preserve meaning.\n\n"
+                         "A serialize(layout=...)/encode(layout=...) mode that pretty-prints. It puts\n"
+                         "block-level elements on their own indented lines and keeps inline content on\n"
+                         "one line, so the rendered text stays the same, and indenting its own output\n"
+                         "again reproduces it.\n\n"
                          ":param indent: the per-level unit: an int for that many spaces, or a string\n"
                          "    used verbatim.");
 
