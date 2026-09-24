@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, TypeAlias
+from typing import TYPE_CHECKING, Final, NoReturn, TypeAlias
 
 from turbohtml._html import _microdata_as_dict, _register_structured_data
 
@@ -168,4 +168,14 @@ class OpenGraph(Mapping[str, str]):
         return all(self._properties.get(name) for name in _OG_REQUIRED)
 
 
-_register_structured_data(json.loads, MicrodataItem, RdfaItem, StructuredData, OpenGraph)
+def _reject_constant(name: str) -> NoReturn:
+    # json.loads accepts NaN, Infinity, and -Infinity, which RFC 8259 JSON does not
+    msg = f"{name} is not a JSON value"
+    raise ValueError(msg)
+
+
+def _decode_json(text: str) -> JSONValue:
+    return json.loads(text, parse_constant=_reject_constant)
+
+
+_register_structured_data(_decode_json, MicrodataItem, RdfaItem, StructuredData, OpenGraph)
