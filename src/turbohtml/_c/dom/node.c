@@ -1675,7 +1675,9 @@ PyDoc_STRVAR(insert_before_doc, "insert_before(*nodes)\n--\n\n"
                                 ":param nodes: the nodes to insert.\n"
                                 ":raises TypeError: if an argument is not a node, or is a Document.\n"
                                 ":raises ValueError: if this node has no parent, or a node is an ancestor of\n"
-                                "    the insertion point (which would form a cycle).");
+                                "    the insertion point (which would form a cycle), or the insertion would break\n"
+                                "    the DOM rules for a Document's children (one doctype, then one element, no\n"
+                                "    Text) or put a doctype outside a Document; nothing moves then.");
 
 PyDoc_STRVAR(insert_after_doc, "insert_after(*nodes)\n--\n\n"
                                "Insert each node into this node's parent right after this node, in order,\n"
@@ -1683,7 +1685,8 @@ PyDoc_STRVAR(insert_after_doc, "insert_after(*nodes)\n--\n\n"
                                ":param nodes: the nodes to insert.\n"
                                ":raises TypeError: if an argument is not a node, or is a Document.\n"
                                ":raises ValueError: if this node has no parent, or a node is an ancestor of\n"
-                               "    the insertion point (which would form a cycle).");
+                               "    the insertion point (which would form a cycle), or the insertion breaks the\n"
+                               "    DOM rules for a Document's children, as for insert_before().");
 
 PyDoc_STRVAR(replace_with_doc, "replace_with(*nodes)\n--\n\n"
                                "Put nodes where this node is, in order, and detach this node, which becomes a\n"
@@ -1692,14 +1695,16 @@ PyDoc_STRVAR(replace_with_doc, "replace_with(*nodes)\n--\n\n"
                                ":param nodes: the nodes to put in this node's place.\n"
                                ":raises TypeError: if an argument is not a node, or is a Document.\n"
                                ":raises ValueError: if this node has no parent, or a node is an ancestor of\n"
-                               "    this node (which would form a cycle).");
+                               "    this node (which would form a cycle), or the result breaks the DOM rules for\n"
+                               "    a Document's children, as for insert_before().");
 
 PyDoc_STRVAR(wrap_doc, "wrap(wrapper, /)\n--\n\n"
                        "Put this node inside wrapper, in this node's place.\n\n"
                        ":param wrapper: the element to wrap this node in.\n"
                        ":returns: wrapper, now holding this node.\n"
                        ":raises TypeError: if wrapper is not an element.\n"
-                       ":raises ValueError: if wrapper is this node.");
+                       ":raises ValueError: if wrapper is this node, this node is a doctype, or the\n"
+                       "    wrapper would break the DOM rules for a Document's children.");
 
 PyDoc_STRVAR(wrap_siblings_doc, "wrap_siblings(wrapper, /, *, until=None)\n--\n\n"
                                 "Wrap this node and the siblings that follow it in wrapper in one move; the\n"
@@ -1710,7 +1715,8 @@ PyDoc_STRVAR(wrap_siblings_doc, "wrap_siblings(wrapper, /, *, until=None)\n--\n\
                                 ":returns: wrapper, now holding the run.\n"
                                 ":raises TypeError: if wrapper is not an element, or until is not a node.\n"
                                 ":raises ValueError: if this node has no parent, or until is not this node or\n"
-                                "    a following sibling.");
+                                "    a following sibling, or the run holds a doctype, or the wrapper would break\n"
+                                "    the DOM rules for a Document's children.");
 
 PyDoc_STRVAR(unwrap_doc, "unwrap()\n--\n\n"
                          "Replace this node with its children, the inverse of wrap().\n\n"

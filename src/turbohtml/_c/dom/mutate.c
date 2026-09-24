@@ -482,6 +482,78 @@ void th_node_append_child_observed(th_tree *tree, th_node *parent, th_node *chil
     th_mo_child_inserted(tree, parent, child);
 }
 
+/* Whether node sits in the sibling run [first, last] (never when first is NULL). */
+static int in_run(const th_node *node, const th_node *first, const th_node *last) {
+    if (first == NULL) {
+        return 0;
+    }
+    for (const th_node *walk = first;; walk = walk->next_sibling) {
+        if (walk == node) {
+            return 1;
+        }
+        if (walk == last) {
+            return 0;
+        }
+    }
+}
+
+/* Whether a child of type sits between from (inclusive) and until (exclusive; NULL runs to the end), skipping the
+   replaced run. */
+static int has_child_between(th_node *from, const th_node *until, enum th_node_type type, const th_node *run_first,
+                             const th_node *run_last) {
+    for (th_node *walk = from; walk != until; walk = walk->next_sibling) {
+        if (walk->type == type && !in_run(walk, run_first, run_last)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const char *th_pre_insert_error(th_node *parent, th_node *const *nodes, Py_ssize_t count, th_node *child,
+                                th_node *run_first, th_node *run_last) {
+    Py_ssize_t elements = 0;
+    Py_ssize_t doctypes = 0;
+    Py_ssize_t texts = 0;
+    for (Py_ssize_t index = 0; index < count; index++) {
+        elements += nodes[index]->type == TH_NODE_ELEMENT;
+        doctypes += nodes[index]->type == TH_NODE_DOCTYPE;
+        texts += nodes[index]->type == TH_NODE_TEXT || nodes[index]->type == TH_NODE_CDATA;
+    }
+    /* several nodes are gathered into a fragment first, and a fragment cannot hold a doctype */
+    if (doctypes > 0 && (parent->type != TH_NODE_DOCUMENT || count > 1)) {
+        return "a doctype can only be a child of a Document";
+    }
+    if (parent->type != TH_NODE_DOCUMENT) {
+        return NULL;
+    }
+    if (texts > 0) {
+        return "a Document cannot hold a Text node";
+    }
+    if (elements > 1) {
+        return "a Document can hold only one element";
+    }
+    /* a replacement goes where the replaced run starts; an insertion before child */
+    th_node *after = run_first != NULL ? run_last->next_sibling : child;
+    th_node *before = run_first != NULL ? run_first : child;
+    if (elements == 1) {
+        if (has_child_between(parent->first_child, NULL, TH_NODE_ELEMENT, run_first, run_last)) {
+            return "a Document can hold only one element";
+        }
+        if (has_child_between(after, NULL, TH_NODE_DOCTYPE, run_first, run_last)) {
+            return "a Document's element must come after its doctype";
+        }
+    }
+    if (doctypes == 1) {
+        if (has_child_between(parent->first_child, NULL, TH_NODE_DOCTYPE, run_first, run_last)) {
+            return "a Document can hold only one doctype";
+        }
+        if (has_child_between(parent->first_child, before, TH_NODE_ELEMENT, run_first, run_last)) {
+            return "a Document's doctype must come before its element";
+        }
+    }
+    return NULL;
+}
+
 void th_node_insert_before_observed(th_tree *tree, th_node *parent, th_node *child, th_node *ref) {
     node_insert_before(parent, child, ref);
     th_mo_child_inserted(tree, parent, child);

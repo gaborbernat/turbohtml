@@ -2065,6 +2065,14 @@ th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_ob
         PyErr_SetString(PyExc_TypeError, "a Document cannot be inserted as a child");
         return NULL;
     }
+    /* a Document parent needs the insertion position, which its callers check with th_pre_insert_error */
+    const char *misplaced = dest_parent->type == TH_NODE_DOCUMENT
+                                ? NULL
+                                : th_pre_insert_error(dest_parent, &child->node, 1, NULL, NULL, NULL);
+    if (misplaced != NULL) {
+        PyErr_SetString(PyExc_ValueError, misplaced);
+        return NULL;
+    }
     th_tree *dest_tree = tree_of((PyObject *)anchor);
     if (dest_tree != tree_of(child_obj)) {
         return import_node(anchor->handle, child);
@@ -2440,6 +2448,61 @@ static th_node *sibling_parent(PyObject *self, PyObject *const *nodes, Py_ssize_
     }
 }
 
+/* Apply the DOM pre-insertion hierarchy rules (th_pre_insert_error) to the node arguments of a sibling edit, self
+   excluded since these edits leave it in place, placed into parent before child or in place of the run [run_first,
+   run_last]. Checked before any node moves, so a rejected call leaves the tree unchanged. Sets a ValueError and
+   returns -1 when the edit would break the tree's shape. */
+static int check_sibling_insert(PyObject *self, th_node *parent, PyObject *nodes, th_node *child, th_node *run_first,
+                                th_node *run_last) {
+    Py_ssize_t size = PyTuple_GET_SIZE(nodes);
+    th_node **incoming = PyMem_Malloc((size_t)(size > 0 ? size : 1) * sizeof(th_node *));
+    if (incoming == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t count = 0;
+    for (Py_ssize_t index = 0; index < size; index++) {
+        PyObject *item = PyTuple_GET_ITEM(nodes, index);
+        if (PyObject_TypeCheck(item, (PyTypeObject *)state_of(self)->node_type) &&
+            ((NodeObject *)item)->node != ((NodeObject *)self)->node) {
+            incoming[count++] = ((NodeObject *)item)->node;
+        }
+    }
+    const char *message = th_pre_insert_error(parent, incoming, count, child, run_first, run_last);
+    PyMem_Free(incoming);
+    if (message != NULL) {
+        PyErr_SetString(PyExc_ValueError, message);
+        return -1;
+    }
+    return 0;
+}
+
+/* The hierarchy rules for a wrap: the wrapper takes the place of the sibling run [first, last] in parent, and the run
+   moves into the wrapper, so a doctype in the run is rejected. Sets a ValueError and returns -1 on a violation. */
+static int reject_wrap(th_node *parent, th_node *wrapper, th_node *first, th_node *last) {
+    const char *message = th_pre_insert_error(parent, &wrapper, 1, NULL, first, last);
+    for (th_node *walk = first; message == NULL; walk = walk->next_sibling) {
+        message = th_pre_insert_error(wrapper, &walk, 1, NULL, NULL, NULL);
+        if (walk == last) {
+            break;
+        }
+    }
+    if (message != NULL) {
+        PyErr_SetString(PyExc_ValueError, message);
+        return -1;
+    }
+    return 0;
+}
+
+/* The wrapper wrap() links into parent in node's place, checked against the hierarchy rules first. NULL with an
+   exception when they reject it or adoption fails. */
+static th_node *adopt_wrapper(NodeObject *node, th_node *parent, PyObject *wrapper_obj) {
+    if (reject_wrap(parent, ((NodeObject *)wrapper_obj)->node, node->node, node->node) < 0) {
+        return NULL;
+    }
+    return adopt_into(node, parent, wrapper_obj);
+}
+
 /* The structural edits hold the per-tree lock around the pointer rewiring so a
    concurrent read/mutate cannot observe a half-linked tree (a no-op on the GIL
    build). sibling_parent imports the foreign arguments before these edits read the
@@ -2450,7 +2513,7 @@ PyObject *node_insert_before(PyObject *self, PyObject *nodes) {
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node *parent = sibling_parent(self, ((PyTupleObject *)nodes)->ob_item, PyTuple_GET_SIZE(nodes));
-    if (parent == NULL) {
+    if (parent == NULL || check_sibling_insert(self, parent, nodes, ref, NULL, NULL) < 0) {
         error = 1;
     } else {
         handle_drop_index(((NodeObject *)self)->handle);
@@ -2479,7 +2542,7 @@ PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node *parent = sibling_parent(self, ((PyTupleObject *)nodes)->ob_item, PyTuple_GET_SIZE(nodes));
-    if (parent == NULL) {
+    if (parent == NULL || check_sibling_insert(self, parent, nodes, cursor->next_sibling, NULL, NULL) < 0) {
         error = 1;
     } else {
         handle_drop_index(((NodeObject *)self)->handle);
@@ -2507,17 +2570,21 @@ PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
 PyObject *node_replace_with(PyObject *self, PyObject *nodes) {
     th_node *ref = ((NodeObject *)self)->node;
     int keep_self = 0;
+    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+        keep_self |= is_same_node(self, PyTuple_GET_ITEM(nodes, index), ref);
+    }
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     th_node *parent = sibling_parent(self, ((PyTupleObject *)nodes)->ob_item, PyTuple_GET_SIZE(nodes));
-    if (parent == NULL) {
+    /* replacing a node with a list that holds it keeps it in place, so the others are inserted around it */
+    if (parent == NULL ||
+        check_sibling_insert(self, parent, nodes, ref, keep_self ? NULL : ref, keep_self ? NULL : ref) < 0) {
         error = 1;
     } else {
         handle_drop_index(((NodeObject *)self)->handle);
         for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
             PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
             if (is_same_node(self, new_obj, ref)) {
-                keep_self = 1; /* replacing a node with itself leaves it in place */
                 continue;
             }
             th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
@@ -2560,7 +2627,7 @@ PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
         handle_drop_index(node->handle);
         th_node *parent = sibling_parent(self, &wrapper_obj, 1);
         /* parent is NULL only when another thread detached this node, or on OOM */
-        th_node *wrapper = parent == NULL ? NULL : adopt_into(node, parent, wrapper_obj); /* GCOVR_EXCL_BR_LINE */
+        th_node *wrapper = parent == NULL ? NULL : adopt_wrapper(node, parent, wrapper_obj); /* GCOVR_EXCL_BR_LINE */
         if (wrapper == NULL) {
             error = 1;
         } else {
@@ -2651,7 +2718,8 @@ PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kwds) {
             }
         }
         if (value_error == NULL) {
-            th_node *wrapper = adopt_into(node, parent, wrapper_obj);
+            th_node *wrapper =
+                reject_wrap(parent, wrapper_node, first, last) < 0 ? NULL : adopt_into(node, parent, wrapper_obj);
             if (wrapper == NULL) {
                 error = 1;
             } else {

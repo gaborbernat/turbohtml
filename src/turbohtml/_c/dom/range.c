@@ -960,6 +960,13 @@ static th_node *insert_core(RangeObject *range, PyObject *node_obj) {
         }
     }
     th_node *parent = reference == NULL ? start_node : reference->parent;
+    /* a Text start is split and the node goes after its head, which is before the head's current next sibling */
+    const char *misplaced =
+        th_pre_insert_error(parent, &incoming, 1, start_text_like ? start_node->next_sibling : reference, NULL, NULL);
+    if (misplaced != NULL) {
+        PyErr_SetString(PyExc_ValueError, misplaced);
+        return NULL;
+    }
     handle_drop_index(range->start_handle);
     if (start_text_like) {
         reference = split_data_node(((HandleObject *)range->start_handle)->tree, start_node, start_offset);
