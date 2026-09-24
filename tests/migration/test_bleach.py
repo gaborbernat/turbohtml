@@ -61,6 +61,11 @@ def test_clean_protocols() -> None:
     )
 
 
+def test_clean_protocols_cannot_admit_javascript() -> None:
+    html = '<a href="javascript:alert(1)">y</a>'
+    assert clean(html, tags=["a"], attributes={"a": ["href"]}, protocols=["javascript"]) == "<a>y</a>"
+
+
 def test_clean_strip_true_unwraps() -> None:
     assert clean("<div><b>x</b></div>", strip=True) == "<b>x</b>"
 

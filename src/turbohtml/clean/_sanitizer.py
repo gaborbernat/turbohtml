@@ -139,7 +139,8 @@ class Policy:
     :param tags: the allowed element set; any tag outside it is handled per ``on_disallowed_tag``.
     :param attributes: allowed attribute names keyed by tag (``"*"`` as the key matches every tag, and ``"*"`` inside a
         set allows every name).
-    :param url_schemes: the allowlist for URL-bearing attributes such as ``href`` and ``src``.
+    :param url_schemes: the allowlist for URL-bearing attributes such as ``href`` and ``src``; ``javascript:`` stays
+        dropped even when listed.
     :param allow_relative_urls: keep relative (scheme-less) URLs, which carry no scheme to check.
     :param on_disallowed_tag: how to treat a tag not in ``tags`` (:class:`OnDisallowed`: escape, strip, or remove).
     :param strip_comments: drop HTML comments from the output.
