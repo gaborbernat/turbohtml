@@ -165,6 +165,7 @@ int xp_name_eq(const lexer *lx, const char *kw);
 typedef struct {
     struct th_tree *tree;
     struct th_node *node;
+    Py_ssize_t attr; /* the context is node itself at -1, else its attribute (>= 0) or namespace node (-2) */
     Py_ssize_t pos;
     Py_ssize_t size;
     const char **feature;

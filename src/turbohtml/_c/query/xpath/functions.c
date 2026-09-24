@@ -26,7 +26,7 @@ static double xp_round(double value) {
 
 /* number() with no argument: the context node's string-value parsed as first number. */
 static double context_node_number(xp_ctx *ctx) {
-    xp_item item = {ctx->node, -1};
+    xp_item item = {ctx->node, ctx->attr};
     Py_ssize_t length;
     Py_UCS4 *text = item_string(ctx->tree, item, &length);
     if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
@@ -119,7 +119,7 @@ static Py_UCS4 *arg_or_context_string(xp_ctx *ctx, xp_result *args, int argc, Py
     if (argc >= 1) {
         return to_string(ctx->tree, &args[0], len);
     }
-    xp_item item = {ctx->node, -1};
+    xp_item item = {ctx->node, ctx->attr};
     return item_string(ctx->tree, item, len);
 }
 
@@ -127,7 +127,7 @@ static Py_UCS4 *arg_or_context_string(xp_ctx *ctx, xp_result *args, int argc, Py
    string; empty for a non-named node or an empty node-set. */
 static Py_UCS4 *node_name_string(xp_ctx *ctx, xp_result *args, int argc, Py_ssize_t *len) {
     struct th_node *node = ctx->node;
-    Py_ssize_t attr = -1;
+    Py_ssize_t attr = ctx->attr;
     if (argc >= 1) {
         if (args[0].kind != XP_NODESET || args[0].nodes.len == 0) {
             *len = 0;
@@ -345,7 +345,7 @@ static int concat(struct th_tree *tree, xp_result *args, int argc, xp_result *ou
    non-elements; the foreign-content URI for an SVG or MathML element. */
 static Py_UCS4 *node_namespace_uri(xp_ctx *ctx, xp_result *args, int argc, Py_ssize_t *len) {
     struct th_node *node = ctx->node;
-    Py_ssize_t attr = -1;
+    Py_ssize_t attr = ctx->attr;
     if (argc >= 1) {
         if (args[0].kind != XP_NODESET || args[0].nodes.len == 0) {
             *len = 0;

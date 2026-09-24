@@ -131,6 +131,42 @@ def test_step_after_attribute_yields_nothing(doc: turbohtml.Node) -> None:
     assert doc.xpath("//a/@href/x") == []
 
 
+ATTR_CONTEXT_XML: Final[str] = '<div><p n="10">x<b>i</b></p><p n="3">y</p></div>'
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("//@n[. > 5]", ["10"], id="dot-is-the-attribute-value"),
+        pytest.param("//@n[.='x']", [], id="dot-is-not-the-owner-text"),
+        pytest.param("//@n[string-length()=1]", ["3"], id="string-length-of-the-attribute"),
+        pytest.param("//@n[number()=3]", ["3"], id="number-of-the-attribute"),
+        pytest.param("//@n[name()='n']", ["10", "3"], id="name-of-the-attribute"),
+        pytest.param("//@n[name()='p']", [], id="name-is-not-the-owner"),
+        pytest.param("//@n[namespace-uri()='']", ["10", "3"], id="namespace-uri-of-the-attribute"),
+        pytest.param("//@n/..", ["p", "p"], id="parent-abbreviation"),
+        pytest.param("//@n/parent::b", [], id="parent-name-test"),
+        pytest.param("//@n/ancestor::*", ["div", "p", "p"], id="ancestor"),
+        pytest.param("//@n/ancestor-or-self::*", ["div", "p", "p"], id="ancestor-or-self-element"),
+        pytest.param("//@n/ancestor-or-self::node()[1]", ["10", "3"], id="ancestor-or-self-starts-at-self"),
+        pytest.param("//@n/self::node()", ["10", "3"], id="self-node"),
+        pytest.param("//@n/self::n", [], id="self-name-test-wants-an-element"),
+        pytest.param("//@n/descendant-or-self::node()", ["10", "3"], id="descendant-or-self-node"),
+        pytest.param("//@n/descendant-or-self::*", [], id="descendant-or-self-element"),
+        pytest.param("//@n[.=10]/following::*", ["b", "p"], id="following-includes-owner-descendants"),
+        pytest.param("//@n[.=3]/preceding::*", ["p", "b"], id="preceding-skips-the-owner"),
+        pytest.param("//@n/child::node()", [], id="child-is-empty"),
+        pytest.param("//@n/following-sibling::node()", [], id="following-sibling-is-empty"),
+        pytest.param("//@n/@*", [], id="attribute-of-attribute-is-empty"),
+        pytest.param("//p/namespace::*/..", ["p", "p"], id="namespace-node-parent"),
+    ],
+)
+def test_attribute_node_as_context(expr: str, expected: list[str]) -> None:
+    result = parse_xml(ATTR_CONTEXT_XML).xpath(expr)
+    assert isinstance(result, list)
+    assert [node.tag if isinstance(node, Element) else node for node in result] == expected
+
+
 def test_text_nodes(doc: turbohtml.Node) -> None:
     assert doc.xpath("//title/text()") == ["T"]
     assert one(doc, "//title").xpath("node()") == ["T"]
