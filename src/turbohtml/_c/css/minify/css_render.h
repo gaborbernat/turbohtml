@@ -3,7 +3,7 @@
 
 /* Render a value's tokens [start, end) into components in the pool. */
 static void css_render_components(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end, int is_color,
-                                  comp_vec *comps) {
+                                  int drop_zero_unit, comp_vec *comps) {
     Py_ssize_t index = start;
     while (index < end) {
         css_token *token = &vec->items[index];
@@ -34,7 +34,7 @@ static void css_render_components(css_buf *pool, token_vec *vec, Py_ssize_t star
             continue;
         }
         if (token->kind == CSS_NUM) {
-            css_format_dimension(pool, token, 1, &comp.off, &comp.len);
+            css_format_dimension(pool, token, drop_zero_unit, &comp.off, &comp.len);
             comp.kind = token->unit_len ? CK_DIM : CK_NUM;
         } else if (token->kind == CSS_HASH) {
             if (!css_color_keyword_or_hash(pool, token, 1, &comp.off, &comp.len)) {
@@ -250,7 +250,8 @@ static void css_handle_flex_basis(css_buf *pool, comp_vec *comps) {
         css_comp *comp = &comps->items[index];
         if (css_comp_kw(pool, comp, "initial")) {
             css_set_comp(pool, comp, "auto", CK_IDENT);
-        } else if (css_comp_is_zero(pool, comp)) {
+        } else if (css_comp_is_zero(pool, comp) && pool->data[comp->off + comp->len - 1] != '%') {
+            /* a 0% basis resolves against an indefinite container to content, a zero length does not */
             css_set_comp(pool, comp, "0", CK_NUM);
         }
     }
