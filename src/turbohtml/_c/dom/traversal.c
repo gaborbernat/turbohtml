@@ -26,10 +26,8 @@ typedef struct {
 typedef struct {
     PyObject_HEAD PyObject *handle;
     PyObject *filter;
-    th_node *root;
-    th_node *reference;
+    th_node_iterator cursor; /* registered on the tree, which adjusts it before each observed removal */
     unsigned long what_to_show;
-    int pointer_before; /* the spec's pointer-before-reference-node flag */
     int active;
 } NodeIteratorObject;
 
@@ -524,41 +522,50 @@ static th_node *ni_preceding(th_node *node, th_node *root) {
     return previous_element(node);
 }
 
-/* NodeIterator.traverse: advance the reference across the flat filtered view. previous == 0 moves forward, 1 back.
-   The flat view has no subtree, so REJECT and SKIP both just keep looking. Returns the accepted node, NULL at an
-   end, or NULL with *failed set on a filter error. */
+/* NodeIterator.traverse: advance the candidate reference across the flat filtered view. previous == 0 moves forward,
+   1 back. The candidate lives on the registered cursor, so a filter that removes nodes has it adjusted like the
+   reference. The flat view has no subtree, so REJECT and SKIP both just keep looking. Returns the accepted node,
+   NULL at an end, or NULL with *failed set on a filter error. */
 static th_node *ni_traverse(NodeIteratorObject *self, module_state *state, int *failed, int previous) {
-    th_node *node = self->reference;
-    int before = self->pointer_before;
+    th_node_iterator *cursor = &self->cursor;
+    cursor->candidate = cursor->reference;
+    cursor->candidate_before = cursor->reference_before;
+    th_node *result = NULL;
     for (;;) {
         if (!previous) {
-            if (!before) {
-                node = ni_following(node, self->root);
-                if (node == NULL) {
-                    return NULL;
+            if (!cursor->candidate_before) {
+                th_node *following = ni_following(cursor->candidate, cursor->root);
+                if (following == NULL) {
+                    break;
                 }
+                cursor->candidate = following;
             }
-            before = 0;
+            cursor->candidate_before = 0;
         } else {
-            if (before) {
-                node = ni_preceding(node, self->root);
-                if (node == NULL) {
-                    return NULL;
+            if (cursor->candidate_before) {
+                th_node *preceding = ni_preceding(cursor->candidate, cursor->root);
+                if (preceding == NULL) {
+                    break;
                 }
+                cursor->candidate = preceding;
             }
-            before = 1;
+            cursor->candidate_before = 1;
         }
+        th_node *node = cursor->candidate;
         int verdict;
         if (run_filter(state, self->handle, self->filter, self->what_to_show, &self->active, node, &verdict) < 0) {
             *failed = 1;
-            return NULL;
+            break;
         }
         if (verdict == TH_FILTER_ACCEPT) {
-            self->reference = node;
-            self->pointer_before = before;
-            return node;
+            cursor->reference = cursor->candidate;
+            cursor->reference_before = cursor->candidate_before;
+            result = node;
+            break;
         }
     }
+    cursor->candidate = NULL;
+    return result;
 }
 
 /* Run one NodeIterator step under the per-tree critical section; return the found node, or found_is_stop set so the
@@ -605,7 +612,7 @@ static PyObject *node_iterator_iternext(PyObject *op) {
 
 static PyObject *node_iterator_get_root(PyObject *op, void *Py_UNUSED(closure)) {
     NodeIteratorObject *self = (NodeIteratorObject *)op;
-    return node_wrap(state_of(op), self->handle, self->root);
+    return node_wrap(state_of(op), self->handle, self->cursor.root);
 }
 
 static PyObject *node_iterator_get_what_to_show(PyObject *op, void *Py_UNUSED(closure)) {
@@ -619,11 +626,11 @@ static PyObject *node_iterator_get_filter(PyObject *op, void *Py_UNUSED(closure)
 
 static PyObject *node_iterator_get_reference(PyObject *op, void *Py_UNUSED(closure)) {
     NodeIteratorObject *self = (NodeIteratorObject *)op;
-    return node_wrap(state_of(op), self->handle, self->reference);
+    return node_wrap(state_of(op), self->handle, self->cursor.reference);
 }
 
 static PyObject *node_iterator_get_pointer_before(PyObject *op, void *Py_UNUSED(closure)) {
-    return PyBool_FromLong(((NodeIteratorObject *)op)->pointer_before);
+    return PyBool_FromLong(((NodeIteratorObject *)op)->cursor.reference_before);
 }
 
 static PyObject *node_iterator_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
@@ -649,12 +656,21 @@ static PyObject *node_iterator_new(PyTypeObject *type, PyObject *args, PyObject 
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     self->handle = Py_NewRef(root->handle);
-    self->root = root->node;
-    self->reference = root->node;
+    self->cursor.root = root->node;
+    self->cursor.reference = root->node;
+    self->cursor.candidate = NULL;
+    self->cursor.reference_before = 1;
     self->what_to_show = what_to_show;
-    self->pointer_before = 1;
     self->filter = filter == Py_None ? NULL : Py_NewRef(filter);
     self->active = 0;
+    int registered;
+    Py_BEGIN_CRITICAL_SECTION(self->handle);
+    registered = th_tree_add_node_iterator(((HandleObject *)self->handle)->tree, &self->cursor);
+    Py_END_CRITICAL_SECTION();
+    if (registered < 0) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     return (PyObject *)self;
 }
 
@@ -663,17 +679,22 @@ static int node_iterator_traverse(PyObject *op, visitproc visit, void *arg) {
     return traversal_traverse(op, visit, arg, self->handle, self->filter);
 }
 
+/* Clears only the filter: the handle is not GC-tracked, so it closes no cycle, and dealloc still needs it to take
+   the tree's lock and unregister the cursor before the tree can free. */
 static int node_iterator_clear(PyObject *op) {
-    NodeIteratorObject *self = (NodeIteratorObject *)op;
-    Py_CLEAR(self->handle); /* GCOVR_EXCL_BR_LINE: the handle is non-NULL until this single clear */
-    Py_CLEAR(self->filter); /* the NULL arm runs for an iterator built without a filter */
+    Py_CLEAR(((NodeIteratorObject *)op)->filter); /* the NULL arm runs for an iterator built without a filter */
     return 0;
 }
 
 static void node_iterator_dealloc(PyObject *op) {
+    NodeIteratorObject *self = (NodeIteratorObject *)op;
     PyTypeObject *type = Py_TYPE(op);
     PyObject_GC_UnTrack(op);
+    Py_BEGIN_CRITICAL_SECTION(self->handle);
+    th_tree_remove_node_iterator(((HandleObject *)self->handle)->tree, &self->cursor);
+    Py_END_CRITICAL_SECTION();
     (void)node_iterator_clear(op);
+    Py_DECREF(self->handle);
     type->tp_free(op);
     Py_DECREF(type);
 }

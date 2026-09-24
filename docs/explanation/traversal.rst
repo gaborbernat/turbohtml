@@ -46,6 +46,14 @@ active flag, and a callback that re-enters the same object (calls a traversal me
 runs under the tree's per-object critical section, so a concurrent mutation cannot rewire the nodes mid-move on the
 free-threaded build.
 
+A :class:`~turbohtml.NodeIterator` also survives removals made while it is in use, including from inside its own filter.
+Before a node leaves the tree through the mutation methods (``decompose``, ``extract``, a move by ``append``, the
+removals a ``MutationObserver`` records), every iterator on that tree whose reference sits in the removed subtree moves
+per the DOM NodeIterator pre-remove steps: to the first node after the subtree when it pointed before its reference,
+otherwise to the node just before the subtree. The next step then continues with the nodes that remain instead of
+wandering into the detached subtree. Edits made through a :class:`~turbohtml.Range` or the bulk cleaners do not adjust
+iterators, the same boundary ranges keep.
+
 ``current_node`` stays assignable, as the DOM requires, but only to a node in the walker's own tree: the cursor holds a
 raw pointer into that tree's arena, so accepting a node from another document would let it dangle. That is the single
 deliberate narrowing of the spec surface, traded for the guarantee that a walker can never point at freed memory.

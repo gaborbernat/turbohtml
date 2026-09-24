@@ -396,10 +396,83 @@ Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree) {
    through: they relink exactly as above and queue a childList mutation record for the
    tree's observers. A removal reads the siblings while child is still linked, then
    detaches; an insertion links first, so child's fresh siblings are the record's. */
+int th_tree_add_node_iterator(th_tree *tree, th_node_iterator *iterator) {
+    if (tree->node_iterator_count == tree->node_iterator_cap) {
+        Py_ssize_t cap = tree->node_iterator_cap == 0 ? 4 : tree->node_iterator_cap * 2;
+        th_node_iterator **grown = PyMem_Realloc(tree->node_iterators, (size_t)cap * sizeof(th_node_iterator *));
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        tree->node_iterators = grown;
+        tree->node_iterator_cap = cap;
+    }
+    tree->node_iterators[tree->node_iterator_count++] = iterator;
+    return 0;
+}
+
+void th_tree_remove_node_iterator(th_tree *tree, th_node_iterator *iterator) {
+    /* the iterator is always registered, so the scan always breaks and never runs to the end */
+    for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) { /* GCOVR_EXCL_BR_LINE */
+        if (tree->node_iterators[index] == iterator) {
+            tree->node_iterators[index] = tree->node_iterators[--tree->node_iterator_count];
+            break;
+        }
+    }
+    if (tree->node_iterator_count == 0) {
+        PyMem_Free(tree->node_iterators);
+        tree->node_iterators = NULL;
+        tree->node_iterator_cap = 0;
+    }
+}
+
+static int is_inclusive_ancestor_of(const th_node *ancestor, const th_node *node) {
+    for (const th_node *walk = node; walk != NULL; walk = walk->parent) {
+        if (walk == ancestor) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The DOM "adjust a node pointer" steps for removed, which is about to leave its parent: a pointer into the removed
+   subtree moves to the first node after that subtree within root when it pointed before its node, else (or when no
+   such node exists) to the node just before the subtree, pointing after it. */
+static void adjust_node_pointer(const th_node_iterator *iterator, th_node *removed, th_node **node, int *before) {
+    if (!is_inclusive_ancestor_of(removed, *node) || is_inclusive_ancestor_of(removed, iterator->root)) {
+        return;
+    }
+    if (*before) {
+        /* a node pointer can leave root through an unobserved edit (a Range extract), so the walk may miss root */
+        for (th_node *walk = removed; walk != NULL && walk != iterator->root; walk = walk->parent) {
+            if (walk->next_sibling != NULL) {
+                *node = walk->next_sibling;
+                return;
+            }
+        }
+    }
+    th_node *previous = removed->prev_sibling;
+    if (previous == NULL) {
+        *node = removed->parent;
+    } else {
+        while (previous->last_child != NULL) {
+            previous = previous->last_child;
+        }
+        *node = previous;
+    }
+    *before = 0;
+}
+
 void th_node_remove_observed(th_tree *tree, th_node *child) {
     th_node *parent = child->parent;
     if (parent != NULL) {
         th_mo_child_removed(tree, parent, child, child->prev_sibling, child->next_sibling);
+        for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
+            th_node_iterator *iterator = tree->node_iterators[index];
+            adjust_node_pointer(iterator, child, &iterator->reference, &iterator->reference_before);
+            if (iterator->candidate != NULL) {
+                adjust_node_pointer(iterator, child, &iterator->candidate, &iterator->candidate_before);
+            }
+        }
     }
     node_remove(child);
 }
