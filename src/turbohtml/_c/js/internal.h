@@ -225,6 +225,8 @@ enum {
     JN_F_DELEGATE = 1 << 13, /* yield* */
     JN_F_PAREN = 1 << 14,    /* a parenthesized optional chain whose parens are load-bearing:
                                 `(a?.b).c` breaks the short-circuit that `a?.b.c` keeps */
+    JN_F_VALUE = 1 << 15,    /* a callee, tag or delete/typeof operand the source wrote as a plain value
+                                (`(0,o.f)()`): marks the slot, so it survives an in-place rewrite */
 };
 
 typedef struct {
@@ -238,6 +240,21 @@ typedef struct {
     const Py_UCS4 *str;
     Py_ssize_t str_len;
 } jm_node;
+
+/* Whether node, as a call's callee or template tag (identifiers 0) or as a delete/typeof operand
+   (identifiers 1), is a Reference that position treats differently from the value it holds: a member
+   access supplies the call's `this` (ECMA-262 §13.3.6.1 EvaluateCall) and is what delete removes
+   (§13.5.1.2), a bare `eval` callee makes a direct eval (§13.3.6.1), and delete/typeof of a name act
+   on the binding (§13.5.1.2, §13.5.3.1). A comma, logical or conditional in such a position yields a
+   value, so once it folds to one of these the printer must keep it a value as `(0,x)`. */
+static inline int jm_is_reference_operand(const jm_node *node, int identifiers) {
+    if (node->kind == JN_MEMBER_EXPR) {
+        return 1;
+    }
+    return node->kind == JN_IDENT &&
+           (identifiers || (node->str_len == 4 && node->str[0] == 'e' && node->str[1] == 'v' && node->str[2] == 'a' &&
+                            node->str[3] == 'l'));
+}
 
 /* A lexical binding. name borrows the source; resolved follows references to their
    declaration after the whole program is parsed (a reference's symbol points at the
@@ -320,6 +337,16 @@ typedef struct jm_program {
 
     int failed; /* allocation failure */
 } jm_program;
+
+/* Overwrite node dst in place with a copy of src, keeping dst's sibling link and its JN_F_VALUE mark:
+   the mark belongs to the slot, not to the expression that now fills it. */
+static inline void jm_node_replace(jm_program *prog, int32_t dst, int32_t src) {
+    int32_t next = prog->nodes[dst].next;
+    uint16_t value = prog->nodes[dst].flags & JN_F_VALUE;
+    prog->nodes[dst] = prog->nodes[src];
+    prog->nodes[dst].next = next;
+    prog->nodes[dst].flags = (uint16_t)((prog->nodes[dst].flags & ~JN_F_VALUE) | value);
+}
 
 /* Copy len code points into a program-owned buffer (freed with the program) and return it, or NULL
    on allocation failure. Used by the fold pass for a literal it synthesizes. */
