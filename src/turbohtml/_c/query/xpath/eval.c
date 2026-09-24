@@ -94,18 +94,15 @@ static int ucs4_eq_ascii(const Py_UCS4 *text, Py_ssize_t text_len, const char *a
 }
 
 static int element_name_matches(struct th_node *node, const step_match *match) {
-    if (match->atom != TH_TAG_UNKNOWN) {
-        /* An XML-parsed tree interns every element as TH_TAG_UNKNOWN, keeping the literal
-           spelling, so a name test whose query resolves to a static HTML atom must fall
-           back to a spelling compare to match a same-named element on such a tree. An HTML
-           tree never stores a known-tag spelling under TH_TAG_UNKNOWN, so this changes no
-           HTML-tree match. */
-        if (node->atom != match->atom &&
-            (node->atom != TH_TAG_UNKNOWN || node->text_len != match->local_len ||
-             memcmp(node->text, match->local, (size_t)match->local_len * sizeof(Py_UCS4)) != 0)) {
+    /* An HTML element with a builtin atom is spelled as that atom, so the atoms decide.
+       Every other element compares its spelling: an XML tree interns every element as
+       TH_TAG_UNKNOWN, and a foreign element keeps the case the tree builder gave it, so
+       the builtin foreignobject atom names an SVG element spelled foreignObject. */
+    if (node->atom != TH_TAG_UNKNOWN && node->ns == TH_NS_HTML) {
+        if (node->atom != match->atom) {
             return 0;
         }
-    } else if (node->atom != TH_TAG_UNKNOWN || node->text_len != match->local_len ||
+    } else if (node->text_len != match->local_len ||
                memcmp(node->text, match->local, (size_t)match->local_len * sizeof(Py_UCS4)) != 0) {
         return 0;
     }

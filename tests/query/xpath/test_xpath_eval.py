@@ -565,6 +565,23 @@ def test_unprefixed_name_test_is_namespace_agnostic(ns_doc: turbohtml.Node) -> N
     assert tags(ns_doc.xpath("//circle", namespaces={"svg": SVG})) == ["circle"]
 
 
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("//foreignObject", ["foreignObject"], id="svg-builtin-atom-mixed-case"),
+        pytest.param("//foreignobject", [], id="svg-builtin-atom-lowercase"),
+        pytest.param("//linearGradient", ["linearGradient"], id="svg-unknown-atom-mixed-case"),
+        pytest.param("//lineargradient", [], id="svg-unknown-atom-lowercase"),
+        pytest.param("//svg", ["svg"], id="svg-builtin-atom-lowercase-spelling"),
+        pytest.param("//SVG", [], id="svg-uppercase"),
+        pytest.param("//foreignObject/p", ["p"], id="html-element-below-foreign-object"),
+    ],
+)
+def test_foreign_element_name_test_is_case_sensitive(expr: str, expected: list[str]) -> None:
+    document = parse("<svg><foreignObject><p>x</p></foreignObject><linearGradient/></svg>")
+    assert tags(document.xpath(expr)) == expected
+
+
 def test_prefixed_attribute_never_matches(ns_doc: turbohtml.Node) -> None:
     # HTML attributes carry no namespace, so a prefixed attribute test selects nothing,
     # while the unprefixed name still reads the attribute value.
