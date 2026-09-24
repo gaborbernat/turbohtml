@@ -1817,11 +1817,24 @@ static int is_mathml_text_point(const th_node *node) {
     return 0;
 }
 
-/* An HTML integration point: an SVG foreignObject/desc/title, or a MathML annotation-xml. annotation-xml counts by
-   name, the way DOMPurify does, not by its encoding attribute: sanitize_attributes runs on a parent before its
-   children are walked, so an encoding-based test would drop a legitimately parsed HTML child the moment a policy
-   strips the parent's encoding. The caller has already established the node is foreign, so a non-SVG parent is MathML.
- */
+/* ASCII case-insensitive match of an attribute value against a lowercase ASCII string. */
+static int value_matches_ci(const Py_UCS4 *value, Py_ssize_t len, const char *target) {
+    if (len != (Py_ssize_t)strlen(target)) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (lower_ascii(value[index]) != (Py_UCS4)target[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* An HTML integration point: an SVG foreignObject/desc/title, or a MathML annotation-xml whose encoding is text/html
+   or application/xhtml+xml. The encoding is read from the attributes the element will serialize with, which
+   sanitize_attributes has already settled because a parent is sanitized before its children are walked: a policy that
+   strips the encoding turns the annotation-xml back into plain MathML on reparse, so its HTML children are then
+   unreachable. The caller has already established the node is foreign, so a non-SVG parent is MathML. */
 static int is_html_integration_point(const th_node *node) {
     static const uint16_t svg_atoms[] = {TH_TAG_FOREIGNOBJECT, TH_TAG_DESC, TH_TAG_TITLE};
     if (node->ns == TH_NS_SVG) {
@@ -1832,7 +1845,19 @@ static int is_html_integration_point(const th_node *node) {
         }
         return 0;
     }
-    return node->atom == TH_TAG_ANNOTATION_XML;
+    if (node->atom != TH_TAG_ANNOTATION_XML) {
+        return 0;
+    }
+    /* a reparse keeps the first of duplicate attributes, so the first encoding decides */
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        const th_node_attr *attr = &node->attrs[index];
+        if (attr->name_atom == TH_ATTR_ENCODING) {
+            /* a bare attribute has a NULL value of length 0, which the length check rejects before any read */
+            return value_matches_ci(attr->value, attr->value_len, "text/html") ||
+                   value_matches_ci(attr->value, attr->value_len, "application/xhtml+xml");
+        }
+    }
+    return 0;
 }
 
 /* Is the element's namespace reachable from its parent's? The (element, namespace, parent) triples the HTML parser can

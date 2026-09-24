@@ -2110,6 +2110,48 @@ def test_namespace_confusion_is_dropped(
     assert marker not in _sanitize_tree(root, tags)  # confused by the move: the reachability check drops it
 
 
+_ANNOTATION_TAGS: Final = frozenset({"math", "annotation-xml", "style", "b"})
+
+
+@pytest.mark.parametrize(
+    ("html", "policy", "expected"),
+    [
+        pytest.param(
+            '<math><annotation-xml encoding="text/html"><style><img src=x onerror=alert(1)>{}</style>',
+            Policy(tags=_ANNOTATION_TAGS),
+            "<math><annotation-xml>&lt;style&gt;&lt;img src=x onerror=alert(1)&gt;{}&lt;/style&gt;"
+            "</annotation-xml></math>",
+            id="stripped-encoding-escapes-html-child",
+        ),
+        pytest.param(
+            '<math><annotation-xml encoding="text/html"><b>hi</b></annotation-xml></math>',
+            Policy(
+                tags=_ANNOTATION_TAGS,
+                attributes={"annotation-xml": frozenset({"encoding"})},
+                attribute_filter=lambda _tag, _name, _value: "text/htmx",
+            ),
+            '<math><annotation-xml encoding="text/htmx">&lt;b&gt;hi&lt;/b&gt;</annotation-xml></math>',
+            id="rewritten-encoding-escapes-html-child",
+        ),
+        pytest.param(
+            '<math><annotation-xml class="x" encoding="Text/HTML"><b>hi</b></annotation-xml></math>',
+            Policy(tags=_ANNOTATION_TAGS, attributes={"annotation-xml": frozenset({"class", "encoding"})}),
+            '<math><annotation-xml class="x" encoding="Text/HTML"><b>hi</b></annotation-xml></math>',
+            id="kept-encoding-keeps-html-child",
+        ),
+    ],
+)
+def test_annotation_xml_integration_follows_kept_encoding(html: str, policy: Policy, expected: str) -> None:
+    """annotation-xml keeps HTML children only while its serialized encoding makes it an integration point."""
+    assert sanitize(html, policy) == expected
+
+
+def test_annotation_xml_bare_encoding_is_not_integration_point() -> None:
+    root = parse_fragment("<math><annotation-xml encoding></annotation-xml></math><b>hi</b>")
+    _find(root, "annotation-xml").append(_find(root, "b"))
+    assert _sanitize_tree(root, _ANNOTATION_TAGS) == "<math><annotation-xml></annotation-xml></math>"
+
+
 _POST = "<p onclick='x'>Hi <b>there</b> <script>evil()</script></p>"
 
 
