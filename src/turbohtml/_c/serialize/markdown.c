@@ -465,12 +465,22 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
             ((kind & MD_CH_CONTEXT) || (translit && ch == 0x2190)) && md_escape_by_context(text, index, len);
         md_put_char(ctx, ch, (kind & ctx->escape_mask) || by_context);
         index++;
-        Py_ssize_t start = index;
-        while (index < len && (text[index] < 0x80 ? !(MD_ASCII[text[index]] & ctx->run_stop) : !translit)) {
+        /* past the word's first character nothing is at a line start, so an escaped
+           character only needs its backslash and the plain runs between them copy whole */
+        while (1) {
+            Py_ssize_t start = index;
+            while (index < len && (text[index] < 0x80 ? !(MD_ASCII[text[index]] & ctx->run_stop) : !translit)) {
+                index++;
+            }
+            if (index > start) {
+                md_put_run(ctx, &text[start], index - start);
+            }
+            if (index == len || text[index] >= 0x80 || !(MD_ASCII[text[index]] & ctx->escape_mask)) {
+                break;
+            }
+            sbuf_putc(&ctx->out, '\\');
+            sbuf_putc(&ctx->out, text[index]);
             index++;
-        }
-        if (index > start) {
-            md_put_run(ctx, &text[start], index - start);
         }
     }
 }
