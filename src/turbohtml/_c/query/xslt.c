@@ -2426,11 +2426,11 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
                 xp_result_free(&value);
                 continue;
             }
-            /* Bounded integers survive the existing decimal round-trip exactly. */
-            if (specs[spec].numeric && value.kind == XP_NUMBER && fabs(value.number) <= 9007199254740991.0 &&
-                value.number == floor(value.number)) {
+            /* XSLT reads the key back from its string form. A finite number survives that round trip exactly (the
+               shortest decimal parses back to the same double), while "Infinity" and "-Infinity" read as NaN. */
+            if (specs[spec].numeric && value.kind == XP_NUMBER) {
                 slot->key = NULL;
-                slot->number = value.number;
+                slot->number = isfinite(value.number) ? value.number : (double)NAN;
                 xp_result_free(&value);
                 continue;
             }

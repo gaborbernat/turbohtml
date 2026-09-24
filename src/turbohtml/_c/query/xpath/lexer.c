@@ -224,22 +224,7 @@ void lex_next(lexer *lx) {
                     lx->pos++;
                 }
             }
-            double value = 0.0;
-            double frac = 0.0;
-            double scale = 1.0;
-            int after_dot = 0;
-            for (Py_ssize_t index = start; index < lx->pos; index++) {
-                Py_UCS4 ch = lx->src[index];
-                if (ch == '.') {
-                    after_dot = 1;
-                } else if (!after_dot) {
-                    value = value * 10.0 + (ch - '0');
-                } else {
-                    scale *= 10.0;
-                    frac += (ch - '0') / scale;
-                }
-            }
-            lx->num = value + frac;
+            lx->num = xp_decimal_value(lx->src + start, lx->pos - start);
             lx->kind = TK_NUM;
             break;
         }

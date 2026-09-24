@@ -485,6 +485,52 @@ Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
     return th_node_text(tree, item.node, len);
 }
 
+/* Clinger's fast path: a digit run whose mantissa fits 2^53 with at most 22 digits after the point is
+   mantissa / 10^fraction_digits, two exact doubles divided with a single rounding. */
+#define XP_EXACT_MANTISSA (UINT64_C(1) << 53)
+#define XP_EXACT_FRACTION_DIGITS 22
+static const double XP_POWERS_OF_TEN[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
+                                          1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+
+/* A decimal run too long for the exact fast path, converted by CPython's correctly
+   rounded strtod. The run is ASCII digits and at most one '.', which Python's float
+   grammar accepts, so only an allocation failure can make the conversion fail. */
+static double decimal_value_slow(const Py_UCS4 *digits, Py_ssize_t len) {
+    char *ascii = PyMem_Malloc((size_t)len + 1);
+    if (ascii == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return (double)NAN; /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        ascii[index] = (char)digits[index];
+    }
+    ascii[len] = '\0';
+    double value = PyOS_string_to_double(ascii, NULL, NULL);
+    PyMem_Free(ascii);
+    if (value == -1.0 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only an allocation failure */
+        PyErr_Clear();                       /* GCOVR_EXCL_LINE */
+        return (double)NAN;                  /* GCOVR_EXCL_LINE */
+    }
+    return value;
+}
+
+double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len) {
+    uint64_t mantissa = 0;
+    Py_ssize_t fraction_digits = 0;
+    int after_dot = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (digits[index] == '.') {
+            after_dot = 1;
+            continue;
+        }
+        mantissa = mantissa * 10 + (digits[index] - '0');
+        fraction_digits += after_dot;
+        if (mantissa > XP_EXACT_MANTISSA || fraction_digits > XP_EXACT_FRACTION_DIGITS) {
+            return decimal_value_slow(digits, len);
+        }
+    }
+    return (double)mantissa / XP_POWERS_OF_TEN[fraction_digits];
+}
+
 /* XPath number parse: optional leading/trailing whitespace around an optional sign,
    digits, and attr_record fractional part; anything else is NaN. */
 double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
@@ -504,28 +550,33 @@ double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
         sign = -1;
         index++;
     }
-    double value = 0;
-    double frac = 0;
-    double scale = 1;
+    uint64_t mantissa = 0;
+    Py_ssize_t fraction_digits = 0;
+    int exact = 1;
     int seen_digit = 0;
     int after_dot = 0;
-    for (; index < end; index++) {
-        Py_UCS4 ch = text[index];
+    for (Py_ssize_t cursor = index; cursor < end; cursor++) {
+        Py_UCS4 ch = text[cursor];
         if (ch == '.' && !after_dot) {
             after_dot = 1;
         } else if (ch >= '0' && ch <= '9') {
             seen_digit = 1;
-            if (after_dot) {
-                scale *= 10;
-                frac += (ch - '0') / scale;
-            } else {
-                value = value * 10 + (ch - '0');
+            if (exact) {
+                mantissa = mantissa * 10 + (ch - '0');
+                fraction_digits += after_dot;
+                exact = mantissa <= XP_EXACT_MANTISSA && fraction_digits <= XP_EXACT_FRACTION_DIGITS;
             }
         } else {
             return (double)NAN;
         }
     }
-    return seen_digit ? sign * (value + frac) : (double)NAN;
+    if (!seen_digit) {
+        return (double)NAN;
+    }
+    if (!exact) {
+        return sign * decimal_value_slow(text + index, end - index);
+    }
+    return sign * (fraction_digits == 0 ? (double)mantissa : (double)mantissa / XP_POWERS_OF_TEN[fraction_digits]);
 }
 
 /* Render a finite non-integer (or a large integer past the %lld fast path) as the plain
