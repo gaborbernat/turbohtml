@@ -2011,45 +2011,27 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return element;
 }
 
-/* Prepare child_obj to become a child of dest_parent in anchor's tree and return
-   the th_node to link (already detached from any old position). A node in the same
-   tree is moved in place, its wrapper unchanged; a node from another tree is
-   deep-copied in and its wrapper re-pointed at the copy, so the source tree frees
-   on its own. NULL with an exception on a non-node, a Document, a cycle (making a
-   node a descendant of itself), or allocation failure. */
-th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj) {
-    module_state *state = state_of((PyObject *)anchor);
-    if (!PyObject_TypeCheck(child_obj, (PyTypeObject *)state->node_type)) {
-        PyErr_SetString(PyExc_TypeError, "child must be a node");
-        return NULL;
-    }
-    NodeObject *child = (NodeObject *)child_obj;
-    if (child->node->type == TH_NODE_DOCUMENT) {
-        PyErr_SetString(PyExc_TypeError, "a Document cannot be inserted as a child");
-        return NULL;
-    }
-    th_tree *dest_tree = tree_of((PyObject *)anchor);
-    if (dest_tree == tree_of(child_obj)) {
-        if (th_node_contains(dest_tree, child->node, dest_parent)) {
-            PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
-            return NULL;
-        }
-        th_node_remove_observed(dest_tree, child->node);
-        return child->node;
-    }
+/* Deep-copy child, a node of another tree, into dest_handle's tree and re-point its
+   wrapper at the copy, so the source tree frees on its own. The caller holds
+   dest_handle's critical section; taking the source tree's lock as well suspends
+   that section while it waits, so another thread can edit the destination tree in
+   between and the caller must not trust tree state it read before this call.
+   NULL with MemoryError on allocation failure. */
+static th_node *import_node(PyObject *dest_handle, NodeObject *child) {
+    th_tree *dest_tree = ((HandleObject *)dest_handle)->tree;
     PyObject *source_handle = child->handle;
 #ifdef Py_GIL_DISABLED
     Py_INCREF(source_handle);
 #endif
     th_node *copy;
-    Py_BEGIN_CRITICAL_SECTION2(anchor->handle, source_handle);
-    copy = th_tree_adopt_copy(dest_tree, tree_of(child_obj), child->node);
+    Py_BEGIN_CRITICAL_SECTION2(dest_handle, source_handle);
+    copy = th_tree_adopt_copy(dest_tree, tree_of((PyObject *)child), child->node);
     if (copy != NULL && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        handle_add_hash_override((HandleObject *)anchor->handle, copy,
+        handle_add_hash_override((HandleObject *)dest_handle, copy,
                                  handle_node_hash((HandleObject *)source_handle, child->node)) == 0) {
         handle_drop_index(source_handle);
-        th_node_remove_observed(tree_of(child_obj), child->node);
-        Py_SETREF(child->handle, Py_NewRef(anchor->handle));
+        th_node_remove_observed(tree_of((PyObject *)child), child->node);
+        Py_SETREF(child->handle, Py_NewRef(dest_handle));
         child->node = copy;
     } else {
         copy = NULL; /* GCOVR_EXCL_LINE */
@@ -2062,7 +2044,59 @@ th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_ob
         PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    /* a reader may have rebuilt the index while the section was suspended */
+    handle_drop_index(dest_handle);
     return copy;
+}
+
+/* Prepare child_obj to become a child of dest_parent in anchor's tree and return
+   the th_node to link (already detached from any old position). A node in the same
+   tree is moved in place, its wrapper unchanged; a node from another tree is
+   imported (see import_node). NULL with an exception on a non-node, a Document, a
+   cycle (making a node a descendant of itself), or allocation failure. */
+th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj) {
+    module_state *state = state_of((PyObject *)anchor);
+    if (!PyObject_TypeCheck(child_obj, (PyTypeObject *)state->node_type)) {
+        PyErr_SetString(PyExc_TypeError, "child must be a node");
+        return NULL;
+    }
+    NodeObject *child = (NodeObject *)child_obj;
+    if (child->node->type == TH_NODE_DOCUMENT) {
+        PyErr_SetString(PyExc_TypeError, "a Document cannot be inserted as a child");
+        return NULL;
+    }
+    th_tree *dest_tree = tree_of((PyObject *)anchor);
+    if (dest_tree != tree_of(child_obj)) {
+        return import_node(anchor->handle, child);
+    }
+    if (th_node_contains(dest_tree, child->node, dest_parent)) {
+        PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
+        return NULL;
+    }
+    th_node_remove_observed(dest_tree, child->node);
+    return child->node;
+}
+
+/* One pass importing every node of nodes that lives outside dest_handle's tree
+   (non-nodes and Documents are left for adopt_into to reject). Returns how many it
+   imported, or -1 on allocation failure. A caller that relinks around tree state it
+   reads must repeat the pass until it imports nothing: only then did its critical
+   section stay held from the read to the relink. */
+Py_ssize_t import_foreign_nodes(PyObject *dest_handle, PyObject *const *nodes, Py_ssize_t count) {
+    module_state *state = state_of(dest_handle);
+    th_tree *dest_tree = ((HandleObject *)dest_handle)->tree;
+    Py_ssize_t imported = 0;
+    for (Py_ssize_t index = 0; index < count; index++) {
+        if (!PyObject_TypeCheck(nodes[index], (PyTypeObject *)state->node_type) ||
+            ((NodeObject *)nodes[index])->node->type == TH_NODE_DOCUMENT || tree_of(nodes[index]) == dest_tree) {
+            continue;
+        }
+        if (import_node(dest_handle, (NodeObject *)nodes[index]) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            return -1;                                                      /* GCOVR_EXCL_LINE: OOM path */
+        }
+        imported++;
+    }
+    return imported;
 }
 
 /* Attach a freshly built element's children, rejecting content on a void tag the
@@ -2383,40 +2417,55 @@ static PyObject *element_wrap_children(PyObject *self, PyObject *wrapper_obj) {
     return Py_NewRef(wrapper_obj);
 }
 
-/* The shared parent for a sibling edit, or NULL with a ValueError set when this
-   node stands alone and so has nowhere to place a sibling. */
-static th_node *sibling_parent(PyObject *self) {
-    th_node *parent = ((NodeObject *)self)->node->parent;
-    if (parent == NULL) {
-        PyErr_SetString(PyExc_ValueError, "node has no parent");
+/* The parent for an edit that links nodes beside self, read under self's critical
+   section once every foreign node in nodes is imported. An import suspends that
+   section (see import_node), so the parent is re-read until a pass imports nothing;
+   the first read comes before any import, so a parentless node raises without
+   moving the arguments. NULL with a ValueError when the node has no parent, or with
+   MemoryError on allocation failure. */
+static th_node *sibling_parent(PyObject *self, PyObject *const *nodes, Py_ssize_t count) {
+    for (;;) {
+        th_node *parent = ((NodeObject *)self)->node->parent;
+        if (parent == NULL) {
+            PyErr_SetString(PyExc_ValueError, "node has no parent");
+            return NULL;
+        }
+        Py_ssize_t imported = import_foreign_nodes(((NodeObject *)self)->handle, nodes, count);
+        if (imported < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (imported == 0) {
+            return parent;
+        }
     }
-    return parent;
 }
 
 /* The structural edits hold the per-tree lock around the pointer rewiring so a
    concurrent read/mutate cannot observe a half-linked tree (a no-op on the GIL
-   build). adopt_into may run under the section; on a blocking point the section
-   suspends safely and the NULL-guarded walks stay memory-safe. */
+   build). sibling_parent imports the foreign arguments before these edits read the
+   parent, so adopt_into only takes the same-tree path and never suspends the
+   section between that read and the relink. */
 PyObject *node_insert_before(PyObject *self, PyObject *nodes) {
     th_node *ref = ((NodeObject *)self)->node;
-    th_node *parent = sibling_parent(self);
-    if (parent == NULL) {
-        return NULL;
-    }
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    handle_drop_index(((NodeObject *)self)->handle);
-    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
-        PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
-        if (is_same_node(self, new_obj, ref)) {
-            continue;
+    th_node *parent = sibling_parent(self, ((PyTupleObject *)nodes)->ob_item, PyTuple_GET_SIZE(nodes));
+    if (parent == NULL) {
+        error = 1;
+    } else {
+        handle_drop_index(((NodeObject *)self)->handle);
+        for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+            PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
+            if (is_same_node(self, new_obj, ref)) {
+                continue;
+            }
+            th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
+            if (node == NULL) {
+                error = 1;
+                break;
+            }
+            th_node_insert_before_observed(tree_of(self), parent, node, ref);
         }
-        th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
-        if (node == NULL) {
-            error = 1;
-            break;
-        }
-        th_node_insert_before_observed(tree_of(self), parent, node, ref);
     }
     Py_END_CRITICAL_SECTION();
     if (error) {
@@ -2427,25 +2476,26 @@ PyObject *node_insert_before(PyObject *self, PyObject *nodes) {
 
 PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
     th_node *cursor = ((NodeObject *)self)->node;
-    th_node *parent = sibling_parent(self);
-    if (parent == NULL) {
-        return NULL;
-    }
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    handle_drop_index(((NodeObject *)self)->handle);
-    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
-        PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
-        if (is_same_node(self, new_obj, cursor)) {
-            continue;
+    th_node *parent = sibling_parent(self, ((PyTupleObject *)nodes)->ob_item, PyTuple_GET_SIZE(nodes));
+    if (parent == NULL) {
+        error = 1;
+    } else {
+        handle_drop_index(((NodeObject *)self)->handle);
+        for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+            PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
+            if (is_same_node(self, new_obj, cursor)) {
+                continue;
+            }
+            th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
+            if (node == NULL) {
+                error = 1;
+                break;
+            }
+            th_node_insert_before_observed(tree_of(self), parent, node, cursor->next_sibling);
+            cursor = node; /* keep multiple inserts in argument order after this node */
         }
-        th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
-        if (node == NULL) {
-            error = 1;
-            break;
-        }
-        th_node_insert_before_observed(tree_of(self), parent, node, cursor->next_sibling);
-        cursor = node; /* keep multiple inserts in argument order after this node */
     }
     Py_END_CRITICAL_SECTION();
     if (error) {
@@ -2456,29 +2506,30 @@ PyObject *node_insert_after(PyObject *self, PyObject *nodes) {
 
 PyObject *node_replace_with(PyObject *self, PyObject *nodes) {
     th_node *ref = ((NodeObject *)self)->node;
-    th_node *parent = sibling_parent(self);
-    if (parent == NULL) {
-        return NULL;
-    }
     int keep_self = 0;
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    handle_drop_index(((NodeObject *)self)->handle);
-    for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
-        PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
-        if (is_same_node(self, new_obj, ref)) {
-            keep_self = 1; /* replacing a node with itself leaves it in place */
-            continue;
+    th_node *parent = sibling_parent(self, ((PyTupleObject *)nodes)->ob_item, PyTuple_GET_SIZE(nodes));
+    if (parent == NULL) {
+        error = 1;
+    } else {
+        handle_drop_index(((NodeObject *)self)->handle);
+        for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(nodes); index++) {
+            PyObject *new_obj = PyTuple_GET_ITEM(nodes, index);
+            if (is_same_node(self, new_obj, ref)) {
+                keep_self = 1; /* replacing a node with itself leaves it in place */
+                continue;
+            }
+            th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
+            if (node == NULL) {
+                error = 1;
+                break;
+            }
+            th_node_insert_before_observed(tree_of(self), parent, node, ref);
         }
-        th_node *node = adopt_into((NodeObject *)self, parent, new_obj);
-        if (node == NULL) {
-            error = 1;
-            break;
+        if (!error && !keep_self) {
+            th_node_remove_observed(tree_of(self), ref);
         }
-        th_node_insert_before_observed(tree_of(self), parent, node, ref);
-    }
-    if (!error && !keep_self) {
-        th_node_remove_observed(tree_of(self), ref);
     }
     Py_END_CRITICAL_SECTION();
     if (error) {
@@ -2500,26 +2551,27 @@ PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
         return NULL;
     }
     th_node *parent = node->node->parent;
+    if (node->node->parent == NULL) {
+        /* a standalone node just moves into the wrapper, under the wrapper's tree lock */
+        PyObject *appended = element_append(wrapper_obj, self);
+        if (appended == NULL) {
+            return NULL;
+        }
+        Py_DECREF(appended);
+        return Py_NewRef(wrapper_obj);
+    }
     int error = 0;
-    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    handle_drop_index(((NodeObject *)self)->handle);
-    if (parent != NULL) {
-        th_node *wrapper = adopt_into(node, parent, wrapper_obj);
-        if (wrapper == NULL) {
-            error = 1;
-        } else {
-            th_node_insert_before_observed(tree_of(self), parent, wrapper, node->node);
-            th_node_remove_observed(tree_of(self), node->node);
-            th_node_append_child_observed(tree_of(self), wrapper, node->node);
-        }
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    handle_drop_index(node->handle);
+    th_node *parent = sibling_parent(self, &wrapper_obj, 1);
+    /* parent is NULL only when another thread detached this node, or on OOM */
+    th_node *wrapper = parent == NULL ? NULL : adopt_into(node, parent, wrapper_obj); /* GCOVR_EXCL_BR_LINE */
+    if (wrapper == NULL) {
+        error = 1;
     } else {
-        NodeObject *wrapper = (NodeObject *)wrapper_obj;
-        th_node *moved = adopt_into(wrapper, wrapper->node, self);
-        if (moved == NULL) {
-            error = 1;
-        } else {
-            th_node_append_child_observed(tree_of(self), wrapper->node, moved);
-        }
+        th_node_insert_before_observed(tree_of(self), parent, wrapper, node->node);
+        th_node_remove_observed(tree_of(self), node->node);
+        th_node_append_child_observed(tree_of(self), wrapper, node->node);
     }
     Py_END_CRITICAL_SECTION();
     if (error) {
@@ -2555,18 +2607,18 @@ PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kwds) {
     }
     NodeObject *node = (NodeObject *)self;
     th_node *first = node->node;
-    th_node *wrapper_node = ((NodeObject *)wrapper_obj)->node;
     int error = 0;
-    int no_parent = 0;
     const char *value_error = NULL;
     Py_BEGIN_CRITICAL_SECTION(node->handle);
     handle_drop_index(node->handle);
-    /* The parent and the run are resolved under the lock; reading them earlier could
-       stale them against a concurrent move that relinks this node to another parent. */
-    th_node *parent = first->parent;
+    /* The parent and the run are resolved under the lock after the wrapper import;
+       reading them earlier could stale them against a concurrent move that relinks
+       this node to another parent. */
+    th_node *parent = sibling_parent(self, &wrapper_obj, 1);
     if (parent == NULL) {
-        no_parent = 1;
+        error = 1;
     } else {
+        th_node *wrapper_node = ((NodeObject *)wrapper_obj)->node;
         th_node *last = NULL;
         if (until_node == NULL) {
             last = parent->last_child; /* the whole run from this node to the end */
@@ -2614,10 +2666,6 @@ PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kwds) {
         }
     }
     Py_END_CRITICAL_SECTION();
-    if (no_parent) {
-        PyErr_SetString(PyExc_ValueError, "node has no parent");
-        return NULL;
-    }
     if (value_error != NULL) {
         PyErr_SetString(PyExc_ValueError, value_error);
         return NULL;
@@ -2630,19 +2678,24 @@ PyObject *node_wrap_siblings(PyObject *self, PyObject *args, PyObject *kwds) {
 
 PyObject *node_unwrap(PyObject *self, PyObject *Py_UNUSED(ignored)) {
     th_node *node = ((NodeObject *)self)->node;
-    th_node *parent = sibling_parent(self);
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    th_node *parent = sibling_parent(self, NULL, 0);
     if (parent == NULL) {
+        error = 1;
+    } else {
+        handle_drop_index(((NodeObject *)self)->handle);
+        while (node->first_child != NULL) {
+            th_node *child = node->first_child;
+            th_node_remove_observed(tree_of(self), child);
+            th_node_insert_before_observed(tree_of(self), parent, child, node);
+        }
+        th_node_remove_observed(tree_of(self), node);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
         return NULL;
     }
-    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    handle_drop_index(((NodeObject *)self)->handle);
-    while (node->first_child != NULL) {
-        th_node *child = node->first_child;
-        th_node_remove_observed(tree_of(self), child);
-        th_node_insert_before_observed(tree_of(self), parent, child, node);
-    }
-    th_node_remove_observed(tree_of(self), node);
-    Py_END_CRITICAL_SECTION();
     return Py_NewRef(self);
 }
 

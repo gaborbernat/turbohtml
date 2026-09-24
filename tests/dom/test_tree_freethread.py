@@ -602,3 +602,25 @@ def test_concurrent_cross_tree_adoption_copies_one_source_state() -> None:
     adopted = destination.select_one("#target")
     assert adopted is not None
     assert adopted.attrs["data-state"] in {"s", long_state}
+
+
+def test_concurrent_wraps_and_inserts_of_foreign_nodes_keep_the_tree_intact() -> None:
+    markup = "<div>" + "<p><b>x</b></p>" * 200 + "</div>"
+    root = turbohtml.parse(markup).find("div")
+    assert root is not None
+    paragraphs = root.find_all("p")
+    start = threading.Barrier(4)
+
+    def editor(offset: int) -> None:
+        start.wait()
+        for index in range(offset, offset + 2000):
+            paragraph = paragraphs[index * 7 % len(paragraphs)]
+            paragraph.wrap(turbohtml.Element("span")).unwrap()  # each foreign wrapper is copied into the tree
+            paragraph.wrap_siblings(turbohtml.Element("span"), until=paragraph).unwrap()
+            paragraph.wrap_children(turbohtml.Element("span")).unwrap()
+            marker = turbohtml.Element("i")
+            paragraph.insert_before(marker)
+            marker.decompose()
+
+    _run(*(lambda offset=offset: editor(offset) for offset in range(4)))
+    assert root.serialize() == markup
