@@ -2550,32 +2550,36 @@ PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
         PyErr_SetString(PyExc_ValueError, "wrapper cannot be the wrapped node");
         return NULL;
     }
-    th_node *parent = node->node->parent;
+    int standalone = 0;
+    int error = 0;
+    Py_BEGIN_CRITICAL_SECTION(node->handle);
+    /* read under the lock: a concurrent move detaches this node for a moment */
     if (node->node->parent == NULL) {
+        standalone = 1;
+    } else {
+        handle_drop_index(node->handle);
+        th_node *parent = sibling_parent(self, &wrapper_obj, 1);
+        /* parent is NULL only when another thread detached this node, or on OOM */
+        th_node *wrapper = parent == NULL ? NULL : adopt_into(node, parent, wrapper_obj); /* GCOVR_EXCL_BR_LINE */
+        if (wrapper == NULL) {
+            error = 1;
+        } else {
+            th_node_insert_before_observed(tree_of(self), parent, wrapper, node->node);
+            th_node_remove_observed(tree_of(self), node->node);
+            th_node_append_child_observed(tree_of(self), wrapper, node->node);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (error) {
+        return NULL;
+    }
+    if (standalone) {
         /* a standalone node just moves into the wrapper, under the wrapper's tree lock */
         PyObject *appended = element_append(wrapper_obj, self);
         if (appended == NULL) {
             return NULL;
         }
         Py_DECREF(appended);
-        return Py_NewRef(wrapper_obj);
-    }
-    int error = 0;
-    Py_BEGIN_CRITICAL_SECTION(node->handle);
-    handle_drop_index(node->handle);
-    th_node *parent = sibling_parent(self, &wrapper_obj, 1);
-    /* parent is NULL only when another thread detached this node, or on OOM */
-    th_node *wrapper = parent == NULL ? NULL : adopt_into(node, parent, wrapper_obj); /* GCOVR_EXCL_BR_LINE */
-    if (wrapper == NULL) {
-        error = 1;
-    } else {
-        th_node_insert_before_observed(tree_of(self), parent, wrapper, node->node);
-        th_node_remove_observed(tree_of(self), node->node);
-        th_node_append_child_observed(tree_of(self), wrapper, node->node);
-    }
-    Py_END_CRITICAL_SECTION();
-    if (error) {
-        return NULL;
     }
     return Py_NewRef(wrapper_obj);
 }
