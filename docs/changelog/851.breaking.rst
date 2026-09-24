@@ -1,2 +1,0 @@
-``Html(layout=Indent())`` now adds whitespace only between block-level elements and keeps inline content on one line, so
-the reparsed text matches the source and indenting the output again reproduces it. Pretty-printed output changes.
