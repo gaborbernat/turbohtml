@@ -198,6 +198,23 @@ def test_escape_reproduces_only_source_start_tags(html: str, expected: str) -> N
     assert sanitize(html, Policy(tags=frozenset({"table", "tr", "td", "col"}))) == expected
 
 
+@pytest.mark.parametrize(
+    "html",
+    [
+        pytest.param("<b>1<p>2</b>3</p>", id="adoption-agency-clone"),
+        pytest.param("<p><b>1</p><p>2</p>", id="reconstructed-formatting"),
+        pytest.param("<i>a<div>b</i>c</div>", id="adoption-agency-block"),
+    ],
+)
+def test_escape_cloned_formatting_element_reproduces_source(html: str) -> None:
+    # the tree builder clones a formatting element the source opened once; escaping renders its start tag once
+    assert sanitize(html, Policy.strict()) == html.replace("<", "&lt;").replace(">", "&gt;")
+
+
+def test_escape_document_skeleton_synthesized_at_eof_is_silent() -> None:
+    assert not sanitize_node(parse(""), Policy.strict()).serialize()
+
+
 def test_escape_renamed_implied_element_has_no_start_tag() -> None:
     policy = Policy(tags=frozenset({"table", "tr", "td"}), transform_tags={"tbody": "section"})
     assert sanitize("<table><tr><td>1</td></tr></table>", policy) == "<table><tr><td>1</td></tr></table>"

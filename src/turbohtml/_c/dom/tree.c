@@ -1307,7 +1307,8 @@ static th_node *node_clone(th_tree *tree, const th_node *src) {
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     node->atom = src->atom;
-    node->tag_flags = src->tag_flags;
+    /* a clone never has a source start tag of its own, and any end tag that closes it is recorded when it pops */
+    node->tag_flags = (uint8_t)((src->tag_flags & ~TH_ELEM_CLOSED_BY_END_TAG) | TH_ELEM_IMPLIED);
     node->text = src->text;
     node->text_len = src->text_len;
     node->attrs = src->attrs; /* attributes are immutable arena data; share them */
@@ -4099,7 +4100,7 @@ static th_node *make_named(th_tree *tree, uint16_t atom, uint8_t flags) {
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     node->atom = atom;
-    node->tag_flags = flags;
+    node->tag_flags = flags | TH_ELEM_IMPLIED;
     node->text = (Py_UCS4 *)th_tag_wide_name(atom);
     node->text_len = th_tag_table[atom - 1].name_len;
     return node;
