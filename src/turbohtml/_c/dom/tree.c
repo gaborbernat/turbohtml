@@ -303,6 +303,26 @@ int th_tree_quirks(const th_tree *tree) {
     return tree->quirks;
 }
 
+int th_doctype_is_quirky(th_node *node) {
+    th_token tok = {0};
+    Py_ssize_t name_len = 0;
+    while (name_len < node->text_len && node->text[name_len] != ' ') {
+        name_len++;
+    }
+    tok.name = (th_buf){node->text, name_len, 0, PyUnicode_4BYTE_KIND};
+    const Py_UCS4 *public_id;
+    const Py_UCS4 *system_id;
+    Py_ssize_t public_len;
+    Py_ssize_t system_len;
+    if (th_node_doctype_ids(node, &public_id, &public_len, &system_id, &system_len)) {
+        tok.has_public_id = (node->tag_flags & TH_DOCTYPE_HAS_PUBLIC) != 0;
+        tok.has_system_id = (node->tag_flags & TH_DOCTYPE_HAS_SYSTEM) != 0;
+        tok.public_id = (th_buf){(void *)public_id, public_len, 0, PyUnicode_4BYTE_KIND};
+        tok.system_id = (th_buf){(void *)system_id, system_len, 0, PyUnicode_4BYTE_KIND};
+    }
+    return doctype_is_quirky(&tok);
+}
+
 int th_tree_scripting(const th_tree *tree) {
     return tree->scripting;
 }

@@ -415,6 +415,11 @@ const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count)
    (Selectors-4 §6.1/§6.2); programmatic trees default to no-quirks. */
 int th_tree_quirks(const th_tree *tree);
 
+/* Whether a doctype node written back as its name and identifiers alone puts a
+   document in quirks mode. A parse can also force quirks through malformed doctype
+   syntax the node does not record, so th_tree_quirks can hold where this does not. */
+int th_doctype_is_quirky(th_node *node);
+
 /* Whether the tree was parsed with the WHATWG scripting flag on (noscript is a
    raw-text element); programmatic trees default to off. innerHTML fragment parsing
    reads it so a scripting-parsed subtree keeps building noscript as raw text. */
