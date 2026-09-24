@@ -6,9 +6,9 @@
 
 #include "dom/nodes.h"
 
-/* The sanitized value of a text-like input (not a checkbox, radio, button, or file input) as a new str. NULL only on
-   allocation failure. */
-PyObject *th_form_input_value(th_node *input);
+/* The sanitized value of a text-like input (not a checkbox, radio, button, or file input) as a new str; type and value
+   are the input's type and value attributes, NULL when it has none. NULL only on allocation failure. */
+PyObject *th_form_input_value(th_node *input, const th_node_attr *type, const th_node_attr *value);
 
 /* A textarea's API value as a new str: its text content with every CRLF and lone CR normalized to LF. NULL only on
    allocation failure. */

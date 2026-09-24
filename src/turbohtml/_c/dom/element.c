@@ -404,8 +404,7 @@ static int input_type_is(th_node *node, const char *name) {
    unrecognized type is text-like, the WHATWG default. */
 enum field_kind { FIELD_TEXTLIKE, FIELD_CHECKABLE, FIELD_BUTTONLIKE, FIELD_FILE };
 
-static enum field_kind input_kind(th_node *node) {
-    const th_node_attr *type = find_node_attr(node, TH_ATTR_TYPE);
+static enum field_kind input_kind(const th_node_attr *type) {
     if (type == NULL || type->value == NULL) {
         return FIELD_TEXTLIKE;
     }
@@ -424,14 +423,17 @@ static enum field_kind input_kind(th_node *node) {
     return FIELD_TEXTLIKE;
 }
 
-/* The value attribute as a str, or the fallback str when the attribute is absent;
+/* An attribute's value as a str, or the fallback str when the attribute is absent;
    a present-but-empty (or valueless) attribute is the empty string. */
-static PyObject *value_attr_or(th_node *node, const char *fallback) {
-    const th_node_attr *value = find_node_attr(node, TH_ATTR_VALUE);
+static PyObject *attr_value_or(const th_node_attr *value, const char *fallback) {
     if (value == NULL) {
         return PyUnicode_FromString(fallback);
     }
     return value->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(value->value, value->value_len);
+}
+
+static PyObject *value_attr_or(th_node *node, const char *fallback) {
+    return attr_value_or(find_node_attr(node, TH_ATTR_VALUE), fallback);
 }
 
 /* A str from a code-point run with leading and trailing ASCII whitespace removed. */
@@ -575,7 +577,7 @@ static PyObject *element_get_field_value(PyObject *self, void *Py_UNUSED(closure
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     switch (node->atom) {
     case TH_TAG_INPUT:
-        result = value_attr_or(node, input_kind(node) == FIELD_CHECKABLE ? "on" : "");
+        result = value_attr_or(node, input_kind(find_node_attr(node, TH_ATTR_TYPE)) == FIELD_CHECKABLE ? "on" : "");
         break;
     case TH_TAG_TEXTAREA:
         result = str_from_accessor(th_node_text, tree, node);
@@ -853,12 +855,8 @@ static int control_in_first_legend(th_node *fieldset, th_node *control) {
 }
 #endif
 
-/* Whether a control is barred from submission: its own disabled attribute, or a
-   disabling fieldset between it and the form. */
-static int control_disabled(th_node *control, th_node *form) {
-    if (find_node_attr(control, TH_ATTR_DISABLED) != NULL) {
-        return 1;
-    }
+/* Whether a disabling fieldset sits between a control and the form. */
+static int fieldset_disables(th_node *control, th_node *form) {
     /* CPython 3.12+ defers collection callbacks until this C call returns. */
 #if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
     for (th_node *ancestor = control->parent; ancestor != form; ancestor = ancestor->parent) {
@@ -871,9 +869,47 @@ static int control_disabled(th_node *control, th_node *form) {
         }
     }
 #else
+    (void)control;
     (void)form;
 #endif
     return 0;
+}
+
+/* The attributes a form control's submission reads, found in one pass over its attribute list (an element never
+   holds two attributes of one name). */
+typedef struct {
+    const th_node_attr *name;
+    const th_node_attr *type;
+    const th_node_attr *value;
+    const th_node_attr *checked;
+    int disabled;
+} control_attrs;
+
+static control_attrs read_control_attrs(const th_node *node) {
+    control_attrs found = {0};
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        const th_node_attr *attr = &node->attrs[index];
+        switch (attr->name_atom) {
+        case TH_ATTR_NAME:
+            found.name = attr;
+            break;
+        case TH_ATTR_TYPE:
+            found.type = attr;
+            break;
+        case TH_ATTR_VALUE:
+            found.value = attr;
+            break;
+        case TH_ATTR_CHECKED:
+            found.checked = attr;
+            break;
+        case TH_ATTR_DISABLED:
+            found.disabled = 1;
+            break;
+        default:
+            break;
+        }
+    }
+    return found;
 }
 
 /* Append a (name, value) pair, taking ownership of value and stealing nothing from
@@ -925,8 +961,10 @@ static int collect_control(th_tree *tree, th_node *form, th_node *node, PyObject
     if (atom != TH_TAG_INPUT && atom != TH_TAG_TEXTAREA && atom != TH_TAG_SELECT) {
         return 0;
     }
-    const th_node_attr *name = find_node_attr(node, TH_ATTR_NAME);
-    if (name == NULL || name->value == NULL || name->value_len == 0 || control_disabled(node, form)) {
+    control_attrs attrs = read_control_attrs(node);
+    const th_node_attr *name = attrs.name;
+    if (name == NULL || name->value == NULL || name->value_len == 0 || attrs.disabled ||
+        fieldset_disables(node, form)) {
         return 0;
     }
     if (atom == TH_TAG_SELECT) {
@@ -935,14 +973,14 @@ static int collect_control(th_tree *tree, th_node *form, th_node *node, PyObject
     if (atom == TH_TAG_TEXTAREA) {
         return emit_pair(pairs, name, th_form_textarea_value(tree, node));
     }
-    enum field_kind kind = input_kind(node);
+    enum field_kind kind = input_kind(attrs.type);
     if (kind == FIELD_BUTTONLIKE || kind == FIELD_FILE) {
         return 0;
     }
-    if (kind == FIELD_CHECKABLE && find_node_attr(node, TH_ATTR_CHECKED) == NULL) {
-        return 0;
+    if (kind == FIELD_CHECKABLE) {
+        return attrs.checked == NULL ? 0 : emit_pair(pairs, name, attr_value_or(attrs.value, "on"));
     }
-    return emit_pair(pairs, name, kind == FIELD_CHECKABLE ? value_attr_or(node, "on") : th_form_input_value(node));
+    return emit_pair(pairs, name, th_form_input_value(node, attrs.type, attrs.value));
 }
 
 PyDoc_STRVAR(form_data_doc, "form_data()\n--\n\n"

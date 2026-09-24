@@ -17,6 +17,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
 enum input_state {
     STATE_TEXT, /* text, search, tel, password, and every unrecognized type */
     STATE_VERBATIM,
@@ -44,29 +54,30 @@ static int ascii_ieq(const Py_UCS4 *value, Py_ssize_t len, const char *literal) 
     return 1;
 }
 
-static enum input_state input_state_of(th_node *input) {
+static enum input_state input_state_of(const th_node_attr *type) {
     static const struct {
         const char *name;
+        Py_ssize_t len;
         enum input_state state;
     } STATES[] = {
-        {"hidden", STATE_VERBATIM},
-        {"color", STATE_VERBATIM},
-        {"url", STATE_URL},
-        {"email", STATE_EMAIL},
-        {"number", STATE_NUMBER},
-        {"range", STATE_RANGE},
-        {"date", STATE_DATE},
-        {"month", STATE_MONTH},
-        {"week", STATE_WEEK},
-        {"time", STATE_TIME},
-        {"datetime-local", STATE_DATETIME_LOCAL},
+        {"hidden", 6, STATE_VERBATIM},
+        {"color", 5, STATE_VERBATIM},
+        {"url", 3, STATE_URL},
+        {"email", 5, STATE_EMAIL},
+        {"number", 6, STATE_NUMBER},
+        {"range", 5, STATE_RANGE},
+        {"date", 4, STATE_DATE},
+        {"month", 5, STATE_MONTH},
+        {"week", 4, STATE_WEEK},
+        {"time", 4, STATE_TIME},
+        {"datetime-local", 14, STATE_DATETIME_LOCAL},
     };
-    const th_node_attr *type = find_node_attr(input, TH_ATTR_TYPE);
-    if (type != NULL && type->value != NULL) {
-        for (size_t index = 0; index < sizeof(STATES) / sizeof(STATES[0]); index++) {
-            if (ascii_ieq(type->value, type->value_len, STATES[index].name)) {
-                return STATES[index].state;
-            }
+    if (type == NULL || type->value == NULL) {
+        return STATE_TEXT;
+    }
+    for (size_t index = 0; index < sizeof(STATES) / sizeof(STATES[0]); index++) {
+        if (type->value_len == STATES[index].len && ascii_ieq(type->value, type->value_len, STATES[index].name)) {
+            return STATES[index].state;
         }
     }
     return STATE_TEXT;
@@ -513,40 +524,51 @@ static PyObject *range_value(th_node *input, const Py_UCS4 *text, Py_ssize_t len
     return valid && constrained == number ? ucs4_to_str(text, len) : number_to_str(constrained);
 }
 
+/* A str from a code-point run, with leading and trailing ASCII whitespace removed when trim is set. */
+static PyObject *trimmed_str(const Py_UCS4 *text, Py_ssize_t len, int trim) {
+    Py_ssize_t start = 0;
+    Py_ssize_t end = len;
+    while (trim && start < end && is_space(text[start])) {
+        start++;
+    }
+    while (trim && end > start && is_space(text[end - 1])) {
+        end--;
+    }
+    return ucs4_to_str(text + start, end - start);
+}
+
+/* The value with every LF and CR removed (the first at index newline), and with leading and trailing ASCII whitespace
+   stripped when trim is set. */
+static TH_NOINLINE PyObject *without_newlines(const Py_UCS4 *text, Py_ssize_t len, Py_ssize_t newline, int trim) {
+    Py_UCS4 *buffer = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+    if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memcpy(buffer, text, (size_t)newline * sizeof(Py_UCS4));
+    Py_ssize_t end = newline;
+    for (Py_ssize_t index = newline + 1; index < len; index++) {
+        if (text[index] != '\n' && text[index] != '\r') {
+            buffer[end++] = text[index];
+        }
+    }
+    PyObject *result = trimmed_str(buffer, end, trim);
+    PyMem_Free(buffer);
+    return result;
+}
+
 /* The value with every LF and CR removed, and with leading and trailing ASCII whitespace stripped when trim is set. */
 static PyObject *strip_newlines(const Py_UCS4 *text, Py_ssize_t len, int trim) {
     Py_ssize_t newline = 0;
+    while (newline < len && text[newline] > '\r') { /* one compare per character skips everything above CR */
+        newline++;
+    }
     while (newline < len && text[newline] != '\n' && text[newline] != '\r') {
         newline++;
     }
-    /* most values carry no newline, so they trim in place without a copy */
-    const Py_UCS4 *source = text;
-    Py_UCS4 *buffer = NULL;
-    Py_ssize_t end = len;
-    if (newline < len) {
-        buffer = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
-        if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        memcpy(buffer, text, (size_t)newline * sizeof(Py_UCS4));
-        end = newline;
-        for (Py_ssize_t index = newline + 1; index < len; index++) {
-            if (text[index] != '\n' && text[index] != '\r') {
-                buffer[end++] = text[index];
-            }
-        }
-        source = buffer;
+    if (newline == len) { /* most values carry no newline, so they need no copy */
+        return trim ? trimmed_str(text, len, 1) : ucs4_to_str(text, len);
     }
-    Py_ssize_t start = 0;
-    while (trim && start < end && is_space(source[start])) {
-        start++;
-    }
-    while (trim && end > start && is_space(source[end - 1])) {
-        end--;
-    }
-    PyObject *result = ucs4_to_str(source + start, end - start);
-    PyMem_Free(buffer);
-    return result;
+    return without_newlines(text, len, newline, trim);
 }
 
 /* A multiple email value: split on commas, each token stripped of ASCII whitespace, rejoined with single commas. A
@@ -588,14 +610,14 @@ static PyObject *kept_if(int valid, const Py_UCS4 *text, Py_ssize_t len) {
     return valid ? ucs4_to_str(text, len) : PyUnicode_New(0, 0);
 }
 
-PyObject *th_form_input_value(th_node *input) {
-    const th_node_attr *attr = find_node_attr(input, TH_ATTR_VALUE);
-    const Py_UCS4 *text = attr != NULL ? attr->value : NULL;
-    Py_ssize_t len = text != NULL ? attr->value_len : 0;
+/* The value of an input whose type attribute picks its value sanitization state. Kept out of line so the common
+   typeless input, a text state, runs in a small function without this switch's register pressure. */
+static TH_NOINLINE PyObject *typed_input_value(th_node *input, const th_node_attr *type, const Py_UCS4 *text,
+                                               Py_ssize_t len) {
     int cycle = 0;
     int month = 0;
     time_shape shape;
-    switch (input_state_of(input)) {
+    switch (input_state_of(type)) {
     case STATE_VERBATIM:
         return ucs4_to_str(text, len);
     case STATE_URL:
@@ -620,6 +642,15 @@ PyObject *th_form_input_value(th_node *input) {
     default: /* STATE_TEXT */
         return strip_newlines(text, len, 0);
     }
+}
+
+PyObject *th_form_input_value(th_node *input, const th_node_attr *type, const th_node_attr *value) {
+    const Py_UCS4 *text = value != NULL ? value->value : NULL;
+    Py_ssize_t len = text != NULL ? value->value_len : 0;
+    if (type == NULL || type->value == NULL) {
+        return strip_newlines(text, len, 0);
+    }
+    return typed_input_value(input, type, text, len);
 }
 
 PyObject *th_form_textarea_value(th_tree *tree, th_node *textarea) {
