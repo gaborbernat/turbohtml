@@ -160,6 +160,11 @@ static int is_url_ignorable(Py_UCS4 c) {
     }
 }
 
+/* javascript: runs script in the page, so the safety baseline refuses it whatever the policy's url_schemes lists. */
+static int is_script_scheme(const char *scheme, size_t len) {
+    return len == 10 && memcmp(scheme, "javascript", 10) == 0;
+}
+
 /* Read the URL's scheme the way a browser does -- skipping the whitespace and control bytes it ignores -- and allow the
    attribute only if that scheme is on the allowlist, or there is no scheme and relative URLs are allowed. The parser
    has already resolved entity references, so the value arrives decoded. Returns 1 allow, 0 drop, -1 error. */
@@ -173,6 +178,9 @@ static int scheme_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t len) {
             continue;
         }
         if (c == ':' && started) {
+            if (is_script_scheme(scheme, (size_t)length)) {
+                return 0;
+            }
             PyObject *name = PyUnicode_FromStringAndSize(scheme, length);
             if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -766,6 +774,10 @@ static int css_url_scheme_allowed(sanitizer *s, const Py_UCS4 *value, Py_ssize_t
             continue;
         }
         if (codepoint == ':' && scheme_started) {
+            if (is_script_scheme(scheme, scheme_len)) {
+                allowed = 0;
+                continue;
+            }
             PyObject *name = PyUnicode_FromStringAndSize(scheme, (Py_ssize_t)scheme_len);
             if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 result = -1;    /* GCOVR_EXCL_LINE: allocation-failure path */

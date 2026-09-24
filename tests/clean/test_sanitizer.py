@@ -2558,6 +2558,34 @@ _SCHEME_PARITY = [
 ]
 
 
+_SCRIPT_SCHEME_POLICY: Final = Policy(
+    tags=frozenset({"a", "img", "p"}),
+    attributes={"a": frozenset({"href"}), "img": frozenset({"srcset"}), "p": frozenset({"style"})},
+    url_schemes=frozenset({"javascript", "http", "x-callback"}),
+    css_properties=frozenset({"background"}),
+)
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param('<a href="javascript:alert(1)">x</a>', "<a>x</a>", id="href"),
+        pytest.param('<a href="JaVa&#9;ScRiPt:alert(1)">x</a>', "<a>x</a>", id="href-obfuscated"),
+        pytest.param('<img srcset="javascript:alert(1) 1x">', "<img>", id="srcset"),
+        pytest.param('<p style="background:url(javascript:alert)">x</p>', "<p>x</p>", id="style-url"),
+        pytest.param('<a href="http://a.com">x</a>', '<a href="http://a.com">x</a>', id="other-listed-scheme-kept"),
+        pytest.param('<a href="x-callback:go">x</a>', '<a href="x-callback:go">x</a>', id="same-length-scheme-kept"),
+    ],
+)
+def test_javascript_scheme_dropped_even_when_allowlisted(html: str, expected: str) -> None:
+    assert sanitize(html, _SCRIPT_SCHEME_POLICY) == expected
+
+
+def test_javascript_scheme_dropped_from_style_element_even_when_allowlisted() -> None:
+    policy = replace(_SCRIPT_SCHEME_POLICY, tags=frozenset({"style"}))
+    assert sanitize("<style>p{background:url(javascript:alert)}</style>", policy) == "<style>p{}</style>"
+
+
 @pytest.mark.parametrize(("url", "kept"), _SCHEME_PARITY)
 def test_scheme_allowlist_parity(url: str, kept: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]
     assert ("href=" in sanitize(f'<a href="{url}">x</a>', Policy())) is kept
