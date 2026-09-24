@@ -476,3 +476,10 @@ def test_feed_malformed_xml_falls_back_to_html() -> None:
     assert feed("<rss><channel><title>T&nbsp;U</title><link>https://example.com/</channel>") == Feed(
         "rss", "T\xa0U", "https://example.com/", None, None, ()
     )
+
+
+def test_feed_field_text_spans_nested_elements() -> None:
+    xml = "<rss><channel><item><description>a <b>bold</b> c</description></item></channel></rss>"
+    assert feed(xml) == Feed(
+        "rss", None, None, None, None, (Entry(None, None, None, None, None, "a bold c", None, None),)
+    )
