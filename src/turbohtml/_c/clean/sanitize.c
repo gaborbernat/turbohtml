@@ -2051,6 +2051,29 @@ static int apply_transform(sanitizer *s, th_node *element, PyObject **tag) {
    <a> must not survive into HTML as a live anchor when its <svg> is escaped). */
 enum sanitize_action { SANITIZE_DONE, SANITIZE_KEEP_CHILDREN, SANITIZE_STRIP_CHILDREN, SANITIZE_ESCAPE_CHILDREN };
 
+/* Record a disallowed element and pick its disposition: drop the whole subtree for a content-removal tag (e.g.
+   script/style, so its text never leaks), in REMOVE mode, or for foreign content under STRIP (unwrapping it would
+   invite namespace confusion); otherwise strip or escape it once its children are done. Returns 0, or -1 on error. */
+static int dispose_disallowed(sanitizer *s, th_node *element, PyObject *tag, enum sanitize_action *action) {
+    if (record_removed(s, tag, NULL, 0) < 0) { /* GCOVR_EXCL_BR_LINE: record only fails on alloc */
+        return -1;                             /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int remove_content = PySet_Contains(s->remove_with_content, tag);
+    if (remove_content < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains never fails on a str key */
+        return -1;            /* GCOVR_EXCL_LINE */
+    }
+    *action = SANITIZE_DONE;
+    if (remove_content || s->on_disallowed == ON_REMOVE ||
+        (s->on_disallowed == ON_STRIP && element->ns != TH_NS_HTML)) {
+        th_node_remove(element);
+    } else if (s->on_disallowed == ON_STRIP) {
+        *action = SANITIZE_STRIP_CHILDREN;
+    } else {
+        *action = SANITIZE_ESCAPE_CHILDREN;
+    }
+    return 0;
+}
+
 static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enum sanitize_action *action) {
     int is_html = element->ns == TH_NS_HTML;
     PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, element->text, element->text_len);
@@ -2103,17 +2126,10 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enu
     if (allowed > 0 && !namespace_reachable(element)) {
         allowed = 0;
     }
-    /* only disallowed elements consult remove_with_content, so a kept element never pays the set lookup */
-    int remove_content = allowed > 0 ? 0 : PySet_Contains(s->remove_with_content, tag);
-    /* a disallowed element is about to be removed, stripped, or escaped; note it before the disposition splits */
-    if (allowed == 0 && record_removed(s, tag, NULL, 0) < 0) { /* GCOVR_EXCL_BR_LINE: record only fails on alloc */
-        Py_DECREF(tag);                                        /* GCOVR_EXCL_LINE: allocation-failure path */
-        return -1;                                             /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
     int status = 0;
     *action = SANITIZE_DONE;
-    if (allowed < 0 || remove_content < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains never fails on a str key */
-        status = -1;                         /* GCOVR_EXCL_LINE */
+    if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains never fails on a str key */
+        status = -1;   /* GCOVR_EXCL_LINE */
     } else if (allowed && style_element) {
         /* a kept <style> holds raw CSS, not child elements, so scrub its stylesheet body instead of walking children */
         status = sanitize_attributes(s, element, tag, custom) < 0 ? -1 : sanitize_style_body(s, element);
@@ -2123,14 +2139,8 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enu
         } else {
             *action = SANITIZE_KEEP_CHILDREN;
         }
-    } else if (remove_content || s->on_disallowed == ON_REMOVE || (s->on_disallowed == ON_STRIP && !is_html)) {
-        /* drop the whole subtree: a content-removal tag (e.g. script/style, so its text never leaks), REMOVE mode, or
-           foreign content under STRIP (unwrapping it would invite namespace confusion) */
-        th_node_remove(element);
-    } else if (s->on_disallowed == ON_STRIP) {
-        *action = SANITIZE_STRIP_CHILDREN;
     } else {
-        *action = SANITIZE_ESCAPE_CHILDREN;
+        status = dispose_disallowed(s, element, tag, action);
     }
     Py_DECREF(tag);
     return status;
@@ -2213,6 +2223,49 @@ static int strip_tree_templates(sanitizer *s, th_node *root) {
     return 0;
 }
 
+/* Strip or escape an element whose children are done, moving them up in its place. Returns 0, or -1 on error. */
+static int unwrap_element(sanitizer *s, th_node *element, enum sanitize_action action) {
+    if (action == SANITIZE_STRIP_CHILDREN) {
+        hoist_children(element);
+        th_node_remove(element);
+        return 0;
+    }
+    return escape_element(s, element);
+}
+
+/* The walk validated each child against the parent it was parsed under, but unwrapping that parent moved the children
+   into the grandparent: an HTML <style> hoisted out of an escaped svg <desc> now sits directly under <svg>, where a
+   reparse reads its body as markup. Re-check every element between `before` (NULL for the parent's start) and `stop`
+   against its new parent and dispose of the unreachable ones like any disallowed node; an unwrapped node's own children
+   land in the same range, so the scan resumes just before it and checks them in turn, without recursion. Returns 0, or
+   -1 on error. */
+static int settle_hoisted(sanitizer *s, th_node *parent, th_node *before, th_node *stop) {
+    th_node *cursor = before == NULL ? parent->first_child : before->next_sibling;
+    while (cursor != stop) {
+        if (cursor->type != TH_NODE_ELEMENT || namespace_reachable(cursor)) {
+            cursor = cursor->next_sibling;
+            continue;
+        }
+        before = cursor->prev_sibling;
+        PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, cursor->text, cursor->text_len);
+        if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        enum sanitize_action action;
+        int status = dispose_disallowed(s, cursor, tag, &action);
+        Py_DECREF(tag);
+        if (status == 0 && action != SANITIZE_DONE) { /* GCOVR_EXCL_BR_LINE: dispose only fails on allocation */
+            status = unwrap_element(s, cursor, action);
+        }
+        if (status < 0) { /* GCOVR_EXCL_BR_LINE: only allocation failures reach this path */
+            return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        /* the escaped start tag always precedes the unwrapped node's children, so the scan resumes after it */
+        cursor = before->next_sibling;
+    }
+    return 0;
+}
+
 typedef struct {
     th_node *element;
     th_node *next;
@@ -2234,13 +2287,16 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
                 return 0;
             }
             sanitize_frame frame = frames[--depth];
-            if (frame.action == SANITIZE_STRIP_CHILDREN) {
-                hoist_children(frame.element);
-                th_node_remove(frame.element);
-            } else if (frame.action == SANITIZE_ESCAPE_CHILDREN && /* GCOVR_EXCL_BR_LINE: escape only fails on alloc */
-                       escape_element(s, frame.element) < 0) {     /* GCOVR_EXCL_BR_LINE: only allocation can fail */
-                PyMem_Free(frames);                                /* GCOVR_EXCL_LINE: allocation-failure cleanup */
-                return -1;                                         /* GCOVR_EXCL_LINE: allocation-failure path */
+            if (frame.action != SANITIZE_KEEP_CHILDREN) {
+                th_node *grandparent = frame.element->parent;
+                th_node *before = frame.element->prev_sibling;
+                /* GCOVR_EXCL_BR_START: unwrapping and settling only fail on allocation */
+                if (unwrap_element(s, frame.element, frame.action) < 0 ||
+                    settle_hoisted(s, grandparent, before, frame.next) < 0) {
+                    PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure cleanup */
+                    return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                /* GCOVR_EXCL_BR_STOP */
             }
             parent_kept = frame.parent_kept;
             child = frame.next;

@@ -2282,6 +2282,56 @@ def test_html_mglyph_under_mathml_text_point_is_unreachable(html: str, expected:
     assert sanitize(html, policy) == expected
 
 
+@pytest.mark.parametrize(
+    ("html", "tags", "expected"),
+    [
+        pytest.param(
+            "<svg><desc><style><img src=x onerror=alert(1)>{}</style></desc></svg>",
+            {"svg", "style"},
+            "<svg>&lt;desc&gt;&lt;style&gt;&lt;img src=x onerror=alert(1)&gt;{}&lt;/style&gt;&lt;/desc&gt;</svg>",
+            id="style-out-of-svg-desc",
+        ),
+        pytest.param(
+            "<math><mi><style><img src=x onerror=alert(1)>{}</style></mi></math>",
+            {"math", "style"},
+            "<math>&lt;mi&gt;&lt;style&gt;&lt;img src=x onerror=alert(1)&gt;{}&lt;/style&gt;&lt;/mi&gt;</math>",
+            id="style-out-of-mathml-text-point",
+        ),
+        pytest.param(
+            "<svg><circle></circle><title><b>hi</b></title></svg>",
+            {"svg", "circle", "b"},
+            "<svg><circle></circle>&lt;title&gt;&lt;b&gt;hi&lt;/b&gt;&lt;/title&gt;</svg>",
+            id="after-a-kept-sibling",
+        ),
+        pytest.param(
+            "<svg><foreignObject><p><b>x</b></p></foreignObject></svg>",
+            {"svg", "p", "b"},
+            "<svg>&lt;foreignObject&gt;&lt;p&gt;&lt;b&gt;x&lt;/b&gt;&lt;/p&gt;&lt;/foreignObject&gt;</svg>",
+            id="nested-html-escaped-in-turn",
+        ),
+        pytest.param(
+            "<div><section><b>hi</b></section></div>",
+            {"div", "b"},
+            "<div>&lt;section&gt;<b>hi</b>&lt;/section&gt;</div>",
+            id="html-parent-keeps-hoisted-child",
+        ),
+    ],
+)
+def test_escape_rechecks_children_hoisted_into_foreign_parent(html: str, tags: set[str], expected: str) -> None:
+    """Escaping an integration point escapes the HTML children it would otherwise leave directly under SVG/MathML."""
+    assert sanitize(html, Policy(tags=frozenset(tags))) == expected
+
+
+def test_escape_removes_hoisted_content_removal_child() -> None:
+    policy = Policy(tags=frozenset({"svg", "style"}), remove_with_content=frozenset({"style"}))
+    assert sanitize("<svg><desc><style>a{}</style></desc></svg>", policy) == "<svg>&lt;desc&gt;&lt;/desc&gt;</svg>"
+
+
+def test_escape_reports_hoisted_children_it_escapes() -> None:
+    _, removed = sanitize_report("<svg><desc><b>hi</b></desc></svg>", Policy(tags=frozenset({"svg", "b"})))
+    assert removed == [Removed("desc"), Removed("b")]
+
+
 _POST = "<p onclick='x'>Hi <b>there</b> <script>evil()</script></p>"
 
 
@@ -2566,6 +2616,7 @@ XSS_CORPUS = [
     pytest.param("<a href='javascript:alert(1)' href='http://ok'>x</a>", id="dup-href-js-first"),
     pytest.param("<a href='http://ok' href='data:text/html,<script>alert(1)</script>'>x</a>", id="dup-href-data"),
     pytest.param('<a href="http://ok" href="vbscript:msgbox(1)">x</a>', id="dup-href-vbscript"),
+    pytest.param("<li><math><mtext><li>", id="li-math-mtext-nesting"),
 ]
 
 _MODES = [
@@ -2687,8 +2738,6 @@ def test_scheme_allowlist_parity(url: str, kept: bool) -> None:  # ruff:ignore[b
 @pytest.mark.parametrize(
     "payload",
     [
-        # foreign-content start/end asymmetry: </li> synthesizes a sibling on the second parse.
-        pytest.param("<li><math><mtext><li>", id="li-math-mtext-nesting"),
         # a raw carriage return normalizes to a newline when the sanitized text is reparsed.
         pytest.param("a&#xd;b", id="cr-normalization"),
         pytest.param("<div>&#xd;</div>", id="cr-in-element"),
@@ -2696,7 +2745,7 @@ def test_scheme_allowlist_parity(url: str, kept: bool) -> None:  # ruff:ignore[b
 )
 def test_inert_even_when_not_string_idempotent(payload: str) -> None:
     # These are benign inputs whose sanitized form is *not* byte-identical on a second pass
-    # (foreign-content nesting shifts, CR->LF normalization). Sanitization is single-pass, so the
+    # (CR->LF normalization). Sanitization is single-pass, so the
     # guarantee is inertness, not string idempotence: no executable construct survives either pass,
     # even though sanitize(sanitize(x)) != sanitize(x). Consumers must trust the first pass, not reparse.
     once = sanitize(payload)
