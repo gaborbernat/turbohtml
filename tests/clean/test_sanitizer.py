@@ -904,6 +904,22 @@ def test_style_element_transformed_from_text_keeps_end_tag_inert() -> None:
     assert sanitize(html, policy) == "<style><\\/style><img src=x onerror=alert(1)>{}</style>"
 
 
+@pytest.mark.parametrize(
+    ("css", "expected_body"),
+    [
+        pytest.param('a{color:"', "a{}", id="empty-string"),
+        pytest.param("a{color:'x", "a{}", id="single-quoted-string"),
+        pytest.param('a{content:"x;}b{color:red}', "a{}", id="string-swallows-later-rules"),
+        pytest.param('a{color:red;content:"x', "a{color:red;}", id="earlier-declaration-kept"),
+        pytest.param("a{color:red/* x", "a{}", id="comment"),
+    ],
+)
+def test_style_element_unterminated_token_is_a_fixpoint(css: str, expected_body: str) -> None:
+    policy = _style_element_policy(css_properties=frozenset({"color", "content"}))
+    once = sanitize(f"<style>{css}</style>", policy)
+    assert (once, sanitize(once, policy)) == (f"<style>{expected_body}</style>", once)
+
+
 def test_style_element_empty_property_set_drops_all_css() -> None:
     # an empty css_properties set means no declaration is allowlisted, so every rule scrubs to an empty block
     assert (
