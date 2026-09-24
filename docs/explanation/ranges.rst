@@ -37,13 +37,14 @@ walk handles contained subtrees without a nesting limit.
 Two scope choices bound this. First, a ``Range`` is only as live as its own operations: its content methods move its
 boundaries per the spec, but an edit made through another API -- appending a sibling, removing a subtree -- does not
 shift a range you happen to be holding, because the tree's mutators do not track live ranges. A range is a cursor you
-drive, not an observer that follows edits made elsewhere. When such an edit leaves a boundary offset past the end of its
-container, the content operations, :meth:`~turbohtml.Range.insert_node`, and
+drive, not an observer that follows edits made elsewhere. When such an edit shortens a text node past a boundary offset
+in it, the content operations, :meth:`~turbohtml.Range.insert_node`, and
 :attr:`~turbohtml.Range.common_ancestor_container` raise :exc:`IndexError`; when it moves the two boundaries into
 separate trees or puts the start after the end, they raise :exc:`ValueError`. Reset the boundaries to use the range
-again. Second, :class:`~turbohtml.StaticRange` is the immutable counterpart the spec defines for exactly that observer
-case: it stores the four boundary values verbatim with no ordering, bounds, or same-root guarantee, so it is a cheap
-snapshot to hand around rather than a handle to operate through.
+again. A child offset past the last child is tolerated and reads as the end of the container. Second,
+:class:`~turbohtml.StaticRange` is the immutable counterpart the spec defines for exactly that observer case: it stores
+the four boundary values verbatim with no ordering, bounds, or same-root guarantee, so it is a cheap snapshot to hand
+around rather than a handle to operate through.
 
 Every boundary, comparison, and content operation is validated against jsdom, which passes the WPT ``dom/ranges`` suite:
 :file:`tests/conformance/test_dom_jsdom_differential.py` replays the same sequences through both libraries over shared

@@ -446,10 +446,12 @@ static int validate_boundary(th_node *node, Py_ssize_t offset) {
     return 0;
 }
 
-/* A range does not follow edits made through other tree APIs, so a boundary can outlive its offset, its shared root,
-   or its order; reject that before an operation reads text past its end or walks toward a common ancestor. */
+/* A range does not follow edits made through other tree APIs, so a boundary can outlive its text offset, its shared
+   root, or its order; reject that before an operation reads text past its end or walks toward a common ancestor. A
+   child offset past the end needs no check: every child walk stops at the last child. */
 static int check_boundaries(RangeObject *range) {
-    if (range->start_offset > node_length(range->start_node) || range->end_offset > node_length(range->end_node)) {
+    if ((is_char_data(range->start_node) && range->start_offset > range->start_node->text_len) ||
+        (is_char_data(range->end_node) && range->end_offset > range->end_node->text_len)) {
         PyErr_SetString(PyExc_IndexError, "a boundary offset is out of range for its container after a tree edit");
         return -1;
     }
@@ -968,7 +970,7 @@ static th_node *insert_core(RangeObject *range, PyObject *node_obj) {
         reference = start_node;
     } else {
         reference = start_node->first_child;
-        for (Py_ssize_t index = 0; index < start_offset; index++) {
+        for (Py_ssize_t index = 0; index < start_offset && reference != NULL; index++) {
             reference = reference->next_sibling;
         }
     }

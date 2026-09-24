@@ -586,21 +586,21 @@ _STALE_OPERATIONS: Final = [
 ]
 
 
-@pytest.mark.parametrize("operation", _STALE_OPERATIONS)
-def test_stale_start_offset_past_children_raises(operation: Callable[[Range], object]) -> None:
+def test_insert_node_at_stale_offset_past_children() -> None:
     doc = parse("<div id=a><p>a</p><i>b</i><u>c</u></div>")
     div = _by_id(doc, "a")
-    boundary = Range(div, 3)
-    div.remove("u")
-    with pytest.raises(IndexError, match="out of range for its container after a tree edit"):
-        operation(boundary)
+    boundary = Range(div, 3)  # a valid end offset when the range is made
+    div.remove("u")  # ...then the tree shrinks under it, so the walk runs off the end
+    boundary.insert_node(Element("x"))
+    assert _tags(div.children) == ["p", "i", "x"]
 
 
 @pytest.mark.parametrize("operation", _STALE_OPERATIONS)
-def test_stale_end_offset_past_text_raises(operation: Callable[[Range], object]) -> None:
+@pytest.mark.parametrize("start", [pytest.param(10, id="start-past-text"), pytest.param(1, id="end-past-text")])
+def test_stale_offset_past_text_raises(operation: Callable[[Range], object], start: int) -> None:
     text = Text("A" * 64)
     Element("p", children=[text])
-    boundary = Range(text, 1)
+    boundary = Range(text, start)
     boundary.set_end(text, 60)
     text.data = "xy"
     with pytest.raises(IndexError, match="out of range for its container after a tree edit"):
