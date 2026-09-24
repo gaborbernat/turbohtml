@@ -2189,6 +2189,33 @@ def test_annotation_xml_bare_encoding_is_not_integration_point() -> None:
     assert _sanitize_tree(root, _ANNOTATION_TAGS) == "<math><annotation-xml></annotation-xml></math>"
 
 
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param(
+            "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>{color:red}</style>",
+            "<math><mtext>&lt;mglyph&gt;<style><img src=x onerror=alert(1)>{color:red;}</style>&lt;table&gt;"
+            "</mtext></math>",
+            id="html-mglyph-escaped",
+        ),
+        pytest.param(
+            "<math><mi><table><malignmark><b>x</b>",
+            "<math><mi>&lt;malignmark&gt;<b>x</b>&lt;table&gt;</mi></math>",
+            id="html-malignmark-escaped",
+        ),
+        pytest.param(
+            "<math><mtext><mglyph></mglyph></mtext></math>",
+            "<math><mtext><mglyph></mglyph></mtext></math>",
+            id="mathml-mglyph-kept",
+        ),
+    ],
+)
+def test_html_mglyph_under_mathml_text_point_is_unreachable(html: str, expected: str) -> None:
+    """A text integration point parses mglyph/malignmark as MathML, so an HTML-namespace one there is not kept."""
+    policy = Policy(tags=frozenset({"math", "mi", "mtext", "mglyph", "malignmark", "style", "b"}))
+    assert sanitize(html, policy) == expected
+
+
 _POST = "<p onclick='x'>Hi <b>there</b> <script>evil()</script></p>"
 
 

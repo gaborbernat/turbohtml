@@ -1954,7 +1954,12 @@ static int namespace_reachable(const th_node *element) {
     if (parent_ns == TH_NS_SVG) {
         return is_html_integration_point(parent);
     }
-    return is_mathml_text_point(parent) || is_html_integration_point(parent);
+    if (is_mathml_text_point(parent)) {
+        /* a text point parses an mglyph or malignmark start tag as MathML, so an HTML one there (foster-parented out
+           of a table) turns MathML on reparse and takes its children with it */
+        return element->atom != TH_TAG_MGLYPH && element->atom != TH_TAG_MALIGNMARK;
+    }
+    return is_html_integration_point(parent);
 }
 
 /* Rename an element to a transform's target tag and add its extra attributes when the policy maps the element's current
