@@ -2492,6 +2492,10 @@ PyObject *node_wrap_in(PyObject *self, PyObject *wrapper_obj) {
         return NULL;
     }
     NodeObject *node = (NodeObject *)self;
+    if (((NodeObject *)wrapper_obj)->node == node->node) {
+        PyErr_SetString(PyExc_ValueError, "wrapper cannot be the wrapped node");
+        return NULL;
+    }
     th_node *parent = node->node->parent;
     int error = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
