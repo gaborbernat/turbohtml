@@ -420,9 +420,9 @@ def test_indent_repetition(unit: str, *, inner: bool, method: str) -> None:
     root: Final = parse_fragment("<section><p>x</p></section>")
     options: Final = Html(layout=Indent(unit))
     expected: Final = (
-        f"<section>\n{unit}<p>\n{unit * 2}x\n{unit}</p>\n</section>"
+        f"<section>\n{unit}<p>x</p>\n</section>"
         if inner
-        else f"<div>\n{unit}<section>\n{unit * 2}<p>\n{unit * 3}x\n{unit * 2}</p>\n{unit}</section>\n</div>"
+        else f"<div>\n{unit}<section>\n{unit * 2}<p>x</p>\n{unit}</section>\n</div>"
     )
     if method == "stream":
         output: Final = "".join(root.serialize_iter(options, inner=inner))
@@ -472,7 +472,7 @@ def test_inner_preserve(tag: str, layout: Indent | Minify) -> None:
 
 def test_inner_indent() -> None:
     root: Final = parse_fragment("<div><p>a</p><p>b</p></div>").children[0]
-    assert root.serialize(Html(layout=Indent()), inner=True) == "<p>\n  a\n</p>\n<p>\n  b\n</p>"
+    assert root.serialize(Html(layout=Indent()), inner=True) == "<p>a</p>\n<p>b</p>"
 
 
 def test_inner_minify_state() -> None:
@@ -717,12 +717,12 @@ def test_comment_and_doctype_pass_through() -> None:
 
 def test_indent_pretty_xml_self_closes_empties() -> None:
     node = _fragment("<div><p>hi</p><br></div>", "div")
-    assert node.serialize(Html(xml=True, layout=Indent(2))) == ("<div>\n  <p>\n    hi\n  </p>\n  <br/>\n</div>")
+    assert node.serialize(Html(xml=True, layout=Indent(2))) == ("<div>\n  <p>hi</p>\n  <br/>\n</div>")
 
 
 def test_indent_pretty_xml_escapes_text() -> None:
     node = _fragment("<p>a&lt;b</p>", "p")
-    assert node.serialize(Html(xml=True, layout=Indent(2))) == "<p>\n  a&lt;b\n</p>"
+    assert node.serialize(Html(xml=True, layout=Indent(2))) == "<p>a&lt;b</p>"
 
 
 def test_indent_pretty_xml_empty_root_self_closes() -> None:
@@ -732,7 +732,7 @@ def test_indent_pretty_xml_empty_root_self_closes() -> None:
 def test_xml_processing_instruction_closes_with_question_mark() -> None:
     node = Element("doc", children=[ProcessingInstruction("t", "d")])
     assert node.serialize(_XML) == "<doc><?t d?></doc>"
-    assert node.serialize(Html(xml=True, layout=Indent(2))) == "<doc>\n  <?t d?>\n</doc>"
+    assert node.serialize(Html(xml=True, layout=Indent(2))) == "<doc><?t d?></doc>"
 
 
 def test_serialize_iter_streams_xml() -> None:
@@ -742,7 +742,7 @@ def test_serialize_iter_streams_xml() -> None:
 
 def test_serialize_iter_streams_indented_xml() -> None:
     node = _fragment("<div><br></div>", "div")
-    assert "".join(node.serialize_iter(Html(xml=True, layout=Indent(2)))) == "<div>\n  <br/>\n</div>"
+    assert "".join(node.serialize_iter(Html(xml=True, layout=Indent(2)))) == "<div><br/></div>"
 
 
 def test_encode_emits_xml_bytes() -> None:
@@ -992,23 +992,21 @@ def test_formatter_serialize(html: str, selector: str, formatter: Formatter, exp
             "<ul><li>a</li><li>b</li></ul>",
             "ul",
             2,
-            "<ul>\n  <li>\n    a\n  </li>\n  <li>\n    b\n  </li>\n</ul>",
+            "<ul>\n  <li>a</li>\n  <li>b</li>\n</ul>",
             id="int-pretty-prints",
         ),
-        pytest.param("<div><p>x</p></div>", "div", "\t", "<div>\n\t<p>\n\t\tx\n\t</p>\n</div>", id="str-unit-verbatim"),
-        pytest.param("<div><p>x</p></div>", "div", 0, "<div>\n<p>\nx\n</p>\n</div>", id="zero-newlines-no-indent"),
+        pytest.param("<div><p>x</p></div>", "div", "\t", "<div>\n\t<p>x</p>\n</div>", id="str-unit-verbatim"),
+        pytest.param("<div><p>x</p></div>", "div", 0, "<div>\n<p>x</p>\n</div>", id="zero-newlines-no-indent"),
         pytest.param("<div></div>", "div", 2, "<div></div>", id="empty-element-one-line"),
-        pytest.param("<p><br></p>", "p", 2, "<p>\n  <br>\n</p>", id="void-element"),
+        pytest.param("<p><br></p>", "p", 2, "<p><br></p>", id="void-element"),
         pytest.param("<frameset><frame>", "frameset", 2, "<frameset>\n  <frame>\n</frameset>", id="void-frame"),
         pytest.param("<div><pre>\n\nkeep</pre></div>", "div", 2, "<div>\n  <pre>\n\nkeep</pre>\n</div>", id="raw-pre"),
-        pytest.param(
-            "<div><script>a<b</script></div>", "div", 2, "<div>\n  <script>a<b</script>\n</div>", id="raw-script"
-        ),
+        pytest.param("<div><script>a<b</script></div>", "div", 2, "<div><script>a<b</script></div>", id="raw-script"),
         pytest.param(
             "<template><p>x</p></template>",
             "template",
             2,
-            "<template>\n  <p>\n    x\n  </p>\n</template>",
+            "<template><p>x</p></template>",
             id="template-content",
         ),
         # a foreign element is laid out like any non-void element, not preserved
@@ -1022,7 +1020,7 @@ def test_formatter_serialize(html: str, selector: str, formatter: Formatter, exp
             "<div><textarea>x</textarea></div>",
             "div",
             2,
-            "<div>\n  <textarea>x</textarea>\n</div>",
+            "<div><textarea>x</textarea></div>",
             id="preserve-textarea",
         ),
         pytest.param(
@@ -1121,7 +1119,7 @@ def test_indent_rejects_extra_positional() -> None:
             "<div><p>x</p></div>",
             "div",
             lambda node: node.encode(options=Html(layout=Indent(2))),
-            b"<div>\n  <p>\n    x\n  </p>\n</div>",
+            b"<div>\n  <p>x</p>\n</div>",
             id="honours-indent",
         ),
     ],
@@ -1290,7 +1288,7 @@ def test_sort_attributes_by_width(count: int, *, reverse: bool, xml: bool, encod
 def test_sort_attributes_composes_with_indent() -> None:
     node: Final = parse("<p z=1 a=2>x").select_one("p")
     assert node is not None
-    assert node.serialize(Html(layout=Indent(2), sort_attributes=True)).splitlines()[0] == '<p a="2" z="1">'
+    assert node.serialize(Html(layout=Indent(2), sort_attributes=True)) == '<p a="2" z="1">x</p>'
 
 
 def test_sort_attributes_composes_with_minify() -> None:
@@ -1413,16 +1411,7 @@ def test_meta_charset_reparses_to_one_declaration() -> None:
 def test_meta_charset_with_indent_indents_injected_meta() -> None:
     out: Final = parse("<p>x").serialize(Html(layout=Indent(2), meta_charset=True))
     assert out == (
-        "<html>\n"
-        "  <head>\n"
-        '    <meta charset="utf-8">\n'
-        "  </head>\n"
-        "  <body>\n"
-        "    <p>\n"
-        "      x\n"
-        "    </p>\n"
-        "  </body>\n"
-        "</html>"
+        '<html>\n  <head>\n    <meta charset="utf-8">\n  </head>\n  <body>\n    <p>x</p>\n  </body>\n</html>'
     )
 
 

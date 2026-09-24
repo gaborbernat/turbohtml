@@ -339,17 +339,205 @@ static void ser_newline_indent(sbuf *out, const ser_opts *opts, int depth) {
     out->len += length;
 }
 
+/* The HTML elements the default CSS lays out as blocks (display block, list-item,
+   table parts, or none). Whitespace at a block's edges and between block siblings
+   renders nothing, so the pretty layout may add or drop it there and nowhere else. */
+static int pretty_is_block_atom(uint16_t atom) {
+    switch (atom) {
+    case TH_TAG_ADDRESS:
+    case TH_TAG_ARTICLE:
+    case TH_TAG_ASIDE:
+    case TH_TAG_BLOCKQUOTE:
+    case TH_TAG_BODY:
+    case TH_TAG_CAPTION:
+    case TH_TAG_CENTER:
+    case TH_TAG_COL:
+    case TH_TAG_COLGROUP:
+    case TH_TAG_DD:
+    case TH_TAG_DETAILS:
+    case TH_TAG_DIALOG:
+    case TH_TAG_DIR:
+    case TH_TAG_DIV:
+    case TH_TAG_DL:
+    case TH_TAG_DT:
+    case TH_TAG_FIELDSET:
+    case TH_TAG_FIGCAPTION:
+    case TH_TAG_FIGURE:
+    case TH_TAG_FOOTER:
+    case TH_TAG_FORM:
+    case TH_TAG_FRAME:
+    case TH_TAG_FRAMESET:
+    case TH_TAG_H1:
+    case TH_TAG_H2:
+    case TH_TAG_H3:
+    case TH_TAG_H4:
+    case TH_TAG_H5:
+    case TH_TAG_H6:
+    case TH_TAG_HEAD:
+    case TH_TAG_HEADER:
+    case TH_TAG_HGROUP:
+    case TH_TAG_HR:
+    case TH_TAG_HTML:
+    case TH_TAG_LEGEND:
+    case TH_TAG_LI:
+    case TH_TAG_LISTING:
+    case TH_TAG_MAIN:
+    case TH_TAG_MENU:
+    case TH_TAG_NAV:
+    case TH_TAG_OL:
+    case TH_TAG_P:
+    case TH_TAG_PLAINTEXT:
+    case TH_TAG_PRE:
+    case TH_TAG_SEARCH:
+    case TH_TAG_SECTION:
+    case TH_TAG_SUMMARY:
+    case TH_TAG_TABLE:
+    case TH_TAG_TBODY:
+    case TH_TAG_TD:
+    case TH_TAG_TFOOT:
+    case TH_TAG_TH:
+    case TH_TAG_THEAD:
+    case TH_TAG_TR:
+    case TH_TAG_UL:
+    case TH_TAG_XMP:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* How the pretty layout writes a node's children. */
+enum {
+    PRETTY_INLINE,   /* verbatim on the node's own line: its whitespace may render */
+    PRETTY_RUNS,     /* a block container: block children on their own lines, the
+                        inline content between them one line per run */
+    PRETTY_ELEMENTS, /* element-only content with no rendering rules (XML, SVG,
+                        MathML): one child per line */
+};
+
+/* An XML tree carries no HTML rendering, and in foreign content only the absence
+   of text says whitespace is free to add (the libxml2 rule): any text child keeps
+   the element verbatim, so reindenting its own output reproduces it. SVG <text>
+   renders the whitespace between its tspans, so it stays verbatim even without. */
+static int pretty_layout(th_tree *tree, th_node *node) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return PRETTY_RUNS; /* the document and a content fragment are block containers */
+    }
+    if (th_tree_is_xml(tree) || node->ns != TH_NS_HTML) {
+        if (node->ns == TH_NS_SVG && ser_value_iequals(node->text, node->text_len, "text")) {
+            return PRETTY_INLINE;
+        }
+        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+            if (child->type == TH_NODE_TEXT) {
+                return PRETTY_INLINE;
+            }
+        }
+        return PRETTY_ELEMENTS;
+    }
+    /* pre and listing are blocks whose whitespace renders */
+    return pretty_is_block_atom(node->atom) && node->atom != TH_TAG_PRE && node->atom != TH_TAG_LISTING ? PRETTY_RUNS
+                                                                                                        : PRETTY_INLINE;
+}
+
+/* Whether child gets a line of its own inside parent. Everything in the document
+   node, <html> and <head> does, since none of it renders inline; so does every
+   child of an element-only container, which holds no text. In a block container
+   only a block-level child does. */
+static int pretty_is_block(th_tree *tree, const th_node *parent, const th_node *child) {
+    if (child->type == TH_NODE_TEXT) {
+        return 0;
+    }
+    if (parent->type == TH_NODE_DOCUMENT ||
+        (parent->type == TH_NODE_ELEMENT && (th_tree_is_xml(tree) || parent->ns != TH_NS_HTML ||
+                                             parent->atom == TH_TAG_HTML || parent->atom == TH_TAG_HEAD))) {
+        return 1;
+    }
+    return child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML && pretty_is_block_atom(child->atom);
+}
+
+static int pretty_is_blank(th_tree *tree, th_node *node) {
+    if (node->type != TH_NODE_TEXT) {
+        return 0;
+    }
+    const Py_UCS4 *text = need_text(tree, node);
+    for (Py_ssize_t index = 0; index < node->text_len; index++) {
+        if (!is_space(text[index])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The first node from start on that begins a line inside parent: a block child, or
+   the first visible node of an inline run. Whitespace-only text between blocks is
+   skipped, since the layout writes its own. */
+static th_node *pretty_first_item(th_tree *tree, const th_node *parent, th_node *start) {
+    while (start != NULL && !pretty_is_block(tree, parent, start) && pretty_is_blank(tree, start)) {
+        start = start->next_sibling;
+    }
+    return start;
+}
+
+static int pretty_has_block(th_tree *tree, const th_node *parent) {
+    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
+        if (pretty_is_block(tree, parent, child)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Write one inline run -- start and the siblings up to the next block child --
+   verbatim on one line, trimming the whitespace at its two ends: they touch a
+   block boundary, where whitespace renders nothing, and the layout's own newline
+   replaces it. Returns the run's last sibling, so the walk resumes after it. */
+static th_node *pretty_emit_run(sbuf *out, th_tree *tree, th_node *start, const th_serialize_opts *opts) {
+    th_node *last = start;
+    th_node *visible = start;
+    for (th_node *node = start->next_sibling; node != NULL && !pretty_is_block(tree, start->parent, node);
+         node = node->next_sibling) {
+        last = node;
+        if (!pretty_is_blank(tree, node)) {
+            visible = node;
+        }
+    }
+    for (th_node *node = start;; node = node->next_sibling) {
+        if (node->type == TH_NODE_TEXT) {
+            const Py_UCS4 *text = need_text(tree, node);
+            Py_ssize_t begin = 0;
+            Py_ssize_t end = node->text_len;
+            while (node == start && is_space(text[begin])) {
+                begin++;
+            }
+            while (node == visible && is_space(text[end - 1])) {
+                end--;
+            }
+            if (opts->xml) {
+                sbuf_put_xml_text(out, text + begin, end - begin, 0, opts->well_formed);
+            } else {
+                sbuf_put_text(out, text + begin, end - begin, 0, opts->formatter);
+            }
+        } else {
+            serialize_compact(out, tree, node, opts);
+        }
+        if (node == visible) {
+            return last;
+        }
+    }
+}
+
 /* Emit one node under the pretty layout and return the next node the walk rooted at
    root visits, or NULL once the subtree is done; *depth carries the current
    indentation level across the walk (and, so serialize_iter can suspend the walk,
    across chunks). A node is written at the current position with no leading
    whitespace; a parent emits the newline and indent before each child, so the root
-   starts at column zero. Raw-text and whitespace-significant elements
-   (script/style/pre/textarea/listing) keep their content verbatim, since reflowing
-   it would change meaning. */
+   starts at column zero. The layout only adds whitespace where it renders nothing
+   (pretty_layout), so the reparsed text reads the same and reindenting the output
+   reproduces it. */
 static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, th_node *root, const ser_opts *opts,
                                       int *depth) {
-    th_node *descend = NULL;
+    th_serialize_opts leaf_opts = *opts->out;
+    leaf_opts.inner = 0;
     if (opts->out->inner && node == root) {
         if (!opts->out->xml && node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML) {
             if (is_serialize_void_atom(node->atom)) {
@@ -357,126 +545,70 @@ static th_node *serialize_pretty_step(sbuf *out, th_tree *tree, th_node *node, t
             }
             if (opts->out->inject_meta && node->atom == TH_TAG_HEAD && !ser_head_has_charset_meta(tree, node)) {
                 ser_emit_meta_charset(out, opts->out);
-                if (node->first_child != NULL) {
+                if (pretty_first_item(tree, node, node->first_child) != NULL) {
                     ser_newline_indent(out, opts, *depth);
                 }
             }
         }
-        return node->first_child;
+        if (pretty_layout(tree, node) == PRETTY_INLINE) {
+            for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+                serialize_compact(out, tree, child, &leaf_opts);
+            }
+            return NULL;
+        }
+        return pretty_first_item(tree, node, node->first_child);
     }
-    switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
-    case TH_NODE_ELEMENT: {
+    if (node != root && !pretty_is_block(tree, node->parent, node)) {
+        node = pretty_emit_run(out, tree, node, &leaf_opts);
+    } else if (node->type == TH_NODE_DOCUMENT || node->type == TH_NODE_CONTENT) {
+        return pretty_first_item(tree, node, node->first_child);
+    } else if (node->type != TH_NODE_ELEMENT || (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) ||
+               is_rawtext_element(node, tree->scripting) || pretty_layout(tree, node) == PRETTY_INLINE) {
+        /* a leaf, a raw-text or whitespace-significant element, or inline content:
+           written verbatim, and treated as a leaf by the walk */
+        serialize_compact(out, tree, node, &leaf_opts);
+    } else {
+        /* meta_charset injects the declaration as head's first child, on its own
+           indented line */
+        int inject = !opts->out->xml && opts->out->inject_meta && node->ns == TH_NS_HTML && node->atom == TH_TAG_HEAD &&
+                     !ser_head_has_charset_meta(tree, node);
+        th_node *first = pretty_first_item(tree, node, node->first_child);
         ser_open_tag(out, tree, node, opts->out);
-        if (opts->out->xml) {
-            /* XML pretty form: an empty element self-closes on its line, a parent
-               opens then lays each child out one level deeper (the ascend closes it) */
-            if (node->first_child == NULL) {
+        if (first == NULL && !inject) {
+            if (opts->out->xml) {
                 sbuf_puts(out, "/>");
             } else {
                 sbuf_putc(out, '>');
+                ser_close_tag(out, node);
+            }
+        } else if (!inject && !pretty_has_block(tree, node)) {
+            /* one inline run and no block child: the run stays on the tag's line */
+            sbuf_putc(out, '>');
+            pretty_emit_run(out, tree, first, &leaf_opts);
+            ser_close_tag(out, node);
+        } else {
+            sbuf_putc(out, '>');
+            if (inject) {
                 ser_newline_indent(out, opts, *depth + 1);
-                descend = node->first_child;
+                ser_emit_meta_charset(out, opts->out);
             }
-            break;
-        }
-        sbuf_putc(out, '>');
-        if (node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
-            break;
-        }
-        int raw = is_rawtext_element(node, tree->scripting);
-        int preserve = raw || ser_needs_leading_newline(tree, node) ||
-                       (node->ns == TH_NS_HTML &&
-                        (node->atom == TH_TAG_PRE || node->atom == TH_TAG_TEXTAREA || node->atom == TH_TAG_LISTING));
-        if (preserve) {
-            /* a whitespace-significant element keeps its content verbatim: its
-               children serialize compactly (itself iterative), so the pretty
-               walk treats it as a leaf and never recurses through it */
-            if (ser_needs_leading_newline(tree, node)) {
-                sbuf_putc(out, '\n');
+            if (first != NULL) {
+                ser_newline_indent(out, opts, *depth + 1);
+                *depth += 1; /* an element indents its children one level deeper */
+                return first;
             }
-            th_serialize_opts child_opts = *opts->out;
-            child_opts.inner = 0;
-            for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-                if (raw && child->type == TH_NODE_TEXT) { /* GCOVR_EXCL_BR_LINE */
-                    sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
-                } else {
-                    serialize_compact(out, tree, child, &child_opts);
-                }
-            }
-            ser_close_tag(out, node);
-            break;
-        }
-        /* meta_charset injects the declaration as head's first child, on its own
-           indented line (head is never a preserve/raw element, so this is reached) */
-        int inject = opts->out->inject_meta && node->ns == TH_NS_HTML && node->atom == TH_TAG_HEAD &&
-                     !ser_head_has_charset_meta(tree, node);
-        if (node->first_child == NULL && !inject) {
-            ser_close_tag(out, node);
-            break;
-        }
-        if (inject) {
-            ser_newline_indent(out, opts, *depth + 1);
-            ser_emit_meta_charset(out, opts->out);
-        }
-        if (node->first_child == NULL) {
             ser_newline_indent(out, opts, *depth);
             ser_close_tag(out, node);
-            break;
         }
-        ser_newline_indent(out, opts, *depth + 1);
-        descend = node->first_child;
-        break;
-    }
-    case TH_NODE_TEXT:
-        if (opts->out->xml) {
-            sbuf_put_xml_text(out, need_text(tree, node), node->text_len, 0, opts->out->well_formed);
-        } else {
-            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->out->formatter);
-        }
-        break;
-    case TH_NODE_COMMENT:
-        /* the pretty layout is a Node.serialize option, never the sanitizer's compact inner_xml,
-           so well_formed is off here and a comment stays on the raw XML path */
-        sbuf_puts(out, "<!--");
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        sbuf_puts(out, "-->");
-        break;
-    case TH_NODE_DOCTYPE:
-        sbuf_puts(out, "<!DOCTYPE ");
-        sbuf_put_ucs4(out, node->text, doctype_name_len(node));
-        sbuf_putc(out, '>');
-        break;
-    case TH_NODE_PI:
-        sbuf_puts(out, "<?");
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        /* XML closes a PI with "?>"; the HTML serialization has no PI syntax and ends the
-           bogus-comment form at ">". */
-        sbuf_puts(out, opts->out->xml ? "?>" : ">");
-        break;
-    case TH_NODE_CDATA:
-        sbuf_puts(out, "<![CDATA[");
-        sbuf_put_ucs4(out, node->text, node->text_len);
-        sbuf_puts(out, "]]>");
-        break;
-    case TH_NODE_CONTENT:
-    case TH_NODE_DOCUMENT:
-        /* a transparent container lays its children out at its own depth */
-        descend = node->first_child;
-        break;
-    }
-    if (descend != NULL) {
-        if (node->type == TH_NODE_ELEMENT) {
-            *depth += 1; /* an element indents its children one level deeper */
-        }
-        return descend;
     }
     /* ascend toward the root, closing each element once its children are done */
     while (node != root) {
-        if (node->next_sibling != NULL) {
-            ser_newline_indent(out, opts, *depth);
-            return node->next_sibling;
-        }
         th_node *parent = node->parent;
+        th_node *next = pretty_first_item(tree, parent, node->next_sibling);
+        if (next != NULL) {
+            ser_newline_indent(out, opts, *depth);
+            return next;
+        }
         if (parent->type == TH_NODE_ELEMENT && !(opts->out->inner && parent == root)) {
             *depth -= 1;
             ser_newline_indent(out, opts, *depth);

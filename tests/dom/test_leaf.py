@@ -444,4 +444,4 @@ def test_pi_adopts_across_trees_keeping_both_halves() -> None:
 def test_pi_and_cdata_serialize_pretty() -> None:
     root = Element("root")
     root.extend([CData("d"), ProcessingInstruction("t", "x")])
-    assert root.serialize(Html(layout=Indent(2))) == "<root>\n  <![CDATA[d]]>\n  <?t x>\n</root>"
+    assert root.serialize(Html(layout=Indent(2))) == "<root><![CDATA[d]]><?t x></root>"

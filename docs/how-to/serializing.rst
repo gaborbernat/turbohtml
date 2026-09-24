@@ -13,8 +13,8 @@ Render a tree back to conformant HTML and control the result: pick the escape :c
 children-only). :meth:`~turbohtml.Node.serialize` adds control through a single :class:`~turbohtml.Html` configuration
 object: its ``formatter`` field selects the escaping through :class:`~turbohtml.Formatter`, and its ``layout`` field
 selects the whitespace. The default ``layout`` of ``None`` gives the compact form; an :class:`~turbohtml.Indent` (an int
-for that many spaces, or a string used verbatim) switches to a pretty form that adds whitespace and so does not preserve
-meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes, with the target encoding as its first argument:
+for that many spaces, or a string used verbatim) switches to a pretty form. :meth:`~turbohtml.Node.encode` is the same
+but returns bytes, with the target encoding as its first argument:
 
 .. testcode::
 
@@ -32,11 +32,34 @@ meaning. :meth:`~turbohtml.Node.encode` is the same but returns bytes, with the 
     <p>café &amp; co</p>
     <div><p>caf&eacute; &amp; co</p></div>
     <div>
-      <p>
-        café &amp; co
-      </p>
+      <p>café &amp; co</p>
     </div>
     b'<div><p>caf&eacute; &amp; co</p></div>'
+
+The pretty form only adds or drops whitespace where the default CSS renders none: between block-level elements such as
+``<div>``, ``<p>``, ``<li>`` or ``<td>``, and at their edges. Inline content -- text, ``<b>``, ``<a>``, ``<span>``, an
+inline ``<svg>`` or ``<math>`` -- stays on one line exactly as written, since a line break there would render as a
+space. ``<pre>``, ``<textarea>`` and raw-text elements keep their content verbatim. So the rendered text stays the same,
+and indenting the output again gives the same output. SVG and MathML children, and every element of an XML tree, get
+their own lines only when the parent holds no text; a parent with text stays verbatim.
+
+.. testcode::
+
+    import turbohtml
+    from turbohtml import Html, Indent
+
+    doc = turbohtml.parse("<ul><li>one <b>two</b></li><li>three</li></ul>")
+    pretty = doc.select_one("ul").serialize(Html(layout=Indent(2)))
+    print(pretty)
+    print(turbohtml.parse(pretty).select_one("ul").serialize(Html(layout=Indent(2))) == pretty)
+
+.. testoutput::
+
+    <ul>
+      <li>one <b>two</b></li>
+      <li>three</li>
+    </ul>
+    True
 
 ***********************************
  Normalize attributes and encoding
@@ -103,12 +126,8 @@ overrides ``formatter`` (the escaping is fixed by XML), and a :class:`~turbohtml
     <div><br/><p>if a &lt; b</p><svg xmlns="http://www.w3.org/2000/svg"><rect/></svg></div>
     <div>
       <br/>
-      <p>
-        if a &lt; b
-      </p>
-      <svg xmlns="http://www.w3.org/2000/svg">
-        <rect/>
-      </svg>
+      <p>if a &lt; b</p>
+      <svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>
     </div>
 
 The output parses with any XML reader, so it round-trips through :mod:`xml.etree.ElementTree` and hands cleanly to an
