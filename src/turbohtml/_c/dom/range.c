@@ -1008,9 +1008,10 @@ static PyObject *range_surround_contents(PyObject *self, PyObject *new_parent) {
         return NULL;
     }
     th_node *parent_node = ((NodeObject *)new_parent)->node;
-    if (parent_node->type == TH_NODE_DOCUMENT || parent_node->type == TH_NODE_DOCTYPE ||
-        parent_node->type == TH_NODE_CONTENT) {
-        PyErr_SetString(PyExc_ValueError, "the wrapper cannot be a document, doctype, or fragment");
+    /* A document, doctype, or fragment is rejected by the DOM up front, and character data or a processing
+       instruction fails the final append of the extracted content; checking both here keeps the tree unchanged. */
+    if (parent_node->type != TH_NODE_ELEMENT) {
+        PyErr_SetString(PyExc_ValueError, "the wrapper must be an element");
         return NULL;
     }
     PyObject *result = NULL;
@@ -1168,7 +1169,9 @@ PyDoc_STRVAR(delete_contents_doc,
              "Remove the range's content from the tree.\n\n"
              ":raises RecursionError: if a partial boundary path is 400 levels or deeper; the tree is unchanged.");
 PyDoc_STRVAR(insert_node_doc, "insert_node(node, /)\n--\n\nInsert node at the start of the range.");
-PyDoc_STRVAR(surround_contents_doc, "surround_contents(new_parent, /)\n--\n\nWrap the range's content in new_parent.");
+PyDoc_STRVAR(surround_contents_doc, "surround_contents(new_parent, /)\n--\n\n"
+                                    "Wrap the range's content in new_parent.\n\n"
+                                    ":raises ValueError: if new_parent is not an element; the tree is unchanged.");
 PyDoc_STRVAR(clone_range_doc, "clone_range()\n--\n\nReturn a new Range with the same boundary points.");
 
 static PyMethodDef range_methods[] = {
