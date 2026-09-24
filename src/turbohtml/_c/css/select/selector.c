@@ -368,8 +368,10 @@ static void sel_attribute(sel_parser *parser, sel_simple *simple) {
     } else if (parser->pos < parser->len && (parser->src[parser->pos] | 32) == 's') {
         parser->pos++;
         sel_skip_ws(parser);
-    } else if (sel_attr_default_ci(name, name_len)) {
-        simple->ci_default = 1; /* the HTML set defaults to case-insensitive without a flag */
+    } else if ((parser->tree == NULL || !th_tree_is_xml(parser->tree)) && sel_attr_default_ci(name, name_len)) {
+        /* the HTML set defaults to case-insensitive without a flag, only in an HTML document
+           (the translator, with no tree, targets one); XML values always compare exactly */
+        simple->ci_default = 1;
     }
     if (parser->pos >= parser->len || parser->src[parser->pos] != ']') {
         sel_fail(parser, "expected ']'");
