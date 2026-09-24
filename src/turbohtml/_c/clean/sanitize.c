@@ -1237,17 +1237,70 @@ static int scrub_stylesheet(sanitizer *s, const Py_UCS4 *value, Py_ssize_t len, 
     return 0;
 }
 
-/* Scrub the CSS a kept `<style>` element holds: a raw-text element carries its stylesheet as one text child (or none
-   when empty), so rewrite that child's data in place with the policy-safe subset. Returns 0, or -1 on error. */
+/* Does `text[at:]` start a `</style` end tag, matched ASCII case-insensitively as the tokenizer does? */
+static int is_style_end_tag(const Py_UCS4 *text, Py_ssize_t at, Py_ssize_t len) {
+    static const char end_tag[] = "</style";
+    Py_ssize_t tag_len = (Py_ssize_t)(sizeof(end_tag) - 1);
+    if (len - at < tag_len) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < tag_len; index++) {
+        if (lower_ascii(text[at + index]) != (Py_UCS4)end_tag[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Write the scrubbed stylesheet into `text`. The serializer emits a raw-text body verbatim, so a `</style` left in it
+   would end the element early and turn the rest into live markup; its solidus is escaped as `<\/style`, which a CSS
+   string reads as the same text and which no longer closes the element. Returns 0, or -1 on error. */
+static int set_style_body(sanitizer *s, th_node *text, const Py_UCS4 *css, Py_ssize_t len) {
+    Py_ssize_t end_tags = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        end_tags += is_style_end_tag(css, index, len);
+    }
+    if (end_tags == 0) {
+        return th_node_set_data(s->tree, text, css, len);
+    }
+    Py_UCS4 *escaped = PyMem_Malloc((size_t)(len + end_tags) * sizeof(Py_UCS4));
+    if (escaped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t written = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        escaped[written++] = css[index];
+        if (is_style_end_tag(css, index, len)) {
+            escaped[written++] = '\\';
+        }
+    }
+    int status = th_node_set_data(s->tree, text, escaped, written);
+    PyMem_Free(escaped);
+    return status;
+}
+
+/* Scrub the CSS a kept `<style>` element holds. A parsed raw-text element carries its stylesheet as one text child, but
+   a built tree or a transformed element can hold several text runs, elements, or comments; the serializer would emit
+   those elements as markup inside the raw text. Drop every non-text child, merge the text into the first child, and
+   rewrite it with the policy-safe subset. Returns 0, or -1 on error. */
 static int sanitize_style_body(sanitizer *s, th_node *element) {
+    for (th_node *child = element->first_child, *next; child != NULL; child = next) {
+        next = child->next_sibling;
+        if (child->type != TH_NODE_TEXT) {
+            th_node_remove(child);
+        }
+    }
     th_node *text = element->first_child;
     if (text == NULL) {
         return 0; /* an empty <style></style> has no body to scrub */
     }
     Py_ssize_t len = 0;
-    Py_UCS4 *body = th_node_data(s->tree, text, &len); /* a parsed text node is a source slice, so materialize it */
+    Py_UCS4 *body = th_node_text(s->tree, element, &len);
     if (body == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    while (text->next_sibling != NULL) {
+        th_node_remove(text->next_sibling);
     }
     Py_UCS4 *out = PyMem_Malloc((size_t)(2 * len + 16) * sizeof(Py_UCS4));
     if (out == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1257,7 +1310,7 @@ static int sanitize_style_body(sanitizer *s, th_node *element) {
     Py_ssize_t out_len = 0;
     int status = scrub_stylesheet(s, body, len, out, &out_len);
     if (status == 0) { /* GCOVR_EXCL_BR_LINE: scrub_stylesheet's non-zero return is its allocation-failure path */
-        status = th_node_set_data(s->tree, text, out, out_len);
+        status = set_style_body(s, text, out, out_len);
     }
     PyMem_Free(out);
     PyMem_Free(body);
