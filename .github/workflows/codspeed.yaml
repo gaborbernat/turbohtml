@@ -20,13 +20,35 @@ jobs:
     name: 🚀 CodSpeed
     # OIDC only authenticates the repository registered with CodSpeed, so a fork's push runs fail with 401 Unauthorized
     if: github.repository == 'tox-dev/turbohtml'
-    # The tox-dev org has no plan for CodSpeed's macro runners; the pins on the run step below hold the instruction
+    # The tox-dev org has no plan for CodSpeed's macro runners; the pins in the steps below hold the instruction
     # stream steady across GitHub's mixed Intel and AMD fleet instead.
     runs-on: ubuntu-24.04
+    env:
+      UV_PYTHON_INSTALL_DIR: /bench/python
     permissions:
       contents: read
       id-token: write # OIDC lets the CodSpeed GitHub App authenticate this public repo without a token secret
     steps:
+      # GitHub rolls a new runner image out over days, so a base run and a head run can land on images that ship
+      # different glibc builds. Upgrading to the archive's current build gives every run the same one.
+      - name: 📦 Upgrade glibc to the archive build
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libc6-dbg
+      # Python lists every directory it imports from, and pytest finds its plugins by listing site-packages. ext4
+      # returns entries in hash order under a per-filesystem seed that each runner image sets differently, so the
+      # listing order, the allocation order behind it, and the heap addresses the benchmarks touch all followed the
+      # image. A filesystem made with a fixed seed lists every directory in the same order on every runner.
+      - name: 💾 Mount a fixed-seed filesystem over the workspace
+        run: |
+          sudo truncate -s 16G /bench.img
+          sudo mkfs.ext4 -q -U 6c1b5a8e-3f0a-4c2e-9d7b-1a2b3c4d5e6f -E hash_seed=0b5e2c7a-9d41-4f3e-8a6c-5d7e8f9a0b1c \
+            /bench.img
+          sudo mkdir /bench
+          sudo mount -o loop,noatime /bench.img /bench
+          sudo chown "$(id -u):$(id -g)" /bench
+          mkdir /bench/work /bench/python
+          sudo mount --bind /bench/work "$GITHUB_WORKSPACE"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -58,6 +80,11 @@ jobs:
             --config-settings=setup-args=-Db_lto=true
         env:
           UV_PYTHON_PREFERENCE: only-managed
+      # The minifier and page benchmarks read corpora that bench.corpus downloads on first use. Fetched inside the
+      # benchmark process, the TLS handshakes and response headers allocate differently on every run, so no two runs
+      # shared a heap layout.
+      - name: ⬇️ Download the network corpora
+        run: .tox/codspeed/bin/python -c 'import sys; sys.path.insert(0, "tools"); from bench.corpus import prefetch; prefetch()'
       # Callgrind counts every instruction glibc runs, and glibc picks its memcpy, memset, str*, and lazy-binding code
       # per CPU. GitHub hands each run an Intel Xeon or an AMD EPYC whose feature and preference bits select different
       # variants, so identical code counts differently between a base run and a head run. Turning every selector off
@@ -87,6 +114,9 @@ jobs:
           # term the CPU pins above do not cover.
           PYTHONHASHSEED: "0"
         with:
+          # The instrument cache is keyed by kernel, not by image, so a restore brings back debug symbols for
+          # whichever glibc the saving run had.
+          cache-instruments: false
           exclude-allocations: true
           mode: simulation
           # The runner hands the job's whole environment to the benchmark process, and a pull request run carries
