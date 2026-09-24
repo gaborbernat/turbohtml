@@ -2,6 +2,7 @@
    find/select/xpath/regex query plus structural-mutation bindings. */
 
 #include "dom/nodes.h"
+#include "dom/form_value.h"
 #include "core/node_map.h"
 
 #include "core/vec.h" /* th_grow_cap overflow-safe buffer growth */
@@ -932,14 +933,7 @@ static int collect_control(th_tree *tree, th_node *form, th_node *node, PyObject
         return collect_select(tree, node, name, pairs);
     }
     if (atom == TH_TAG_TEXTAREA) {
-        Py_ssize_t len;
-        Py_UCS4 *buffer = th_node_text(tree, node, &len);
-        if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        PyObject *value = ucs4_to_str(buffer, len);
-        PyMem_Free(buffer);
-        return emit_pair(pairs, name, value);
+        return emit_pair(pairs, name, th_form_textarea_value(tree, node));
     }
     enum field_kind kind = input_kind(node);
     if (kind == FIELD_BUTTONLIKE || kind == FIELD_FILE) {
@@ -948,7 +942,7 @@ static int collect_control(th_tree *tree, th_node *form, th_node *node, PyObject
     if (kind == FIELD_CHECKABLE && find_node_attr(node, TH_ATTR_CHECKED) == NULL) {
         return 0;
     }
-    return emit_pair(pairs, name, value_attr_or(node, kind == FIELD_CHECKABLE ? "on" : ""));
+    return emit_pair(pairs, name, kind == FIELD_CHECKABLE ? value_attr_or(node, "on") : th_form_input_value(node));
 }
 
 PyDoc_STRVAR(form_data_doc, "form_data()\n--\n\n"
@@ -957,9 +951,13 @@ PyDoc_STRVAR(form_data_doc, "form_data()\n--\n\n"
                             "own disabled or a disabling ancestor fieldset), buttons, and\n"
                             "file/submit/reset/image inputs are skipped; a checkbox or radio contributes\n"
                             "only when checked, a select one pair per selected non-disabled option (the\n"
-                            "default first option only when its display size is 1). Controls inside a\n"
-                            "template's contents have no form owner and are excluded. Controls are matched\n"
-                            "by containment in the form.\n\n"
+                            "default first option only when its display size is 1). An input submits its\n"
+                            "value after its type's value sanitization (newlines stripped, url/email\n"
+                            "trimmed, an invalid number or date/time value emptied, datetime-local\n"
+                            "normalized, range clamped to min/max/step); hidden and color inputs submit the\n"
+                            "value attribute as written. A textarea submits its text with CRLF and CR\n"
+                            "normalized to LF. Controls inside a datalist or a template's contents are\n"
+                            "excluded. Controls are matched by containment in the form.\n\n"
                             ":returns: the (name, value) pairs in document order.");
 
 static th_node *next_form_control(th_node *current, th_node *form) {
@@ -968,7 +966,7 @@ static th_node *next_form_control(th_node *current, th_node *form) {
         if (legend != NULL) {
             return legend;
         }
-    } else if (current->atom != TH_TAG_TEMPLATE && current->first_child != NULL) {
+    } else if (current->atom != TH_TAG_TEMPLATE && current->atom != TH_TAG_DATALIST && current->first_child != NULL) {
         return current->first_child;
     }
     while (current != form) {
