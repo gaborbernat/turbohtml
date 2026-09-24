@@ -3,10 +3,12 @@ Generate src/turbohtml/_c/data/entity_names.h: the codepoint to named-entity tab
 
 The NAMED_ENTITIES serializer formatter renders any character that has an HTML
 named reference as ``&name;`` (so U+00E9 becomes ``&eacute;``), matching the
-output of BeautifulSoup's ``html`` formatter. That formatter draws on the legacy
-HTML4 name set, which the standard library exposes as
-``html.entities.codepoint2name``; this script bakes the same mapping into a C
-table sorted by codepoint for a binary search at serialization time.
+output of BeautifulSoup's ``html`` formatter. It writes the legacy HTML4 names
+(``html.entities.codepoint2name``), each at the code point HTML5 decodes it to
+(``html.entities.html5``): a parser reads the output under HTML5 rules, and
+HTML5 moved ``&lang;``/``&rang;`` from U+2329/U+232A to U+27E8/U+27E9. This
+script bakes that mapping into a C table sorted by codepoint for a binary
+search at serialization time.
 
 Usage:  python tools/generate_entities.py src/turbohtml/_c/data/entity_names.h
 """
@@ -14,15 +16,16 @@ Usage:  python tools/generate_entities.py src/turbohtml/_c/data/entity_names.h
 from __future__ import annotations
 
 import sys
-from html.entities import codepoint2name
+from html.entities import codepoint2name, html5
 from pathlib import Path
 
 
 def generate(out_path: Path) -> None:
     """Write the generated codepoint to entity-name C header to *out_path*."""
     # apos is an XML name absent from the HTML4 set; codepoint2name already omits
-    # it. Sort by codepoint so the runtime can binary-search the table.
-    entries = sorted(codepoint2name.items())
+    # it. Every HTML4 name decodes to one HTML5 code point. Sort by codepoint so
+    # the runtime can binary-search the table.
+    entries = sorted((ord(html5[f"{name};"]), name) for name in codepoint2name.values())
     rows = "\n".join(f'    {{0x{codepoint:04X}, "{name}"}},' for codepoint, name in entries)
 
     out_path.write_text(

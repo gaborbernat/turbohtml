@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from html.entities import codepoint2name
 from typing import TYPE_CHECKING, Final
 from xml.etree import (  # ruff:ignore[suspicious-xml-etree-import]  # parsing turbohtml's own output, not untrusted input
     ElementTree as ET,
@@ -979,10 +980,20 @@ def test_default_formatter_keeps_non_ascii_literal() -> None:
             "<p>\x85\U0001f600</p>",
             id="named-passes-unnamed-non-ascii",
         ),
+        # HTML5 decodes &lang;/&rang; to U+27E8/U+27E9, not HTML4's U+2329/U+232A
+        pytest.param("<p>〈〉</p>", "p", Formatter.NAMED_ENTITIES, "<p>〈〉</p>", id="named-keeps-html4-angles"),
+        pytest.param("<p>⟨⟩</p>", "p", Formatter.NAMED_ENTITIES, "<p>&lang;&rang;</p>", id="named-html5-angles"),
     ],
 )
 def test_formatter_serialize(html: str, selector: str, formatter: Formatter, expected: str) -> None:
     assert _one(html, selector).serialize(Html(formatter=formatter)) == expected
+
+
+def test_named_entities_reparse_to_the_same_text() -> None:
+    text: Final = "".join(chr(codepoint) for codepoint in sorted(codepoint2name)) + "⟨⟩"
+    node: Final = Element("p", children=[Text(text)])
+    reparsed: Final = parse(node.serialize(Html(formatter=Formatter.NAMED_ENTITIES))).select("p")
+    assert [paragraph.text for paragraph in reparsed] == [text]
 
 
 @pytest.mark.parametrize(

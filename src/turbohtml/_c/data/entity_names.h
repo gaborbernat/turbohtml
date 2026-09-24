@@ -258,13 +258,13 @@ static const th_entity_entry th_entity_table[] = {
     {0x2309, "rceil"},
     {0x230A, "lfloor"},
     {0x230B, "rfloor"},
-    {0x2329, "lang"},
-    {0x232A, "rang"},
     {0x25CA, "loz"},
     {0x2660, "spades"},
     {0x2663, "clubs"},
     {0x2665, "hearts"},
     {0x2666, "diams"},
+    {0x27E8, "lang"},
+    {0x27E9, "rang"},
 };
 
 /* The named entity for a codepoint, or NULL when it has none. Binary search
