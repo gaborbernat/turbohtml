@@ -969,3 +969,21 @@ def test_minify_detached_root_bounds_scope(tag: str, sibling: str, *, inner: boo
     root: Final = Element("div", children=[Element(tag, children=[Text("a")]), Element(sibling, children=[Text("b")])])
     content: Final = f"<{tag}>a</{tag}><{sibling}>b"
     assert root.serialize(Html(layout=Minify()), inner=inner) == (content if inner else f"<div>{content}</div>")
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("<plaintext>hello <b>", "<plaintext>hello <b>", id="document"),
+        pytest.param("<div><plaintext>x", "<div><plaintext>x", id="inside-div"),
+        pytest.param("<template><plaintext>x</template>y", "<template><plaintext>x</template>y", id="in-template"),
+    ],
+)
+def test_minify_plaintext_leaves_the_rest_open(source: str, expected: str) -> None:
+    # the parser reads everything after <plaintext> as its text, so no end tag may follow
+    assert minify(source) == expected
+
+
+def test_minify_plaintext_root_omits_end_tag() -> None:
+    root: Final = Element("plaintext", children=[Text("x")])
+    assert root.serialize(Html(layout=Minify())) == "<plaintext>x"
