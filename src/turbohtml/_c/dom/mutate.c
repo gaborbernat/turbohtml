@@ -24,6 +24,10 @@ th_tree *th_tree_new(void) {
     return PyMem_Calloc(1, sizeof(th_tree));
 }
 
+void th_tree_set_quirks(th_tree *tree, int quirks) {
+    tree->quirks = quirks;
+}
+
 int th_tree_is_xml(const th_tree *tree) {
     return tree->xml;
 }
@@ -904,6 +908,21 @@ th_node *th_tree_adopt_copy(th_tree *dest, th_tree *src, th_node *src_node) {
     }
 }
 
+th_tree *th_tree_new_rooted(enum th_node_type type, int xml, int quirks) {
+    th_tree *tree = th_tree_new();
+    if (tree == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    tree->xml = xml;
+    tree->quirks = quirks;
+    tree->document = node_new(tree, type);
+    if (tree->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);       /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return tree;
+}
+
 /* Copy a document into an independent tree while its caller holds the source-tree lock. */
 th_tree *th_tree_copy_document(th_tree *src) {
     th_tree *dest = th_tree_new();
@@ -911,6 +930,7 @@ th_tree *th_tree_copy_document(th_tree *src) {
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     dest->xml = src->xml;
+    dest->quirks = src->quirks;
     dest->document = th_tree_copy_node(dest, src, src->document);
     if (dest->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(dest);       /* GCOVR_EXCL_LINE: allocation-failure path */

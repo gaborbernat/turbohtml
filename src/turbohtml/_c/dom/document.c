@@ -1906,7 +1906,10 @@ static PyObject *node_children_list(PyObject *self) {
 }
 
 /* The pickle payload for this node: the leaf data, the element tag and attribute
-   dict, the doctype identifiers, or the document's own markup. */
+   dict, the doctype identifiers, the document's quirks mode, None for a fragment, or
+   (host, mode) for a shadow root. A document or fragment carries its children like an
+   element does, so the round-trip rebuilds the structure itself (adjacent Text nodes,
+   template contents, a doctype's identifiers) rather than reparsing serialized markup. */
 static PyObject *node_pickle_data(PyObject *self, th_node *node) {
     switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_TEXT:
@@ -1935,22 +1938,14 @@ static PyObject *node_pickle_data(PyObject *self, th_node *node) {
         return Py_BuildValue("(NNi)", element_get_tag(self, NULL), attrs, (int)node->ns);
     }
     case TH_NODE_DOCUMENT:
+        return PyLong_FromLong(th_tree_quirks(tree_of(self)));
     case TH_NODE_CONTENT:
-        /* An XML tree serializes under XML rules so the round-trip reparses with
-           parse_xml and keeps case-sensitive names; th_node_html would lower them. */
-        if (th_tree_is_xml(tree_of(self))) {
-            th_serialize_opts opts = {0};
-            opts.xml = 1;
-            Py_ssize_t len;
-            Py_UCS4 *markup = th_node_serialize(tree_of(self), node, &opts, NULL, 0, &len);
-            if (markup == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-            }
-            PyObject *result = ucs4_to_str(markup, len);
-            PyMem_Free(markup);
-            return result;
+        if (th_node_is_shadow_root(node)) {
+            PyObject *host =
+                node_wrap(state_of(self), ((NodeObject *)self)->handle, th_shadow_host(tree_of(self), node));
+            return host == NULL ? NULL : Py_BuildValue("(Ni)", host, th_shadow_mode(node)); /* GCOVR_EXCL_BR_LINE */
         }
-        return str_from_accessor(th_node_html, tree_of(self), node);
+        Py_RETURN_NONE;
     }
     Py_RETURN_NONE; /* GCOVR_EXCL_LINE: unreachable, the switch is exhaustive */
 }
@@ -1962,14 +1957,15 @@ PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored)) {
         return NULL;           /* GCOVR_EXCL_LINE: unreachable */
     }
     PyObject *data = node_pickle_data(self, node);
-    PyObject *children = node->type == TH_NODE_ELEMENT ? node_children_list(self) : PyList_New(0);
+    int has_children = node->type == TH_NODE_ELEMENT || node->type == TH_NODE_DOCUMENT || node->type == TH_NODE_CONTENT;
+    PyObject *children = has_children ? node_children_list(self) : PyList_New(0);
     if (data == NULL || children == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_XDECREF(data);                   /* GCOVR_EXCL_LINE: allocation-failure path */
         Py_XDECREF(children);               /* GCOVR_EXCL_LINE: allocation-failure path */
         Py_DECREF(reconstruct);             /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;                        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    /* the xml flag rebuilds a document/content payload with parse_xml; other kinds ignore it */
+    /* the xml flag rebuilds a document, fragment, or element under XML naming rules */
     PyObject *result =
         Py_BuildValue("(O(iNNi))", reconstruct, (int)node->type, data, children, th_tree_is_xml(tree_of(self)));
     Py_DECREF(reconstruct);
@@ -2016,11 +2012,64 @@ static PyObject *reconstruct_doctype(module_state *state, PyObject *data) {
     return node;
 }
 
+/* A fresh document or fragment wrapper for a pickled one: a document carries its quirks mode as data. A pickle from
+   before the structural format carried the serialized markup instead, which still reparses. */
+static PyObject *reconstruct_root(PyObject *module, module_state *state, int kind, PyObject *data, int xml) {
+    if (PyUnicode_Check(data)) {
+        PyObject *call_args = PyTuple_Pack(1, data);
+        if (call_args == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *node = xml ? turbohtml_parse_xml(module, call_args, NULL) : turbohtml_parse(module, call_args, NULL);
+        Py_DECREF(call_args);
+        return node;
+    }
+    int quirks = kind == TH_NODE_DOCUMENT ? PyObject_IsTrue(data) : 0;
+    if (quirks < 0) {
+        return NULL;
+    }
+    th_tree *tree = th_tree_new_rooted((enum th_node_type)kind, xml, quirks);
+    if (tree == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *empty = PyUnicode_New(0, 0);
+    if (empty == NULL) {    /* GCOVR_EXCL_BR_LINE: the empty string is interned and cannot fail */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *node = tree_to_node(state, tree, empty, Py_None, 0);
+    Py_DECREF(empty);
+    return node;
+}
+
+/* A pickled shadow root: attach one of the pickled mode to the rebuilt host and return it. */
+static PyObject *reconstruct_shadow_root(module_state *state, PyObject *data) {
+    PyObject *host;
+    int mode;
+    if (!PyArg_ParseTuple(data, "O!i", (PyTypeObject *)state->element_type, &host, &mode)) {
+        return NULL;
+    }
+    if (mode != 0 && mode != 1) { /* guard against a crafted payload */
+        PyErr_SetString(PyExc_ValueError, "shadow root mode out of range");
+        return NULL;
+    }
+    th_node *host_node = ((NodeObject *)host)->node;
+    if (th_element_shadow_root(tree_of(host), host_node) != NULL) {
+        PyErr_SetString(PyExc_ValueError, "the host already has a shadow root");
+        return NULL;
+    }
+    th_node *root = th_element_attach_shadow(tree_of(host), host_node, mode);
+    if (root == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return node_wrap(state, ((NodeObject *)host)->handle, root);
+}
+
 PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
     int kind;
     PyObject *data;
     PyObject *children;
-    int xml = 0; /* set for a document/content payload serialized under XML rules */
+    int xml = 0; /* set for a node pickled from a parse_xml tree */
     if (!PyArg_ParseTuple(args, "iOO|i", &kind, &data, &children, &xml)) {
         return NULL;
     }
@@ -2050,7 +2099,7 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
             PyErr_SetString(PyExc_ValueError, "namespace out of range");
             return NULL;
         }
-        node = make_element((PyTypeObject *)state->element_type, tag, element_attrs, xml);
+        node = make_element((PyTypeObject *)state->element_type, tag, element_attrs, xml, ns != TH_NS_HTML);
         if (node != NULL) {
             ((NodeObject *)node)->node->ns = (uint8_t)ns;
         }
@@ -2059,26 +2108,27 @@ PyObject *turbohtml_reconstruct(PyObject *module, PyObject *args) {
     case TH_NODE_DOCTYPE:
         node = reconstruct_doctype(state, data);
         break;
-    default: { /* TH_NODE_DOCUMENT / TH_NODE_CONTENT: data is the serialized markup */
-        PyObject *call_args = PyTuple_Pack(1, data);
-        if (call_args == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        node = xml ? turbohtml_parse_xml(module, call_args, NULL) : turbohtml_parse(module, call_args, NULL);
-        Py_DECREF(call_args);
+    case TH_NODE_CONTENT:
+        node = PyTuple_Check(data) ? reconstruct_shadow_root(state, data)
+                                   : reconstruct_root(module, state, kind, data, xml);
         break;
-    }
+    default: /* TH_NODE_DOCUMENT */
+        node = reconstruct_root(module, state, kind, data, xml);
+        break;
     }
     if (node == NULL) {
         return NULL;
     }
+    /* link each rebuilt child straight into the node: a document has no append(), and a fragment child (a template's
+       contents) must land as a child rather than be spliced */
+    th_node *parent = ((NodeObject *)node)->node;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(children); index++) {
-        PyObject *appended = PyObject_CallMethod(node, "append", "O", PyList_GET_ITEM(children, index));
-        if (appended == NULL) { /* GCOVR_EXCL_BR_LINE: a reconstructed child always appends */
-            Py_DECREF(node);    /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        th_node *child = adopt_into((NodeObject *)node, parent, PyList_GET_ITEM(children, index));
+        if (child == NULL) {
+            Py_DECREF(node);
+            return NULL;
         }
-        Py_DECREF(appended);
+        th_node_append_child(parent, child);
     }
     return node;
 }

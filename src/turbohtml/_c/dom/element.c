@@ -1920,8 +1920,10 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
    "a<b" from malformed input) that Element() rejects but that must round-trip
    unchanged, so the trusted callers reach the element through this helper. xml keeps
    the tag and attribute names case-sensitive (no fold, no builtin atom), so an element
-   unpickled from an XML tree matches parse_xml's storage. */
-PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs, int xml) {
+   unpickled from an XML tree matches parse_xml's storage. keep_case keeps the spelling
+   of an HTML-tree element's names while still resolving its atom, for an unpickled SVG
+   or MathML element whose parser-adjusted case (foreignObject, viewBox) must survive. */
+PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs, int xml, int keep_case) {
     Py_ssize_t tag_len = PyUnicode_GET_LENGTH(tag);
     PyObject *keys = NULL;
     Py_ssize_t attr_count = 0;
@@ -1956,15 +1958,15 @@ PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs, int x
             PyErr_Clear(); /* a surrogate or very long custom tag is not in the table */
         }
     }
-    Py_UCS4 *tag_points = atom == TH_TAG_UNKNOWN ? PyUnicode_AsUCS4Copy(tag) : NULL;
-    if (atom == TH_TAG_UNKNOWN && tag_points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        th_tree_free(tree);                             /* GCOVR_EXCL_LINE: allocation-failure path */
-        Py_XDECREF(keys);                               /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+    Py_UCS4 *tag_points = atom == TH_TAG_UNKNOWN || keep_case ? PyUnicode_AsUCS4Copy(tag) : NULL;
+    if ((atom == TH_TAG_UNKNOWN || keep_case) && tag_points == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        th_tree_free(tree);                                            /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_XDECREF(keys);                                              /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                                                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     /* An HTML unknown tag is ASCII-lowercased to match what the parser stores; a known
        name already points at its lowercase entry, and an XML name keeps its case. */
-    for (Py_ssize_t index = 0; !xml && index < tag_len && tag_points != NULL; index++) {
+    for (Py_ssize_t index = 0; !xml && !keep_case && index < tag_len && tag_points != NULL; index++) {
         if (tag_points[index] >= 'A' && tag_points[index] <= 'Z') {
             tag_points[index] += 32;
         }
@@ -1976,7 +1978,7 @@ PyObject *make_element(PyTypeObject *type, PyObject *tag, PyObject *attrs, int x
         Py_XDECREF(keys);        /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (keys != NULL && fill_element_attrs(tree, node, attrs, keys, !xml) < 0) {
+    if (keys != NULL && fill_element_attrs(tree, node, attrs, keys, !xml && !keep_case) < 0) {
         th_tree_free(tree);
         Py_DECREF(keys);
         return NULL;
@@ -2000,7 +2002,7 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if (validate_name(tag, 0) < 0) {
         return NULL;
     }
-    PyObject *element = make_element(type, tag, attrs, 0); /* the public constructor builds HTML elements */
+    PyObject *element = make_element(type, tag, attrs, 0, 0); /* the public constructor builds HTML elements */
     if (element == NULL) {
         return NULL;
     }

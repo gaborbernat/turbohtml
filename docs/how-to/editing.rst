@@ -208,7 +208,8 @@ empty text nodes, throughout the subtree (the DOM operation `BeautifulSoup
 
 Any node deep-copies into a fresh standalone tree, so a clone is independent of the original. Use
 :func:`python:copy.deepcopy` to duplicate in memory, or :mod:`python:pickle` to cross a process or cache boundary; both
-preserve processing instructions and CDATA sections exactly:
+keep the structure exactly, including processing instructions, CDATA sections, adjacent text nodes, and a document's
+doctype and quirks mode:
 
 .. testcode::
 
