@@ -213,6 +213,38 @@ def test_a_sequence_split_across_chunks_decodes_as_one_piece(encoding: str, raw:
     assert _streamed(raw, encoding, chunk) == parse(raw, encoding=encoding).text
 
 
+@pytest.mark.parametrize(
+    ("encoding", "raw"),
+    [
+        pytest.param("windows-1252", b"\xef\xbb\xbf<p>\xc3\xa9", id="utf-8-mark-outranks-label"),
+        pytest.param("utf-8", "\ufeff<p>\xe9".encode("utf-16-le"), id="utf-16le-mark"),
+        pytest.param("windows-1252", "\ufeff<p>\xe9".encode("utf-16-be"), id="utf-16be-mark"),
+        pytest.param("windows-1252", b"\xef\xbb<p>", id="partial-utf-8-mark"),
+        pytest.param("windows-1252", b"\xfe<p>", id="partial-utf-16-mark"),
+        pytest.param("windows-1252", b"\xef", id="mark-prefix-at-close"),
+        pytest.param("utf-8", b"<p>x", id="no-mark"),
+    ],
+)
+@pytest.mark.parametrize(
+    "chunk",
+    [pytest.param(1, id="one-byte"), pytest.param(2, id="two-byte"), pytest.param(64, id="whole")],
+)
+def test_a_byte_order_mark_decides_the_stream_encoding(encoding: str, raw: bytes, chunk: int) -> None:
+    parser = IncrementalParser(encoding=encoding)
+    for start in range(0, len(raw), chunk):
+        parser.feed(raw[start : start + chunk])
+    document = parser.close()
+    expected = parse(raw, encoding=encoding)
+    assert (document.text, document.encoding) == (expected.text, expected.encoding)
+
+
+def test_a_byte_order_mark_after_an_empty_chunk_is_stripped() -> None:
+    parser = IncrementalParser(encoding="windows-1252")
+    parser.feed(b"")
+    parser.feed(b"\xef\xbb\xbf\xc3\xa9")
+    assert parser.close().text == "\xe9"
+
+
 def test_a_label_alias_reports_its_canonical_name() -> None:
     parser = IncrementalParser(encoding="iso-8859-1")
     parser.feed(b"caf\xe9")
