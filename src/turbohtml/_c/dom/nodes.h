@@ -646,6 +646,7 @@ PyObject *node_reduce(PyObject *self, PyObject *Py_UNUSED(ignored));
 /* Prepare child_obj to become a child of dest_parent in anchor's tree, returning the
    th_node to link. Defined in element.c; shadow.c reuses it for ShadowRoot.append. */
 th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_obj);
+Py_ssize_t import_foreign_nodes(PyObject *dest_handle, PyObject *const *nodes, Py_ssize_t count);
 
 /* Raise the first well-formedness error of an XML fragment parse (the parse error parse_xml raises), shifting a
    first-line column left by the length of the wrapper start tag so it counts from the fragment's own start. Frees

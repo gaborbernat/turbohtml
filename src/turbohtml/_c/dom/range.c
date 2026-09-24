@@ -902,69 +902,54 @@ static PyObject *range_clone_contents(PyObject *self, PyObject *Py_UNUSED(ignore
     return result;
 }
 
-/* Detach a node argument from wherever it lives and return the th_node to link into the range's
-   tree (a same-tree node moves in place; a foreign node is copied and its wrapper re-pointed).
-   NULL with an exception on a Document, a cycle, or allocation failure. */
+/* Detach a node argument, already in the range's tree (insert_core imports a foreign one first),
+   from wherever it lives and return it. NULL with an exception on a Document or a cycle. */
 static th_node *adopt(RangeObject *range, PyObject *child_obj) {
     NodeObject *child = (NodeObject *)child_obj;
     if (child->node->type == TH_NODE_DOCUMENT) {
         PyErr_SetString(PyExc_ValueError, "a Document cannot be inserted");
         return NULL;
     }
-    th_tree *dest_tree = ((HandleObject *)range->start_handle)->tree;
-    th_tree *child_tree = ((HandleObject *)child->handle)->tree;
-    if (dest_tree == child_tree) {
-        if (th_node_contains(dest_tree, child->node, range->start_node)) {
-            PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
-            return NULL;
-        }
-        th_node_remove(child->node);
-        return child->node;
+    if (th_node_contains(((HandleObject *)range->start_handle)->tree, child->node, range->start_node)) {
+        PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
+        return NULL;
     }
-    PyObject *source_handle = child->handle;
-#ifdef Py_GIL_DISABLED
-    Py_INCREF(source_handle);
-#endif
-    th_node *copy;
-    Py_BEGIN_CRITICAL_SECTION2(range->start_handle, source_handle);
-    copy = th_tree_adopt_copy(dest_tree, child_tree, child->node);
-    if (copy != NULL && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        handle_add_hash_override((HandleObject *)range->start_handle, copy,
-                                 handle_node_hash((HandleObject *)source_handle, child->node)) == 0) {
-        handle_drop_index(source_handle);
-        th_node_remove(child->node);
-        Py_SETREF(child->handle, Py_NewRef(range->start_handle));
-        child->node = copy;
-    } else {
-        copy = NULL; /* GCOVR_EXCL_LINE */
-    }
-    Py_END_CRITICAL_SECTION2();
-#ifdef Py_GIL_DISABLED
-    Py_DECREF(source_handle);
-#endif
-    if (copy == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    return copy;
+    th_node_remove(child->node);
+    return child->node;
 }
 
 /* The DOM insert algorithm; returns the linked th_node in the range's tree, or NULL on error. The
-   caller holds the range handle's critical section. */
+   caller holds the range handle's critical section. Importing a foreign node suspends that section
+   (see import_node), so the boundary is re-validated until a pass imports nothing; the first check
+   comes before any import, so a bad boundary raises without moving the node. */
 static th_node *insert_core(RangeObject *range, PyObject *node_obj) {
     if (!is_node(node_obj, state_of((PyObject *)range))) {
         PyErr_SetString(PyExc_TypeError, "expected a node");
         return NULL;
     }
-    th_node *start_node = range->start_node;
+    th_node *start_node;
+    int start_text_like;
+    for (;;) {
+        if (check_boundaries(range) < 0) {
+            return NULL;
+        }
+        start_node = range->start_node;
+        start_text_like = start_node->type == TH_NODE_TEXT || start_node->type == TH_NODE_CDATA;
+        if (start_node->type == TH_NODE_COMMENT || start_node->type == TH_NODE_PI ||
+            (start_text_like && start_node->parent == NULL) || ((NodeObject *)node_obj)->node == start_node) {
+            PyErr_SetString(PyExc_ValueError, "cannot insert at this boundary point");
+            return NULL;
+        }
+        Py_ssize_t imported = import_foreign_nodes(range->start_handle, &node_obj, 1);
+        if (imported < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (imported == 0) {
+            break;
+        }
+    }
     Py_ssize_t start_offset = range->start_offset;
     th_node *incoming = ((NodeObject *)node_obj)->node;
-    int start_text_like = start_node->type == TH_NODE_TEXT || start_node->type == TH_NODE_CDATA;
-    if (start_node->type == TH_NODE_COMMENT || start_node->type == TH_NODE_PI ||
-        (start_text_like && start_node->parent == NULL) || incoming == start_node) {
-        PyErr_SetString(PyExc_ValueError, "cannot insert at this boundary point");
-        return NULL;
-    }
     th_node *reference;
     if (start_text_like) {
         reference = start_node;
@@ -975,6 +960,13 @@ static th_node *insert_core(RangeObject *range, PyObject *node_obj) {
         }
     }
     th_node *parent = reference == NULL ? start_node : reference->parent;
+    /* a Text start is split and the node goes after its head, which is before the head's current next sibling */
+    const char *misplaced =
+        th_pre_insert_error(parent, &incoming, 1, start_text_like ? start_node->next_sibling : reference, NULL, NULL);
+    if (misplaced != NULL) {
+        PyErr_SetString(PyExc_ValueError, misplaced);
+        return NULL;
+    }
     handle_drop_index(range->start_handle);
     if (start_text_like) {
         reference = split_data_node(((HandleObject *)range->start_handle)->tree, start_node, start_offset);
@@ -1002,7 +994,7 @@ static PyObject *range_insert_node(PyObject *self, PyObject *node_obj) {
     RangeObject *range = (RangeObject *)self;
     th_node *linked;
     Py_BEGIN_CRITICAL_SECTION(range->start_handle);
-    linked = check_boundaries(range) == 0 ? insert_core(range, node_obj) : NULL;
+    linked = insert_core(range, node_obj);
     Py_END_CRITICAL_SECTION();
     if (linked == NULL) {
         return NULL;
@@ -1024,6 +1016,21 @@ static int reject_partial_non_text(RangeObject *range) {
     return 0;
 }
 
+/* surroundContents' checks, then new_parent imported into the range's tree before the extract
+   mutates it. An import suspends the caller's critical section, so the checks repeat until a pass
+   imports nothing. Returns 0, or -1 with an exception. */
+static int import_surround_parent(RangeObject *range, PyObject *new_parent) {
+    for (;;) {
+        if (check_boundaries(range) < 0 || reject_partial_non_text(range) < 0) {
+            return -1;
+        }
+        Py_ssize_t imported = import_foreign_nodes(range->start_handle, &new_parent, 1);
+        if (imported <= 0) {
+            return (int)imported;
+        }
+    }
+}
+
 static PyObject *range_surround_contents(PyObject *self, PyObject *new_parent) {
     RangeObject *range = (RangeObject *)self;
     module_state *state = state_of(self);
@@ -1041,7 +1048,8 @@ static PyObject *range_surround_contents(PyObject *self, PyObject *new_parent) {
     PyObject *result = NULL;
     th_tree *tree = ((HandleObject *)range->start_handle)->tree;
     Py_BEGIN_CRITICAL_SECTION(range->start_handle);
-    if (check_boundaries(range) == 0 && reject_partial_non_text(range) == 0) {
+    if (import_surround_parent(range, new_parent) == 0) {
+        parent_node = ((NodeObject *)new_parent)->node; /* the import re-points a foreign wrapper at its copy */
         handle_drop_index(range->start_handle);
         th_node *new_node;
         Py_ssize_t new_offset;

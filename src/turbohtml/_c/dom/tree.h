@@ -349,6 +349,12 @@ typedef struct th_node_iterator {
    -1 on allocation failure. */
 int th_tree_add_node_iterator(th_tree *tree, th_node_iterator *iterator);
 void th_tree_remove_node_iterator(th_tree *tree, th_node_iterator *iterator);
+/* The DOM "ensure pre-insertion validity" hierarchy rules (steps 4-6, and the replace variant): may nodes (count of
+   them, gathered into one fragment when there are several) go into parent before child (NULL appends), or in place of
+   the sibling run [run_first, run_last] when run_first is not NULL? A doctype belongs only under a Document, which
+   holds no Text, at most one element and one doctype, the doctype first. Returns NULL when valid, else the reason. */
+const char *th_pre_insert_error(th_node *parent, th_node *const *nodes, Py_ssize_t count, th_node *child,
+                                th_node *run_first, th_node *run_last);
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
 /* th_tree_copy_node for a node the DOM moves into dest (adoption): between an XML and an HTML tree the copied elements
    also take dest's naming rules, see convert_element_kind. */
