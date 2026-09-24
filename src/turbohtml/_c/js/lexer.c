@@ -77,6 +77,7 @@ void jm_lex_init(jm_lexer *lx, const Py_UCS4 *src, Py_ssize_t len) {
     lx->newline_before = 0;
     lx->sink = NULL;
     lx->comment_count = 0;
+    lx->html_comments = 1;
     lx->error = 0;
 }
 
@@ -148,6 +149,18 @@ static void jm_capture_comment(jm_lexer *lx, const Py_UCS4 *text, Py_ssize_t len
     lx->comment_count++;
 }
 
+/* Whether an Annex B.1.1 HTML-like comment opens at lx->pos, reading to the end of the line: `<!--`
+   anywhere, or `-->` once a line terminator separates it from the previous token (only white space and
+   comments may follow that terminator, which a trivia scan that has set newline_before guarantees). */
+static int jm_html_comment_opens(const jm_lexer *lx, Py_UCS4 ch) {
+    const Py_UCS4 *rest = lx->src + lx->pos;
+    Py_ssize_t left = lx->len - lx->pos;
+    if (ch == '<') {
+        return left >= 4 && rest[1] == '!' && rest[2] == '-' && rest[3] == '-';
+    }
+    return ch == '-' && lx->newline_before && left >= 3 && rest[1] == '-' && rest[2] == '>';
+}
+
 /* Consume white space and comments, recording in lx->newline_before whether any
    line terminator was crossed (a block comment counts when it spans one): the
    parser turns that flag into automatic-semicolon-insertion decisions. */
@@ -160,7 +173,8 @@ static void jm_skip_trivia(jm_lexer *lx) {
             lx->pos++;
         } else if (jm_is_ws(ch)) {
             lx->pos++;
-        } else if (ch == '/' && lx->pos + 1 < lx->len && lx->src[lx->pos + 1] == '/') {
+        } else if ((ch == '/' && lx->pos + 1 < lx->len && lx->src[lx->pos + 1] == '/') ||
+                   (lx->html_comments && jm_html_comment_opens(lx, ch))) {
             lx->pos += 2;
             while (lx->pos < lx->len && !jm_is_line_term(lx->src[lx->pos])) {
                 lx->pos++;

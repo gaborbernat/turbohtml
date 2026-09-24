@@ -798,6 +798,22 @@ def test_non_javascript_types_pass_through(script_type: str) -> None:
     assert body in out
 
 
+@pytest.mark.parametrize(
+    ("script_type", "expected"),
+    [
+        pytest.param("", "<script type>f(a)</script>", id="classic-comment"),
+        pytest.param("text/javascript", "<script type=text/javascript>f(a)</script>", id="javascript-comment"),
+        pytest.param("module", "<script type=module>f(a<! --b)</script>", id="module-operators"),
+        pytest.param("Module", "<script type=Module>f(a<! --b)</script>", id="module-mixed-case"),
+    ],
+)
+def test_html_like_comment_follows_script_goal(script_type: str, expected: str) -> None:
+    # Annex B.1.1 HTML-like comments exist only in the Script goal; a module reads `<!--` as `<`, `!`, `--`
+    source = f'<script type="{script_type}">f(a <!--b\n)</script>'
+    out = parse_fragment(source, "div").serialize(Html(layout=Minify(minify_js=JSMinify())))
+    assert out == f"<div>{expected}</div>"
+
+
 def test_unparseable_script_emitted_verbatim() -> None:
     # the JS parser cannot handle this; the script falls back to its original bytes rather
     # than breaking the surrounding document

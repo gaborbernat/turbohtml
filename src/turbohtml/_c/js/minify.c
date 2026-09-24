@@ -7,9 +7,9 @@
 #include "js/internal.h"
 #include "js/minify.h"
 
-Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, Py_ssize_t *out_len, char *errbuf,
-                      size_t errlen) {
-    jm_program *prog = jm_parse(src, len, errbuf, errlen);
+Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, int module, Py_ssize_t *out_len,
+                      char *errbuf, size_t errlen) {
+    jm_program *prog = jm_parse(src, len, module, errbuf, errlen);
     if (prog == NULL) {
         return NULL; /* errbuf carries the message; empty on allocation failure */
     }

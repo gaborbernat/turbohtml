@@ -47,12 +47,12 @@ static Py_UCS4 *widen(const unsigned char *bytes, size_t len, Py_ssize_t *out_le
 static int run_once(const Py_UCS4 *src, Py_ssize_t len) {
     char err[160];
     Py_ssize_t out_len = 0;
-    Py_UCS4 *out = th_js_minify(src, len, 1, 1, &out_len, err, sizeof(err));
+    Py_UCS4 *out = th_js_minify(src, len, 1, 1, 0, &out_len, err, sizeof(err));
     if (out == NULL) {
         return 0; /* parse error (err set) or OOM (err empty) — nothing allocated leaks */
     }
     Py_ssize_t round_len = 0;
-    Py_UCS4 *round = th_js_minify(out, out_len, 1, 1, &round_len, err, sizeof(err));
+    Py_UCS4 *round = th_js_minify(out, out_len, 1, 1, 0, &round_len, err, sizeof(err));
     free(round); /* may be NULL; free(NULL) is a no-op */
     free(out);
     return 1;

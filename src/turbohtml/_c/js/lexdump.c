@@ -31,7 +31,7 @@ static PyObject *minify_js_impl(PyObject *arg, int fold, int mangle, int passthr
     }
     Py_ssize_t out_len = 0;
     char err[160];
-    Py_UCS4 *out = th_js_minify(src, len, fold, mangle, &out_len, err, sizeof(err));
+    Py_UCS4 *out = th_js_minify(src, len, fold, mangle, 0, &out_len, err, sizeof(err));
     PyMem_Free(src);
     if (out == NULL) {
         if (err[0] != '\0') { /* GCOVR_EXCL_BR_LINE: the empty-message case is an allocation failure */
@@ -257,7 +257,7 @@ PyObject *turbohtml_minify_js_parse(PyObject *Py_UNUSED(module), PyObject *arg) 
         return NULL;   /* GCOVR_EXCL_LINE */
     }
     char err[128];
-    jm_program *prog = jm_parse(src, len, err, sizeof(err));
+    jm_program *prog = jm_parse(src, len, 0, err, sizeof(err));
     if (prog == NULL) {
         PyMem_Free(src);
         /* GCOVR_EXCL_BR_LINE: the empty-message fallback below is an allocation failure */

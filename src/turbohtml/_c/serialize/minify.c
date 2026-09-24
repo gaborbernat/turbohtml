@@ -448,8 +448,8 @@ static int mini_omit_start_tag(th_tree *tree, th_node *node, int strip_comments)
               first->atom == TH_TAG_STYLE || first->atom == TH_TAG_TEMPLATE));
 }
 
-/* Whether a <script>'s type marks it as JavaScript the minifier may rewrite: absent,
-   empty, "module", or a WHATWG JavaScript MIME type essence. Any other type
+/* Whether a <script>'s type marks it as JavaScript the minifier may rewrite: 2 for "module", 1 for
+   absent, empty, or a WHATWG JavaScript MIME type essence (a classic script), 0 otherwise. Any other type
    (application/json, importmap, a text/html template, ...) is data, not script, and must
    pass through untouched, so it is never handed to the JS minifier. A type padded with
    whitespace is treated conservatively as non-JS -- rare, and verbatim is always safe. */
@@ -484,7 +484,7 @@ static int script_is_js(th_tree *tree, th_node *node) {
     };
     for (size_t index = 0; index < sizeof(js_types) / sizeof(js_types[0]); index++) {
         if (ser_value_iequals(value, len, js_types[index])) {
-            return 1;
+            return index == 0 ? 2 : 1;
         }
     }
     return 0;
@@ -497,7 +497,8 @@ static int mini_emit_script_js(sbuf *out, th_tree *tree, th_node *node, const th
     if (node->atom != TH_TAG_SCRIPT) {
         return 0; /* style/textarea/title and other raw-text elements are never JavaScript */
     }
-    if (!script_is_js(tree, node)) {
+    int kind = script_is_js(tree, node);
+    if (!kind) {
         return 0;
     }
     Py_ssize_t total = 0;
@@ -518,7 +519,8 @@ static int mini_emit_script_js(sbuf *out, th_tree *tree, th_node *node, const th
     }
     /* errlen 0: the HTML path discards the message and falls back to verbatim instead */
     Py_ssize_t out_len;
-    Py_UCS4 *result = th_js_minify(src, total, opts->minify_js_fold, opts->minify_js_mangle, &out_len, NULL, 0);
+    Py_UCS4 *result =
+        th_js_minify(src, total, opts->minify_js_fold, opts->minify_js_mangle, kind == 2, &out_len, NULL, 0);
     PyMem_Free(src);
     if (result == NULL) {
         return 0; /* a parse error (or allocation failure): emit the script verbatim */

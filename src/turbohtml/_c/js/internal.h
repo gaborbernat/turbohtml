@@ -118,11 +118,13 @@ typedef struct {
     struct jm_program *sink; /* kept comments accrue here; NULL discards every comment (the token-dump path) */
     int32_t comment_count;   /* kept-comment count so far, rewound with the lexer on a speculative backtrack */
 
+    int html_comments; /* Script goal: `<!--` and a line-leading `-->` open line comments (Annex B.1.1) */
+
     int error; /* a lexical error was hit; kind is JT_ERROR */
 } jm_lexer;
 
-/* Initialize a lexer over src[0..len). Does not read the first token; call
-   jm_lex_next. The caller owns src for the lexer's lifetime; the lexer itself
+/* Initialize a lexer over src[0..len) for the Script goal (HTML-like comments on). Does not read the
+   first token; call jm_lex_next. The caller owns src for the lexer's lifetime; the lexer itself
    holds no owned memory (template nesting is tracked by the parser's recursion). */
 void jm_lex_init(jm_lexer *lx, const Py_UCS4 *src, Py_ssize_t len);
 
@@ -342,7 +344,7 @@ Py_ssize_t jm_str_encode(const Py_UCS4 *value, Py_ssize_t len, Py_UCS4 quote, Py
 /* Parse src[0..len) into a program. Returns NULL on a syntax error (a NUL-terminated
    message is written into errbuf, capacity errlen) or allocation failure (errbuf
    empty). The source must outlive the program (nodes borrow its code points). */
-jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen);
+jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, int module, char *errbuf, size_t errlen);
 
 void jm_program_free(jm_program *prog);
 
