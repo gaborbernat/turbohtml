@@ -208,6 +208,8 @@ typedef struct {
     int32_t slot_count;  /* number of distinct rename slots assigned across the program */
     int32_t global;      /* the global scope, where label symbols are parked */
     int32_t label_depth; /* count of lexically-enclosing labels, indexing their short names */
+    int32_t args_scope;  /* scope of the innermost enclosing non-arrow function, whose `arguments` a
+                            free `arguments` read names (-1 at the top level) */
     int poisoned;        /* a with / eval was seen: stop renaming entirely */
     int failed;
 } M;
@@ -391,6 +393,20 @@ static void hoist_block(M *mangler, int32_t first, int32_t scope) {
 
 static void walk(M *mangler, int32_t idx, int32_t scope, int bind);
 
+/* A sloppy function with a simple parameter list maps `arguments[i]` onto its i-th parameter
+   (§10.4.4), so reading `arguments` reads every parameter and writing through it writes them. Count
+   both on each parameter, so no pass drops an assignment to one as a dead store. */
+static void alias_parameters(M *mangler) {
+    for (int32_t sym = mangler->prog->scopes[mangler->args_scope].first_sym; sym >= 0;
+         sym = mangler->prog->syms[sym].scope_next) {
+        if (mangler->prog->syms[sym].decl == 3) {
+            mangler->prog->syms[sym].refs++;
+            mangler->prog->syms[sym].writes++;
+            mangler->prog->syms[sym].ref_scope = -1;
+        }
+    }
+}
+
 /* Walk a chain of siblings. */
 static void walk_chain(M *mangler, int32_t first, int32_t scope, int bind) {
     for (int32_t idx = first; idx >= 0; idx = mangler->prog->nodes[idx].next) {
@@ -407,6 +423,10 @@ static void walk_function(M *mangler, int32_t idx, int32_t parent) {
         return;              /* GCOVR_EXCL_LINE */
     }
     int32_t mark = mangler->undo_count;
+    int32_t outer_args = mangler->args_scope;
+    if (node->kind == JN_FUNC) { /* an arrow has no arguments object of its own (§10.2.11) */
+        mangler->args_scope = scope;
+    }
     /* a named function expression binds its own name inside its scope (and nowhere else), so the
        name is renamable (decl 7) like any local; tag the node so the printer emits the new name */
     if (node->kind == JN_FUNC && (node->flags & JN_F_EXPR) && node->str != NULL) {
@@ -421,6 +441,7 @@ static void walk_function(M *mangler, int32_t idx, int32_t parent) {
         /* default param values reference the param scope, then the expression body */
         walk_chain(mangler, node->a, scope, 1);
         walk(mangler, body, scope, 0);
+        mangler->args_scope = outer_args;
         undo_to(mangler, mark);
         return;
     }
@@ -431,6 +452,7 @@ static void walk_function(M *mangler, int32_t idx, int32_t parent) {
     hoist_vars(mangler, body_stmts, scope);
     hoist_block(mangler, body_stmts, scope);
     walk_chain(mangler, body_stmts, scope, 0);
+    mangler->args_scope = outer_args;
     undo_to(mangler, mark);
 }
 
@@ -471,6 +493,9 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
                 mangler->prog->syms[sym].writes++;
             } /* bind == 1: a declaration target, neither read nor write */
         } else {
+            if (mangler->args_scope >= 0 && word_is(node->str, node->str_len, "arguments")) {
+                alias_parameters(mangler);
+            }
             hslot *slot = htab_slot(&mangler->frees, node->str, node->str_len, 1); /* a global / free name */
             if (slot != NULL) { /* GCOVR_EXCL_BR_LINE: the false branch is an allocation failure */
                 slot->val = 1;
@@ -1524,6 +1549,7 @@ static int32_t analyze(M *mangler, jm_program *prog) {
         return -1;    /* GCOVR_EXCL_LINE */
     }
     mangler->global = global;
+    mangler->args_scope = -1;
     int32_t stmts = prog->nodes[prog->root].a;
     hoist_vars(mangler, stmts, global);
     hoist_block(mangler, stmts, global);
