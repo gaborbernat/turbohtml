@@ -85,6 +85,13 @@ def test_xml_set_inner_html_parses_as_xml() -> None:
     assert child.html == '<c><p:x y="1">t &amp; u</p:x><Z></Z></c>'
 
 
+def test_xml_set_inner_html_under_a_redeclared_namespace() -> None:
+    child = _xml_root('<r xmlns:p="urn:a"><c xmlns:p="urn:c"/></r>').children[0]
+    assert isinstance(child, Element)
+    child.set_inner_html("<p:x/>")
+    assert child.html == '<c xmlns:p="urn:c"><p:x></p:x></c>'
+
+
 def test_xml_set_inner_html_on_a_detached_element() -> None:
     child = _xml_child().extract()
     child.set_inner_html("<Mixed/>")

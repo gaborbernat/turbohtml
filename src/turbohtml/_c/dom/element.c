@@ -2744,10 +2744,12 @@ static int add_scope_declarations(th_tree *tree, th_node *scope, PyObject *decla
             continue;
         }
         PyObject *key = PyUnicode_DecodeUTF8(name, name_len, "strict");
-        PyObject *value = attr_value_obj(&scope->attrs[index]);
+        int seen = key == NULL ? -1 : PyDict_Contains(declarations, key); /* GCOVR_EXCL_BR_LINE: OOM only */
+        PyObject *value = seen == 0 ? attr_value_obj(&scope->attrs[index]) : NULL;
         /* allocation failure cannot be forced from a test */
-        int failed = key == NULL || value == NULL ||                      /* GCOVR_EXCL_BR_LINE */
-                     PyDict_SetDefault(declarations, key, value) == NULL; /* GCOVR_EXCL_BR_LINE */
+        int failed =
+            seen < 0 ||                                                                     /* GCOVR_EXCL_BR_LINE */
+            (seen == 0 && (value == NULL || PyDict_SetItem(declarations, key, value) < 0)); /* GCOVR_EXCL_BR_LINE */
         Py_XDECREF(key);
         Py_XDECREF(value);
         if (failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -2805,19 +2807,28 @@ static PyObject *xml_fragment_source(PyObject *self, th_node *context, PyObject 
         return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyObject *tag = ucs4_to_str(context->text, context->text_len);
-    PyObject *start = PyUnicode_FromString("<");
-    PyUnicode_Append(&start, tag);
+    PyObject *parts = Py_BuildValue("[sO]", "<", tag);
     PyObject *name;
     PyObject *value;
     Py_ssize_t position = 0;
-    while (PyDict_Next(declarations, &position, &name, &value)) {
+    while (parts != NULL && PyDict_Next(declarations, &position, &name, &value)) { /* GCOVR_EXCL_BR_LINE: OOM */
         PyObject *escaped = escape_attribute_value(value);
-        PyObject *declaration =
-            escaped == NULL ? NULL : th_str_format(" %U=\"%U\"", name, escaped); /* GCOVR_EXCL_BR_LINE */
-        Py_XDECREF(escaped);
-        PyUnicode_AppendAndDel(&start, declaration);
+        if (escaped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            Py_CLEAR(parts);   /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;             /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *declaration = th_str_format(" %U=\"%U\"", name, escaped);
+        Py_DECREF(escaped);
+        if (declaration == NULL || PyList_Append(parts, declaration) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            Py_CLEAR(parts);                                                /* GCOVR_EXCL_LINE: OOM path */
+        }
+        Py_XDECREF(declaration);
     }
     Py_DECREF(declarations);
+    PyObject *empty = PyUnicode_FromString("");
+    PyObject *start = parts == NULL || empty == NULL ? NULL : PyUnicode_Join(empty, parts); /* GCOVR_EXCL_BR_LINE */
+    Py_XDECREF(empty);
+    Py_XDECREF(parts);
     if (start == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_XDECREF(tag); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
