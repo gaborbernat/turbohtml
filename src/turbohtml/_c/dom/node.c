@@ -1698,7 +1698,8 @@ PyDoc_STRVAR(wrap_doc, "wrap(wrapper, /)\n--\n\n"
                        "Put this node inside wrapper, in this node's place.\n\n"
                        ":param wrapper: the element to wrap this node in.\n"
                        ":returns: wrapper, now holding this node.\n"
-                       ":raises TypeError: if wrapper is not an element.");
+                       ":raises TypeError: if wrapper is not an element.\n"
+                       ":raises ValueError: if wrapper is this node.");
 
 PyDoc_STRVAR(wrap_siblings_doc, "wrap_siblings(wrapper, /, *, until=None)\n--\n\n"
                                 "Wrap this node and the siblings that follow it in wrapper in one move; the\n"

@@ -1758,6 +1758,19 @@ def test_wrap_in_an_ancestor_is_a_cycle() -> None:
         _found(doc, "span").wrap(_found(doc, "div"))
 
 
+def test_wrap_in_itself_is_rejected() -> None:
+    doc = parse("<p>one<b>two</b></p>")
+    with pytest.raises(ValueError, match="wrapper cannot be the wrapped node"):
+        _found(doc, "b").wrap(_found(doc, "b"))
+
+
+def test_wrap_in_itself_leaves_the_tree_unchanged() -> None:
+    doc = parse("<p>one<b>two</b></p>")
+    with pytest.raises(ValueError, match="wrapper"):
+        _found(doc, "b").wrap(_found(doc, "b"))
+    assert _found(doc, "p").html == "<p>one<b>two</b></p>"
+
+
 def test_wrap_a_document_is_rejected() -> None:
     with pytest.raises(TypeError, match="Document cannot be inserted"):
         parse("<p></p>").wrap(Element("div"))
