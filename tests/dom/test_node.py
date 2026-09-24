@@ -837,6 +837,23 @@ def test_incremental_parser_tracks_locations_across_feeds() -> None:
     assert "id" in second.attrs
 
 
+@pytest.mark.parametrize(
+    "markup",
+    [
+        pytest.param('<p id=a class="b">x</p><b>y</b>', id="attributes"),
+        pytest.param("<div>\r\n<i>a</i>\r<br></div>", id="carriage-returns"),
+        pytest.param("<p>\u00e9\U0001f600<i>z</i></p>", id="astral"),
+    ],
+)
+def test_incremental_parser_locations_match_parse_at_every_split(markup: str) -> None:
+    expected = [element.source_location for element in parse(markup, source_locations=True).select("*")]
+    for cut in range(len(markup) + 1):
+        parser = IncrementalParser(source_locations=True)
+        parser.feed(markup[:cut])
+        parser.feed(markup[cut:])
+        assert [element.source_location for element in parser.close().select("*")] == expected, cut
+
+
 def test_incremental_parser_off_reports_none() -> None:
     parser = IncrementalParser()
     parser.feed("<p>x</p>")

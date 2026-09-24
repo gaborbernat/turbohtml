@@ -1858,7 +1858,9 @@ PyDoc_STRVAR(stream_doc, "IncrementalParser(*, encoding='utf-8', positions=True,
                          ":param positions: whether to record each element's source line and column;\n"
                          "    pass False to skip it when memory or speed matters more.\n"
                          ":param source_locations: whether to record each element's granular start-\n"
-                         "    and end-tag and per-attribute spans, read via Element.source_location.");
+                         "    and end-tag and per-attribute spans, read via Element.source_location.\n"
+                         "    The spans index the whole source, so the parser keeps every chunk for\n"
+                         "    Node.to_source() instead of discarding what it has consumed.");
 
 static PyType_Slot stream_slots[] = {
     {Py_tp_doc, (void *)stream_doc},
