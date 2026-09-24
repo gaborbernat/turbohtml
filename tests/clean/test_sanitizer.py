@@ -13,6 +13,7 @@ from typing_extensions import assert_type
 
 from turbohtml import Document, Element, parse, parse_fragment, parse_xml
 from turbohtml._html import _sanitize, _sanitize_policy
+from turbohtml.build import E
 from turbohtml.clean import (
     DEFAULT_ATTRIBUTES,
     DEFAULT_CSS_PROPERTIES,
@@ -796,6 +797,43 @@ def test_style_element_body_is_idempotent() -> None:
         "<style>a{color:red;position:fixed}@media(min-width:1px){p{width:5px;top:0}}</style>", _style_element_policy()
     )
     assert sanitize(once, _style_element_policy()) == once
+
+
+@pytest.mark.parametrize(
+    ("style", "expected"),
+    [
+        pytest.param(
+            E.style("</style><img src=x onerror=alert(1)>{color:red}"),
+            "<style><\\/style><img src=x onerror=alert(1)>{color:red;}</style>",
+            id="end-tag-in-prelude",
+        ),
+        pytest.param(
+            E.style('a{color:"</StYlE>"}'), '<style>a{color:"<\\/StYlE>";}</style>', id="mixed-case-end-tag-in-string"
+        ),
+        pytest.param(
+            E.style(E.b("x"), "a{color:red;", E.i(), "position:fixed}"),
+            "<style>a{color:red;}</style>",
+            id="element-children-dropped-text-merged",
+        ),
+        pytest.param(E.style(E.b("x")), "<style></style>", id="only-element-child"),
+    ],
+)
+def test_style_element_body_built_tree(style: Element, expected: str) -> None:
+    assert (
+        sanitize_node(E.div(style), _style_element_policy(css_properties=frozenset({"color"}))).inner_html == expected
+    )
+
+
+def test_style_element_escaped_end_tag_is_idempotent() -> None:
+    policy = _style_element_policy(css_properties=frozenset({"color"}))
+    once = sanitize_node(E.div(E.style("</style><img src=x onerror=alert(1)>{color:red}")), policy).inner_html
+    assert sanitize(once, policy) == once
+
+
+def test_style_element_transformed_from_text_keeps_end_tag_inert() -> None:
+    policy = Policy(tags=frozenset({"style"}), transform_tags={"div": "style"})
+    html = "<div>&lt;/style&gt;&lt;img src=x onerror=alert(1)&gt;{}</div>"
+    assert sanitize(html, policy) == "<style><\\/style><img src=x onerror=alert(1)>{}</style>"
 
 
 def test_style_element_empty_property_set_drops_all_css() -> None:
