@@ -515,24 +515,36 @@ static PyObject *range_value(th_node *input, const Py_UCS4 *text, Py_ssize_t len
 
 /* The value with every LF and CR removed, and with leading and trailing ASCII whitespace stripped when trim is set. */
 static PyObject *strip_newlines(const Py_UCS4 *text, Py_ssize_t len, int trim) {
-    Py_UCS4 *buffer = PyMem_Malloc((size_t)(len > 0 ? len : 1) * sizeof(Py_UCS4));
-    if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    Py_ssize_t newline = 0;
+    while (newline < len && text[newline] != '\n' && text[newline] != '\r') {
+        newline++;
     }
-    Py_ssize_t end = 0;
-    for (Py_ssize_t index = 0; index < len; index++) {
-        if (text[index] != '\n' && text[index] != '\r') {
-            buffer[end++] = text[index];
+    /* most values carry no newline, so they trim in place without a copy */
+    const Py_UCS4 *source = text;
+    Py_UCS4 *buffer = NULL;
+    Py_ssize_t end = len;
+    if (newline < len) {
+        buffer = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+        if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+        memcpy(buffer, text, (size_t)newline * sizeof(Py_UCS4));
+        end = newline;
+        for (Py_ssize_t index = newline + 1; index < len; index++) {
+            if (text[index] != '\n' && text[index] != '\r') {
+                buffer[end++] = text[index];
+            }
+        }
+        source = buffer;
     }
     Py_ssize_t start = 0;
-    while (trim && start < end && is_space(buffer[start])) {
+    while (trim && start < end && is_space(source[start])) {
         start++;
     }
-    while (trim && end > start && is_space(buffer[end - 1])) {
+    while (trim && end > start && is_space(source[end - 1])) {
         end--;
     }
-    PyObject *result = ucs4_to_str(buffer + start, end - start);
+    PyObject *result = ucs4_to_str(source + start, end - start);
     PyMem_Free(buffer);
     return result;
 }
