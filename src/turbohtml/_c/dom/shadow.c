@@ -564,7 +564,14 @@ static PyObject *shadow_root_set_inner_html(PyObject *self, PyObject *html) {
     Py_RETURN_NONE;
 }
 
+PyDoc_STRVAR(shadow_root_append_doc, "append(child, /)\n--\n\n"
+                                     "Add child as the last node of the shadow tree, moving a node from this tree\n"
+                                     "or adopting one from another by copy, like Element.append. A DocumentFragment\n"
+                                     "argument moves its children in and is left empty.");
+
 static PyMethodDef shadow_root_methods[] = {
+    /* listed again so the reference documents it on ShadowRoot as well as on DocumentFragment */
+    {"append", node_append_child, METH_O, shadow_root_append_doc},
     {"set_inner_html", shadow_root_set_inner_html, METH_O, shadow_root_set_inner_html_doc},
     {NULL, NULL, 0, NULL},
 };
