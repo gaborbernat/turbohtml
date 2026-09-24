@@ -245,6 +245,11 @@ def test_microdata_function_base_url_omitted_is_verbatim() -> None:
             id="multiple-names-share-value",
         ),
         pytest.param(
+            '<div itemscope><span itemprop="a b a">v</span></div>',
+            [MicrodataItem(type=None, id=None, properties={"a": ["v"], "b": ["v"]})],
+            id="duplicate-names-collapse",
+        ),
+        pytest.param(
             '<div itemscope><span itemprop="x">1</span><span itemprop="x">2</span></div>',
             [MicrodataItem(type=None, id=None, properties={"x": ["1", "2"]})],
             id="repeated-name-collects-values",
