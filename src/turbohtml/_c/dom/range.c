@@ -446,6 +446,24 @@ static int validate_boundary(th_node *node, Py_ssize_t offset) {
     return 0;
 }
 
+/* A range does not follow edits made through other tree APIs, so a boundary can outlive its offset, its shared root,
+   or its order; reject that before an operation reads text past its end or walks toward a common ancestor. */
+static int check_boundaries(RangeObject *range) {
+    if (range->start_offset > node_length(range->start_node) || range->end_offset > node_length(range->end_node)) {
+        PyErr_SetString(PyExc_IndexError, "a boundary offset is out of range for its container after a tree edit");
+        return -1;
+    }
+    if (!same_root(range->start_handle, range->start_node, range->end_handle, range->end_node)) {
+        PyErr_SetString(PyExc_ValueError, "the range boundaries no longer share a root after a tree edit");
+        return -1;
+    }
+    if (bp_compare(range->start_node, range->start_offset, range->end_node, range->end_offset) > 0) {
+        PyErr_SetString(PyExc_ValueError, "the range start follows its end after a tree edit");
+        return -1;
+    }
+    return 0;
+}
+
 static int range_is_collapsed(RangeObject *self) {
     return self->start_node == self->end_node && self->start_offset == self->end_offset;
 }
@@ -547,8 +565,10 @@ static PyObject *get_collapsed(PyObject *self, void *Py_UNUSED(closure)) {
 
 static PyObject *get_common_ancestor(PyObject *self, void *Py_UNUSED(closure)) {
     RangeObject *range = (RangeObject *)self;
-    th_node *container = common_ancestor(range->start_node, range->end_node);
-    return node_wrap(state_of(self), range->start_handle, container);
+    if (check_boundaries(range) < 0) {
+        return NULL;
+    }
+    return node_wrap(state_of(self), range->start_handle, common_ancestor(range->start_node, range->end_node));
 }
 
 /* --- boundary setters --- */
@@ -833,7 +853,8 @@ static PyObject *extract_or_delete(PyObject *self, int discard) {
     module_state *state = state_of(self);
     PyObject *result = NULL;
     Py_BEGIN_CRITICAL_SECTION(range->start_handle);
-    if (range_check_recursive_depth(range, discard ? "delete_contents()" : "extract_contents()") == 0) {
+    if (check_boundaries(range) == 0 &&
+        range_check_recursive_depth(range, discard ? "delete_contents()" : "extract_contents()") == 0) {
         handle_drop_index(range->start_handle);
         th_node *new_node;
         Py_ssize_t new_offset;
@@ -869,7 +890,7 @@ static PyObject *range_clone_contents(PyObject *self, PyObject *Py_UNUSED(ignore
     module_state *state = state_of(self);
     PyObject *result = NULL;
     Py_BEGIN_CRITICAL_SECTION(range->start_handle);
-    if (range_check_recursive_depth(range, "clone_contents()") == 0) {
+    if (check_boundaries(range) == 0 && range_check_recursive_depth(range, "clone_contents()") == 0) {
         th_node *fragment = do_clone(tree, range->start_node, range->start_offset, range->end_node, range->end_offset);
         if (fragment != NULL) {
             result = node_wrap(state, range->start_handle, fragment);
@@ -947,7 +968,7 @@ static th_node *insert_core(RangeObject *range, PyObject *node_obj) {
         reference = start_node;
     } else {
         reference = start_node->first_child;
-        for (Py_ssize_t index = 0; index < start_offset && reference != NULL; index++) {
+        for (Py_ssize_t index = 0; index < start_offset; index++) {
             reference = reference->next_sibling;
         }
     }
@@ -979,7 +1000,7 @@ static PyObject *range_insert_node(PyObject *self, PyObject *node_obj) {
     RangeObject *range = (RangeObject *)self;
     th_node *linked;
     Py_BEGIN_CRITICAL_SECTION(range->start_handle);
-    linked = insert_core(range, node_obj);
+    linked = check_boundaries(range) == 0 ? insert_core(range, node_obj) : NULL;
     Py_END_CRITICAL_SECTION();
     if (linked == NULL) {
         return NULL;
@@ -987,13 +1008,14 @@ static PyObject *range_insert_node(PyObject *self, PyObject *node_obj) {
     Py_RETURN_NONE;
 }
 
-/* Whether the range partially contains any non-Text node (surroundContents forbids it). */
-static int has_partial_non_text(RangeObject *range) {
+/* surroundContents forbids a range partially containing any non-Text node: sets a ValueError and returns -1 then. */
+static int reject_partial_non_text(RangeObject *range) {
     th_node *common = common_ancestor(range->start_node, range->end_node);
     th_node *node = common;
     while (node != NULL) {
         if (node->type != TH_NODE_TEXT && is_partially_contained(node, range->start_node, range->end_node)) {
-            return 1;
+            PyErr_SetString(PyExc_ValueError, "the range partially contains a non-Text node");
+            return -1;
         }
         node = preorder_next(node, common);
     }
@@ -1016,9 +1038,7 @@ static PyObject *range_surround_contents(PyObject *self, PyObject *new_parent) {
     PyObject *result = NULL;
     th_tree *tree = ((HandleObject *)range->start_handle)->tree;
     Py_BEGIN_CRITICAL_SECTION(range->start_handle);
-    if (has_partial_non_text(range)) {
-        PyErr_SetString(PyExc_ValueError, "the range partially contains a non-Text node");
-    } else {
+    if (check_boundaries(range) == 0 && reject_partial_non_text(range) == 0) {
         handle_drop_index(range->start_handle);
         th_node *new_node;
         Py_ssize_t new_offset;

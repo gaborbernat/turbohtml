@@ -576,13 +576,57 @@ def test_insert_node_rejects_bad_boundary(container: Node) -> None:
         boundary.insert_node(Element("b"))
 
 
-def test_insert_node_at_stale_offset_past_children() -> None:
+_STALE_OPERATIONS: Final = [
+    pytest.param(lambda boundary: boundary.clone_contents(), id="clone_contents"),
+    pytest.param(lambda boundary: boundary.extract_contents(), id="extract_contents"),
+    pytest.param(lambda boundary: boundary.delete_contents(), id="delete_contents"),
+    pytest.param(lambda boundary: boundary.surround_contents(Element("em")), id="surround_contents"),
+    pytest.param(lambda boundary: boundary.insert_node(Element("em")), id="insert_node"),
+    pytest.param(lambda boundary: boundary.common_ancestor_container, id="common_ancestor_container"),
+]
+
+
+@pytest.mark.parametrize("operation", _STALE_OPERATIONS)
+def test_stale_start_offset_past_children_raises(operation: Callable[[Range], object]) -> None:
     doc = parse("<div id=a><p>a</p><i>b</i><u>c</u></div>")
     div = _by_id(doc, "a")
-    boundary = Range(div, 3)  # a valid end offset when the range is made
-    div.remove("u")  # ...then the tree shrinks under it, so the walk runs off the end
-    boundary.insert_node(Element("x"))
-    assert _tags(div.children) == ["p", "i", "x"]
+    boundary = Range(div, 3)
+    div.remove("u")
+    with pytest.raises(IndexError, match="out of range for its container after a tree edit"):
+        operation(boundary)
+
+
+@pytest.mark.parametrize("operation", _STALE_OPERATIONS)
+def test_stale_end_offset_past_text_raises(operation: Callable[[Range], object]) -> None:
+    text = Text("A" * 64)
+    Element("p", children=[text])
+    boundary = Range(text, 1)
+    boundary.set_end(text, 60)
+    text.data = "xy"
+    with pytest.raises(IndexError, match="out of range for its container after a tree edit"):
+        operation(boundary)
+
+
+@pytest.mark.parametrize("operation", _STALE_OPERATIONS)
+def test_boundaries_split_across_roots_raise(operation: Callable[[Range], object]) -> None:
+    doc = parse("<p id=a>one<b>two</b>three</p>")
+    bold = _found(doc, "b")
+    boundary = Range(bold, 1)
+    boundary.set_end(_by_id(doc, "a"), 2)
+    bold.decompose()
+    with pytest.raises(ValueError, match="no longer share a root"):
+        operation(boundary)
+
+
+@pytest.mark.parametrize("operation", _STALE_OPERATIONS)
+def test_boundaries_reordered_by_edit_raise(operation: Callable[[Range], object]) -> None:
+    doc = parse("<p><i>a</i><b>b</b></p>")
+    italic = _found(doc, "i")
+    boundary = Range(italic.children[0], 0)
+    boundary.set_end(_found(doc, "b").children[0], 1)
+    _found(doc, "p").append(italic)
+    with pytest.raises(ValueError, match="start follows its end"):
+        operation(boundary)
 
 
 def test_insert_node_rejects_self() -> None:
