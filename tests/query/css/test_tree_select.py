@@ -1796,6 +1796,32 @@ def test_xml_matches_is_case_sensitive() -> None:
     assert not child.matches("Child")
 
 
+@pytest.mark.parametrize(
+    ("selector", "texts"),
+    [
+        pytest.param("title", ["one", "two"], id="type"),
+        pytest.param("Title", ["three"], id="type-case-exact"),
+        pytest.param("book title", ["one"], id="descendant"),
+        pytest.param("p > title", ["two"], id="child"),
+        pytest.param("p + Title", ["three"], id="adjacent-sibling"),
+        pytest.param("book ~ title", [], id="general-sibling-absent"),
+        pytest.param("p ~ Title", ["three"], id="general-sibling"),
+    ],
+)
+def test_xml_document_select_finds_builtin_named_elements(selector: str, texts: list[str]) -> None:
+    # every XML element carries the unknown tag atom, so a builtin-named selector must not take the atom fast paths
+    document = parse_xml(
+        "<catalog><book><title>one</title></book><p><title>two</title></p><Title>three</Title></catalog>"
+    )
+    assert [element.text for element in document.select(selector)] == texts
+
+
+def test_xml_matches_builtin_named_parent() -> None:
+    child = parse_xml("<r><p><x/></p></r>").xpath_one("//x")
+    assert isinstance(child, Element)
+    assert child.matches("p > x")
+
+
 def test_xml_builtin_named_element_matches_only_its_spelling() -> None:
     root = _root("<Root><Table/></Root>")
     assert [element.tag for element in root.select("Table")] == ["Table"]

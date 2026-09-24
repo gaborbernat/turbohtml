@@ -1937,8 +1937,9 @@ static int sel_match_compound(th_node *node, const sel_compound *compound, const
     return 1;
 }
 
-static uint16_t sel_compound_known_type_atom(const sel_compound *compound) {
-    if (compound->count != 1) {
+static uint16_t sel_compound_known_type_atom(const sel_compound *compound, th_tree *tree) {
+    /* an XML element carries TH_TAG_UNKNOWN whatever its name, so only an HTML tree can compare atoms */
+    if (compound->count != 1 || th_tree_is_xml(tree)) {
         return TH_TAG_UNKNOWN;
     }
     const sel_simple *simple = &compound->simples[0];
@@ -2004,7 +2005,7 @@ static int sel_match_from(th_node *node, const sel_complex *complex, int index, 
         }
     }
     const sel_compound *target = &complex->compounds[index - 1];
-    uint16_t target_atom = sel_compound_known_type_atom(target);
+    uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
     switch (complex->compounds[index].combinator) {
     case '>': {
         /* a matched node is an element, so it always has a parent (the document
