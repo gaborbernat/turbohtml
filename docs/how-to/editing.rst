@@ -73,6 +73,30 @@ would keep. ``strip_tags`` is the bulk form of :meth:`~turbohtml.Node.unwrap`, a
 matches collapse to their innermost content. Both snapshot the matches under the per-tree lock before touching the tree,
 so a selector that calls back into Python never sees a half-edited document.
 
+*****************************************
+ Insert a batch of nodes with a fragment
+*****************************************
+
+Collect nodes in a :class:`~turbohtml.DocumentFragment` and insert the fragment: its children land in place, in order,
+and the fragment is left empty, ready to collect the next batch. Every insertion method takes one, and so does
+:meth:`~turbohtml.Range.insert_node`:
+
+.. testcode::
+
+    page = turbohtml.parse("<ul><li>tea</li></ul>")
+    batch = turbohtml.DocumentFragment()
+    for drink in ("coffee", "juice"):
+        batch.append(turbohtml.Element("li", children=[turbohtml.Text(drink)]))
+    page.find("ul").append(batch)
+    print(page.find("ul").html, len(batch.children))
+
+.. testoutput::
+
+    <ul><li>tea</li><li>coffee</li><li>juice</li></ul> 0
+
+A fragment from :meth:`~turbohtml.Range.extract_contents` moves a cut-out run the same way, and inserting a
+:class:`~turbohtml.ShadowRoot` moves its children out while the root stays attached to its host.
+
 ****************************
  Wrap a group of nodes once
 ****************************
@@ -161,6 +185,21 @@ parent), while ``"afterbegin"`` and ``"beforeend"`` add them as the first or las
 
     <a href="/new" class="btn primary">go</a>
 
+The view is a full :class:`~collections.abc.MutableMapping`, so the dict methods work as well: ``update`` merges several
+attributes at once, ``pop`` removes one and hands back its value, and ``copy`` or ``attrs | other`` give a plain
+``dict`` snapshot that no longer tracks the element:
+
+.. testcode::
+
+    link.attrs.update({"rel": "next"}, title="Next page")
+    print(link.attrs.pop("class"), link.html)
+    print(link.attrs == {"href": "/new", "rel": ["next"], "title": "Next page"})
+
+.. testoutput::
+
+    ['btn', 'primary'] <a href="/new" rel="next" title="Next page">go</a>
+    True
+
 ***************************
  Edit an element's classes
 ***************************
@@ -208,7 +247,8 @@ empty text nodes, throughout the subtree (the DOM operation `BeautifulSoup
 
 Any node deep-copies into a fresh standalone tree, so a clone is independent of the original. Use
 :func:`python:copy.deepcopy` to duplicate in memory, or :mod:`python:pickle` to cross a process or cache boundary; both
-preserve processing instructions and CDATA sections exactly:
+keep the structure exactly, including processing instructions, CDATA sections, adjacent text nodes, and a document's
+doctype and quirks mode:
 
 .. testcode::
 

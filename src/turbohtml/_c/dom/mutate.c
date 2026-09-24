@@ -24,6 +24,10 @@ th_tree *th_tree_new(void) {
     return PyMem_Calloc(1, sizeof(th_tree));
 }
 
+void th_tree_set_quirks(th_tree *tree, int quirks) {
+    tree->quirks = quirks;
+}
+
 int th_tree_is_xml(const th_tree *tree) {
     return tree->xml;
 }
@@ -482,6 +486,78 @@ void th_node_append_child_observed(th_tree *tree, th_node *parent, th_node *chil
     th_mo_child_inserted(tree, parent, child);
 }
 
+/* Whether node sits in the sibling run [first, last] (never when first is NULL). */
+static int in_run(const th_node *node, const th_node *first, const th_node *last) {
+    if (first == NULL) {
+        return 0;
+    }
+    for (const th_node *walk = first;; walk = walk->next_sibling) {
+        if (walk == node) {
+            return 1;
+        }
+        if (walk == last) {
+            return 0;
+        }
+    }
+}
+
+/* Whether a child of type sits between from (inclusive) and until (exclusive; NULL runs to the end), skipping the
+   replaced run. */
+static int has_child_between(th_node *from, const th_node *until, enum th_node_type type, const th_node *run_first,
+                             const th_node *run_last) {
+    for (th_node *walk = from; walk != until; walk = walk->next_sibling) {
+        if (walk->type == type && !in_run(walk, run_first, run_last)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const char *th_pre_insert_error(th_node *parent, th_node *const *nodes, Py_ssize_t count, th_node *child,
+                                th_node *run_first, th_node *run_last) {
+    Py_ssize_t elements = 0;
+    Py_ssize_t doctypes = 0;
+    Py_ssize_t texts = 0;
+    for (Py_ssize_t index = 0; index < count; index++) {
+        elements += nodes[index]->type == TH_NODE_ELEMENT;
+        doctypes += nodes[index]->type == TH_NODE_DOCTYPE;
+        texts += nodes[index]->type == TH_NODE_TEXT || nodes[index]->type == TH_NODE_CDATA;
+    }
+    /* several nodes are gathered into a fragment first, and a fragment cannot hold a doctype */
+    if (doctypes > 0 && (parent->type != TH_NODE_DOCUMENT || count > 1)) {
+        return "a doctype can only be a child of a Document";
+    }
+    if (parent->type != TH_NODE_DOCUMENT) {
+        return NULL;
+    }
+    if (texts > 0) {
+        return "a Document cannot hold a Text node";
+    }
+    if (elements > 1) {
+        return "a Document can hold only one element";
+    }
+    /* a replacement goes where the replaced run starts; an insertion before child */
+    th_node *after = run_first != NULL ? run_last->next_sibling : child;
+    th_node *before = run_first != NULL ? run_first : child;
+    if (elements == 1) {
+        if (has_child_between(parent->first_child, NULL, TH_NODE_ELEMENT, run_first, run_last)) {
+            return "a Document can hold only one element";
+        }
+        if (has_child_between(after, NULL, TH_NODE_DOCTYPE, run_first, run_last)) {
+            return "a Document's element must come after its doctype";
+        }
+    }
+    if (doctypes == 1) {
+        if (has_child_between(parent->first_child, NULL, TH_NODE_DOCTYPE, run_first, run_last)) {
+            return "a Document can hold only one doctype";
+        }
+        if (has_child_between(parent->first_child, before, TH_NODE_ELEMENT, run_first, run_last)) {
+            return "a Document's doctype must come before its element";
+        }
+    }
+    return NULL;
+}
+
 void th_node_insert_before_observed(th_tree *tree, th_node *parent, th_node *child, th_node *ref) {
     node_insert_before(parent, child, ref);
     th_mo_child_inserted(tree, parent, child);
@@ -897,6 +973,21 @@ th_node *th_tree_adopt_copy(th_tree *dest, th_tree *src, th_node *src_node) {
     }
 }
 
+th_tree *th_tree_new_rooted(enum th_node_type type, int xml, int quirks) {
+    th_tree *tree = th_tree_new();
+    if (tree == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    tree->xml = xml;
+    tree->quirks = quirks;
+    tree->document = node_new(tree, type);
+    if (tree->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);       /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return tree;
+}
+
 /* Copy a document into an independent tree while its caller holds the source-tree lock. */
 th_tree *th_tree_copy_document(th_tree *src) {
     th_tree *dest = th_tree_new();
@@ -904,6 +995,7 @@ th_tree *th_tree_copy_document(th_tree *src) {
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     dest->xml = src->xml;
+    dest->quirks = src->quirks;
     dest->document = th_tree_copy_node(dest, src, src->document);
     if (dest->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         th_tree_free(dest);       /* GCOVR_EXCL_LINE: allocation-failure path */

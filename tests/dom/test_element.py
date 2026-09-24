@@ -1591,11 +1591,11 @@ def test_insert_clamps_out_of_range_index(index: int, text: str, expected: str) 
     assert paragraph.html == expected
 
 
-def test_insert_moving_a_node_onto_its_own_slot_appends() -> None:
+def test_insert_moving_a_node_onto_its_own_slot_keeps_it_there() -> None:
     doc = parse("<p><a></a><b></b><c></c></p>")
     paragraph = _found(doc, "p")
-    paragraph.insert(1, _found(doc, "b"))  # the reference slot is the moved node itself, so it tails
-    assert paragraph.html == "<p><a></a><c></c><b></b></p>"
+    paragraph.insert(1, _found(doc, "b"))  # inserting a node before itself leaves it in place, as in the DOM
+    assert paragraph.html == "<p><a></a><b></b><c></c></p>"
 
 
 def test_insert_rejects_bad_arguments() -> None:

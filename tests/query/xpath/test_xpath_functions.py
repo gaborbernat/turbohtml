@@ -79,6 +79,15 @@ def doc() -> turbohtml.Node:
         pytest.param("number(false())", 0.0, id="number-false"),
         pytest.param("number(' -2.50 ')", -2.5, id="number-whitespace"),
         pytest.param("number('.5')", 0.5, id="number-leading-dot"),
+        # numbers convert to the nearest double, as Python's float() does
+        pytest.param("0.49999999999999994 < 0.5", True, id="literal-just-below-half"),
+        pytest.param("number('0.49999999999999994') < 0.5", True, id="number-just-below-half"),
+        pytest.param("number('0.009221885624698875')", 0.009221885624698875, id="number-seventeen-digits"),
+        pytest.param("1.7976931348623157", 1.7976931348623157, id="literal-seventeen-digits"),
+        pytest.param("number('9007199254740993')", 9007199254740992.0, id="number-past-2-pow-53-ties-to-even"),
+        pytest.param("12345678901234567890", 12345678901234567890.0, id="literal-past-2-pow-53"),
+        pytest.param("number('0.0000000000000000000000000000001')", 1e-31, id="number-past-22-fraction-digits"),
+        pytest.param("string(number(string(0.1 + 0.2))) = string(0.1 + 0.2)", True, id="string-number-round-trip"),
         pytest.param("number(//li)", 1.0, id="number-nodeset"),
         pytest.param("5 - 2", 3.0, id="subtraction"),
         # string functions
@@ -623,6 +632,34 @@ def test_lang_reads_html_lang_attribute_where_lxml_reads_xml_lang(langs: turboht
     # lxml's lang() returns nothing here (no xml:lang); turbohtml matches the
     # 'inherit' (lang='en-US') and 'outer' (lang='en') paragraphs.
     assert len(node_list(langs.xpath("//p[lang('en')]"))) == 2
+
+
+# XPath 1.0 §4.3 reads xml:lang; an HTML tree follows HTML "the lang and xml:lang
+# attributes", where xml:lang is in the XML namespace only on a foreign element
+@pytest.mark.parametrize(
+    ("markup", "expr", "expected"),
+    [
+        pytest.param('<svg xml:lang="it"><g/></svg>', "//g[lang('it')]", ["g"], id="foreign-xml-lang"),
+        pytest.param('<svg xml:lang="it" lang="fr"><g/></svg>', "//g[lang('fr')]", [], id="xml-lang-wins-over-lang"),
+        pytest.param('<p xml:lang="de"><b>x</b></p>', "//b[lang('de')]", [], id="html-xml-lang-in-no-namespace"),
+        pytest.param('<svg lang="es"><g/></svg>', "//g[lang('es')]", ["g"], id="svg-lang"),
+        pytest.param('<math lang="fr"><mi>x</mi></math>', "//mi[lang('fr')]", [], id="mathml-lang-ignored"),
+    ],
+)
+def test_lang_html_tree_reads_xml_lang_on_foreign_elements(markup: str, expr: str, expected: list[str]) -> None:
+    assert tags(turbohtml.parse(markup).xpath(expr)) == expected
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("//e[lang('en')]", ["e"], id="xml-lang-inherited"),
+        pytest.param("//f[lang('fr')]", [], id="lang-without-namespace-ignored"),
+    ],
+)
+def test_lang_xml_tree_reads_xml_lang(expr: str, expected: list[str]) -> None:
+    document = turbohtml.parse_xml('<r><d xml:lang="en-US"><e/></d><f lang="fr"/></r>')
+    assert tags(document.xpath(expr)) == expected
 
 
 def test_lang_on_a_text_node_context_reads_ancestor_lang() -> None:

@@ -38,7 +38,8 @@ descendants of the context node. Migrating from ``lxml``, ``parsel``, or ``pyque
 Two functions read the HTML document the way HTML means it, where ``lxml``'s legacy HTML parser returns nothing:
 ``lang()`` honors the HTML ``lang`` attribute (``lxml`` only consults ``xml:lang``), and ``namespace-uri()`` reports the
 real SVG and MathML namespace for foreign content (``lxml`` leaves it empty). HTML elements report no namespace in both,
-so an unprefixed name test keeps matching them.
+so an unprefixed name test keeps matching them. ``xml:lang`` still counts where it is in the XML namespace: on an SVG or
+MathML element it overrides ``lang``, and an XML tree reads only ``xml:lang``, as XPath 1.0 specifies.
 
 To select foreign content by namespace, bind each prefix to a URI through ``namespaces`` (the same argument ``lxml``
 takes). A prefixed name test then matches an element whose namespace equals the bound URI and whose local name equals

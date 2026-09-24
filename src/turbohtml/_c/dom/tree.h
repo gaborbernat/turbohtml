@@ -349,12 +349,21 @@ typedef struct th_node_iterator {
    -1 on allocation failure. */
 int th_tree_add_node_iterator(th_tree *tree, th_node_iterator *iterator);
 void th_tree_remove_node_iterator(th_tree *tree, th_node_iterator *iterator);
+/* The DOM "ensure pre-insertion validity" hierarchy rules (steps 4-6, and the replace variant): may nodes (count of
+   them, gathered into one fragment when there are several) go into parent before child (NULL appends), or in place of
+   the sibling run [run_first, run_last] when run_first is not NULL? A doctype belongs only under a Document, which
+   holds no Text, at most one element and one doctype, the doctype first. Returns NULL when valid, else the reason. */
+const char *th_pre_insert_error(th_node *parent, th_node *const *nodes, Py_ssize_t count, th_node *child,
+                                th_node *run_first, th_node *run_last);
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
 /* th_tree_copy_node for a node the DOM moves into dest (adoption): between an XML and an HTML tree the copied elements
    also take dest's naming rules, see convert_element_kind. */
 th_node *th_tree_adopt_copy(th_tree *dest, th_tree *src, th_node *src_node);
 th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node);
 th_tree *th_tree_copy_document(th_tree *src);
+/* A fresh empty tree rooted at a node of type (TH_NODE_DOCUMENT, or TH_NODE_CONTENT for a fragment), with the given
+   XML flag and quirks mode, for rebuilding a pickled document or fragment. NULL on allocation failure. */
+th_tree *th_tree_new_rooted(enum th_node_type type, int xml, int quirks);
 
 /* Whether two subtrees are structurally equal: same node type, and for an element the
    same namespace, tag name, and attribute set (names + values, order-independent) with
@@ -441,6 +450,7 @@ const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count)
    quirks mode CSS class and ID selectors match ASCII case-insensitively
    (Selectors-4 §6.1/§6.2); programmatic trees default to no-quirks. */
 int th_tree_quirks(const th_tree *tree);
+void th_tree_set_quirks(th_tree *tree, int quirks);
 
 /* Whether a doctype node written back as its name and identifiers alone puts a
    document in quirks mode. A parse can also force quirks through malformed doctype

@@ -302,19 +302,66 @@ static int mini_is_p_follow(uint16_t atom) {
     }
 }
 
-/* A </p> may not be omitted at the end of its parent when that parent is one of
-   these (its content model would make the reparsed <p> close differently), nor
-   when the parent is an autonomous custom element (an unknown HTML tag). */
-static int mini_p_parent_excluded(uint16_t atom) {
-    switch (atom) {
-    case TH_TAG_A:
-    case TH_TAG_AUDIO:
-    case TH_TAG_DEL:
-    case TH_TAG_INS:
-    case TH_TAG_MAP:
-    case TH_TAG_NOSCRIPT:
-    case TH_TAG_VIDEO:
-    case TH_TAG_UNKNOWN:
+/* Whether the parent's end tag, on reparse, closes a p, li or dd left open inside
+   it: the end tags that "generate implied end tags" before popping (WHATWG
+   13.2.6.4.7), plus a template's content, which its </template> closes whole. Any
+   other end tag (span, label, a, ...) walks the open stack, stops at the special
+   p/li/dd and is ignored, so the child would swallow the parent's later siblings.
+   The spec's own exclusions for </p> (a, audio, del, ins, map, noscript, video,
+   custom elements) all fall outside this set. */
+static int mini_end_closes_child(const th_node *parent) {
+    if (parent->type != TH_NODE_ELEMENT) {
+        return 1;
+    }
+    if (parent->ns != TH_NS_HTML) {
+        return 0; /* a foreign parent's end tag is an ordinary in-body end tag */
+    }
+    switch (parent->atom) {
+    case TH_TAG_ADDRESS:
+    case TH_TAG_APPLET:
+    case TH_TAG_ARTICLE:
+    case TH_TAG_ASIDE:
+    case TH_TAG_BLOCKQUOTE:
+    case TH_TAG_BODY:
+    case TH_TAG_BUTTON:
+    case TH_TAG_CAPTION:
+    case TH_TAG_CENTER:
+    case TH_TAG_DD:
+    case TH_TAG_DETAILS:
+    case TH_TAG_DIALOG:
+    case TH_TAG_DIR:
+    case TH_TAG_DIV:
+    case TH_TAG_DL:
+    case TH_TAG_DT:
+    case TH_TAG_FIELDSET:
+    case TH_TAG_FIGCAPTION:
+    case TH_TAG_FIGURE:
+    case TH_TAG_FOOTER:
+    case TH_TAG_FORM:
+    case TH_TAG_H1:
+    case TH_TAG_H2:
+    case TH_TAG_H3:
+    case TH_TAG_H4:
+    case TH_TAG_H5:
+    case TH_TAG_H6:
+    case TH_TAG_HEADER:
+    case TH_TAG_HGROUP:
+    case TH_TAG_HTML:
+    case TH_TAG_LI:
+    case TH_TAG_LISTING:
+    case TH_TAG_MAIN:
+    case TH_TAG_MARQUEE:
+    case TH_TAG_MENU:
+    case TH_TAG_NAV:
+    case TH_TAG_OBJECT:
+    case TH_TAG_OL:
+    case TH_TAG_PRE:
+    case TH_TAG_SEARCH:
+    case TH_TAG_SECTION:
+    case TH_TAG_SUMMARY:
+    case TH_TAG_TD:
+    case TH_TAG_TH:
+    case TH_TAG_UL:
         return 1;
     default:
         return 0;
@@ -353,20 +400,19 @@ static int mini_in_scope(const th_node *node, uint16_t atom) {
    content sibling, stripped comments already skipped). This is the cheap test; the
    formatting-reconstruction guard is applied separately so its rightmost-path walk
    only runs for an element the rule already deems omittable, not every element.
-   "No more content in the parent" is just next == NULL: the parent's own close (or
-   its omission) reconstructs the element, so dropping the end tag stays round-trip
-   safe even when the parent is a document or template content node. */
+   "No more content in the parent" is next == NULL; for the special p, li and dd it
+   also needs a parent whose end tag closes them on reparse (mini_end_closes_child). */
 static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next, int quirks) {
     int last = next == NULL;
     uint16_t na =
         (next != NULL && next->type == TH_NODE_ELEMENT && next->ns == TH_NS_HTML) ? next->atom : TH_TAG_UNKNOWN;
     switch (node->atom) {
     case TH_TAG_LI:
-        return na == TH_TAG_LI || last;
+        return na == TH_TAG_LI || (last && mini_end_closes_child(node->parent));
     case TH_TAG_DT:
         return na == TH_TAG_DT || na == TH_TAG_DD;
     case TH_TAG_DD:
-        return na == TH_TAG_DD || na == TH_TAG_DT || last;
+        return na == TH_TAG_DD || na == TH_TAG_DT || (last && mini_end_closes_child(node->parent));
     case TH_TAG_RT:
     case TH_TAG_RP:
         return ((na == TH_TAG_RT || na == TH_TAG_RP) && mini_in_scope(node, TH_TAG_RUBY)) || last;
@@ -388,7 +434,7 @@ static int mini_end_tag_rule(th_tree *tree, th_node *node, th_node *next, int qu
     case TH_TAG_P:
         /* a quirks-mode <table> nests inside an open <p> instead of closing it */
         return (mini_is_p_follow(na) && !(quirks && na == TH_TAG_TABLE)) ||
-               (last && node->parent->ns == TH_NS_HTML && !mini_p_parent_excluded(node->parent->atom));
+               (last && mini_end_closes_child(node->parent));
     case TH_TAG_HTML:
     case TH_TAG_BODY:
         return next == NULL || !mini_is_comment_like(next);
@@ -642,6 +688,10 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
     int last_was_space =
         0; /* whether the last byte emitted is a folded space, so a space across a stripped comment is dropped */
     int quirks = mini_reparses_quirks(tree, root);
+    /* The parser reads everything after a <plaintext> start tag as its text, so a
+       parsed plaintext element ends the document: its end tag, and every ancestor's
+       after it, would reparse as literal text. EOF closes them all instead. */
+    int after_plaintext = 0;
     while (1) {
         th_node *descend = NULL;
         switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
@@ -674,7 +724,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                         sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
                     }
                 }
-                if (!(st->inner && node == root)) {
+                if (node->atom == TH_TAG_PLAINTEXT) {
+                    after_plaintext = 1;
+                } else if (!(st->inner && node == root)) {
                     ser_close_tag(out, node);
                 }
                 break;
@@ -748,8 +800,9 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                 if (node->tag_flags & TH_TAG_FORMATTING) {
                     formatting--;
                 }
-                if (!(st->inner && node == root) && !(opts->omit_optional_tags && node != root &&
-                                                      mini_omit_end_tag(tree, node, opts, formatting, quirks))) {
+                if (!after_plaintext && !(st->inner && node == root) &&
+                    !(opts->omit_optional_tags && node != root &&
+                      mini_omit_end_tag(tree, node, opts, formatting, quirks))) {
                     ser_close_tag(out, node);
                     last_was_space = 0;
                 }

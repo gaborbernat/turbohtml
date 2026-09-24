@@ -704,6 +704,9 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
             sel_parse_dir(parser, simple);
         } else {
             sel_parse_lang(parser, simple);
+            if (parser->tree != NULL) {
+                simple->attr_atom = th_attr_lookup(parser->tree, "xml:lang", 8);
+            }
         }
         if (parser->error) {
             return;
@@ -1646,14 +1649,34 @@ static int sel_lang_range_matches(const Py_UCS4 *tag, Py_ssize_t tag_len, const 
     return 1;
 }
 
-/* :lang(): the element's language is the nearest lang attribute on it or an
-   ancestor; it matches when any comma-separated range in the argument matches. */
-static int sel_matches_lang(th_node *node, const sel_simple *simple) {
+/* The attribute declaring an element's language (HTML "the lang and xml:lang
+   attributes"), or NULL: xml:lang in the XML namespace wins, and only an XML tree or a
+   foreign element carries one (the HTML parser leaves xml:lang on an HTML element in
+   no namespace); then lang, which counts on an HTML or SVG element of an HTML tree. An
+   empty value is stored as NULL and skipped. */
+static const th_node_attr *sel_lang_attr(th_tree *tree, th_node *node, uint32_t xml_lang_atom) {
+    int xml = th_tree_is_xml(tree);
+    if (xml || node->ns != TH_NS_HTML) {
+        const th_node_attr *attr = sel_find_attr(node, xml_lang_atom);
+        if (attr != NULL && attr->value != NULL) {
+            return attr;
+        }
+    }
+    if (xml || node->ns == TH_NS_MATHML) {
+        return NULL;
+    }
+    const th_node_attr *attr = sel_find_attr(node, TH_ATTR_LANG);
+    return attr != NULL && attr->value != NULL ? attr : NULL;
+}
+
+/* :lang(): the element's language is the one the nearest self-or-ancestor element
+   declares; it matches when any comma-separated range in the argument matches. */
+static int sel_matches_lang(th_tree *tree, th_node *node, const sel_simple *simple) {
     const Py_UCS4 *tag = NULL;
     Py_ssize_t tag_len = 0;
     for (th_node *ancestor = node; ancestor != NULL && ancestor->type == TH_NODE_ELEMENT; ancestor = ancestor->parent) {
-        const th_node_attr *attr = sel_find_attr(ancestor, TH_ATTR_LANG);
-        if (attr != NULL && attr->value != NULL) { /* an empty lang is stored as NULL and skipped */
+        const th_node_attr *attr = sel_lang_attr(tree, ancestor, simple->attr_atom);
+        if (attr != NULL) {
             tag = attr->value;
             tag_len = attr->value_len;
             break;
@@ -1853,7 +1876,7 @@ static int sel_match_pseudo(th_node *node, const sel_simple *simple, const sel_c
     case PSEUDO_DEFAULT:
         return sel_is_default(node, ctx->default_memo);
     case PSEUDO_LANG:
-        return sel_matches_lang(node, simple);
+        return sel_matches_lang(ctx->tree, node, simple);
     case PSEUDO_DIR:
         return sel_direction(ctx->tree, node) == simple->nth_a;
     /* :link/:any-link: an a or area carrying an href (HTML "the :link/:any-link") */

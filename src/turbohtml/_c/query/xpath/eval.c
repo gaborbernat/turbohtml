@@ -78,6 +78,8 @@ typedef struct {
     Py_ssize_t local_len;
     int has_ns;         /* the test carried a namespace prefix */
     int ns_unmatchable; /* the bound URI names no namespace an HTML tree's elements carry */
+    int xml_ns;         /* the prefix binds the XML namespace (xml:lang, xml:space) */
+    int foreign_only;   /* an attribute test that only a foreign element of an HTML tree can satisfy */
     uint8_t want_ns;    /* enum th_ns an element must carry when has_ns and not unmatchable */
 } step_match;
 
@@ -187,14 +189,17 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, enum xp_axis axis, c
     switch (axis) {
     case AX_ATTRIBUTE: {
         /* node() and * both match every attribute; a name test matches by atom; a
-           prefixed name test matches none (HTML attributes carry no namespace);
-           text()/comment()/processing-instruction() match no attribute. A non-element
-           context node carries no attribute storage, so the axis yields nothing. */
+           prefixed name test matches only an xml:-prefixed attribute in the XML
+           namespace, which an XML tree or a foreign element carries (the HTML parser
+           leaves xml:lang on an HTML element in no namespace); text()/comment()/
+           processing-instruction() match no attribute. A non-element context node
+           carries no attribute storage, so the axis yields nothing. */
         th_node_attr *attrs;
         Py_ssize_t attr_count = th_node_attributes(ctx, &attrs);
+        int eligible = !match->foreign_only || ctx->ns != TH_NS_HTML;
         for (Py_ssize_t index = 0; index < attr_count; index++) {
             int hit = step->test == NT_STAR || step->test == NT_NODE ||
-                      (step->test == NT_NAME && !match->has_ns && attrs[index].name_atom == match->attr_atom);
+                      (step->test == NT_NAME && eligible && attrs[index].name_atom == match->attr_atom);
             if (hit && ns_push(out, ctx, index) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
                 return -1;                             /* GCOVR_EXCL_LINE */
             }
@@ -480,6 +485,52 @@ Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
     return th_node_text(tree, item.node, len);
 }
 
+/* Clinger's fast path: a digit run whose mantissa fits 2^53 with at most 22 digits after the point is
+   mantissa / 10^fraction_digits, two exact doubles divided with a single rounding. */
+#define XP_EXACT_MANTISSA (UINT64_C(1) << 53)
+#define XP_EXACT_FRACTION_DIGITS 22
+static const double XP_POWERS_OF_TEN[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
+                                          1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+
+/* A decimal run too long for the exact fast path, converted by CPython's correctly
+   rounded strtod. The run is ASCII digits and at most one '.', which Python's float
+   grammar accepts, so only an allocation failure can make the conversion fail. */
+static double decimal_value_slow(const Py_UCS4 *digits, Py_ssize_t len) {
+    char *ascii = PyMem_Malloc((size_t)len + 1);
+    if (ascii == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return (double)NAN; /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        ascii[index] = (char)digits[index];
+    }
+    ascii[len] = '\0';
+    double value = PyOS_string_to_double(ascii, NULL, NULL);
+    PyMem_Free(ascii);
+    if (value == -1.0 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only an allocation failure */
+        PyErr_Clear();                       /* GCOVR_EXCL_LINE */
+        return (double)NAN;                  /* GCOVR_EXCL_LINE */
+    }
+    return value;
+}
+
+double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len) {
+    uint64_t mantissa = 0;
+    Py_ssize_t fraction_digits = 0;
+    int after_dot = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (digits[index] == '.') {
+            after_dot = 1;
+            continue;
+        }
+        mantissa = mantissa * 10 + (digits[index] - '0');
+        fraction_digits += after_dot;
+        if (mantissa > XP_EXACT_MANTISSA || fraction_digits > XP_EXACT_FRACTION_DIGITS) {
+            return decimal_value_slow(digits, len);
+        }
+    }
+    return (double)mantissa / XP_POWERS_OF_TEN[fraction_digits];
+}
+
 /* XPath number parse: optional leading/trailing whitespace around an optional sign,
    digits, and attr_record fractional part; anything else is NaN. */
 double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
@@ -499,28 +550,33 @@ double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
         sign = -1;
         index++;
     }
-    double value = 0;
-    double frac = 0;
-    double scale = 1;
+    uint64_t mantissa = 0;
+    Py_ssize_t fraction_digits = 0;
+    int exact = 1;
     int seen_digit = 0;
     int after_dot = 0;
-    for (; index < end; index++) {
-        Py_UCS4 ch = text[index];
+    for (Py_ssize_t cursor = index; cursor < end; cursor++) {
+        Py_UCS4 ch = text[cursor];
         if (ch == '.' && !after_dot) {
             after_dot = 1;
         } else if (ch >= '0' && ch <= '9') {
             seen_digit = 1;
-            if (after_dot) {
-                scale *= 10;
-                frac += (ch - '0') / scale;
-            } else {
-                value = value * 10 + (ch - '0');
+            if (exact) {
+                mantissa = mantissa * 10 + (ch - '0');
+                fraction_digits += after_dot;
+                exact = mantissa <= XP_EXACT_MANTISSA && fraction_digits <= XP_EXACT_FRACTION_DIGITS;
             }
         } else {
             return (double)NAN;
         }
     }
-    return seen_digit ? sign * (value + frac) : (double)NAN;
+    if (!seen_digit) {
+        return (double)NAN;
+    }
+    if (!exact) {
+        return sign * decimal_value_slow(text + index, end - index);
+    }
+    return sign * (fraction_digits == 0 ? (double)mantissa : (double)mantissa / XP_POWERS_OF_TEN[fraction_digits]);
 }
 
 /* Render a finite non-integer (or a large integer past the %lld fast path) as the plain
@@ -726,11 +782,15 @@ static int resolve_step_ns(xp_ctx *ctx, const Py_UCS4 *prefix, Py_ssize_t prefix
     if (!found) {
         if (ucs4_eq_ascii(prefix, prefix_len, XP_XML_NS_PREFIX, sizeof(XP_XML_NS_PREFIX) - 1)) {
             match->ns_unmatchable = 1; /* no element in an HTML tree is in the xml namespace */
+            match->xml_ns = 1;
             return 0;
         }
         return -1;
     }
-    if (ucs4_eq_ascii(uri, uri_len, XP_SVG_NS_URI, sizeof(XP_SVG_NS_URI) - 1)) {
+    if (ucs4_eq_ascii(uri, uri_len, XP_XML_NS_URI, sizeof(XP_XML_NS_URI) - 1)) {
+        match->ns_unmatchable = 1;
+        match->xml_ns = 1;
+    } else if (ucs4_eq_ascii(uri, uri_len, XP_SVG_NS_URI, sizeof(XP_SVG_NS_URI) - 1)) {
         match->want_ns = TH_NS_SVG;
     } else if (ucs4_eq_ascii(uri, uri_len, XP_MATHML_NS_URI, sizeof(XP_MATHML_NS_URI) - 1)) {
         match->want_ns = TH_NS_MATHML;
@@ -762,8 +822,19 @@ static int build_step_match(xp_ctx *ctx, const xn *step, step_match *match) {
             return -3;
         }
     }
-    if (step->axis == AX_ATTRIBUTE) {
-        match->attr_atom = resolve_attr_atom(ctx->tree, match->local, match->local_len);
+    if (step->axis == AX_ATTRIBUTE && match->xml_ns) {
+        /* both trees store an XML-namespace attribute under its xml:-prefixed name */
+        Py_UCS4 qualified[128] = {'x', 'm', 'l', ':'};
+        if (match->local_len < (Py_ssize_t)(sizeof(qualified) / sizeof(qualified[0])) - 4) {
+            memcpy(qualified + 4, match->local, (size_t)match->local_len * sizeof(Py_UCS4));
+            match->attr_atom = resolve_attr_atom(ctx->tree, qualified, match->local_len + 4);
+        }
+        match->foreign_only = !th_tree_is_xml(ctx->tree);
+    } else if (step->axis == AX_ATTRIBUTE) {
+        /* a prefix that binds any other namespace names no attribute a tree carries */
+        if (!match->has_ns) {
+            match->attr_atom = resolve_attr_atom(ctx->tree, match->local, match->local_len);
+        }
     } else {
         match->atom = resolve_tag_atom(match->local, match->local_len);
     }

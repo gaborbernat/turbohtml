@@ -1159,6 +1159,23 @@ static int append_target(PyObject *targets, PyObject *owner, th_node *node) {
     return 0;
 }
 
+/* An HTML raw-text or escapable raw-text element: the serializer writes a raw-text element's children verbatim, so an
+   inserted <a> would turn into literal markup or lose its text, and an escapable raw-text element's content reparses
+   as text only. noscript is raw text only when the tree was parsed with scripting on, and plaintext carries no
+   raw-text flag because it swallows the rest of the document. */
+static int holds_text_only(th_tree *tree, const th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (node->atom == TH_TAG_PLAINTEXT) {
+        return 1;
+    }
+    if (node->atom == TH_TAG_NOSCRIPT) {
+        return th_tree_scripting(tree);
+    }
+    return (th_tag_flags(node->atom) & (TH_TAG_RAWTEXT | TH_TAG_RCDATA)) != 0;
+}
+
 static PyObject *collect_targets(PyObject *module, PyObject *owner, int process_existing, PyObject *skip_tags) {
     PyObject *targets = PyList_New(0);
     if (targets == NULL) { /* GCOVR_EXCL_BR_LINE: target list allocation cannot be forced from a test */
@@ -1171,7 +1188,6 @@ static PyObject *collect_targets(PyObject *module, PyObject *owner, int process_
     th_tree *tree;
     th_node *root;
     (void)turbohtml_node_borrow(module, owner, &tree, &root);
-    (void)tree;
     th_node *node = root->first_child;
     while (node != NULL) {
         if (node->type == TH_NODE_TEXT) {
@@ -1179,8 +1195,9 @@ static PyObject *collect_targets(PyObject *module, PyObject *owner, int process_
                 error = 1;                                 /* GCOVR_EXCL_LINE */
                 break;                                     /* GCOVR_EXCL_LINE */
             }
-        } else if (node->type == TH_NODE_ELEMENT && (node->atom == TH_TAG_A || node->atom == TH_TAG_SCRIPT ||
-                                                     node->atom == TH_TAG_STYLE || tag_in_tuple(node, skip_tags))) {
+        } else if (node->type == TH_NODE_ELEMENT &&
+                   (node->atom == TH_TAG_A || node->atom == TH_TAG_SCRIPT || node->atom == TH_TAG_STYLE ||
+                    holds_text_only(tree, node) || tag_in_tuple(node, skip_tags))) {
             if (process_existing && node->atom == TH_TAG_A) {
                 if (append_target(targets, owner, node) < 0) { /* GCOVR_EXCL_BR_LINE: wrapper/list allocation */
                     error = 1;                                 /* GCOVR_EXCL_LINE */

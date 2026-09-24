@@ -379,6 +379,10 @@ def test_transform_sort_data_type_and_order(data_type: str, order: str, expected
         ),
         pytest.param("number(@key)", ("1", "bad", "bad"), "bca", "abc", id="nan-stability"),
         pytest.param("number(@key) div 0", ("1", "-1", "0"), "abc", "abc", id="infinity-string-coercion"),
+        pytest.param("1 div number(@key)", ("0", "2", "4"), "acb", "bca", id="positive-infinity-reads-as-nan"),
+        pytest.param(
+            "number(@key) div 3", ("1", "1.0000000000000002", "0.9999999999999999"), "acb", "bac", id="adjacent-doubles"
+        ),
         pytest.param("@key = 'true'", ("true", "false", "true"), "abc", "abc", id="boolean-string-coercion"),
         pytest.param("string(@key)", ("2", "-1", "0"), "bca", "acb", id="string-key"),
         pytest.param("string(@key)", ("", "bad", "1"), "abc", "cab", id="string-nan-stability"),
