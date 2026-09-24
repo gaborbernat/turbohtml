@@ -1225,7 +1225,9 @@ static int scrub_stylesheet(sanitizer *s, const Py_UCS4 *value, Py_ssize_t len, 
         }
     }
     if (brace_depth > 0) { /* an unclosed block: flush its trailing declaration and balance the missing braces */
-        int flushed = css_emit_block_declaration(s, value, seg_start, len, colon, out, &out_len);
+        /* a string or comment left open at the end would swallow the `;` and `}` appended after it, so the next pass
+           would read them as data and append another pair; drop that declaration to keep the output a fixpoint */
+        int flushed = mode == 0 ? css_emit_block_declaration(s, value, seg_start, len, colon, out, &out_len) : 0;
         if (flushed < 0) { /* GCOVR_EXCL_BR_LINE: css_emit_block_declaration only fails on allocation failure */
             return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
