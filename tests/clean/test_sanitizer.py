@@ -171,6 +171,56 @@ def test_escape_node_end_tags_follow_its_markup(node: Element | Document, expect
 
 
 @pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param("<table><tr><td>1</td></tr></table>", "<table><tr><td>1</td></tr></table>", id="implied-tbody"),
+        pytest.param(
+            "<table><td>1</td></table>", "<table><tr><td>1</td></tr></table>", id="implied-tbody-allowed-implied-tr"
+        ),
+        pytest.param("<table><col></table>", "<table><col></table>", id="implied-colgroup"),
+        pytest.param(
+            "<table><tbody><tr><td>1</td></tr></tbody></table>",
+            "<table>&lt;tbody&gt;<tr><td>1</td></tr>&lt;/tbody&gt;</table>",
+            id="source-tbody",
+        ),
+        pytest.param(
+            "<table><tr><td>1</td></tr></tbody></table>",
+            "<table><tr><td>1</td></tr>&lt;/tbody&gt;</table>",
+            id="implied-tbody-source-end-tag",
+        ),
+        pytest.param("a</p>b", "a&lt;/p&gt;b", id="stray-p-end-tag"),
+        pytest.param("a</br>b", "a&lt;/br&gt;b", id="stray-br-end-tag"),
+    ],
+)
+def test_escape_reproduces_only_source_start_tags(html: str, expected: str) -> None:
+    # the parser inserts a tbody, tr, or colgroup the author never wrote, and turns a stray </p> or </br> into an
+    # element; escape mode renders only the tags the source contains
+    assert sanitize(html, Policy(tags=frozenset({"table", "tr", "td", "col"}))) == expected
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        pytest.param("<b>1<p>2</b>3</p>", id="adoption-agency-clone"),
+        pytest.param("<p><b>1</p><p>2</p>", id="reconstructed-formatting"),
+        pytest.param("<i>a<div>b</i>c</div>", id="adoption-agency-block"),
+    ],
+)
+def test_escape_cloned_formatting_element_reproduces_source(html: str) -> None:
+    # the tree builder clones a formatting element the source opened once; escaping renders its start tag once
+    assert sanitize(html, Policy.strict()) == html.replace("<", "&lt;").replace(">", "&gt;")
+
+
+def test_escape_document_skeleton_synthesized_at_eof_is_silent() -> None:
+    assert not sanitize_node(parse(""), Policy.strict()).serialize()
+
+
+def test_escape_renamed_implied_element_has_no_start_tag() -> None:
+    policy = Policy(tags=frozenset({"table", "tr", "td"}), transform_tags={"tbody": "section"})
+    assert sanitize("<table><tr><td>1</td></tr></table>", policy) == "<table><tr><td>1</td></tr></table>"
+
+
+@pytest.mark.parametrize(
     ("disposition", "expected"),
     [
         pytest.param(OnDisallowed.ESCAPE, "&lt;div&gt;<b>x</b>&lt;/div&gt;", id="escape"),
