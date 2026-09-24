@@ -105,10 +105,15 @@ def test_parse_fragment_rejects_unknown_context(context: str) -> None:
         pytest.param("svg circle", "circle", id="svg-open-registry"),
         pytest.param("math mrow", "mrow", id="math-open-registry"),
         pytest.param("TABLE", "table", id="uppercase-known-tag"),
+        pytest.param("svg foreignObject", "foreignObject", id="svg-mixed-case"),
+        pytest.param("svg clippath", "clipPath", id="svg-lowercase-adjusted"),
+        pytest.param("svg CIRCLE", "circle", id="svg-unadjusted-lowercased"),
+        pytest.param("math mI", "mi", id="math-lowercased"),
     ],
 )
 def test_parse_fragment_accepts_context(context: str, tag: str) -> None:
-    # a namespaced foreign registry is open-ended; a known tag matches case-insensitively
+    # a namespaced foreign registry is open-ended, a known tag matches case-insensitively, and an SVG name takes
+    # the mixed case the SVG element name adjustments give a parsed element
     assert parse_fragment("<p/>", context).tag == tag
 
 
