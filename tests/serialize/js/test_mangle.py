@@ -162,6 +162,66 @@ def test_mangling_preserves_behavior(snippet: str) -> None:
     assert _run(snippet) == _run(minify_js(snippet))
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("{function g(){return 1}}g()", "{function g(){return 1}}g()", id="top-level-block-kept"),
+        pytest.param(
+            "function t(){{function g(){return 1}}return typeof g}",
+            "function t(){{function g(){return 1}}return typeof g}",
+            id="unread-in-block-kept",
+        ),
+        pytest.param(
+            "function t(){{function g(){return 1}g()}return typeof g}",
+            "function t(){{function g(){return 1}g()}return typeof g}",
+            id="single-use-in-block-not-inlined",
+        ),
+        pytest.param(
+            "function t(){var g=1;{function g(){}}return g}",
+            "function t(){var g=1;{function g(){}}return g}",
+            id="outer-var-not-propagated",
+        ),
+        pytest.param(
+            "function t(){var g=1,h=g;{function g(){}}return[h,g]}",
+            "function t(){var g=1,a=g;{function g(){}}return[a,g]}",
+            id="outer-var-keeps-name",
+        ),
+        pytest.param(
+            "function t(){function g(){}return[g,g]}",
+            "function t(){function a(){}return[a,a]}",
+            id="body-level-renamed",
+        ),
+        pytest.param(
+            "function t(){class C{}return[C,C]}", "function t(){class a{}return[a,a]}", id="body-level-class-renamed"
+        ),
+    ],
+)
+def test_annex_b_block_function(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        pytest.param("{function g(){return 1}}console.log(typeof g)", id="top-level"),
+        pytest.param("function t(){if(1){function g(){return 2}}return g()}console.log(t())", id="if-block"),
+        pytest.param("function t(){{function g(){return 1}g()}return typeof g}console.log(t())", id="used-in-block"),
+        pytest.param(
+            "function t(){{function g(){return 1}}{function g(){return 2}}return g()}console.log(t())",
+            id="later-block-wins",
+        ),
+        pytest.param("function t(){var g=1;{function g(){}}return typeof g}console.log(t())", id="outer-var"),
+        pytest.param(
+            "function o(){var g=5;function t(){{function g(){}}return g}return typeof t()}console.log(o())",
+            id="outer-function-binding",
+        ),
+    ],
+)
+def test_annex_b_block_function_preserves_behavior(snippet: str) -> None:
+    assert _run(snippet) == _run(minify_js(snippet))
+
+
 _BS = chr(0x5C)  # backslash, kept out of the literals so the \u escapes are unambiguous
 
 

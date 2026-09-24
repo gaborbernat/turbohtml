@@ -362,14 +362,29 @@ static void hoist_block(M *mangler, int32_t first, int32_t scope) {
                 declare_pattern(mangler, mangler->prog->nodes[declarator].a, scope, node->decl);
             }
         } else if (node->kind == JN_FUNC) { /* in a statement list a function is always a named declaration */
+            /* Annex B.3.3: in sloppy code, running the block that declares a function also assigns it to a
+               same-named var of the enclosing function, which code after the block reads. The analysis
+               sees neither that var nor the assignment, so the block binding and whatever binding the
+               name reaches from outside the block stay exactly as written. */
+            int annex_b = mangler->prog->scopes[scope].kind != 1;
+            int32_t outer = annex_b ? resolve(mangler, node->str, node->str_len) : -1;
+            if (outer >= 0) {
+                mangler->prog->syms[outer].pinned = 1;
+            }
             declare(mangler, scope, node->str, node->str_len, 4);
             node->sym = resolve(mangler, node->str, node->str_len); /* so the name renames with its references */
             if (node->sym >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on an allocation failure */
                 mangler->prog->syms[node->sym].decl_node = idx; /* let drop_unused find an unused function */
+                mangler->prog->syms[node->sym].pinned |= (uint8_t)annex_b;
             }
         } else if (node->kind == JN_CLASS) { /* likewise a class is always a named declaration */
             declare(mangler, scope, node->str, node->str_len, 6);
             node->sym = resolve(mangler, node->str, node->str_len);
+            if (node->sym >= 0) { /* GCOVR_EXCL_BR_LINE: unresolved only on an allocation failure */
+                /* one in a block keeps its name like a block function does; one directly in a function
+                   body renames */
+                mangler->prog->syms[node->sym].pinned = mangler->prog->scopes[scope].kind != 1;
+            }
         }
     }
 }
@@ -758,11 +773,8 @@ static int is_forbidden(M *mangler, const Py_UCS4 *name, Py_ssize_t len) {
 static void assign_slots(M *mangler, int32_t scope, int32_t base) {
     int32_t counter = base;
     for (int32_t sym = mangler->prog->scopes[scope].first_sym; sym >= 0; sym = mangler->prog->syms[sym].scope_next) {
-        if ((mangler->prog->syms[sym].decl == 4 || mangler->prog->syms[sym].decl == 6) &&
-            mangler->prog->scopes[scope].kind != 1) {
-            continue; /* a function/class declaration in a block keeps its name: renaming it would
-                         miss the Annex-B B.3.3 hoisted copy in the enclosing function scope. One
-                         directly in a function body (scope kind 1) has no such copy and renames. */
+        if (mangler->prog->syms[sym].pinned) {
+            continue;
         }
         mangler->prog->syms[sym].slot = counter++;
     }
@@ -1175,7 +1187,7 @@ static int drop_unused(jm_program *prog, int32_t global) {
     int changed = 0;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].refs != 0 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
-            prog->syms[sym].scope == global) {
+            prog->syms[sym].scope == global || prog->syms[sym].pinned) {
             continue; /* a written binding (even if never read) keeps its declaration; see dead stores */
         }
         int32_t stmt = prog->syms[sym].decl_node;
@@ -1300,7 +1312,7 @@ static int inline_single_use(jm_program *prog, int32_t global) {
     int changed = 0;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].refs != 1 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
-            prog->syms[sym].scope == global) {
+            prog->syms[sym].scope == global || prog->syms[sym].pinned) {
             continue; /* one read, never written: the read is where the declaration's value goes */
         }
         int32_t ref = prog->syms[sym].ref_node;
@@ -1416,7 +1428,7 @@ static int propagate_value_literals(jm_program *prog, int32_t global) {
     jm_propagation *plans = NULL;
     for (int32_t sym = 0; sym < prog->sym_count; sym++) {
         if (prog->syms[sym].refs < 2 || prog->syms[sym].writes != 0 || prog->syms[sym].decl_node < 0 ||
-            prog->syms[sym].scope == global || prog->syms[sym].decl > 2) {
+            prog->syms[sym].scope == global || prog->syms[sym].decl > 2 || prog->syms[sym].pinned) {
             continue; /* decl > 2 also skips functions; only var/let/const record a JN_VAR decl_node */
         }
         int32_t stmt = prog->syms[sym].decl_node;
