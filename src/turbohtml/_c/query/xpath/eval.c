@@ -185,8 +185,9 @@ static int emit_if_match(xp_nodeset *out, struct th_node *node, const xn *step, 
     return ns_push(out, node, -1);
 }
 
-static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, const step_match *match) {
-    switch (step->axis) {
+static int apply_step(xp_nodeset *out, struct th_node *ctx, enum xp_axis axis, const xn *step,
+                      const step_match *match) {
+    switch (axis) {
     case AX_ATTRIBUTE: {
         /* node() and * both match every attribute; a name test matches by atom; a
            prefixed name test matches none (HTML attributes carry no namespace);
@@ -295,6 +296,36 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, const xn *step, cons
                 return -1;                                   /* GCOVR_EXCL_LINE */
             }
         }
+        return 0;
+    }
+}
+
+/* An attribute or namespace node has no children and no siblings; its parent is the
+   owner element, and in document order it follows the owner and precedes the owner's
+   children (XPath 1.0 §5). Only node() matches it on the self axis, whose principal
+   node type is element. */
+static int apply_owned_step(xp_nodeset *out, xp_item item, const xn *step, const step_match *match) {
+    switch (step->axis) {
+    case AX_SELF:
+    case AX_DESCENDANT_OR_SELF:
+        return step->test == NT_NODE ? ns_push(out, item.node, item.attr) : 0;
+    case AX_ANCESTOR_OR_SELF:
+        if (step->test == NT_NODE && ns_push(out, item.node, item.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                                         /* GCOVR_EXCL_LINE */
+        }
+        TH_FALLTHROUGH; /* the owner element is the nearest ancestor */
+    case AX_ANCESTOR:
+        return apply_step(out, item.node, AX_ANCESTOR_OR_SELF, step, match);
+    case AX_PARENT:
+        return apply_step(out, item.node, AX_SELF, step, match);
+    case AX_FOLLOWING:
+        if (apply_step(out, item.node, AX_DESCENDANT, step, match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                                    /* GCOVR_EXCL_LINE */
+        }
+        return apply_step(out, item.node, AX_FOLLOWING, step, match);
+    case AX_PRECEDING:
+        return apply_step(out, item.node, AX_PRECEDING, step, match);
+    default: /* the child, descendant, sibling, attribute, and namespace axes are empty */
         return 0;
     }
 }
@@ -656,8 +687,8 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
         Py_ssize_t write_pos = 0;
         for (Py_ssize_t index = 0; index < set->len; index++) {
             xp_ctx pctx = {
-                ctx->tree,       set->items[index].node, index + 1,          size,      ctx->feature, ctx->vars,
-                ctx->namespaces, ctx->extension,         ctx->extension_ctx, ctx->depth};
+                ctx->tree, set->items[index].node, set->items[index].attr, index + 1,          size,      ctx->feature,
+                ctx->vars, ctx->namespaces,        ctx->extension,         ctx->extension_ctx, ctx->depth};
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
             if (rc < 0) {
@@ -760,8 +791,8 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
         cur = base.nodes; /* take ownership */
     } else {
         struct th_node *start = root->absolute ? th_tree_document(ctx->tree) : ctx->node;
-        if (ns_push(&cur, start, -1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-            return -1;                      /* GCOVR_EXCL_LINE */
+        if (ns_push(&cur, start, root->absolute ? -1 : ctx->attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                                   /* GCOVR_EXCL_LINE */
         }
     }
     xp_nodeset next = {0};
@@ -776,14 +807,14 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
         }
         next.len = 0;
         for (Py_ssize_t index = 0; index < cur.len; index++) {
-            if (cur.items[index].attr != -1) {
-                continue; /* an attribute or namespace node has no axes of its own */
-            }
             Py_ssize_t before = next.len;
-            if (apply_step(&next, cur.items[index].node, step, &match) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                xp_nodeset_free(&cur);                                        /* GCOVR_EXCL_LINE */
-                xp_nodeset_free(&next);                                       /* GCOVR_EXCL_LINE */
-                return -1;                                                    /* GCOVR_EXCL_LINE */
+            xp_item item = cur.items[index];
+            int stepped = item.attr == -1 ? apply_step(&next, item.node, step->axis, step, &match)
+                                          : apply_owned_step(&next, item, step, &match);
+            if (stepped < 0) {          /* GCOVR_EXCL_BR_LINE: alloc */
+                xp_nodeset_free(&cur);  /* GCOVR_EXCL_LINE */
+                xp_nodeset_free(&next); /* GCOVR_EXCL_LINE */
+                return -1;              /* GCOVR_EXCL_LINE */
             }
             if (step->first >= 0) {
                 /* filter this context node's candidates in proximity order */
@@ -1275,7 +1306,7 @@ int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) 
 int xp_eval_at(const xp_program *prog, struct th_tree *tree, struct th_node *context, Py_ssize_t pos, Py_ssize_t size,
                const xp_bindings *vars, const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx,
                xp_result *out, const char **feature) {
-    xp_ctx ctx = {tree, context, pos, size, feature, vars, namespaces, extension, extension_ctx, 0};
+    xp_ctx ctx = {tree, context, -1, pos, size, feature, vars, namespaces, extension, extension_ctx, 0};
     return eval_expr(prog, prog->root, &ctx, out);
 }
 
