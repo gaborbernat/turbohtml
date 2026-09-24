@@ -170,6 +170,8 @@ nitpick_ignore = [
     # values (not a class) are spelled out in the field's docstring, so it is intentionally not a cross-ref target.
     ("py:class", "Signal"),
     ("py:type", "Signal"),
+    # _Attrs is the private type of Element.attrs; the docs describe it as a MutableMapping, not as a class of its own.
+    ("py:class", "_Attrs"),
 ]
 
 issues_github_path = "tox-dev/turbohtml"

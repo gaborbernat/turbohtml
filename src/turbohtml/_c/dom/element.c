@@ -280,10 +280,7 @@ static PyObject *attrs_to_dict(PyObject *self) {
     if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *mapping = PyDict_New();
-    if (mapping != NULL && PyDict_MergeFromSeq2(mapping, items, 1) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
-        Py_CLEAR(mapping);                                                /* GCOVR_EXCL_LINE: OOM path */
-    }
+    PyObject *mapping = PyObject_CallOneArg((PyObject *)&PyDict_Type, items);
     Py_DECREF(items);
     return mapping;
 }
@@ -399,18 +396,11 @@ static PyObject *attrs_setdefault(PyObject *self, PyObject *args) {
 /* Assign every pair of other (a mapping, or an iterable of pairs) and then of kwds, the way dict.update does. The
    pairs are gathered into a dict first, so a malformed argument fails before any attribute changes. */
 static int attrs_merge(PyObject *self, PyObject *other, PyObject *kwds) {
-    PyObject *pairs = PyDict_New();
-    if (pairs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    PyObject *pairs = other == NULL ? PyDict_New() : PyObject_CallOneArg((PyObject *)&PyDict_Type, other);
+    if (pairs == NULL) {
+        return -1;
     }
-    int rc = 0;
-    if (other != NULL) {
-        rc = PyObject_HasAttrString(other, "keys") ? PyDict_Merge(pairs, other, 1)
-                                                   : PyDict_MergeFromSeq2(pairs, other, 1);
-    }
-    if (rc == 0 && kwds != NULL) {
-        rc = PyDict_Merge(pairs, kwds, 1);
-    }
+    int rc = kwds == NULL ? 0 : PyDict_Update(pairs, kwds);
     PyObject *key;
     PyObject *value;
     Py_ssize_t position = 0;

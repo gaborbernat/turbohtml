@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, MutableMapping
+from collections.abc import MutableMapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
@@ -18,18 +18,13 @@ def _anchor() -> Element:
     return Element("a", {"id": "x", "class": "c1 c2", "href": "h"})
 
 
-class _BrokenMapping(Mapping[str, str]):
-    """A mapping whose iteration raises, so copying it into a dict fails."""
+class _BrokenMapping:
+    """A mapping-like object whose keys() raises, so copying it into a dict fails."""
 
-    def __getitem__(self, key: str) -> str:
-        raise KeyError(key)
-
-    def __iter__(self) -> Iterator[str]:
+    @staticmethod
+    def keys() -> NoReturn:
         msg = "broken"
         raise RuntimeError(msg)
-
-    def __len__(self) -> int:
-        return 1
 
 
 def test_attrs_is_a_mutable_mapping() -> None:
