@@ -928,6 +928,10 @@ def _run(code: str) -> str:
         # unreachable-tail cut: a terminator that is the last statement, and a tail that hoists
         pytest.param("(function(){function f(){console.log('x');return 1}console.log(f())})()", id="terminator-last"),
         pytest.param("(function(){function f(){return 1;var x}console.log(f())})()", id="tail-hoists-kept"),
+        pytest.param(
+            "var s='a" + chr(0x2028) + "b'+'" + chr(0x2029) + "';console.log(s.length,s.charCodeAt(1),s.charCodeAt(3))",
+            id="string-line-separators",
+        ),
     ],
 )
 def test_folding_preserves_behavior(snippet: str) -> None:

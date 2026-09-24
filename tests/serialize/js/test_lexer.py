@@ -66,6 +66,10 @@ def test_numbers(source: str, dump: str) -> None:
         pytest.param(r"'a\'b'", r"STRING:'a\'b' EOF", id="escaped-quote"),
         pytest.param("'a\\\nb'", "STRING:'a\\\nb' EOF", id="line-continuation"),
         pytest.param('""', 'STRING:"" EOF', id="empty-string"),
+        pytest.param("'a" + chr(0x2028) + "b'", "STRING:'a" + chr(0x2028) + "b' EOF", id="line-separator-in-string"),
+        pytest.param(
+            '"a' + chr(0x2029) + 'b"', 'STRING:"a' + chr(0x2029) + 'b" EOF', id="paragraph-separator-in-string"
+        ),
     ],
 )
 def test_strings(source: str, dump: str) -> None:
@@ -191,6 +195,7 @@ def test_trivia_and_newlines(source: str, dump: str) -> None:
     [
         pytest.param("'unterminated", "ERROR:'unterminated", id="unterminated-string"),
         pytest.param("'newline\nhere'", "ERROR:'newline", id="string-newline"),
+        pytest.param("'return\rhere'", "ERROR:'return", id="string-carriage-return"),
         pytest.param("`unterminated", "ERROR:`unterminated", id="unterminated-template"),
         pytest.param("/* never closed", "ERROR:/* never closed", id="unterminated-block-comment"),
         pytest.param("/unterminated", "ERROR:/unterminated", id="unterminated-regex"),

@@ -320,8 +320,8 @@ static void jm_scan_string(jm_lexer *lx, Py_UCS4 quote) {
             }
             continue;
         }
-        if (jm_is_line_term(ch)) {
-            break; /* an unescaped newline is illegal in a string literal */
+        if (ch == '\n' || ch == '\r') {
+            break; /* an unescaped LF or CR is illegal in a string literal; LS and PS are not (ES2019, §12.9.4) */
         }
         lx->pos++;
     }
