@@ -134,6 +134,12 @@ struct th_tree {
     struct th_observer **observers;
     Py_ssize_t observer_count;
     Py_ssize_t observer_cap;
+    /* Live NodeIterators rooted in this tree, each owned by its NodeIterator Python
+       object (dom/traversal.c), which holds a handle reference keeping the tree alive,
+       so the array is empty by the time the tree is freed. NULL when none exist. */
+    struct th_node_iterator **node_iterators;
+    Py_ssize_t node_iterator_count;
+    Py_ssize_t node_iterator_cap;
     /* WHATWG parse errors collected during the parse, in document order. The
        tokenizer fills it through this sink while the tree builder adds its own
        construction errors. The preprocessing errors, which depend on the input alone,

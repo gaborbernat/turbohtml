@@ -634,3 +634,101 @@ def test_iterate_module_exports() -> None:
     assert turbohtml.TreeWalker is TreeWalker
     assert turbohtml.NodeIterator is NodeIterator
     assert turbohtml.NodeFilter is NodeFilter
+
+
+_REMOVAL_SAMPLE = "<div id=r><p id=p0><b></b></p><p id=p1></p><p id=p2></p></div>"
+
+
+def _removal_doc() -> Document:
+    """A fresh tree per test: these tests mutate it, and parallel runs must not share it."""
+    return parse(_REMOVAL_SAMPLE)
+
+
+def _ids(nodes: list[Node]) -> list[str]:
+    return [str(_el(node).attrs.get("id", _el(node).tag)) for node in nodes]
+
+
+def _walk_to(iterator: NodeIterator, forward: int, back: int = 0) -> None:
+    for _ in range(forward):
+        iterator.next_node()
+    for _ in range(back):
+        iterator.previous_node()
+
+
+def test_iterator_continues_after_removing_the_reference_ancestor() -> None:
+    removal_doc = _removal_doc()
+    visited: list[Node] = []
+    for node in NodeIterator(_el(removal_doc.select_one("#r"))):
+        visited.append(node)
+        if _named(node, "b"):
+            _el(removal_doc.select_one("#p0")).decompose()
+    assert _ids(visited) == ["r", "p0", "b", "p1", "p2"]
+
+
+def test_iterator_removal_after_reference_moves_to_previous_last_descendant() -> None:
+    removal_doc = _removal_doc()
+    iterator = NodeIterator(_el(removal_doc.select_one("#r")))
+    _walk_to(iterator, 4)  # reference: p1, pointer after
+    _el(removal_doc.select_one("#p1")).decompose()
+    assert (_tags(iterator.reference_node), iterator.pointer_before_reference_node) == ("b", False)
+
+
+def test_iterator_removal_before_reference_moves_to_next_sibling() -> None:
+    removal_doc = _removal_doc()
+    iterator = NodeIterator(_el(removal_doc.select_one("#r")))
+    _walk_to(iterator, 5, back=2)  # reference: p1, pointer before
+    _el(removal_doc.select_one("#p1")).decompose()
+    assert _ids([iterator.reference_node]) == ["p2"]
+
+
+def test_iterator_removal_before_reference_without_following_falls_back() -> None:
+    removal_doc = _removal_doc()
+    iterator = NodeIterator(_el(removal_doc.select_one("#r")))
+    _walk_to(iterator, 5, back=1)  # reference: p2, pointer before
+    _el(removal_doc.select_one("#p2")).decompose()
+    assert (_ids([iterator.reference_node]), iterator.pointer_before_reference_node) == (["p1"], False)
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [pytest.param("#p2", id="unrelated"), pytest.param("#p0", id="root-itself")],
+)
+def test_iterator_ignores_removal_outside_its_reference_path(removed: str) -> None:
+    removal_doc = _removal_doc()
+    iterator = NodeIterator(_el(removal_doc.select_one("#p0")))
+    _walk_to(iterator, 2)  # reference: b, pointer after
+    _el(removal_doc.select_one(removed)).decompose()
+    assert _tags(iterator.reference_node) == "b"
+
+
+def test_iterator_adjusts_the_candidate_when_the_filter_removes_nodes() -> None:
+    removal_doc = _removal_doc()
+
+    def drop_first_paragraph(node: Node) -> int:
+        if _named(node, "b"):
+            _el(removal_doc.select_one("#p0")).decompose()
+            return SKIP
+        return ACCEPT
+
+    visited = list(NodeIterator(_el(removal_doc.select_one("#r")), filter=drop_first_paragraph))
+    assert _ids(visited) == ["r", "p0", "p1", "p2"]
+
+
+def test_iterator_reference_moved_out_of_root_unobserved_falls_back() -> None:
+    removal_doc = _removal_doc()
+    iterator = NodeIterator(_el(removal_doc.select_one("#r")))
+    _walk_to(iterator, 4, back=2)  # reference: b, pointer before
+    moved = turbohtml.Range(_el(removal_doc.select_one("#r")))
+    moved.select_node(_el(removal_doc.select_one("#p0")))
+    fragment = moved.extract_contents()  # a Range edit does not adjust iterators
+    _el(fragment.children[0].children[0]).decompose()
+    assert (_ids([iterator.reference_node]), iterator.pointer_before_reference_node) == (["p0"], False)
+
+
+def test_many_iterators_on_one_tree_all_follow_removals() -> None:
+    removal_doc = _removal_doc()
+    iterators = [NodeIterator(_el(removal_doc.select_one("#r"))) for _ in range(6)]
+    for iterator in iterators:
+        _walk_to(iterator, 3)  # reference: b, pointer after
+    _el(removal_doc.select_one("#p0")).decompose()
+    assert [_ids([iterator.reference_node]) for iterator in iterators] == [["r"]] * 6

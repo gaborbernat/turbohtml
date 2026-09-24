@@ -325,6 +325,22 @@ Py_ssize_t *th_tree_observer_count_ptr(th_tree *tree);
 Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree);
 
 int th_node_contains(th_tree *tree, th_node *ancestor, th_node *node);
+
+/* A NodeIterator's two node pointers (DOM "node pointer": a node plus its pointer-before flag), registered on the
+   iterator's tree so every removal through the observed mutation API runs the DOM NodeIterator pre-remove steps on
+   them. candidate is the traverse step's cursor and NULL outside a traverse. */
+typedef struct th_node_iterator {
+    th_node *root;
+    th_node *reference;
+    th_node *candidate;
+    int reference_before;
+    int candidate_before;
+} th_node_iterator;
+
+/* Register or unregister a live NodeIterator; the caller holds the tree's critical section. Registering returns
+   -1 on allocation failure. */
+int th_tree_add_node_iterator(th_tree *tree, th_node_iterator *iterator);
+void th_tree_remove_node_iterator(th_tree *tree, th_node_iterator *iterator);
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node);
 th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_node);
 th_tree *th_tree_copy_document(th_tree *src);
