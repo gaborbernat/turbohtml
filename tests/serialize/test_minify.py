@@ -323,6 +323,39 @@ def test_omit_keeps_end_tag_outside_required_ancestor(source: str, expected: str
     assert parse(once).serialize(Html(layout=Minify())) == once
 
 
+_PHRASING_PARENTS: Final = ["span", "label", "q", "sup", "ruby", "option", "slot", "picture", "my-el", "del"]
+
+
+@pytest.mark.parametrize("child", ["p", "li", "dd"])
+@pytest.mark.parametrize("parent", _PHRASING_PARENTS)
+def test_omit_keeps_end_tag_last_in_phrasing_parent(parent: str, child: str) -> None:
+    # `</span>` reaches the special p/li/dd on the open stack and is ignored, so an
+    # omitted end tag would pull the parent's next sibling into the child
+    source: Final = f"<!DOCTYPE html><div><{parent}><{child}>x</{child}></{parent}>y</div>"
+    assert minify(source) == f"<!DOCTYPE html><div><{parent}><{child}>x</{child}></{parent}>y</div>"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("<button><p>x</p></button>y", "<button><p>x</button>y", id="p-in-button"),
+        pytest.param("<form><p>x</p></form>y", "<form><p>x</form>y", id="p-in-form"),
+        pytest.param("<h1><p>x</p></h1>y", "<h1><p>x</h1>y", id="p-in-heading"),
+        pytest.param("<dl><dt><p>x</p></dt></dl>", "<dl><dt><p>x</dt></dl>", id="p-in-dt"),
+        pytest.param("<object><p>x</p></object>y", "<object><p>x</object>y", id="p-in-object"),
+        pytest.param("<table><tr><td><p>x</p></td></tr></table>", "<table><tbody><tr><td><p>x</table>", id="p-in-cell"),
+        pytest.param("<template><p>x</p></template>y", "<template><p>x</template>y", id="p-in-template"),
+        pytest.param(
+            "<svg><foreignObject><p>x</p></foreignObject></svg>y",
+            "<svg><foreignObject><p>x</p></foreignObject></svg>y",
+            id="p-in-foreign-kept",
+        ),
+    ],
+)
+def test_omit_last_child_end_tag_by_parent(source: str, expected: str) -> None:
+    assert frag(source, strip_comments=False) == expected
+
+
 def test_omit_keeps_p_end_inside_formatting() -> None:
     # the <p> ends inside a reconstructed <i>, so dropping </p> would change the reparse
     out = frag("<i>a<p>b</i>", strip_comments=False)
