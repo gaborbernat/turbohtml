@@ -60,11 +60,12 @@ enum th_node_type {
    through the API has no source, so every non-void one carries it. */
 #define TH_ELEM_CLOSED_BY_END_TAG 0x20u
 
-/* The start-tag counterpart: an element the tree builder inserted without a source
-   start tag (the implied html/head/body, a table's tbody/tr/colgroup, and the p or
-   br a stray end tag creates, which also carries TH_ELEM_CLOSED_BY_END_TAG). Bit
-   0x40 is free on elements because only doctype nodes read TH_DOCTYPE_HAS_PUBLIC.
-   Escape mode reads it so it never renders a `<tag>` the author never wrote. */
+/* The start-tag counterpart: an element the tree builder created without a source
+   start tag (the implied html/head/body, the skeleton an empty document gets at EOF,
+   a table's tbody/tr/colgroup, a cloned formatting element, and the p or br a stray
+   end tag creates, which also carries TH_ELEM_CLOSED_BY_END_TAG). Bit 0x40 is free
+   on elements because only doctype nodes read TH_DOCTYPE_HAS_PUBLIC. Escape mode
+   reads it so it never renders a `<tag>` the author never wrote. */
 #define TH_ELEM_IMPLIED 0x40u
 
 /* A TH_NODE_CONTENT node reuses two otherwise-unused tag_flags bits to record that
