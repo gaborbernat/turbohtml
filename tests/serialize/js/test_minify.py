@@ -367,6 +367,20 @@ def test_bang_comment_survives_full_minify_and_is_idempotent(source: str) -> Non
     assert minify_js(once) == once
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("var a=1,b=2;f(a <!--b\n)", "var a=1,b=2;f(a)", id="open-comment-mid-line"),
+        pytest.param("<!--\nf(1)\n-->", "f(1)", id="wrapped-script"),
+        pytest.param("f(1)\n  /* c */ --> x\nf(2)", "f(1),f(2)", id="close-after-block-comment"),
+        pytest.param("x-->0", "x-- >0", id="close-mid-line-is-operators"),
+        pytest.param("a< !--b", "a<! --b", id="spaced-open-is-operators"),
+    ],
+)
+def test_html_like_comments(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
 def test_unparseable_input_raises() -> None:
     # module syntax is not handled; minify_js fails loudly rather than silently
     # echoing the source back, so an unminifiable script never passes unnoticed

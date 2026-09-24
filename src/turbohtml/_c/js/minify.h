@@ -13,13 +13,13 @@
 /* Minify the script src[0..len) into a freshly PyMem-allocated code-point buffer;
    *out_len receives its length. fold runs the constant-folding / dead-code pass and
    mangle the identifier-renaming pass; whitespace, comment and number minification is
-   unconditional. Returns NULL on a parse error (a NUL-terminated message, including the
-   byte offset, is written into errbuf - capacity errlen) or on allocation failure
+   unconditional. module selects the Module goal, which has no HTML-like comments. Returns NULL on a parse error (a
+   NUL-terminated message, including the byte offset, is written into errbuf - capacity errlen) or on allocation failure
    (errbuf left empty). Failing loudly rather than echoing the input back keeps an
    unminifiable script from passing silently; the HTML inline path layers its own
    fallback on top so one bad <script> never breaks serialization. */
-Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, Py_ssize_t *out_len, char *errbuf,
-                      size_t errlen);
+Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, int module, Py_ssize_t *out_len,
+                      char *errbuf, size_t errlen);
 
 /* Parser-test hook: render the token stream of src[0..len) as a canonical,
    newline-separated dump (PyMem-allocated code points; *out_len receives the

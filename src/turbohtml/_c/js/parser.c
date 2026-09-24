@@ -1495,7 +1495,7 @@ static int32_t parse_class(P *parser, int is_expr) {
     return parser->err ? -1 : node;
 }
 
-jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen) {
+jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, int module, char *errbuf, size_t errlen) {
     jm_program *prog = jm_calloc(1, sizeof(jm_program));
     if (prog == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         if (errlen > 0) {     /* GCOVR_EXCL_LINE */
@@ -1511,6 +1511,7 @@ jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t er
         errbuf[0] = '\0';
     }
     jm_lex_init(&parser.lx, src, len);
+    parser.lx.html_comments = !module;
     parser.lx.sink = prog; /* accrue kept license/banner comments before the first token is read */
     advance(&parser);
 
