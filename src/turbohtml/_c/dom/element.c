@@ -2540,9 +2540,51 @@ static int import_all(PyObject *self, PyObject *list) {
     }
 }
 
+/* Append one node that is not a DocumentFragment as parent's last child: the same imports and checks as gathering it
+   into a list (see gather_insert), without the list or the scratch array. A foreign node is imported first, which
+   suspends the caller's critical section, and every check below then reads the tree afresh, so one import is enough.
+   The imported copy is fresh and nothing links to it, so it needs no ancestor walk. Returns 0, or -1 with an exception.
+ */
+static int append_one(PyObject *self, th_node *parent, PyObject *item) {
+    if (!PyObject_TypeCheck(item, (PyTypeObject *)state_of(self)->node_type)) {
+        PyErr_SetString(PyExc_TypeError, "child must be a node");
+        return -1;
+    }
+    NodeObject *child = (NodeObject *)item;
+    if (child->node->type == TH_NODE_DOCUMENT) {
+        PyErr_SetString(PyExc_TypeError, "a Document cannot be inserted as a child");
+        return -1;
+    }
+    th_tree *tree = tree_of(self);
+    int foreign = tree_of(item) != tree;
+    if (foreign && import_node(((NodeObject *)self)->handle, child) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
+        return -1;                                                             /* GCOVR_EXCL_LINE: OOM path */
+    }
+    th_node *node = child->node;
+    const char *message = NULL;
+    if (!foreign && th_node_contains(tree, node, parent)) {
+        message = "cannot insert a node into its own subtree";
+    } else if (node->type == TH_NODE_DOCTYPE) { /* no Document appends: a doctype is the only rule that can fail */
+        message = th_pre_insert_error(parent, &node, 1, NULL, NULL, NULL);
+    }
+    if (message != NULL) {
+        PyErr_SetString(PyExc_ValueError, message);
+        return -1;
+    }
+    handle_drop_index(((NodeObject *)self)->handle);
+    if (!foreign) {
+        th_node_remove_observed(tree, node);
+    }
+    th_node_append_child_observed(tree, parent, node);
+    return 0;
+}
+
 /* Import the foreign arguments in list, then append them all to parent (see insert_gathered). Returns 0, or -1 with
    an exception. */
 static int append_gathered(PyObject *self, th_node *parent, PyObject *list) {
+    if (PyList_GET_SIZE(list) == 1 && !is_fragment_arg(state_of(self), PyList_GET_ITEM(list, 0))) {
+        return append_one(self, parent, PyList_GET_ITEM(list, 0));
+    }
     if (import_all(self, list) < 0) { /* GCOVR_EXCL_BR_LINE: the import fails only on allocation failure */
         return -1;                    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -2552,12 +2594,18 @@ static int append_gathered(PyObject *self, th_node *parent, PyObject *list) {
 /* Append child (a node, or a fragment whose children move) as this node's last child: the body of append() on an
    element, a DocumentFragment, and a ShadowRoot. */
 PyObject *node_append_child(PyObject *self, PyObject *child) {
+    int error;
+    if (!is_fragment_arg(state_of(self), child)) {
+        Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+        error = append_one(self, ((NodeObject *)self)->node, child) < 0;
+        Py_END_CRITICAL_SECTION();
+        return error ? NULL : Py_NewRef(Py_None);
+    }
     PyObject *list = PyList_New(1);
     if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     PyList_SET_ITEM(list, 0, Py_NewRef(child));
-    int error;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     error = append_gathered(self, ((NodeObject *)self)->node, list) < 0;
     Py_END_CRITICAL_SECTION();
@@ -2585,12 +2633,20 @@ static int append_build_children(PyObject *element, PyObject *tag, PyObject *chi
         PyErr_Format(PyExc_ValueError, "void element %R cannot have children", tag);
         return -1;
     }
+    int error;
+    PyObject *only = count == 1 ? PySequence_Fast_GET_ITEM(sequence, 0) : NULL;
+    if (only != NULL && !is_fragment_arg(state_of(element), only)) { /* one plain child needs no list */
+        Py_BEGIN_CRITICAL_SECTION(self->handle);
+        error = append_one(element, self->node, only) < 0;
+        Py_END_CRITICAL_SECTION();
+        Py_DECREF(sequence);
+        return error ? -1 : 0;
+    }
     PyObject *list = PySequence_List(sequence);
     Py_DECREF(sequence);
     if (list == NULL) { /* GCOVR_EXCL_BR_LINE: a fast sequence always converts */
         return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    int error;
     Py_BEGIN_CRITICAL_SECTION(self->handle);
     error = append_gathered(element, self->node, list) < 0;
     Py_END_CRITICAL_SECTION();
