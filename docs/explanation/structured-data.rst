@@ -68,10 +68,13 @@ so calling code never branches on the format. The format is detected from the ro
 ``<dc:creator>``. Timestamps come back verbatim -- feedparser's date-format zoo is out of scope. The precedence rules
 are feedparser's, kept to the minimal, typed shape ``htmlparser2``'s ``parseFeed`` models.
 
-A feed is XML, but turbohtml parses it with the HTML tree builder rather than a second parser, because RSS and Atom
-element names are lowercase ASCII the builder keeps verbatim (namespaced names like ``dc:creator`` included). Two HTML
-rules are worked with rather than around: ``<link>`` is void, so an RSS ``<link>URL</link>`` leaves the URL as the void
-element's next text sibling (Atom's ``<link href=...>`` keeps it in the attribute, which survives), and ``<title>`` is
-RCDATA, which is the plain-text value a feed title wants. The walk runs in C under the per-tree critical section and
-hands the gathered fields to the frozen :class:`~turbohtml.extract.Feed`/:class:`~turbohtml.extract.Entry` records, so,
-like the structured-data records, they hold no reference back into the tree.
+A feed is XML, so :func:`~turbohtml.extract.feed` parses it with :func:`turbohtml.parse_xml` first. The XML tree keeps
+what the HTML tree builder would lose: a ``<![CDATA[...]]>`` section is character data, so a ``<description>`` or
+``<content:encoded>`` wrapping markup in CDATA returns that markup verbatim, and a channel's ``<image>`` keeps its
+nested ``<title>`` and ``<link>`` instead of becoming a void ``<img>`` whose children spill into the channel. Real-world
+feeds are often not well-formed (an HTML entity like ``&nbsp;``, an undeclared ``dc:`` prefix), and ``feedparser``
+recovers from those, so a feed ``parse_xml`` rejects falls back to the HTML tree builder. There ``<link>`` is void, so
+an RSS ``<link>URL</link>`` leaves the URL as the void element's next text sibling, which the walk reads instead of the
+element's own text. :meth:`turbohtml.Document.feed` reads either tree. The walk runs in C under the per-tree critical
+section and hands the gathered fields to the frozen :class:`~turbohtml.extract.Feed`/ :class:`~turbohtml.extract.Entry`
+records, so, like the structured-data records, they hold no reference back into the tree.
