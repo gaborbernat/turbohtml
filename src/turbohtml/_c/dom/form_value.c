@@ -433,6 +433,11 @@ static int larger(int left, int right) {
     return left > right ? left : right;
 }
 
+/* A number with `scale` decimals as an integer count of its last decimal place; a scale of 1 leaves it as is. */
+static double scaled(double value, double scale) {
+    return scale > 1.0 ? round(value * scale) : value;
+}
+
 static int in_range(double value, double minimum, double maximum) {
     return value >= minimum && (maximum < minimum || value <= maximum);
 }
@@ -441,16 +446,22 @@ static int in_range(double value, double minimum, double maximum) {
    bound only when maximum is not below minimum), the nearer-to-positive-infinity one on a tie, or value unchanged when
    it is already aligned or no aligned number fits. */
 static double step_align(double value, double base, double step, double minimum, double maximum) {
-    double steps = (value - base) / step;
+    /* Scaling by the decimals the three numbers carry turns them into integers, so 0.35 with step 0.1 is exactly 3.5
+       steps (a tie that rounds up) rather than binary 3.4999...; past 15 decimals the numbers stay as they are. */
+    int decimals = larger(fraction_digits(value), larger(fraction_digits(base), fraction_digits(step)));
+    double scale = decimals <= 15 ? pow(10.0, decimals) : 1.0;
+    double scaled_value = scaled(value, scale);
+    double scaled_base = scaled(base, scale);
+    double scaled_step = scaled(step, scale);
+    double steps = (scaled_value - scaled_base) / scaled_step;
     double nearest = floor(steps + 0.5);
     /* a remainder under 2^-46 of a step is binary rounding noise, not a mismatch */
     if (fabs(steps - nearest) <= ldexp(1.0, -46)) {
         return value;
     }
-    int decimals = larger(fraction_digits(base), fraction_digits(step));
     double candidates[2] = {nearest, nearest > steps ? nearest - 1 : nearest + 1};
     for (size_t index = 0; index < 2; index++) {
-        double candidate = round_decimals(base + candidates[index] * step, decimals);
+        double candidate = (scaled_base + candidates[index] * scaled_step) / scale;
         if (in_range(candidate, minimum, maximum)) {
             return candidate;
         }
