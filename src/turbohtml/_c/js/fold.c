@@ -55,9 +55,7 @@ static int ident_is(const jm_node *node, const char *word) {
 /* Overwrite the node at dst with the node at src, keeping dst's sibling link so a
    replacement inside a statement or argument chain stays connected. */
 static void replace_with(F *folder, int32_t dst, int32_t src) {
-    int32_t next = folder->prog->nodes[dst].next;
-    folder->prog->nodes[dst] = folder->prog->nodes[src];
-    folder->prog->nodes[dst].next = next;
+    jm_node_replace(folder->prog, dst, src);
     folder->changed = 1;
 }
 

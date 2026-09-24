@@ -609,10 +609,11 @@ static void walk(M *mangler, int32_t idx, int32_t scope, int bind) {
         walk_chain(mangler, node->a, scope, bind); /* elements / properties / exprs / parts */
         return;
     case JN_CALL: {
-        /* a direct call to `eval` resolves names dynamically: poison renaming */
+        /* a direct call to `eval` resolves names dynamically: poison renaming. The parser marks every
+           other name callee JN_F_VALUE, and so a folded `(1&&eval)(s)`, an indirect eval that sees only
+           the global scope. */
         const jm_node *callee = &mangler->prog->nodes[node->a];
-        if (callee->kind == JN_IDENT && callee->str_len == 4 && callee->str[0] == 'e' && callee->str[1] == 'v' &&
-            callee->str[2] == 'a' && callee->str[3] == 'l') {
+        if (callee->kind == JN_IDENT && !(callee->flags & JN_F_VALUE)) {
             mangler->poisoned = 1;
         }
         walk(mangler, node->a, scope, 0);
@@ -969,9 +970,7 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
     for (int32_t elem = prog->nodes[seq].a; elem >= 0; elem = prog->nodes[elem].next) {
         int32_t init = dead_store_value(prog, elem);
         if (init >= 0) { /* `x=EXPR` with x never read is just EXPR (value and effects preserved) */
-            int32_t after = prog->nodes[elem].next;
-            prog->nodes[elem] = prog->nodes[init];
-            prog->nodes[elem].next = after;
+            jm_node_replace(prog, elem, init);
             *changed = 1;
             continue;
         }
@@ -986,7 +985,7 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
         }
         int32_t after = prog->nodes[use].next;
         if (prog->syms[target].refs == 1 && prog->syms[target].writes == 1) {
-            prog->nodes[elem] = prog->nodes[prog->nodes[elem].b]; /* `(t=EXPR, t)` with t used once -> EXPR */
+            jm_node_replace(prog, elem, prog->nodes[elem].b); /* `(t=EXPR, t)` with t used once -> EXPR */
             prog->nodes[elem].next = after;
             prog->syms[target].refs = 0;
             prog->syms[target].writes = 0;
@@ -1017,9 +1016,7 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
     int32_t only = prog->nodes[seq].a; /* a sequence always keeps its last element; if that is the only
                                           one left, the sequence is just that element */
     if (prog->nodes[only].next < 0) {
-        int32_t seq_next = prog->nodes[seq].next;
-        prog->nodes[seq] = prog->nodes[only];
-        prog->nodes[seq].next = seq_next;
+        jm_node_replace(prog, seq, only);
         *changed = 1;
     }
 }
@@ -1326,13 +1323,11 @@ static int inline_single_use(jm_program *prog, int32_t global) {
             if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
                 continue;                           /* GCOVR_EXCL_LINE */
             }
-            int32_t next = prog->nodes[ref].next;
             int32_t decl = prog->syms[sym].decl_node;
-            prog->nodes[ref] = prog->nodes[decl];
+            jm_node_replace(prog, ref, decl);
             prog->nodes[ref].flags |= JN_F_EXPR;
             prog->nodes[ref].str = NULL;
             prog->nodes[ref].str_len = 0;
-            prog->nodes[ref].next = next;
             prog->nodes[decl].kind = JN_EMPTY;
             prog->syms[sym].decl_node = -2;
             changed = 1;
@@ -1362,9 +1357,7 @@ static int inline_single_use(jm_program *prog, int32_t global) {
         if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             continue;                           /* GCOVR_EXCL_LINE */
         }
-        int32_t next = prog->nodes[ref].next;
-        prog->nodes[ref] = prog->nodes[init];
-        prog->nodes[ref].next = next;
+        jm_node_replace(prog, ref, init);
         unlink_declarator(prog, sym);
         changed = 1;
     }
@@ -1406,9 +1399,7 @@ static void replace_reads(jm_program *prog, int32_t idx, jm_propagation *plans) 
         if (prog->nodes[idx].kind == JN_IDENT && prog->nodes[idx].sym >= 0) {
             jm_propagation *plan = &plans[prog->nodes[idx].sym];
             if (plan->target >= 0 && idx != plan->target) {
-                int32_t next = prog->nodes[idx].next;
-                prog->nodes[idx] = prog->nodes[plan->init];
-                prog->nodes[idx].next = next;
+                jm_node_replace(prog, idx, plan->init);
                 plan->replaced++;
             }
             if (prog->nodes[idx].kind != JN_IDENT) {

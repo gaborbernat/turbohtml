@@ -873,6 +873,14 @@ static int32_t parse_expr(P *parser, int no_in) {
     return node;
 }
 
+/* Mark a callee, tag or delete/typeof operand the source wrote as a plain value, so the printer keeps it
+   one should a fold reduce it to a Reference (see jm_is_reference_operand). */
+static void mark_value_slot(P *parser, int32_t idx, int identifiers) {
+    if (!jm_is_reference_operand(&parser->prog->nodes[idx], identifiers)) {
+        parser->prog->nodes[idx].flags |= JN_F_VALUE;
+    }
+}
+
 static int32_t parse_unary(P *parser) {
     jm_tok kind = parser->lx.kind;
     jm_kind node_kind;
@@ -903,6 +911,10 @@ static int32_t parse_unary(P *parser) {
     }
     set_a(parser, node, parse_unary(parser));
     leave(parser);
+    /* typeof and delete are the six-letter word operators; void takes any value */
+    if (kind == JT_IDENT && parser->prog->nodes[node].str_len == 6 && !parser->err) {
+        mark_value_slot(parser, parser->prog->nodes[node].a, 1);
+    }
     return parser->err ? -1 : node;
 }
 
@@ -1062,6 +1074,7 @@ chain:
                 int32_t call = jm_node_new(parser->prog, JN_CALL);
                 parser->prog->nodes[call].flags |= JN_F_OPTIONAL;
                 set_a(parser, call, expr);
+                mark_value_slot(parser, expr, 0);
                 parse_args(parser, call);
                 expr = call;
             } else if (at(parser, JT_LBRACK)) { /* ?.[ */
@@ -1085,11 +1098,13 @@ chain:
         } else if (at(parser, JT_LPAREN)) {
             int32_t node = jm_node_new(parser->prog, JN_CALL);
             set_a(parser, node, expr);
+            mark_value_slot(parser, expr, 0);
             parse_args(parser, node);
             expr = node;
         } else { /* JT_TEMPLATE / JT_TEMPLATE_HEAD: a tagged template */
             int32_t node = jm_node_new(parser->prog, JN_TAGGED);
             set_a(parser, node, expr);
+            mark_value_slot(parser, expr, 0);
             set_b(parser, node, parse_primary(parser)); /* the template literal */
             expr = node;
         }

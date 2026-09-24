@@ -801,6 +801,42 @@ def test_compresses(source: str, expected: str) -> None:
     assert minify_js(source) == expected
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("(0,o.f)()", "(0,o.f)()", id="sequence-callee"),
+        pytest.param("(0,0,o.f)()", "(0,o.f)()", id="long-sequence-callee"),
+        pytest.param("((0,o.f))()", "(0,o.f)()", id="parenthesized-sequence-callee"),
+        pytest.param("(1&&o.f)()", "(0,o.f)()", id="and-callee"),
+        pytest.param("(0||o[k])()", "(0,o[k])()", id="or-computed-callee"),
+        pytest.param("(null??o.f)()", "(0,o.f)()", id="nullish-callee"),
+        pytest.param("(!0?o.f:0)()", "(0,o.f)()", id="conditional-callee"),
+        pytest.param("(0,o?.f)()", "(0,o?.f)()", id="optional-member-callee"),
+        pytest.param("(0,o.f)?.()", "(0,o.f)?.()", id="optional-call-callee"),
+        pytest.param("(0,o.f)`x`", "(0,o.f)`x`", id="tag"),
+        pytest.param("(0,eval)(s)", "(0,eval)(s)", id="indirect-eval"),
+        pytest.param("(1&&eval)`s`", "(0,eval)`s`", id="eval-tag"),
+        pytest.param("delete(0,o.f)", "delete(0,o.f)", id="delete-member"),
+        pytest.param("delete(1&&x)", "delete(0,x)", id="delete-name"),
+        pytest.param("typeof(0,x)", "typeof(0,x)", id="typeof-name"),
+        pytest.param("typeof(0,o.f)", "typeof(0,o.f)", id="typeof-member"),
+        pytest.param("(0,f)()", "f()", id="plain-name-callee-unwraps"),
+        pytest.param("(0,o).f()", "o.f()", id="object-unwraps"),
+        pytest.param("new(0,o.f)", "new o.f()", id="new-callee-unwraps"),
+        pytest.param("void(0,o.f)", "void o.f", id="void-operand-unwraps"),
+        pytest.param("x=(0,o.f)", "x=o.f", id="assigned-value-unwraps"),
+        pytest.param("o.f()", "o.f()", id="member-callee"),
+        pytest.param("delete o.f", "delete o.f", id="delete-member-reference"),
+    ],
+)
+def test_value_slot_keeps_value(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
+def test_indirect_eval_leaves_locals_renamable() -> None:
+    assert minify_js("function f(){var x=g();return(1&&eval)(x)}") == "function f(){var a=g();return(0,eval)(a)}"
+
+
 def _run(code: str) -> str:
     assert _NODE is not None  # the callers are skipped when node is unavailable
     # the first node start on a cold Windows runner has taken over a minute on its own; the timeout
@@ -928,6 +964,14 @@ def _run(code: str) -> str:
         # unreachable-tail cut: a terminator that is the last statement, and a tail that hoists
         pytest.param("(function(){function f(){console.log('x');return 1}console.log(f())})()", id="terminator-last"),
         pytest.param("(function(){function f(){return 1;var x}console.log(f())})()", id="tail-hoists-kept"),
+        pytest.param(
+            "var o={f(){return this===o}};console.log((0,o.f)(),(1&&o.f)(),(!0?o.f:0)(),(0,o.f)`x`)",
+            id="value-callee-this",
+        ),
+        pytest.param("var o={f:1};console.log(delete(0,o.f),delete(1&&o.f),o.f)", id="value-delete-operand"),
+        pytest.param(
+            "var x=1;function t(){var x=2;return[(0,eval)('x'),(1&&eval)('x')]}console.log(t())", id="indirect-eval"
+        ),
     ],
 )
 def test_folding_preserves_behavior(snippet: str) -> None:

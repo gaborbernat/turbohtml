@@ -287,6 +287,32 @@ static void print_sub(St *st, int32_t index, int min_prec) {
     }
 }
 
+/* Whether a callee, tag or delete/typeof operand the source wrote as a plain value has since folded to
+   a Reference (`(0,o.f)()` -> `o.f`): it then prints as `(0,x)` to stay a value. */
+static int folded_to_reference(const St *st, int32_t index, int identifiers) {
+    const jm_node *node = &st->prog->nodes[index];
+    return (node->flags & JN_F_VALUE) && jm_is_reference_operand(node, identifiers);
+}
+
+static void print_as_value(St *st, int32_t index) {
+    put_ascii(st, "(0,");
+    print_expr(st, index);
+    put_char(st, ')');
+}
+
+/* Print a call's callee or a template's tag. */
+static void print_callee(St *st, int32_t index) {
+    if (folded_to_reference(st, index, 0)) {
+        print_as_value(st, index);
+    } else if (st->prog->nodes[index].flags & JN_F_PAREN) {
+        put_char(st, '(');
+        print_expr(st, index);
+        put_char(st, ')');
+    } else {
+        print_sub(st, index, 18);
+    }
+}
+
 /* Print a logical/coalesce operand. ECMA-262 §13.13 forbids ?? adjacent to an unparenthesized
    || or && (a Syntax early error), so the source parens around `(a||b)??c` or `a??(b&&c)` are
    load-bearing; the parser keeps no parens once the tree is built, so re-add them whenever a
@@ -722,13 +748,7 @@ static void print_expr(St *st, int32_t index) {
         break;
     case JN_TAGGED:
         /* an optional chain may not be a template tag (§13.3.1), so its load-bearing parens stay */
-        if (st->prog->nodes[node->a].flags & JN_F_PAREN) {
-            put_char(st, '(');
-            print_expr(st, node->a);
-            put_char(st, ')');
-        } else {
-            print_sub(st, node->a, 18);
-        }
+        print_callee(st, node->a);
         print_template(st, node->b);
         break;
     case JN_ARRAY:
@@ -796,7 +816,11 @@ static void print_expr(St *st, int32_t index) {
         } else {
             put_ascii(st, node->op == JT_NOT ? "!" : node->op == JT_BIT_NOT ? "~" : node->op == JT_PLUS ? "+" : "-");
         }
-        print_sub(st, node->a, 16);
+        if (folded_to_reference(st, node->a, 1)) {
+            print_as_value(st, node->a);
+        } else {
+            print_sub(st, node->a, 16);
+        }
         break;
     case JN_AWAIT:
         put_ascii(st, "await ");
@@ -854,13 +878,7 @@ static void print_expr(St *st, int32_t index) {
         break;
     }
     case JN_CALL:
-        if (st->prog->nodes[node->a].flags & JN_F_PAREN) {
-            put_char(st, '(');
-            print_expr(st, node->a);
-            put_char(st, ')');
-        } else {
-            print_sub(st, node->a, 18);
-        }
+        print_callee(st, node->a);
         if (node->flags & JN_F_OPTIONAL) {
             put_ascii(st, "?.");
         }
