@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import unquote
 
 import pytest
 from markdown_it import MarkdownIt
@@ -311,6 +312,152 @@ def test_tables(html: str, expected: str) -> None:
 )
 def test_escaping(html: str, expected: str) -> None:
     assert md(html) == expected
+
+
+_COMMONMARK_TEXT_CASES: Final = [
+    pytest.param("<ul><li>1. x</li></ul>", "- 1\\. x", id="li-ordered-marker"),
+    pytest.param("<ul><li>2) x</li></ul>", "- 2\\) x", id="li-paren-marker"),
+    pytest.param("<ol><li>1) x</li></ol>", "1. 1\\) x", id="ol-paren-marker"),
+    pytest.param("<ul><li>- inner</li></ul>", "- \\- inner", id="li-dash"),
+    pytest.param("<ul><li>+ x</li></ul>", "- \\+ x", id="li-plus"),
+    pytest.param("<ul><li># h</li></ul>", "- \\# h", id="li-hash"),
+    pytest.param("<ol><li>&gt; q</li></ol>", "1. \\> q", id="li-gt"),
+    pytest.param("<ul><li><p>- b</p></li></ul>", "- \\- b", id="li-paragraph-dash"),
+    pytest.param("<ul><li>a<ul><li>- b</li></ul></li></ul>", "- a\n  - \\- b", id="nested-li-dash"),
+    pytest.param("<blockquote><p>1. x</p></blockquote>", "> 1\\. x", id="blockquote-ordered-marker"),
+    pytest.param("<p>~~x~~</p>", "\\~\\~x\\~\\~", id="double-tilde"),
+    pytest.param("<p>~x~</p>", "\\~x\\~", id="single-tilde"),
+    pytest.param("<p>~~~</p>", "\\~\\~\\~", id="tilde-fence"),
+    pytest.param("<p>&lt;div&gt;</p>", "\\<div>", id="lt-tag"),
+    pytest.param("<p>&lt;/p&gt;</p>", "\\</p>", id="lt-closing-tag"),
+    pytest.param("<p>&lt;!-- c --&gt;</p>", "\\<!-- c -->", id="lt-comment"),
+    pytest.param("<p>&lt;http://x.com&gt;</p>", "\\<http://x.com>", id="lt-autolink"),
+    pytest.param("<p>a&lt;b</p>", "a\\<b", id="lt-mid-word"),
+    pytest.param("<p>a &lt; b</p>", "a < b", id="lt-before-space"),
+    pytest.param("<p>a&lt;<b>x</b></p>", "a\\<**x**", id="lt-at-run-end"),
+    pytest.param("<p>&amp;amp;</p>", "\\&amp;", id="amp-named-reference"),
+    pytest.param("<p>a&amp;#65;b</p>", "a\\&#65;b", id="amp-decimal-reference"),
+    pytest.param("<p>&amp;#x41;</p>", "\\&#x41;", id="amp-hex-reference"),
+    pytest.param("<p>&amp;#X41;</p>", "\\&#X41;", id="amp-upper-hex-reference"),
+    pytest.param("<p>a &amp; b</p>", "a & b", id="amp-before-space"),
+    pytest.param("<p>&amp;;</p>", "&;", id="amp-empty-name"),
+    pytest.param("<p>&amp;#</p>", "&#", id="amp-hash-at-end"),
+    pytest.param("<p>AT&amp;T</p>", "AT&T", id="amp-name-at-end"),
+    pytest.param("<p>&amp;x y;</p>", "&x y;", id="amp-name-without-semicolon"),
+    pytest.param("<h1>a # b #</h1>", "# a # b \\#", id="heading-trailing-hash"),
+    pytest.param("<h2>x ##</h2>", "## x \\##", id="heading-trailing-hash-run"),
+    pytest.param("<h1>#</h1>", "# \\#", id="heading-only-hash"),
+    pytest.param("<h1>a#</h1>", "# a#", id="heading-hash-after-word"),
+    pytest.param("<h1></h1>", "#", id="heading-empty"),
+    pytest.param("<p>a<br>===</p>", "a  \n\\===", id="setext-equals-after-break"),
+    pytest.param("<p>a<br>---</p>", "a  \n\\---", id="setext-dash-after-break"),
+]
+
+
+@pytest.mark.parametrize(("html", "expected"), _COMMONMARK_TEXT_CASES)
+def test_escaping_commonmark(html: str, expected: str) -> None:
+    assert md(html) == expected
+
+
+def _visible(html: str) -> str:
+    return "".join(parse(html).text.split())
+
+
+@pytest.mark.parametrize(("html", "expected"), _COMMONMARK_TEXT_CASES)
+def test_escaping_commonmark_renders_source_text(html: str, expected: str) -> None:
+    assert _visible(_render(expected)) == _visible(html)
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param("<p>a ← b</p>", "a <- b", id="arrow-before-space"),
+        pytest.param("<p>a ←b</p>", "a \\<-b", id="arrow-before-word"),
+        pytest.param("<p>a ←</p>", "a \\<-", id="arrow-at-run-end"),
+        pytest.param("<p>a • b</p>", "a \\* b", id="bullet-folds-to-escaped-asterisk"),
+    ],
+)
+def test_escaping_transliterated(html: str, expected: str) -> None:
+    assert parse(html).to_markdown(Markdown(document=Markdown.Document(transliterate=True))) == expected
+
+
+def test_escaping_arrow_kept_without_transliteration() -> None:
+    assert md("<p>a ←b</p>") == "a ←b"
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param('<a href="http://x.com/a)b">t</a>', "[t](http://x.com/a\\)b)", id="unbalanced-close"),
+        pytest.param('<a href="x(y">t</a>', "[t](x\\(y)", id="unclosed-open"),
+        pytest.param('<a href="w/F_(b)">t</a>', "[t](w/F_(b))", id="balanced-kept"),
+        pytest.param('<a href="x\\">t</a>', "[t](x\\\\)", id="backslash"),
+        pytest.param('<a href="x&amp;amp;y">t</a>', "[t](x\\&amp;y)", id="reference-shaped-amp"),
+        pytest.param('<a href="?a=1&amp;b=2">t</a>', "[t](?a=1&b=2)", id="query-amp"),
+        pytest.param('<a href="&lt;x&gt;">t</a>', "[t](<\\<x\\>>)", id="leading-angle"),
+        pytest.param('<a href="a&lt;b">t</a>', "[t](a<b)", id="inner-angle-bare"),
+        pytest.param('<a href="a b)">t</a>', "[t](<a b)>)", id="space-takes-parens"),
+        pytest.param('<img src="a)b" alt="x">', "![x](a\\)b)", id="image-unbalanced"),
+        pytest.param(
+            '<a href="http://x.com/a b">http://x.com/a b</a>',
+            "[http://x.com/a b](<http://x.com/a b>)",
+            id="no-autolink-space",
+        ),
+        pytest.param('<a href="http://x/&lt;">http://x/&lt;</a>', "[http://x/\\<](http://x/<)", id="no-autolink-lt"),
+        pytest.param('<a href="http://x/&gt;">http://x/&gt;</a>', "[http://x/>](http://x/>)", id="no-autolink-gt"),
+        pytest.param(
+            '<a href="http://x/\x7f">http://x/\x7f</a>', "[http://x/\x7f](http://x/\x7f)", id="no-autolink-del"
+        ),
+        pytest.param('<a href="http://x/y">http://x/y</a>', "<http://x/y>", id="autolink"),
+    ],
+)
+def test_link_destination(html: str, expected: str) -> None:
+    assert md(html) == expected
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        pytest.param('<a href="http://x.com/a)b">t</a>', id="unbalanced-close"),
+        pytest.param('<a href="x(y">t</a>', id="unclosed-open"),
+        pytest.param('<a href="x\\">t</a>', id="backslash"),
+        pytest.param('<a href="x&amp;amp;y">t</a>', id="reference-shaped-amp"),
+        pytest.param('<a href="&lt;x&gt;">t</a>', id="leading-angle"),
+        pytest.param('<a href="a b)">t</a>', id="space-takes-parens"),
+        pytest.param('<a href="http://x/&gt;">http://x/&gt;</a>', id="no-autolink-gt"),
+    ],
+)
+def test_link_destination_renders_source_href(html: str) -> None:
+    rendered: Final = parse(_render(md(html))).select("a")
+    assert [unquote(link.attr("href") or "") for link in rendered] == [
+        link.attr("href") for link in parse(html).select("a")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param('<a href="a b">t</a>', "[t](<http://s/a b>)", id="space"),
+        pytest.param('<a href="&lt;u">u</a>', "[u](http://s/<u)", id="leading-angle-after-base"),
+    ],
+)
+def test_link_destination_base_url(html: str, expected: str) -> None:
+    assert parse(html).to_markdown(Markdown(links=Markdown.Links(base_url="http://s/"))) == expected
+
+
+def test_reference_definition_escapes_destination() -> None:
+    config: Final = Markdown(links=Markdown.Links(style="reference"))
+    assert parse('<a href="a)b">t</a>').to_markdown(config) == "[t][1]\n\n[1]: a\\)b"
+
+
+def test_atx_closed_heading_keeps_trailing_hash() -> None:
+    config: Final = Markdown(headings=Markdown.Headings(style="atx_closed"))
+    assert parse("<h1>a #</h1>").to_markdown(config) == "# a # #"
+
+
+def test_setext_heading_escapes_line_start() -> None:
+    config: Final = Markdown(headings=Markdown.Headings(style="setext"))
+    assert parse("<h1>- a</h1>").to_markdown(config) == "\\- a\n===="
 
 
 @pytest.mark.parametrize(

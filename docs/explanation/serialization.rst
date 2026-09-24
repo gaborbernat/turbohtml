@@ -201,6 +201,13 @@ backslash. The same cell context decides what becomes of a block the cell cannot
 source HTML, legal there because raw HTML is inline content, rather than dropping its grid or its bullets onto the row
 as literal text.
 
+The minimal escaping mode escapes what a CommonMark reader would act on, so the rendered page shows the source text. A
+line start counts after a list marker too, so ``<li>1. x</li>`` becomes ``- 1\. x`` and not a nested list. A ``~``
+always escapes because GFM strikes text through between tildes. A ``<`` escapes unless whitespace follows it, since it
+could open raw HTML or an autolink, and a ``&`` escapes when it starts an ``&name;`` or ``&#65;`` reference. A link
+destination keeps balanced parentheses bare, backslash-escapes unbalanced ones, and switches to the ``<...>`` form for a
+space or a leading ``<``.
+
 The walk holds no state outside its stack frame (no module-level buffers, no per-converter object), so two threads
 exporting two trees never interfere, and the binding takes the same per-tree critical section
 :attr:`~turbohtml.Node.text` and :attr:`~turbohtml.Node.html` use so a concurrent mutation cannot rewire the tree

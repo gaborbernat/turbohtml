@@ -112,19 +112,21 @@ typedef struct {
     int line_has_content; /* real content past the prefix/marker on the current line */
     Py_ssize_t line_start;
     Py_ssize_t line_checked;
-    int space_pending;  /* a collapsed-away whitespace run is owed one space */
-    int pending_word;   /* code points in the word the owed space precedes, for greedy wrapping */
-    int no_wrap;        /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
-    int inline_only;    /* >0 inside link text: a block flattens to inline, never opens a line */
-    int in_cell;        /* inside a table cell: a pipe is escaped as it is written, a block turns into HTML */
-    int drop_space;     /* swallow the next pending space (block/inline start) without emitting */
-    int pending_loose;  /* the previous block wants a blank line after it */
-    int suppress_break; /* the next block attaches to the current (list marker) line */
-    int tight;          /* inside a list item: inline runs do not add blank lines */
-    int list_depth;     /* nesting depth of the current list, for bullet cycling */
-    int g_bold;         /* google_doc: a CSS font-weight bold is in force from an ancestor */
-    int g_italic;       /* google_doc: a CSS font-style italic is in force from an ancestor */
-    int failed;         /* a reference buffer allocation failed */
+    int space_pending;   /* a collapsed-away whitespace run is owed one space */
+    int pending_word;    /* code points in the word the owed space precedes, for greedy wrapping */
+    int no_wrap;         /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
+    int inline_only;     /* >0 inside link text: a block flattens to inline, never opens a line */
+    int in_cell;         /* inside a table cell: a pipe is escaped as it is written, a block turns into HTML */
+    int drop_space;      /* swallow the next pending space (block/inline start) without emitting */
+    int pending_loose;   /* the previous block wants a blank line after it */
+    int suppress_break;  /* the next block attaches to the current (list marker) line */
+    int tight;           /* inside a list item: inline runs do not add blank lines */
+    int list_depth;      /* nesting depth of the current list, for bullet cycling */
+    int g_bold;          /* google_doc: a CSS font-weight bold is in force from an ancestor */
+    int g_italic;        /* google_doc: a CSS font-style italic is in force from an ancestor */
+    int failed;          /* a reference buffer allocation failed */
+    uint8_t escape_mask; /* the MD_ASCII classes the options escape */
+    uint8_t run_stop;    /* the MD_ASCII classes that end a bulk-copied run */
 } md_ctx;
 
 /* Emit a configured option string, which may hold non-ASCII (a typographic
@@ -250,26 +252,72 @@ static void md_before_visible(md_ctx *ctx) {
     md_emit_pending(ctx, ctx->pending);
 }
 
-/* Characters that begin a markdown construct and so are backslash-escaped in
-   running text. Leading line markers (#, >, -, +) are handled separately, only
-   at the very start of a line. */
-static int md_needs_escape(const md_opts *opt, Py_UCS4 ch) {
-    switch (ch) {
-    case '\\':
-    case '`':
-    case '[':
-    case ']':
-        return 1;
-    case '*':
-        return opt->escape_asterisks;
-    case '_':
-        return opt->escape_underscores;
-    default:
-        break;
+/* What each ASCII character means to running text, as bits, so one lookup answers
+   both whether it escapes under the options (md_ctx.escape_mask) and whether it ends
+   a bulk-copied run (md_ctx.run_stop). Leading line markers (#, >, -, +, =) are
+   handled separately, only at the very start of a line. */
+enum {
+    MD_CH_ESCAPE = 1,     /* always escaped; GFM strikes through text between tildes */
+    MD_CH_ASTERISK = 2,   /* escaped unless Escaping(asterisks=False) */
+    MD_CH_UNDERSCORE = 4, /* escaped unless Escaping(underscores=False) */
+    MD_CH_ALL = 8,        /* escaped only by the "all" mode */
+    MD_CH_CONTEXT = 16,   /* escaped by what follows it (md_escape_by_context) */
+    MD_CH_SPACE = 32,     /* part of a whitespace run */
+};
+
+static const uint8_t MD_ASCII[128] = {
+    ['\t'] = MD_CH_SPACE,
+    ['\n'] = MD_CH_SPACE,
+    ['\f'] = MD_CH_SPACE,
+    ['\r'] = MD_CH_SPACE,
+    [' '] = MD_CH_SPACE,
+    ['\\'] = MD_CH_ESCAPE,
+    ['`'] = MD_CH_ESCAPE,
+    ['['] = MD_CH_ESCAPE,
+    [']'] = MD_CH_ESCAPE,
+    ['~'] = MD_CH_ESCAPE,
+    ['*'] = MD_CH_ASTERISK,
+    ['_'] = MD_CH_UNDERSCORE,
+    ['<'] = MD_CH_ALL | MD_CH_CONTEXT,
+    ['&'] = MD_CH_ALL | MD_CH_CONTEXT,
+    ['>'] = MD_CH_ALL,
+    ['#'] = MD_CH_ALL,
+    ['+'] = MD_CH_ALL,
+    ['-'] = MD_CH_ALL,
+    ['='] = MD_CH_ALL,
+    ['|'] = MD_CH_ALL,
+    ['!'] = MD_CH_ALL,
+};
+
+/* Whether the `&` at text[index] opens something CommonMark decodes as a character
+   reference: `&name;`, `&#digits;` or `&#xhex;`. The name is not looked up, so a
+   shape that names no entity is escaped too, which renders the same. */
+static int md_starts_reference(const Py_UCS4 *text, Py_ssize_t index, Py_ssize_t len) {
+    Py_ssize_t scan = index + 1;
+    if (scan < len && text[scan] == '#') {
+        scan++;
+        if (scan < len && (text[scan] == 'x' || text[scan] == 'X')) {
+            scan++;
+        }
     }
-    /* the "all" mode escapes every other character a markdown reader could act on */
-    return opt->escape_mode == TH_MD_ESCAPE_ALL && (ch == '<' || ch == '>' || ch == '#' || ch == '+' || ch == '-' ||
-                                                    ch == '=' || ch == '~' || ch == '|' || ch == '!' || ch == '&');
+    Py_ssize_t start = scan;
+    while (scan < len && (is_ascii_alpha(text[scan]) || is_ascii_digit(text[scan]))) {
+        scan++;
+    }
+    return scan > start && scan < len && text[scan] == ';';
+}
+
+/* Whether a `<` or `&` in running text needs a backslash, which depends on what
+   follows it: a `&` can open a character reference, and a `<` before anything but
+   whitespace can open raw HTML, a comment or an autolink. The run's end counts as
+   a possible tag start, since the next node's text continues the line. A U+2190
+   arrow transliterates to "<-", and what follows it decides that `<` the same way,
+   since `-` can start an email autolink's local part. */
+static int md_escape_by_context(const Py_UCS4 *text, Py_ssize_t index, Py_ssize_t len) {
+    if (text[index] == '&') {
+        return md_starts_reference(text, index, len);
+    }
+    return index + 1 == len || !is_space(text[index + 1]);
 }
 
 /* The transliterate map: common non-ASCII typography folded to an ASCII spelling.
@@ -310,18 +358,24 @@ static const char *md_translit(Py_UCS4 ch) {
     return NULL;
 }
 
-static void md_put_char(md_ctx *ctx, Py_UCS4 ch) {
+/* Write one code point of running text. escape says the caller found it escapes
+   wherever it sits: an escaped character under the options, or a `<` or `&` that
+   what follows turns into markup. A transliterated "<-" passes that on to its `<`.
+   At a line start `=` and `-` also escape: after a paragraph line they would
+   underline it into a setext heading. */
+static void md_put_char(md_ctx *ctx, Py_UCS4 ch, int escape) {
     if (ctx->opt->transliterate) {
         const char *ascii = md_translit(ch);
         if (ascii != NULL) {
             for (const char *cursor = ascii; *cursor != '\0'; cursor++) {
-                md_put_char(ctx, (Py_UCS4)(unsigned char)*cursor);
+                unsigned char folded = (unsigned char)*cursor;
+                md_put_char(ctx, folded, (MD_ASCII[folded] & ctx->escape_mask) || (folded == '<' && escape));
             }
             return;
         }
     }
-    int line_start_marker = !ctx->line_has_content && (ch == '#' || ch == '>' || ch == '-' || ch == '+');
-    if (md_needs_escape(ctx->opt, ch) || line_start_marker || (ctx->in_cell && ch == '|')) {
+    int line_start_marker = !ctx->line_has_content && (ch == '#' || ch == '>' || ch == '-' || ch == '+' || ch == '=');
+    if (escape || line_start_marker || (ctx->in_cell && ch == '|')) {
         sbuf_putc(&ctx->out, '\\');
     }
     sbuf_putc(&ctx->out, ch);
@@ -386,7 +440,8 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
     Py_ssize_t index = 0;
     while (index < len) {
         Py_UCS4 ch = text[index];
-        if (is_space(ch)) {
+        uint8_t kind = ch < 0x80 ? MD_ASCII[ch] : 0;
+        if (kind & MD_CH_SPACE) {
             ctx->space_pending = 1;
             index++;
             continue;
@@ -406,15 +461,26 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
                 continue;
             }
         }
-        md_put_char(ctx, ch);
+        int by_context =
+            ((kind & MD_CH_CONTEXT) || (translit && ch == 0x2190)) && md_escape_by_context(text, index, len);
+        md_put_char(ctx, ch, (kind & ctx->escape_mask) || by_context);
         index++;
-        Py_ssize_t start = index;
-        while (index < len && !is_space(text[index]) && !md_needs_escape(ctx->opt, text[index]) &&
-               !(translit && text[index] >= 0x80)) {
+        /* past the word's first character nothing is at a line start, so an escaped
+           character only needs its backslash and the plain runs between them copy whole */
+        while (1) {
+            Py_ssize_t start = index;
+            while (index < len && (text[index] < 0x80 ? !(MD_ASCII[text[index]] & ctx->run_stop) : !translit)) {
+                index++;
+            }
+            if (index > start) {
+                md_put_run(ctx, &text[start], index - start);
+            }
+            if (index == len || text[index] >= 0x80 || !(MD_ASCII[text[index]] & ctx->escape_mask)) {
+                break;
+            }
+            sbuf_putc(&ctx->out, '\\');
+            sbuf_putc(&ctx->out, text[index]);
             index++;
-        }
-        if (index > start) {
-            md_put_run(ctx, &text[start], index - start);
         }
     }
 }
@@ -609,21 +675,41 @@ static void md_emit_code_span(md_ctx *ctx, th_node *node) {
     PyMem_Free(content.data);
 }
 
-/* Write a URL/destination verbatim (no markdown escaping); a space inside it is
-   wrapped in angle brackets so the destination stays a single token. */
-static void md_emit_url(md_ctx *ctx, const Py_UCS4 *url, Py_ssize_t len) {
-    int has_space = 0;
+/* Write a link destination (CommonMark 6.3) after an optional base prefix. A bare
+   destination cannot hold a space or start with `<`, and takes parentheses only
+   in balanced pairs; anything else goes in the `<...>` form, which takes any
+   parenthesis but no unescaped angle bracket. Parentheses stay bare while they
+   balance, so a `wiki/Foo_(bar)` URL reads as written. A backslash, and a `&` that
+   would decode as a character reference, are escaped in either form. */
+static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ssize_t len) {
+    int angle = 0;
+    int depth = 0;
+    int unbalanced = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
-        if (url[index] == ' ') {
-            has_space = 1;
+        if (url[index] == ' ' || (index == 0 && *base == '\0' && url[index] == '<')) {
+            angle = 1;
+        } else if (url[index] == '(') {
+            depth++;
+        } else if (url[index] == ')') {
+            unbalanced |= depth == 0;
+            depth -= depth > 0;
         }
     }
-    if (has_space) {
+    unbalanced |= depth > 0;
+    if (angle) {
         sbuf_putc(&ctx->out, '<');
-        md_put_run(ctx, url, len);
+    }
+    md_puts8(&ctx->out, base);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 ch = url[index];
+        int bracket = angle ? ch == '<' || ch == '>' : unbalanced && (ch == '(' || ch == ')');
+        if (bracket || ch == '\\' || (ch == '&' && md_starts_reference(url, index, len))) {
+            sbuf_putc(&ctx->out, '\\');
+        }
+        md_put_literal(ctx, ch);
+    }
+    if (angle) {
         sbuf_putc(&ctx->out, '>');
-    } else {
-        md_put_run(ctx, url, len);
     }
 }
 
@@ -656,6 +742,17 @@ static int md_href_absolute(const Py_UCS4 *href, Py_ssize_t len) {
         }
     }
     return 0;
+}
+
+/* An autolink `<url>` takes its content literally and ends at the first `>`, so it
+   holds only a URL free of spaces, angle brackets and control characters. */
+static int md_href_autolinkable(const Py_UCS4 *href, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (href[index] <= ' ' || href[index] == '<' || href[index] == '>' || href[index] == 0x7F) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /* Record a reference-style target, returning its 1-based number. On allocation
@@ -697,7 +794,8 @@ static void md_emit_link(md_ctx *ctx, th_node *node) {
     Py_ssize_t title_len;
     const Py_UCS4 *title = md_attr(ctx->tree, node, "title", &title_len);
     int relative = *opt->base_url != '\0' && !md_href_absolute(href, href_len) && !md_href_internal(href);
-    if (opt->autolink && title == NULL && !relative && md_href_absolute(href, href_len)) {
+    if (opt->autolink && title == NULL && !relative && md_href_absolute(href, href_len) &&
+        md_href_autolinkable(href, href_len)) {
         /* the bare-URL shortcut <url> applies when the visible text is the href */
         Py_ssize_t text_len;
         Py_UCS4 *text = th_node_text(ctx->tree, node, &text_len);
@@ -739,10 +837,7 @@ static void md_emit_link(md_ctx *ctx, th_node *node) {
         return;
     }
     sbuf_puts(&ctx->out, "](");
-    if (relative) {
-        md_puts8(&ctx->out, opt->base_url);
-    }
-    md_emit_url(ctx, href, href_len);
+    md_emit_url(ctx, relative ? opt->base_url : "", href, href_len);
     if (title != NULL) {
         sbuf_puts(&ctx->out, " \"");
         md_emit_title(ctx, title, title_len);
@@ -899,10 +994,8 @@ static void md_emit_image(md_ctx *ctx, th_node *node) {
     md_emit_alt(ctx, alt, alt_len, 1);
     sbuf_puts(&ctx->out, "](");
     if (src != NULL) {
-        if (*opt->base_url != '\0' && !md_href_absolute(src, src_len) && !md_href_internal(src)) {
-            md_puts8(&ctx->out, opt->base_url);
-        }
-        md_emit_url(ctx, src, src_len);
+        int relative = *opt->base_url != '\0' && !md_href_absolute(src, src_len) && !md_href_internal(src);
+        md_emit_url(ctx, relative ? opt->base_url : "", src, src_len);
     }
     Py_ssize_t title_len;
     const Py_UCS4 *title = md_attr(ctx->tree, node, "title", &title_len);
@@ -1465,7 +1558,8 @@ static void md_render_list(md_ctx *ctx, th_node *node, int ordered) {
             sbuf_putc(&ctx->out, ' ');
             width = lead + 2;
         }
-        ctx->line_has_content = 1;
+        /* the item's content starts its own line: `- 1. x` would nest an ordered list */
+        ctx->line_has_content = 0;
         sub_indent = width;
         Py_ssize_t base = md_push_spaces(ctx, width);
         int saved_tight = ctx->tight;
@@ -1881,7 +1975,6 @@ static void md_render_block_body(md_ctx *ctx, th_node *node) {
             /* setext underlines the heading text, so render it then lay a run of
                '=' (h1) or '-' (h2) as wide as the text under it */
             Py_ssize_t mark = ctx->out.len;
-            ctx->line_has_content = 1;
             ctx->drop_space = 1;
             md_inline_children(ctx, node);
             Py_ssize_t width = ctx->out.len - mark;
@@ -1899,12 +1992,25 @@ static void md_render_block_body(md_ctx *ctx, th_node *node) {
         sbuf_putc(&ctx->out, ' ');
         ctx->line_has_content = 1;
         ctx->drop_space = 1;
+        Py_ssize_t content = ctx->out.len;
         md_inline_children(ctx, node);
         if (ctx->opt->heading_style == TH_MD_HEADING_ATX_CLOSED) {
             sbuf_putc(&ctx->out, ' ');
             for (int index = 0; index < level; index++) {
                 sbuf_putc(&ctx->out, '#');
             }
+            return;
+        }
+        /* a trailing `#` run after a space reads as the optional closing sequence and
+           vanishes; escaping its first `#` keeps it text. The run is all `#`, so the
+           backslash overwrites its head and one more `#` restores its length. */
+        Py_ssize_t run = ctx->out.len;
+        while (run > content && ctx->out.data[run - 1] == '#') {
+            run--;
+        }
+        if (run < ctx->out.len && (run == content || ctx->out.data[run - 1] == ' ')) {
+            ctx->out.data[run] = '\\';
+            sbuf_putc(&ctx->out, '#');
         }
         return;
     }
@@ -1978,7 +2084,7 @@ static void md_flush_references(md_ctx *ctx) {
         sbuf_putc(&ctx->out, '[');
         md_put_decimal(&ctx->out, index + 1);
         sbuf_puts(&ctx->out, "]: ");
-        sbuf_put_run(&ctx->out, ctx->refs[index].url, ctx->refs[index].url_len);
+        md_emit_url(ctx, "", ctx->refs[index].url, ctx->refs[index].url_len);
         if (ctx->refs[index].title != NULL) {
             sbuf_puts(&ctx->out, " \"");
             md_emit_title(ctx, ctx->refs[index].title, ctx->refs[index].title_len);
@@ -1994,6 +2100,10 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     md_ctx ctx = {0};
     ctx.tree = tree;
     ctx.opt = opt;
+    ctx.escape_mask = MD_CH_ESCAPE | (opt->escape_asterisks ? MD_CH_ASTERISK : 0) |
+                      (opt->escape_underscores ? MD_CH_UNDERSCORE : 0) |
+                      (opt->escape_mode == TH_MD_ESCAPE_ALL ? MD_CH_ALL : 0);
+    ctx.run_stop = ctx.escape_mask | MD_CH_CONTEXT | MD_CH_SPACE;
     sbuf_presize_for_root(&ctx.out, tree, node);
     if (node->type == TH_NODE_TEXT) {
         ctx.started = 1;
