@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from itertools import starmap
 from typing import Final, NamedTuple, cast
 
-from turbohtml._html import Element, _boilerplate, parse
+from turbohtml._html import Element, HTMLParseError, _boilerplate, parse, parse_xml
 
 from ._article import Article
 from ._dates import DateExtraction, PublicationDate, dates
@@ -166,12 +166,18 @@ def feed(xml: str, /) -> Feed | None:
     Detects the format from the root element and maps each format's spelling of a field onto one shape: the feed's
     ``title``, ``link``, ``description``, and ``updated``, and its ``entries``, each :class:`Entry` carrying ``title``,
     ``link``, ``id``, ``updated``/``published``, ``summary``/``content``, and ``author``. Timestamps are returned
-    verbatim, not parsed. Shorthand for :meth:`turbohtml.Document.feed`.
+    verbatim, not parsed. A well-formed feed parses under :func:`turbohtml.parse_xml`, so CDATA sections and nested
+    elements such as a channel ``<image>`` keep their XML meaning; a feed that is not well-formed XML falls back to
+    the HTML tree builder's recovery. Shorthand for :meth:`turbohtml.Document.feed` on either tree.
 
     :param xml: the feed document.
     :returns: the parsed :class:`Feed`, or ``None`` when ``xml`` has no ``<rss>``, ``<feed>``, or ``<rdf:RDF>`` root.
     """
-    return parse(xml).feed()
+    try:
+        document = parse_xml(xml)
+    except HTMLParseError:
+        document = parse(xml)
+    return document.feed()
 
 
 def boilerplate(html: str, options: Extraction | None = None, /) -> list[Paragraph]:

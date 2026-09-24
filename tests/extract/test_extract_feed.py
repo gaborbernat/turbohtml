@@ -7,7 +7,7 @@ from typing import Final, cast
 import pytest
 from bench.operations import INPUTS
 
-from turbohtml import parse
+from turbohtml import parse, parse_xml
 from turbohtml.extract import Entry, Feed, feed
 
 RSS = """<?xml version="1.0"?>
@@ -423,4 +423,56 @@ def test_feed_benchmark_entry_values(case: int) -> None:
         cast("str | None", header.get("subtitle")),
         cast("str | None", header.get("updated")),
         entries,
+    )
+
+
+XML_RSS: Final = """<?xml version="1.0"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+<image><title>Logo title</title><url>https://example.com/logo.png</url><link>https://example.com/logo</link></image>
+<title>Feed title</title>
+<link>https://example.com/</link>
+<item>
+<title>Item</title>
+<link>https://example.com/1</link>
+<guid isPermaLink="false">urn:1</guid>
+<description><![CDATA[<p>hi <a href="/x">x</a></p>]]></description>
+<content:encoded><![CDATA[<p>full</p>]]></content:encoded>
+</item>
+</channel></rss>"""
+
+XML_RSS_FEED: Final = Feed(
+    "rss",
+    "Feed title",
+    "https://example.com/",
+    None,
+    None,
+    (Entry("Item", "https://example.com/1", "urn:1", None, None, '<p>hi <a href="/x">x</a></p>', "<p>full</p>", None),),
+)
+
+
+def test_feed_well_formed_rss_parses_as_xml() -> None:
+    assert feed(XML_RSS) == XML_RSS_FEED
+
+
+def test_feed_xml_document_method() -> None:
+    assert parse_xml(XML_RSS).feed() == XML_RSS_FEED
+
+
+def test_feed_xml_guid_permalink_false_is_not_a_link() -> None:
+    xml = '<rss><channel><item><guid isPermaLink="false">urn:x</guid></item></channel></rss>'
+    assert parse_xml(xml).feed() == Feed(
+        "rss", None, None, None, None, (Entry(None, None, "urn:x", None, None, None, None, None),)
+    )
+
+
+def test_feed_atom_summary_cdata() -> None:
+    xml = '<feed xmlns="http://www.w3.org/2005/Atom"><entry><summary><![CDATA[<b>s</b>]]></summary></entry></feed>'
+    assert feed(xml) == Feed(
+        "atom", None, None, None, None, (Entry(None, None, None, None, None, "<b>s</b>", None, None),)
+    )
+
+
+def test_feed_malformed_xml_falls_back_to_html() -> None:
+    assert feed("<rss><channel><title>T&nbsp;U</title><link>https://example.com/</channel>") == Feed(
+        "rss", "T\xa0U", "https://example.com/", None, None, ()
     )

@@ -6,11 +6,11 @@
    dozen fields, first-present-wins precedence) with feedparser's field precedence for the cases that matter (the
    content:encoded/content/summary/description chain, guid-as-permalink link, the Atom rel="alternate" link selection).
 
-   A feed is XML, but turbohtml has no XML parser: the WHATWG HTML tree builder parses it well enough because RSS/Atom
-   element names are lowercase ASCII, and it keeps namespaced names (dc:creator, content:encoded) verbatim except for
-   lowercasing. Two HTML quirks are handled here rather than fought: <link> is a void element, so an RSS/RDF
-   <link>URL</link> leaves the URL as the void element's next text sibling (Atom's <link href=...> keeps the URL in the
-   attribute, which survives); and <title> is RCDATA, which is exactly the plain-text value a feed title wants.
+   The facade parses a feed with parse_xml and falls back to the HTML tree builder when it is not well-formed, so the
+   walk reads either tree. Tag names compare ASCII case-insensitively, which covers the XML tree's lastBuildDate and the
+   HTML tree's lowercased lastbuilddate alike. A field's value is its Text and CDATA character data. The one structural
+   difference is <link>: HTML makes it void, so an RSS/RDF <link>URL</link> leaves the URL as the void element's next
+   text sibling, where the XML tree keeps it as the element's own text.
 
    The walk runs under the per-tree critical section so a concurrent mutation cannot relink the tree mid-walk, and hands
    the gathered plain str/None fields to the Feed and Entry NamedTuple classes the thin Python facade defines and
@@ -22,6 +22,7 @@
 
 #include "tokenizer/binding.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
 #include "dom/nodes.h"
+#include "serialize/buffer.h"
 
 #include <string.h>
 
@@ -75,16 +76,31 @@ static PyObject *ucs4_trimmed(const Py_UCS4 *value, Py_ssize_t len) {
     return ucs4_to_str(value + start, end - start);
 }
 
-/* The whitespace-trimmed text content of an element as a new str (empty when it holds only whitespace). NULL only on
-   the excluded allocation-failure path. */
+/* The whitespace-trimmed character data of an element as a new str (empty when it holds only whitespace): its Text and
+   CDATA descendants in document order. An XML feed wraps markup-bearing fields in CDATA
+   (<description><![CDATA[<p>...</p>]]></description>), and the field's value is that markup verbatim, as an escaped
+   description's is. NULL only on the excluded allocation-failure path. */
 static PyObject *node_text_trimmed(th_tree *tree, th_node *node) {
-    Py_ssize_t len;
-    Py_UCS4 *buffer = th_node_text(tree, node, &len);
-    if (buffer == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    sbuf buffer = {NULL, 0, 0, 0};
+    for (th_node *child = node->first_child; child != NULL; child = preorder_next(child, node)) {
+        if (child->type != TH_NODE_TEXT && child->type != TH_NODE_CDATA) {
+            continue;
+        }
+        Py_ssize_t len;
+        Py_UCS4 *data = th_node_data(tree, child, &len);
+        if (data == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            buffer.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            break;             /* GCOVR_EXCL_LINE */
+        }
+        sbuf_put_ucs4(&buffer, data, len);
+        PyMem_Free(data);
+    }
+    if (buffer.failed) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyMem_Free(buffer.data); /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *result = ucs4_trimmed(buffer, len);
-    PyMem_Free(buffer);
+    PyObject *result = ucs4_trimmed(buffer.data, buffer.len);
+    PyMem_Free(buffer.data);
     return result;
 }
 
@@ -113,7 +129,7 @@ static PyObject *field_text(th_tree *tree, th_node *parent, const feed_tag *tags
 }
 
 /* A <link>'s trimmed href attribute (the Atom form), or NULL when it carries no non-empty href (the RSS/RDF form, whose
-   URL is the void element's text sibling instead). */
+   URL is the element's text instead). */
 static PyObject *link_href(th_tree *tree, th_node *link) {
     Py_ssize_t index = th_node_attr_find(tree, link, "href", 4);
     if (index < 0 || link->attrs[index].value == NULL) {
@@ -140,9 +156,30 @@ static int link_is_alternate(th_tree *tree, th_node *link) {
     return ucs4_ieq(link->attrs[index].value, link->attrs[index].value_len, "alternate", 9);
 }
 
-/* The permalink URL of `parent`: the first Atom <link rel="alternate"> href, else the first RSS/RDF void <link>'s text
-   sibling, else the first non-alternate Atom href as a fallback, else None. NULL only on the excluded
-   allocation-failure path. */
+/* The trimmed URL an RSS/RDF <link> without an href holds: its own text in an XML tree, the next text sibling in an
+   HTML tree (where <link> is void, so the parser moves the URL out of it), empty when there is none. NULL only on the
+   excluded allocation-failure path. */
+static PyObject *link_text(th_tree *tree, th_node *link) {
+    if (th_tree_is_xml(tree)) {
+        return node_text_trimmed(tree, link);
+    }
+    th_node *sibling = link->next_sibling;
+    if (sibling == NULL || sibling->type != TH_NODE_TEXT) {
+        return PyUnicode_New(0, 0);
+    }
+    Py_ssize_t len;
+    Py_UCS4 *data = th_node_data(tree, sibling, &len);
+    if (data == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *text = ucs4_trimmed(data, len);
+    PyMem_Free(data);
+    return text;
+}
+
+/* The permalink URL of `parent`: the first Atom <link rel="alternate"> href, else the first RSS/RDF <link>'s text,
+   else the first non-alternate Atom href as a fallback, else None. NULL only on the excluded allocation-failure
+   path. */
 static PyObject *extract_link(th_tree *tree, th_node *parent) {
     if (parent == NULL) {
         return Py_NewRef(Py_None);
@@ -165,19 +202,16 @@ static PyObject *extract_link(th_tree *tree, th_node *parent) {
             }
             continue;
         }
-        th_node *sibling = child->next_sibling;
-        if (sibling != NULL && sibling->type == TH_NODE_TEXT) {
-            PyObject *text = node_text_trimmed(tree, sibling);
-            if (text == NULL) {       /* GCOVR_EXCL_BR_LINE: node_text_trimmed fails only on allocation */
-                Py_XDECREF(fallback); /* GCOVR_EXCL_LINE: allocation-failure path */
-                return NULL;          /* GCOVR_EXCL_LINE */
-            }
-            if (PyUnicode_GET_LENGTH(text) > 0) {
-                Py_XDECREF(fallback);
-                return text;
-            }
-            Py_DECREF(text);
+        PyObject *text = link_text(tree, child);
+        if (text == NULL) {       /* GCOVR_EXCL_BR_LINE: link_text fails only on allocation */
+            Py_XDECREF(fallback); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;          /* GCOVR_EXCL_LINE */
         }
+        if (PyUnicode_GET_LENGTH(text) > 0) {
+            Py_XDECREF(fallback);
+            return text;
+        }
+        Py_DECREF(text);
     }
     if (fallback != NULL) {
         return fallback;
@@ -353,7 +387,8 @@ static int apply_guid_permalink(th_tree *tree, th_node *guid, PyObject **link) {
     if (guid == NULL) {
         return 0;
     }
-    Py_ssize_t index = th_node_attr_find(tree, guid, "ispermalink", 11);
+    /* XML keeps the attribute's spelling (isPermaLink) and matches it case-sensitively; HTML lowercases it. */
+    Py_ssize_t index = th_node_attr_find(tree, guid, th_tree_is_xml(tree) ? "isPermaLink" : "ispermalink", 11);
     if (index >= 0 && guid->attrs[index].value != NULL &&
         ucs4_ieq(guid->attrs[index].value, guid->attrs[index].value_len, "false", 5)) {
         return 0;
