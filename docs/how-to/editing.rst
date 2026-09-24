@@ -73,6 +73,30 @@ would keep. ``strip_tags`` is the bulk form of :meth:`~turbohtml.Node.unwrap`, a
 matches collapse to their innermost content. Both snapshot the matches under the per-tree lock before touching the tree,
 so a selector that calls back into Python never sees a half-edited document.
 
+*****************************************
+ Insert a batch of nodes with a fragment
+*****************************************
+
+Collect nodes in a :class:`~turbohtml.DocumentFragment` and insert the fragment: its children land in place, in order,
+and the fragment is left empty, ready to collect the next batch. Every insertion method takes one, and so does
+:meth:`~turbohtml.Range.insert_node`:
+
+.. testcode::
+
+    page = turbohtml.parse("<ul><li>tea</li></ul>")
+    batch = turbohtml.DocumentFragment()
+    for drink in ("coffee", "juice"):
+        batch.append(turbohtml.Element("li", children=[turbohtml.Text(drink)]))
+    page.find("ul").append(batch)
+    print(page.find("ul").html, len(batch.children))
+
+.. testoutput::
+
+    <ul><li>tea</li><li>coffee</li><li>juice</li></ul> 0
+
+A fragment from :meth:`~turbohtml.Range.extract_contents` moves a cut-out run the same way, and inserting a
+:class:`~turbohtml.ShadowRoot` moves its children out while the root stays attached to its host.
+
 ****************************
  Wrap a group of nodes once
 ****************************

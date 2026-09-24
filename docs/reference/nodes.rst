@@ -17,11 +17,19 @@ shape), so there is no text/tail split.
 .. autoclass:: Namespace
     :members:
 
-An element can host a shadow tree with :meth:`Element.attach_shadow`, returning a :class:`ShadowRoot` -- a
-document-fragment-like root held off the light tree. ``<slot>`` elements inside it pull in the host's children by name;
-:meth:`Element.assigned_nodes`, :meth:`Element.assigned_elements`, :attr:`Node.assigned_slot`, and
-:attr:`Node.flattened_children` read the assignment and the composed tree. See :doc:`/how-to/shadow-dom` for recipes and
-:doc:`/explanation/shadow-dom` for the model.
+A :class:`DocumentFragment` is a parentless container of nodes. Inserting one (``append``, ``insert_before``,
+``replace_with``, :meth:`Range.insert_node`, ...) moves its children into place and leaves it empty, so it carries a
+batch of nodes into the tree in one call. :meth:`Range.extract_contents` and :meth:`Range.clone_contents` return one,
+and a ``<template>``'s contents are one.
+
+.. autoclass:: DocumentFragment
+    :members:
+
+An element can host a shadow tree with :meth:`Element.attach_shadow`, returning a :class:`ShadowRoot` -- the
+:class:`DocumentFragment` rooting a shadow tree, held off the light tree. ``<slot>`` elements inside it pull in the
+host's children by name; :meth:`Element.assigned_nodes`, :meth:`Element.assigned_elements`, :attr:`Node.assigned_slot`,
+and :attr:`Node.flattened_children` read the assignment and the composed tree. See :doc:`/how-to/shadow-dom` for recipes
+and :doc:`/explanation/shadow-dom` for the model.
 
 .. autoclass:: ShadowRoot
     :members:

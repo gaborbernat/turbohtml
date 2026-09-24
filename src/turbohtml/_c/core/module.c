@@ -335,30 +335,31 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     for (int index = 0; index < 5; index++) {
         Py_VISIT(state->kinds[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
-    Py_VISIT(state->node_type);           /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->element_type);        /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->text_type);           /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->comment_type);        /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->doctype_type);        /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->pi_type);             /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->cdata_type);          /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->document_type);       /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->shadow_root_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->parser_type);         /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->parse_error_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->parse_error_exc);     /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->handle_type);         /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->detect_stream_type);  /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->attrs_type);          /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->walker_type);         /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->tree_walker_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->node_iterator_type);  /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->string_walker_type);  /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->serialize_iter_type); /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->sax_events_type);     /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->rewrite_handle_type); /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->phone_config_type);   /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->namespace_enum);      /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->node_type);              /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_type);           /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->text_type);              /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->comment_type);           /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->doctype_type);           /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->pi_type);                /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->cdata_type);             /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->document_type);          /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->document_fragment_type); /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->shadow_root_type);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->parser_type);            /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->parse_error_type);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->parse_error_exc);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->handle_type);            /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->detect_stream_type);     /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->attrs_type);             /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->walker_type);            /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->tree_walker_type);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->node_iterator_type);     /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->string_walker_type);     /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->serialize_iter_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->sax_events_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->rewrite_handle_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->phone_config_type);      /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->namespace_enum);         /* GCOVR_EXCL_BR_LINE: same */
     for (int index = 0; index < 3; index++) {
         Py_VISIT(state->namespaces[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
@@ -420,6 +421,7 @@ static int html_clear(PyObject *module) {
     Py_CLEAR(state->pi_type);
     Py_CLEAR(state->cdata_type);
     Py_CLEAR(state->document_type);
+    Py_CLEAR(state->document_fragment_type);
     Py_CLEAR(state->shadow_root_type);
     Py_CLEAR(state->parser_type);
     Py_CLEAR(state->parse_error_type);

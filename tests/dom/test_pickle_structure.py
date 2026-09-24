@@ -136,6 +136,11 @@ def test_reconstruct_rejects_a_non_node_child() -> None:
         _reconstruct(_kind(Element("div")), ("div", {}), ["x"])  # ty: ignore[invalid-argument-type]
 
 
+def test_reconstruct_rejects_a_document_child() -> None:
+    with pytest.raises(TypeError, match="Document cannot be inserted"):
+        _reconstruct(_kind(Element("div")), ("div", {}), [parse("")])
+
+
 @pytest.mark.parametrize(
     ("payload", "error", "message"),
     [

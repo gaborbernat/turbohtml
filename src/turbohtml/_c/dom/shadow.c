@@ -523,27 +523,6 @@ static PyGetSetDef shadow_root_getset[] = {
     {NULL, NULL, NULL, NULL, NULL},
 };
 
-PyDoc_STRVAR(shadow_root_append_doc, "append(child, /)\n--\n\n"
-                                     "Add child as the last node of the shadow tree, moving a node from this tree\n"
-                                     "or adopting one from another by copy, like Element.append.");
-
-static PyObject *shadow_root_append(PyObject *self, PyObject *child) {
-    th_node *parent = ((NodeObject *)self)->node;
-    int error;
-    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    handle_drop_index(((NodeObject *)self)->handle);
-    th_node *node = adopt_into((NodeObject *)self, parent, child);
-    error = node == NULL;
-    if (node != NULL) {
-        th_node_append_child(parent, node);
-    }
-    Py_END_CRITICAL_SECTION();
-    if (error) {
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
-
 PyDoc_STRVAR(shadow_root_set_inner_html_doc,
              "set_inner_html(html, /)\n--\n\n"
              "Replace the shadow tree's content by parsing html as a fragment, the way\n"
@@ -586,20 +565,71 @@ static PyObject *shadow_root_set_inner_html(PyObject *self, PyObject *html) {
 }
 
 static PyMethodDef shadow_root_methods[] = {
-    {"append", shadow_root_append, METH_O, shadow_root_append_doc},
     {"set_inner_html", shadow_root_set_inner_html, METH_O, shadow_root_set_inner_html_doc},
     {NULL, NULL, 0, NULL},
 };
 
-PyDoc_STRVAR(shadow_root_doc, "A shadow root: the document-fragment-like root of an element's shadow tree,\n"
-                              "created by Element.attach_shadow. It is held off the light tree, so it never\n"
-                              "appears among the host's children or in its serialization.");
+PyDoc_STRVAR(shadow_root_doc, "A shadow root: the DocumentFragment rooting an element's shadow tree, created\n"
+                              "by Element.attach_shadow. It is held off the light tree, so it never appears\n"
+                              "among the host's children or in its serialization. Inserting it elsewhere moves\n"
+                              "its children, as for any DocumentFragment, and leaves it attached to its host.");
 
 static PyType_Slot shadow_root_slots[] = {
     {Py_tp_doc, (void *)shadow_root_doc},
     {Py_tp_getset, shadow_root_getset},
     {Py_tp_methods, shadow_root_methods},
     TH_SEALED_END,
+};
+
+PyDoc_STRVAR(document_fragment_append_doc,
+             "append(child, /)\n--\n\n"
+             "Add child as the last node of this fragment, moving a node from this tree or\n"
+             "adopting one from another by copy, like Element.append. A DocumentFragment\n"
+             "argument moves its children in and is left empty.\n\n"
+             ":param child: the node to append.\n"
+             ":raises TypeError: if child is not a node, or is a Document.\n"
+             ":raises ValueError: if child contains this fragment (which would form a cycle), or\n"
+             "    is a doctype.");
+
+static PyMethodDef document_fragment_methods[] = {
+    {"append", node_append_child, METH_O, document_fragment_append_doc},
+    {NULL, NULL, 0, NULL},
+};
+
+/* DocumentFragment(): an empty fragment in its own tree, ready to collect nodes and be inserted as a batch. */
+static PyObject *document_fragment_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    static char *keywords[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, ":DocumentFragment", keywords)) {
+        return NULL;
+    }
+    th_tree *tree = th_tree_new();
+    th_node *fragment = tree == NULL ? NULL : th_tree_make_fragment(tree); /* GCOVR_EXCL_BR_LINE: OOM only */
+    if (fragment == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tree_free(tree);      /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return wrap_fresh_tree_node(PyType_GetModuleState(type), tree, fragment);
+}
+
+PyDoc_STRVAR(document_fragment_doc,
+             "DocumentFragment()\n--\n\n"
+             "A parentless container of nodes (the DOM DocumentFragment). Inserting one with\n"
+             "append, insert_before, insert_after, replace_with, extend, or Range.insert_node\n"
+             "moves its children into place, in order, and leaves it empty. Range.extract_contents\n"
+             "and Range.clone_contents return one; ShadowRoot is a DocumentFragment with a host.");
+
+static PyType_Slot document_fragment_slots[] = {
+    {Py_tp_doc, (void *)document_fragment_doc},
+    {Py_tp_new, document_fragment_new},
+    {Py_tp_methods, document_fragment_methods},
+    {0, NULL},
+};
+
+PyType_Spec document_fragment_spec = {
+    .name = "turbohtml._html.DocumentFragment",
+    .basicsize = sizeof(NodeObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .slots = document_fragment_slots,
 };
 
 PyType_Spec shadow_root_spec = {

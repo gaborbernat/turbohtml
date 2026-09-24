@@ -1432,7 +1432,7 @@ static PyObject *node_repr(PyObject *self) {
     case TH_NODE_CONTENT:
         break;
     }
-    return PyUnicode_FromString("Node()");
+    return th_str_format("%s()", (node->tag_flags & TH_SHADOW_ROOT) != 0 ? "ShadowRoot" : "DocumentFragment");
 }
 
 PyDoc_STRVAR(re_doc, "re(pattern, /, *, attr=None)\n--\n\n"
