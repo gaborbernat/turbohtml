@@ -1362,10 +1362,13 @@ static PyObject *element_toggle_class(PyObject *self, PyObject *arg) {
 
 PyDoc_STRVAR(set_inner_html_doc, "set_inner_html(html, /)\n--\n\n"
                                  "Replace this element's children with the nodes parsed from html, a fragment\n"
-                                 "parsed in this element's own context (the DOM innerHTML= setter). The\n"
-                                 "string is run through the same HTML parser as parse(), so malformed markup\n"
-                                 "is repaired the same way.\n\n"
-                                 ":raises TypeError: if html is not a str.");
+                                 "parsed in this element's own context (the DOM innerHTML= setter). In an\n"
+                                 "HTML tree the string is run through the same HTML parser as parse(), so\n"
+                                 "malformed markup is repaired the same way; in a parse_xml tree it is parsed\n"
+                                 "as XML with the namespace declarations in scope, and must be well-formed.\n\n"
+                                 ":raises TypeError: if html is not a str.\n"
+                                 ":raises HTMLParseError: if this element is in a parse_xml tree and html is\n"
+                                 "    not well-formed XML; the children are left unchanged.");
 
 PyDoc_STRVAR(set_text_doc, "set_text(text, /)\n--\n\n"
                            "Replace this element's children with a single Text node holding text\n"
@@ -2040,7 +2043,7 @@ th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_ob
 #endif
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION2(anchor->handle, source_handle);
-    copy = th_tree_copy_node(dest_tree, tree_of(child_obj), child->node);
+    copy = th_tree_adopt_copy(dest_tree, tree_of(child_obj), child->node);
     if (copy != NULL && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         handle_add_hash_override((HandleObject *)anchor->handle, copy,
                                  handle_node_hash((HandleObject *)source_handle, child->node)) == 0) {
@@ -2723,14 +2726,155 @@ static int resolve_adjacency(PyObject *position, enum th_adjacency *out) {
     return rc;
 }
 
+/* Whether an attribute name declares a namespace: xmlns, or xmlns:prefix. */
+static int is_xmlns_name(const char *name, Py_ssize_t name_len) {
+    if (name_len < 5 || memcmp(name, "xmlns", 5) != 0) {
+        return 0;
+    }
+    return name_len == 5 || (name_len > 6 && name[5] == ':');
+}
+
+/* Add scope's own xmlns declarations to declarations unless a nearer scope already declared the name. Returns 0, or
+   -1 on allocation failure. */
+static int add_scope_declarations(th_tree *tree, th_node *scope, PyObject *declarations) {
+    for (Py_ssize_t index = 0; index < scope->attr_count; index++) {
+        Py_ssize_t name_len;
+        const char *name = th_attr_name(tree, scope->attrs[index].name_atom, &name_len);
+        if (!is_xmlns_name(name, name_len)) {
+            continue;
+        }
+        PyObject *key = PyUnicode_DecodeUTF8(name, name_len, "strict");
+        PyObject *value = attr_value_obj(&scope->attrs[index]);
+        /* allocation failure cannot be forced from a test */
+        int failed = key == NULL || value == NULL ||                      /* GCOVR_EXCL_BR_LINE */
+                     PyDict_SetDefault(declarations, key, value) == NULL; /* GCOVR_EXCL_BR_LINE */
+        Py_XDECREF(key);
+        Py_XDECREF(value);
+        if (failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return 0;
+}
+
+/* The xmlns declarations in scope at context, as {attribute name: value} with the nearest declaration winning,
+   read under the per-tree lock. NULL with an exception on allocation failure. */
+static PyObject *xml_declarations_in_scope(PyObject *self, th_node *context) {
+    PyObject *declarations = PyDict_New();
+    if (declarations == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int failed = 0;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *scope = context; scope != NULL && scope->type == TH_NODE_ELEMENT; scope = scope->parent) {
+        if (add_scope_declarations(tree_of(self), scope, declarations) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            failed = 1;                                                       /* GCOVR_EXCL_LINE: OOM path */
+            break;                                                            /* GCOVR_EXCL_LINE: OOM path */
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (failed) {                /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(declarations); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;             /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return declarations;
+}
+
+/* value escaped for a double-quoted XML attribute: the three characters it cannot hold become references. NULL with
+   an exception on allocation failure. */
+static PyObject *escape_attribute_value(PyObject *value) {
+    static const char *const replacements[][2] = {{"&", "&amp;"}, {"<", "&lt;"}, {"\"", "&quot;"}};
+    PyObject *escaped = Py_NewRef(value);
+    for (size_t index = 0; index < sizeof(replacements) / sizeof(replacements[0]); index++) {
+        Py_SETREF(escaped,
+                  PyObject_CallMethod(escaped, "replace", "ss", replacements[index][0], replacements[index][1]));
+        if (escaped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return NULL;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return escaped;
+}
+
+/* The wrapped source for the XML fragment parse: html inside a start and end tag named like the context element,
+   the start tag carrying the xmlns declarations in scope, so prefixes and the default namespace resolve as they would
+   inside the context. *start_len receives the start tag's length, for shifting error columns. NULL with an exception
+   on allocation failure. */
+static PyObject *xml_fragment_source(PyObject *self, th_node *context, PyObject *html, Py_ssize_t *start_len) {
+    PyObject *declarations = xml_declarations_in_scope(self, context);
+    if (declarations == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *tag = ucs4_to_str(context->text, context->text_len);
+    PyObject *start = PyUnicode_FromString("<");
+    PyUnicode_Append(&start, tag);
+    PyObject *name;
+    PyObject *value;
+    Py_ssize_t position = 0;
+    while (PyDict_Next(declarations, &position, &name, &value)) {
+        PyObject *escaped = escape_attribute_value(value);
+        PyObject *declaration =
+            escaped == NULL ? NULL : th_str_format(" %U=\"%U\"", name, escaped); /* GCOVR_EXCL_BR_LINE */
+        Py_XDECREF(escaped);
+        PyUnicode_AppendAndDel(&start, declaration);
+    }
+    Py_DECREF(declarations);
+    if (start == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_XDECREF(tag); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    *start_len = PyUnicode_GET_LENGTH(start) + 1;
+    PyObject *source = th_str_format("%U>%U</%U>", start, html, tag);
+    Py_DECREF(start);
+    Py_DECREF(tag);
+    return source;
+}
+
+/* The HTML standard's XML fragment parsing algorithm, used for a context element in an XML document: html is parsed
+   as XML inside the wrapper xml_fragment_source builds, and the wrapper's children become the fragment's top-level
+   nodes. A well-formedness error raises the parse error parse_xml raises, with a first-line column counted from the
+   start of html. *keep_alive receives the source the fragment's text borrows; the caller releases it after the
+   splice. */
+static th_tree *parse_xml_fragment_in_context(PyObject *self, th_node *context, PyObject *html, PyObject **keep_alive) {
+    Py_ssize_t start_len;
+    PyObject *source = xml_fragment_source(self, context, html, &start_len);
+    if (source == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_tree *fragment = th_tree_parse_xml(PyUnicode_KIND(source), PyUnicode_DATA(source), PyUnicode_GET_LENGTH(source));
+    if (fragment == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(source);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (raise_xml_fragment_error(state_of(self), fragment, start_len) < 0) {
+        Py_DECREF(source);
+        return NULL;
+    }
+    th_node *document = th_tree_document(fragment);
+    th_node *wrapper = document->first_child;
+    while (wrapper->first_child != NULL) {
+        th_node *child = wrapper->first_child;
+        th_node_remove(child);
+        th_node_insert_before(document, child, wrapper);
+    }
+    th_node_remove(wrapper);
+    *keep_alive = source;
+    return fragment;
+}
+
 /* Parse html as a fragment in the context element's own context, so its content
    model and namespace drive the parse exactly as the DOM innerHTML setter requires
    (the context name is the tag, prefixed "svg "/"math " for a foreign element). The
    parse only borrows html and never touches the live tree, so it runs before the
    per-tree lock is taken and never holds a structural pointer across it. The caller
-   owns the returned tree (free it with th_tree_free). NULL with an exception set on a
-   non-encodable (lone-surrogate) tag name or an allocation failure. */
-static th_tree *parse_fragment_in_context(th_node *context, PyObject *html, int scripting) {
+   owns the returned tree (free it with th_tree_free) and any *keep_alive the XML path
+   sets. NULL with an exception set on a non-encodable (lone-surrogate) tag name, an XML
+   well-formedness error, or an allocation failure. */
+static th_tree *parse_fragment_in_context(PyObject *self, th_node *context, PyObject *html, PyObject **keep_alive) {
+    if (th_tree_is_xml(tree_of(self))) {
+        return parse_xml_fragment_in_context(self, context, html, keep_alive);
+    }
+    int scripting = th_tree_scripting(tree_of(self));
     PyObject *tag = ucs4_to_str(context->text, context->text_len);
     if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -2806,7 +2950,8 @@ static PyObject *element_set_inner_html(PyObject *self, PyObject *html) {
         return NULL;
     }
     th_node *node = ((NodeObject *)self)->node;
-    th_tree *fragment = parse_fragment_in_context(node, html, th_tree_scripting(tree_of(self)));
+    PyObject *keep_alive = NULL;
+    th_tree *fragment = parse_fragment_in_context(self, node, html, &keep_alive);
     if (fragment == NULL) {
         return NULL;
     }
@@ -2820,6 +2965,7 @@ static PyObject *element_set_inner_html(PyObject *self, PyObject *html) {
     error = splice_fragment(dest, fragment, NULL, node, TH_ADJ_BEFOREEND);
     Py_END_CRITICAL_SECTION();
     th_tree_free(fragment);
+    Py_XDECREF(keep_alive);
     if (error) {                 /* GCOVR_EXCL_BR_LINE: splice only fails on a copy allocation failure */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -2847,7 +2993,8 @@ static PyObject *element_insert_adjacent_html(PyObject *self, PyObject *args) {
         }
         context = parent;
     }
-    th_tree *fragment = parse_fragment_in_context(context, html, th_tree_scripting(tree_of(self)));
+    PyObject *keep_alive = NULL;
+    th_tree *fragment = parse_fragment_in_context(self, context, html, &keep_alive);
     if (fragment == NULL) {
         return NULL;
     }
@@ -2858,6 +3005,7 @@ static PyObject *element_insert_adjacent_html(PyObject *self, PyObject *args) {
     error = splice_fragment(dest, fragment, parent, node, position_kind);
     Py_END_CRITICAL_SECTION();
     th_tree_free(fragment);
+    Py_XDECREF(keep_alive);
     if (error) {                 /* GCOVR_EXCL_BR_LINE: splice only fails on a copy allocation failure */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
