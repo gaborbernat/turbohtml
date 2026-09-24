@@ -104,6 +104,7 @@ int32_t jm_sym_new(jm_program *prog, const Py_UCS4 *name, Py_ssize_t name_len, i
     sym->scope_next = prog->scopes[scope].first_sym;
     prog->scopes[scope].first_sym = index;
     sym->decl = decl;
+    sym->pinned = 0;
     sym->uses = 0;
     sym->slot = -1;
     sym->mangled = NULL;
