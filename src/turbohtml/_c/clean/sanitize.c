@@ -2134,6 +2134,61 @@ static int strip_text_templates(sanitizer *s, th_node *node) {
     return status;
 }
 
+/* Merge the run of adjacent text siblings starting at `first` into it, then strip its template markers, so a marker
+   split across the run (`{` then `{x}}`) is seen whole. Returns 0, or -1 on error. */
+static int strip_text_run(sanitizer *s, th_node *first) {
+    if (first->next_sibling == NULL || first->next_sibling->type != TH_NODE_TEXT) {
+        return strip_text_templates(s, first);
+    }
+    Py_ssize_t total = 0;
+    for (th_node *node = first; node != NULL && node->type == TH_NODE_TEXT; node = node->next_sibling) {
+        total += node->text_len;
+    }
+    Py_UCS4 *joined = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
+    if (joined == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t len = 0;
+    for (th_node *node = first; node != NULL && node->type == TH_NODE_TEXT; node = node->next_sibling) {
+        const Py_UCS4 *data = th_node_realize_text(s->tree, node);
+        if (data == NULL && node->text_len > 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+            PyMem_Free(joined);                   /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;                            /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < node->text_len; index++) {
+            joined[len++] = data[index];
+        }
+    }
+    int status = th_node_set_data(s->tree, first, joined, len);
+    PyMem_Free(joined);
+    while (first->next_sibling != NULL && first->next_sibling->type == TH_NODE_TEXT) {
+        th_node_remove(first->next_sibling);
+    }
+    return status < 0 ? -1 : strip_text_templates(s, first); /* GCOVR_EXCL_BR_LINE: set only fails on allocation */
+}
+
+/* SAFE_FOR_TEMPLATES runs once the walk has settled the tree: removing a comment or element, or unwrapping one, joins
+   text the walk saw apart (`{<!---->{x}}` becomes `{{x}}`), and escaping an element adds its tag as text. Visit every
+   text run in document order, without recursion. Returns 0, or -1 on error. */
+static int strip_tree_templates(sanitizer *s, th_node *root) {
+    th_node *node = root->first_child;
+    while (node != NULL) {
+        if (node->type == TH_NODE_TEXT) {
+            if (strip_text_run(s, node) < 0) { /* GCOVR_EXCL_BR_LINE: only allocation failures reach this path */
+                return -1;                     /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        } else if (node->first_child != NULL) {
+            node = node->first_child;
+            continue;
+        }
+        while (node != root && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        node = node == root ? NULL : node->next_sibling;
+    }
+    return 0;
+}
+
 typedef struct {
     th_node *element;
     th_node *next;
@@ -2203,13 +2258,7 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
             if (s->strip_comments) {
                 th_node_remove(child);
             }
-        } else if (child->type == TH_NODE_TEXT) {
-            /* strip_text_templates only fails on allocation, which no test can force */
-            if (s->strip_templates && strip_text_templates(s, child) < 0) { /* GCOVR_EXCL_BR_LINE */
-                PyMem_Free(frames);                                         /* GCOVR_EXCL_LINE */
-                return -1;                                                  /* GCOVR_EXCL_LINE */
-            }
-        } else {
+        } else if (child->type != TH_NODE_TEXT) {
             th_node_remove(child); /* doctype, processing instruction, CDATA: never valid in a sanitized fragment */
         }
         child = next;
@@ -2690,6 +2739,9 @@ PyObject *turbohtml_sanitize(PyObject *module, PyObject *args) {
         return NULL;                                    /* GCOVR_EXCL_LINE */
     }
     int failed = sanitize_children(&s, root, 1) < 0; /* the fragment root is kept context */
+    if (!failed && s.strip_templates) {
+        failed = strip_tree_templates(&s, root) < 0;
+    }
     Py_XDECREF(s.prefix_tuple);
     Py_DECREF(s.star);
     Py_DECREF(s.re_search);
