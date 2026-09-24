@@ -123,10 +123,12 @@ turbohtml resolves the spans itself, in C, and hands back plain lists and dicts,
 
 :meth:`~turbohtml.Element.rows` builds a dense grid. It walks the ``<tr>`` elements that belong to the table -- skipping
 any nested table's subtree, whose rows belong to *that* table -- and places each ``<td>``/``<th>`` at the next free
-column, filling every slot a ``rowspan`` or ``colspan`` covers with a copy of the cell's text. Rows are padded to a
-rectangle, so a ragged table reads back uniform and an empty cell is ``""``. The whole grid is snapshotted into C memory
-under the per-tree critical section *before* any Python object is built, the same free-threading discipline the link and
-text walks follow: the read never dereferences a live ``first_child``/``next_sibling`` pointer across an allocation that
+column, filling every slot a ``rowspan`` or ``colspan`` covers with a copy of the cell's text. It follows the WHATWG
+table model for row order and span limits: ``<tfoot>`` rows come after every other row wherever the footer sits in the
+markup, and a ``rowspan`` stops at the end of its ``<thead>``/``<tbody>``/``<tfoot>``. Rows are padded to a rectangle,
+so a ragged table reads back uniform and an empty cell is ``""``. The whole grid is snapshotted into C memory under the
+per-tree critical section *before* any Python object is built, the same free-threading discipline the link and text
+walks follow: the read never dereferences a live ``first_child``/``next_sibling`` pointer across an allocation that
 could let another thread rewire the subtree. :meth:`~turbohtml.Element.records` keys the first row (the header, normally
 the ``thead`` row, which the parser emits first) over each later row; a duplicated header keeps the rightmost column's
 value, the way a ``dict`` does. :meth:`~turbohtml.Node.tables` runs the same grid build for every table in a subtree,

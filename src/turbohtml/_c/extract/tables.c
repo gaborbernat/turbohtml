@@ -121,8 +121,8 @@ static int ensure_columns(grid_row *row, Py_ssize_t needed) {
 
 /* Place a row's <td>/<th> cells into the grid, honoring spans: each cell takes the next free column, and a rowspan or
    colspan shares one text snapshot across its covered slots. group_remaining is the number of rows from row_index to
-   the end of this row's row group (thead/tbody/tfoot), the stop point for a rowspan=0 cell. -1 on
-   allocation failure. */
+   the end of this row's row group (thead/tbody/tfoot): the WHATWG table model ends every rowspan there, and a
+   rowspan=0 cell grows exactly that far. -1 on allocation failure. */
 static int fill_row(th_tree *tree, table_grid *grid, Py_ssize_t row_index, th_node *tr, Py_ssize_t group_remaining) {
     Py_ssize_t column = 0;
     for (th_node *child = tr->first_child; child != NULL; child = child->next_sibling) {
@@ -135,14 +135,11 @@ static int fill_row(th_tree *tree, table_grid *grid, Py_ssize_t row_index, th_no
         }
         Py_ssize_t colspan = parse_span(child, TH_ATTR_COLSPAN);
         colspan = colspan <= 0 ? 1 : colspan; /* absent (-1) or a 0 span both mean one column */
-        Py_ssize_t remaining = grid->row_count - row_index;
         Py_ssize_t rowspan = parse_span(child, TH_ATTR_ROWSPAN);
         if (rowspan < 0) {
             rowspan = 1; /* absent: a single row */
-        } else if (rowspan == 0) {
-            rowspan = group_remaining; /* 0 grows downward, stopping at the end of its row group (thead/tbody/tfoot) */
-        } else if (rowspan > remaining) {
-            rowspan = remaining; /* an overlong fixed span clamps to existing rows; it may cross group boundaries */
+        } else if (rowspan == 0 || rowspan > group_remaining) {
+            rowspan = group_remaining;
         }
         Py_ssize_t text_len;
         Py_UCS4 *raw = th_node_text(tree, child, &text_len);
@@ -216,7 +213,7 @@ static int collect_table_rows(th_node *table, th_node ***rows, Py_ssize_t *count
 }
 
 /* The row group a <tr> belongs to: its nearest thead/tbody/tfoot ancestor below `table`, or `table` itself when the row
-   sits directly in the table. A rowspan=0 cell grows downward only to the end of this group. A collected row always has
+   sits directly in the table. A rowspan ends at the end of this group. A collected row always has
    `table` as an ancestor, so the walk terminates there; its ancestors up to `table` are all elements. */
 static th_node *row_group(th_node *tr, th_node *table) {
     for (th_node *ancestor = tr->parent; ancestor != table; ancestor = ancestor->parent) {
@@ -227,23 +224,37 @@ static th_node *row_group(th_node *tr, th_node *table) {
     return table;
 }
 
-/* For each collected row, the number of rows from it to the end of its row group inclusive (>= 1). Rows of one group
-   are contiguous in the document-order walk, so a backward pass extends the run whenever a row shares its successor's
-   group. -1 on allocation failure. */
+/* Put the collected rows in table-model order and record, for each, the number of rows from it to the end of its row
+   group inclusive (>= 1). The WHATWG table model processes every tfoot after the other row groups, so tfoot rows move
+   to the end, keeping tree order within each part. Rows of one group are then contiguous, so a backward pass extends
+   the run whenever a row shares its successor's group. -1 on allocation failure. */
 static int group_run_lengths(th_node *table, th_node **rows, Py_ssize_t count, Py_ssize_t **remaining) {
     if (count == 0) {
         return 0;
     }
-    th_node **groups = PyMem_Malloc((size_t)count * sizeof(th_node *));
+    th_node **groups = PyMem_Malloc((size_t)count * 3 * sizeof(th_node *));
     Py_ssize_t *run = PyMem_Malloc((size_t)count * sizeof(Py_ssize_t));
     if (groups == NULL || run == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(groups);              /* GCOVR_EXCL_LINE: allocation-failure path */
         PyMem_Free(run);                 /* GCOVR_EXCL_LINE: allocation-failure path */
         return -1;                       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    th_node **ordered_rows = groups + count;
+    th_node **ordered_groups = groups + 2 * count;
     for (Py_ssize_t index = 0; index < count; index++) {
         groups[index] = row_group(rows[index], table);
     }
+    Py_ssize_t placed = 0;
+    for (int footer = 0; footer < 2; footer++) {
+        for (Py_ssize_t index = 0; index < count; index++) {
+            if ((groups[index]->atom == TH_TAG_TFOOT) == footer) {
+                ordered_rows[placed] = rows[index];
+                ordered_groups[placed++] = groups[index];
+            }
+        }
+    }
+    memcpy(rows, ordered_rows, (size_t)count * sizeof(th_node *));
+    memcpy(groups, ordered_groups, (size_t)count * sizeof(th_node *));
     for (Py_ssize_t index = count - 1; index >= 0; index--) {
         run[index] = index + 1 < count && groups[index] == groups[index + 1] ? run[index + 1] + 1 : 1;
     }

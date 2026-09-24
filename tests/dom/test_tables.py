@@ -120,8 +120,24 @@ ROWS_CASES = [
     pytest.param(
         "<table><tbody><tr><td rowspan=3>A</td><td>B</td></tr><tr><td>C</td></tr></tbody>"
         "<tbody><tr><td>D</td></tr></tbody></table>",
-        [["A", "B"], ["A", "C"], ["A", "D"]],
-        id="fixed-rowspan-crosses-row-group-boundary",
+        [["A", "B"], ["A", "C"], ["D", ""]],
+        id="fixed-rowspan-stops-at-row-group-end",
+    ),
+    pytest.param(
+        "<table><thead><tr><td rowspan=5>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>",
+        [["h"], ["b"]],
+        id="fixed-rowspan-from-thead-stops-at-thead-end",
+    ),
+    pytest.param(
+        "<table><tfoot><tr><td>foot</td></tr></tfoot><tbody><tr><td>body</td></tr></tbody></table>",
+        [["body"], ["foot"]],
+        id="tfoot-rows-come-last",
+    ),
+    pytest.param(
+        "<table><tfoot><tr><td>f1</td></tr></tfoot><thead><tr><td>head</td></tr></thead>"
+        "<tfoot><tr><td>f2</td></tr></tfoot><tbody><tr><td>body</td></tr></tbody></table>",
+        [["head"], ["body"], ["f1"], ["f2"]],
+        id="tfoot-groups-keep-tree-order-at-the-end",
     ),
     pytest.param(
         "<table><tr><td>A</td><td rowspan=2>B</td></tr><tr><td colspan=3>C</td></tr></table>",
