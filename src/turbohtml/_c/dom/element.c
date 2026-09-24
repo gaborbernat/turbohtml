@@ -2027,7 +2027,7 @@ th_node *adopt_into(NodeObject *anchor, th_node *dest_parent, PyObject *child_ob
     }
     th_tree *dest_tree = tree_of((PyObject *)anchor);
     if (dest_tree == tree_of(child_obj)) {
-        if (th_node_contains(child->node, dest_parent)) {
+        if (th_node_contains(dest_tree, child->node, dest_parent)) {
             PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
             return NULL;
         }

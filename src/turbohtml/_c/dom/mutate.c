@@ -414,10 +414,12 @@ void th_node_insert_before_observed(th_tree *tree, th_node *parent, th_node *chi
     th_mo_child_inserted(tree, parent, child);
 }
 
-/* Whether ancestor is node itself or one of its ancestors, the test that rejects
-   making a node a descendant of itself. */
-int th_node_contains(th_node *ancestor, th_node *node) {
-    for (th_node *walk = node; walk != NULL; walk = walk->parent) {
+/* Whether ancestor is a host-including inclusive ancestor of node (DOM pre-insert), the test that rejects making a
+   node a descendant of itself. The walk crosses from a shadow root to its host, so a host cannot move into its own
+   shadow tree. */
+int th_node_contains(th_tree *tree, th_node *ancestor, th_node *node) {
+    for (th_node *walk = node; walk != NULL;
+         walk = walk->parent == NULL && th_node_is_shadow_root(walk) ? th_shadow_host(tree, walk) : walk->parent) {
         if (walk == ancestor) {
             return 1;
         }

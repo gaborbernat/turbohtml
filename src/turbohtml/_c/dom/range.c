@@ -891,7 +891,7 @@ static th_node *adopt(RangeObject *range, PyObject *child_obj) {
     th_tree *dest_tree = ((HandleObject *)range->start_handle)->tree;
     th_tree *child_tree = ((HandleObject *)child->handle)->tree;
     if (dest_tree == child_tree) {
-        if (th_node_contains(child->node, range->start_node)) {
+        if (th_node_contains(dest_tree, child->node, range->start_node)) {
             PyErr_SetString(PyExc_ValueError, "cannot insert a node into its own subtree");
             return NULL;
         }

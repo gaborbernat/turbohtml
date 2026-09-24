@@ -369,6 +369,30 @@ def test_shadow_root_append_copies_a_foreign_node() -> None:
     assert root.html == "<p>hi</p>"
 
 
+def test_shadow_root_append_rejects_its_host() -> None:
+    host = Element("div")
+    root = host.attach_shadow("open")
+    with pytest.raises(ValueError, match="own subtree"):
+        root.append(host)
+
+
+def test_shadow_descendant_append_rejects_the_host_ancestor() -> None:
+    outer = Element("section")
+    host = Element("div")
+    outer.append(host)
+    inner = Element("span")
+    host.attach_shadow("open").append(inner)
+    with pytest.raises(ValueError, match="own subtree"):
+        inner.append(outer)
+
+
+def test_range_insert_node_rejects_the_shadow_host() -> None:
+    host = Element("div")
+    root = host.attach_shadow("open")
+    with pytest.raises(ValueError, match="own subtree"):
+        Range(root, 0).insert_node(host)
+
+
 def test_shadow_root_append_rejects_non_node() -> None:
     root = Element("div").attach_shadow("open")
     with pytest.raises(TypeError, match="must be a node"):
