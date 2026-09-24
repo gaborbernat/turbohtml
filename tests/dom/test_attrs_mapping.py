@@ -132,7 +132,7 @@ def test_attrs_update_without_arguments_changes_nothing() -> None:
 
 def test_attrs_update_with_malformed_pairs_changes_nothing() -> None:
     element = _anchor()
-    with pytest.raises(ValueError, match="length"):
+    with pytest.raises(ValueError, match=r"length|pairs"):  # CPython and PyPy word the error differently
         element.attrs.update([("title", "t"), ("bad",)])  # ty: ignore[no-matching-overload]
     assert element.html == '<a id="x" class="c1 c2" href="h"></a>'
 
