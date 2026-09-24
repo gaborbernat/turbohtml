@@ -2392,25 +2392,44 @@ th_node *adopt_child(NodeObject *anchor, th_node *dest_parent, PyObject *child_o
     return adopt_into(anchor, dest_parent, child_obj);
 }
 
-Py_ssize_t import_foreign_nodes(PyObject *dest_handle, PyObject **nodes, Py_ssize_t count) {
+int import_foreign_node(PyObject *dest_handle, PyObject **slot) {
     module_state *state = state_of(dest_handle);
-    th_tree *dest_tree = ((HandleObject *)dest_handle)->tree;
+    PyObject *node = *slot;
+    if (!PyObject_TypeCheck(node, (PyTypeObject *)state->node_type) ||
+        ((NodeObject *)node)->node->type == TH_NODE_DOCUMENT || tree_of(node) == ((HandleObject *)dest_handle)->tree) {
+        return 0;
+    }
+    if (is_fragment_arg(state, node)) {
+        PyObject *local = import_fragment_children(dest_handle, (NodeObject *)node);
+        if (local == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_SETREF(*slot, local);
+    } else if (import_node(dest_handle, (NodeObject *)node) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
+        return -1;                                                     /* GCOVR_EXCL_LINE: OOM path */
+    }
+    return 1;
+}
+
+/* import_foreign_node for every item of list, replacing an imported fragment by its local copy. Returns how many it
+   imported, or -1 on allocation failure. Reads and writes the items through the list accessors, not the item array,
+   which PyPy's C-API layer does not expose. */
+static Py_ssize_t import_foreign_list(PyObject *dest_handle, PyObject *list) {
     Py_ssize_t imported = 0;
-    for (Py_ssize_t index = 0; index < count; index++) {
-        if (!PyObject_TypeCheck(nodes[index], (PyTypeObject *)state->node_type) ||
-            ((NodeObject *)nodes[index])->node->type == TH_NODE_DOCUMENT || tree_of(nodes[index]) == dest_tree) {
-            continue;
+    for (Py_ssize_t index = 0; index < PyList_GET_SIZE(list); index++) {
+        PyObject *item = PyList_GET_ITEM(list, index);
+        PyObject *slot = Py_NewRef(item);
+        int status = import_foreign_node(dest_handle, &slot);
+        if (status < 0) {    /* GCOVR_EXCL_BR_LINE: OOM only */
+            Py_DECREF(slot); /* GCOVR_EXCL_LINE */
+            return -1;       /* GCOVR_EXCL_LINE */
         }
-        if (is_fragment_arg(state, nodes[index])) {
-            PyObject *local = import_fragment_children(dest_handle, (NodeObject *)nodes[index]);
-            if (local == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
-            }
-            Py_SETREF(nodes[index], local);
-        } else if (import_node(dest_handle, (NodeObject *)nodes[index]) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
-            return -1;                                                             /* GCOVR_EXCL_LINE: OOM path */
+        if (slot != item) {
+            PyList_SetItem(list, index, slot);
+        } else {
+            Py_DECREF(slot);
         }
-        imported++;
+        imported += status;
     }
     return imported;
 }
@@ -2510,12 +2529,11 @@ static int insert_gathered(PyObject *self, th_node *parent, PyObject *list, th_n
     return 0;
 }
 
-/* Import every foreign argument in list, repeating the pass until it imports nothing (see import_foreign_nodes).
+/* Import every foreign argument in list, repeating the pass until it imports nothing (see import_foreign_node).
    Returns 0, or -1 on allocation failure. */
 static int import_all(PyObject *self, PyObject *list) {
     for (;;) {
-        Py_ssize_t imported =
-            import_foreign_nodes(((NodeObject *)self)->handle, ((PyListObject *)list)->ob_item, PyList_GET_SIZE(list));
+        Py_ssize_t imported = import_foreign_list(((NodeObject *)self)->handle, list);
         if (imported <= 0) {
             return (int)imported;
         }
@@ -2861,10 +2879,7 @@ static th_node *sibling_parent(PyObject *self, PyObject *list) {
             PyErr_SetString(PyExc_ValueError, "node has no parent");
             return NULL;
         }
-        Py_ssize_t imported = list == NULL
-                                  ? 0
-                                  : import_foreign_nodes(((NodeObject *)self)->handle, ((PyListObject *)list)->ob_item,
-                                                         PyList_GET_SIZE(list));
+        Py_ssize_t imported = list == NULL ? 0 : import_foreign_list(((NodeObject *)self)->handle, list);
         if (imported < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
             return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
