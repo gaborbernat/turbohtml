@@ -3536,6 +3536,12 @@ static enum th_drain drain_in_column_group(th_tree *tree, th_token *tok, th_inse
     if (tok->kind == TH_TEXT) {
         Py_ssize_t len;
         Py_UCS4 *text = token_text(tree, tok, &len);
+        if (current_node(tree)->atom != TH_TAG_COLGROUP) {
+            /* a fragment or template root ignores each non-whitespace character and stays in this mode, so the
+               whitespace after it is still inserted */
+            insert_whitespace_only(tree, text, len);
+            return TH_DRAIN_NEXT;
+        }
         Py_ssize_t ws = 0;
         while (ws < len && (is_space(text[ws]))) {
             ws++;

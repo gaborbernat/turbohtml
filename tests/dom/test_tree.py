@@ -475,6 +475,18 @@ def test_stray_html_in_colgroup_keeps_it_open() -> None:
     assert out == ('<html lang="en"><head></head><body><table><colgroup><col><col></colgroup></table></body></html>')
 
 
+def test_colgroup_fragment_keeps_whitespace_after_ignored_characters() -> None:
+    # with no colgroup to pop, each non-whitespace character is ignored in "in column group" and the
+    # whitespace between them is still inserted
+    assert parse_fragment("a b\nc", "colgroup").inner_html == " \n"
+
+
+def test_template_column_group_keeps_whitespace_after_ignored_characters() -> None:
+    template = parse("<template><col>a b c</template>").find("template")
+    assert template is not None
+    assert template.inner_html == "<col>  "
+
+
 @pytest.mark.parametrize(
     ("html", "expected"),
     [
