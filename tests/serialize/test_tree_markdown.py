@@ -374,9 +374,10 @@ def test_escaping_commonmark_renders_source_text(html: str, expected: str) -> No
         pytest.param("<p>a ← b</p>", "a <- b", id="arrow-before-space"),
         pytest.param("<p>a ←b</p>", "a \\<-b", id="arrow-before-word"),
         pytest.param("<p>a ←</p>", "a \\<-", id="arrow-at-run-end"),
+        pytest.param("<p>a • b</p>", "a \\* b", id="bullet-folds-to-escaped-asterisk"),
     ],
 )
-def test_escaping_transliterated_arrow(html: str, expected: str) -> None:
+def test_escaping_transliterated(html: str, expected: str) -> None:
     assert parse(html).to_markdown(Markdown(document=Markdown.Document(transliterate=True))) == expected
 
 

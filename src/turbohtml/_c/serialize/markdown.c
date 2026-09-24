@@ -112,19 +112,21 @@ typedef struct {
     int line_has_content; /* real content past the prefix/marker on the current line */
     Py_ssize_t line_start;
     Py_ssize_t line_checked;
-    int space_pending;  /* a collapsed-away whitespace run is owed one space */
-    int pending_word;   /* code points in the word the owed space precedes, for greedy wrapping */
-    int no_wrap;        /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
-    int inline_only;    /* >0 inside link text: a block flattens to inline, never opens a line */
-    int in_cell;        /* inside a table cell: a pipe is escaped as it is written, a block turns into HTML */
-    int drop_space;     /* swallow the next pending space (block/inline start) without emitting */
-    int pending_loose;  /* the previous block wants a blank line after it */
-    int suppress_break; /* the next block attaches to the current (list marker) line */
-    int tight;          /* inside a list item: inline runs do not add blank lines */
-    int list_depth;     /* nesting depth of the current list, for bullet cycling */
-    int g_bold;         /* google_doc: a CSS font-weight bold is in force from an ancestor */
-    int g_italic;       /* google_doc: a CSS font-style italic is in force from an ancestor */
-    int failed;         /* a reference buffer allocation failed */
+    int space_pending;   /* a collapsed-away whitespace run is owed one space */
+    int pending_word;    /* code points in the word the owed space precedes, for greedy wrapping */
+    int no_wrap;         /* >0 inside verbatim/grid/unbreakable content: never insert a wrap break */
+    int inline_only;     /* >0 inside link text: a block flattens to inline, never opens a line */
+    int in_cell;         /* inside a table cell: a pipe is escaped as it is written, a block turns into HTML */
+    int drop_space;      /* swallow the next pending space (block/inline start) without emitting */
+    int pending_loose;   /* the previous block wants a blank line after it */
+    int suppress_break;  /* the next block attaches to the current (list marker) line */
+    int tight;           /* inside a list item: inline runs do not add blank lines */
+    int list_depth;      /* nesting depth of the current list, for bullet cycling */
+    int g_bold;          /* google_doc: a CSS font-weight bold is in force from an ancestor */
+    int g_italic;        /* google_doc: a CSS font-style italic is in force from an ancestor */
+    int failed;          /* a reference buffer allocation failed */
+    uint8_t escape_mask; /* the MD_ASCII classes the options escape */
+    uint8_t run_stop;    /* the MD_ASCII classes that end a bulk-copied run */
 } md_ctx;
 
 /* Emit a configured option string, which may hold non-ASCII (a typographic
@@ -250,28 +252,42 @@ static void md_before_visible(md_ctx *ctx) {
     md_emit_pending(ctx, ctx->pending);
 }
 
-/* Characters that begin a markdown construct and so are backslash-escaped in
-   running text. Leading line markers (#, >, -, +, =) are handled separately, only
-   at the very start of a line, and `<` and `&` by what follows them. */
-static int md_needs_escape(const md_opts *opt, Py_UCS4 ch) {
-    switch (ch) {
-    case '\\':
-    case '`':
-    case '[':
-    case ']':
-    case '~': /* GFM strikes through text between single or double tildes */
-        return 1;
-    case '*':
-        return opt->escape_asterisks;
-    case '_':
-        return opt->escape_underscores;
-    default:
-        break;
-    }
-    /* the "all" mode escapes every other character a markdown reader could act on */
-    return opt->escape_mode == TH_MD_ESCAPE_ALL && (ch == '<' || ch == '>' || ch == '#' || ch == '+' || ch == '-' ||
-                                                    ch == '=' || ch == '|' || ch == '!' || ch == '&');
-}
+/* What each ASCII character means to running text, as bits, so one lookup answers
+   both whether it escapes under the options (md_ctx.escape_mask) and whether it ends
+   a bulk-copied run (md_ctx.run_stop). Leading line markers (#, >, -, +, =) are
+   handled separately, only at the very start of a line. */
+enum {
+    MD_CH_ESCAPE = 1,     /* always escaped; GFM strikes through text between tildes */
+    MD_CH_ASTERISK = 2,   /* escaped unless Escaping(asterisks=False) */
+    MD_CH_UNDERSCORE = 4, /* escaped unless Escaping(underscores=False) */
+    MD_CH_ALL = 8,        /* escaped only by the "all" mode */
+    MD_CH_CONTEXT = 16,   /* escaped by what follows it (md_escape_by_context) */
+    MD_CH_SPACE = 32,     /* part of a whitespace run */
+};
+
+static const uint8_t MD_ASCII[128] = {
+    ['\t'] = MD_CH_SPACE,
+    ['\n'] = MD_CH_SPACE,
+    ['\f'] = MD_CH_SPACE,
+    ['\r'] = MD_CH_SPACE,
+    [' '] = MD_CH_SPACE,
+    ['\\'] = MD_CH_ESCAPE,
+    ['`'] = MD_CH_ESCAPE,
+    ['['] = MD_CH_ESCAPE,
+    [']'] = MD_CH_ESCAPE,
+    ['~'] = MD_CH_ESCAPE,
+    ['*'] = MD_CH_ASTERISK,
+    ['_'] = MD_CH_UNDERSCORE,
+    ['<'] = MD_CH_ALL | MD_CH_CONTEXT,
+    ['&'] = MD_CH_ALL | MD_CH_CONTEXT,
+    ['>'] = MD_CH_ALL,
+    ['#'] = MD_CH_ALL,
+    ['+'] = MD_CH_ALL,
+    ['-'] = MD_CH_ALL,
+    ['='] = MD_CH_ALL,
+    ['|'] = MD_CH_ALL,
+    ['!'] = MD_CH_ALL,
+};
 
 /* Whether the `&` at text[index] opens something CommonMark decodes as a character
    reference: `&name;`, `&#digits;` or `&#xhex;`. The name is not looked up, so a
@@ -292,16 +308,16 @@ static int md_starts_reference(const Py_UCS4 *text, Py_ssize_t index, Py_ssize_t
 }
 
 /* Whether a `<` or `&` in running text needs a backslash, which depends on what
-   follows it: a `<` before anything but whitespace can open raw HTML, a comment or
-   an autolink, and a `&` can open a character reference. The run's end counts as
+   follows it: a `&` can open a character reference, and a `<` before anything but
+   whitespace can open raw HTML, a comment or an autolink. The run's end counts as
    a possible tag start, since the next node's text continues the line. A U+2190
    arrow transliterates to "<-", and what follows it decides that `<` the same way,
    since `-` can start an email autolink's local part. */
 static int md_escape_by_context(const Py_UCS4 *text, Py_ssize_t index, Py_ssize_t len) {
-    if (text[index] == '<' || text[index] == 0x2190) {
-        return index + 1 == len || !is_space(text[index + 1]);
+    if (text[index] == '&') {
+        return md_starts_reference(text, index, len);
     }
-    return text[index] == '&' && md_starts_reference(text, index, len);
+    return index + 1 == len || !is_space(text[index + 1]);
 }
 
 /* The transliterate map: common non-ASCII typography folded to an ASCII spelling.
@@ -342,23 +358,24 @@ static const char *md_translit(Py_UCS4 ch) {
     return NULL;
 }
 
-/* Write one code point of running text. by_context says the caller found the
-   characters after a `<` or `&` turn it into markup (md_escape_by_context). At a
-   line start `=` and `-` also escape: after a paragraph line they would underline
-   it into a setext heading. */
-static void md_put_char(md_ctx *ctx, Py_UCS4 ch, int by_context) {
+/* Write one code point of running text. escape says the caller found it escapes
+   wherever it sits: an escaped character under the options, or a `<` or `&` that
+   what follows turns into markup. A transliterated "<-" passes that on to its `<`.
+   At a line start `=` and `-` also escape: after a paragraph line they would
+   underline it into a setext heading. */
+static void md_put_char(md_ctx *ctx, Py_UCS4 ch, int escape) {
     if (ctx->opt->transliterate) {
         const char *ascii = md_translit(ch);
         if (ascii != NULL) {
             for (const char *cursor = ascii; *cursor != '\0'; cursor++) {
-                md_put_char(ctx, (Py_UCS4)(unsigned char)*cursor, by_context);
+                unsigned char folded = (unsigned char)*cursor;
+                md_put_char(ctx, folded, (MD_ASCII[folded] & ctx->escape_mask) || (folded == '<' && escape));
             }
             return;
         }
     }
     int line_start_marker = !ctx->line_has_content && (ch == '#' || ch == '>' || ch == '-' || ch == '+' || ch == '=');
-    if ((by_context && (ch == '<' || ch == '&')) || md_needs_escape(ctx->opt, ch) || line_start_marker ||
-        (ctx->in_cell && ch == '|')) {
+    if (escape || line_start_marker || (ctx->in_cell && ch == '|')) {
         sbuf_putc(&ctx->out, '\\');
     }
     sbuf_putc(&ctx->out, ch);
@@ -423,7 +440,8 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
     Py_ssize_t index = 0;
     while (index < len) {
         Py_UCS4 ch = text[index];
-        if (is_space(ch)) {
+        uint8_t kind = ch < 0x80 ? MD_ASCII[ch] : 0;
+        if (kind & MD_CH_SPACE) {
             ctx->space_pending = 1;
             index++;
             continue;
@@ -443,11 +461,12 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
                 continue;
             }
         }
-        md_put_char(ctx, ch, md_escape_by_context(text, index, len));
+        int by_context =
+            ((kind & MD_CH_CONTEXT) || (translit && ch == 0x2190)) && md_escape_by_context(text, index, len);
+        md_put_char(ctx, ch, (kind & ctx->escape_mask) || by_context);
         index++;
         Py_ssize_t start = index;
-        while (index < len && !is_space(text[index]) && !md_needs_escape(ctx->opt, text[index]) && text[index] != '<' &&
-               text[index] != '&' && !(translit && text[index] >= 0x80)) {
+        while (index < len && (text[index] < 0x80 ? !(MD_ASCII[text[index]] & ctx->run_stop) : !translit)) {
             index++;
         }
         if (index > start) {
@@ -2071,6 +2090,10 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     md_ctx ctx = {0};
     ctx.tree = tree;
     ctx.opt = opt;
+    ctx.escape_mask = MD_CH_ESCAPE | (opt->escape_asterisks ? MD_CH_ASTERISK : 0) |
+                      (opt->escape_underscores ? MD_CH_UNDERSCORE : 0) |
+                      (opt->escape_mode == TH_MD_ESCAPE_ALL ? MD_CH_ALL : 0);
+    ctx.run_stop = ctx.escape_mask | MD_CH_CONTEXT | MD_CH_SPACE;
     sbuf_presize_for_root(&ctx.out, tree, node);
     if (node->type == TH_NODE_TEXT) {
         ctx.started = 1;
