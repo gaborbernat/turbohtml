@@ -244,8 +244,20 @@ static PyObject *microdata_value(micro_ctx *ctx, th_node *element) {
     return str_from_accessor(th_node_text, ctx->tree, element);
 }
 
-/* Append `value` under every whitespace-separated name in the itemprop run to the properties dict, each name mapping to
-   a list of values in document order. -1 only on the excluded allocation-failure path. */
+/* Whether the token at `index` repeats an earlier one: an element's property names are its itemprop tokens with the
+   duplicates removed, so itemprop="a a" adds its value under "a" once. */
+static int token_repeats(PyObject *tokens, Py_ssize_t index) {
+    PyObject *token = PyList_GET_ITEM(tokens, index);
+    for (Py_ssize_t earlier = 0; earlier < index; earlier++) {
+        if (PyUnicode_Compare(PyList_GET_ITEM(tokens, earlier), token) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Append `value` under every distinct whitespace-separated name in the itemprop run to the properties dict, each name
+   mapping to a list of values in document order. -1 only on the excluded allocation-failure path. */
 static int add_property(PyObject *properties, const Py_UCS4 *names, Py_ssize_t names_len, PyObject *value) {
     PyObject *tokens = split_token_list(names, names_len);
     if (tokens == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -253,6 +265,9 @@ static int add_property(PyObject *properties, const Py_UCS4 *names, Py_ssize_t n
     }
     Py_ssize_t count = PyList_GET_SIZE(tokens);
     for (Py_ssize_t index = 0; index < count; index++) {
+        if (token_repeats(tokens, index)) {
+            continue;
+        }
         PyObject *key = PyList_GET_ITEM(tokens, index);
         PyObject *bucket = PyDict_GetItemWithError(properties, key);
         if (bucket != NULL) {
