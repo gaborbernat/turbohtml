@@ -35,7 +35,9 @@ def test_one_compiled_expression_across_threads_each_correct() -> None:
 
     def worker(index: int) -> None:
         start.wait()
-        cells = [cell.text for cell in selector(documents[index], cls="num") if isinstance(cell, Element)]
+        result = selector(documents[index], cls="num")
+        assert isinstance(result, list)
+        cells = [cell.text for cell in result if isinstance(cell, Element)]
         with lock:
             results[index] = cells
 
@@ -57,7 +59,9 @@ def test_concurrent_evaluation_on_one_document_is_memory_safe() -> None:
     def worker() -> None:
         start.wait()
         for _ in range(50):
-            found = len(selector(document))
+            result = selector(document)
+            assert isinstance(result, list)
+            found = len(result)
             with lock:
                 counts.append(found)
 

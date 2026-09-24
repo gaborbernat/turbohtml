@@ -247,8 +247,7 @@ def test_scalar_through_xpath_iter(doc: turbohtml.Node) -> None:
 
 def test_filter_base_node_set_continues_as_path(doc: turbohtml.Node) -> None:
     # a parenthesised node-set followed by a step
-    result = doc.xpath("(//div)/p")
-    assert [node.tag for node in result if isinstance(node, Element)] == ["p", "p", "p"]
+    assert tags(doc.xpath("(//div)/p")) == ["p", "p", "p"]
 
 
 # An unknown function name is a static error (XPath 1.0 §3.2); nested inside any
@@ -516,8 +515,14 @@ LANG_HTML = (
 )
 
 
-def tags(result: list[Element | str]) -> list[str]:
-    return [node.tag if isinstance(node, Element) else node for node in result]
+def node_list(result: object) -> list[turbohtml.Node | str]:
+    """The node-set list an expression is expected to return."""
+    assert isinstance(result, list)
+    return result
+
+
+def tags(result: object) -> list[str]:
+    return [node.tag if isinstance(node, Element) else str(node) for node in node_list(result)]
 
 
 @pytest.fixture
@@ -605,7 +610,7 @@ def test_lang(langs: turbohtml.Node, expr: str, expected: list[str]) -> None:
 def test_lang_reads_html_lang_attribute_where_lxml_reads_xml_lang(langs: turbohtml.Node) -> None:
     # lxml's lang() returns nothing here (no xml:lang); turbohtml matches the
     # 'inherit' (lang='en-US') and 'outer' (lang='en') paragraphs.
-    assert len(langs.xpath("//p[lang('en')]")) == 2
+    assert len(node_list(langs.xpath("//p[lang('en')]"))) == 2
 
 
 def test_lang_on_a_text_node_context_reads_ancestor_lang() -> None:

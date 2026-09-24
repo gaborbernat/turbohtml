@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import pytest
 
@@ -15,9 +15,6 @@ from turbohtml.convert import (
     css_specificity,
     css_to_xpath,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 
 @pytest.mark.parametrize(
@@ -428,7 +425,8 @@ SELECTORS = (
 )
 
 
-def _ids(nodes: Iterable[Element | str]) -> list[str]:
+def _ids(nodes: object) -> list[str]:
+    assert isinstance(nodes, list)
     out: list[str] = []
     for node in nodes:
         assert isinstance(node, Element)

@@ -52,8 +52,14 @@ HTML = (
 )
 
 
-def tags(result: Iterable[object]) -> list[str]:
-    return [node.tag for node in result if isinstance(node, Element)]
+def node_list(result: object) -> list[turbohtml.Node | str]:
+    """The node-set list an expression is expected to return."""
+    assert isinstance(result, list)
+    return result
+
+
+def tags(result: object) -> list[str]:
+    return [node.tag for node in node_list(result) if isinstance(node, Element)]
 
 
 def one(node: turbohtml.Node, expr: str) -> Element:
@@ -131,7 +137,7 @@ def test_text_nodes(doc: turbohtml.Node) -> None:
 
 
 def test_comment(doc: turbohtml.Node) -> None:
-    assert len(doc.xpath("//comment()")) == 1
+    assert len(node_list(doc.xpath("//comment()"))) == 1
 
 
 def test_processing_instruction_absent(doc: turbohtml.Node) -> None:
@@ -218,7 +224,7 @@ def test_xpath_one_returns_first_or_none(doc: turbohtml.Node) -> None:
 def test_xpath_iter_yields_results(doc: turbohtml.Node) -> None:
     iterator = doc.xpath_iter("//p")
     assert iter(iterator) is iterator
-    assert tags(iterator) == ["p", "p"]
+    assert tags(list(iterator)) == ["p", "p"]
 
 
 def test_xpath_iter_supports_partial_consumption(doc: turbohtml.Node) -> None:
@@ -281,13 +287,13 @@ def paragraph_doc() -> turbohtml.Node:
 
 def test_compiled_evaluate_node_set(table_doc: turbohtml.Node) -> None:
     selector = XPath("//td")
-    assert [cell.text for cell in selector(table_doc) if isinstance(cell, Element)] == ["1", "2", "3", "4"]
+    assert [cell.text for cell in node_list(selector(table_doc)) if isinstance(cell, Element)] == ["1", "2", "3", "4"]
 
 
 def test_compiled_reuse_across_many_context_nodes(table_doc: turbohtml.Node) -> None:
     selector = XPath(".//td[@class=$cls]")
-    rows = [row for row in table_doc.xpath("//tr") if isinstance(row, Element)]
-    matched = [[cell.text for cell in selector(row, cls="num") if isinstance(cell, Element)] for row in rows]
+    rows = [row for row in node_list(table_doc.xpath("//tr")) if isinstance(row, Element)]
+    matched = [[cell.text for cell in node_list(selector(row, cls="num")) if isinstance(cell, Element)] for row in rows]
     assert matched == [["1"], ["3", "4"]]
 
 
@@ -321,8 +327,8 @@ def test_compiled_scalar_result(table_doc: turbohtml.Node, expr: str, *, expecte
 
 def test_compiled_context_node_scopes_relative_path(table_doc: turbohtml.Node) -> None:
     selector = XPath("td")
-    second_row = [row for row in table_doc.xpath("//tr") if isinstance(row, Element)][1]
-    assert [cell.text for cell in selector(second_row) if isinstance(cell, Element)] == ["3", "4"]
+    second_row = [row for row in node_list(table_doc.xpath("//tr")) if isinstance(row, Element)][1]
+    assert [cell.text for cell in node_list(selector(second_row)) if isinstance(cell, Element)] == ["3", "4"]
 
 
 @pytest.mark.parametrize(
@@ -401,13 +407,13 @@ def test_compiled_call_site_rejects(
 
 
 def test_compiled_smart_strings_off_yields_plain_str(links_doc: turbohtml.Node) -> None:
-    result = XPath("//a/@href")(links_doc)
+    result = node_list(XPath("//a/@href")(links_doc))
     assert result == ["/x", "/y"]
     assert not any(isinstance(value, XPathString) for value in result)
 
 
 def test_compiled_smart_strings_on_yields_xpath_string(links_doc: turbohtml.Node) -> None:
-    result = XPath("//a/@href", smart_strings=True)(links_doc)
+    result = node_list(XPath("//a/@href", smart_strings=True)(links_doc))
     assert all(isinstance(value, XPathString) for value in result)
     first = result[0]
     assert isinstance(first, XPathString)
@@ -430,7 +436,7 @@ def test_compiled_extension_receives_context_node(links_doc: turbohtml.Node) -> 
         return context.context_node.tag
 
     extensions: dict[tuple[str | None, str], Callable[..., str | float | bool]] = {(None, "tag"): context_tag}
-    matched = XPath("//a[tag()='a']", extensions=extensions)(links_doc)
+    matched = node_list(XPath("//a[tag()='a']", extensions=extensions)(links_doc))
     assert all(isinstance(node, Element) and node.tag == "a" for node in matched)
     assert len(matched) == 2
 
@@ -472,7 +478,7 @@ def test_predicate_survives_in_compound_expression(
 ) -> None:
     result = union_doc.xpath(expr)
     if expected is None:
-        assert len(result) == 2
+        assert len(node_list(result)) == 2
     else:
         assert result == pytest.approx(expected)
 
@@ -862,12 +868,12 @@ VARIABLE_HTML = (
 )
 
 
-def variable_tags(result: list[Element | str]) -> list[str]:
-    return [node.tag if isinstance(node, Element) else node for node in result]
+def variable_tags(result: object) -> list[str]:
+    return [node.tag if isinstance(node, Element) else str(node) for node in node_list(result)]
 
 
-def ids(result: list[Element | str]) -> list[str | None]:
-    return [node.attr("id") for node in result if isinstance(node, Element)]
+def ids(result: object) -> list[str | None]:
+    return [node.attr("id") for node in node_list(result) if isinstance(node, Element)]
 
 
 @pytest.fixture
@@ -957,7 +963,7 @@ def test_variable_through_xpath_one(variable_doc: turbohtml.Node) -> None:
 
 
 def query(node: turbohtml.Node, expression: str) -> list[Element]:
-    return [item for item in node.xpath(expression) if isinstance(item, Element)]
+    return [item for item in node_list(node.xpath(expression)) if isinstance(item, Element)]
 
 
 def reversed_with_duplicate(node: turbohtml.Node) -> list[Element]:

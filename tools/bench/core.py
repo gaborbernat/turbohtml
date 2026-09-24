@@ -397,7 +397,7 @@ def _select_scaling(case: tuple[str, str]) -> None:
 _XPATH_REPLACE_DOCUMENT: Final = turbohtml.parse("<p></p>")
 
 
-def _xpath_replace(case: tuple[str, str, str, str]) -> str | list[turbohtml.Element | str]:
+def _xpath_replace(case: tuple[str, str, str, str]) -> list[turbohtml.Node | str] | float | bool | str:
     text, search, replacement, _expected = case
     return _XPATH_REPLACE_DOCUMENT.xpath(
         "str:replace($text, $search, $replacement)", text=text, search=search, replacement=replacement
@@ -1139,9 +1139,9 @@ _ID_REUSE = turbohtml.XPath("id('" + " ".join(f"r{index}" for index in range(1_0
 
 
 @functools.cache
-def _div_rows(text: str) -> list[object]:
+def _div_rows(text: str) -> list[turbohtml.Element]:
     """Return the document's <div> elements, cached so the node-set variable case times only the reuse."""
-    return [node for node in _parsed(text).xpath("//div") if isinstance(node, turbohtml.Element)]
+    return _parsed(text).select("div")
 
 
 _XPATH_CALLS: dict[str, Callable[..., object]] = {

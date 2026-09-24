@@ -51,11 +51,13 @@ def doc() -> turbohtml.Node:
     return turbohtml.parse(HTML)
 
 
-def tags(result: list[Element | str]) -> list[str]:
+def tags(result: object) -> list[str]:
+    assert isinstance(result, list)
     return [node.tag if isinstance(node, Element) else node for node in result]
 
 
-def ids(result: list[Element | str]) -> list[str]:
+def ids(result: object) -> list[str]:
+    assert isinstance(result, list)
     collected: list[str] = []
     for node in result:
         assert isinstance(node, Element)
@@ -65,7 +67,8 @@ def ids(result: list[Element | str]) -> list[str]:
     return collected
 
 
-def texts(result: list[Element | str]) -> list[str]:
+def texts(result: object) -> list[str]:
+    assert isinstance(result, list)
     return [node.text for node in result if isinstance(node, Element)]
 
 
