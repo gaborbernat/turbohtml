@@ -109,16 +109,23 @@ def test_indent_body_with_only_inline_content() -> None:
     )
 
 
+def _compact_roundtrips(source: str) -> bool:
+    compact = parse(source).serialize()
+    return parse(compact).serialize() == compact
+
+
+def _pretty_is_fixpoint(source: str) -> bool:
+    pretty = parse(source).serialize(_PRETTY)
+    return parse(pretty).serialize(_PRETTY) == pretty
+
+
 def test_indent_reindent_is_fixpoint(wpt_html_tree_corpus: WptHtmlTreeCorpus) -> None:
-    unstable: Final[list[str]] = []
-    for case in wpt_html_tree_corpus["cases"]:
-        document = parse(case["data"])
-        compact = document.serialize()
-        if parse(compact).serialize() != compact:
-            continue  # the markup does not round-trip even without a layout
-        pretty = document.serialize(_PRETTY)
-        if parse(pretty).serialize(_PRETTY) != pretty:
-            unstable.append(case["data"])
+    # only markup the compact serializer round-trips can be asked to reindent stably
+    unstable: Final = [
+        case["data"]
+        for case in wpt_html_tree_corpus["cases"]
+        if _compact_roundtrips(case["data"]) and not _pretty_is_fixpoint(case["data"])
+    ]
     assert unstable == []
 
 
