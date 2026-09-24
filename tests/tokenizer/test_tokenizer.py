@@ -1005,6 +1005,19 @@ def test_capture_source_spans_feed_boundary_without_leading_text() -> None:
     assert start.source == '<b x="y">'
 
 
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param("<p>abc</p><p", " class=x>", id="shorter-prefix"),
+        pytest.param("<p>abcdefghij</p><p cl", "ass=x>", id="longer-prefix"),
+    ],
+)
+def test_capture_source_spans_feed_boundary_after_consumed_markup(first: str, second: str) -> None:
+    tokenizer = Tokenizer(capture_source=True)
+    list(tokenizer.feed(first))
+    assert [token.source for token in tokenizer.feed(second)] == ["<p class=x>"]
+
+
 def test_tokenize_rejects_unknown_keyword() -> None:
     with pytest.raises(TypeError):
         tokenize("x", flavor=1)  # ty: ignore[unknown-argument]  # unexpected keyword on purpose
