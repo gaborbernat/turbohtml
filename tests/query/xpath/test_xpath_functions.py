@@ -625,6 +625,34 @@ def test_lang_reads_html_lang_attribute_where_lxml_reads_xml_lang(langs: turboht
     assert len(node_list(langs.xpath("//p[lang('en')]"))) == 2
 
 
+# XPath 1.0 §4.3 reads xml:lang; an HTML tree follows HTML "the lang and xml:lang
+# attributes", where xml:lang is in the XML namespace only on a foreign element
+@pytest.mark.parametrize(
+    ("markup", "expr", "expected"),
+    [
+        pytest.param('<svg xml:lang="it"><g/></svg>', "//g[lang('it')]", ["g"], id="foreign-xml-lang"),
+        pytest.param('<svg xml:lang="it" lang="fr"><g/></svg>', "//g[lang('fr')]", [], id="xml-lang-wins-over-lang"),
+        pytest.param('<p xml:lang="de"><b>x</b></p>', "//b[lang('de')]", [], id="html-xml-lang-in-no-namespace"),
+        pytest.param('<svg lang="es"><g/></svg>', "//g[lang('es')]", ["g"], id="svg-lang"),
+        pytest.param('<math lang="fr"><mi>x</mi></math>', "//mi[lang('fr')]", [], id="mathml-lang-ignored"),
+    ],
+)
+def test_lang_html_tree_reads_xml_lang_on_foreign_elements(markup: str, expr: str, expected: list[str]) -> None:
+    assert tags(turbohtml.parse(markup).xpath(expr)) == expected
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        pytest.param("//e[lang('en')]", ["e"], id="xml-lang-inherited"),
+        pytest.param("//f[lang('fr')]", [], id="lang-without-namespace-ignored"),
+    ],
+)
+def test_lang_xml_tree_reads_xml_lang(expr: str, expected: list[str]) -> None:
+    document = turbohtml.parse_xml('<r><d xml:lang="en-US"><e/></d><f lang="fr"/></r>')
+    assert tags(document.xpath(expr)) == expected
+
+
 def test_lang_on_a_text_node_context_reads_ancestor_lang() -> None:
     # lang() walks self-or-ancestor elements from the context node; on a text-node
     # context it used to loop over a text-node span's attr_count with attrs == NULL and

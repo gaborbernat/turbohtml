@@ -78,6 +78,8 @@ typedef struct {
     Py_ssize_t local_len;
     int has_ns;         /* the test carried a namespace prefix */
     int ns_unmatchable; /* the bound URI names no namespace an HTML tree's elements carry */
+    int xml_ns;         /* the prefix binds the XML namespace (xml:lang, xml:space) */
+    int foreign_only;   /* an attribute test that only a foreign element of an HTML tree can satisfy */
     uint8_t want_ns;    /* enum th_ns an element must carry when has_ns and not unmatchable */
 } step_match;
 
@@ -187,14 +189,17 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, enum xp_axis axis, c
     switch (axis) {
     case AX_ATTRIBUTE: {
         /* node() and * both match every attribute; a name test matches by atom; a
-           prefixed name test matches none (HTML attributes carry no namespace);
-           text()/comment()/processing-instruction() match no attribute. A non-element
-           context node carries no attribute storage, so the axis yields nothing. */
+           prefixed name test matches only an xml:-prefixed attribute in the XML
+           namespace, which an XML tree or a foreign element carries (the HTML parser
+           leaves xml:lang on an HTML element in no namespace); text()/comment()/
+           processing-instruction() match no attribute. A non-element context node
+           carries no attribute storage, so the axis yields nothing. */
         th_node_attr *attrs;
         Py_ssize_t attr_count = th_node_attributes(ctx, &attrs);
+        int eligible = !match->foreign_only || ctx->ns != TH_NS_HTML;
         for (Py_ssize_t index = 0; index < attr_count; index++) {
             int hit = step->test == NT_STAR || step->test == NT_NODE ||
-                      (step->test == NT_NAME && !match->has_ns && attrs[index].name_atom == match->attr_atom);
+                      (step->test == NT_NAME && eligible && attrs[index].name_atom == match->attr_atom);
             if (hit && ns_push(out, ctx, index) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
                 return -1;                             /* GCOVR_EXCL_LINE */
             }
@@ -726,11 +731,15 @@ static int resolve_step_ns(xp_ctx *ctx, const Py_UCS4 *prefix, Py_ssize_t prefix
     if (!found) {
         if (ucs4_eq_ascii(prefix, prefix_len, XP_XML_NS_PREFIX, sizeof(XP_XML_NS_PREFIX) - 1)) {
             match->ns_unmatchable = 1; /* no element in an HTML tree is in the xml namespace */
+            match->xml_ns = 1;
             return 0;
         }
         return -1;
     }
-    if (ucs4_eq_ascii(uri, uri_len, XP_SVG_NS_URI, sizeof(XP_SVG_NS_URI) - 1)) {
+    if (ucs4_eq_ascii(uri, uri_len, XP_XML_NS_URI, sizeof(XP_XML_NS_URI) - 1)) {
+        match->ns_unmatchable = 1;
+        match->xml_ns = 1;
+    } else if (ucs4_eq_ascii(uri, uri_len, XP_SVG_NS_URI, sizeof(XP_SVG_NS_URI) - 1)) {
         match->want_ns = TH_NS_SVG;
     } else if (ucs4_eq_ascii(uri, uri_len, XP_MATHML_NS_URI, sizeof(XP_MATHML_NS_URI) - 1)) {
         match->want_ns = TH_NS_MATHML;
@@ -762,8 +771,19 @@ static int build_step_match(xp_ctx *ctx, const xn *step, step_match *match) {
             return -3;
         }
     }
-    if (step->axis == AX_ATTRIBUTE) {
-        match->attr_atom = resolve_attr_atom(ctx->tree, match->local, match->local_len);
+    if (step->axis == AX_ATTRIBUTE && match->xml_ns) {
+        /* both trees store an XML-namespace attribute under its xml:-prefixed name */
+        Py_UCS4 qualified[128] = {'x', 'm', 'l', ':'};
+        if (match->local_len < (Py_ssize_t)(sizeof(qualified) / sizeof(qualified[0])) - 4) {
+            memcpy(qualified + 4, match->local, (size_t)match->local_len * sizeof(Py_UCS4));
+            match->attr_atom = resolve_attr_atom(ctx->tree, qualified, match->local_len + 4);
+        }
+        match->foreign_only = !th_tree_is_xml(ctx->tree);
+    } else if (step->axis == AX_ATTRIBUTE) {
+        /* a prefix that binds any other namespace names no attribute a tree carries */
+        if (!match->has_ns) {
+            match->attr_atom = resolve_attr_atom(ctx->tree, match->local, match->local_len);
+        }
     } else {
         match->atom = resolve_tag_atom(match->local, match->local_len);
     }

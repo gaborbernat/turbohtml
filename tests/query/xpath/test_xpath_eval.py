@@ -625,6 +625,31 @@ def test_prefixed_attribute_never_matches(ns_doc: turbohtml.Node) -> None:
     assert ns_doc.xpath("//svg:svg/@width", namespaces={"svg": SVG}) == ["10"]
 
 
+XML_NS: Final[str] = "http://www.w3.org/XML/1998/namespace"
+
+
+@pytest.mark.parametrize(
+    ("markup", "expr", "namespaces", "expected"),
+    [
+        pytest.param("<r><d xml:lang='en'/></r>", "//@xml:lang", None, ["en"], id="xml-tree-implicit-prefix"),
+        pytest.param("<r><d xml:lang='en'/></r>", "//@x:lang", {"x": XML_NS}, ["en"], id="xml-tree-rebound-prefix"),
+        pytest.param("<r><d xml:lang='en'/></r>", "//@xml:space", None, [], id="xml-tree-other-local-name"),
+        pytest.param("<r><d xml:lang='en'/></r>", "//@xml:" + "z" * 130, None, [], id="xml-tree-overlong-local-name"),
+        pytest.param("<r><d xml:lang='en'/></r>", "//@x:lang", {"x": "urn:x"}, [], id="xml-tree-other-namespace"),
+    ],
+)
+def test_xml_namespace_attribute_test_on_xml_tree(
+    markup: str, expr: str, namespaces: dict[str, str] | None, expected: list[str]
+) -> None:
+    assert parse_xml(markup).xpath(expr, namespaces=namespaces) == expected
+
+
+def test_xml_namespace_attribute_test_on_html_tree_matches_foreign_elements_only() -> None:
+    # the HTML parser puts xml:lang in the XML namespace only on a foreign element
+    document = parse('<p xml:lang="de">x</p><svg xml:lang="it"></svg>')
+    assert document.xpath("//@xml:lang") == ["it"]
+
+
 def test_xpath_one_accepts_namespaces(ns_doc: turbohtml.Node) -> None:
     node = ns_doc.xpath_one("//svg:circle", namespaces={"svg": SVG})
     assert isinstance(node, Element)

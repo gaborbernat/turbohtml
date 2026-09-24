@@ -1419,6 +1419,23 @@ def test_lang_pseudo(html: str, selector: str, ids: list[str]) -> None:
     assert _ids(html, selector) == ids
 
 
+# HTML "the lang and xml:lang attributes": xml:lang in the XML namespace wins, and the
+# HTML parser puts it there only on foreign elements; lang counts on HTML and SVG elements
+@pytest.mark.parametrize(
+    ("html", "selector", "ids"),
+    [
+        pytest.param('<svg xml:lang="it"><g id=a /></svg>', ":lang(it)", ["a"], id="foreign-xml-lang-inherited"),
+        pytest.param('<svg xml:lang="it" lang="fr" id=a></svg>', ":lang(fr)", [], id="foreign-xml-lang-wins-over-lang"),
+        pytest.param('<svg xml:lang="" lang="fr" id=a></svg>', ":lang(fr)", ["a"], id="foreign-empty-xml-lang-skipped"),
+        pytest.param('<p xml:lang="de"><b id=a>x</b></p>', ":lang(de)", [], id="html-xml-lang-in-no-namespace"),
+        pytest.param('<svg lang="es"><g id=a /></svg>', ":lang(es)", ["a"], id="svg-lang"),
+        pytest.param('<math lang="fr"><mi id=a>x</mi></math>', ":lang(fr)", [], id="mathml-lang-ignored"),
+    ],
+)
+def test_lang_pseudo_xml_lang(html: str, selector: str, ids: list[str]) -> None:
+    assert _ids(html, selector) == ids
+
+
 @pytest.mark.parametrize(
     ("html", "selector", "ids"),
     [
@@ -1786,6 +1803,18 @@ def test_xml_selectors_are_case_sensitive(selector: str, tags: list[str]) -> Non
 )
 def test_xml_attribute_values_ignore_the_html_case_insensitive_set(selector: str, tags: list[str]) -> None:
     root = _root('<r><input type="CheckBox" rel="' + "A" * 80 + '"/></r>')
+    assert [element.tag for element in root.select(selector)] == tags
+
+
+@pytest.mark.parametrize(
+    ("selector", "tags"),
+    [
+        pytest.param("e:lang(en)", ["e"], id="xml-lang-inherited"),
+        pytest.param("f:lang(fr)", [], id="lang-without-namespace-ignored"),
+    ],
+)
+def test_xml_lang_pseudo_reads_xml_lang(selector: str, tags: list[str]) -> None:
+    root = _root('<r><d xml:lang="en-US"><e/></d><f lang="fr"/></r>')
     assert [element.tag for element in root.select(selector)] == tags
 
 

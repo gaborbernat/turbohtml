@@ -422,10 +422,9 @@ static void xt_read_write_cond(xt_ctx *ctx) {
     xt_text(&ctx->out, " = 'true')");
 }
 
-/* The condition for :lang(): the nearest non-empty lang attribute on the element or
-   an ancestor matches one of the comma-separated ranges by BCP 47 basic filtering. */
-static void xt_lang_cond(xt_ctx *ctx, const sel_simple *simple) {
-    xt_text(&ctx->out, "ancestor-or-self::*[@lang != ''][1][");
+/* Emit the comma-separated :lang() ranges as a condition on one attribute: its value
+   matches a range by BCP 47 basic filtering. */
+static void xt_lang_ranges(xt_ctx *ctx, const sel_simple *simple, const char *attr) {
     Py_ssize_t cursor = 0;
     int wrote = 0;
     while (cursor < simple->value_len) {
@@ -456,11 +455,11 @@ static void xt_lang_cond(xt_ctx *ctx, const sel_simple *simple) {
         }
         wrote = 1;
         xt_char(&ctx->out, '(');
-        xt_folded_attr(ctx, "lang");
+        xt_folded_attr(ctx, attr);
         xt_text(&ctx->out, " = ");
         xt_value_literal(ctx, simple->value + start, end - start, 1, 0, 0);
         xt_text(&ctx->out, " or starts-with(");
-        xt_folded_attr(ctx, "lang");
+        xt_folded_attr(ctx, attr);
         xt_text(&ctx->out, ", ");
         xt_value_literal(ctx, simple->value + start, end - start, 1, 0, 1);
         xt_text(&ctx->out, "))");
@@ -468,7 +467,19 @@ static void xt_lang_cond(xt_ctx *ctx, const sel_simple *simple) {
     if (!wrote) {
         xt_text(&ctx->out, "false()");
     }
-    xt_char(&ctx->out, ']');
+}
+
+/* The condition for :lang(): the nearest element on the ancestor-or-self axis that
+   declares a non-empty language matches one of the ranges. xml:lang in the XML
+   namespace wins (XPath's @xml:lang selects only that one), then lang, which a MathML
+   element does not honor (HTML "the lang and xml:lang attributes"). */
+static void xt_lang_cond(xt_ctx *ctx, const sel_simple *simple) {
+    xt_text(&ctx->out, "ancestor-or-self::*[@xml:lang != '' or @lang != '' and namespace-uri() != "
+                       "'http://www.w3.org/1998/Math/MathML'][1][(@xml:lang != '' and (");
+    xt_lang_ranges(ctx, simple, "xml:lang");
+    xt_text(&ctx->out, ")) or (not(@xml:lang != '') and (");
+    xt_lang_ranges(ctx, simple, "lang");
+    xt_text(&ctx->out, "))]");
 }
 
 /* Emit the condition for one pseudo-class simple; the compound provides the type
