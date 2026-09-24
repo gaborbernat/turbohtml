@@ -63,6 +63,17 @@ def doc() -> turbohtml.Node:
         pytest.param("round(-2.5)", -2.0, id="round-neg-half-up"),
         pytest.param("round(-0.5)", 0.0, id="round-neg-half-to-zero"),
         pytest.param("round(2.5)", 3.0, id="round-pos-half-up"),
+        # the largest double below 0.5 rounds down; adding 0.5 first would round the sum up to 1
+        pytest.param("round(0.5 - 1 div 18014398509481984)", 0.0, id="round-just-below-half"),
+        # 2^52 + 1 is already an integer; adding 0.5 first would land on 2^52 + 2
+        pytest.param("round(4503599627370497)", 4503599627370497.0, id="round-odd-integer-past-2-pow-52"),
+        # [-0.5, 0) rounds to negative zero, whose reciprocal is negative infinity
+        pytest.param("1 div round(-0.4)", float("-inf"), id="round-small-negative-to-negative-zero"),
+        pytest.param("1 div round(-0.5)", float("-inf"), id="round-negative-half-to-negative-zero"),
+        pytest.param("1 div round(-0)", float("-inf"), id="round-keeps-negative-zero"),
+        pytest.param("1 div round(0)", float("inf"), id="round-keeps-positive-zero"),
+        pytest.param("round(-1 div 0)", float("-inf"), id="round-negative-infinity"),
+        pytest.param("string(round(0 div 0))", "NaN", id="round-nan"),
         pytest.param("number('3.5')", 3.5, id="number-string"),
         pytest.param("number(true())", 1.0, id="number-bool"),
         pytest.param("number(false())", 0.0, id="number-false"),
@@ -95,6 +106,7 @@ def doc() -> turbohtml.Node:
         # substring rounds its numeric arguments with the XPath round (ties toward
         # positive infinity): round(1.5)=2 and round(2.6)=3 select positions 2..4
         pytest.param("substring('12345', 1.5, 2.6)", "234", id="substring-rounded-args"),
+        pytest.param("substring('abcdef', 0.5 - 1 div 18014398509481984, 2)", "a", id="substring-start-below-half"),
         pytest.param("substring('hello', 3, -1)", "", id="substring-empty"),
         pytest.param("substring('', 1, 1)", "", id="substring-of-empty"),
         pytest.param("substring-before('a/b/c', '/')", "a", id="substring-before"),

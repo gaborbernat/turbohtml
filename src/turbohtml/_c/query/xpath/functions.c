@@ -12,9 +12,16 @@
 
 /* XPath 1.0 round(): the integer closest to the argument, ties resolved toward
    positive infinity (§4.4, so round(-2.5) is -2, not the -3 that C round() gives
-   by rounding half away from zero). NaN and the infinities pass through floor. */
+   by rounding half away from zero), and [-0.5, 0) rounds to negative zero. The
+   fraction value - floor(value) is exact, where floor(value + 0.5) rounds the sum
+   first: 0.49999999999999994 + 0.5 is 1.0, and 2^52 + 1 + 0.5 is 2^52 + 2. NaN, the
+   infinities, and both zeros pass through, as the comparisons fail for them. */
 static double xp_round(double value) {
-    return floor(value + 0.5);
+    if (value < 0 && value >= -0.5) {
+        return -0.0;
+    }
+    double floored = floor(value);
+    return value - floored >= 0.5 ? floored + 1 : floored;
 }
 
 /* number() with no argument: the context node's string-value parsed as first number. */
