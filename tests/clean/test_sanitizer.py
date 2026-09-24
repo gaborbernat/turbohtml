@@ -13,6 +13,7 @@ from typing_extensions import assert_type
 
 from turbohtml import Document, Element, parse, parse_fragment, parse_xml
 from turbohtml._html import _sanitize, _sanitize_policy
+from turbohtml.build import E
 from turbohtml.clean import (
     DEFAULT_ATTRIBUTES,
     DEFAULT_CSS_PROPERTIES,
@@ -149,6 +150,24 @@ def test_escape_reproduces_only_source_end_tags(html: str, expected: str) -> Non
     # escape mode renders the author's markup as text: a disallowed element gets a `</tag>` only where the source wrote
     # one, never a fabricated close tag after an unclosed or void element
     assert sanitize(html, Policy.strict()) == expected
+
+
+@pytest.mark.parametrize(
+    ("node", "expected"),
+    [
+        pytest.param(
+            E.div(E.span("x"), E.br(), "y"),
+            "<div>&lt;span&gt;x&lt;/span&gt;&lt;br&gt;y</div>",
+            id="built-closes-non-void",
+        ),
+        pytest.param(
+            parse_xml("<r><a>1</a><b/></r>"), "&lt;r&gt;&lt;a&gt;1&lt;/a&gt;&lt;b&gt;&lt;/r&gt;", id="xml-self-closed"
+        ),
+    ],
+)
+def test_escape_node_end_tags_follow_its_markup(node: Element | Document, expected: str) -> None:
+    # a built tree has no source, so escaping renders the end tags it serializes with; an XML tree keeps its source's
+    assert sanitize_node(node, Policy.strict()).serialize() == expected
 
 
 @pytest.mark.parametrize(

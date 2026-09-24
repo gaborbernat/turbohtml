@@ -165,6 +165,11 @@ th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_
     }
     node->atom = atom;
     node->tag_flags = th_tag_flags(atom); /* so a constructed/unpickled raw-text element serializes literally */
+    /* A built element has no source: its markup is its serialization, which closes every non-void element, so escape
+       mode must reproduce that end tag. The XML parser, the one caller that reads source, records its own. */
+    if (!is_void_atom(atom)) {
+        node->tag_flags |= TH_ELEM_CLOSED_BY_END_TAG;
+    }
     if (atom == TH_TAG_UNKNOWN || tag != NULL) {
         if (tag_len > 0) {
             Py_UCS4 *owned = arena_alloc(tree, tag_len * (Py_ssize_t)sizeof(Py_UCS4));

@@ -56,7 +56,8 @@ enum th_node_type {
    table only occupy 0x01..0x10) to record that the source actually closed it with
    an end tag, as opposed to the parser closing it implicitly or at EOF. The
    sanitizer's escape mode reads it to reproduce a disallowed element as visible
-   text without fabricating a `</tag>` the author never wrote. */
+   text without fabricating a `</tag>` the author never wrote. An element built
+   through the API has no source, so every non-void one carries it. */
 #define TH_ELEM_CLOSED_BY_END_TAG 0x20u
 
 /* A TH_NODE_CONTENT node reuses two otherwise-unused tag_flags bits to record that
