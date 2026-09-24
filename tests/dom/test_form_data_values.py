@@ -18,6 +18,7 @@ def _submitted(markup: str) -> list[tuple[str, str]]:
     ("attrs", "expected"),
     [
         pytest.param('value="a&#10;b&#13;c"', "abc", id="text-strips-newlines"),
+        pytest.param('value="a&#13;b&#10;c&#10;&#13;d"', "abcd", id="text-strips-every-newline"),
         pytest.param('type value="a&#10;b"', "ab", id="valueless-type-is-text"),
         pytest.param('type=bogus value="a&#10;b"', "ab", id="unknown-type-is-text"),
         pytest.param('type=SEARCH value=" a&#10;b "', " ab ", id="search-keeps-spaces"),
