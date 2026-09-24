@@ -448,12 +448,18 @@ static void css_handle_background(css_buf *pool, comp_vec *comps) {
     *comps = result;
 }
 
+/* browsers resolve an omitted flex-basis to 0%, which a zero length basis is not */
 static int css_flex_is_zero(css_buf *pool, const css_comp *comp) {
-    Py_ssize_t len = comp->len;
-    while (len > 0 && pool->data[comp->off + len - 1] == '%') {
-        len--;
+    return comp_ieq(pool, comp, "0%");
+}
+
+/* A zero length after two flex factors may drop its unit: Flexbox 1 §7.1 reads that unitless zero as the basis. */
+static void css_flex_basis_drop_zero_unit(css_buf *pool, comp_vec *comps) {
+    css_comp *basis = &comps->items[2];
+    if (comps->items[0].kind == CK_NUM && comps->items[1].kind == CK_NUM && basis->kind == CK_DIM &&
+        pool->data[basis->off] == '0' && css_unit_zero_droppable(pool->data + basis->off + 1, basis->len - 1)) {
+        basis->len = 1;
     }
-    return len == 1 && pool->data[comp->off] == '0';
 }
 
 static int css_comp_single_digit(css_buf *pool, const css_comp *comp) {
@@ -462,6 +468,9 @@ static int css_comp_single_digit(css_buf *pool, const css_comp *comp) {
 
 /* Collapse the flex shorthand to its shortest equivalent (CSS Flexbox 1 §7.1.1, the flex keyword expansions). */
 static void css_handle_flex(css_buf *pool, comp_vec *comps) {
+    if (comps->len == 3) {
+        css_flex_basis_drop_zero_unit(pool, comps);
+    }
     if (comps->len == 3 && css_comp_single_digit(pool, &comps->items[0]) &&
         css_comp_single_digit(pool, &comps->items[1])) {
         int zero0 = comp_ieq(pool, &comps->items[0], "0");
@@ -766,7 +775,9 @@ static void css_minify_value(css_buf *pool, token_vec *vec, Py_ssize_t start, Py
         return;
     }
     scratch->len = 0;
-    css_render_components(pool, vec, start, end, css_prop_is_color(name, name_len), scratch);
+    /* Flexbox 1 §7.1: a unitless zero not preceded by two flex factors is a flex factor, so flex keeps zero units */
+    css_render_components(pool, vec, start, end, css_prop_is_color(name, name_len),
+                          !css_run_ieq(name, name_len, "flex"), scratch);
     css_apply_handler(pool, name, name_len, scratch);
     css_assemble(pool, scratch, out);
 }
