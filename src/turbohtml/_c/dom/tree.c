@@ -4479,6 +4479,8 @@ th_tree *th_stream_finish(th_stream *stream) {
     stream_sync_input(stream);
     run_drain(stream->tree, stream->sm, &stream->run_state);
     run_close(stream->tree);
+    /* the source locations index the uncompacted input, and to_source() reads it after the tokenizer is gone */
+    retain_normalized_source(stream->tree, stream->sm, stream->tree->track_locations);
     finalize_document(stream->tree);
     stream->tree->failed |= th_error_sink_merge(&stream->tree->errors, &stream->preprocessing) < 0;
     th_error_sink_free(&stream->preprocessing);

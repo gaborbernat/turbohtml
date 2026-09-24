@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from turbohtml import Element, Text, parse, parse_fragment, parse_xml
+from turbohtml import Element, IncrementalParser, Text, parse, parse_fragment, parse_xml
 
 DOC = "<!DOCTYPE html><html><head></head><body>{}</body></html>"
 
@@ -203,3 +203,20 @@ def test_normalizing_inputs_are_idempotent_and_reparse_equal(markup: str) -> Non
     twice = parse(once, source_locations=True).to_source()
     assert once == twice
     assert parse(once).serialize() == doc.serialize()
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        pytest.param([_doc("<p id=a>x</p><b>y</b>")], id="one-chunk"),
+        pytest.param(
+            ["<!DOCTYPE html><html><head></head><body><p id=", "a>x</p><b>y</b></body></html>"], id="two-chunks"
+        ),
+        pytest.param(list(_doc("<p id=a>x\r\n</p><b>y</b>")), id="per-character"),
+    ],
+)
+def test_incremental_parser_round_trip_is_byte_identical(chunks: list[str]) -> None:
+    parser = IncrementalParser(source_locations=True)
+    for chunk in chunks:
+        parser.feed(chunk)
+    assert parser.close().to_source() == "".join(chunks).replace("\r\n", "\n")

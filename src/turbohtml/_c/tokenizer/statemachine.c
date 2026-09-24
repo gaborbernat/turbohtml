@@ -508,9 +508,11 @@ static void input_append(th_tokenizer *self, int kind, const void *data, Py_ssiz
 /* Reclaim the consumed prefix of the input buffer so a long-lived streaming
    tokenizer does not grow without bound. The only live offsets into the buffer
    are `pos` and, while a text run is open, `slice_start`; an emitted record still
-   spanning the buffer (queue_len != 0) pins it, so skip until it has drained. */
+   spanning the buffer (queue_len != 0) pins it, so skip until it has drained.
+   Captured locations are offsets into the whole source, which the tree keeps for
+   to_source(), so a locating tokenizer reclaims nothing. */
 static void compact_input(th_tokenizer *self) {
-    if (self->queue_len != 0) {
+    if (self->queue_len != 0 || self->capture_locations) {
         return;
     }
     Py_ssize_t keep_from = self->slice_len > 0 ? self->slice_start : self->pos;
