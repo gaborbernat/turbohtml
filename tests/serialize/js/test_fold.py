@@ -1280,3 +1280,37 @@ def test_unused_declarators_preserve_call_order(case: int, count: int) -> None:
     program: Final = source + ";const trace=[];console.log(JSON.stringify([f(value=>(trace.push(value),value)),trace]))"
     expected: Final = json.dumps([[], list(range(count))], separators=(",", ":")) + "\n"
     assert (_run(program), _run(minify_js(program))) == (expected, expected)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "f(typeof undefined,function(undefined){return undefined}(3))",
+            "f(typeof void 0,function(a){return a}(3))",
+            id="global-read-beside-parameter",
+        ),
+        pytest.param(
+            "function g(undefined){return()=>undefined}f(undefined)",
+            "function g(a){return()=>a}f(void 0)",
+            id="closure-read-keeps-binding",
+        ),
+        pytest.param(
+            "try{g()}catch(undefined){f(undefined)}f(undefined)",
+            "try{g()}catch(a){f(a)}f(void 0)",
+            id="catch-parameter",
+        ),
+        pytest.param(
+            "with(o)f(undefined);(function(undefined){f(undefined)})(4)",
+            "with(o)f(undefined);(function(undefined){f(undefined)}(4))",
+            id="with-keeps-every-read",
+        ),
+    ],
+)
+def test_undefined_folds_where_resolution_proves_global(source: str, expected: str) -> None:
+    assert (minify_js(source), minify_js(expected)) == (expected, expected)
+
+
+def test_undefined_kept_without_mangling_when_shadowed() -> None:
+    source: Final = "f(typeof undefined,function(undefined){return undefined}(3))"
+    assert minify_js(source, JSMinify(mangle=False)) == source
