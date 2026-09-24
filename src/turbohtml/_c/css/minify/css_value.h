@@ -777,9 +777,19 @@ static Py_ssize_t css_match_paren(token_vec *vec, Py_ssize_t open_paren, Py_ssiz
     return index;
 }
 
+/* The CSS Values 4 §10 math functions: their arguments are calculations, where a bare 0 is a <number> that no longer
+   type-checks against a length, and a '+' or '-' operator needs whitespace on both sides. */
 static int css_is_math_func(const css_char *name, Py_ssize_t len) {
-    return css_run_ieq(name, len, "calc") || css_run_ieq(name, len, "min") || css_run_ieq(name, len, "max") ||
-           css_run_ieq(name, len, "clamp");
+    static const char *const math_funcs[] = {"abs", "acos", "asin",  "atan", "atan2", "calc", "clamp",
+                                             "cos", "exp",  "hypot", "log",  "max",   "min",  "mod",
+                                             "pow", "rem",  "round", "sign", "sin",   "sqrt", "tan"};
+    css_char first = css_lower(name[0]);
+    for (size_t index = 0; index < sizeof(math_funcs) / sizeof(math_funcs[0]); index++) {
+        if (css_run_ieq_first(name, len, first, math_funcs[index])) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* Trim trailing spaces already written to a scratch buffer (the func-arg comma rule). */

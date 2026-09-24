@@ -529,6 +529,36 @@ def test_minify_css_spec_fixes(source: str, expected: str) -> None:
     assert minify_css(source) == expected
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("abs(0px)", id="abs"),
+        pytest.param("acos(0deg)", id="acos"),
+        pytest.param("asin(0px)", id="asin"),
+        pytest.param("atan(0px)", id="atan"),
+        pytest.param("atan2(0px,1px)", id="atan2"),
+        pytest.param("clamp(0px,1vw,2px)", id="clamp"),
+        pytest.param("cos(0px)", id="cos"),
+        pytest.param("exp(0px)", id="exp"),
+        pytest.param("hypot(0px,3px)", id="hypot"),
+        pytest.param("log(0px)", id="log"),
+        pytest.param("max(0px,1vw)", id="max"),
+        pytest.param("min(0px,1vw)", id="min"),
+        pytest.param("mod(0px,1px)", id="mod"),
+        pytest.param("pow(0px,2)", id="pow"),
+        pytest.param("rem(0px,1px)", id="rem"),
+        pytest.param("round(0px,1px)", id="round"),
+        pytest.param("ROUND(up,0px,1px)", id="round-upper-case"),
+        pytest.param("sign(0px)", id="sign"),
+        pytest.param("sin(0px)", id="sin"),
+        pytest.param("sqrt(0px)", id="sqrt"),
+        pytest.param("tan(0px)", id="tan"),
+    ],
+)
+def test_minify_css_math_function_keeps_zero_unit(value: str) -> None:
+    assert minify_css(f"a{{width:{value}}}") == f"a{{width:{value}}}"
+
+
 _HASH_FILLER = "".join(f"--v{index}:{index};" for index in range(40))
 
 
