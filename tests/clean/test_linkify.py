@@ -173,6 +173,48 @@ def test_linkify_skips_raw_text_elements(tag: str) -> None:
     assert '<a href="http://y.com">' in out
 
 
+@pytest.mark.parametrize(
+    "tag",
+    [
+        pytest.param("xmp", id="xmp"),
+        pytest.param("iframe", id="iframe"),
+        pytest.param("noembed", id="noembed"),
+        pytest.param("noframes", id="noframes"),
+        pytest.param("textarea", id="textarea"),
+        pytest.param("title", id="title"),
+    ],
+)
+def test_linkify_skips_raw_text_and_rcdata_elements(tag: str) -> None:
+    html = f"<{tag}>see http://x.com now</{tag}>"
+    assert linkify(html, Linkify(callbacks=_no_callbacks())) == html
+
+
+def test_linkify_skips_plaintext() -> None:
+    out = linkify("<plaintext>see http://x.com now", Linkify(callbacks=_no_callbacks()))
+    assert out == "<plaintext>see http://x.com now</plaintext>"
+
+
+@pytest.mark.parametrize(
+    ("scripting", "expected"),
+    [
+        pytest.param(True, "<noscript>http://x.com</noscript>", id="scripting-raw-text"),
+        pytest.param(False, '<noscript><a href="http://x.com">http://x.com</a></noscript>', id="no-scripting-markup"),
+    ],
+)
+def test_linkify_noscript_follows_scripting_flag(
+    scripting: bool,  # ruff:ignore[boolean-type-hint-positional-argument]  # a pytest parametrize value
+    expected: str,
+) -> None:
+    root = parse_fragment("<noscript>http://x.com</noscript>", scripting=scripting)
+    assert linkify_node(root, Linkify(callbacks=_no_callbacks())).inner_html == expected
+
+
+def test_linkify_links_svg_title() -> None:
+    html = "<svg><title>http://x.com</title></svg>"
+    expected = '<svg><title><a href="http://x.com">http://x.com</a></title></svg>'
+    assert linkify(html, Linkify(callbacks=_no_callbacks())) == expected
+
+
 @pytest.mark.parametrize("skip_tag", ["code", "CODE"], ids=["lowercase", "uppercase"])
 def test_linkify_skip_tags(skip_tag: str) -> None:
     html = "<code>http://x.com</code> http://y.com"
