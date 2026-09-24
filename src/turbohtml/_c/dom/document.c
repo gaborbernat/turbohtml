@@ -1496,11 +1496,14 @@ PyObject *turbohtml_tree_parse_fragment(PyObject *module, PyObject *args, PyObje
    marking the parser spent. */
 typedef struct {
     PyObject_HEAD th_stream *stream;
-    PyObject *encoding;             /* the encoding label the caller gave, reported back as the tree's encoding */
-    PyObject *unicode_decoder;      /* a CPython incremental decoder for UTF-8 and UTF-16; NULL for the rest */
-    const th_encoding_entry *entry; /* resolved on the first bytes feed; NULL while only str has been fed */
-    th_decoder decoder;             /* carries ISO-2022-JP's mode across a chunk boundary */
-    Py_UCS4 *scratch;               /* grown to the largest chunk seen, so a chunked decode allocates once */
+    PyObject *encoding;               /* the encoding label the caller gave, reported back as the tree's encoding */
+    PyObject *unicode_decoder;        /* a CPython incremental decoder for UTF-8 and UTF-16; NULL for the rest */
+    const th_encoding_entry *labeled; /* the encoding argument, resolved on the first bytes feed */
+    const th_encoding_entry *entry;   /* the decoding encoding, set once the byte-order-mark sniff settles */
+    unsigned char head[3];            /* the leading bytes held back while they could still be a byte-order mark */
+    Py_ssize_t head_len;
+    th_decoder decoder; /* carries ISO-2022-JP's mode across a chunk boundary */
+    Py_UCS4 *scratch;   /* grown to the largest chunk seen, so a chunked decode allocates once */
     Py_ssize_t scratch_len;
     unsigned char tail[4]; /* the incomplete sequence a chunk ended on; gb18030 needs the most, four bytes */
     Py_ssize_t tail_len;
@@ -1520,7 +1523,9 @@ static PyObject *stream_new(PyTypeObject *type, PyObject *args, PyObject *kwds) 
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    self->labeled = NULL;
     self->entry = NULL;
+    self->head_len = 0;
     self->unicode_decoder = NULL;
     self->scratch = NULL;
     self->scratch_len = 0;
@@ -1597,17 +1602,22 @@ static PyObject *stream_decode_legacy(StreamObject *parser, const unsigned char 
 }
 
 /* Resolve the label on the first bytes feed, so an unsupported one raises LookupError there rather than at close. */
-static int stream_resolve(StreamObject *parser) {
+static int stream_resolve_label(StreamObject *parser) {
     Py_ssize_t label_len = 0;
     const char *label = PyUnicode_AsUTF8AndSize(parser->encoding, &label_len);
     if (label == NULL) { /* a lone-surrogate encoding name has no UTF-8 form */
         return -1;
     }
-    const th_encoding_entry *entry = th_encoding_lookup(label, label_len);
-    if (entry == NULL) {
+    parser->labeled = th_encoding_lookup(label, label_len);
+    if (parser->labeled == NULL) {
         PyErr_Format(PyExc_LookupError, "unknown encoding: %s", label);
         return -1;
     }
+    return 0;
+}
+
+/* Set up the decoder for the encoding the byte-order-mark sniff settled on. */
+static int stream_start_decoder(StreamObject *parser, const th_encoding_entry *entry) {
     if (entry->kind == TH_DEC_UTF8 || entry->kind == TH_DEC_UTF16LE || entry->kind == TH_DEC_UTF16BE) {
         /* CPython's UTF-8 and UTF-16 decoders match the spec, and their incremental form already carries a sequence
            split across chunks, so there is nothing for a native chunk decoder to add */
@@ -1624,12 +1634,9 @@ static int stream_resolve(StreamObject *parser) {
     return 0;
 }
 
-/* Decode a bytes chunk with the same WHATWG decoder parse(bytes) uses. final flushes whatever the last chunk boundary
-   held back. */
-static PyObject *stream_decode(StreamObject *parser, const unsigned char *chunk, Py_ssize_t chunk_len, int final) {
-    if (parser->entry == NULL && stream_resolve(parser) < 0) {
-        return NULL;
-    }
+/* Decode a chunk with the settled encoding's decoder. */
+static PyObject *stream_decode_settled(StreamObject *parser, const unsigned char *chunk, Py_ssize_t chunk_len,
+                                       int final) {
     if (parser->unicode_decoder != NULL) {
         return PyObject_CallMethod(parser->unicode_decoder, "decode", "y#i", (const char *)chunk, chunk_len, final);
     }
@@ -1646,6 +1653,55 @@ static PyObject *stream_decode(StreamObject *parser, const unsigned char *chunk,
         return th_decode(parser->entry, chunk, chunk_len);
     }
     return stream_decode_legacy(parser, chunk, chunk_len, final);
+}
+
+/* Whether the bytes held so far are a proper prefix of a byte-order mark, so the next byte decides it. */
+static int stream_bom_pending(const unsigned char *head, Py_ssize_t len) {
+    static const unsigned char utf8_bom[] = {0xEF, 0xBB};
+    return len == 0 || (len < 3 && memcmp(head, utf8_bom, (size_t)len) == 0) ||
+           (len == 1 && (head[0] == 0xFE || head[0] == 0xFF));
+}
+
+/* Hold the leading bytes until the byte-order-mark sniff settles, then decode them and the rest of the chunk with the
+   encoding a mark names, or the parser's encoding when there is none. Per the Encoding standard's decode, a mark
+   outranks the encoding argument and never reaches the document. */
+static PyObject *stream_sniff(StreamObject *parser, const unsigned char *chunk, Py_ssize_t chunk_len, int final) {
+    Py_ssize_t take = chunk_len < 3 - parser->head_len ? chunk_len : 3 - parser->head_len;
+    memcpy(parser->head + parser->head_len, chunk, (size_t)take);
+    parser->head_len += take;
+    if (!final && stream_bom_pending(parser->head, parser->head_len)) {
+        return PyUnicode_New(0, 0);
+    }
+    const th_encoding_entry *marked = NULL;
+    Py_ssize_t skip = th_encoding_bom(parser->head, parser->head_len, &marked);
+    if (stream_start_decoder(parser, marked != NULL ? marked : parser->labeled) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+        return NULL; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *head = stream_decode_settled(parser, parser->head + skip, parser->head_len - skip, 0);
+    if (head == NULL) { /* GCOVR_EXCL_BR_LINE: replace-mode decoding fails only on allocation */
+        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *rest = stream_decode_settled(parser, chunk + take, chunk_len - take, final);
+    if (rest == NULL) {  /* GCOVR_EXCL_BR_LINE: replace-mode decoding fails only on allocation */
+        Py_DECREF(head); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *joined = PyUnicode_Concat(head, rest);
+    Py_DECREF(head);
+    Py_DECREF(rest);
+    return joined;
+}
+
+/* Decode a bytes chunk with the same WHATWG decoder parse(bytes) uses. final flushes whatever the last chunk boundary
+   held back. */
+static PyObject *stream_decode(StreamObject *parser, const unsigned char *chunk, Py_ssize_t chunk_len, int final) {
+    if (parser->labeled == NULL && stream_resolve_label(parser) < 0) {
+        return NULL;
+    }
+    if (parser->entry == NULL) {
+        return stream_sniff(parser, chunk, chunk_len, final);
+    }
+    return stream_decode_settled(parser, chunk, chunk_len, final);
 }
 
 /* Feed already-decoded code points to the C stream; -1 with an exception set on
@@ -1715,8 +1771,8 @@ static PyObject *stream_close_locked(StreamObject *parser, module_state *state) 
         PyErr_SetString(PyExc_ValueError, "IncrementalParser is already closed");
         return NULL;
     }
-    if (parser->entry != NULL) {
-        /* flush any bytes the decoder held back at the last chunk boundary */
+    if (parser->labeled != NULL) {
+        /* flush any bytes the decoder or the byte-order-mark sniff held back at the last chunk boundary */
         PyObject *tail = stream_decode(parser, (const unsigned char *)"", 0, 1);
         if (tail == NULL) { /* GCOVR_EXCL_BR_LINE: a final empty decode cannot fail once the label resolved */
             return NULL;    /* GCOVR_EXCL_LINE: decode-failure path */
