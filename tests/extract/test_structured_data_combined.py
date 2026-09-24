@@ -1345,6 +1345,14 @@ def test_several_blocks_keep_only_the_ones_carrying_data() -> None:
             [{"ok": True}],
             id="invalid-block-skipped",
         ),
+        pytest.param(
+            '<script type="application/ld+json">{"a": NaN}</script>'
+            '<script type="application/ld+json">{"a": Infinity}</script>'
+            '<script type="application/ld+json">[-Infinity]</script>'
+            '<script type="application/ld+json">{"ok": 1.5}</script>',
+            [{"ok": 1.5}],
+            id="non-json-constants-skipped",
+        ),
         pytest.param('<script type="APPLICATION/LD+JSON">{"ok": 1}</script>', [{"ok": 1}], id="type-uppercase"),
         pytest.param('<script type="  application/ld+json  ">{"ok": 1}</script>', [{"ok": 1}], id="type-whitespace"),
         pytest.param('<script type="Application/LD+Json">{"ok": 1}</script>', [{"ok": 1}], id="type-mixed-case"),
