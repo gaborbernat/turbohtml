@@ -1169,6 +1169,7 @@ static int consume_start_tag(xml_parser *parser) {
     if (element == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    element->tag_flags &= (uint8_t)~TH_ELEM_CLOSED_BY_END_TAG; /* consume_end_tag sets it for a written end tag */
     Py_ssize_t depth = parser->stack_len;
     parser->attr_spans_len = 0;
     int self_closing = 0;
