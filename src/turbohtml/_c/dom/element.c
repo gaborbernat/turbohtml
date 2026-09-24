@@ -1862,10 +1862,26 @@ static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len
     return 0;
 }
 
+/* Whether one of the first filled attributes of node is named name. */
+static int has_attr_named(th_tree *tree, const th_node *node, Py_ssize_t filled, const char *name,
+                          Py_ssize_t name_len) {
+    for (Py_ssize_t index = 0; index < filled; index++) {
+        Py_ssize_t existing_len;
+        const char *existing = th_attr_name(tree, node->attrs[index].name_atom, &existing_len);
+        if (existing_len == name_len && memcmp(existing, name, (size_t)name_len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Fill a constructed element's attribute slots from the keys of attrs. fold lowercases
-   each name for an HTML tree; an XML tree keeps case, so its names are stored verbatim. */
+   each name for an HTML tree; an XML tree keeps case, so its names are stored verbatim.
+   Two keys that fold to one name keep the first, as the HTML tokenizer does for a
+   repeated attribute, so the element never carries the same name twice. */
 static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyObject *keys, int fold) {
     Py_ssize_t count = PyList_GET_SIZE(keys);
+    Py_ssize_t filled = 0;
     for (Py_ssize_t index = 0; index < count; index++) {
         PyObject *name = PyList_GET_ITEM(keys, index);
         if (!PyUnicode_Check(name)) {
@@ -1888,6 +1904,10 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
             char ch = name_utf8[byte];
             stored[byte] = fold && ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch;
         }
+        if (fold && has_attr_named(tree, node, filled, stored, name_len)) {
+            PyMem_Free(stored);
+            continue;
+        }
         PyObject *value = PyObject_GetItem(attrs, name);
         Py_UCS4 *points;
         Py_ssize_t value_len;
@@ -1898,13 +1918,14 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
             PyMem_Free(stored);
             return -1;
         }
-        int rc = th_tree_set_attr(tree, node, index, stored, name_len, points, value_len, has_value);
+        int rc = th_tree_set_attr(tree, node, filled++, stored, name_len, points, value_len, has_value);
         PyMem_Free(stored);
         PyMem_Free(points);
         if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
+    node->attr_count = filled;
     return 0;
 }
 
