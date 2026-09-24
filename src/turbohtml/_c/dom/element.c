@@ -3323,7 +3323,7 @@ static PyObject *xml_fragment_source(PyObject *self, th_node *context, PyObject 
         Py_DECREF(escaped);
         if (declaration == NULL || PyList_Append(parts, declaration) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
             Py_CLEAR(parts);                                                /* GCOVR_EXCL_LINE: OOM path */
-        }
+        } /* GCOVR_EXCL_LINE */
         Py_XDECREF(declaration);
     }
     Py_DECREF(declarations);
