@@ -512,14 +512,13 @@ def test_node_is_truthy_regardless_of_children(
 
 @pytest.mark.parametrize("count", [1, 29, 30, 100], ids=["small", "below-index", "index", "large"])
 @pytest.mark.parametrize("position", ["first", "last"])
-@pytest.mark.parametrize("different", [False, True], ids=["same", "different"])
-def test_duplicate_normalized_attributes(count: int, position: str, *, different: bool) -> None:
-    duplicates: Final = {"A": "x", "a": "y" if different else "x"}
+def test_duplicate_normalized_attributes_keep_the_first(count: int, position: str) -> None:
     ordinary: Final = {f"data-{index}": "é水😀" for index in range(count)}
+    duplicates: Final = {"A": "x", "a": "y"}
+    kept: Final = {"a": "x"}
     attributes: Final = duplicates | ordinary if position == "first" else ordinary | duplicates
-    left: Final = Element("div", attributes)
-    right: Final = Element("div", attributes)
-    assert left.equals(right) is not different
+    expected: Final = kept | ordinary if position == "first" else ordinary | kept
+    assert Element("div", attributes).equals(Element("div", expected))
 
 
 @pytest.mark.parametrize("prefix", ["data-", "é", "水", "𐐀"], ids=["ascii", "latin1", "ucs2", "ucs4"])

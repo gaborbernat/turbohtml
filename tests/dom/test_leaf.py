@@ -127,6 +127,21 @@ def test_element_attribute_name_is_lowercased() -> None:
 
 
 @pytest.mark.parametrize(
+    "attrs",
+    [
+        pytest.param({"ID": "a", "id": "b"}, id="upper-first"),
+        pytest.param({"id": "a", "Id": "b", "ID": "c"}, id="three-spellings"),
+    ],
+)
+def test_element_attribute_names_folding_together_keep_the_first(attrs: dict[str, str]) -> None:
+    assert Element("div", {**attrs, "title": "t"}).html == '<div id="a" title="t"></div>'
+
+
+def test_element_attribute_names_folding_together_count_once() -> None:
+    assert len(Element("div", {"ID": "a", "id": "b"}).attrs) == 1
+
+
+@pytest.mark.parametrize(
     "tag",
     # an empty name has nothing to write; the others could not round-trip if written
     [

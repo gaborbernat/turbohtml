@@ -546,7 +546,7 @@ static int attrs_equal(th_tree *left_tree, th_node *left, th_tree *right_tree, t
         }
         if (can_index) {
             comparisons += other + 1;
-            if (comparisons >= left->attr_count * 2 && index + 1 < left->attr_count) {
+            if (comparisons >= left->attr_count * 2) {
                 can_index = 0;
                 const int indexed = attrs_equal_indexed(left_tree, left, right_tree, right, index + 1);
                 if (indexed >= 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -569,32 +569,25 @@ static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right
         return -1;       /* GCOVR_EXCL_LINE: fall back to the allocation-free comparison */
     }
     for (Py_ssize_t index = 0; index < right->attr_count; index++) {
+        /* an element never carries one name twice, so every name takes a fresh slot */
         size_t slot = ((size_t)right->attrs[index].name_atom * 2654435761U) & (capacity - 1);
-        while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != right->attrs[index].name_atom) {
+        while (slots[slot] != 0) {
             slot = (slot + 1) & (capacity - 1);
         }
-        /* Constructors can retain duplicate normalized names; equality uses their first value. */
-        if (slots[slot] == 0) {
-            slots[slot] = index + 1;
-        }
+        slots[slot] = index + 1;
     }
     int equal = 1;
-    uint32_t previous_atom = UINT32_MAX;
-    size_t slot = 0;
     for (Py_ssize_t index = start; index < left->attr_count; index++) {
         const th_node_attr *want = &left->attrs[index];
         uint32_t atom = want->name_atom;
-        if (atom != previous_atom) {
-            previous_atom = atom;
-            if (left_tree != right_tree) {
-                Py_ssize_t name_len;
-                const char *name = th_attr_name(left_tree, atom, &name_len);
-                atom = th_attr_lookup(right_tree, name, name_len);
-            }
-            slot = ((size_t)atom * 2654435761U) & (capacity - 1);
-            while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != atom) {
-                slot = (slot + 1) & (capacity - 1);
-            }
+        if (left_tree != right_tree) {
+            Py_ssize_t name_len;
+            const char *name = th_attr_name(left_tree, atom, &name_len);
+            atom = th_attr_lookup(right_tree, name, name_len);
+        }
+        size_t slot = ((size_t)atom * 2654435761U) & (capacity - 1);
+        while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != atom) {
+            slot = (slot + 1) & (capacity - 1);
         }
         if (slots[slot] == 0 || !attr_value_equal(want, &right->attrs[slots[slot] - 1])) {
             equal = 0;
