@@ -271,7 +271,7 @@ static inline PyObject *type_for_node(module_state *state, const th_node *node) 
     case TH_NODE_CONTENT:
         return (node->tag_flags & TH_SHADOW_ROOT) != 0 ? state->shadow_root_type : state->document_fragment_type;
     }
-    return state->node_type;
+    return state->node_type; /* GCOVR_EXCL_LINE: every node type returns above */
 }
 
 static inline PyObject *node_wrap(module_state *state, PyObject *handle, th_node *node) {

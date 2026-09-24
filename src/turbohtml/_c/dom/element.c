@@ -1042,7 +1042,11 @@ static th_node *fieldset_first_legend(th_node *fieldset) {
     return NULL;
 }
 
+/* CPython 3.12+ defers collection callbacks until this C call returns, so the control walk skips a disabled fieldset's
+   subtree and no control needs to look up its ancestors. Older CPython, PyPy, and free-threaded builds walk instead. */
 #if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
+#define FORM_WALKS_ANCESTOR_FIELDSETS 1
+
 static int control_in_first_legend(th_node *fieldset, th_node *control) {
     th_node *legend = fieldset_first_legend(fieldset);
     if (legend == NULL) {
@@ -1055,12 +1059,9 @@ static int control_in_first_legend(th_node *fieldset, th_node *control) {
     }
     return 0;
 }
-#endif
 
 /* Whether a disabling fieldset sits between a control and the form. */
 static int fieldset_disables(th_node *control, th_node *form) {
-    /* CPython 3.12+ defers collection callbacks until this C call returns. */
-#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
     for (th_node *ancestor = control->parent; ancestor != form; ancestor = ancestor->parent) {
         if (ancestor == NULL) {
             return 1;
@@ -1070,12 +1071,9 @@ static int fieldset_disables(th_node *control, th_node *form) {
             return 1;
         }
     }
-#else
-    (void)control;
-    (void)form;
-#endif
     return 0;
 }
+#endif
 
 /* The attributes a form control's submission reads, found in one pass over its attribute list (an element never
    holds two attributes of one name). */
@@ -1165,10 +1163,16 @@ static int collect_control(th_tree *tree, th_node *form, th_node *node, PyObject
     }
     control_attrs attrs = read_control_attrs(node);
     const th_node_attr *name = attrs.name;
-    if (name == NULL || name->value == NULL || name->value_len == 0 || attrs.disabled ||
-        fieldset_disables(node, form)) {
+    if (name == NULL || name->value == NULL || name->value_len == 0 || attrs.disabled) {
         return 0;
     }
+#ifdef FORM_WALKS_ANCESTOR_FIELDSETS
+    if (fieldset_disables(node, form)) {
+        return 0;
+    }
+#else
+    (void)form;
+#endif
     if (atom == TH_TAG_SELECT) {
         return collect_select(tree, node, name, pairs);
     }
