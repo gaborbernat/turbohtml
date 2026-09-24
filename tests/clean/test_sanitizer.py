@@ -2542,6 +2542,42 @@ def test_templates_text_run_collapses(fragment: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("fragment", "mode", "expected"),
+    [
+        pytest.param("<p>{<!---->{x}}</p>", OnDisallowed.ESCAPE, "<p> </p>", id="removed-comment"),
+        pytest.param("<p>{<b>{x}}</b></p>", OnDisallowed.STRIP, "<p> </p>", id="stripped-element"),
+        pytest.param(
+            '<p>{<b>zz</b>{constructor.constructor("alert(1)")()}}</p>', OnDisallowed.REMOVE, "<p> </p>", id="removed"
+        ),
+        pytest.param("<p>a<b>{</b>{x}}c</p>", OnDisallowed.STRIP, "<p>a c</p>", id="run-of-three"),
+        pytest.param("<p><b>{</b>{</p>x", OnDisallowed.STRIP, "<p> </p>x", id="run-at-end-of-parent"),
+        pytest.param("<p>{<b>x</b>}</p>", OnDisallowed.STRIP, "<p>{x}</p>", id="merged-without-marker"),
+        pytest.param(
+            '<p><b>{</b>{x}}<a href="/y">k</a></p>',
+            OnDisallowed.STRIP,
+            '<p> <a href="/y">k</a></p>',
+            id="run-before-kept-element",
+        ),
+        pytest.param(
+            '<p>{{x}}<a href="/y">k</a></p>',
+            OnDisallowed.STRIP,
+            '<p> <a href="/y">k</a></p>',
+            id="single-text-before-kept-element",
+        ),
+        pytest.param(
+            '<p><x-y title="{{x}}">a</x-y></p>',
+            OnDisallowed.ESCAPE,
+            '<p>&lt;x-y title=" "&gt;a&lt;/x-y&gt;</p>',
+            id="escaped-tag-text",
+        ),
+    ],
+)
+def test_templates_joined_text_collapses(fragment: str, mode: OnDisallowed, expected: str) -> None:
+    """Markers split across text the walk removes or unwraps an element between are still stripped."""
+    assert sanitize(fragment, replace(_SANITIZER_TEMPLATES_ON, on_disallowed_tag=mode)) == expected
+
+
+@pytest.mark.parametrize(
     ("value", "expected"),
     [
         pytest.param("{{t}}", " ", id="marker"),
