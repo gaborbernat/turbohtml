@@ -235,7 +235,14 @@ FORMS_DOC = """<!doctype html>
 </body></html>
 """
 
-DOCS = {"ids": IDS_DOC, "forms": FORMS_DOC}
+LANG_DOC = """<!doctype html>
+<div id="lang-root"><svg id="svg-it" xml:lang="it" lang="fr"><g id="g-it"/></svg>
+<p id="p-xml-lang" xml:lang="de"><b id="b-in-p">x</b></p>
+<svg id="svg-es" lang="es"><g id="g-es" xml:lang=""/></svg>
+<math id="math-fr" lang="fr"><mi id="mi-fr">x</mi></math></div>
+"""
+
+DOCS = {"ids": IDS_DOC, "forms": FORMS_DOC, "lang": LANG_DOC}
 
 SELECTORS = (
     # type, universal, and (ignored) namespace prefixes
@@ -407,6 +414,9 @@ SELECTORS = (
     ":lang('en)",
     ":lang('en-us')",
     ":lang(fr, en)",
+    ":lang(it)",
+    ":lang(de)",
+    ":lang(es)",
     ":lang(,)",
     ":dir(sideways)",
     "a:hover",

@@ -384,25 +384,39 @@ static int lang_tag_matches(const Py_UCS4 *tag, Py_ssize_t tag_len, const Py_UCS
     return tag_len == want_len || tag[want_len] == '-';
 }
 
-/* lang(): true when the nearest self-or-ancestor element carrying a lang
-   attribute names a language the wanted code is a prefix of. */
+/* The attribute declaring a node's language, or NULL. XPath 1.0 §4.3 reads xml:lang,
+   the only form an XML tree honors. An HTML tree follows HTML "the lang and xml:lang
+   attributes": xml:lang in the XML namespace wins, and only a foreign element carries
+   one (the HTML parser leaves xml:lang on an HTML element in no namespace); then lang,
+   which counts on an HTML or SVG element. */
+static const th_node_attr *node_lang_attr(struct th_tree *tree, struct th_node *node, uint32_t xml_lang_atom) {
+    int xml = th_tree_is_xml(tree);
+    const th_node_attr *lang_attr = NULL;
+    th_node_attr *attrs;
+    Py_ssize_t attr_count = th_node_attributes(node, &attrs);
+    for (Py_ssize_t index = 0; index < attr_count; index++) {
+        if (attrs[index].name_atom == xml_lang_atom && (xml || node->ns != TH_NS_HTML)) {
+            return &attrs[index];
+        }
+        if (attrs[index].name_atom == TH_ATTR_LANG && !xml && node->ns != TH_NS_MATHML) {
+            lang_attr = &attrs[index];
+        }
+    }
+    return lang_attr;
+}
+
+/* lang(): true when the language the nearest self-or-ancestor element declares
+   names a language the wanted code is a prefix of. */
 static int node_lang(xp_ctx *ctx, xp_result *arg) {
     Py_ssize_t want_len;
     Py_UCS4 *want = to_string(ctx->tree, arg, &want_len);
     if (want == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;      /* GCOVR_EXCL_LINE */
     }
+    uint32_t xml_lang_atom = th_attr_lookup(ctx->tree, "xml:lang", 8);
     int result = 0;
     for (struct th_node *node = ctx->node; node != NULL; node = node->parent) {
-        th_node_attr *attrs;
-        Py_ssize_t attr_count = th_node_attributes(node, &attrs);
-        const th_node_attr *lang_attr = NULL;
-        for (Py_ssize_t index = 0; index < attr_count; index++) {
-            if (attrs[index].name_atom == TH_ATTR_LANG) {
-                lang_attr = &attrs[index];
-                break;
-            }
-        }
+        const th_node_attr *lang_attr = node_lang_attr(ctx->tree, node, xml_lang_atom);
         if (lang_attr != NULL) {
             result = lang_tag_matches(lang_attr->value, lang_attr->value_len, want, want_len);
             break;
