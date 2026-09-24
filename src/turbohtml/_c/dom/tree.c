@@ -4295,8 +4295,11 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
         th_tree_free(tree);   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         return NULL;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
+    /* the root carries the context's element name, which for SVG takes the same mixed case a parsed element gets */
+    const char *mixed = ctx_ns == TH_NS_SVG ? svg_adjust_name(lower, lower_len) : NULL;
+    const char *root_name = mixed != NULL ? mixed : lower;
     for (Py_ssize_t index = 0; index < lower_len; index++) {
-        root->text[index] = (Py_UCS4)(unsigned char)lower[index];
+        root->text[index] = (Py_UCS4)(unsigned char)root_name[index];
     }
     root->text_len = lower_len;
     node_append(tree->document, root);
