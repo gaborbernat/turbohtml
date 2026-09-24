@@ -32,8 +32,7 @@
 
 typedef struct {
     jm_program *prog;
-    int fold_undefined; /* `undefined` is not shadowed by any binding -> fold to void 0 */
-    int changed;        /* a transform fired this pass: jm_fold walks again so cascades finish */
+    int changed; /* a transform fired this pass: jm_fold walks again so cascades finish */
 } F;
 
 static int ident_is(const jm_node *node, const char *word) {
@@ -1254,8 +1253,9 @@ static void walk(F *folder, int32_t idx) {
             fold_boolean(folder, idx, 1);
         } else if (ident_is(node, "false")) {
             fold_boolean(folder, idx, 0);
-        } else if (folder->fold_undefined && ident_is(node, "undefined")) {
-            fold_void(folder, idx);
+        } else if (ident_is(node, "undefined") &&
+                   (!folder->prog->shadows_undefined || (folder->prog->resolved && node->sym < 0))) {
+            fold_void(folder, idx); /* a read no binding shadows is the global undefined, void 0 */
         }
         return;
     case JN_MEMBER_EXPR:
@@ -1548,9 +1548,9 @@ static void walk(F *folder, int32_t idx) {
 }
 
 int jm_fold(jm_program *prog) {
-    F folder = {.prog = prog, .fold_undefined = 0, .changed = 0};
-    /* fold `undefined` only when no binding shadows it anywhere in the program */
-    folder.fold_undefined = !declares(&folder, prog->nodes[prog->root].a, "undefined");
+    F folder = {.prog = prog, .changed = 0};
+    /* with a binding named `undefined` anywhere, only a read resolution proves global folds */
+    prog->shadows_undefined = declares(&folder, prog->nodes[prog->root].a, "undefined");
     /* the transforms cascade -- a spliced else exposes a guard fold, whose block a merge then
        collapses -- so walk until a full pass changes nothing and the output is a fixpoint */
     int any = 0;

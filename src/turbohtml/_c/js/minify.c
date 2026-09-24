@@ -31,10 +31,12 @@ Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, 
             }
             settled = fold && !jm_fold(prog); /* clean up empties and fold what the compress exposed */
         }
-        jm_mangle(prog);        /* assign short names once the shape has settled */
-        if (fold && !settled) { /* GCOVR_EXCL_BR_LINE: only the backstop cap exits the loop unsettled */
-            jm_fold(prog);      /* GCOVR_EXCL_LINE: a last fold over that pathological exit */
-        } /* GCOVR_EXCL_LINE */
+        jm_mangle(prog); /* assign short names once the shape has settled */
+        /* a last fold over a pathological unsettled exit, and over the `undefined` reads a shadowing
+           binding kept the first fold from touching: the mangle resolution now proves them global */
+        if (fold && (!settled || prog->shadows_undefined)) { /* GCOVR_EXCL_BR_LINE: only the cap exits unsettled */
+            jm_fold(prog);
+        }
     }
     Py_UCS4 *out = jm_print(prog, out_len);
     jm_program_free(prog);

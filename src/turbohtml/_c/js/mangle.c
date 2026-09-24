@@ -1571,12 +1571,14 @@ static void mangler_free(M *mangler) {
 int jm_compress(jm_program *prog) {
     M mangler = {0};
     int32_t global = analyze(&mangler, prog);
+    prog->resolved = 0;
     int result = -1;
     /* top-level bindings are observable and never touched; a with/eval poisons the whole program */
     if (!mangler.poisoned) {
         /* GCOVR_EXCL_BR_START: the remaining guards are allocation-failure paths */
         if (global >= 0 && !mangler.failed && !mangler.visible.failed && !mangler.frees.failed) {
             /* GCOVR_EXCL_BR_STOP */
+            prog->resolved = 1;
             int changed = 0;
             collapse_chain(prog, prog->nodes[prog->root].a, &changed);
             changed |= drop_unused(prog, global);
@@ -1594,10 +1596,12 @@ int jm_compress(jm_program *prog) {
 void jm_mangle(jm_program *prog) {
     M mangler = {0};
     int32_t global = analyze(&mangler, prog);
+    prog->resolved = 0;
     if (!mangler.poisoned) {
         /* GCOVR_EXCL_BR_START: the remaining guards are allocation-failure paths */
         if (global >= 0 && !mangler.failed && !mangler.visible.failed && !mangler.frees.failed) {
             /* GCOVR_EXCL_BR_STOP */
+            prog->resolved = 1;
             /* reserve every *kept* function/class declaration name globally so a mangled binding in any
                scope can never be assigned a name that shadows one. A declaration in a non-global
                function scope is renamed, not kept (see assign_slots), so it is not reserved. */

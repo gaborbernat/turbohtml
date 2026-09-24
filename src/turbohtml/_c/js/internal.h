@@ -315,6 +315,9 @@ typedef struct jm_program {
     int32_t comment_count;
     int32_t comment_cap;
 
+    int shadows_undefined; /* some binding is named `undefined`, so the fold pass must check each read */
+    int resolved;          /* every identifier carries its symbol from a with/eval-free resolution */
+
     int failed; /* allocation failure */
 } jm_program;
 
