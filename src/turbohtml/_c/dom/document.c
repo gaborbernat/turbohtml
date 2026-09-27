@@ -622,6 +622,9 @@ PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObj
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     self->tree = tree;
+#ifndef Py_GIL_DISABLED
+    self->state = state;
+#endif
     self->bindings = self->inline_bindings;
     self->binding_capacity = sizeof(self->inline_bindings) / sizeof(*self->inline_bindings);
     self->binding_next = 1;

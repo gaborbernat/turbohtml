@@ -84,6 +84,9 @@ typedef struct {
 
 typedef struct {
     PyObject_HEAD th_tree *tree;
+#ifndef Py_GIL_DISABLED
+    module_state *state;
+#endif
     PyObject *source;   /* the input str whose storage the tree's spans borrow */
     PyObject *encoding; /* the resolved encoding name for bytes input, else None */
     /* Lazy per-tree element index, bucketed by tag atom: index_nodes holds every

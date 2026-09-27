@@ -58,12 +58,14 @@ void th_node_freelist_clear(module_state *Py_UNUSED(state)) {
 
 static void node_dealloc(PyObject *self) {
     PyTypeObject *type = Py_TYPE(self);
+#ifndef Py_GIL_DISABLED
+    module_state *state = ((HandleObject *)((NodeObject *)self)->handle)->state;
+#endif
     node_unbind((NodeObject *)self);
 #ifndef Py_GIL_DISABLED
     /* Park the wrapper for reuse instead of freeing it, unless the pool is full.
        Every node type has basicsize sizeof(NodeObject) and none accept a subclass,
        so any node object fits a base-type reuse. */
-    module_state *state = state_of(self);
     if (state->node_freelist_len < NODE_FREELIST_MAX) {
         ((NodeObject *)self)->node = (th_node *)state->node_freelist; /* stash the next link in the node field */
         state->node_freelist = self;
