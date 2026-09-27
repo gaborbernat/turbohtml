@@ -217,7 +217,8 @@ TH_NODE_API(, PyObject *, node_select, (PyObject * self, PyObject *arg), (self, 
 
 /* _select_limited(node, selector, limit) -> list[Element]: the first `limit` matching descendants in document order,
    or every one for a limit of 0 or less; the walk stops once it has enough. */
-PyObject *turbohtml_select_limited(PyObject *module, PyObject *args) {
+TH_NODE_API(, PyObject *, turbohtml_select_limited, (PyObject * module, PyObject *args), (module, args),
+            (PyObject * module, PyObject *args), node_argument(PyModule_GetState(module), args, NULL, 0, NULL), NULL) {
     PyObject *node;
     PyObject *selector;
     Py_ssize_t limit;
@@ -991,7 +992,7 @@ static int xpath_append_result_node(xpath_ext_ctx *ec, PyObject *obj, xp_nodeset
         return -1;
     }
     NodeObject *node_obj = (NodeObject *)obj;
-    if (node_obj->handle != ec->handle) {
+    if (!node_owned_by(node_obj, ec->handle)) {
         PyErr_SetString(PyExc_ValueError, "xpath extension returned an element from a different document");
         return -1;
     }
@@ -1269,7 +1270,7 @@ static int xpath_push_element(PyObject *obj, module_state *state, PyObject *refe
         return -1;
     }
     NodeObject *element = (NodeObject *)obj;
-    if (element->handle != reference_handle) {
+    if (!node_owned_by(element, reference_handle)) {
         PyErr_SetString(PyExc_ValueError, "xpath variable refers to a node from a different tree");
         return -1;
     }
@@ -1610,7 +1611,9 @@ static void xpath_compiled_dealloc(PyObject *self) {
 /* XPath.__call__(node, /, **variables): evaluate the compiled program against the
    context Node, binding each keyword as a $name variable. Returns the same result a
    matching Node.xpath call would. */
-static PyObject *xpath_compiled_call(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(static, PyObject *, xpath_compiled_call, (PyObject * self, PyObject *args, PyObject *kwds),
+            (self, args, kwds), (PyObject * self, PyObject *args, PyObject *kwds),
+            node_argument(state_of(self), args, NULL, 0, NULL), NULL) {
     XPathObject *compiled = (XPathObject *)self;
     module_state *state = state_of(self);
     if (PyTuple_GET_SIZE(args) != 1) {

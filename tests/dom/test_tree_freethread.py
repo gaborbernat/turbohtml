@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 import turbohtml
+from turbohtml.clean import sanitize_node
+from turbohtml.conformance import check
 from turbohtml.query import Query
 from turbohtml.transform import Transform
 
@@ -636,6 +638,12 @@ def test_concurrent_adoption_preserves_descendant_aliases() -> None:
         pytest.param(lambda node: len(node.select("b")), 1, id="select"),
         pytest.param(lambda node: len(Query(node).filter("section")), 1, id="query-filter"),
         pytest.param(lambda node: node.xpath("count(.//b)"), 1.0, id="xpath"),
+        pytest.param(turbohtml.XPath("count(.//b)"), 1.0, id="compiled-xpath"),
+        pytest.param(lambda node: len(Query([node, node])), 1, id="query-deduplication"),
+        pytest.param(lambda node: len(Query(node).children()), 1, id="query-children"),
+        pytest.param(lambda node: len(Query(node).children().parent()), 1, id="query-parent"),
+        pytest.param(lambda node: sanitize_node(node).text, "text", id="sanitize"),
+        pytest.param(lambda node: check(node).valid, True, id="validate"),
         pytest.param(lambda node: len(list(node.descendants)), 2, id="descendants"),
         pytest.param(lambda node: node.attrs.copy(), {"live": "yes"}, id="attributes"),
         pytest.param(hash, None, id="hash"),

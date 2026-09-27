@@ -10,6 +10,7 @@
 #include "core/ascii.h"
 #include "core/vec.h"
 #include "dom/tree.h"
+#include "dom/ownership.h"
 #include "query/xpath/xpath.h"
 
 /* A per-tree cache of compiled CSS selectors. A repeated select()/select_one()
@@ -174,95 +175,6 @@ static inline int handle_add_hash_override(HandleObject *handle, th_node *node, 
     hash_override_put(overrides, node, hash);
     return 0;
 }
-
-typedef struct NodeObject {
-    PyObject_HEAD PyObject *handle;
-    th_node *node;
-#ifdef Py_GIL_DISABLED
-    PyThread_type_lock ownership_lock;
-    struct NodeObject *previous_binding;
-    struct NodeObject *next_binding;
-#endif
-} NodeObject;
-
-#ifdef Py_GIL_DISABLED
-/* Ownership changes must not suspend the tree critical sections. */
-static inline PyObject *node_owner_ref(NodeObject *self) {
-    PyThread_acquire_lock(self->ownership_lock, WAIT_LOCK);
-    PyObject *handle = Py_NewRef(self->handle);
-    PyThread_release_lock(self->ownership_lock);
-    return handle;
-}
-
-static inline int node_owned_by(NodeObject *self, PyObject *handle) {
-    PyThread_acquire_lock(self->ownership_lock, WAIT_LOCK);
-    int same = self->handle == handle;
-    PyThread_release_lock(self->ownership_lock);
-    return same;
-}
-
-typedef struct {
-    PyCriticalSection2 section;
-    PyObject *first;
-    PyObject *second;
-} node_guard;
-
-static inline void node_guard_begin(node_guard *guard, NodeObject *first, NodeObject *second) {
-    if (second == NULL) {
-        second = first;
-    }
-    for (;;) {
-        guard->first = node_owner_ref(first);
-        guard->second = node_owner_ref(second);
-        PyCriticalSection2_Begin(&guard->section, guard->first, guard->second);
-        if (node_owned_by(first, guard->first) && node_owned_by(second, guard->second)) {
-            return;
-        }
-        PyCriticalSection2_End(&guard->section);
-        Py_DECREF(guard->first);
-        Py_DECREF(guard->second);
-    }
-}
-
-static inline void node_guard_begin_with_handle(node_guard *guard, PyObject *handle, NodeObject *node) {
-    guard->first = Py_NewRef(handle);
-    for (;;) {
-        guard->second = node_owner_ref(node);
-        PyCriticalSection2_Begin(&guard->section, guard->first, guard->second);
-        if (node_owned_by(node, guard->second)) {
-            return;
-        }
-        PyCriticalSection2_End(&guard->section);
-        Py_DECREF(guard->second);
-    }
-}
-
-static inline void node_guard_end(node_guard *guard) {
-    PyCriticalSection2_End(&guard->section);
-    Py_DECREF(guard->first);
-    Py_DECREF(guard->second);
-}
-
-#define TH_NODE_API(storage, result_type, name, parameters, arguments, body_parameters, owner, other)                  \
-    static result_type name##_guarded_body body_parameters;                                                            \
-    storage result_type name parameters {                                                                              \
-        node_guard guard;                                                                                              \
-        node_guard_begin(&guard, owner, other);                                                                        \
-        result_type result = name##_guarded_body arguments;                                                            \
-        node_guard_end(&guard);                                                                                        \
-        return result;                                                                                                 \
-    }                                                                                                                  \
-    static result_type name##_guarded_body body_parameters
-#else
-static inline PyObject *node_owner_ref(NodeObject *self) {
-    return Py_NewRef(self->handle);
-}
-static inline int node_owned_by(NodeObject *self, PyObject *handle) {
-    return self->handle == handle;
-}
-#define TH_NODE_API(storage, result_type, name, parameters, arguments, body_parameters, owner, other)                  \
-    storage result_type name body_parameters
-#endif
 
 static inline node_binding_overflow *node_overflow_slot(HandleObject *handle, th_node *node) {
     size_t slot = hash_override_slot(node, handle->binding_overflow_mask);
@@ -583,10 +495,6 @@ static inline PyObject *node_wrap(module_state *state, PyObject *handle, th_node
     result = node_wrap_locked(state, handle, node);
     Py_END_CRITICAL_SECTION();
     return result;
-}
-
-static inline int is_node(PyObject *obj, module_state *state) {
-    return PyObject_TypeCheck(obj, (PyTypeObject *)state->node_type);
 }
 
 static inline th_node *preorder_next(th_node *current, th_node *root) {

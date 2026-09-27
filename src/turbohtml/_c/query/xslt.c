@@ -5205,7 +5205,11 @@ static th_node *stylesheet_root(th_node *node) {
     return NULL; /* GCOVR_EXCL_LINE: an XML document always has a root element */
 }
 
-static PyObject *stylesheet_import_hrefs(PyObject *module, PyObject *stylesheet, PyObject *base, int allow_imports) {
+TH_NODE_API(static, PyObject *, stylesheet_import_hrefs,
+            (PyObject * module, PyObject *stylesheet, PyObject *base, int allow_imports),
+            (module, stylesheet, base, allow_imports),
+            (PyObject * module, PyObject *stylesheet, PyObject *base, int allow_imports),
+            is_node(stylesheet, PyModule_GetState(module)) ? (NodeObject *)stylesheet : NULL, NULL) {
     PyObject *hrefs = PyList_New(0);
     if (hrefs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         return NULL;     /* GCOVR_EXCL_LINE */
@@ -6003,7 +6007,8 @@ static int copy_imports(PyObject *module, xslt_compiled *compiled, PyObject *imp
     return 0;
 }
 
-PyObject *turbohtml_xslt_compile(PyObject *module, PyObject *args) {
+TH_NODE_API(, PyObject *, turbohtml_xslt_compile, (PyObject * module, PyObject *args), (module, args),
+            (PyObject * module, PyObject *args), node_argument(PyModule_GetState(module), args, NULL, 0, NULL), NULL) {
     PyObject *stylesheet_obj;
     PyObject *imports_obj = Py_None;
     /* The typed facade fixes this private signature. */
@@ -6073,7 +6078,8 @@ PyObject *turbohtml_xslt_compile(PyObject *module, PyObject *args) {
     return capsule;
 }
 
-PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
+TH_NODE_API(, PyObject *, turbohtml_xslt_transform, (PyObject * module, PyObject *args), (module, args),
+            (PyObject * module, PyObject *args), node_argument(PyModule_GetState(module), args, NULL, 1, NULL), NULL) {
     PyObject *compiled_obj;
     PyObject *source_obj;
     PyObject *params = Py_None;

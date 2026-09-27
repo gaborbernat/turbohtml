@@ -29,7 +29,7 @@ from turbohtml.build import E
 from turbohtml.query import Query, SelectorSyntaxError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from turbohtml import Document
 
@@ -69,6 +69,18 @@ def test_call_is_find() -> None:
 
 def test_find_collects_across_the_set_in_document_order() -> None:
     assert [e.text for e in Query(_DOC)("li")] == ["a", "b", "c"]
+
+
+def test_construct_deduplicates_a_node_adopted_during_iteration() -> None:
+    node: Final = Element("b")
+    destination: Final = Element("main")
+
+    def nodes() -> Iterator[Element]:
+        yield node
+        destination.append(node)
+        yield node
+
+    assert list(Query(nodes())) == [node]
 
 
 def test_find_across_multiple_nodes_deduplicates() -> None:

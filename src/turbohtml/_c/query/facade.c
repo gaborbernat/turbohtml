@@ -14,7 +14,9 @@
 #include <string.h>
 
 /* Borrow the node behind one Element wrapper, rejecting anything else. */
-static th_node *facade_node(PyObject *module, PyObject *element) {
+TH_NODE_API(static, th_node *, facade_node, (PyObject * module, PyObject *element), (module, element),
+            (PyObject * module, PyObject *element),
+            is_node(element, PyModule_GetState(module)) ? (NodeObject *)element : NULL, NULL) {
     th_tree *tree;
     th_node *node;
     if (turbohtml_node_borrow(module, element, &tree, &node) < 0) {
@@ -23,16 +25,9 @@ static th_node *facade_node(PyObject *module, PyObject *element) {
     return node;
 }
 
-/* Append `element` to `out` when its node has not been seen, recording it in `seen`. A fresh wrapper is handed out on
-   each tree access, so two wrappers of one node are distinct objects; the node address is the identity. */
-static int facade_keep_new(PyObject *out, PyObject *seen, PyObject *element, th_node *node) {
-    PyObject *address = PyLong_FromVoidPtr(node);
-    if (address == NULL) { /* GCOVR_EXCL_BR_LINE: integer allocation cannot be forced to fail */
-        return -1;         /* GCOVR_EXCL_LINE */
-    }
+static int facade_keep_new(PyObject *out, PyObject *seen, PyObject *element) {
     Py_ssize_t before = PySet_GET_SIZE(seen);
-    int added = PySet_Add(seen, address);
-    Py_DECREF(address);
+    int added = PySet_Add(seen, element);
     /* GCOVR_EXCL_BR_START: set insertion only fails on allocation failure */
     if (added < 0) {
         return -1; /* GCOVR_EXCL_LINE */
@@ -64,7 +59,7 @@ PyObject *turbohtml_query_unique(PyObject *module, PyObject *elements) {
     int status = 0;
     while (status == 0 && (element = PyIter_Next(iterator)) != NULL) {
         th_node *node = facade_node(module, element);
-        status = node == NULL ? -1 : facade_keep_new(out, seen, element, node);
+        status = node == NULL ? -1 : facade_keep_new(out, seen, element);
         Py_DECREF(element);
     }
     Py_DECREF(iterator);
@@ -109,8 +104,8 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
             break;
         }
 #ifdef Py_GIL_DISABLED
-        PyObject *handle = turbohtml_node_handle(owner);
-        Py_BEGIN_CRITICAL_SECTION(handle);
+        node_guard guard;
+        node_guard_begin(&guard, (NodeObject *)owner, NULL);
         do {
             node = ((NodeObject *)owner)->node;
 #endif
@@ -154,7 +149,7 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
 #ifndef Py_GIL_DISABLED
                 status = PyList_Append(out, wrapper); /* GCOVR_EXCL_BR_LINE: allocation failure */
 #else
-            status = facade_keep_new(out, seen, wrapper, sibling);
+            status = facade_keep_new(out, seen, wrapper);
 #endif
                 Py_DECREF(wrapper);
                 if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
@@ -166,7 +161,7 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
             }
 #ifdef Py_GIL_DISABLED
         } while (0);
-        Py_END_CRITICAL_SECTION();
+        node_guard_end(&guard);
         if (status < 0) {
             break;
         }
@@ -216,8 +211,8 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
             break;
         }
 #ifdef Py_GIL_DISABLED
-        PyObject *handle = turbohtml_node_handle(owner);
-        Py_BEGIN_CRITICAL_SECTION(handle);
+        node_guard guard;
+        node_guard_begin(&guard, (NodeObject *)owner, NULL);
         do {
             node = ((NodeObject *)owner)->node;
 #endif
@@ -243,7 +238,7 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
 #ifndef Py_GIL_DISABLED
             status = PyList_Append(out, wrapper); /* GCOVR_EXCL_BR_LINE: allocation failure */
 #else
-        status = facade_keep_new(out, seen, wrapper, parent);
+        status = facade_keep_new(out, seen, wrapper);
 #endif
             Py_DECREF(wrapper);
             if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
@@ -251,7 +246,7 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
             }
 #ifdef Py_GIL_DISABLED
         } while (0);
-        Py_END_CRITICAL_SECTION();
+        node_guard_end(&guard);
         if (status < 0) {
             break;
         }
@@ -289,8 +284,8 @@ PyObject *turbohtml_query_children(PyObject *module, PyObject *args) {
             break;
         }
 #ifdef Py_GIL_DISABLED
-        PyObject *handle = turbohtml_node_handle(owner);
-        Py_BEGIN_CRITICAL_SECTION(handle);
+        node_guard guard;
+        node_guard_begin(&guard, (NodeObject *)owner, NULL);
         do {
             node = ((NodeObject *)owner)->node;
 #endif
@@ -311,7 +306,7 @@ PyObject *turbohtml_query_children(PyObject *module, PyObject *args) {
             }
 #ifdef Py_GIL_DISABLED
         } while (0);
-        Py_END_CRITICAL_SECTION();
+        node_guard_end(&guard);
 #endif
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: wrapper or list allocation failure */
             break;        /* GCOVR_EXCL_LINE */
@@ -379,7 +374,7 @@ PyObject *turbohtml_query_closest(PyObject *module, PyObject *args) {
             break;
         }
         if (found != Py_None) {
-            status = facade_keep_new(out, seen, found, facade_node(module, found));
+            status = facade_keep_new(out, seen, found);
         }
         Py_DECREF(found);
 #endif
