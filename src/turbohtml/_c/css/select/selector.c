@@ -1310,17 +1310,30 @@ static int sel_nth_of_index(th_node *node, int from_end, const sel_simple *simpl
     return index;
 }
 
-/* Query walks advance through siblings, so the previous position avoids recounting their shared prefix. */
+/* Recounting sibling positions makes wide-tree traversal quadratic. */
 static int sel_nth_index(th_node *node, int from_end, int of_type, const sel_simple *simple, const sel_ctx *ctx) {
     if (simple->sub != NULL && !sel_matches_alts(node, simple->sub, simple->sub_count, ctx)) {
         return 0;
     }
     if (ctx->nth_memo != NULL) {
         const sel_nth_memo previous = *ctx->nth_memo;
-        if (previous.simple == simple && previous.scope == ctx->scope &&
+        if (previous.simple == simple && (simple->sub == NULL || previous.scope == ctx->scope) &&
             (!of_type || sel_same_type(previous.node, node))) {
-            if (previous.node == node->prev_sibling) {
+            th_node *before = node->prev_sibling;
+            while (before != NULL && before->type != TH_NODE_ELEMENT) {
+                before = before->prev_sibling;
+            }
+            if (previous.node == before) {
                 const int index = previous.index + (from_end ? -1 : 1);
+                *ctx->nth_memo = (sel_nth_memo){node, ctx->scope, simple, index};
+                return index;
+            }
+            th_node *after = node->next_sibling;
+            while (after != NULL && after->type != TH_NODE_ELEMENT) {
+                after = after->next_sibling;
+            }
+            if (previous.node == after) {
+                const int index = previous.index + (from_end ? 1 : -1);
                 *ctx->nth_memo = (sel_nth_memo){node, ctx->scope, simple, index};
                 return index;
             }
