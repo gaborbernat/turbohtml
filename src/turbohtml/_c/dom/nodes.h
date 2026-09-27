@@ -161,13 +161,16 @@ static inline int handle_add_hash_override(HandleObject *handle, th_node *node, 
 typedef struct NodeObject {
     PyObject_HEAD PyObject *handle; /* _TreeHandle keeping tree + source alive */
     th_node *node;
+#ifdef Py_GIL_DISABLED
     struct NodeObject *previous_binding;
     struct NodeObject *next_binding;
+#endif
 } NodeObject;
 
 static inline void node_bind(NodeObject *self, PyObject *handle, th_node *node) {
     self->handle = Py_NewRef(handle);
     self->node = node;
+#ifdef Py_GIL_DISABLED
     Py_BEGIN_CRITICAL_SECTION(handle);
     self->previous_binding = NULL;
     self->next_binding = node->bindings;
@@ -176,9 +179,13 @@ static inline void node_bind(NodeObject *self, PyObject *handle, th_node *node) 
     }
     node->bindings = self;
     Py_END_CRITICAL_SECTION();
+#else
+    node->bindings = self;
+#endif
 }
 
 static inline void node_unbind(NodeObject *self) {
+#ifdef Py_GIL_DISABLED
     Py_BEGIN_CRITICAL_SECTION(self->handle);
     if (self->previous_binding != NULL) {
         self->previous_binding->next_binding = self->next_binding;
@@ -189,6 +196,9 @@ static inline void node_unbind(NodeObject *self) {
         self->next_binding->previous_binding = self->previous_binding;
     }
     Py_END_CRITICAL_SECTION();
+#else
+    self->node->bindings = NULL;
+#endif
     Py_DECREF(self->handle);
 }
 
@@ -236,7 +246,9 @@ typedef struct {
     Py_ssize_t indent_len;
 } SerializeIterObject;
 
-typedef NodeObject AttrsObject;
+typedef struct {
+    PyObject_HEAD NodeObject *owner;
+} AttrsObject;
 
 /* The serialize(minify=...) options object: four independent round-trip-safe markup
    transforms plus an opt-in inline-<script> JS pass and an opt-in <style>/style="" CSS
@@ -305,11 +317,14 @@ static inline PyObject *str_from_accessor(Py_UCS4 *(*accessor)(th_tree *, th_nod
 }
 
 static inline PyObject *type_for_node(module_state *state, const th_node *node) {
+    if (node->type == TH_NODE_ELEMENT) {
+        return state->element_type;
+    }
     switch ((enum th_node_type)node->type) { /* GCOVR_EXCL_BR_LINE: node types are exhaustive */
     case TH_NODE_DOCUMENT:
         return state->document_type;
     case TH_NODE_ELEMENT:
-        return state->element_type;
+        break; /* GCOVR_EXCL_LINE: handled before the switch */
     case TH_NODE_TEXT:
         return state->text_type;
     case TH_NODE_COMMENT:
@@ -330,6 +345,11 @@ static inline PyObject *node_wrap(module_state *state, PyObject *handle, th_node
     if (node == NULL) {
         Py_RETURN_NONE;
     }
+#ifndef Py_GIL_DISABLED
+    if (node->bindings != NULL) {
+        return Py_NewRef((PyObject *)node->bindings);
+    }
+#endif
     PyTypeObject *type = (PyTypeObject *)type_for_node(state, node);
     NodeObject *self;
 #ifndef Py_GIL_DISABLED

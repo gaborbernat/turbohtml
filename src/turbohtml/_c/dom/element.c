@@ -42,44 +42,46 @@ char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len) {
 
 /* The live mutable view of an element's attributes: a mapping name -> value over
    the node's own attribute array, so reads and edits go straight to the tree. */
-static PyObject *attrs_new(module_state *state, PyObject *handle, th_node *node) {
+static PyObject *attrs_new(module_state *state, NodeObject *owner) {
     PyTypeObject *type = (PyTypeObject *)state->attrs_type;
     AttrsObject *self = (AttrsObject *)type->tp_alloc(type, 0);
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    node_bind(self, handle, node);
+    self->owner = (NodeObject *)Py_NewRef((PyObject *)owner);
     return (PyObject *)self;
 }
 
 static void attrs_dealloc(PyObject *self) {
     PyTypeObject *type = Py_TYPE(self);
-    node_unbind((NodeObject *)self);
+    Py_DECREF(((AttrsObject *)self)->owner);
     type->tp_free(self);
     Py_DECREF(type);
 }
 
 static Py_ssize_t attrs_length(PyObject *self) {
     Py_ssize_t count;
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
-    count = ((AttrsObject *)self)->node->attr_count;
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
+    count = owner->node->attr_count;
     Py_END_CRITICAL_SECTION();
     return count;
 }
 
 static PyObject *attrs_subscript(PyObject *self, PyObject *key) {
     Py_ssize_t len;
-    char *name = attr_key_utf8(tree_of(self), key, &len);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    char *name = attr_key_utf8(tree_of((PyObject *)owner), key, &len);
     if (name == NULL) {
         return NULL;
     }
-    th_node *node = ((AttrsObject *)self)->node;
+    th_node *node = owner->node;
     Py_ssize_t index;
     PyObject *result = NULL;
     /* hold the per-tree lock across the lookup and the value read so a concurrent attr
        set/del cannot resize the attribute array between them (a no-op on the GIL build) */
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
-    index = find_attr_index(tree_of(self), node, name, len);
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
+    index = find_attr_index(tree_of((PyObject *)owner), node, name, len);
     if (index >= 0) {
         result = attr_value_obj(&node->attrs[index]);
     }
@@ -93,8 +95,9 @@ static PyObject *attrs_subscript(PyObject *self, PyObject *key) {
 }
 
 static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
-    th_node *node = ((AttrsObject *)self)->node;
-    th_tree *tree = tree_of(self);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    th_node *node = owner->node;
+    th_tree *tree = tree_of((PyObject *)owner);
     if (value == NULL) {
         Py_ssize_t len;
         char *name = attr_key_utf8(tree, key, &len);
@@ -102,7 +105,7 @@ static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
             return -1;
         }
         int removed;
-        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+        Py_BEGIN_CRITICAL_SECTION(owner->handle);
         removed = th_node_attr_del(tree, node, name, len);
         Py_END_CRITICAL_SECTION();
         PyMem_Free(name);
@@ -130,7 +133,7 @@ static int attrs_ass_subscript(PyObject *self, PyObject *key, PyObject *value) {
     int bad = element_attr_value(value, &points, &value_len, &has_value) < 0;
     int rc = -1;
     if (!bad) {
-        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+        Py_BEGIN_CRITICAL_SECTION(owner->handle);
         rc = th_node_attr_set(tree, node, name, len, points, value_len, has_value);
         Py_END_CRITICAL_SECTION();
     }
@@ -146,23 +149,25 @@ static int attrs_contains(PyObject *self, PyObject *key) {
         return 0; /* a non-str key is never an attribute name */
     }
     Py_ssize_t len;
-    char *name = attr_key_utf8(tree_of(self), key, &len);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    char *name = attr_key_utf8(tree_of((PyObject *)owner), key, &len);
     if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here, so this cannot fail */
         return -1;      /* GCOVR_EXCL_LINE: unreachable */
     }
     Py_ssize_t index;
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
-    index = find_attr_index(tree_of(self), ((AttrsObject *)self)->node, name, len);
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
+    index = find_attr_index(tree_of((PyObject *)owner), owner->node, name, len);
     Py_END_CRITICAL_SECTION();
     PyMem_Free(name);
     return index >= 0;
 }
 
 static PyObject *attrs_iter(PyObject *self) {
-    th_node *node = ((AttrsObject *)self)->node;
-    th_tree *tree = tree_of(self);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    th_node *node = owner->node;
+    th_tree *tree = tree_of((PyObject *)owner);
     PyObject *names;
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
     names = PyList_New(node->attr_count);
     if (names != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
@@ -188,10 +193,11 @@ enum attrs_view { ATTRS_KEYS, ATTRS_VALUES, ATTRS_ITEMS };
 
 /* Materialize the attribute names, values, or (name, value) pairs as a list. */
 static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
-    th_node *node = ((AttrsObject *)self)->node;
-    th_tree *tree = tree_of(self);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    th_node *node = owner->node;
+    th_tree *tree = tree_of((PyObject *)owner);
     PyObject *out;
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
     out = PyList_New(node->attr_count);
     if (out != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         for (Py_ssize_t index = 0; index < node->attr_count; index++) {
@@ -253,15 +259,16 @@ static PyObject *attrs_get(PyObject *self, PyObject *args) {
     }
     if (PyUnicode_Check(key)) {
         Py_ssize_t len;
-        char *name = attr_key_utf8(tree_of(self), key, &len);
+        NodeObject *owner = ((AttrsObject *)self)->owner;
+        char *name = attr_key_utf8(tree_of((PyObject *)owner), key, &len);
         if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here */
             return NULL;    /* GCOVR_EXCL_LINE: unreachable */
         }
-        th_node *node = ((AttrsObject *)self)->node;
+        th_node *node = owner->node;
         Py_ssize_t index;
         PyObject *result = NULL;
-        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
-        index = find_attr_index(tree_of(self), node, name, len);
+        Py_BEGIN_CRITICAL_SECTION(owner->handle);
+        index = find_attr_index(tree_of((PyObject *)owner), node, name, len);
         if (index >= 0) {
             result = attr_value_obj(&node->attrs[index]);
         }
@@ -317,16 +324,17 @@ static PyObject *attrs_pop(PyObject *self, PyObject *args) {
     PyObject *result = NULL;
     if (PyUnicode_Check(key)) {
         Py_ssize_t len;
-        char *name = attr_key_utf8(tree_of(self), key, &len);
+        NodeObject *owner = ((AttrsObject *)self)->owner;
+        char *name = attr_key_utf8(tree_of((PyObject *)owner), key, &len);
         if (name == NULL) { /* GCOVR_EXCL_BR_LINE: key is a str here */
             return NULL;    /* GCOVR_EXCL_LINE: unreachable */
         }
-        th_node *node = ((AttrsObject *)self)->node;
+        th_node *node = owner->node;
         /* one critical section, so another thread cannot remove the attribute between the read and the delete */
-        Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
-        Py_ssize_t index = find_attr_index(tree_of(self), node, name, len);
+        Py_BEGIN_CRITICAL_SECTION(owner->handle);
+        Py_ssize_t index = find_attr_index(tree_of((PyObject *)owner), node, name, len);
         if (index >= 0) {
-            result = attrs_take(tree_of(self), node, index);
+            result = attrs_take(tree_of((PyObject *)owner), node, index);
         }
         Py_END_CRITICAL_SECTION();
         PyMem_Free(name);
@@ -342,11 +350,12 @@ static PyObject *attrs_pop(PyObject *self, PyObject *args) {
 }
 
 static PyObject *attrs_popitem(PyObject *self, PyObject *Py_UNUSED(ignored)) {
-    th_node *node = ((AttrsObject *)self)->node;
-    th_tree *tree = tree_of(self);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    th_node *node = owner->node;
+    th_tree *tree = tree_of((PyObject *)owner);
     PyObject *name = NULL;
     PyObject *value = NULL;
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
     if (node->attr_count > 0) {
         Py_ssize_t last = node->attr_count - 1;
         name = attr_name_obj(tree, &node->attrs[last]);
@@ -364,9 +373,10 @@ static PyObject *attrs_popitem(PyObject *self, PyObject *Py_UNUSED(ignored)) {
 }
 
 static PyObject *attrs_clear(PyObject *self, PyObject *Py_UNUSED(ignored)) {
-    th_node *node = ((AttrsObject *)self)->node;
-    th_tree *tree = tree_of(self);
-    Py_BEGIN_CRITICAL_SECTION(((AttrsObject *)self)->handle);
+    NodeObject *owner = ((AttrsObject *)self)->owner;
+    th_node *node = owner->node;
+    th_tree *tree = tree_of((PyObject *)owner);
+    Py_BEGIN_CRITICAL_SECTION(owner->handle);
     while (node->attr_count > 0) {
         Py_ssize_t name_len;
         const char *name = th_attr_name(tree, node->attrs[node->attr_count - 1].name_atom, &name_len);
@@ -528,7 +538,7 @@ static PyObject *element_get_namespace(PyObject *self, void *Py_UNUSED(closure))
 }
 
 PyObject *element_get_attrs(PyObject *self, void *Py_UNUSED(closure)) {
-    return attrs_new(state_of(self), ((NodeObject *)self)->handle, ((NodeObject *)self)->node);
+    return attrs_new(state_of(self), (NodeObject *)self);
 }
 
 static int element_set_text(PyObject *self, PyObject *value, void *closure);
@@ -2319,7 +2329,12 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
     do {
         dest->bindings = source->bindings;
         source->bindings = NULL;
+#ifdef Py_GIL_DISABLED
         for (NodeObject *binding = dest->bindings; binding != NULL; binding = binding->next_binding) {
+#else
+        if (dest->bindings != NULL) {
+            NodeObject *binding = dest->bindings;
+#endif
             binding->node = dest;
             Py_SETREF(binding->handle, Py_NewRef(dest_handle));
         }
