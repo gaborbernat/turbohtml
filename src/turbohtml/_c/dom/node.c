@@ -255,7 +255,11 @@ static PyObject *walker_next(PyObject *self) {
     if (node == NULL) {
         return NULL;
     }
+#ifndef Py_GIL_DISABLED
+    return node_wrap(((HandleObject *)walker->handle)->state, walker->handle, node);
+#else
     return node_wrap(state_of(self), walker->handle, node);
+#endif
 }
 
 static PyType_Slot walker_slots[] = {
