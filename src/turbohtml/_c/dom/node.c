@@ -76,6 +76,24 @@ static void node_dealloc(PyObject *self) {
     Py_DECREF(type);
 }
 
+node_binding_overflow *node_overflow_slot(HandleObject *handle, th_node *node) {
+    size_t slot = hash_override_slot(node, handle->binding_overflow_mask);
+    while (handle->binding_overflow[slot].node != NULL && handle->binding_overflow[slot].node != node) {
+        slot = (slot + 1) & handle->binding_overflow_mask;
+    }
+    return &handle->binding_overflow[slot];
+}
+
+void node_free_binding(HandleObject *handle, th_node *node) {
+    if (node->binding_id == UINT16_MAX) {
+        node_overflow_slot(handle, node)->binding = NULL;
+    } else {
+        handle->bindings[node->binding_id].next = handle->binding_free;
+        handle->binding_free = node->binding_id;
+    }
+    node->binding_id = 0;
+}
+
 NodeObject **node_grow_bindings(HandleObject *handle, th_node *node) {
     if (handle->binding_next != UINT16_MAX) {
         size_t capacity = (size_t)handle->binding_capacity * 2;

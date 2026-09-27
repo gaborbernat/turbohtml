@@ -177,13 +177,8 @@ static inline int handle_add_hash_override(HandleObject *handle, th_node *node, 
     return 0;
 }
 
-static inline node_binding_overflow *node_overflow_slot(HandleObject *handle, th_node *node) {
-    size_t slot = hash_override_slot(node, handle->binding_overflow_mask);
-    while (handle->binding_overflow[slot].node != NULL && handle->binding_overflow[slot].node != node) {
-        slot = (slot + 1) & handle->binding_overflow_mask;
-    }
-    return &handle->binding_overflow[slot];
-}
+node_binding_overflow *node_overflow_slot(HandleObject *handle, th_node *node);
+void node_free_binding(HandleObject *handle, th_node *node);
 
 static inline NodeObject **node_binding_pointer(HandleObject *handle, th_node *node) {
     if (node->binding_id == UINT16_MAX) {
@@ -227,13 +222,7 @@ static inline void node_release_binding(HandleObject *handle, th_node *node) {
         return;
     }
 #endif
-    if (node->binding_id == UINT16_MAX) {
-        node_overflow_slot(handle, node)->binding = NULL;
-    } else {
-        handle->bindings[node->binding_id].next = handle->binding_free;
-        handle->binding_free = node->binding_id;
-    }
-    node->binding_id = 0;
+    node_free_binding(handle, node);
 }
 
 static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node, NodeObject **binding) {
