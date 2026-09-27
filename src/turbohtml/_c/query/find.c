@@ -897,7 +897,9 @@ static PyObject *find_with_text(PyObject *self, const query_t *query, int want_a
     return node_wrap(state, handle, found);
 }
 
-PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
+TH_NODE_API(, PyObject *, node_find, (PyObject * self, PyObject *args, PyObject *kwargs), (self, args, kwargs),
+            (PyObject * self, PyObject *args, PyObject *kwargs), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     query_t query;
     if (build_query(self, args, kwargs, 0, &query) < 0) {
         free_query(&query);
@@ -966,7 +968,9 @@ PyObject *node_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     return node_wrap(state, ((NodeObject *)self)->handle, found);
 }
 
-PyObject *node_find_all(PyObject *self, PyObject *args, PyObject *kwargs) {
+TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObject *kwargs), (self, args, kwargs),
+            (PyObject * self, PyObject *args, PyObject *kwargs), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     query_t query;
     if (build_query(self, args, kwargs, 1, &query) < 0) {
         free_query(&query);

@@ -112,6 +112,7 @@ struct th_node {
     uint16_t atom;               /* TH_TAG_* for elements, else TH_TAG_UNKNOWN */
     uint8_t tag_flags;           /* category bitmask from the atom table */
     uint8_t ns;                  /* enum th_ns: HTML / SVG / MathML */
+    uint16_t binding_id;
     th_node *parent;
     th_node *first_child;
     th_node *last_child;
@@ -120,7 +121,6 @@ struct th_node {
     /* element: tag name; text/comment: payload; doctype: name */
     Py_UCS4 *text;
     Py_ssize_t text_len;
-    void *bindings; /* live Python views, relocated together when this node is adopted */
     th_node_attr *attrs;
     Py_ssize_t attr_count;
 };

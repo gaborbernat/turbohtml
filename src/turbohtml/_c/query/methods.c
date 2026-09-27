@@ -210,7 +210,8 @@ retry:;
     return out;
 }
 
-PyObject *node_select(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_select, (PyObject * self, PyObject *arg), (self, arg), (PyObject * self, PyObject *arg),
+            (NodeObject *)self, arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     return select_limited(self, arg, 0);
 }
 
@@ -271,13 +272,13 @@ PyObject *turbohtml_matches_many(PyObject *module, PyObject *args) {
         }
         NodeObject *anchor = (NodeObject *)item;
         Py_ssize_t index = first;
-        PyObject *handle = Py_NewRef(anchor->handle);
+        PyObject *handle = node_owner_ref(anchor);
         int moved = 0;
         Py_BEGIN_CRITICAL_SECTION(handle);
         sel_compiled *compiled = cached_compile(state->selector_error, (HandleObject *)handle, selector);
         if (compiled == NULL) {
             error = 1;
-        } else if (anchor->handle != handle) {
+        } else if (!node_owned_by(anchor, handle)) {
             moved = 1;
         } else {
             for (; index < count; index++) {
@@ -288,7 +289,7 @@ PyObject *turbohtml_matches_many(PyObject *module, PyObject *args) {
                     break;
                 }
                 NodeObject *candidate = (NodeObject *)item;
-                if (candidate->handle != anchor->handle) {
+                if (!node_owned_by(candidate, handle)) {
                     break;
                 }
                 int matched = selector_matches(candidate->node, compiled, candidate->node);
@@ -435,13 +436,13 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
             continue;
         }
         NodeObject *anchor = roots[first].node;
-        PyObject *handle = Py_NewRef(anchor->handle);
+        PyObject *handle = node_owner_ref(anchor);
         int moved = 0;
         Py_BEGIN_CRITICAL_SECTION(handle);
         sel_compiled *compiled = cached_compile(state->selector_error, (HandleObject *)handle, selector);
         if (compiled == NULL) {
             error = 1;
-        } else if (anchor->handle != handle) {
+        } else if (!node_owned_by(anchor, handle)) {
             moved = 1;
         } else {
             th_node_map tops = {0};
@@ -451,7 +452,7 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
             for (Py_ssize_t index = first; index < count;
                  index = handles == NULL ? index + 1 : roots[index].next_handle) {
                 NodeObject *candidate = roots[index].node;
-                if (roots[index].processed || candidate->handle != anchor->handle) {
+                if (roots[index].processed || !node_owned_by(candidate, handle)) {
                     continue;
                 }
                 th_node *top = node_root(candidate->node);
@@ -543,7 +544,9 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     return out;
 }
 
-PyObject *node_select_one(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_select_one, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), (NodeObject *)self,
+            arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
     }
@@ -729,7 +732,9 @@ static int regex_attr_name(th_tree *tree, PyObject *attr_obj, char **name, Py_ss
     return *name == NULL ? -1 : 0;
 }
 
-PyObject *node_re(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, node_re, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     static char *kw[] = {"", "attr", NULL};
     PyObject *pattern;
     PyObject *attr_obj = NULL;
@@ -765,7 +770,9 @@ PyObject *node_re(PyObject *self, PyObject *args, PyObject *kwds) {
     return result;
 }
 
-PyObject *node_re_first(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, node_re_first, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     static char *kw[] = {"", "default", "attr", NULL};
     PyObject *pattern;
     PyObject *fallback = Py_None;
@@ -1487,11 +1494,15 @@ static PyObject *xpath_eval_with_vars(PyObject *self, PyObject *args, PyObject *
     return result;
 }
 
-PyObject *node_xpath(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, node_xpath, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     return xpath_eval_with_vars(self, args, kwds, "xpath");
 }
 
-PyObject *node_xpath_iter(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, node_xpath_iter, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     PyObject *value = xpath_eval_with_vars(self, args, kwds, "xpath_iter");
     if (value == NULL) {
         return NULL;
@@ -1510,7 +1521,9 @@ PyObject *node_xpath_iter(PyObject *self, PyObject *args, PyObject *kwds) {
     return iterator;
 }
 
-PyObject *node_xpath_one(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, node_xpath_one, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     PyObject *value = xpath_eval_with_vars(self, args, kwds, "xpath_one");
     if (value == NULL) {
         return NULL;
@@ -1668,7 +1681,9 @@ PyType_Spec xpath_compiled_spec = {
     .slots = xpath_compiled_slots,
 };
 
-PyObject *node_css_matches(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_css_matches, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), (NodeObject *)self,
+            arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
     }
@@ -1699,7 +1714,9 @@ retry:;
     return PyBool_FromLong(matched);
 }
 
-PyObject *node_css_closest(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_css_closest, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), (NodeObject *)self,
+            arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     th_node *found;
     if (node_css_closest_borrowed(self, arg, &found) < 0) {
         return NULL;
@@ -1839,7 +1856,8 @@ static th_node *subtree_after(th_node *node, th_node *root) {
     return NULL;
 }
 
-PyObject *node_prune(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_prune, (PyObject * self, PyObject *arg), (self, arg), (PyObject * self, PyObject *arg),
+            (NodeObject *)self, arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
     }
@@ -1989,7 +2007,8 @@ static int snapshot_matches(sel_compiled *compiled, th_node *origin, node_snapsh
     return result;
 }
 
-PyObject *node_remove(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_remove, (PyObject * self, PyObject *arg), (self, arg), (PyObject * self, PyObject *arg),
+            (NodeObject *)self, arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
     }
@@ -2030,7 +2049,9 @@ retry:;
     return Py_NewRef(self);
 }
 
-PyObject *node_strip_tags(PyObject *self, PyObject *arg) {
+TH_NODE_API(, PyObject *, node_strip_tags, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), (NodeObject *)self,
+            arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     if (check_selector_arg(arg) < 0) {
         return NULL;
     }

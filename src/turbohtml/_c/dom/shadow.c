@@ -376,7 +376,9 @@ static PyObject *nodevec_to_list(nodevec *vec, module_state *state, PyObject *ha
     return list;
 }
 
-PyObject *element_attach_shadow(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, element_attach_shadow, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     static char *keywords[] = {"mode", NULL};
     PyObject *mode_obj = NULL;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|U:attach_shadow", keywords, &mode_obj)) {
@@ -417,7 +419,8 @@ PyObject *element_attach_shadow(PyObject *self, PyObject *args, PyObject *kwds) 
     return result;
 }
 
-PyObject *element_get_shadow_root(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(, PyObject *, element_get_shadow_root, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     NodeObject *node = (NodeObject *)self;
     th_tree *tree = tree_of(self);
     th_node *root;
@@ -455,15 +458,20 @@ static PyObject *slot_assigned(PyObject *self, PyObject *args, PyObject *kwds, i
     return nodevec_to_list(&vec, state_of(self), node->handle, elements_only);
 }
 
-PyObject *element_assigned_nodes(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, element_assigned_nodes, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
+            (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     return slot_assigned(self, args, kwds, 0);
 }
 
-PyObject *element_assigned_elements(PyObject *self, PyObject *args, PyObject *kwds) {
+TH_NODE_API(, PyObject *, element_assigned_elements, (PyObject * self, PyObject *args, PyObject *kwds),
+            (self, args, kwds), (PyObject * self, PyObject *args, PyObject *kwds), (NodeObject *)self,
+            args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
     return slot_assigned(self, args, kwds, 1);
 }
 
-PyObject *node_get_assigned_slot(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(, PyObject *, node_get_assigned_slot, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     NodeObject *node = (NodeObject *)self;
     th_tree *tree = tree_of(self);
     th_node *slot = NULL;
@@ -475,7 +483,8 @@ PyObject *node_get_assigned_slot(PyObject *self, void *Py_UNUSED(closure)) {
     return node_wrap(state_of(self), node->handle, slot);
 }
 
-PyObject *node_get_flattened_children(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(, PyObject *, node_get_flattened_children, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     NodeObject *node = (NodeObject *)self;
     th_tree *tree = tree_of(self);
     nodevec vec = {0};
@@ -493,19 +502,23 @@ PyDoc_STRVAR(shadow_root_delegates_focus_doc,
 PyDoc_STRVAR(shadow_root_clonable_doc, "whether the shadow root is clonable, from a declarative shadow root's\n"
                                        "shadowrootclonable attribute (always False otherwise)");
 
-static PyObject *shadow_root_get_mode(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(static, PyObject *, shadow_root_get_mode, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     return PyUnicode_FromString(th_shadow_mode(((NodeObject *)self)->node) != 0 ? "closed" : "open");
 }
 
-static PyObject *shadow_root_get_delegates_focus(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(static, PyObject *, shadow_root_get_delegates_focus, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     return PyBool_FromLong((((NodeObject *)self)->node->tag_flags & TH_SHADOW_DELEGATES_FOCUS) != 0);
 }
 
-static PyObject *shadow_root_get_clonable(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(static, PyObject *, shadow_root_get_clonable, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     return PyBool_FromLong((((NodeObject *)self)->node->tag_flags & TH_SHADOW_CLONABLE) != 0);
 }
 
-static PyObject *shadow_root_get_host(PyObject *self, void *Py_UNUSED(closure)) {
+TH_NODE_API(static, PyObject *, shadow_root_get_host, (PyObject * self, void *closure), (self, closure),
+            (PyObject * self, void *Py_UNUSED(closure)), (NodeObject *)self, NULL) {
     NodeObject *node = (NodeObject *)self;
     th_tree *tree = tree_of(self);
     th_node *host;
@@ -530,7 +543,9 @@ PyDoc_STRVAR(shadow_root_set_inner_html_doc,
              ":param html: the markup to parse and install as the shadow content.\n"
              ":raises TypeError: if html is not a str.");
 
-static PyObject *shadow_root_set_inner_html(PyObject *self, PyObject *html) {
+TH_NODE_API(static, PyObject *, shadow_root_set_inner_html, (PyObject * self, PyObject *html), (self, html),
+            (PyObject * self, PyObject *html), (NodeObject *)self,
+            html != NULL && is_node(html, state_of(self)) ? (NodeObject *)html : NULL) {
     if (!PyUnicode_Check(html)) {
         PyErr_SetString(PyExc_TypeError, "html must be a str");
         return NULL;
