@@ -95,6 +95,7 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
 #ifndef Py_GIL_DISABLED
     th_node_map parents = {0};
 #endif
+    module_state *state = PyModule_GetState(module);
     int status = 0;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(nodes); index++) {
         PyObject *owner = PyList_GET_ITEM(nodes, index);
@@ -139,7 +140,7 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
                 if (sibling->type != TH_NODE_ELEMENT || sibling == node) {
                     continue;
                 }
-                PyObject *wrapper = turbohtml_node_wrap_in(owner, sibling);
+                PyObject *wrapper = node_wrap_locked(state, ((NodeObject *)owner)->handle, sibling);
                 /* GCOVR_EXCL_BR_START: wrapper allocation cannot be forced to fail */
                 if (wrapper == NULL) {
                     status = -1; /* GCOVR_EXCL_LINE */
@@ -230,7 +231,7 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
                 break;                                      /* GCOVR_EXCL_LINE */
             } /* GCOVR_EXCL_LINE */
 #endif
-            PyObject *wrapper = turbohtml_node_wrap_in(owner, parent);
+            PyObject *wrapper = node_wrap_locked(PyModule_GetState(module), ((NodeObject *)owner)->handle, parent);
             if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: wrapper allocation cannot be forced to fail */
                 status = -1;       /* GCOVR_EXCL_LINE */
                 break;             /* GCOVR_EXCL_LINE */
@@ -289,11 +290,12 @@ PyObject *turbohtml_query_children(PyObject *module, PyObject *args) {
         do {
             node = ((NodeObject *)owner)->node;
 #endif
+            module_state *state = PyModule_GetState(module);
             for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
                 if (child->type != TH_NODE_ELEMENT) {
                     continue;
                 }
-                PyObject *wrapper = turbohtml_node_wrap_in(owner, child);
+                PyObject *wrapper = node_wrap_locked(state, ((NodeObject *)owner)->handle, child);
                 if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: wrapper allocation cannot be forced to fail */
                     status = -1;       /* GCOVR_EXCL_LINE */
                     break;             /* GCOVR_EXCL_LINE */

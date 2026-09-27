@@ -195,61 +195,27 @@ static inline NodeObject *node_binding(HandleObject *handle, th_node *node) {
     return node->binding_id == 0 ? NULL : *node_binding_pointer(handle, node);
 }
 
-static inline int node_reserve_binding(HandleObject *handle, th_node *node) {
+NodeObject **node_grow_bindings(HandleObject *handle, th_node *node);
+
+static inline NodeObject **node_reserve_binding(HandleObject *handle, th_node *node) {
 #ifdef Py_GIL_DISABLED
     if (node->binding_id != 0) {
-        return 0;
+        return node_binding_pointer(handle, node);
     }
 #endif
     if (handle->binding_free != 0) {
         node->binding_id = handle->binding_free;
         handle->binding_free = handle->bindings[node->binding_id].next;
-    } else if (handle->binding_next != UINT16_MAX) {
-        if (handle->binding_next == handle->binding_capacity) {
-            size_t capacity = handle->binding_capacity == 0 ? 16 : (size_t)handle->binding_capacity * 2;
-            if (capacity > UINT16_MAX) {
-                capacity = UINT16_MAX;
-            }
-            node_binding_slot *slots = PyMem_Realloc(handle->bindings, capacity * sizeof(node_binding_slot));
-            if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
-                PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
-                return -1;        /* GCOVR_EXCL_LINE */
-            }
-            handle->bindings = slots;
-            handle->binding_capacity = (uint16_t)capacity;
-            if (handle->binding_next == 0) {
-                handle->binding_next = 1;
-            }
-        }
+    } else if (handle->binding_next < handle->binding_capacity) {
         node->binding_id = handle->binding_next++;
     } else {
-        size_t capacity = handle->binding_overflow == NULL ? 0 : handle->binding_overflow_mask + 1;
-        if (handle->binding_overflow_count * 2 >= capacity) {
-            size_t grown = capacity == 0 ? 16 : capacity * 2;
-            node_binding_overflow *slots = PyMem_Calloc(grown, sizeof(node_binding_overflow));
-            if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
-                PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
-                return -1;        /* GCOVR_EXCL_LINE */
-            }
-            node_binding_overflow *old = handle->binding_overflow;
-            handle->binding_overflow = slots;
-            handle->binding_overflow_mask = grown - 1;
-            for (size_t slot = 0; slot < capacity; slot++) {
-                if (old[slot].node != NULL) {
-                    *node_overflow_slot(handle, old[slot].node) = old[slot];
-                }
-            }
-            PyMem_Free(old);
-        }
-        node_binding_overflow *slot = node_overflow_slot(handle, node);
-        if (slot->node == NULL) {
-            slot->node = node;
-            handle->binding_overflow_count++;
-        }
-        node->binding_id = UINT16_MAX;
+        return node_grow_bindings(handle, node);
     }
-    *node_binding_pointer(handle, node) = NULL;
-    return 0;
+    NodeObject **binding = &handle->bindings[node->binding_id].node;
+#ifdef Py_GIL_DISABLED
+    *binding = NULL;
+#endif
+    return binding;
 }
 
 static inline void node_release_binding(HandleObject *handle, th_node *node) {
@@ -271,7 +237,8 @@ static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node) {
         return -1;
     }
 #endif
-    if (node_reserve_binding(owner, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+    NodeObject **binding = node_reserve_binding(owner, node);
+    if (binding == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
 #ifdef Py_GIL_DISABLED
         PyThread_free_lock(self->ownership_lock);
 #endif
@@ -279,7 +246,6 @@ static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node) {
     }
     self->handle = Py_NewRef(handle);
     self->node = node;
-    NodeObject **binding = node_binding_pointer(owner, node);
 #ifdef Py_GIL_DISABLED
     self->previous_binding = NULL;
     self->next_binding = *binding;

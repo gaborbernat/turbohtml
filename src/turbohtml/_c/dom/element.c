@@ -2361,9 +2361,11 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
     th_node *dest = copy;
     do {
         if (node_binding(source_owner, source) != NULL) {
-            if (node_reserve_binding(dest_owner, dest) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                return -1;                                    /* GCOVR_EXCL_LINE */
+            NodeObject **reserved = node_reserve_binding(dest_owner, dest);
+            if (reserved == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;          /* GCOVR_EXCL_LINE */
             }
+            *reserved = NULL;
             Py_hash_t hash = handle_node_hash((HandleObject *)source_handle, source);
             if (handle_add_hash_override((HandleObject *)dest_handle, dest, hash) < 0) { /* GCOVR_EXCL_BR_LINE */
                 return -1; /* GCOVR_EXCL_LINE: allocation failure */

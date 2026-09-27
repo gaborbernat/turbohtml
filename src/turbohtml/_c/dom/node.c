@@ -76,6 +76,56 @@ static void node_dealloc(PyObject *self) {
     Py_DECREF(type);
 }
 
+NodeObject **node_grow_bindings(HandleObject *handle, th_node *node) {
+    if (handle->binding_next != UINT16_MAX) {
+        size_t capacity = handle->binding_capacity == 0 ? 16 : (size_t)handle->binding_capacity * 2;
+        if (capacity > UINT16_MAX) {
+            capacity = UINT16_MAX;
+        }
+        node_binding_slot *slots = PyMem_Realloc(handle->bindings, capacity * sizeof(node_binding_slot));
+        if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+            return NULL;      /* GCOVR_EXCL_LINE */
+        }
+        handle->bindings = slots;
+        handle->binding_capacity = (uint16_t)capacity;
+        if (handle->binding_next == 0) {
+            handle->binding_next = 1;
+        }
+        node->binding_id = handle->binding_next++;
+    } else {
+        size_t capacity = handle->binding_overflow == NULL ? 0 : handle->binding_overflow_mask + 1;
+        if (handle->binding_overflow_count * 2 >= capacity) {
+            size_t grown = capacity == 0 ? 16 : capacity * 2;
+            node_binding_overflow *slots = PyMem_Calloc(grown, sizeof(node_binding_overflow));
+            if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+                return NULL;      /* GCOVR_EXCL_LINE */
+            }
+            node_binding_overflow *old = handle->binding_overflow;
+            handle->binding_overflow = slots;
+            handle->binding_overflow_mask = grown - 1;
+            for (size_t slot = 0; slot < capacity; slot++) {
+                if (old[slot].node != NULL) {
+                    *node_overflow_slot(handle, old[slot].node) = old[slot];
+                }
+            }
+            PyMem_Free(old);
+        }
+        node_binding_overflow *slot = node_overflow_slot(handle, node);
+        if (slot->node == NULL) {
+            slot->node = node;
+            handle->binding_overflow_count++;
+        }
+        node->binding_id = UINT16_MAX;
+    }
+    NodeObject **binding = node_binding_pointer(handle, node);
+#ifdef Py_GIL_DISABLED
+    *binding = NULL;
+#endif
+    return binding;
+}
+
 TH_NODE_API(static, PyObject *, node_richcompare, (PyObject * left, PyObject *right, int op), (left, right, op),
             (PyObject * left, PyObject *right, int op), (NodeObject *)left,
             right != NULL && is_node(right, state_of(left)) ? (NodeObject *)right : NULL) {
