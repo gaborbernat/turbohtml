@@ -198,11 +198,9 @@ static inline NodeObject *node_binding(HandleObject *handle, th_node *node) {
 NodeObject **node_grow_bindings(HandleObject *handle, th_node *node);
 
 static inline NodeObject **node_reserve_binding(HandleObject *handle, th_node *node) {
-#ifdef Py_GIL_DISABLED
     if (node->binding_id != 0) {
         return node_binding_pointer(handle, node);
     }
-#endif
     if (handle->binding_free != 0) {
         node->binding_id = handle->binding_free;
         handle->binding_free = handle->bindings[node->binding_id].next;
@@ -219,6 +217,13 @@ static inline NodeObject **node_reserve_binding(HandleObject *handle, th_node *n
 }
 
 static inline void node_release_binding(HandleObject *handle, th_node *node) {
+#ifndef Py_GIL_DISABLED
+    /* Repeated walks can reuse slots without growing the retained cache beyond 8 KiB. */
+    if (node->binding_id < 1024) {
+        handle->bindings[node->binding_id].node = NULL;
+        return;
+    }
+#endif
     if (node->binding_id == UINT16_MAX) {
         node_overflow_slot(handle, node)->binding = NULL;
     } else {
