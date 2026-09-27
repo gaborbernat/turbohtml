@@ -2407,11 +2407,8 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
     return 0;
 }
 
-/* Deep-copy child into dest_handle's tree and relocate its live views. The caller holds
-   dest_handle's critical section; taking the source tree's lock as well suspends
-   that section while it waits, so another thread can edit the destination tree in
-   between and the caller must not trust tree state it read before this call.
-   NULL with MemoryError on allocation failure. */
+/* Taking the source lock can suspend the destination's critical section, so callers
+   must recheck destination tree state after importing. */
 static th_node *import_node(PyObject *dest_handle, NodeObject *child) {
     th_tree *dest_tree = ((HandleObject *)dest_handle)->tree;
 #ifdef Py_GIL_DISABLED
