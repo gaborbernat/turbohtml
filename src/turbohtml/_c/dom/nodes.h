@@ -97,6 +97,7 @@ typedef struct {
     void *path_positions;
     node_hash_overrides *hash_overrides;
     node_binding_slot *bindings;
+    node_binding_slot inline_bindings[16];
     uint16_t binding_capacity;
     uint16_t binding_next;
     uint16_t binding_free;
@@ -198,9 +199,11 @@ static inline NodeObject *node_binding(HandleObject *handle, th_node *node) {
 NodeObject **node_grow_bindings(HandleObject *handle, th_node *node);
 
 static inline NodeObject **node_reserve_binding(HandleObject *handle, th_node *node) {
+#ifdef Py_GIL_DISABLED
     if (node->binding_id != 0) {
         return node_binding_pointer(handle, node);
     }
+#endif
     if (handle->binding_free != 0) {
         node->binding_id = handle->binding_free;
         handle->binding_free = handle->bindings[node->binding_id].next;
@@ -218,8 +221,8 @@ static inline NodeObject **node_reserve_binding(HandleObject *handle, th_node *n
 
 static inline void node_release_binding(HandleObject *handle, th_node *node) {
 #ifndef Py_GIL_DISABLED
-    /* Repeated walks can reuse slots without growing the retained cache beyond 8 KiB. */
-    if (node->binding_id < 1024) {
+    /* Repeated walks can reuse slots without growing the retained cache beyond 128 KiB. */
+    if (node->binding_id < 16384) {
         handle->bindings[node->binding_id].node = NULL;
         return;
     }
@@ -233,7 +236,7 @@ static inline void node_release_binding(HandleObject *handle, th_node *node) {
     node->binding_id = 0;
 }
 
-static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node) {
+static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node, NodeObject **binding) {
     HandleObject *owner = (HandleObject *)handle;
 #ifdef Py_GIL_DISABLED
     self->ownership_lock = PyThread_allocate_lock();
@@ -242,7 +245,9 @@ static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node) {
         return -1;
     }
 #endif
-    NodeObject **binding = node_reserve_binding(owner, node);
+    if (binding == NULL) {
+        binding = node_reserve_binding(owner, node);
+    }
     if (binding == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
 #ifdef Py_GIL_DISABLED
         PyThread_free_lock(self->ownership_lock);
@@ -430,10 +435,13 @@ static inline PyObject *node_wrap_locked(module_state *state, PyObject *handle, 
     if (node == NULL) {
         Py_RETURN_NONE;
     }
+    NodeObject **binding = NULL;
 #ifndef Py_GIL_DISABLED
-    NodeObject *binding = node_binding((HandleObject *)handle, node);
-    if (binding != NULL) {
-        return Py_NewRef((PyObject *)binding);
+    if (node->binding_id != 0) {
+        binding = node_binding_pointer((HandleObject *)handle, node);
+        if (*binding != NULL) {
+            return Py_NewRef((PyObject *)*binding);
+        }
     }
 #endif
     PyTypeObject *type = (PyTypeObject *)type_for_node(state, node);
@@ -452,10 +460,10 @@ static inline PyObject *node_wrap_locked(module_state *state, PyObject *handle, 
             return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    if (node_bind(self, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        type->tp_free(self);                 /* GCOVR_EXCL_LINE */
-        Py_DECREF(type);                     /* GCOVR_EXCL_LINE */
-        return NULL;                         /* GCOVR_EXCL_LINE */
+    if (node_bind(self, handle, node, binding) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        type->tp_free(self);                          /* GCOVR_EXCL_LINE */
+        Py_DECREF(type);                              /* GCOVR_EXCL_LINE */
+        return NULL;                                  /* GCOVR_EXCL_LINE */
     }
     return (PyObject *)self;
 }

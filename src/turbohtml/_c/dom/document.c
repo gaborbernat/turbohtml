@@ -590,7 +590,9 @@ static void handle_dealloc(PyObject *self) {
     PyMem_Free(handle->index_offsets);
     PyMem_Free(handle->index_nodes);
     PyMem_Free(handle->hash_overrides);
-    PyMem_Free(handle->bindings);
+    if (handle->bindings != handle->inline_bindings) {
+        PyMem_Free(handle->bindings);
+    }
     PyMem_Free(handle->binding_overflow);
     path_id_map_free(handle->path_ids);
     path_positions_free(handle->path_positions);
@@ -620,6 +622,9 @@ PyObject *handle_new(module_state *state, th_tree *tree, PyObject *source, PyObj
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     self->tree = tree;
+    self->bindings = self->inline_bindings;
+    self->binding_capacity = sizeof(self->inline_bindings) / sizeof(*self->inline_bindings);
+    self->binding_next = 1;
     self->source = Py_NewRef(source);
     self->encoding = Py_NewRef(encoding);
     self->encoding_certain = encoding_certain;

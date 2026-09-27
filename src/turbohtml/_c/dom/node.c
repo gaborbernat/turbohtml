@@ -78,20 +78,21 @@ static void node_dealloc(PyObject *self) {
 
 NodeObject **node_grow_bindings(HandleObject *handle, th_node *node) {
     if (handle->binding_next != UINT16_MAX) {
-        size_t capacity = handle->binding_capacity == 0 ? 16 : (size_t)handle->binding_capacity * 2;
+        size_t capacity = (size_t)handle->binding_capacity * 2;
         if (capacity > UINT16_MAX) {
             capacity = UINT16_MAX;
         }
-        node_binding_slot *slots = PyMem_Realloc(handle->bindings, capacity * sizeof(node_binding_slot));
+        node_binding_slot *slots = PyMem_Realloc(handle->bindings == handle->inline_bindings ? NULL : handle->bindings,
+                                                 capacity * sizeof(node_binding_slot));
         if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
             PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
             return NULL;      /* GCOVR_EXCL_LINE */
         }
+        if (handle->bindings == handle->inline_bindings) {
+            memcpy(slots, handle->inline_bindings, sizeof(handle->inline_bindings));
+        }
         handle->bindings = slots;
         handle->binding_capacity = (uint16_t)capacity;
-        if (handle->binding_next == 0) {
-            handle->binding_next = 1;
-        }
         node->binding_id = handle->binding_next++;
     } else {
         size_t capacity = handle->binding_overflow == NULL ? 0 : handle->binding_overflow_mask + 1;
