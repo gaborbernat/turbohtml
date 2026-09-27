@@ -604,6 +604,28 @@ def test_concurrent_cross_tree_adoption_copies_one_source_state() -> None:
     assert adopted.attrs["data-state"] in {"s", long_state}
 
 
+def test_concurrent_adoption_preserves_descendant_aliases() -> None:
+    source = turbohtml.Element("section", children=[turbohtml.Element("b")])
+    descendant = source.select_one("b")
+    assert descendant is not None
+    destinations = [turbohtml.Element("main"), turbohtml.Element("aside")]
+    start = threading.Barrier(2)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(10_000):
+            assert descendant.parent is not None
+            descendant.attrs["seen"] = "yes"
+
+    def mover() -> None:
+        start.wait()
+        for index in range(10_000):
+            destinations[index % 2].append(source)
+
+    _run(reader, mover)
+    assert (destinations[1].select_one("b"), descendant.attr("seen")) == (descendant, "yes")
+
+
 def test_concurrent_wraps_and_inserts_of_foreign_nodes_keep_the_tree_intact() -> None:
     markup = "<div>" + "<p><b>x</b></p>" * 200 + "</div>"
     root = turbohtml.parse(markup).find("div")

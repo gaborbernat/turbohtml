@@ -158,10 +158,39 @@ static inline int handle_add_hash_override(HandleObject *handle, th_node *node, 
     return 0;
 }
 
-typedef struct {
+typedef struct NodeObject {
     PyObject_HEAD PyObject *handle; /* _TreeHandle keeping tree + source alive */
     th_node *node;
+    struct NodeObject *previous_binding;
+    struct NodeObject *next_binding;
 } NodeObject;
+
+static inline void node_bind(NodeObject *self, PyObject *handle, th_node *node) {
+    self->handle = Py_NewRef(handle);
+    self->node = node;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    self->previous_binding = NULL;
+    self->next_binding = node->bindings;
+    if (self->next_binding != NULL) {
+        self->next_binding->previous_binding = self;
+    }
+    node->bindings = self;
+    Py_END_CRITICAL_SECTION();
+}
+
+static inline void node_unbind(NodeObject *self) {
+    Py_BEGIN_CRITICAL_SECTION(self->handle);
+    if (self->previous_binding != NULL) {
+        self->previous_binding->next_binding = self->next_binding;
+    } else {
+        self->node->bindings = self->next_binding;
+    }
+    if (self->next_binding != NULL) {
+        self->next_binding->previous_binding = self->previous_binding;
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_DECREF(self->handle);
+}
 
 enum walk_mode { WALK_DESCENDANTS, WALK_ANCESTORS, WALK_NEXT_SIBLINGS, WALK_PREVIOUS_SIBLINGS, WALK_PRECEDING };
 
@@ -207,10 +236,7 @@ typedef struct {
     Py_ssize_t indent_len;
 } SerializeIterObject;
 
-typedef struct {
-    PyObject_HEAD PyObject *handle;
-    th_node *node; /* the element whose live attributes this view exposes */
-} AttrsObject;
+typedef NodeObject AttrsObject;
 
 /* The serialize(minify=...) options object: four independent round-trip-safe markup
    transforms plus an opt-in inline-<script> JS pass and an opt-in <style>/style="" CSS
@@ -320,8 +346,7 @@ static inline PyObject *node_wrap(module_state *state, PyObject *handle, th_node
             return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    self->handle = Py_NewRef(handle);
-    self->node = node;
+    node_bind(self, handle, node);
     return (PyObject *)self;
 }
 

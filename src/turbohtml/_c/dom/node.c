@@ -30,8 +30,8 @@ PyObject *turbohtml_node_wrap_in(PyObject *owner, th_node *node) {
 
 #ifndef Py_GIL_DISABLED
 /* The pool caps the wrappers a burst of find_all()/select()/iteration may recycle
-   without pinning unbounded memory afterwards. At sizeof(NodeObject) (32 bytes) the
-   cap costs at most ~32 KiB resident per interpreter, and it covers a query result
+   without pinning unbounded memory afterwards. At sizeof(NodeObject) (48 bytes) the
+   cap costs at most ~48 KiB resident per interpreter, and it covers a query result
    or transient walk of up to this many nodes; a larger result falls back to malloc
    for the surplus. */
 #define NODE_FREELIST_MAX 1024
@@ -58,7 +58,7 @@ void th_node_freelist_clear(module_state *Py_UNUSED(state)) {
 
 static void node_dealloc(PyObject *self) {
     PyTypeObject *type = Py_TYPE(self);
-    Py_DECREF(((NodeObject *)self)->handle);
+    node_unbind((NodeObject *)self);
 #ifndef Py_GIL_DISABLED
     /* Park the wrapper for reuse instead of freeing it, unless the pool is full.
        Every node type has basicsize sizeof(NodeObject) and none accept a subclass,

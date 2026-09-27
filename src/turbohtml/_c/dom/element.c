@@ -48,14 +48,13 @@ static PyObject *attrs_new(module_state *state, PyObject *handle, th_node *node)
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    self->handle = Py_NewRef(handle);
-    self->node = node;
+    node_bind(self, handle, node);
     return (PyObject *)self;
 }
 
 static void attrs_dealloc(PyObject *self) {
     PyTypeObject *type = Py_TYPE(self);
-    Py_DECREF(((AttrsObject *)self)->handle);
+    node_unbind((NodeObject *)self);
     type->tp_free(self);
     Py_DECREF(type);
 }
@@ -2301,35 +2300,54 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return element;
 }
 
-/* Deep-copy child, a node of another tree, into dest_handle's tree and re-point its
-   wrapper at the copy, so the source tree frees on its own. The caller holds
+static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_node *root, th_node *copy) {
+    th_node *source = root;
+    th_node *dest = copy;
+    do {
+        if (source->bindings != NULL) {
+            Py_hash_t hash = handle_node_hash((HandleObject *)source_handle, source);
+            if (handle_add_hash_override((HandleObject *)dest_handle, dest, hash) < 0) { /* GCOVR_EXCL_BR_LINE */
+                return -1; /* GCOVR_EXCL_LINE: allocation failure */
+            }
+        }
+        source = preorder_next(source, root);
+        dest = preorder_next(dest, copy);
+    } while (source != NULL);
+    th_node_remove_observed(((HandleObject *)source_handle)->tree, root);
+    source = root;
+    dest = copy;
+    do {
+        dest->bindings = source->bindings;
+        source->bindings = NULL;
+        for (NodeObject *binding = dest->bindings; binding != NULL; binding = binding->next_binding) {
+            binding->node = dest;
+            Py_SETREF(binding->handle, Py_NewRef(dest_handle));
+        }
+        source = preorder_next(source, root);
+        dest = preorder_next(dest, copy);
+    } while (source != NULL);
+    return 0;
+}
+
+/* Deep-copy child into dest_handle's tree and relocate its live views. The caller holds
    dest_handle's critical section; taking the source tree's lock as well suspends
    that section while it waits, so another thread can edit the destination tree in
    between and the caller must not trust tree state it read before this call.
    NULL with MemoryError on allocation failure. */
 static th_node *import_node(PyObject *dest_handle, NodeObject *child) {
     th_tree *dest_tree = ((HandleObject *)dest_handle)->tree;
-    PyObject *source_handle = child->handle;
-#ifdef Py_GIL_DISABLED
-    Py_INCREF(source_handle);
-#endif
+    PyObject *source_handle = Py_NewRef(child->handle);
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION2(dest_handle, source_handle);
     copy = th_tree_adopt_copy(dest_tree, tree_of((PyObject *)child), child->node);
     if (copy != NULL && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        handle_add_hash_override((HandleObject *)dest_handle, copy,
-                                 handle_node_hash((HandleObject *)source_handle, child->node)) == 0) {
+        relocate_subtree(dest_handle, source_handle, child->node, copy) == 0) {
         handle_drop_index(source_handle);
-        th_node_remove_observed(tree_of((PyObject *)child), child->node);
-        Py_SETREF(child->handle, Py_NewRef(dest_handle));
-        child->node = copy;
     } else {
         copy = NULL; /* GCOVR_EXCL_LINE */
     }
     Py_END_CRITICAL_SECTION2();
-#ifdef Py_GIL_DISABLED
     Py_DECREF(source_handle);
-#endif
     if (copy == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -2351,10 +2369,7 @@ static int is_fragment_arg(module_state *state, PyObject *obj) {
    exception on allocation failure. */
 static PyObject *import_fragment_children(PyObject *dest_handle, NodeObject *fragment) {
     th_tree *dest_tree = ((HandleObject *)dest_handle)->tree;
-    PyObject *source_handle = fragment->handle;
-#ifdef Py_GIL_DISABLED
-    Py_INCREF(source_handle);
-#endif
+    PyObject *source_handle = Py_NewRef(fragment->handle);
     th_node *copy;
     Py_BEGIN_CRITICAL_SECTION2(dest_handle, source_handle);
     copy = th_tree_make_fragment(dest_tree);
@@ -2370,14 +2385,16 @@ static PyObject *import_fragment_children(PyObject *dest_handle, NodeObject *fra
     }
     if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         handle_drop_index(source_handle);
-        while (fragment->node->first_child != NULL) {
-            th_node_remove_observed(tree_of((PyObject *)fragment), fragment->node->first_child);
+        for (th_node *child_copy = copy->first_child; child_copy != NULL; child_copy = child_copy->next_sibling) {
+            int status = relocate_subtree(dest_handle, source_handle, fragment->node->first_child, child_copy);
+            if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                copy = NULL;  /* GCOVR_EXCL_LINE: allocation failure */
+                break;        /* GCOVR_EXCL_LINE */
+            }
         }
     }
     Py_END_CRITICAL_SECTION2();
-#ifdef Py_GIL_DISABLED
     Py_DECREF(source_handle);
-#endif
     if (copy == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }

@@ -1493,6 +1493,46 @@ def test_append_preserves_node_hash() -> None:
     assert _found(second_destination, "span") in held
 
 
+def test_append_preserves_descendant_references() -> None:
+    source = _found(parse('<section><b data-value="old">text</b><i>end</i></section>'), "section")
+    descendant = _found(source, "b")
+    alias = _found(source, "b")
+    attributes = descendant.attrs
+    held = {descendant}
+    destination = Element("main")
+    destination.append(source)
+    attributes["data-value"] = "new"
+    alias.tag = "strong"
+    assert (_found(destination, "strong") in held, descendant.html) == (
+        True,
+        '<strong data-value="new">text</strong>',
+    )
+
+
+def test_append_preserves_subtree_alias() -> None:
+    document = parse("<section><b>text</b></section>")
+    source = _found(document, "section")
+    alias = _found(document, "section")
+    destination = Element("main")
+    destination.append(source)
+    alias.append(Text("tail"))
+    assert destination.html == "<main><section><b>text</b>tail</section></main>"
+
+
+@pytest.mark.parametrize("node_type", [pytest.param(Text, id="text"), pytest.param(Comment, id="comment")])
+def test_append_preserves_leaf_references(node_type: type[Text | Comment]) -> None:
+    source = Element("section", children=[node_type("before")])
+    leaf = source.children[0]
+    assert isinstance(leaf, (Text, Comment))
+    held = {leaf}
+    destination = Element("main")
+    destination.append(source)
+    leaf.data = "after"
+    adopted = source.children[0]
+    assert isinstance(adopted, (Text, Comment))
+    assert (adopted in held, adopted.data) == (True, "after")
+
+
 def test_append_preserves_hashes_across_table_growth() -> None:
     # enough imports into one tree to grow the hash table several times
     nodes = [Element(f"x-{index}") for index in range(200)]

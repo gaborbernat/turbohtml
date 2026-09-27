@@ -120,6 +120,7 @@ struct th_node {
     /* element: tag name; text/comment: payload; doctype: name */
     Py_UCS4 *text;
     Py_ssize_t text_len;
+    void *bindings; /* live Python views, relocated together when this node is adopted */
     th_node_attr *attrs;
     Py_ssize_t attr_count;
 };
