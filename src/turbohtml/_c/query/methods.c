@@ -873,50 +873,16 @@ PyObject *turbohtml_register_xpath_string(PyObject *module, PyObject *type) {
     Py_RETURN_NONE;
 }
 
-/* Wrap an attribute or text string result as an XPathString that remembers the
-   element it came from (lxml's smart strings). Steals the value reference. */
-static PyObject *xpath_smart_string(module_state *state, PyObject *handle, th_node *owner, PyObject *value,
-                                    int is_attribute, PyObject *attrname) {
-    PyObject *parent = node_wrap(state, handle, owner);
-    if (parent == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-        Py_DECREF(value);    /* GCOVR_EXCL_LINE */
-        Py_DECREF(attrname); /* GCOVR_EXCL_LINE */
-        return NULL;         /* GCOVR_EXCL_LINE */
-    }
-    PyObject *result = PyObject_CallFunction(state->xpath_string_type, "OOOO", value, parent,
-                                             is_attribute ? Py_True : Py_False, attrname);
-    Py_DECREF(value);
-    Py_DECREF(parent);
-    Py_DECREF(attrname);
-    return result;
-}
-
-static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item,
-                                  int smart_strings) {
+static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
     if (item.attr == -2) {
         return PyUnicode_FromString("http://www.w3.org/XML/1998/namespace");
     }
     if (item.attr >= 0) {
         const th_node_attr *attr = &item.node->attrs[item.attr];
-        PyObject *value = attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);
-        if (!smart_strings || value == NULL) { /* GCOVR_EXCL_BR_LINE: value NULL is an unforced alloc */
-            return value;
-        }
-        Py_ssize_t name_len;
-        const char *name = th_attr_name(tree, attr->name_atom, &name_len);
-        PyObject *attrname = PyUnicode_FromStringAndSize(name, name_len);
-        if (attrname == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-            Py_DECREF(value);   /* GCOVR_EXCL_LINE */
-            return NULL;        /* GCOVR_EXCL_LINE */
-        }
-        return xpath_smart_string(state, handle, item.node, value, 1, attrname);
+        return attr->value == NULL ? PyUnicode_New(0, 0) : ucs4_to_str(attr->value, attr->value_len);
     }
     if (item.node->type == TH_NODE_TEXT) {
-        PyObject *value = str_from_accessor(th_node_data, tree, item.node);
-        if (!smart_strings || value == NULL) { /* GCOVR_EXCL_BR_LINE: value NULL is an unforced alloc */
-            return value;
-        }
-        return xpath_smart_string(state, handle, item.node->parent, value, 0, Py_NewRef(Py_None));
+        return str_from_accessor(th_node_data, tree, item.node);
     }
     return node_wrap(state, handle, item.node);
 }
@@ -1051,7 +1017,7 @@ static PyObject *xpath_arg_to_py(xpath_ext_ctx *ec, const xp_result *value) {
             return NULL;    /* GCOVR_EXCL_LINE */
         }
         for (Py_ssize_t index = 0; index < value->nodes.len; index++) {
-            PyObject *item = xpath_item_to_py(ec->state, ec->handle, ec->tree, value->nodes.items[index], 0);
+            PyObject *item = xpath_item_to_py(ec->state, ec->handle, ec->tree, value->nodes.items[index]);
             if (item == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                 Py_DECREF(list); /* GCOVR_EXCL_LINE */
                 return NULL;     /* GCOVR_EXCL_LINE */
@@ -1145,6 +1111,81 @@ static int xpath_call_extension(void *vctx, th_node *context_node, const Py_UCS4
     return rc;
 }
 
+typedef struct {
+    PyObject *value;
+    PyObject *parent;
+    PyObject *attrname;
+} xpath_snapshot_item;
+
+static PyObject *xpath_snapshot_to_py(module_state *state, PyObject *handle, th_tree *tree, int smart_strings,
+                                      const xp_nodeset *nodes) {
+    if (nodes->len == 0) {
+        return PyList_New(0);
+    }
+    xpath_snapshot_item *items = PyMem_Calloc((size_t)nodes->len, sizeof(xpath_snapshot_item));
+    if (items == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+    }
+    PyObject *out = NULL;
+    /* GC and smart-string constructors can adopt nodes before later results are wrapped. */
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        xp_item source = nodes->items[index];
+        items[index].value = xpath_item_to_py(state, handle, tree, source);
+        if (items[index].value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            goto done;                    /* GCOVR_EXCL_LINE */
+        }
+#if PY_VERSION_HEX < 0x030C0000 && !defined(PYPY_VERSION)
+        if (!smart_strings) {
+            continue;
+        }
+#else
+        (void)smart_strings;
+#endif
+        if (source.attr >= 0 || source.node->type == TH_NODE_TEXT) {
+            items[index].parent = node_wrap(state, handle, source.attr >= 0 ? source.node : source.node->parent);
+            if (items[index].parent == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                goto done;                     /* GCOVR_EXCL_LINE */
+            }
+            if (source.attr >= 0) {
+                Py_ssize_t length;
+                const char *name = th_attr_name(tree, source.node->attrs[source.attr].name_atom, &length);
+                items[index].attrname = PyUnicode_FromStringAndSize(name, length);
+                if (items[index].attrname == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    goto done;                       /* GCOVR_EXCL_LINE */
+                }
+            }
+        }
+    }
+    out = PyList_New(nodes->len);
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        goto done;     /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        xpath_snapshot_item item = items[index];
+        PyObject *value;
+        if (item.parent == NULL) {
+            value = Py_NewRef(item.value);
+        } else {
+            value = PyObject_CallFunction(state->xpath_string_type, "OOOO", item.value, item.parent,
+                                          item.attrname == NULL ? Py_False : Py_True,
+                                          item.attrname == NULL ? Py_None : item.attrname);
+            if (value == NULL) { /* GCOVR_EXCL_BR_LINE: smart-string allocation failure */
+                Py_CLEAR(out);   /* GCOVR_EXCL_LINE */
+                goto done;       /* GCOVR_EXCL_LINE */
+            }
+        }
+        PyList_SET_ITEM(out, index, value);
+    }
+done:
+    for (Py_ssize_t index = 0; index < nodes->len; index++) {
+        Py_XDECREF(items[index].value);
+        Py_XDECREF(items[index].parent);
+        Py_XDECREF(items[index].attrname);
+    }
+    PyMem_Free(items);
+    return out;
+}
+
 /* Marshal an evaluated xp_result to a Python object under the held handle critical
    section: a node-set to a list (elements as nodes, attribute/text values as str),
    a scalar to its float / str / bool. Always frees *result. Returns the object (a
@@ -1153,20 +1194,28 @@ static PyObject *xpath_result_to_py(module_state *state, PyObject *handle, th_tr
                                     xp_result *result) {
     PyObject *out;
     if (result->kind == XP_NODESET) {
-        out = PyList_New(result->nodes.len);
-        if (out == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-            xp_result_free(result); /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        for (Py_ssize_t index = 0; index < result->nodes.len; index++) {
-            PyObject *item = xpath_item_to_py(state, handle, tree, result->nodes.items[index], smart_strings);
-            if (item == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-                Py_DECREF(out);         /* GCOVR_EXCL_LINE: allocation-failure path */
-                xp_result_free(result); /* GCOVR_EXCL_LINE: allocation-failure path */
-                return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
+#if PY_VERSION_HEX < 0x030C0000 && !defined(PYPY_VERSION)
+        out = xpath_snapshot_to_py(state, handle, tree, smart_strings, &result->nodes);
+#else
+        if (smart_strings) {
+            out = xpath_snapshot_to_py(state, handle, tree, smart_strings, &result->nodes);
+        } else {
+            out = PyList_New(result->nodes.len);
+            if (out == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure */
+                xp_result_free(result); /* GCOVR_EXCL_LINE */
+                return NULL;            /* GCOVR_EXCL_LINE */
             }
-            PyList_SET_ITEM(out, index, item);
+            for (Py_ssize_t index = 0; index < result->nodes.len; index++) {
+                PyObject *item = xpath_item_to_py(state, handle, tree, result->nodes.items[index]);
+                if (item == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    Py_DECREF(out);         /* GCOVR_EXCL_LINE */
+                    xp_result_free(result); /* GCOVR_EXCL_LINE */
+                    return NULL;            /* GCOVR_EXCL_LINE */
+                }
+                PyList_SET_ITEM(out, index, item);
+            }
         }
+#endif
     } else {
         out = xpath_scalar_to_py(result); /* NULL with the error set on an unforced allocation failure */
     }
