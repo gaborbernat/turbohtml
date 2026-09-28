@@ -968,6 +968,50 @@ TH_NODE_API(, PyObject *, node_find, (PyObject * self, PyObject *args, PyObject 
     return node_wrap(state, ((NodeObject *)self)->handle, found);
 }
 
+static PyObject *find_indexed_tag(module_state *state, PyObject *handle, uint16_t tag, Py_ssize_t limit) {
+    HandleObject *owner = (HandleObject *)handle;
+    Py_ssize_t count = owner->index_offsets[tag + 1] - owner->index_offsets[tag];
+    if (limit >= 0 && limit < count) {
+        count = limit;
+    }
+    PyObject *out;
+    for (;;) {
+        out = PyList_New(count);
+        if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return NULL;   /* GCOVR_EXCL_LINE */
+        }
+#if PY_VERSION_HEX < 0x030C0000 && !defined(PYPY_VERSION)
+        /* CPython 3.12 defers collection until the eval breaker; older allocations can mutate the document. */
+        if (!owner->index_built && handle_build_index(owner) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(out);                                         /* GCOVR_EXCL_LINE */
+            PyErr_NoMemory();                                       /* GCOVR_EXCL_LINE */
+            return NULL;                                            /* GCOVR_EXCL_LINE */
+        }
+        Py_ssize_t refreshed = owner->index_offsets[tag + 1] - owner->index_offsets[tag];
+        if (limit >= 0 && limit < refreshed) {
+            refreshed = limit;
+        }
+        if (count == refreshed) {
+            break;
+        }
+        Py_DECREF(out);
+        count = refreshed;
+#else
+        break;
+#endif
+    }
+    Py_ssize_t start = owner->index_offsets[tag];
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *wrapped = node_wrap_locked(state, handle, owner->index_nodes[start + index]);
+        if (wrapped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(out);    /* GCOVR_EXCL_LINE */
+            return NULL;       /* GCOVR_EXCL_LINE */
+        }
+        PyList_SET_ITEM(out, index, wrapped);
+    }
+    return out;
+}
+
 TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObject *kwargs), (self, args, kwargs),
             (PyObject * self, PyObject *args, PyObject *kwargs), (NodeObject *)self,
             args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
@@ -1000,23 +1044,23 @@ TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObj
         query.limit >= 0 && query.limit <= 8
             ? handle_obj->index_built && handle_index_usable(handle_obj, origin) && query_is_indexed_tag(&query)
             : handle_use_index(handle_obj, origin, query_is_indexed_tag(&query));
-    if (use_index) {
-        int simple = query_is_simple_tag(&query);
+    if (use_index && query_is_simple_tag(&query)) {
+        Py_SETREF(out, find_indexed_tag(state, handle, query.tag_atom, query.limit));
+        error = out == NULL;
+    } else if (use_index) {
         Py_ssize_t end = handle_obj->index_offsets[query.tag_atom + 1];
         for (Py_ssize_t pos = handle_obj->index_offsets[query.tag_atom]; pos < end; pos++) {
             if (query.limit >= 0 && PyList_GET_SIZE(out) >= query.limit) {
                 break;
             }
             th_node *node = handle_obj->index_nodes[pos];
-            if (!simple) {
-                int matched = node_matches(state, node, &query);
-                if (matched < 0) {
-                    error = 1;
-                    break;
-                }
-                if (matched == 0) {
-                    continue;
-                }
+            int matched = node_matches(state, node, &query);
+            if (matched < 0) {
+                error = 1;
+                break;
+            }
+            if (matched == 0) {
+                continue;
             }
             if (append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 error = 1;                                      /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1055,7 +1099,7 @@ TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObj
     Py_END_CRITICAL_SECTION();
     free_query(&query);
     if (error) {
-        Py_DECREF(out);
+        Py_XDECREF(out);
         return NULL;
     }
     return out;
