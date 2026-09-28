@@ -1056,14 +1056,18 @@ TH_NODE_API(static, int, element_set_checked, (PyObject * self, PyObject *value,
         PyErr_SetString(PyExc_TypeError, "checked can only be set on a checkbox or radio input");
         return -1;
     }
-    int on = PyObject_IsTrue(value);
-    if (on < 0) {
-        return -1;
+    if (!PyBool_Check(value)) {
+        int on = PyObject_IsTrue(value);
+        if (on < 0) {
+            return -1;
+        }
+        /* Truth callbacks can adopt the input into another tree. */
+        return element_set_checked(self, on ? Py_True : Py_False, NULL);
     }
     th_tree *tree = tree_of(self);
     int rc = 0;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    if (on) {
+    if (value == Py_True) {
         rc = th_node_attr_set(tree, node, "checked", 7, NULL, 0, 0);
         if (rc >= 0 && input_type_is(node, "radio")) { /* GCOVR_EXCL_BR_LINE: attr_set only fails on OOM */
             clear_radio_group((HandleObject *)((NodeObject *)self)->handle, node);
