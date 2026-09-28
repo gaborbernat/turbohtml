@@ -166,34 +166,6 @@ TH_NODE_API(static, int, attrs_contains, (PyObject * self, PyObject *key), (self
     return index >= 0;
 }
 
-TH_NODE_API(static, PyObject *, attrs_iter, (PyObject * self), (self), (PyObject * self), ((AttrsObject *)self)->owner,
-            NULL) {
-    NodeObject *owner = ((AttrsObject *)self)->owner;
-    th_node *node = owner->node;
-    th_tree *tree = tree_of((PyObject *)owner);
-    PyObject *names;
-    Py_BEGIN_CRITICAL_SECTION(owner->handle);
-    names = PyList_New(node->attr_count);
-    if (names != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-            PyObject *name = attr_name_obj(tree, &node->attrs[index]);
-            if (name == NULL) {   /* GCOVR_EXCL_BR_LINE: a stored name always decodes */
-                Py_DECREF(names); /* GCOVR_EXCL_LINE: decode-failure path */
-                names = NULL;     /* GCOVR_EXCL_LINE: decode-failure path */
-                break;            /* GCOVR_EXCL_LINE: decode-failure path */
-            }
-            PyList_SET_ITEM(names, index, name);
-        }
-    }
-    Py_END_CRITICAL_SECTION();
-    if (names == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure and stored-name decode failure cannot be forced */
-        return NULL;     /* GCOVR_EXCL_LINE: allocation/decode-failure path */
-    }
-    PyObject *iterator = PyObject_GetIter(names);
-    Py_DECREF(names);
-    return iterator;
-}
-
 enum attrs_view { ATTRS_KEYS, ATTRS_VALUES, ATTRS_ITEMS };
 
 /* Materialize the attribute names, values, or (name, value) pairs as a list. */
@@ -201,12 +173,27 @@ static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
     NodeObject *owner = ((AttrsObject *)self)->owner;
     th_node *node = owner->node;
     th_tree *tree = tree_of((PyObject *)owner);
+    const Py_ssize_t count = node->attr_count;
+    const th_node_attr *attrs = node->attrs;
+#if PY_VERSION_HEX < 0x030C0000 && !defined(PYPY_VERSION)
+    /* Older CPython allocations can run callbacks that mutate or adopt the owner. */
+    th_node_attr *snapshot = NULL;
+    if (count > 0) {
+        snapshot = PyMem_Malloc((size_t)count * sizeof(th_node_attr));
+        if (snapshot == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        }
+        memcpy(snapshot, attrs, (size_t)count * sizeof(th_node_attr));
+    }
+    attrs = snapshot;
+    PyObject *handle = Py_NewRef(owner->handle);
+#endif
     PyObject *out;
     Py_BEGIN_CRITICAL_SECTION(owner->handle);
-    out = PyList_New(node->attr_count);
+    out = PyList_New(count);
     if (out != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        for (Py_ssize_t index = 0; index < node->attr_count; index++) {
-            const th_node_attr *attr = &node->attrs[index];
+        for (Py_ssize_t index = 0; index < count; index++) {
+            const th_node_attr *attr = &attrs[index];
             PyObject *item;
             if (kind == ATTRS_VALUES) {
                 item = attr_value_obj(attr);
@@ -241,7 +228,22 @@ static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
         }
     }
     Py_END_CRITICAL_SECTION();
+#if PY_VERSION_HEX < 0x030C0000 && !defined(PYPY_VERSION)
+    PyMem_Free(snapshot);
+    Py_DECREF(handle);
+#endif
     return out;
+}
+
+TH_NODE_API(static, PyObject *, attrs_iter, (PyObject * self), (self), (PyObject * self), ((AttrsObject *)self)->owner,
+            NULL) {
+    PyObject *names = attrs_collect(self, ATTRS_KEYS);
+    if (names == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    PyObject *iterator = PyObject_GetIter(names);
+    Py_DECREF(names);
+    return iterator;
 }
 
 TH_NODE_API(static, PyObject *, attrs_keys, (PyObject * self, PyObject *ignored), (self, ignored),
