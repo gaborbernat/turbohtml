@@ -18,29 +18,29 @@ typedef struct {
     char name[];
 } xp_attribute;
 
-static xp_attribute *item_snapshot(xp_item item) {
-    if (!xp_is_attribute(item.attr) || !((uintptr_t)item.attr & 1)) {
-        return NULL;
-    }
-    uintptr_t address = (uintptr_t)item.attr & ~(uintptr_t)1;
+static xp_attribute *attribute_snapshot(Py_ssize_t attr) {
+    uintptr_t address = (uintptr_t)attr & ~(uintptr_t)1;
     xp_attribute *snapshot;
     memcpy(&snapshot, &address, sizeof(xp_attribute *));
     return snapshot;
 }
 
+static xp_attribute *item_snapshot(xp_item item) {
+    return xp_is_attribute(item.attr) && ((uintptr_t)item.attr & 1) ? attribute_snapshot(item.attr) : NULL;
+}
+
 const th_node_attr *xp_item_attribute(struct th_tree *tree, xp_item item) {
     (void)tree;
-    xp_attribute *snapshot = item_snapshot(item);
-    return snapshot == NULL ? &item.node->attrs[item.attr >> 1] : &snapshot->attribute;
+    return (uintptr_t)item.attr & 1 ? &attribute_snapshot(item.attr)->attribute : &item.node->attrs[item.attr >> 1];
 }
 
 const char *xp_item_attr_name(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
-    xp_attribute *snapshot = item_snapshot(item);
-    if (snapshot != NULL) {
+    if ((uintptr_t)item.attr & 1) {
+        xp_attribute *snapshot = attribute_snapshot(item.attr);
         *len = snapshot->name_len;
         return snapshot->name;
     }
-    return th_attr_name(tree, xp_item_attribute(tree, item)->name_atom, len);
+    return th_attr_name(tree, item.node->attrs[item.attr >> 1].name_atom, len);
 }
 
 int xp_item_equal(xp_item left, xp_item right) {
@@ -112,29 +112,50 @@ int xp_visit_live_nodes(const xp_live_frame *frame, int (*visitor)(void *, struc
     return 0;
 }
 
-int ns_push(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr) {
-    if (ns->len == ns->cap) {
-        size_t cap;
-        size_t bytes;
-        int grew = th_grow_cap((size_t)ns->cap + 1, (size_t)ns->cap, 8, sizeof(xp_item), &cap, &bytes);
-        if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            return -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-        }
-        xp_item *grown = PyMem_Realloc(ns->items, bytes);
-        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-            return -1;       /* GCOVR_EXCL_LINE */
-        }
-        ns->items = grown;
-        ns->cap = (Py_ssize_t)cap;
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
+/* Growth stays out of line so ordinary result appends can inline. */
+static TH_NOINLINE int ns_grow(xp_nodeset *ns) {
+    size_t cap;
+    size_t bytes;
+    int grew = th_grow_cap((size_t)ns->cap + 1, (size_t)ns->cap, 8, sizeof(xp_item), &cap, &bytes);
+    if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+        return -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
     }
-    ns->items[ns->len].node = node;
-    ns->items[ns->len].attr = attr;
-    xp_attribute *snapshot = item_snapshot(ns->items[ns->len]);
+    xp_item *grown = PyMem_Realloc(ns->items, bytes);
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        return -1;       /* GCOVR_EXCL_LINE */
+    }
+    ns->items = grown;
+    ns->cap = (Py_ssize_t)cap;
+    return 0;
+}
+
+static inline int ns_append(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr) {
+    if (ns->len == ns->cap) {
+        if (ns_grow(ns) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;         /* GCOVR_EXCL_LINE */
+        }
+    }
+    ns->items[ns->len++] = (xp_item){node, attr};
+    return 0;
+}
+
+int ns_push(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr) {
+    if (ns_append(ns, node, attr) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                       /* GCOVR_EXCL_LINE */
+    }
+    xp_attribute *snapshot = item_snapshot((xp_item){node, attr});
     if (snapshot != NULL) {
         snapshot->references++;
         ns->snapshots = 1;
     }
-    ns->len++;
     return 0;
 }
 
@@ -152,7 +173,7 @@ void xp_nodeset_free(xp_nodeset *ns) {
 
 static int push_attribute(xp_nodeset *set, xp_ctx *ctx, struct th_node *node, Py_ssize_t index) {
     if (ctx->live == NULL) {
-        return ns_push(set, node, index << 1);
+        return ns_append(set, node, index << 1);
     }
     Py_ssize_t name_len;
     const char *name = th_attr_name(ctx->tree, node->attrs[index].name_atom, &name_len);
@@ -323,7 +344,7 @@ static int emit_if_match(xp_nodeset *out, struct th_node *node, const xn *step, 
     if (!node_test_matches(node, step, match)) {
         return 0;
     }
-    return ns_push(out, node, -1);
+    return ns_append(out, node, -1);
 }
 
 static int apply_descendant_step(xp_nodeset *out, struct th_node *root, const xn *step, const step_match *match,
@@ -449,7 +470,7 @@ static int apply_step(xp_nodeset *out, struct th_node *ctx, enum xp_axis axis, c
                       (step->test == NT_NAME && step->str_len == 3 && step->str[0] == 'x' && step->str[1] == 'm' &&
                        step->str[2] == 'l');
         if (ctx->type == TH_NODE_ELEMENT && matches) {
-            return ns_push(out, ctx, -2);
+            return ns_append(out, ctx, -2);
         }
         return 0;
     }
@@ -1427,9 +1448,9 @@ static int nodeset_union(xp_nodeset *target, xp_nodeset *source) {
             item = order <= 0 ? &target->items[left++] : &source->items[right];
             right += order >= 0;
         }
-        if (ns_push(&merged, item->node, item->attr) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-            xp_nodeset_free(&merged);                       /* GCOVR_EXCL_LINE: allocation failure */
-            return -1;                                      /* GCOVR_EXCL_LINE: allocation failure */
+        if (ns_append(&merged, item->node, item->attr) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            xp_nodeset_free(&merged);                         /* GCOVR_EXCL_LINE: allocation failure */
+            return -1;                                        /* GCOVR_EXCL_LINE: allocation failure */
         }
     }
     xp_nodeset_free(target);
