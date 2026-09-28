@@ -60,15 +60,24 @@ def test_xpath_frame_path_candidates_keep_adopted_nodes(expression: str) -> None
     assert [node.attrs["id"] for node in target.select("b[live=yes]")] == ["0", "1"]
 
 
-def test_xpath_frame_filter_compaction_keeps_adopted_node() -> None:
-    source: Final = Element("section", children=[Element("b", {"id": str(index)}) for index in range(3)])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        pytest.param("(.//b)[adopt()]", id="callback-first"),
+        pytest.param("(@id | .//b)[self::b and adopt()]", id="attribute-first"),
+    ],
+)
+def test_xpath_frame_filter_compaction_keeps_adopted_node(expression: str) -> None:
+    source: Final = Element(
+        "section", {"id": "root"}, children=[Element("b", {"id": str(index)}) for index in range(3)]
+    )
     target: Final = Element("main")
 
     def adopt(context: SimpleNamespace) -> bool:
         target.append(context.context_node)
         return context.context_node.attrs["id"] == "2"
 
-    result: Final = source.xpath("(.//b)[adopt()]", extensions={(None, "adopt"): adopt})
+    result: Final = source.xpath(expression, extensions={(None, "adopt"): adopt})
     assert isinstance(result, list)
     assert len(result) == 1
     assert isinstance(result[0], Element)
