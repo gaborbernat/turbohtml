@@ -1370,7 +1370,7 @@ static int eval_program(engine *eng, const xp_program *prog, th_node *context, P
                         xp_result *out) {
     xp_binding storage[16];
     xp_binding *bindings = storage;
-    if (eng->scope_len > 16) {
+    if (prog->has_variables && eng->scope_len > 16) {
         bindings = PyMem_Malloc((size_t)eng->scope_len * sizeof(xp_binding));
         if (bindings == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
             fail_py(eng);       /* GCOVR_EXCL_LINE */
@@ -1378,8 +1378,10 @@ static int eval_program(engine *eng, const xp_program *prog, th_node *context, P
             return -1;          /* GCOVR_EXCL_LINE */
         }
     }
-    xp_bindings vars;
-    scope_bindings(eng, bindings, &vars);
+    xp_bindings vars = {0};
+    if (prog->has_variables) {
+        scope_bindings(eng, bindings, &vars);
+    }
     const char *feature = NULL;
     int status = xp_eval_at(prog, eng->src_tree, context, pos, size, &vars, NULL, xslt_extension, eng, out, &feature);
     if (bindings != storage) {

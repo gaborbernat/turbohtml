@@ -80,6 +80,7 @@ typedef struct {
 struct xp_program {
     size_t references;
     int has_python_calls;
+    int has_variables;
     xn *nodes;
     int32_t count;
     int32_t cap;

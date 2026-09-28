@@ -161,6 +161,25 @@ def test_transform_variable_scope_restores_shadowed_bindings(count: int) -> None
     assert _run("<r><n/><n/></r>", body) == f"0{count - 1}locallocalglobal"
 
 
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        pytest.param("$v + position()", "78", id="variable-and-position"),
+        pytest.param("concat($v, @id)", "6a6b", id="variable-in-function"),
+        pytest.param("count(../n[@rank = $v])", "11", id="variable-in-predicate"),
+        pytest.param("concat(position(), last(), @id)", "12a22b", id="context-only"),
+        pytest.param("'$v'", "$v$v", id="literal-dollar"),
+    ],
+)
+def test_transform_variable_scope_expression_context(expression: str, expected: str) -> None:
+    body: Final = (
+        '<xsl:variable name="v" select="6"/><xsl:template match="/">'
+        '<xsl:for-each select="r/n">'
+        f'<xsl:value-of select="{expression}"/></xsl:for-each></xsl:template>'
+    )
+    assert _run('<r><n id="a" rank="6"/><n id="b" rank="7"/></r>', body) == expected
+
+
 @pytest.mark.parametrize("passed", [pytest.param(False, id="default"), pytest.param(True, id="override")])
 def test_transform_parameter_scope_default_and_restoration(*, passed: bool) -> None:
     argument: Final = '<xsl:with-param name="a" select="\'passed\'"/>' if passed else ""

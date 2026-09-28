@@ -312,6 +312,7 @@ static int32_t parse_primary(parser *ps) {
             fail(ps, "expected a name after '$'");
             return -1;
         }
+        ps->prog->has_variables = 1;
         int32_t var = xn_new(ps->prog, XN_VAR);
         if (var < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
@@ -722,6 +723,7 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
     }
     prog->references = 1;
     prog->has_python_calls = 0;
+    prog->has_variables = 0;
     prog->nodes = NULL;
     prog->count = 0;
     prog->cap = 0;
