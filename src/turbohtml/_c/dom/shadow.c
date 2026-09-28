@@ -18,8 +18,13 @@
 /* A grow-on-demand array of node pointers the assignment/flatten walks accumulate
    into, wrapped into a Python list by the binding once the walk finishes. failed is
    set on an allocation failure so the caller reports it after freeing the buffer. */
+typedef union {
+    th_node *node;
+    PyObject *wrapper;
+} nodevec_item;
+
 typedef struct {
-    th_node **items;
+    nodevec_item *items;
     Py_ssize_t len;
     Py_ssize_t cap;
     int failed;
@@ -32,12 +37,12 @@ static void nodevec_push(nodevec *vec, th_node *node) {
     if (vec->len == vec->cap) {
         size_t cap, bytes;
         /* the requested length cannot overflow size_t, so the grow guard never trips */
-        int fits = th_grow_cap((size_t)vec->len + 1, (size_t)vec->cap, 8, sizeof(th_node *), &cap, &bytes);
+        int fits = th_grow_cap((size_t)vec->len + 1, (size_t)vec->cap, 8, sizeof(nodevec_item), &cap, &bytes);
         if (!fits) {         /* GCOVR_EXCL_BR_LINE: overflow-guard path, unreachable from a test */
             vec->failed = 1; /* GCOVR_EXCL_LINE: overflow-guard path */
             return;          /* GCOVR_EXCL_LINE: overflow-guard path */
         }
-        th_node **items = PyMem_Realloc(vec->items, bytes);
+        nodevec_item *items = PyMem_Realloc(vec->items, bytes);
         if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             vec->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             return;          /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -45,7 +50,7 @@ static void nodevec_push(nodevec *vec, th_node *node) {
         vec->items = items;
         vec->cap = (Py_ssize_t)cap;
     }
-    vec->items[vec->len++] = node;
+    vec->items[vec->len++].node = node;
 }
 
 /* Whether node is an HTML <slot> element (the shadow tree's insertion point). */
@@ -268,7 +273,7 @@ static void collect_slotables_indexed(th_tree *tree, th_node *slot, th_node *roo
     slot_bucket *bucket = slot_index_bucket(index, name, name_len);
     if (bucket->slot == slot) {
         for (Py_ssize_t position = 0; position < bucket->assigned.len; position++) {
-            nodevec_push(vec, bucket->assigned.items[position]);
+            nodevec_push(vec, bucket->assigned.items[position].node);
         }
     }
 }
@@ -299,7 +304,7 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec, slot_i
     nodevec assigned = {0};
     collect_flattened_candidates(tree, slot, &assigned, slots);
     for (Py_ssize_t index = assigned.len; index > 0; index--) {
-        nodevec_push(&pending, assigned.items[index - 1]);
+        nodevec_push(&pending, assigned.items[index - 1].node);
     }
     if (assigned.failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         pending.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -308,12 +313,12 @@ static void collect_flattened(th_tree *tree, th_node *slot, nodevec *vec, slot_i
         if (pending.failed || vec->failed) { /* GCOVR_EXCL_BR_LINE: nodevec fails only on allocation failure */
             break;                           /* GCOVR_EXCL_LINE: allocation-failure path */
         } /* GCOVR_EXCL_LINE: closes the allocation-failure-only branch */
-        th_node *node = pending.items[--pending.len];
+        th_node *node = pending.items[--pending.len].node;
         if (is_slot(node) && th_node_is_shadow_root(node_root(node))) {
             assigned.len = 0;
             collect_flattened_candidates(tree, node, &assigned, slots);
             for (Py_ssize_t index = assigned.len; index > 0; index--) {
-                nodevec_push(&pending, assigned.items[index - 1]);
+                nodevec_push(&pending, assigned.items[index - 1].node);
             }
             if (assigned.failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 pending.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -355,33 +360,35 @@ static PyObject *nodevec_to_list(nodevec *vec, module_state *state, PyObject *ha
         PyMem_Free(vec->items);  /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    Py_ssize_t count = vec->len;
-    if (elements_only) {
-        count = 0;
-        for (Py_ssize_t index = 0; index < vec->len; index++) {
-            count += vec->items[index]->type == TH_NODE_ELEMENT;
-        }
-    }
-    PyObject *list = PyList_New(count);
-    if (list == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(vec->items); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    Py_ssize_t output = 0;
+    /* List allocation can run GC callbacks that adopt the host into another arena. */
+    Py_ssize_t count = 0;
     for (Py_ssize_t index = 0; index < vec->len; index++) {
-        if (elements_only && vec->items[index]->type != TH_NODE_ELEMENT) {
+        if (elements_only && vec->items[index].node->type != TH_NODE_ELEMENT) {
             continue;
         }
-        PyObject *wrapped = node_wrap_locked(state, handle, vec->items[index]);
-        if (wrapped == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
-            Py_DECREF(list);        /* GCOVR_EXCL_LINE: allocation-failure path */
-            PyMem_Free(vec->items); /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyObject *wrapped = node_wrap_locked(state, handle, vec->items[index].node);
+        if (wrapped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            goto error;        /* GCOVR_EXCL_LINE */
         }
-        PyList_SET_ITEM(list, output++, wrapped);
+        vec->items[count++].wrapper = wrapped;
+    }
+    PyObject *list = PyList_New(count);
+    if (list == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        goto error;     /* GCOVR_EXCL_LINE */
+    }
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyList_SET_ITEM(list, index, vec->items[index].wrapper);
     }
     PyMem_Free(vec->items);
     return list;
+    /* GCOVR_EXCL_START: allocation failure */
+error:
+    for (Py_ssize_t index = 0; index < count; index++) {
+        Py_DECREF(vec->items[index].wrapper);
+    }
+    PyMem_Free(vec->items);
+    return NULL;
+    /* GCOVR_EXCL_STOP */
 }
 
 TH_NODE_API(, PyObject *, element_attach_shadow, (PyObject * self, PyObject *args, PyObject *kwds), (self, args, kwds),
