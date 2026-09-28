@@ -360,10 +360,35 @@ static PyObject *nodevec_to_list(nodevec *vec, module_state *state, PyObject *ha
         PyMem_Free(vec->items);  /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+#if PY_VERSION_HEX >= 0x030C0000 && !defined(Py_GIL_DISABLED) && !defined(PYPY_VERSION)
+    /* CPython 3.12+ defers automatic GC until bytecode evaluation resumes. */
+    if (!elements_only) {
+        PyObject *list = PyList_New(vec->len);
+        if (list == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure */
+            PyMem_Free(vec->items); /* GCOVR_EXCL_LINE */
+            return NULL;            /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < vec->len; index++) {
+            PyObject *wrapped = node_wrap_locked(state, handle, vec->items[index].node);
+            if (wrapped == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
+                Py_DECREF(list);        /* GCOVR_EXCL_LINE */
+                PyMem_Free(vec->items); /* GCOVR_EXCL_LINE */
+                return NULL;            /* GCOVR_EXCL_LINE */
+            }
+            PyList_SET_ITEM(list, index, wrapped);
+        }
+        PyMem_Free(vec->items);
+        return list;
+    }
+#endif
     /* List allocation can run GC callbacks that adopt the host into another arena. */
     Py_ssize_t count = 0;
     for (Py_ssize_t index = 0; index < vec->len; index++) {
+#if PY_VERSION_HEX >= 0x030C0000 && !defined(Py_GIL_DISABLED) && !defined(PYPY_VERSION)
+        if (vec->items[index].node->type != TH_NODE_ELEMENT) {
+#else
         if (elements_only && vec->items[index].node->type != TH_NODE_ELEMENT) {
+#endif
             continue;
         }
         PyObject *wrapped = node_wrap_locked(state, handle, vec->items[index].node);
