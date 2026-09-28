@@ -350,27 +350,35 @@ static void collect_flattened_children(th_tree *tree, th_node *node, nodevec *ve
     slot_index_clear(&slots);
 }
 
-/* Wrap a collected node array into a Python list, filtering to elements when
-   elements_only is set, and free the array. NULL with an exception set on failure. */
 static PyObject *nodevec_to_list(nodevec *vec, module_state *state, PyObject *handle, int elements_only) {
     if (vec->failed) {           /* GCOVR_EXCL_BR_LINE: only set on an unforceable allocation failure */
         PyMem_Free(vec->items);  /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    PyObject *list = PyList_New(0);
+    Py_ssize_t count = vec->len;
+    if (elements_only) {
+        count = 0;
+        for (Py_ssize_t index = 0; index < vec->len; index++) {
+            count += vec->items[index]->type == TH_NODE_ELEMENT;
+        }
+    }
+    PyObject *list = PyList_New(count);
     if (list == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(vec->items); /* GCOVR_EXCL_LINE: allocation-failure path */
         return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    Py_ssize_t output = 0;
     for (Py_ssize_t index = 0; index < vec->len; index++) {
         if (elements_only && vec->items[index]->type != TH_NODE_ELEMENT) {
             continue;
         }
-        if (append_wrapped(list, state, handle, vec->items[index]) < 0) { /* GCOVR_EXCL_BR_LINE: alloc failure */
-            Py_DECREF(list);                                              /* GCOVR_EXCL_LINE: allocation-failure path */
-            PyMem_Free(vec->items);                                       /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;                                                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyObject *wrapped = node_wrap_locked(state, handle, vec->items[index]);
+        if (wrapped == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(list);        /* GCOVR_EXCL_LINE: allocation-failure path */
+            PyMem_Free(vec->items); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+        PyList_SET_ITEM(list, output++, wrapped);
     }
     PyMem_Free(vec->items);
     return list;
