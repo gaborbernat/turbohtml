@@ -75,6 +75,11 @@ th_node *th_element_attach_shadow(th_tree *tree, th_node *host, int mode) {
         tree->shadows = grown;
         tree->shadow_cap = (Py_ssize_t)cap;
     }
+    if (th_node_map_reserve(&tree->shadow_index, tree->shadow_index.count + 2) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+        return NULL;                                                                  /* GCOVR_EXCL_LINE */
+    }
+    (void)th_node_map_insert(&tree->shadow_index, host, tree->shadow_count + 1);
+    (void)th_node_map_insert(&tree->shadow_index, root, tree->shadow_count + 1);
     tree->shadows[tree->shadow_count].host = host;
     tree->shadows[tree->shadow_count].root = root;
     tree->shadow_count++;
@@ -82,23 +87,15 @@ th_node *th_element_attach_shadow(th_tree *tree, th_node *host, int mode) {
 }
 
 th_node *th_element_shadow_root(th_tree *tree, th_node *host) {
-    for (Py_ssize_t index = 0; index < tree->shadow_count; index++) {
-        if (tree->shadows[index].host == host) {
-            return tree->shadows[index].root;
-        }
+    if (host->type != TH_NODE_ELEMENT) {
+        return NULL;
     }
-    return NULL;
+    Py_ssize_t index = th_node_map_find(&tree->shadow_index, host);
+    return index == 0 ? NULL : tree->shadows[index - 1].root;
 }
 
 th_node *th_shadow_host(th_tree *tree, th_node *root) {
-    /* only ever called on a shadow root, which is always in the table, so the scan
-       always finds its host and the fall-through below is unreachable */
-    for (Py_ssize_t index = 0; index < tree->shadow_count; index++) { /* GCOVR_EXCL_BR_LINE */
-        if (tree->shadows[index].root == root) {
-            return tree->shadows[index].host;
-        }
-    }
-    return NULL; /* GCOVR_EXCL_LINE: unreachable; every shadow root has a registered host */
+    return tree->shadows[th_node_map_find(&tree->shadow_index, root) - 1].host;
 }
 
 /* Materialize a character-data node's text in place (a parsed text node borrows a
@@ -972,6 +969,10 @@ static th_node *copy_node_at(th_tree *dest, th_tree *src, th_node *src_node, int
 
 th_node *th_tree_copy_node(th_tree *dest, th_tree *src, th_node *src_node) {
     return copy_node_at(dest, src, src_node, 0);
+}
+
+int th_tree_has_shadows(const th_tree *tree) {
+    return tree->shadow_count != 0;
 }
 
 th_node *th_node_next_including_shadow(th_tree *tree, th_node *node, th_node *root) {

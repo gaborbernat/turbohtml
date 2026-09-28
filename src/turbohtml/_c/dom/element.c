@@ -2358,7 +2358,17 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return element;
 }
 
-static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_node *root, th_node *copy) {
+/* Constant shadow flags keep ordinary adoption on the light-tree traversal. */
+#if defined(_MSC_VER)
+#define TH_RELOCATE_INLINE __forceinline
+#elif defined(__OPTIMIZE__)
+#define TH_RELOCATE_INLINE inline __attribute__((always_inline))
+#else
+#define TH_RELOCATE_INLINE
+#endif
+
+static TH_RELOCATE_INLINE int relocate_subtree_nodes(PyObject *dest_handle, PyObject *source_handle, th_node *root,
+                                                     th_node *copy, int has_shadows) {
     HandleObject *source_owner = (HandleObject *)source_handle;
     HandleObject *dest_owner = (HandleObject *)dest_handle;
     th_node *source = root;
@@ -2375,8 +2385,9 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
                 return -1; /* GCOVR_EXCL_LINE: allocation failure */
             }
         }
-        source = th_node_next_including_shadow(source_owner->tree, source, root);
-        dest = th_node_next_including_shadow(dest_owner->tree, dest, copy);
+        source =
+            has_shadows ? th_node_next_including_shadow(source_owner->tree, source, root) : preorder_next(source, root);
+        dest = has_shadows ? th_node_next_including_shadow(dest_owner->tree, dest, copy) : preorder_next(dest, copy);
     } while (source != NULL);
     th_node_remove_observed(((HandleObject *)source_handle)->tree, root);
     source = root;
@@ -2405,10 +2416,18 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
             } while (binding != NULL);
 #endif
         }
-        source = th_node_next_including_shadow(source_owner->tree, source, root);
-        dest = th_node_next_including_shadow(dest_owner->tree, dest, copy);
+        source =
+            has_shadows ? th_node_next_including_shadow(source_owner->tree, source, root) : preorder_next(source, root);
+        dest = has_shadows ? th_node_next_including_shadow(dest_owner->tree, dest, copy) : preorder_next(dest, copy);
     } while (source != NULL);
     return 0;
+}
+
+static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_node *root, th_node *copy) {
+    if (th_tree_has_shadows(((HandleObject *)source_handle)->tree)) {
+        return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 1);
+    }
+    return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 0);
 }
 
 /* Taking the source lock can suspend the destination's critical section, so callers
