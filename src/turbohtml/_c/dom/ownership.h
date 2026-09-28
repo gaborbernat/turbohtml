@@ -4,10 +4,18 @@
 #include "tokenizer/binding.h"
 #include "dom/tree.h"
 
+#ifdef Py_GIL_DISABLED
+/* Immutable identity avoids suspending tree locks during alias hashing and comparison. */
+typedef struct {
+    Py_hash_t hash;
+} node_identity;
+#endif
+
 typedef struct NodeObject {
     PyObject_HEAD PyObject *handle;
     th_node *node;
 #ifdef Py_GIL_DISABLED
+    node_identity *identity;
     PyThread_type_lock ownership_lock;
     struct NodeObject *previous_binding;
     struct NodeObject *next_binding;

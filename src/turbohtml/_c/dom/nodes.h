@@ -246,6 +246,20 @@ static inline int node_bind(NodeObject *self, PyObject *handle, th_node *node, N
 #endif
         return -1; /* GCOVR_EXCL_LINE */
     }
+#ifdef Py_GIL_DISABLED
+    if (*binding != NULL) {
+        self->identity = (*binding)->identity;
+    } else {
+        self->identity = PyMem_Malloc(sizeof(node_identity));
+        if (self->identity == NULL) {
+            node_release_binding(owner, node);
+            PyThread_free_lock(self->ownership_lock);
+            PyErr_NoMemory();
+            return -1;
+        }
+        self->identity->hash = handle_node_hash(owner, node);
+    }
+#endif
     self->handle = Py_NewRef(handle);
     self->node = node;
 #ifdef Py_GIL_DISABLED
@@ -275,6 +289,7 @@ static inline void node_unbind(NodeObject *self) {
         self->next_binding->previous_binding = self->previous_binding;
     }
     if (node_binding(handle, self->node) == NULL) {
+        PyMem_Free(self->identity);
         node_release_binding(handle, self->node);
     }
 #else

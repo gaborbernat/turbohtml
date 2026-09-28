@@ -640,6 +640,7 @@ def test_concurrent_adoption_preserves_descendant_aliases() -> None:
         pytest.param(lambda node: node.xpath("count(.//b)"), 1.0, id="xpath"),
         pytest.param(turbohtml.XPath("count(.//b)"), 1.0, id="compiled-xpath"),
         pytest.param(lambda node: len(Query([node, node])), 1, id="query-deduplication"),
+        pytest.param(lambda node: len({node.children[0], node.children[0]}), 1, id="alias-equality"),
         pytest.param(lambda node: len(Query(node).children()), 1, id="query-children"),
         pytest.param(lambda node: len(Query(node).children().parent()), 1, id="query-parent"),
         pytest.param(lambda node: sanitize_node(node).text, "text", id="sanitize"),

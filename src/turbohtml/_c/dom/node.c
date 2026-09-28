@@ -147,9 +147,7 @@ NodeObject **node_grow_bindings(HandleObject *handle, th_node *node) {
     return binding;
 }
 
-TH_NODE_API(static, PyObject *, node_richcompare, (PyObject * left, PyObject *right, int op), (left, right, op),
-            (PyObject * left, PyObject *right, int op), (NodeObject *)left,
-            right != NULL && is_node(right, state_of(left)) ? (NodeObject *)right : NULL) {
+static PyObject *node_richcompare(PyObject *left, PyObject *right, int op) {
     module_state *state = state_of(left);
     if (op != Py_EQ && op != Py_NE) {
         Py_RETURN_NOTIMPLEMENTED;
@@ -157,13 +155,21 @@ TH_NODE_API(static, PyObject *, node_richcompare, (PyObject * left, PyObject *ri
     if (!is_node(right, state)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
+#ifdef Py_GIL_DISABLED
+    int equal = ((NodeObject *)left)->identity == ((NodeObject *)right)->identity;
+#else
     int equal = ((NodeObject *)left)->node == ((NodeObject *)right)->node;
+#endif
     return PyBool_FromLong(op == Py_EQ ? equal : !equal);
 }
 
-TH_NODE_API(static, Py_hash_t, node_hash, (PyObject * self), (self), (PyObject * self), (NodeObject *)self, NULL) {
+static Py_hash_t node_hash(PyObject *self) {
     NodeObject *node = (NodeObject *)self;
+#ifdef Py_GIL_DISABLED
+    return node->identity->hash;
+#else
     return handle_node_hash((HandleObject *)node->handle, node->node);
+#endif
 }
 
 PyDoc_STRVAR(equals_doc, "equals(other, /)\n--\n\n"
