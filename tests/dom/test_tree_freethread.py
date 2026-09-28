@@ -693,3 +693,32 @@ def test_concurrent_wraps_and_inserts_of_foreign_nodes_keep_the_tree_intact() ->
 
     _run(*(lambda offset=offset: editor(offset) for offset in range(4)))
     assert root.serialize() == markup
+
+
+@pytest.mark.parametrize("move_parent", [pytest.param(False, id="first"), pytest.param(True, id="parent")])
+def test_concurrent_sibling_memo_and_adoption(*, move_parent: bool) -> None:
+    children: Final = [turbohtml.Element("b") for _ in range(128)]
+    parent: Final = turbohtml.Element("main", children=children)
+    marker: Final = turbohtml.Element("i")
+    destinations: Final = [turbohtml.Element("div"), turbohtml.Element("aside", children=[marker])]
+    query: Final = Query(children[::2])
+    stable: Final = set(children[1:])
+    allowed: Final = {*children, marker}
+    start: Final = threading.Barrier(2)
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            siblings = list(query.siblings())
+            assert stable <= set(siblings) <= allowed
+            assert len(siblings) == len(set(siblings))
+
+    def mover() -> None:
+        start.wait()
+        for index in range(200):
+            if move_parent:
+                destinations[index % 2].append(parent)
+            else:
+                (parent if index % 2 else destinations[1]).append(children[0])
+
+    _run(reader, mover)

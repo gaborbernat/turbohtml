@@ -71,6 +71,10 @@ PyObject *turbohtml_query_unique(PyObject *module, PyObject *elements) {
     return out;
 }
 
+#ifdef Py_GIL_DISABLED
+static int facade_siblings(module_state *state, NodeObject *owner, PyObject *out, PyObject *seen, PyObject *parents);
+#endif
+
 /* _query_siblings(module, nodes) -> list[Element]: every element sibling of every wrapped element, deduplicated. */
 PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
     PyObject *nodes;
@@ -84,11 +88,13 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
     }
 #else
     PyObject *seen = PySet_New(NULL);
+    PyObject *parents = PyDict_New();
     /* GCOVR_EXCL_BR_START: list and set allocation cannot be forced to fail */
-    if (out == NULL || seen == NULL) {
-        Py_XDECREF(out);  /* GCOVR_EXCL_LINE */
-        Py_XDECREF(seen); /* GCOVR_EXCL_LINE */
-        return NULL;      /* GCOVR_EXCL_LINE */
+    if (out == NULL || seen == NULL || parents == NULL) {
+        Py_XDECREF(out);     /* GCOVR_EXCL_LINE */
+        Py_XDECREF(seen);    /* GCOVR_EXCL_LINE */
+        Py_XDECREF(parents); /* GCOVR_EXCL_LINE */
+        return NULL;         /* GCOVR_EXCL_LINE */
     }
     /* GCOVR_EXCL_BR_STOP */
 #endif
@@ -105,66 +111,54 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
             break;
         }
 #ifdef Py_GIL_DISABLED
-        node_guard guard;
-        node_guard_begin(&guard, (NodeObject *)owner, NULL);
-        do {
-            node = ((NodeObject *)owner)->node;
-#endif
-            /* the document root has no parent, and a node whose parent is not an element has no element siblings */
-            if (node->parent == NULL || node->parent->type != TH_NODE_ELEMENT) {
-                continue;
-            }
-#ifndef Py_GIL_DISABLED
-            /* The memo must not outlive exclusive traversal access to the tree. */
-            const Py_ssize_t first = th_node_map_find(&parents, node->parent);
-            if (first != 0) {
-                if (first <= PyList_GET_SIZE(nodes)) {
-                    status = PyList_Append(
-                        out, PyList_GET_ITEM(nodes, first - 1)); /* GCOVR_EXCL_BR_LINE: allocation failure */
-                    parents.entries[th_node_map_slot(&parents, node->parent)].value = PyList_GET_SIZE(nodes) + 1;
-                    if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                        break;        /* GCOVR_EXCL_LINE */
-                    }
-                }
-                continue;
-            }
-            /* GCOVR_EXCL_BR_START: allocation failure */
-            if (th_node_map_insert(&parents, node->parent, index + 1) < 0) {
-                PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
-                status = -1;      /* GCOVR_EXCL_LINE */
-                break;            /* GCOVR_EXCL_LINE */
-            } /* GCOVR_EXCL_LINE */
-            /* GCOVR_EXCL_BR_STOP */
-#endif
-            for (th_node *sibling = node->parent->first_child; sibling != NULL; sibling = sibling->next_sibling) {
-                if (sibling->type != TH_NODE_ELEMENT || sibling == node) {
-                    continue;
-                }
-                PyObject *wrapper = node_wrap_locked(state, ((NodeObject *)owner)->handle, sibling);
-                /* GCOVR_EXCL_BR_START: wrapper allocation cannot be forced to fail */
-                if (wrapper == NULL) {
-                    status = -1; /* GCOVR_EXCL_LINE */
-                    break;       /* GCOVR_EXCL_LINE */
-                }
-                /* GCOVR_EXCL_BR_STOP */
-#ifndef Py_GIL_DISABLED
-                status = PyList_Append(out, wrapper); /* GCOVR_EXCL_BR_LINE: allocation failure */
+        status = facade_siblings(state, (NodeObject *)owner, out, seen, parents);
+        if (status < 0) {
+            break;
+        }
 #else
-            status = facade_keep_new(out, seen, wrapper);
-#endif
-                Py_DECREF(wrapper);
-                if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
+        /* the document root has no parent, and a node whose parent is not an element has no element siblings */
+        if (node->parent == NULL || node->parent->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        /* The memo must not outlive exclusive traversal access to the tree. */
+        const Py_ssize_t first = th_node_map_find(&parents, node->parent);
+        if (first != 0) {
+            if (first <= PyList_GET_SIZE(nodes)) {
+                status =
+                    PyList_Append(out, PyList_GET_ITEM(nodes, first - 1)); /* GCOVR_EXCL_BR_LINE: allocation failure */
+                parents.entries[th_node_map_slot(&parents, node->parent)].value = PyList_GET_SIZE(nodes) + 1;
+                if (status < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                     break;        /* GCOVR_EXCL_LINE */
                 }
             }
+            continue;
+        }
+        /* GCOVR_EXCL_BR_START: allocation failure */
+        if (th_node_map_insert(&parents, node->parent, index + 1) < 0) {
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+            status = -1;      /* GCOVR_EXCL_LINE */
+            break;            /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE */
+        /* GCOVR_EXCL_BR_STOP */
+        for (th_node *sibling = node->parent->first_child; sibling != NULL; sibling = sibling->next_sibling) {
+            if (sibling->type != TH_NODE_ELEMENT || sibling == node) {
+                continue;
+            }
+            PyObject *wrapper = node_wrap_locked(state, ((NodeObject *)owner)->handle, sibling);
+            /* GCOVR_EXCL_BR_START: wrapper allocation cannot be forced to fail */
+            if (wrapper == NULL) {
+                status = -1; /* GCOVR_EXCL_LINE */
+                break;       /* GCOVR_EXCL_LINE */
+            }
+            /* GCOVR_EXCL_BR_STOP */
+            status = PyList_Append(out, wrapper); /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(wrapper);
             if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
                 break;        /* GCOVR_EXCL_LINE */
             }
-#ifdef Py_GIL_DISABLED
-        } while (0);
-        node_guard_end(&guard);
-        if (status < 0) {
-            break;
+        }
+        if (status < 0) { /* GCOVR_EXCL_BR_LINE: the append only fails on allocation failure */
+            break;        /* GCOVR_EXCL_LINE */
         }
 #endif
     }
@@ -172,6 +166,7 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
     PyMem_Free(parents.entries);
 #else
     Py_DECREF(seen);
+    Py_DECREF(parents);
 #endif
     if (status < 0) {
         Py_DECREF(out);
@@ -179,6 +174,79 @@ PyObject *turbohtml_query_siblings(PyObject *module, PyObject *args) {
     }
     return out;
 }
+
+#ifdef Py_GIL_DISABLED
+static int facade_siblings(module_state *state, NodeObject *owner, PyObject *out, PyObject *seen, PyObject *parents) {
+    for (;;) {
+        node_guard guard;
+        node_guard_begin(&guard, owner, NULL);
+        th_node *parent_node = owner->node->parent;
+        if (parent_node == NULL || parent_node->type != TH_NODE_ELEMENT) {
+            node_guard_end(&guard);
+            return 0;
+        }
+        PyObject *parent = node_wrap_locked(state, owner->handle, parent_node);
+        node_guard_end(&guard);
+        if (parent == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;        /* GCOVR_EXCL_LINE */
+        }
+        PyObject *first = PyDict_GetItem(parents, parent);
+        node_guard_begin(&guard, owner, (NodeObject *)first);
+        /* Adoption may change either owner while the memo is read. */
+        if (!node_owned_by((NodeObject *)parent, guard.first) || owner->node->parent != ((NodeObject *)parent)->node) {
+            node_guard_end(&guard);
+            Py_DECREF(parent);
+            continue;
+        }
+        int status = 0;
+        PyObject **wrappers = NULL;
+        Py_ssize_t count = 0;
+        if (first != NULL) {
+            th_node *excluded = ((NodeObject *)first)->node;
+            if (excluded != owner->node && excluded->parent == owner->node->parent) {
+                status = facade_keep_new(out, seen, first);
+            }
+        } else {
+            Py_ssize_t capacity = 0;
+            for (th_node *sibling = owner->node->parent->first_child; sibling != NULL;
+                 sibling = sibling->next_sibling) {
+                capacity += sibling->type == TH_NODE_ELEMENT && sibling != owner->node;
+            }
+            if (capacity != 0) {
+                wrappers = PyMem_Malloc((size_t)capacity * sizeof(PyObject *));
+                if (wrappers == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    PyErr_NoMemory();   /* GCOVR_EXCL_LINE */
+                    status = -1;        /* GCOVR_EXCL_LINE */
+                }
+            }
+            for (th_node *sibling = owner->node->parent->first_child; status == 0 && sibling != NULL;
+                 sibling = sibling->next_sibling) {
+                if (sibling->type != TH_NODE_ELEMENT || sibling == owner->node) {
+                    continue;
+                }
+                PyObject *wrapper = node_wrap_locked(state, owner->handle, sibling);
+                if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    status = -1;       /* GCOVR_EXCL_LINE */
+                    break;             /* GCOVR_EXCL_LINE */
+                }
+                wrappers[count++] = wrapper;
+                status = facade_keep_new(out, seen, wrapper);
+            }
+        }
+        node_guard_end(&guard);
+        /* A duplicate wrapper's deallocator can suspend a held tree guard. */
+        for (Py_ssize_t index = 0; index < count; index++) {
+            Py_DECREF(wrappers[index]);
+        }
+        PyMem_Free(wrappers);
+        if (status == 0 && first == NULL) {
+            status = PyDict_SetItem(parents, parent, (PyObject *)owner);
+        }
+        Py_DECREF(parent);
+        return status;
+    }
+}
+#endif
 
 /* _query_parents(module, nodes) -> list[Element]: the element parent of every wrapped element, deduplicated,
    since siblings share one. */

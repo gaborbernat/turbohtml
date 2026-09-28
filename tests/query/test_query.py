@@ -414,6 +414,22 @@ def test_siblings_deduplicates_across_the_set() -> None:
 
 
 @pytest.mark.parametrize(
+    ("indices", "expected"),
+    [
+        pytest.param([], [], id="empty"),
+        pytest.param([0], [1, 2], id="one"),
+        pytest.param([0, 0], [1, 2], id="duplicate"),
+        pytest.param([0, 1, 2], [1, 2, 0], id="all"),
+        pytest.param([2, 0, 1], [0, 1, 2], id="reverse"),
+    ],
+)
+def test_siblings_preserves_first_encounter_order(indices: list[int], expected: list[int]) -> None:
+    children: Final = [Element("b"), Element("i"), Element("em")]
+    Element("div", children=children)
+    assert list(Query([children[index] for index in indices]).siblings()) == [children[index] for index in expected]
+
+
+@pytest.mark.parametrize(
     ("call", "args"),
     [
         pytest.param(_query_siblings, ("notalist",), id="siblings"),
