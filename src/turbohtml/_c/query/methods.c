@@ -125,12 +125,11 @@ PyObject *turbohtml_register_selector_error(PyObject *module, PyObject *type) {
 }
 
 static int append_selected(PyObject *out, module_state *state, PyObject *handle, th_node *origin,
-                           sel_compiled *compiled, Py_ssize_t limit) {
+                           sel_compiled *compiled, Py_ssize_t limit, const sel_simple *single) {
     int error = 0;
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
     sel_has_memo has_memo = {0};
-    const sel_simple *single = sel_single_simple(compiled);
     uint16_t subject = selector_subject_atom(compiled);
     HandleObject *handle_obj = (HandleObject *)handle;
     sel_ctx ctx = {compiled->tree, origin,       compiled->quirks, selector_uses_has_memo(compiled) ? &has_memo : NULL,
@@ -139,8 +138,7 @@ static int append_selected(PyObject *out, module_state *state, PyObject *handle,
         Py_ssize_t end = handle_obj->index_offsets[subject + 1];
         for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
             th_node *node = handle_obj->index_nodes[pos];
-            int matched =
-                single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx);
+            int matched = selector_matches_c(node, compiled, &ctx);
             if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
                 error = 1;                                                 /* GCOVR_EXCL_LINE */
                 break;                                                     /* GCOVR_EXCL_LINE */
@@ -195,7 +193,14 @@ retry:;
         moved = 1;
     } else {
         th_node *origin = ((NodeObject *)self)->node;
-        error = append_selected(out, state, handle, origin, compiled, limit);
+        const sel_simple *single = sel_single_simple(compiled);
+        if (single != NULL && single->kind == 'e' && single->tag_atom != TH_TAG_UNKNOWN &&
+            !th_tree_is_xml(compiled->tree) && handle_use_index(handle_obj, origin, 1)) {
+            Py_SETREF(out, node_wrap_indexed(state, handle, single->tag_atom, limit > 0 ? limit : -1));
+            error = out == NULL;
+        } else {
+            error = append_selected(out, state, handle, origin, compiled, limit, single);
+        }
     }
     Py_END_CRITICAL_SECTION();
     Py_DECREF(handle);
@@ -204,7 +209,7 @@ retry:;
         goto retry;
     }
     if (error) {
-        Py_DECREF(out);
+        Py_XDECREF(out);
         return NULL;
     }
     return out;
@@ -501,7 +506,8 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
                         continue;
                     }
                     covered = origin;
-                    int append_error = append_selected(out, state, anchor->handle, origin, compiled, 0);
+                    int append_error =
+                        append_selected(out, state, anchor->handle, origin, compiled, 0, sel_single_simple(compiled));
                     if (append_error < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                         error = 1;          /* GCOVR_EXCL_LINE */
                         break;              /* GCOVR_EXCL_LINE */

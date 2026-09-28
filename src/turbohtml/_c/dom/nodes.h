@@ -751,6 +751,50 @@ static inline int handle_use_index(HandleObject *handle, th_node *origin, int el
            0; /* GCOVR_EXCL_BR_LINE: an index build only fails on unforceable allocation */
 }
 
+static inline PyObject *node_wrap_indexed(module_state *state, PyObject *handle, uint16_t tag, Py_ssize_t limit) {
+    HandleObject *owner = (HandleObject *)handle;
+    Py_ssize_t count = owner->index_offsets[tag + 1] - owner->index_offsets[tag];
+    if (limit >= 0 && limit < count) {
+        count = limit;
+    }
+    PyObject *out;
+    for (;;) {
+        out = PyList_New(count);
+        if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return NULL;   /* GCOVR_EXCL_LINE */
+        }
+#if PY_VERSION_HEX < 0x030C0000 && !defined(PYPY_VERSION)
+        /* CPython 3.12 defers collection until the eval breaker; older allocations can mutate the document. */
+        if (!owner->index_built && handle_build_index(owner) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(out);                                         /* GCOVR_EXCL_LINE */
+            PyErr_NoMemory();                                       /* GCOVR_EXCL_LINE */
+            return NULL;                                            /* GCOVR_EXCL_LINE */
+        }
+        Py_ssize_t refreshed = owner->index_offsets[tag + 1] - owner->index_offsets[tag];
+        if (limit >= 0 && limit < refreshed) {
+            refreshed = limit;
+        }
+        if (count == refreshed) {
+            break;
+        }
+        Py_DECREF(out);
+        count = refreshed;
+#else
+        break;
+#endif
+    }
+    Py_ssize_t start = owner->index_offsets[tag];
+    for (Py_ssize_t index = 0; index < count; index++) {
+        PyObject *wrapped = node_wrap_locked(state, handle, owner->index_nodes[start + index]);
+        if (wrapped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(out);    /* GCOVR_EXCL_LINE */
+            return NULL;       /* GCOVR_EXCL_LINE */
+        }
+        PyList_SET_ITEM(out, index, wrapped);
+    }
+    return out;
+}
+
 /* Wrap node and append it to the result list; -1 on allocation failure. */
 static inline int append_wrapped(PyObject *out, module_state *state, PyObject *handle, th_node *node) {
     PyObject *wrapped = node_wrap(state, handle, node);
