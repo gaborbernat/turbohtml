@@ -1677,13 +1677,15 @@ int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) 
         return -3;
     }
     ctx->depth++;
-    xp_live_frame frame;
-    if (ctx->live != NULL) {
-        frame = (xp_live_frame){.node = ctx->node};
+    int rc;
+    if (ctx->live == NULL) {
+        rc = eval_expr_inner(prog, idx, ctx, out);
+    } else {
+        xp_live_frame frame = {.node = ctx->node};
         xp_live_enter(ctx, &frame);
+        rc = eval_expr_inner(prog, idx, ctx, out);
+        xp_live_leave(ctx, &frame);
     }
-    int rc = eval_expr_inner(prog, idx, ctx, out);
-    xp_live_leave(ctx, &frame);
     ctx->depth--;
     return rc;
 }
