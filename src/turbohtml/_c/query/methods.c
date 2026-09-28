@@ -404,6 +404,26 @@ static PyObject *index_root_handles(multi_root *roots, Py_ssize_t count, PyObjec
 }
 #endif
 
+static Py_ssize_t index_root_group(th_node_map *groups, th_node *root, Py_ssize_t position) {
+    size_t slot = 0;
+    if (groups->capacity != 0) {
+        slot = th_node_map_slot(groups, root);
+        if (groups->entries[slot].node != NULL) {
+            return groups->entries[slot].value;
+        }
+    }
+    size_t capacity = groups->capacity;
+    if (th_node_map_reserve(groups, groups->count + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                            /* GCOVR_EXCL_LINE */
+    }
+    if (groups->capacity != capacity) {
+        slot = th_node_map_slot(groups, root);
+    }
+    groups->entries[slot] = (th_node_map_entry){root, position};
+    groups->count++;
+    return 0;
+}
+
 PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     PyObject *roots_obj;
     PyObject *selector;
@@ -472,15 +492,16 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
                     continue;
                 }
                 th_node *top = node_root(candidate->node);
-                Py_ssize_t head = top == first_top ? first_group : th_node_map_find(&tops, top);
+                Py_ssize_t head = top == first_top   ? first_group
+                                  : first_group == 0 ? 0
+                                                     : index_root_group(&tops, top, index + 1);
+                if (head < 0) {       /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+                    error = 1;        /* GCOVR_EXCL_LINE */
+                    break;            /* GCOVR_EXCL_LINE */
+                }
                 if (head == 0) {
                     if (first_group != 0) {
-                        const int inserted = th_node_map_insert(&tops, top, index + 1);
-                        if (inserted < 0) {   /* GCOVR_EXCL_BR_LINE: allocation failure */
-                            PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
-                            error = 1;        /* GCOVR_EXCL_LINE */
-                            break;            /* GCOVR_EXCL_LINE */
-                        }
                         roots[last_group - 1].next_group = index + 1;
                     } else {
                         first_top = top;
