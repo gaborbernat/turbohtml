@@ -2371,8 +2371,8 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
                 return -1; /* GCOVR_EXCL_LINE: allocation failure */
             }
         }
-        source = preorder_next(source, root);
-        dest = preorder_next(dest, copy);
+        source = th_node_next_including_shadow(source_owner->tree, source, root);
+        dest = th_node_next_including_shadow(dest_owner->tree, dest, copy);
     } while (source != NULL);
     th_node_remove_observed(((HandleObject *)source_handle)->tree, root);
     source = root;
@@ -2401,8 +2401,8 @@ static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_n
             } while (binding != NULL);
 #endif
         }
-        source = preorder_next(source, root);
-        dest = preorder_next(dest, copy);
+        source = th_node_next_including_shadow(source_owner->tree, source, root);
+        dest = th_node_next_including_shadow(dest_owner->tree, dest, copy);
     } while (source != NULL);
     return 0;
 }
@@ -2467,7 +2467,7 @@ static PyObject *import_fragment_children(PyObject *dest_handle, NodeObject *fra
     /* copy is NULL only on allocation failure */
     for (th_node *child = fragment->node->first_child; copy != NULL && child != NULL; /* GCOVR_EXCL_BR_LINE */
          child = child->next_sibling) {
-        th_node *child_copy = th_tree_copy_node(dest_tree, tree_of((PyObject *)fragment), child);
+        th_node *child_copy = th_tree_adopt_copy(dest_tree, tree_of((PyObject *)fragment), child);
         if (child_copy == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             copy = NULL;          /* GCOVR_EXCL_LINE: allocation-failure path */
             break;                /* GCOVR_EXCL_LINE: allocation-failure path */
