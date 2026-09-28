@@ -894,9 +894,19 @@ typedef struct xpath_ext_ctx {
     th_node_map owners;
     th_node_map text_parents;
     struct xpath_ext_ctx *previous;
+    struct xpath_frame_pins **frames;
+    size_t frame_count;
 } xpath_ext_ctx;
 
+typedef struct xpath_frame_pins {
+    uint64_t activation;
+    uint64_t version;
+    size_t references;
+    xpath_ext_ctx pins;
+} xpath_frame_pins;
+
 static PyObject *xpath_owned_node(xpath_ext_ctx *ec, th_node *node);
+static PyObject *xpath_text_parent(xpath_ext_ctx *ec, th_node *node);
 
 static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
     if (item.attr == -1 && item.node->type == TH_NODE_ELEMENT) {
@@ -993,11 +1003,11 @@ static int xpath_snapshot_prepare(module_state *state, PyObject *handle, th_tree
             continue;
         }
         if (xp_is_attribute(source.attr) || source.node->type == TH_NODE_TEXT) {
-            Py_ssize_t parent = ec == NULL ? 0 : th_node_map_find(&ec->text_parents, source.node);
+            PyObject *parent = ec == NULL ? NULL : xpath_text_parent(ec, source.node);
             th_node *owner = xp_is_attribute(source.attr) ? source.node : source.node->parent;
-            snapshot->items[index].parent = parent != 0  ? Py_NewRef(ec->retained[parent - 1])
-                                            : ec != NULL ? xpath_owned_node(ec, owner)
-                                                         : node_wrap(state, handle, owner);
+            snapshot->items[index].parent = parent != NULL ? Py_NewRef(parent)
+                                            : ec != NULL   ? xpath_owned_node(ec, owner)
+                                                           : node_wrap(state, handle, owner);
             if (snapshot->items[index].parent == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                 return -1;                               /* GCOVR_EXCL_LINE */
             }
@@ -1072,9 +1082,28 @@ static int xpath_extension_retain(xpath_ext_ctx *ec, PyObject *object) {
     return 0;
 }
 
+static PyObject *xpath_retained_node(xpath_ext_ctx *ec, th_node *node, int parent) {
+    Py_ssize_t index = th_node_map_find(parent ? &ec->text_parents : &ec->owners, node);
+    if (index != 0) {
+        return ec->retained[index - 1];
+    }
+    for (size_t frame = 0; frame < ec->frame_count; frame++) {
+        xpath_ext_ctx *pins = &ec->frames[frame]->pins;
+        index = th_node_map_find(parent ? &pins->text_parents : &pins->owners, node);
+        if (index != 0) {
+            return pins->retained[index - 1];
+        }
+    }
+    return NULL;
+}
+
+static PyObject *xpath_text_parent(xpath_ext_ctx *ec, th_node *node) {
+    return xpath_retained_node(ec, node, 1);
+}
+
 static PyObject *xpath_owned_node(xpath_ext_ctx *ec, th_node *node) {
-    Py_ssize_t owner = th_node_map_find(&ec->owners, node);
-    return owner != 0 ? Py_NewRef(ec->retained[owner - 1]) : node_wrap(ec->state, ec->handle, node);
+    PyObject *owner = xpath_retained_node(ec, node, 0);
+    return owner != NULL ? Py_NewRef(owner) : node_wrap(ec->state, ec->handle, node);
 }
 
 static int xpath_capture_owner(void *context, th_node *node) {
@@ -1097,9 +1126,8 @@ static int xpath_capture_owner(void *context, th_node *node) {
         return -1;                                                                 /* GCOVR_EXCL_LINE */
     }
     if (node->type == TH_NODE_TEXT) {
-        Py_ssize_t prior = th_node_map_find(&previous->text_parents, node);
-        PyObject *parent =
-            prior != 0 ? Py_NewRef(previous->retained[prior - 1]) : xpath_owned_node(previous, node->parent);
+        PyObject *prior = xpath_text_parent(previous, node);
+        PyObject *parent = prior != NULL ? Py_NewRef(prior) : xpath_owned_node(previous, node->parent);
         if (parent == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             return -1;        /* GCOVR_EXCL_LINE */
         }
@@ -1124,15 +1152,60 @@ static void xpath_extension_clear(xpath_ext_ctx *ec) {
     PyMem_Free(ec->retained);
     PyMem_Free(ec->owners.entries);
     PyMem_Free(ec->text_parents.entries);
+    for (size_t index = 0; index < ec->frame_count; index++) {
+        xpath_frame_pins *frame = ec->frames[index];
+        if (--frame->references == 0) {
+            xpath_extension_clear(&frame->pins);
+            PyMem_Free(frame);
+        }
+    }
+    PyMem_Free(ec->frames);
 }
 
 static int xpath_before_python(void *context, const xp_live_frame *frame) {
     xpath_ext_ctx *ec = context;
     xpath_ext_ctx current = {
         .extensions = ec->extensions, .handle = ec->handle, .state = ec->state, .tree = ec->tree, .previous = ec};
-    if (xp_visit_live_nodes(frame, xpath_capture_owner, &current) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        xpath_extension_clear(&current);                                 /* GCOVR_EXCL_LINE */
-        return -1;                                                       /* GCOVR_EXCL_LINE */
+    size_t count = 0;
+    for (const xp_live_frame *active = frame; active != NULL; active = xp_live_previous(active)) {
+        count++;
+    }
+    current.frames = PyMem_Malloc(count * sizeof(xpath_frame_pins *));
+    if (current.frames == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory();         /* GCOVR_EXCL_LINE */
+        return -1;                /* GCOVR_EXCL_LINE */
+    }
+    for (const xp_live_frame *active = frame; active != NULL; active = xp_live_previous(active)) {
+        xpath_frame_pins *pins = NULL;
+        for (size_t index = 0; index < ec->frame_count; index++) {
+            xpath_frame_pins *prior = ec->frames[index];
+            if (prior->activation == xp_live_id(active) && prior->version == xp_live_version(active)) {
+                pins = prior;
+                pins->references++;
+                break;
+            }
+        }
+        if (pins == NULL) {
+            pins = PyMem_Calloc(1, sizeof(xpath_frame_pins));
+            if (pins == NULL) {                  /* GCOVR_EXCL_BR_LINE: allocation failure */
+                PyErr_NoMemory();                /* GCOVR_EXCL_LINE */
+                xpath_extension_clear(&current); /* GCOVR_EXCL_LINE */
+                return -1;                       /* GCOVR_EXCL_LINE */
+            }
+            pins->activation = xp_live_id(active);
+            pins->version = xp_live_version(active);
+            pins->references = 1;
+            pins->pins = (xpath_ext_ctx){.handle = ec->handle, .state = ec->state, .tree = ec->tree, .previous = ec};
+            current.frames[current.frame_count++] = pins;
+            int visited = xp_visit_frame_nodes(active, xpath_capture_owner, &pins->pins);
+            if (visited < 0) {                   /* GCOVR_EXCL_BR_LINE: allocation failure */
+                xpath_extension_clear(&current); /* GCOVR_EXCL_LINE */
+                return -1;                       /* GCOVR_EXCL_LINE */
+            }
+            pins->pins.previous = NULL;
+        } else {
+            current.frames[current.frame_count++] = pins;
+        }
     }
     xpath_ext_ctx previous = *ec;
     current.previous = NULL;

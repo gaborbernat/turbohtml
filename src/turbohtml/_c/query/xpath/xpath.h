@@ -62,7 +62,10 @@ uintptr_t xp_item_hash(xp_item item);
 
 typedef struct xp_live_frame xp_live_frame;
 typedef int (*xp_before_python_fn)(void *ctx, const xp_live_frame *frame);
-int xp_visit_live_nodes(const xp_live_frame *frame, int (*visitor)(void *, struct th_node *), void *data);
+const xp_live_frame *xp_live_previous(const xp_live_frame *frame);
+uint64_t xp_live_id(const xp_live_frame *frame);
+uint64_t xp_live_version(const xp_live_frame *frame);
+int xp_visit_frame_nodes(const xp_live_frame *frame, int (*visitor)(void *, struct th_node *), void *data);
 
 void xp_nodeset_free(xp_nodeset *ns);
 

@@ -78,34 +78,44 @@ static int visit_set(const xp_nodeset *set, int (*visitor)(void *, struct th_nod
     return 0;
 }
 
-int xp_visit_live_nodes(const xp_live_frame *frame, int (*visitor)(void *, struct th_node *), void *data) {
-    for (; frame != NULL; frame = frame->previous) {
-        if (frame->node != NULL) {
-            if (visitor(data, frame->node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                return -1;                        /* GCOVR_EXCL_LINE */
+const xp_live_frame *xp_live_previous(const xp_live_frame *frame) {
+    return frame->previous;
+}
+
+uint64_t xp_live_id(const xp_live_frame *frame) {
+    return frame->id;
+}
+
+uint64_t xp_live_version(const xp_live_frame *frame) {
+    return frame->version;
+}
+
+int xp_visit_frame_nodes(const xp_live_frame *frame, int (*visitor)(void *, struct th_node *), void *data) {
+    if (frame->node != NULL) {
+        if (visitor(data, frame->node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                        /* GCOVR_EXCL_LINE */
+        }
+    }
+    for (int index = 0; index < 2; index++) {
+        if (frame->sets[index] != NULL) {
+            if (visit_set(frame->sets[index], visitor, data) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;                                          /* GCOVR_EXCL_LINE */
             }
         }
-        for (int index = 0; index < 2; index++) {
-            if (frame->sets[index] != NULL) {
-                if (visit_set(frame->sets[index], visitor, data) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                    return -1;                                          /* GCOVR_EXCL_LINE */
-                }
+    }
+    for (Py_ssize_t index = 0; index < frame->result_count; index++) {
+        if (frame->results[index].kind == XP_NODESET) {
+            int rc = visit_set(&frame->results[index].nodes, visitor, data);
+            if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1; /* GCOVR_EXCL_LINE */
             }
         }
-        for (Py_ssize_t index = 0; index < frame->result_count; index++) {
-            if (frame->results[index].kind == XP_NODESET) {
-                int rc = visit_set(&frame->results[index].nodes, visitor, data);
-                if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
-                    return -1; /* GCOVR_EXCL_LINE */
-                }
-            }
-        }
-        for (Py_ssize_t index = 0; frame->vars != NULL && index < frame->vars->len; index++) {
-            const xp_result *value = &frame->vars->items[index].value;
-            if (value->kind == XP_NODESET) {
-                if (visit_set(&value->nodes, visitor, data) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                    return -1;                                     /* GCOVR_EXCL_LINE */
-                }
+    }
+    for (Py_ssize_t index = 0; frame->vars != NULL && index < frame->vars->len; index++) {
+        const xp_result *value = &frame->vars->items[index].value;
+        if (value->kind == XP_NODESET) {
+            if (visit_set(&value->nodes, visitor, data) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;                                     /* GCOVR_EXCL_LINE */
             }
         }
     }
@@ -1146,6 +1156,7 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
                 return -1;                  /* GCOVR_EXCL_LINE */
             }
             if (step->first >= 0) {
+                xp_live_changed(ctx);
                 /* filter this context node's candidates in proximity order */
                 xp_nodeset slice = {following->items + before, following->len - before, 0, following->snapshots};
                 int rc = apply_predicates(prog, step->first, ctx, &slice);
@@ -1715,7 +1726,7 @@ int xp_eval_snapshot(const xp_program *prog, struct th_tree *tree, struct th_nod
                      const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx,
                      xp_before_python_fn before_python, xp_result *out, const char **feature) {
     PyObject *regex_cache = NULL;
-    xp_live_frame *live = NULL;
+    xp_live_registry live = {0};
     xp_ctx ctx = {tree,         context, -1,           1, 1, feature, vars, namespaces, extension, extension_ctx, 0,
                   &regex_cache, &live,   before_python};
     xp_live_frame frame = {.node = context, .vars = vars};
@@ -1725,6 +1736,7 @@ int xp_eval_snapshot(const xp_program *prog, struct th_tree *tree, struct th_nod
         if (rc == 0) {
             frame.results = out;
             frame.result_count = 1;
+            xp_live_changed(&ctx);
             if (xp_before_python(&ctx) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                 xp_result_free(out);          /* GCOVR_EXCL_LINE */
                 rc = -1;                      /* GCOVR_EXCL_LINE */

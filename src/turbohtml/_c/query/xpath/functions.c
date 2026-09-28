@@ -1702,6 +1702,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
             return arg_rc;
         }
         filled++;
+        xp_live_changed(ctx);
     }
     int rc = 0;
     if (func_is(fn, "true") || func_is(fn, "false")) {
