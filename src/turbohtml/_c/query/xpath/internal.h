@@ -193,6 +193,7 @@ struct xp_live_frame {
     uint64_t version;
     struct th_node *node;
     const xp_nodeset *sets[2];
+    const xp_nodeset *append;
     const xp_result *results;
     Py_ssize_t result_count;
     const xp_bindings *vars;

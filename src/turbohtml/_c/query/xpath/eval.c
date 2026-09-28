@@ -90,6 +90,20 @@ uint64_t xp_live_version(const xp_live_frame *frame) {
     return frame->version;
 }
 
+Py_ssize_t xp_live_append_count(const xp_live_frame *frame) {
+    return frame->append != NULL ? frame->append->len : 0;
+}
+
+int xp_visit_frame_append(const xp_live_frame *frame, Py_ssize_t start, int (*visitor)(void *, struct th_node *),
+                          void *data) {
+    for (Py_ssize_t index = start; index < xp_live_append_count(frame); index++) {
+        if (visitor(data, frame->append->items[index].node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                             /* GCOVR_EXCL_LINE */
+        }
+    }
+    return 0;
+}
+
 int xp_visit_frame_nodes(const xp_live_frame *frame, int (*visitor)(void *, struct th_node *), void *data) {
     if (frame->node != NULL) {
         if (visitor(data, frame->node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -119,7 +133,7 @@ int xp_visit_frame_nodes(const xp_live_frame *frame, int (*visitor)(void *, stru
             }
         }
     }
-    return 0;
+    return xp_visit_frame_append(frame, 0, visitor, data);
 }
 
 #if defined(_MSC_VER)
@@ -1094,7 +1108,11 @@ static int build_step_match(xp_ctx *ctx, const xn *step, step_match *match) {
     return 0;
 }
 
-/* Evaluate an XN_PATH (optionally with a filter base) into a node-set. */
+static int eval_path_step(const xp_program *prog, const xn *step, const step_match *match, xp_ctx *ctx,
+                          xp_nodeset *current, xp_nodeset *following);
+static int eval_path_step_inner(const xp_program *prog, const xn *step, const step_match *match, xp_ctx *ctx,
+                                xp_nodeset *current, xp_nodeset *following, xp_nodeset *accepted);
+
 static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out, xp_nodeset *current,
                            xp_nodeset *following) {
     const xn *root = &prog->nodes[path_idx];
@@ -1132,41 +1150,11 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
             following->snapshots = 0;
         }
         following->len = 0;
-        /* Mark covered contexts during the subtree walk: checking ancestry per context is quadratic on deep trees. */
-        int skip_nested =
-            current->len > 1 && step->first < 0 && (step->axis == AX_DESCENDANT || step->axis == AX_DESCENDANT_OR_SELF);
-        Py_ssize_t covered = 0;
-        for (Py_ssize_t index = 0; index < current->len; index++) {
-            Py_ssize_t before = following->len;
-            xp_item item = current->items[index];
-            int stepped;
-            if (skip_nested && item.attr == -1) {
-                if (index < covered) {
-                    continue;
-                }
-                covered = index + 1;
-                stepped = apply_descendant_step(following, item.node, step, &match, current, &covered);
-            } else {
-                stepped = item.attr == -1 ? apply_step(following, item.node, step->axis, step, &match, ctx)
-                                          : apply_owned_step(following, item, step, &match);
-            }
-            if (stepped < 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
-                xp_nodeset_free(current);   /* GCOVR_EXCL_LINE */
-                xp_nodeset_free(following); /* GCOVR_EXCL_LINE */
-                return -1;                  /* GCOVR_EXCL_LINE */
-            }
-            if (step->first >= 0) {
-                xp_live_changed(ctx);
-                /* filter this context node's candidates in proximity order */
-                xp_nodeset slice = {following->items + before, following->len - before, 0, following->snapshots};
-                int rc = apply_predicates(prog, step->first, ctx, &slice);
-                if (rc < 0) {
-                    xp_nodeset_free(current);
-                    xp_nodeset_free(following);
-                    return rc;
-                }
-                following->len = before + slice.len;
-            }
+        int stepped = eval_path_step(prog, step, &match, ctx, current, following);
+        if (stepped < 0) {
+            xp_nodeset_free(current);
+            xp_nodeset_free(following);
+            return stepped;
         }
         xp_nodeset swap = *current;
         *current = *following;
@@ -1182,17 +1170,68 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
     return 0;
 }
 
+static int eval_path_step(const xp_program *prog, const xn *step, const step_match *match, xp_ctx *ctx,
+                          xp_nodeset *current, xp_nodeset *following) {
+    if (ctx->live == NULL) {
+        return eval_path_step_inner(prog, step, match, ctx, current, following, NULL);
+    }
+    xp_nodeset accepted = {0};
+    xp_live_frame frame = {.sets = {current}, .append = &accepted};
+    xp_live_enter(ctx, &frame);
+    int rc = eval_path_step_inner(prog, step, match, ctx, current, following, &accepted);
+    xp_live_leave(ctx, &frame);
+    return rc;
+}
+
+static int eval_path_step_inner(const xp_program *prog, const xn *step, const step_match *match, xp_ctx *ctx,
+                                xp_nodeset *current, xp_nodeset *following, xp_nodeset *accepted) {
+    /* Mark covered contexts during the subtree walk: checking ancestry per context is quadratic on deep trees. */
+    int skip_nested =
+        current->len > 1 && step->first < 0 && (step->axis == AX_DESCENDANT || step->axis == AX_DESCENDANT_OR_SELF);
+    Py_ssize_t covered = 0;
+    for (Py_ssize_t index = 0; index < current->len; index++) {
+        Py_ssize_t before = following->len;
+        xp_item item = current->items[index];
+        int stepped;
+        if (skip_nested && item.attr == -1) {
+            if (index < covered) {
+                continue;
+            }
+            covered = index + 1;
+            stepped = apply_descendant_step(following, item.node, step, match, current, &covered);
+        } else {
+            stepped = item.attr == -1 ? apply_step(following, item.node, step->axis, step, match, ctx)
+                                      : apply_owned_step(following, item, step, match);
+        }
+        if (stepped < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;     /* GCOVR_EXCL_LINE */
+        }
+        if (step->first >= 0) {
+            xp_nodeset slice = {following->items + before, following->len - before, 0, following->snapshots};
+            int rc;
+            if (accepted != NULL) {
+                *accepted = *following;
+                accepted->len = before;
+                xp_live_frame frame = {.sets = {&slice}};
+                xp_live_enter(ctx, &frame);
+                rc = apply_predicates(prog, step->first, ctx, &slice);
+                xp_live_leave(ctx, &frame);
+            } else {
+                rc = apply_predicates(prog, step->first, ctx, &slice);
+            }
+            if (rc < 0) {
+                return rc;
+            }
+            following->len = before + slice.len;
+        }
+    }
+    return 0;
+}
+
 static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out) {
     xp_nodeset current = {0};
     xp_nodeset following = {0};
-    xp_live_frame frame;
-    if (ctx->live != NULL) {
-        frame = (xp_live_frame){.sets = {&current, &following}};
-        xp_live_enter(ctx, &frame);
-    }
-    int rc = eval_path_inner(prog, path_idx, ctx, out, &current, &following);
-    xp_live_leave(ctx, &frame);
-    return rc;
+    return eval_path_inner(prog, path_idx, ctx, out, &current, &following);
 }
 
 /* Existential comparison of two scalar values (neither a node-set). */

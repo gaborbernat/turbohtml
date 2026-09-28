@@ -83,3 +83,28 @@ def test_xpath_frame_filter_compaction_keeps_adopted_node(expression: str) -> No
     assert isinstance(result[0], Element)
     result[0].attrs["live"] = "yes"
     assert [node.attrs["id"] for node in target.select("b[live=yes]")] == ["2"]
+
+
+def test_xpath_frame_path_retains_accepted_nodes_after_compaction() -> None:
+    source: Final = Element(
+        "section",
+        children=[
+            Element("div", children=[Element("b", {"id": str(index * 3 + child)}) for child in range(3)])
+            for index in range(8)
+        ],
+    )
+    target: Final = Element("main")
+
+    def adopt(context: SimpleNamespace) -> bool:
+        target.append(context.context_node)
+        return True
+
+    def keep(context: SimpleNamespace) -> bool:
+        return int(context.context_node.attrs["id"]) % 2 == 1
+
+    result: Final = source.xpath("div/b[adopt()][keep()]", extensions={(None, "adopt"): adopt, (None, "keep"): keep})
+    assert isinstance(result, list)
+    for node in result:
+        assert isinstance(node, Element)
+        node.attrs["live"] = "yes"
+    assert [node.attrs["id"] for node in target.select("b[live=yes]")] == [str(index) for index in range(1, 24, 2)]
