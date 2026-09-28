@@ -874,6 +874,9 @@ PyObject *turbohtml_register_xpath_string(PyObject *module, PyObject *type) {
 }
 
 static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree *tree, xp_item item) {
+    if (item.attr == -1 && item.node->type == TH_NODE_ELEMENT) {
+        return element_wrap(state, handle, item.node);
+    }
     if (item.attr == -2) {
         return PyUnicode_FromString("http://www.w3.org/XML/1998/namespace");
     }

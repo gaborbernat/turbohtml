@@ -299,7 +299,7 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
                 break;                                      /* GCOVR_EXCL_LINE */
             } /* GCOVR_EXCL_LINE */
 #endif
-            PyObject *wrapper = node_wrap_locked(PyModule_GetState(module), ((NodeObject *)owner)->handle, parent);
+            PyObject *wrapper = node_wrap_nonnull(PyModule_GetState(module), ((NodeObject *)owner)->handle, parent, 1);
             if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: wrapper allocation cannot be forced to fail */
                 status = -1;       /* GCOVR_EXCL_LINE */
                 break;             /* GCOVR_EXCL_LINE */
