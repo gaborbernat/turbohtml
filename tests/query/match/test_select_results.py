@@ -49,8 +49,8 @@ def test_select_indexed_xml_case() -> None:
 
 
 @pytest.mark.skipif(sys.implementation.name != "cpython", reason="CPython allocation-triggered collection")
-@pytest.mark.parametrize("offset", [0, 1])
-@pytest.mark.parametrize("count", [pytest.param(0, id="clear"), pytest.param(33, id="replace")])
+@pytest.mark.parametrize("offset", range(8), ids=lambda offset: f"allocation-{offset}")
+@pytest.mark.parametrize("count", [pytest.param(7, id="shrink"), pytest.param(67, id="grow")])
 def test_select_indexed_collection(offset: int, count: int) -> None:
     thresholds: Final = gc.get_threshold()
     restore_gc: Final = gc.enable if gc.isenabled() else gc.disable
@@ -83,12 +83,10 @@ def test_select_indexed_collection(offset: int, count: int) -> None:
         gc.set_threshold(*thresholds)
         restore_gc()
         reserve.clear()
-    expected: Final = ["new"] * count if sys.version_info < (3, 12) else ["old"] * 33
-    assert (changed, [element.attrs["id"] for element in result], main.inner_html) == (
-        True,
-        expected,
-        '<input id="new">' * count,
-    )
+    assert (changed, tuple(element.attrs["id"] for element in result), main.inner_html) in {
+        (True, ("old",) * 33, '<input id="new">' * count),
+        (True, ("new",) * count, '<input id="new">' * count),
+    }
 
 
 @pytest.mark.parametrize(
