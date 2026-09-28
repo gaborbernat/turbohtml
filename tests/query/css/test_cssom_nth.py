@@ -47,6 +47,29 @@ def test_computed_style_sibling_positions_after_insertion() -> None:
 
 
 @pytest.mark.parametrize(
+    "order",
+    [
+        pytest.param((0, 1, 2, 3), id="forward"),
+        pytest.param((3, 2, 1, 0), id="reverse"),
+        pytest.param((0, 3, 1, 2), id="shuffled"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        pytest.param(":nth-of-type(odd)", ("red", "blue", "red", "blue"), id="type"),
+        pytest.param(":nth-last-of-type(odd)", ("blue", "red", "blue", "red"), id="last-type"),
+    ],
+)
+def test_computed_style_sibling_types(selector: str, expected: tuple[str, ...], order: tuple[int, ...]) -> None:
+    document: Final = parse(
+        f"<style>i{{color:blue}}i{selector}{{color:red}}</style>" + "<i></i> <!--gap--> <b></b>" * 4
+    )
+    nodes: Final = document.select("i")
+    assert tuple(computed_style(nodes[index])["color"] for index in order) == tuple(expected[index] for index in order)
+
+
+@pytest.mark.parametrize(
     ("order", "expected"),
     [
         pytest.param((1, 2, 0), ("red", "red", "red"), id="siblings-parent"),
