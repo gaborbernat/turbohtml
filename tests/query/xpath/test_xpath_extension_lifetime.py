@@ -93,7 +93,7 @@ def test_xpath_extension_validates_yielded_owner(*, compiled: bool) -> None:
 
 
 @pytest.mark.skipif(sys.implementation.name != "cpython", reason="CPython allocation-triggered collection")
-@pytest.mark.parametrize("offset", [0, 1, 2, 4])
+@pytest.mark.parametrize("offset", [0, 1, 2, 4, 32])
 def test_xpath_extension_snapshots_arguments(offset: int) -> None:
     thresholds: Final = gc.get_threshold()
     restore_gc: Final = gc.enable if gc.isenabled() else gc.disable
