@@ -2360,7 +2360,7 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return element;
 }
 
-/* Constant shadow flags keep ordinary adoption on the light-tree traversal. */
+/* Constant traversal flags avoid per-node dispatch during adoption. */
 #if defined(_MSC_VER)
 #define TH_RELOCATE_INLINE __forceinline
 #elif defined(__OPTIMIZE__)
@@ -2370,7 +2370,7 @@ static PyObject *element_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 #endif
 
 static TH_RELOCATE_INLINE int relocate_subtree_nodes(PyObject *dest_handle, PyObject *source_handle, th_node *root,
-                                                     th_node *copy, int has_shadows) {
+                                                     th_node *copy, int has_shadows, int descendants) {
     HandleObject *source_owner = (HandleObject *)source_handle;
     HandleObject *dest_owner = (HandleObject *)dest_handle;
     th_node *source = root;
@@ -2386,6 +2386,9 @@ static TH_RELOCATE_INLINE int relocate_subtree_nodes(PyObject *dest_handle, PyOb
             if (handle_add_hash_override((HandleObject *)dest_handle, dest, hash) < 0) { /* GCOVR_EXCL_BR_LINE */
                 return -1; /* GCOVR_EXCL_LINE: allocation failure */
             }
+        }
+        if (!descendants) {
+            break;
         }
         source =
             has_shadows ? th_node_next_including_shadow(source_owner->tree, source, root) : preorder_next(source, root);
@@ -2418,6 +2421,9 @@ static TH_RELOCATE_INLINE int relocate_subtree_nodes(PyObject *dest_handle, PyOb
             } while (binding != NULL);
 #endif
         }
+        if (!descendants) {
+            break;
+        }
         source =
             has_shadows ? th_node_next_including_shadow(source_owner->tree, source, root) : preorder_next(source, root);
         dest = has_shadows ? th_node_next_including_shadow(dest_owner->tree, dest, copy) : preorder_next(dest, copy);
@@ -2425,11 +2431,27 @@ static TH_RELOCATE_INLINE int relocate_subtree_nodes(PyObject *dest_handle, PyOb
     return 0;
 }
 
-static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_node *root, th_node *copy) {
-    if (th_tree_has_shadows(((HandleObject *)source_handle)->tree)) {
-        return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 1);
+static int only_root_binding(HandleObject *handle, th_node *root) {
+    if (handle->bindings != handle->inline_bindings) {
+        return 0;
     }
-    return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 0);
+    for (uint16_t index = 1; index < handle->binding_next; index++) {
+        if (index != root->binding_id && handle->bindings[index].node != NULL) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int relocate_subtree(PyObject *dest_handle, PyObject *source_handle, th_node *root, th_node *copy) {
+    HandleObject *owner = (HandleObject *)source_handle;
+    if (th_tree_has_shadows(owner->tree)) {
+        return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 1, 1);
+    }
+    if (root->first_child == NULL || only_root_binding(owner, root)) {
+        return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 0, 0);
+    }
+    return relocate_subtree_nodes(dest_handle, source_handle, root, copy, 0, 1);
 }
 
 /* Taking the source lock can suspend the destination's critical section, so callers
