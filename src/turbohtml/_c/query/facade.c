@@ -272,14 +272,24 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
     }
     /* GCOVR_EXCL_BR_STOP */
 #endif
+    module_state *state = PyModule_GetState(module);
     int status = 0;
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(nodes); index++) {
         PyObject *owner = PyList_GET_ITEM(nodes, index);
+#ifndef Py_GIL_DISABLED
+        if (!is_node(owner, state)) {
+            PyErr_SetString(PyExc_TypeError, "expected a turbohtml element");
+            status = -1;
+            break;
+        }
+        th_node *node = ((NodeObject *)owner)->node;
+#else
         th_node *node = facade_node(module, owner);
         if (node == NULL) {
             status = -1;
             break;
         }
+#endif
 #ifdef Py_GIL_DISABLED
         node_guard guard;
         node_guard_begin(&guard, (NodeObject *)owner, NULL);
@@ -303,7 +313,7 @@ PyObject *turbohtml_query_parents(PyObject *module, PyObject *args) {
                 } /* GCOVR_EXCL_LINE */
             }
 #endif
-            PyObject *wrapper = node_wrap_nonnull(PyModule_GetState(module), ((NodeObject *)owner)->handle, parent, 1);
+            PyObject *wrapper = node_wrap_nonnull(state, ((NodeObject *)owner)->handle, parent, 1);
             if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: wrapper allocation cannot be forced to fail */
                 status = -1;       /* GCOVR_EXCL_LINE */
                 break;             /* GCOVR_EXCL_LINE */
