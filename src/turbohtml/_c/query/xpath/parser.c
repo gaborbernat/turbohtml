@@ -720,6 +720,7 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
         snprintf(errbuf, errlen, "out of memory"); /* GCOVR_EXCL_LINE */
         return NULL;                               /* GCOVR_EXCL_LINE */
     }
+    prog->references = 1;
     prog->nodes = NULL;
     prog->count = 0;
     prog->cap = 0;
@@ -753,9 +754,16 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
     return prog;
 }
 
+void xp_retain(xp_program *prog) {
+    prog->references++;
+}
+
 void xp_free(xp_program *prog) {
     if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: callers never pass NULL */
         return;         /* GCOVR_EXCL_LINE */
+    }
+    if (--prog->references != 0) {
+        return;
     }
     for (int32_t index = 0; index < prog->count; index++) {
         PyMem_Free(prog->nodes[index].str);

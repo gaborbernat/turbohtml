@@ -26,6 +26,7 @@ typedef struct xp_program xp_program;
    its capacity). The source is not retained; names and literals are copied. */
 xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen);
 
+void xp_retain(xp_program *prog);
 void xp_free(xp_program *prog);
 
 /* Render the compiled AST as a canonical S-expression (UCS4 code points), the form

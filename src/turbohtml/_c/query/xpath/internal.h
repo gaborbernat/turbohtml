@@ -78,6 +78,7 @@ typedef struct {
 } xn;
 
 struct xp_program {
+    size_t references;
     xn *nodes;
     int32_t count;
     int32_t cap;
