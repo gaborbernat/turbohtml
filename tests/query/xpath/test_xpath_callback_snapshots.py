@@ -245,3 +245,15 @@ def test_xpath_callback_reuses_attribute_name() -> None:
         return []
 
     assert source.xpath("@* | mutate() | @*", extensions={(None, "mutate"): mutate}) == ["second", "first"]
+
+
+def test_xpath_callback_mixed_attribute_namespace() -> None:
+    source: Final = Element("section", {"id": "value"})
+
+    def empty(_context: SimpleNamespace) -> list[Element]:
+        return []
+
+    assert source.xpath("@id | namespace::* | empty()", extensions={(None, "empty"): empty}) == [
+        "value",
+        "http://www.w3.org/XML/1998/namespace",
+    ]
