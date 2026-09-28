@@ -438,10 +438,7 @@ static inline PyObject *type_for_node(module_state *state, const th_node *node) 
     return state->node_type; /* GCOVR_EXCL_LINE: every node type returns above */
 }
 
-static inline PyObject *node_wrap_locked(module_state *state, PyObject *handle, th_node *node) {
-    if (node == NULL) {
-        Py_RETURN_NONE;
-    }
+static inline PyObject *node_wrap_nonnull(module_state *state, PyObject *handle, th_node *node, int element) {
     NodeObject **binding = NULL;
 #ifndef Py_GIL_DISABLED
     if (node->binding_id != 0) {
@@ -451,7 +448,7 @@ static inline PyObject *node_wrap_locked(module_state *state, PyObject *handle, 
         }
     }
 #endif
-    PyTypeObject *type = (PyTypeObject *)type_for_node(state, node);
+    PyTypeObject *type = (PyTypeObject *)(element ? state->element_type : type_for_node(state, node));
     NodeObject *self;
 #ifndef Py_GIL_DISABLED
     if (state->node_freelist != NULL) {
@@ -473,6 +470,21 @@ static inline PyObject *node_wrap_locked(module_state *state, PyObject *handle, 
         return NULL;                                  /* GCOVR_EXCL_LINE */
     }
     return (PyObject *)self;
+}
+
+static inline PyObject *node_wrap_locked(module_state *state, PyObject *handle, th_node *node) {
+    if (node == NULL) {
+        Py_RETURN_NONE;
+    }
+    return node_wrap_nonnull(state, handle, node, 0);
+}
+
+static inline PyObject *element_wrap(module_state *state, PyObject *handle, th_node *node) {
+    PyObject *result;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    result = node_wrap_nonnull(state, handle, node, 1);
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 static inline PyObject *node_wrap(module_state *state, PyObject *handle, th_node *node) {
@@ -785,7 +797,7 @@ static inline PyObject *node_wrap_indexed(module_state *state, PyObject *handle,
     }
     Py_ssize_t start = owner->index_offsets[tag];
     for (Py_ssize_t index = 0; index < count; index++) {
-        PyObject *wrapped = node_wrap_locked(state, handle, owner->index_nodes[start + index]);
+        PyObject *wrapped = node_wrap_nonnull(state, handle, owner->index_nodes[start + index], 1);
         if (wrapped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             Py_DECREF(out);    /* GCOVR_EXCL_LINE */
             return NULL;       /* GCOVR_EXCL_LINE */
@@ -797,7 +809,7 @@ static inline PyObject *node_wrap_indexed(module_state *state, PyObject *handle,
 
 /* Wrap node and append it to the result list; -1 on allocation failure. */
 static inline int append_wrapped(PyObject *out, module_state *state, PyObject *handle, th_node *node) {
-    PyObject *wrapped = node_wrap(state, handle, node);
+    PyObject *wrapped = element_wrap(state, handle, node);
     if (wrapped == NULL || PyList_Append(out, wrapped) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
         Py_XDECREF(wrapped);                                  /* GCOVR_EXCL_LINE: allocation-failure path */
         return -1;                                            /* GCOVR_EXCL_LINE: allocation-failure path */
