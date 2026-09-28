@@ -2371,8 +2371,13 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
         if (rel->count == 1 && (lead_combinator == '>' || lead_combinator == '+' || lead_combinator == '~')) {
             th_node *candidate =
                 lead_combinator == '>' ? sel_first_element_child(anchor) : sel_next_element_sibling(anchor);
+            if (candidate == NULL) {
+                continue;
+            }
+            const uint16_t target_atom = sel_compound_known_type_atom(&rel->compounds[0], ctx->tree);
             for (; candidate != NULL; candidate = sel_next_element_sibling(candidate)) {
-                if (sel_match_compound(candidate, &rel->compounds[0], &scoped)) {
+                if (target_atom != TH_TAG_UNKNOWN ? candidate->atom == target_atom
+                                                  : sel_match_compound(candidate, &rel->compounds[0], &scoped)) {
                     return 1;
                 }
                 if (lead_combinator == '+') {
