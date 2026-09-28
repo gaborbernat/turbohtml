@@ -1120,8 +1120,8 @@ typedef struct {
     PyObject *attrname;
 } xpath_snapshot_item;
 
-static PyObject *xpath_snapshot_to_py(module_state *state, PyObject *handle, th_tree *tree, int smart_strings,
-                                      const xp_nodeset *nodes) {
+static Py_NO_INLINE PyObject *xpath_snapshot_to_py(module_state *state, PyObject *handle, th_tree *tree,
+                                                   int smart_strings, const xp_nodeset *nodes) {
     if (nodes->len == 0) {
         return PyList_New(0);
     }
