@@ -1197,11 +1197,9 @@ static int xslt_extension(void *vctx, th_node *context_node, const Py_UCS4 *name
     memset(out, 0, sizeof(*out));
     if (ucs4_ascii_eq(name, name_len, "current")) {
         out->kind = XP_NODESET;
-        if (eng->cur_attr < 0 && ns_push(&out->nodes, eng->cur_node, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                                          /* GCOVR_EXCL_LINE */
-        }
-        if (eng->cur_attr >= 0 && ns_push(&out->nodes, eng->cur_node, eng->cur_attr) < 0) { /* GCOVR_EXCL_BR_LINE */
-            return -1;                                                                      /* GCOVR_EXCL_LINE */
+        int rc = ns_push(&out->nodes, eng->cur_node, xp_is_attribute(eng->cur_attr) ? eng->cur_attr : -1);
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1; /* GCOVR_EXCL_LINE */
         }
         return 0;
     }
@@ -1853,7 +1851,7 @@ static int do_value_of(engine *eng, th_node *instruction, th_node *out_parent) {
     if (select == NULL) {
         return fail(eng, "xsl:value-of requires a select attribute");
     }
-    if (eng->cur_attr >= 0 && is_self_dot(select, select_len)) {
+    if (xp_is_attribute(eng->cur_attr) && is_self_dot(select, select_len)) {
         Py_ssize_t text_len = 0;
         Py_UCS4 *text = current_string(eng, &text_len);
         if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
@@ -1887,8 +1885,8 @@ static int do_value_of(engine *eng, th_node *instruction, th_node *out_parent) {
 
 /* Deep-copy a source subtree into the output tree, appended to out_parent. */
 static int copy_of_node(engine *eng, th_node *out_parent, xp_item item) {
-    if (item.attr >= 0) {
-        const th_node_attr *attr = &item.node->attrs[item.attr];
+    if (xp_is_attribute(item.attr)) {
+        const th_node_attr *attr = xp_item_attribute(eng->src_tree, item);
         Py_ssize_t name_len = 0;
         const char *attr_name = th_attr_name(eng->src_tree, attr->name_atom, &name_len);
         if (out_parent->type == TH_NODE_ELEMENT) {
@@ -2194,8 +2192,8 @@ static int do_attribute(engine *eng, th_node *instruction, th_node *out_parent) 
 
 /* xsl:copy: shallow-copy the current node and instantiate the body inside it. */
 static int do_copy(engine *eng, th_node *instruction, th_node *out_parent) {
-    if (eng->cur_attr >= 0) {
-        const th_node_attr *attr = &eng->cur_node->attrs[eng->cur_attr];
+    if (xp_is_attribute(eng->cur_attr)) {
+        const th_node_attr *attr = xp_item_attribute(eng->src_tree, (xp_item){eng->cur_node, eng->cur_attr});
         Py_ssize_t name_len = 0;
         const char *name = th_attr_name(eng->src_tree, attr->name_atom, &name_len);
         if (out_parent->type == TH_NODE_ELEMENT) {
@@ -2932,7 +2930,7 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         }
         values[nvalues++] = (long)floor(to_number(eng->src_tree, &result) + 0.5);
         xp_result_free(&result);
-    } else if (eng->cur_attr >= 0) {
+    } else if (xp_is_attribute(eng->cur_attr)) {
         values[nvalues++] = 1;
     } else {
         Py_ssize_t count_len = 0;
@@ -3338,8 +3336,8 @@ static int apply_to_item(engine *eng, xp_item item, Py_ssize_t pos, Py_ssize_t s
 
 static int apply_builtin(engine *eng, th_node *node, Py_ssize_t attr, const Py_UCS4 *mode, Py_ssize_t mode_len,
                          th_node *out_parent) {
-    if (attr >= 0) {
-        const th_node_attr *attribute = &node->attrs[attr];
+    if (xp_is_attribute(attr)) {
+        const th_node_attr *attribute = xp_item_attribute(eng->src_tree, (xp_item){node, attr});
         return emit_text(eng, out_parent, attribute->value, attribute->value_len);
     }
     if (node->type == TH_NODE_TEXT) {
@@ -3396,7 +3394,7 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
         /* Default: the children of the current node, in document order. */
         memset(&value, 0, sizeof(value));
         value.kind = XP_NODESET;
-        if (eng->cur_attr < 0) {
+        if (!xp_is_attribute(eng->cur_attr)) {
             for (th_node *child = eng->cur_node->first_child; child != NULL; child = child->next_sibling) {
                 if (ns_push(&value.nodes, child, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     xp_result_free(&value);                 /* GCOVR_EXCL_LINE */

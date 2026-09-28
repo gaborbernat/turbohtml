@@ -482,6 +482,17 @@ def test_transform_current_function() -> None:
     assert _run('<r><n id="1"/><n id="2"/></r>', body) == "12"
 
 
+def test_transform_current_attribute() -> None:
+    assert (
+        _run(
+            '<r id="one" title="two"/>',
+            '<xsl:template match="/"><xsl:for-each select="r/@*">'
+            '<xsl:value-of select="current()"/></xsl:for-each></xsl:template>',
+        )
+        == "onetwo"
+    )
+
+
 def test_transform_generate_id_is_stable_per_node() -> None:
     body = '<xsl:template match="/"><xsl:value-of select="generate-id(//n) = generate-id(//n)"/></xsl:template>'
     assert _run("<r><n/></r>", body) == "true"

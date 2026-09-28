@@ -139,9 +139,9 @@ static Py_UCS4 *node_name_string(xp_ctx *ctx, xp_result *args, int argc, Py_ssiz
     if (attr == -2) {
         return ucs4_from_ascii(XP_XML_NS_PREFIX, sizeof(XP_XML_NS_PREFIX) - 1, len);
     }
-    if (attr >= 0) {
+    if (xp_is_attribute(attr)) {
         Py_ssize_t blen;
-        const char *bytes = th_attr_name(ctx->tree, node->attrs[attr].name_atom, &blen);
+        const char *bytes = xp_item_attr_name(ctx->tree, (xp_item){node, attr}, &blen);
         Py_UCS4 *buffer = ucs4_from_ascii(bytes, blen, len);
         if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
             return NULL;      /* GCOVR_EXCL_LINE */
@@ -960,10 +960,8 @@ typedef struct {
 } xp_membership;
 
 static size_t membership_slot(const xp_membership *table, xp_item item) {
-    const uintptr_t address = (uintptr_t)item.node;
-    size_t slot = ((address >> 4) ^ (address >> 13) ^ (size_t)item.attr) & table->mask;
-    while (table->slots[slot].node != NULL &&
-           (table->slots[slot].node != item.node || table->slots[slot].attr != item.attr)) {
+    size_t slot = xp_item_hash(item) & table->mask;
+    while (table->slots[slot].node != NULL && !xp_item_equal(table->slots[slot], item)) {
         slot = (slot + 1) & table->mask;
     }
     return slot;
@@ -995,7 +993,7 @@ static int item_in_nodeset(const xp_membership *table, xp_item probe) {
         return table->slots[membership_slot(table, probe)].node != NULL;
     }
     for (Py_ssize_t index = 0; index < table->nodes->len; index++) {
-        if (table->nodes->items[index].node == probe.node && table->nodes->items[index].attr == probe.attr) {
+        if (xp_item_equal(table->nodes->items[index], probe)) {
             return 1;
         }
     }
@@ -1120,8 +1118,7 @@ static int set_split(const xp_result *args, int want_before, xp_result *out) {
     } else {
         Py_ssize_t pivot = -1;
         for (Py_ssize_t index = 0; index < first->len; index++) {
-            if (first->items[index].node == second->items[0].node &&
-                first->items[index].attr == second->items[0].attr) {
+            if (xp_item_equal(first->items[index], second->items[0])) {
                 pivot = index;
                 break;
             }
@@ -1151,8 +1148,8 @@ static int concat_item_view(th_tree *tree, xp_item item, const Py_UCS4 **part, P
     *owned = NULL;
     if (item.attr == -2) {
         *owned = item_string(tree, item, len);
-    } else if (item.attr >= 0) {
-        const th_node_attr *attr = &item.node->attrs[item.attr];
+    } else if (xp_is_attribute(item.attr)) {
+        const th_node_attr *attr = xp_item_attribute(tree, item);
         *part = attr->value;
         *len = attr->value == NULL ? 0 : attr->value_len;
         return 0;
@@ -1688,10 +1685,16 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
             return -1;        /* GCOVR_EXCL_LINE */
         }
     }
+    xp_live_frame frame;
+    if (ctx->live != NULL) {
+        frame = (xp_live_frame){.results = args, .result_count = argc};
+        xp_live_enter(ctx, &frame);
+    }
     int filled = 0;
     for (int32_t arg_node = fn->first; arg_node >= 0; arg_node = prog->nodes[arg_node].next) {
         int arg_rc = eval_expr(prog, arg_node, ctx, &args[filled]);
         if (arg_rc < 0) {
+            xp_live_leave(ctx, &frame);
             for (int cleanup_index = 0; cleanup_index < filled; cleanup_index++) {
                 xp_result_free(&args[cleanup_index]);
             }
@@ -1789,9 +1792,13 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
         rc = eval_id(ctx, &args[0], out);
     } else if (func_is(fn, "re:test") || func_is(fn, "matches")) {
         /* fn:matches shares the EXSLT re:test regex pipeline (input, pattern, flags?) */
-        rc = exslt_re_test(ctx, args, argc, out);
+        if ((rc = xp_before_python(ctx)) == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = exslt_re_test(ctx, args, argc, out);
+        }
     } else if (func_is(fn, "re:replace")) {
-        rc = exslt_re_replace(ctx->tree, args, out);
+        if ((rc = xp_before_python(ctx)) == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = exslt_re_replace(ctx->tree, args, out);
+        }
     } else if (func_is(fn, "set:difference") || func_is(fn, "set:intersection") || func_is(fn, "set:has-same-node") ||
                func_is(fn, "set:leading") || func_is(fn, "set:trailing")) {
         if (args[0].kind != XP_NODESET || args[1].kind != XP_NODESET) {
@@ -1810,7 +1817,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
         if (args[0].kind != XP_NODESET) {
             *ctx->feature = "set:distinct on a non-node-set";
             rc = -4;
-        } else {
+        } else if ((rc = xp_before_python(ctx)) == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             rc = set_distinct(ctx->tree, &args[0], out);
         }
     } else if (func_is(fn, "str:concat")) {
@@ -1917,15 +1924,24 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
     } else if (func_is(fn, "string-join")) {
         rc = string_join(ctx->tree, args, out);
     } else if (func_is(fn, "lower-case") || func_is(fn, "upper-case")) {
-        rc = case_convert(ctx->tree, &args[0], func_is(fn, "upper-case"), out);
+        if ((rc = xp_before_python(ctx)) == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = case_convert(ctx->tree, &args[0], func_is(fn, "upper-case"), out);
+        }
     } else if (func_is(fn, "replace")) {
-        rc = fn_replace(ctx->tree, args, argc, out);
-    } else if (ctx->extension != NULL &&
-               (rc = ctx->extension(ctx->extension_ctx, ctx->node, fn->str, fn->str_len, args, argc, out)) != -2) {
-        /* a registered extension handled it (rc is 0 or a propagated error) */
+        if ((rc = xp_before_python(ctx)) == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = fn_replace(ctx->tree, args, argc, out);
+        }
+    } else if (ctx->extension != NULL) {
+        if ((rc = xp_before_python(ctx)) == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            rc = ctx->extension(ctx->extension_ctx, ctx->node, fn->str, fn->str_len, args, argc, out);
+        }
+        if (rc == -2) {
+            rc = raise_unknown_function(fn);
+        }
     } else {
         rc = raise_unknown_function(fn);
     }
+    xp_live_leave(ctx, &frame);
     for (int cleanup_index = 0; cleanup_index < argc; cleanup_index++) {
         xp_result_free(&args[cleanup_index]);
     }

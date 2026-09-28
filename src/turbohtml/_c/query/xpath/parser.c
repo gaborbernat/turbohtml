@@ -721,6 +721,7 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
         return NULL;                               /* GCOVR_EXCL_LINE */
     }
     prog->references = 1;
+    prog->has_python_calls = 0;
     prog->nodes = NULL;
     prog->count = 0;
     prog->cap = 0;
@@ -751,7 +752,26 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
         return NULL;
     }
     optimize_descendant_steps(prog);
+    static const char *const PYTHON_FUNCS[] = {"re:test",    "matches",    "re:replace",   "replace",
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
+                                               "lower-case", "upper-case", "set:distinct",
+#endif
+                                               NULL};
+    for (int32_t index = 0; index < prog->count; index++) {
+        if (
+#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
+            prog->nodes[index].kind == XN_EQ || prog->nodes[index].kind == XN_NE ||
+#endif
+            (prog->nodes[index].kind == XN_FUNC && func_name_in(&prog->nodes[index], PYTHON_FUNCS))) {
+            prog->has_python_calls = 1;
+            break;
+        }
+    }
     return prog;
+}
+
+int xp_calls_python(const xp_program *prog) {
+    return prog->has_python_calls;
 }
 
 void xp_retain(xp_program *prog) {

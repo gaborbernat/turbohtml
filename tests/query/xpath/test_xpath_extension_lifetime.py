@@ -135,14 +135,22 @@ def test_xpath_extension_snapshots_arguments(offset: int) -> None:
     assert (changed, result, target.children) == (True, True, (source,))
 
 
-@pytest.mark.parametrize("foreign", [False, True], ids=["type", "owner"])
-def test_xpath_extension_stops_at_invalid_yield(*, foreign: bool) -> None:
+@pytest.mark.parametrize(
+    ("kind", "error", "match"),
+    [
+        ("type", TypeError, "extension result must be"),
+        ("owner", ValueError, "different document"),
+        ("iterator", LookupError, "iteration resumed"),
+    ],
+    ids=["type", "owner", "iterator"],
+)
+def test_xpath_extension_validates_iterator(kind: str, error: type[Exception], match: str) -> None:
+    source: Final = Element("section")
+
     def invalid(_context: SimpleNamespace) -> Iterator[Element]:
-        yield Element("other") if foreign else cast("Element", 42)
-        msg = "iteration continued past an invalid node"
+        yield cast("Element", 42) if kind == "type" else Element("other") if kind == "owner" else source
+        msg = "iteration resumed"
         raise LookupError(msg)
 
-    with pytest.raises(
-        ValueError if foreign else TypeError, match="different document" if foreign else "extension result must be"
-    ):
-        Element("section").xpath("invalid()", extensions={(None, "invalid"): invalid})
+    with pytest.raises(error, match=match):
+        source.xpath("invalid()", extensions={(None, "invalid"): invalid})
