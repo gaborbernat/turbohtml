@@ -257,3 +257,24 @@ def test_xpath_callback_mixed_attribute_namespace() -> None:
         "value",
         "http://www.w3.org/XML/1998/namespace",
     ]
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected", "moved"),
+    [
+        pytest.param("@id[self::node()[move()]]", ["old"], True, id="attribute-self"),
+        pytest.param("@id[parent::section[move()]]", ["old"], True, id="attribute-parent"),
+        pytest.param("@id[child::node()[move()]]", [], False, id="empty-first-step"),
+    ],
+)
+def test_xpath_callback_initial_attribute_context(expression: str, expected: list[str], *, moved: bool) -> None:
+    source: Final = Element("section", {"id": "old"})
+    target: Final = Element("main")
+
+    def move(_context: SimpleNamespace) -> bool:
+        target.append(source)
+        del source.attrs["id"]
+        return True
+
+    result: Final = source.xpath(expression, extensions={(None, "move"): move})
+    assert (result, tuple(target.children)) == (expected, (source,) if moved else ())

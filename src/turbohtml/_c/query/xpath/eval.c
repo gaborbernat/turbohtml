@@ -1116,6 +1116,9 @@ static int eval_path_step_inner(const xp_program *prog, const xn *step, const st
 static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out, xp_nodeset *current,
                            xp_nodeset *following) {
     const xn *root = &prog->nodes[path_idx];
+    xp_item start;
+    xp_nodeset initial;
+    xp_nodeset *contexts = current;
     if (root->second >= 0) {
         xp_result base;
         int rc = eval_expr(prog, root->second, ctx, &base);
@@ -1129,9 +1132,15 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
         }
         *current = base.nodes; /* take ownership */
     } else {
-        struct th_node *start = root->absolute ? tree_root(ctx->tree, ctx->node) : ctx->node;
-        if (ns_push(current, start, root->absolute ? -1 : ctx->attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                                      /* GCOVR_EXCL_LINE */
+        start =
+            (xp_item){root->absolute ? tree_root(ctx->tree, ctx->node) : ctx->node, root->absolute ? -1 : ctx->attr};
+        if (root->first < 0) {
+            if (ns_push(current, start.node, start.attr) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                      /* GCOVR_EXCL_LINE */
+            }
+        } else {
+            initial = (xp_nodeset){.items = &start, .len = 1};
+            contexts = &initial;
         }
     }
     for (int32_t si = root->first; si >= 0; si = prog->nodes[si].next) {
@@ -1150,7 +1159,7 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
             following->snapshots = 0;
         }
         following->len = 0;
-        int stepped = eval_path_step(prog, step, &match, ctx, current, following);
+        int stepped = eval_path_step(prog, step, &match, ctx, contexts, following);
         if (stepped < 0) {
             xp_nodeset_free(current);
             xp_nodeset_free(following);
@@ -1159,6 +1168,7 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
         xp_nodeset swap = *current;
         *current = *following;
         *following = swap;
+        contexts = current;
         if (sort_unique(current) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             xp_nodeset_free(current);   /* GCOVR_EXCL_LINE */
             xp_nodeset_free(following); /* GCOVR_EXCL_LINE */
