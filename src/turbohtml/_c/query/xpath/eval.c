@@ -159,11 +159,15 @@ int ns_push(xp_nodeset *ns, struct th_node *node, Py_ssize_t attr) {
     return 0;
 }
 
+static TH_NOINLINE void release_snapshots(const xp_nodeset *ns) {
+    for (Py_ssize_t index = 0; index < ns->len; index++) {
+        item_release(ns->items[index]);
+    }
+}
+
 void xp_nodeset_free(xp_nodeset *ns) {
     if (ns->snapshots) {
-        for (Py_ssize_t index = 0; index < ns->len; index++) {
-            item_release(ns->items[index]);
-        }
+        release_snapshots(ns);
     }
     ns->snapshots = 0;
     PyMem_Free(ns->items);
