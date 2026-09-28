@@ -6120,8 +6120,7 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
         engine_clear(&eng);                                       /* GCOVR_EXCL_LINE */
         return PyErr_NoMemory();                                  /* GCOVR_EXCL_LINE */
     }
-    PyObject *source_handle = turbohtml_node_handle(source_obj);
-    (void)source_handle; /* used only by the critical-section macro, a no-op on the GIL build */
+    PyObject *source_handle = Py_NewRef(turbohtml_node_handle(source_obj));
     PyObject *result = NULL;
     Py_BEGIN_CRITICAL_SECTION(source_handle);
     result = run_transform(&eng, compiled->sheet_root, params);
@@ -6133,5 +6132,6 @@ PyObject *turbohtml_xslt_transform(PyObject *module, PyObject *args) {
         PyErr_Format(PyExc_ValueError, "%s", eng.error);
     }
     engine_clear(&eng);
+    Py_DECREF(source_handle);
     return result;
 }
