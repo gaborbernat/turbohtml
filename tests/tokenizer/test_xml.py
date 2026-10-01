@@ -792,7 +792,7 @@ def test_round_trip_against_lxml() -> None:
     assert [node.tag.split(":")[-1] for node in (ours, *ours.descendants) if isinstance(node, Element)] == their_locals
 
 
-@pytest.mark.parametrize(("index", "count"), [(0, 128), (1, 1)], ids=["many", "single"])
+@pytest.mark.parametrize(("index", "count"), [(0, 128), (1, 1), (2, 1_000)], ids=["many", "single", "wide"])
 @pytest.mark.oracle
 def test_lxml_namespace_benchmark_output(index: int, count: int) -> None:
     etree: Final = pytest.importorskip("lxml.etree", exc_type=ImportError)
