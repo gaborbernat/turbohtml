@@ -627,9 +627,8 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int keyframe, rule_i
             item->is_rule = 1;
             item->sel_off = pool->len;
             css_minify_selector(cur->vec, prelude_start, prelude_end, keyframe, pool);
-            /* an empty or whitespace-only prelude ({--x:}) emits no selector, so css_minify_selector's trailing rtrim
-               trims a space off the pool scratch below sel_off; restore the length so the selector-less rule gets a
-               0-length selector, never a negative one that would reach cbuf_put_run's memcpy as (size_t)-1 */
+            /* an empty prelude ({--x:}) lets css_minify_selector's rtrim cut below sel_off, and a negative length
+               would reach cbuf_put_run's memcpy as (size_t)-1 */
             if (pool->len < item->sel_off) {
                 pool->len = item->sel_off;
             }
@@ -904,12 +903,9 @@ static int css_summaries_conflict(const css_buf *pool, const rule_item *first, c
     return 0;
 }
 
-/* How far back a repeated rule scans for a merge target. Without it the scan is O(n) per rule and the body-merge
-   re-renders a growing body into the arena, so n same-selector rules cost O(n^2) time and memory: ~115 KiB of such CSS
-   already reaches ~1 GiB. The cap keeps the pass linear by bounding merges into one target; past it rules stay separate
-   (correct, just not merged), the stance tdewolff/minify (no cross-rule merge) and clean-css (merge only at level 2)
-   take by default. 256 sits well above the longest merge reach in the bench corpora (normalize.css, pico), so real
-   stylesheets keep every merge. */
+/* Unbounded, n same-selector rules cost O(n^2) time and memory (~115 KiB of CSS reached ~1 GiB); past the cap rules
+   stay unmerged, as tdewolff/minify and clean-css level 1 leave them. 256 is well above the longest merge reach in the
+   bench corpora (normalize.css, pico). */
 #define CSS_MAX_MERGE_REACH 256
 
 /* Merge qualified rules: same selector -> combine declaration bodies; identical body -> combine selectors into a list.
@@ -981,11 +977,7 @@ CSS_NOINLINE static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items
            moves back. Each intervening rule that sets a property this body sets ends the reach; an opaque node does
            too. */
         rule_item *merged = NULL;
-        Py_ssize_t reach = 0;
-        for (Py_ssize_t back = index - 1; back >= 0; back--) {
-            if (++reach > CSS_MAX_MERGE_REACH) {
-                break;
-            }
+        for (Py_ssize_t back = index - 1; back >= 0 && index - back <= CSS_MAX_MERGE_REACH; back--) {
             rule_item *target = &items->items[back];
             if (target->dropped) {
                 continue;
