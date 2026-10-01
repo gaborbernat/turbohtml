@@ -267,19 +267,17 @@ def test_minify_css_many_rules_keep_blocked_merge() -> None:
     assert minify_css(source) == source
 
 
-def _max_decls_per_rule(rule_count: int) -> int:
-    out = minify_css("".join(f"a{{--p{index}:{index}}}" for index in range(rule_count)))
-    return max(body.count(":") for body in re.findall(r"\{([^}]*)\}", out))
-
-
 def test_minify_css_same_selector_merge_is_bounded() -> None:
-    # A run of same-selector rules with distinct declarations must not all fold into one rule: that merge
-    # re-renders a body that grows with every rule, which is O(rules^2) in time and arena memory. The merged
-    # body is capped, so the largest output rule stays the same size no matter how many rules come in.
-    small = _max_decls_per_rule(4 * 256)
-    large = _max_decls_per_rule(16 * 256)
-    assert small == large
+    # folding a whole same-selector run into one rule re-renders a body that grows per rule, O(rules^2) in time and
+    # arena memory; the capped merge keeps the largest output rule the same size however many rules come in
+    large: Final = _max_decls_per_rule(16 * 256)
+    assert _max_decls_per_rule(4 * 256) == large
     assert large < 4 * 256
+
+
+def _max_decls_per_rule(rule_count: int) -> int:
+    out: Final = minify_css("".join(f"a{{--p{index}:{index}}}" for index in range(rule_count)))
+    return max(body.count(":") for body in re.findall(r"\{([^}]*)\}", out))
 
 
 @pytest.mark.parametrize(
