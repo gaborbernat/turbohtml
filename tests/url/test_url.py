@@ -4,7 +4,7 @@ import itertools
 import random
 import re
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -1315,14 +1315,17 @@ def test_variant_key_rejects_non_str() -> None:
 )
 def test_url_split_ends_special_authority_at_backslash(url: str, host: str, path: str) -> None:
     # a browser ends a special-scheme authority at '\', so the host is the span before it, not the userinfo trick's tail
-    _scheme, _netloc, split_path, _query, _fragment, _userinfo, split_host, *_rest = _url_split(url)
-    assert (split_host, split_path) == (host, path)
+    split: Final = _url_split(url)
+    assert (split[6], split[2]) == (host, path)
 
 
-@pytest.mark.parametrize("scheme", ["gopher", "mailto", "nntp"])
+@pytest.mark.parametrize(
+    "scheme",
+    [pytest.param("gopher", id="gopher"), pytest.param("mailto", id="mailto"), pytest.param("nntp", id="nntp")],
+)
 def test_url_split_keeps_backslash_host_for_non_special_scheme(scheme: str) -> None:
     # a non-special scheme does not treat '\' as a separator, so it stays urllib-compatible
-    url = f"{scheme}://evil\\@good.example/"
+    url: Final = f"{scheme}://evil\\@good.example/"
     assert _url_split(url)[6] == urlsplit(url).hostname
 
 

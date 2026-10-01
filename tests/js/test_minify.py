@@ -124,9 +124,8 @@ def test_computed_member_to_dot(source: str, expected: str) -> None:
 
 @pytest.mark.parametrize("source", [pytest.param("t.0.", id="dot"), pytest.param("t,(0).", id="paren")])
 def test_empty_member_name_does_not_over_read(source: str) -> None:
-    # a `.` after a numeric member leaves an empty member name whose borrowed source span sits one
-    # past the buffer end; printing it must not read that code point (asan-js catches the over-read).
-    # The inline-<script> path allocates the span with no NUL terminator, so it exercises the bug.
+    # a `.` after a numeric member leaves an empty member name whose span starts one past the buffer end; ASan flags
+    # a read there, and only the inline-<script> path's buffer lacks the NUL terminator that hides it
     assert minify_js(source) == "t,(0)."
     assert clean.minify(f"<script>{source}</script>", Minify(minify_js=JSMinify())) == "<script>t,(0).</script>"
 
