@@ -406,6 +406,38 @@ commands = [
   ],
 ]
 
+[env.fuzz-js]
+description = "run JS before and after minify_js and compare output: ufuzz programs, UglifyJS's suite, test262"
+package = "skip"
+deps = []  # override the base env's gcovr; this env checks behavior, not coverage
+dependency_groups = [ "test" ]  # carries the meson-python build backend the no-build-isolation install below needs
+# NODE_PATH lets the vendored UglifyJS harness resolve its semver dependency from the shared Node install
+set_env = { NODE_PATH = "{tox_root}{/}tools{/}bench{/}node{/}node_modules", PYTHONHASHSEED = "0" }
+commands_pre = [
+  [
+    "uv",
+    "pip",
+    "install",
+    "--reinstall",
+    "--no-deps",
+    "--no-build-isolation",
+    "--editable",
+    "{tox_root}",
+    "--config-settings=build-dir={env_dir}{/}cbuild",
+    "--config-settings=setup-args=-Dbuildtype=release",
+  ],
+]
+commands = [
+  [
+    "node",
+    "{tox_root}{/}tools{/}fuzz{/}js{/}oracle.js",
+    "--out",
+    "{env_tmp_dir}{/}findings",
+    { replace = "posargs", extend = true },
+  ],
+]
+allowlist_externals = [ "node" ]
+
 [env.fuzz-smoke]
 description = "replay the benign fuzz seed corpus through every harness under ASan/UBSan (the fast per-PR gate)"
 deps = []  # override the base env's gcovr; this env instruments for ASan, not coverage

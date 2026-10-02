@@ -264,6 +264,7 @@ extend-exclude = [
   "tests/conformance/python-phonenumbers",
   "tests/conformance/unicodetools",
   "tests/html5lib-tests",
+  "tools/fuzz/js/test262",
   "tools/html5lib-python"
 ]  # vendored suites, not our code
 format.preview = true
@@ -325,9 +326,9 @@ builtin = "clear,usage,en-GB_to_en-US"
 # café, &notin;, afe (active formatting elements), vave (CSS-minify test value), grey (CSS Color 4), forin (JS dump),
 # opps (the _minify_js PyArg_ParseTuple format "Opps"), fo/nd/te (ISO 639-1 codes in the URL language filter),
 # januar/februar/juni/juli/oktober/dezember (German month names in the date extractor's vocabulary),
-# shttp (a scheme in urllib's uses_relative list the URL join guard mirrors)
+# shttp (a scheme in urllib's uses_relative list the URL join guard mirrors), varify (an UglifyJS test file)
 ignore-words-list = """\
-  caf,notin,afe,hava,vave,grey,forin,opps,fo,nd,te,januar,februar,juni,juli,oktober,dezember,tha,shttp\
+  caf,notin,afe,hava,vave,grey,forin,opps,fo,nd,te,januar,februar,juni,juli,oktober,dezember,tha,shttp,varify\
   """
 skip = """\
   */html_entities.h,*/tag_atom.h,*/entity_names.h,*/tld_table.h,*/psl_table.h,*/css_colors.h,*/language_data.h,*/idna_t\
@@ -348,6 +349,7 @@ src.exclude = [
   "tests/conformance/python-phonenumbers",
   "tests/conformance/unicodetools",
   "tests/html5lib-tests",
+  "tools/fuzz/js/test262",
   "tools/html5lib-python"
 ]  # vendored suites, not our code
 environment.extra-paths = [

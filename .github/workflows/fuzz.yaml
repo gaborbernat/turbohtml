@@ -63,3 +63,33 @@ jobs:
             **/*.crash
           if-no-files-found: ignore
           retention-days: 14
+  js:
+    name: 🧪 JS execution oracle (ufuzz, UglifyJS suite, test262)
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # runs each program before and after minify_js and compares what it prints. Like the deep job it is a hunt, not a PR
+    # gate: a new divergence, or a recorded one that now passes, fails the job for a maintainer to triage.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # meson project() derives the version from git history
+          persist-credentials: false
+      - name: 📥 Check out UglifyJS and test262
+        # test262 is `update = none` so recursive checkouts elsewhere skip its 270 MB; --checkout overrides that here
+        run: git submodule update --init --checkout --depth 1 tools/fuzz/js/UglifyJS tools/fuzz/js/test262
+      - name: 🟢 Install Node
+        # zizmor: ignore[cache-poisoning] no cache: input is set, so setup-node writes no restorable cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: 📦 Install the Node deps (synckit, semver, test262-harness, parse5)
+        run: npm ci
+        working-directory: tools/bench/node
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - name: ✅ Run fuzz-js
+        run: uvx --with tox-uv tox run -e fuzz-js -- --minutes 20
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
