@@ -855,6 +855,9 @@ Py_UCS4 *th_node_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
 
 Py_UCS4 *th_node_inner_html(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
+    if (node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML && is_serialize_void_atom(node->atom)) {
+        return sbuf_finish(&out, out_len);
+    }
     /* a clonable shadow root sets the bit that marks a raw-text element */
     if (node->type == TH_NODE_ELEMENT && is_rawtext_element(node, tree->scripting)) {
         ser_put_rawtext(&out, tree, node, &ser_default_opts);

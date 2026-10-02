@@ -682,6 +682,21 @@ def test_inner_frame_ignores_children(layout: Indent | Minify | None) -> None:
     assert not root.serialize(Html(layout=layout), inner=True)
 
 
+def test_inner_html_frame_ignores_children() -> None:
+    assert not Element("frame", children=[Text("not emitted")]).inner_html
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        pytest.param("<svg><frame>x</frame></svg>", id="svg"),
+        pytest.param("<math><frame>x</frame></math>", id="mathml"),
+    ],
+)
+def test_inner_html_foreign_frame_keeps_children(markup: str) -> None:
+    assert _one(markup, "frame").inner_html == "x"
+
+
 @pytest.mark.parametrize("layout", [None, Indent(), Minify()])
 @pytest.mark.parametrize("content", ["", "<title>x</title>", '<meta charset="utf-8">'])
 def test_inner_meta_charset(layout: Indent | Minify | None, content: str) -> None:

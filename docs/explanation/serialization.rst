@@ -53,14 +53,15 @@ at the four points the algorithms diverge, so the HTML fast path is untouched.
 The first divergence is empty elements. HTML has a closed list of *void* elements (``br``, ``img``, ``input``, ...) that
 take a start tag and never an end tag, and every other empty element still writes ``<div></div>``. XML has no such list:
 any element with no children self-closes as ``<div/>`` and a childless ``<br>`` becomes ``<br/>`` for the same reason a
-``<div>`` does, not a special case. The second is raw text. HTML copies the text of a ``<script>`` or ``<style>``
-verbatim, because those elements switch the tokenizer into a raw-text state on the way back in; an element or comment
-child added through the DOM still writes as markup, and reparses as part of that text. XML has no raw-text elements, so
-a ``<`` inside a script escapes like any other text and reparses to the same character. The third is escaping. XML
-predefines only ``&amp; &lt; &gt; &quot; &apos;``, so the HTML no-break-space shortcut ``&nbsp;`` -- undefined without a
-DTD -- cannot appear; turbohtml writes a literal U+00A0 (the output is Unicode), while the whitespace characters XML
-would otherwise normalize away inside an attribute (tab, newline, carriage return) become numeric references so the
-value round-trips.
+``<div>`` does, not a special case. A ``frame`` the DOM gave children still serializes as void in HTML, so its
+``inner_html`` is empty, while XML writes the children. The second is raw text. HTML copies the text of a ``<script>``
+or ``<style>`` verbatim, because those elements switch the tokenizer into a raw-text state on the way back in; an
+element or comment child added through the DOM still writes as markup, and reparses as part of that text. XML has no
+raw-text elements, so a ``<`` inside a script escapes like any other text and reparses to the same character. The third
+is escaping. XML predefines only ``&amp; &lt; &gt; &quot; &apos;``, so the HTML no-break-space shortcut ``&nbsp;`` --
+undefined without a DTD -- cannot appear; turbohtml writes a literal U+00A0 (the output is Unicode), while the
+whitespace characters XML would otherwise normalize away inside an attribute (tab, newline, carriage return) become
+numeric references so the value round-trips.
 
 The fourth is namespaces. turbohtml parses HTML, so an inline ``<svg>`` or ``<math>`` lands in the SVG or MathML
 namespace inside an otherwise-HTML tree, with no namespace prefixes -- HTML has none. XML has no such implicit
