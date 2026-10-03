@@ -65,6 +65,13 @@ typedef struct {
     int allow_html;   /* USE_PROFILES.html: keep HTML-namespace elements (off drops the whole HTML namespace) */
     int allow_svg;    /* USE_PROFILES.svg: keep SVG-namespace elements */
     int allow_mathml; /* USE_PROFILES.mathMl: keep MathML-namespace elements */
+    int xml;        /* the output is serialized as XML, which round-trips through parse_xml, so the HTML parse-stability
+                       balancer (an HTML-serialization concern) does not run */
+    int from_parse; /* the input is fresh parser output (the str entrypoint): unless the parse flagged a reparse
+                       hazard, it re-parses to itself, so only this walk's own edits can unsettle it and
+                       settle_hoisted checks those inline. A node entrypoint may hand in a hand-built or
+                       post-parse-mutated tree with no such guarantee, so it is always balanced. */
+    int balance_edited; /* settle_hoisted or balance_subtree changed the tree beyond the unwrap that called it */
     int bleach_raw_values;
     int bleach_url_policy;
     int bleach_raw_urls;
@@ -133,10 +140,10 @@ static int node_name_is(const th_node *node, const char *lower) {
 }
 
 /* A parse_xml name keeps its source case and has no atom, while the HTML parser reading the output lowercases it. */
-static uint16_t reparsed_atom(const th_node *element) {
+static uint16_t reparsed_name_atom(const th_node *element) {
     char lower[16];
-    if (element->atom != TH_TAG_UNKNOWN || element->text_len > (Py_ssize_t)sizeof(lower)) {
-        return element->atom; /* every tag name the safety checks know is shorter than the buffer */
+    if (element->text_len > (Py_ssize_t)sizeof(lower)) {
+        return TH_TAG_UNKNOWN; /* every tag name the safety checks know is shorter than the buffer */
     }
     for (Py_ssize_t index = 0; index < element->text_len; index++) {
         if (element->text[index] >= 0x80) {
@@ -147,9 +154,25 @@ static uint16_t reparsed_atom(const th_node *element) {
     return th_tag_lookup(lower, element->text_len);
 }
 
+/* Split from reparsed_name_atom so the known-atom case, nearly every element, inlines into the per-element callers. */
+static inline uint16_t reparsed_atom(const th_node *element) {
+    return element->atom != TH_TAG_UNKNOWN ? element->atom : reparsed_name_atom(element);
+}
+
+/* sanitize_element and the steps the walks inline from it run once per element in both walks. Called from two walks,
+   GCC keeps them out of line, which measured slower for each walk, so they are forced inline; a debug build keeps one
+   copy, which the coverage gates need. */
+#if defined(_MSC_VER)
+#define TH_WALK_INLINE __forceinline
+#elif defined(__OPTIMIZE__)
+#define TH_WALK_INLINE inline __attribute__((always_inline))
+#else
+#define TH_WALK_INLINE
+#endif
+
 /* SVG animation elements can rewrite any attribute of their target, href included. A parse_xml name counts as the HTML
    reparse reads it, lowercased and in SVG under any `svg` ancestor. */
-static int is_unsafe_svg_animation(const th_node *element) {
+static TH_WALK_INLINE int is_unsafe_svg_animation(const th_node *element) {
     static const char *const names[] = {"animate", "animatecolor", "animatemotion", "animatetransform", "set"};
     int animation = 0;
     for (size_t index = 0; index < sizeof(names) / sizeof(names[0]) && !animation; index++) {
@@ -2403,8 +2426,6 @@ static int apply_attribute_predicate(sanitizer *s, th_node *element, PyObject *t
     return 0;
 }
 
-static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept);
-
 /* Make a Text node owning a copy of `text` in the walked tree. */
 static th_node *make_text(sanitizer *s, PyObject *text) {
     Py_UCS4 *points = PyUnicode_AsUCS4Copy(text);
@@ -2591,11 +2612,9 @@ static int is_html_integration_point(const th_node *node) {
    point. A tree the parser built always passes; only a namespace-confused node a later mutation could splice in -- an
    HTML element reparented under SVG/MathML, or a foreign element escaped into HTML content where its children would
    reparse as HTML -- fails, and is then dropped like any disallowed node (mXSS defense-in-depth). Returns 1 reachable,
-   0 confused. */
-static int namespace_reachable(const th_node *element) {
-    /* the walk only reaches an element through its parent, so element->parent is never NULL here; a fragment or
-       document root carries the HTML namespace, so reading parent->ns needs no element-type guard */
-    const th_node *parent = element->parent;
+   0 confused. The balancer passes the parent the element will have once its escaped ancestors are gone. */
+static inline int namespace_reachable_under(const th_node *element, const th_node *parent) {
+    /* a fragment or document root carries the HTML namespace, so reading parent->ns needs no element-type guard */
     uint8_t parent_ns = parent->ns;
     uint8_t ns = element->ns;
     if (ns == parent_ns) {
@@ -2620,6 +2639,11 @@ static int namespace_reachable(const th_node *element) {
         return element->atom != TH_TAG_MGLYPH && element->atom != TH_TAG_MALIGNMARK;
     }
     return is_html_integration_point(parent);
+}
+
+/* The walk only reaches an element through its parent, so element->parent is never NULL here. */
+static inline int namespace_reachable(const th_node *element) {
+    return namespace_reachable_under(element, element->parent);
 }
 
 /* Rename an element to a transform's target tag and add its extra attributes when the policy maps the element's current
@@ -2719,7 +2743,8 @@ static int dispose_disallowed(sanitizer *s, th_node *element, PyObject *tag, enu
     *action = SANITIZE_DONE;
     if (remove_content || s->on_disallowed == ON_REMOVE ||
         (s->on_disallowed == ON_STRIP && element->ns != TH_NS_HTML)) {
-        th_node_remove(element);
+        th_node_remove(
+            element); /* the whole subtree goes, hoisting nothing, so no nesting the balancer must re-examine */
     } else if (s->on_disallowed == ON_STRIP) {
         *action = SANITIZE_STRIP_CHILDREN;
     } else {
@@ -2728,7 +2753,8 @@ static int dispose_disallowed(sanitizer *s, th_node *element, PyObject *tag, enu
     return 0;
 }
 
-static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enum sanitize_action *action) {
+static TH_WALK_INLINE int sanitize_element(sanitizer *s, th_node *element, int parent_kept,
+                                           enum sanitize_action *action) {
     int is_html = element->ns == TH_NS_HTML;
     PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, element->text, element->text_len);
     if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -2786,8 +2812,10 @@ static int sanitize_element(sanitizer *s, th_node *element, int parent_kept, enu
     if (allowed < 0) { /* GCOVR_EXCL_BR_LINE: PySet_Contains never fails on a str key */
         status = -1;   /* GCOVR_EXCL_LINE */
     } else if (allowed && style_element) {
-        /* a kept <style> holds raw CSS, not child elements, so scrub its stylesheet body instead of walking children */
+        /* a kept <style> holds raw CSS, not child elements, so scrub its stylesheet body; the walk then finds only the
+           one text child, but still passes through so the balancer judges the element like any other kept one */
         status = sanitize_attributes(s, element, tag, custom) < 0 ? -1 : sanitize_style_body(s, element);
+        *action = SANITIZE_KEEP_CHILDREN;
     } else if (allowed) {
         if (sanitize_attributes(s, element, tag, custom) < 0) {
             status = -1;
@@ -2888,38 +2916,209 @@ static int unwrap_element(sanitizer *s, th_node *element, enum sanitize_action a
     return escape_element(s, element);
 }
 
+/* What the balancer's ancestor scans would find above a child of `parent`, one bit per scan, so the walk judges each
+   element with mask tests and derives a child's bits from its parent's instead of rescanning. `parent` is the element
+   the child will sit under once every escaped or unwrapped ancestor between them is gone. */
+enum balance_bit {
+    CONTEXT_LIST_ITEM = 1u << 0,     /* balancer_autocloses_item reaches an li */
+    CONTEXT_DEFINITION = 1u << 1,    /* ... reaches a dd or dt */
+    CONTEXT_PARAGRAPH = 1u << 2,     /* balancer_block_closes_open_p reaches a p */
+    CONTEXT_OPTION = 1u << 3,        /* balancer_option_autocloses reaches an option */
+    CONTEXT_OPTION_GROUP = 1u << 4,  /* ... reaches an option or optgroup */
+    CONTEXT_SELECT = 1u << 5,        /* balancer_in_scope finds a select */
+    CONTEXT_BUTTON = 1u << 6,        /* ... a button */
+    CONTEXT_RUBY = 1u << 7,          /* ... a ruby */
+    CONTEXT_FORM = 1u << 8,          /* balancer_form_dropped finds a form */
+    CONTEXT_LINK = 1u << 9,          /* balancer_formatting_reopens reaches an a */
+    CONTEXT_NOBR = 1u << 10,         /* ... a nobr */
+    CONTEXT_IN_ROW = 1u << 11,       /* balancer_table_part_orphaned finds a cell's row */
+    CONTEXT_IN_ROW_GROUP = 1u << 12, /* ... a row's row group */
+    CONTEXT_IN_TABLE = 1u << 13,     /* ... a section's table */
+    CONTEXT_TABLE_PARENT = 1u << 14, /* the parent is a table context (balancer_is_table_context) */
+    CONTEXT_FOSTERS = 1u << 15,      /* the parent fosters content out (balancer_fosters_from) */
+    CONTEXT_DETACHED = 1u << 16,     /* a kept ancestor is escaped, so the tree still holds what the bits skip */
+    CONTEXT_PENDING = 1u << 17,      /* not derived from the parent's yet, since only an element child reads them */
+    CONTEXT_PARENT_GONE = 1u << 18,  /* the parent in the tree is escaped or unwrapped: the parent the balancer judges
+                                        against is the nearest kept ancestor still standing */
+    /* The walk's region, carried in the same word. Every ancestor kept (neither bit): a verdict holds, so an unstable
+       element is escaped after its children. */
+    CONTEXT_RECORD = 1u << 19, /* under a disallowed non-barrier element: its unwrap re-checks only the hoisted range
+                                  itself, so record verdicts, judged as if it were gone, and apply them once the unwrap
+                                  has settled */
+    CONTEXT_QUIET = 1u << 20,  /* under a disallowed barrier, whose deep settle balances the whole range, or under a
+                                  table part, whose foster parenting and implied wrappers need its final children:
+                                  balanced afterward */
+    /* Rule bits, past the context bits in the same word: the checks balancer_rule asks for beyond a context bit it
+       must not meet. */
+    RULE_HEADING = 1u << 21,         /* a heading under a heading parent */
+    RULE_IMPLIED_SELECT = 1u << 22,  /* generates implied end tags with a select in scope */
+    RULE_IMPLIED_RUBY = 1u << 23,    /* ... with a ruby in scope */
+    RULE_SPARES_OPTGROUP = 1u << 24, /* ... except over an optgroup parent */
+    RULE_SPARES_RTC = 1u << 25,      /* ... except over an rtc parent */
+    RULE_CELL = 1u << 26,            /* a table part orphaned without a row */
+    RULE_ROW = 1u << 27,             /* ... without a row group */
+    RULE_SECTION = 1u << 28,         /* ... without a table */
+    RULE_DEFERS = 1u << 29,          /* a table part, which balancer_defers leaves to its post-order */
+    RULE_REPARSED = 1u << 30,        /* no atom: the rules read the name a reparse lowercases */
+    RULE_SHAPES = 1u << 31,          /* an atom balancer_child_bits sets or clears bits for */
+    RULE_IMPLIED_END = RULE_IMPLIED_SELECT | RULE_IMPLIED_RUBY,
+    RULE_BEYOND_BITS = RULE_HEADING | RULE_IMPLIED_END | RULE_CELL | RULE_ROW | RULE_SECTION | RULE_REPARSED,
+};
+
+typedef struct {
+    const th_node *parent;
+    uint32_t bits;
+} balance_context;
+
+/* The parse-stability balancer's predicates, defined below; settle_hoisted applies them to each edited range inline. */
+static int balancer_structurally_unstable(const th_node *element);
+static int balancer_table_text_fostered(sanitizer *s, th_node *text);
+static int balancer_normalize_table_children(sanitizer *s, th_node *container, th_node *before, th_node *stop);
+static int balancer_fosters_from(const th_node *parent);
+static int balance_subtree(sanitizer *s, th_node *root);
+static uint32_t balancer_child_bits(const th_node *element, uint32_t outer);
+static uint32_t balancer_rule(uint16_t atom);
+static int balancer_structurally_unstable_in(const th_node *element, balance_context context, uint32_t rule);
+static int balancer_context_breaks(const th_node *element, balance_context context, uint32_t rule);
+static int balancer_defers(const th_node *element, uint32_t rule);
+static int balance_range(sanitizer *s, th_node *first, th_node *stop, balance_context context);
+
+/* Every ancestor scan the balancer mirrors (list-item and open-p closing, option/select scope, the formatting markers,
+   table structure, namespace) stops at a foreign or an HTML special element, so unwrapping any other element changes
+   only its children's parent, never what a deeper descendant's scan reaches. */
+static int balancer_barrier(const th_node *element) {
+    return element->ns != TH_NS_HTML || (element->tag_flags & TH_TAG_SPECIAL) != 0;
+}
+
 /* The walk validated each child against the parent it was parsed under, but unwrapping that parent moved the children
    into the grandparent: an HTML <style> hoisted out of an escaped svg <desc> now sits directly under <svg>, where a
-   reparse reads its body as markup. Re-check every element between `before` (NULL for the parent's start) and `stop`
-   against its new parent and dispose of the unreachable ones like any disallowed node; an unwrapped node's own children
-   land in the same range, so the scan resumes just before it and checks them in turn, without recursion. Returns 0, or
-   -1 on error. */
-static int settle_hoisted(sanitizer *s, th_node *parent, th_node *before, th_node *stop) {
+   reparse reads its body as markup. Re-check every node between `before` (NULL for the parent's start) and `stop`
+   against its new parent: dispose a namespace-confused element per the policy and, for HTML output, escape a
+   structurally unstable one to inert text. When the `unwrapped` element (detached, but its fields intact) was a
+   barrier, the hoist can also expose deeper descendants, or leave orphan rows or table text under a table context (only
+   a barrier sits directly in one; the parser fosters anything else out), so the range is balanced in depth. An element
+   escaped here after a non-barrier unwrap broke a parent rule (a heading under a heading), and that parent stops the
+   same scans the escaped element did, so the depth stays as the unwrapped element set it. An escaped or unwrapped
+   node's own children land in the same range, so the scan resumes just before it and checks them in turn, without
+   recursion. XML output round-trips through parse_xml and takes only the namespace check. Returns 0, or -1 on error. */
+static TH_WALK_INLINE int settle_hoisted(sanitizer *s, th_node *parent, th_node *before, th_node *stop,
+                                         const th_node *unwrapped) {
+    int balance = !s->xml;
+    int deep = balance && balancer_barrier(unwrapped);
+    int table_parent = deep && balancer_fosters_from(parent);
+    if (table_parent) {
+        /* only the hoisted range: a run reaching past it would move `before` or `stop`, the walk's place in the tree */
+        if (balancer_normalize_table_children(s, parent, before, stop) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
     th_node *cursor = before == NULL ? parent->first_child : before->next_sibling;
     while (cursor != stop) {
-        if (cursor->type != TH_NODE_ELEMENT || namespace_reachable(cursor)) {
+        if (cursor->type != TH_NODE_ELEMENT) {
+            if (table_parent && cursor->type == TH_NODE_TEXT) {
+                th_node *after = cursor->next_sibling; /* fostering moves cursor out of the range: capture its place */
+                int fostered = balancer_table_text_fostered(s, cursor);
+                if (fostered < 0) { /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
+                    return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                cursor = fostered ? after : cursor->next_sibling;
+                continue;
+            }
             cursor = cursor->next_sibling;
             continue;
         }
-        before = cursor->prev_sibling;
-        PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, cursor->text, cursor->text_len);
-        if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        int reachable = namespace_reachable(cursor);
+        if (reachable && !(balance && balancer_structurally_unstable(cursor))) {
+            if (deep) {
+                if (balance_subtree(s, cursor) < 0) { /* GCOVR_EXCL_BR_LINE: balance only fails on allocation */
+                    return -1;                        /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+            }
+            cursor = cursor->next_sibling;
+            continue;
         }
-        enum sanitize_action action;
-        int status = dispose_disallowed(s, cursor, tag, &action);
-        Py_DECREF(tag);
-        if (status == 0 && action != SANITIZE_DONE) { /* GCOVR_EXCL_BR_LINE: dispose only fails on allocation */
-            status = unwrap_element(s, cursor, action);
+        th_node *resume_before = cursor->prev_sibling;
+        s->balance_edited = 1;
+        if (!reachable) {
+            /* a namespace-confused node is disposed per the policy (escape/strip/remove), not just escaped */
+            PyObject *tag = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, cursor->text, cursor->text_len);
+            if (tag == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            enum sanitize_action action;
+            int status = dispose_disallowed(s, cursor, tag, &action);
+            Py_DECREF(tag);
+            if (status == 0 && action != SANITIZE_DONE) { /* GCOVR_EXCL_BR_LINE: dispose only fails on allocation */
+                status = unwrap_element(s, cursor, action);
+            }
+            if (status < 0) { /* GCOVR_EXCL_BR_LINE: only allocation failures reach this path */
+                return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        } else if (escape_element(s, cursor) < 0) { /* GCOVR_EXCL_BR_LINE: escape only fails on allocation */
+            return -1;                              /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: only allocation failures reach this path */
-            return -1;    /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-        /* the escaped start tag always precedes the unwrapped node's children, so the scan resumes after it */
-        cursor = before->next_sibling;
+        /* the disposed/escaped node's hoisted children (and an escaped start tag) take its place, so re-scan from there
+         */
+        cursor = resume_before != NULL ? resume_before->next_sibling : parent->first_child;
     }
     return 0;
 }
+
+/* The balancing work an element's frame leaves for its post-order step. */
+enum balance_role {
+    ROLE_NONE,
+    ROLE_RECORDED,      /* a kept element recorded in a CONTEXT_RECORD verdict, escaped once the region settles */
+    ROLE_ESCAPE,        /* a kept element the output would not re-parse in place */
+    ROLE_TABLE,         /* a table part whose subtree is balanced once it is walked */
+    ROLE_BARRIER_RANGE, /* the outermost disallowed element, a barrier: its deep settle balances what it hoists */
+    ROLE_RECORD_RANGE,  /* the outermost disallowed element, not a barrier: apply the verdicts recorded below it */
+};
+
+/* sanitize_frame for the balanced walk, which also keeps the context and the balancing work per level. */
+typedef struct {
+    th_node *element;
+    th_node *next;
+    uint32_t context_bits; /* the context bits, region included, the element and its siblings sit in */
+    uint8_t action;        /* enum sanitize_action */
+    uint8_t parent_kept;   /* whether the element's own parent is kept */
+    uint8_t role;          /* enum balance_role */
+} balanced_frame;
+
+/* The balancing state a walk keeps apart from its context bits, read only off the common path. */
+typedef struct {
+    const th_node *root;
+    th_node **verdicts; /* the escapes a CONTEXT_RECORD region recorded */
+    Py_ssize_t verdict_count;
+    Py_ssize_t verdict_capacity;
+    int spoiled; /* the CONTEXT_RECORD region holds a table part, so its verdicts cannot stand */
+} balance_walk;
+
+/* The rarer balancing steps run out of line, so the walk's loop keeps its registers for the policy work every element
+   pays for. */
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
+/* balance_enter's result on an allocation failure: no context word sets every bit. */
+#define BALANCE_FAILED UINT32_MAX
+
+static void *grow_one(void *items, Py_ssize_t *capacity, size_t size);
+static inline int balancer_passes(const th_node *element, uint32_t bits, uint32_t rule);
+static inline int balancer_shapes_context(const th_node *element, uint32_t rule);
+static TH_NOINLINE uint32_t balance_enter(balance_walk *walk, balanced_frame *frames, Py_ssize_t depth, uint32_t rule);
+static inline int balance_leave(sanitizer *s, balance_walk *walk, const balanced_frame *frames, Py_ssize_t depth,
+                                th_node *parent, th_node *before);
+static int balancer_unstable_in_walk(const th_node *element, uint32_t bits, uint32_t rule, const balanced_frame *frames,
+                                     Py_ssize_t depth, const th_node *root);
+static const th_node *balancer_view_parent(const balanced_frame *frames, Py_ssize_t depth, const th_node *root);
+static TH_NOINLINE int balance_hoisted_range(sanitizer *s, const balance_walk *walk, const balanced_frame *frames,
+                                             Py_ssize_t depth, th_node *parent, th_node *before);
+static TH_NOINLINE int balance_walked_table(sanitizer *s, const balance_walk *walk, const balanced_frame *frames,
+                                            Py_ssize_t depth);
 
 typedef struct {
     th_node *element;
@@ -2947,7 +3146,7 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
                 th_node *before = frame.element->prev_sibling;
                 /* GCOVR_EXCL_BR_START: unwrapping and settling only fail on allocation */
                 if (unwrap_element(s, frame.element, frame.action) < 0 ||
-                    settle_hoisted(s, grandparent, before, frame.next) < 0) {
+                    settle_hoisted(s, grandparent, before, frame.next, frame.element) < 0) {
                     PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure cleanup */
                     return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
                 }
@@ -2991,12 +3190,1084 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
             }
         } else if (child->type == TH_NODE_COMMENT) {
             if (s->strip_comments) {
-                th_node_remove(child);
+                th_node_remove(child); /* dropping a leaf joins no nesting, so the balancer need not revisit here */
             }
         } else if (child->type != TH_NODE_TEXT) {
             th_node_remove(child); /* doctype, processing instruction, CDATA: never valid in a sanitized fragment */
         }
         child = next;
+    }
+}
+
+/* A non-element node has nothing below it to walk: drop a comment when the policy strips them, and anything but text,
+   which never belongs in a sanitized fragment. A dropped leaf joins no nesting, so the balancer need not revisit it. */
+static inline void sanitize_leaf(const sanitizer *s, th_node *node) {
+    if (node->type != TH_NODE_TEXT && (node->type != TH_NODE_COMMENT || s->strip_comments)) {
+        th_node_remove(node); /* comment, doctype, processing instruction, CDATA */
+    }
+}
+
+/* sanitize_children for HTML output that must also come out parse-stable. It judges each kept element as it reaches it,
+   wherever the tree around it is already final (see CONTEXT_RECORD and CONTEXT_QUIET): the balancer reads the finished
+   tree top-down, the order the walk reaches it in. A walk of its own, so the plain walk carries none of this; both
+   inline sanitize_element. Returns 0, or -1 on error. */
+static int sanitize_balanced_children(sanitizer *s, th_node *root) {
+    balanced_frame *frames = NULL;
+    Py_ssize_t depth = 0;
+    Py_ssize_t capacity = 0;
+    balance_walk walk = {root, NULL, 0, 0, 0};
+    uint32_t bits = balancer_child_bits(root, 0);
+    int parent_kept = 1; /* the root is kept context */
+    th_node *child = root->first_child;
+    for (;;) {
+        if (child == NULL) {
+            if (depth == 0) {
+                PyMem_Free(frames);
+                PyMem_Free(walk.verdicts);
+                return 0;
+            }
+            /* nothing below pushes, so the frame stays in place while its post-order work runs */
+            const balanced_frame *frame = &frames[--depth];
+            int status = 0;
+            th_node *grandparent = NULL;
+            th_node *before = NULL;
+            if (frame->action != SANITIZE_KEEP_CHILDREN) {
+                grandparent = frame->element->parent;
+                before = frame->element->prev_sibling;
+                /* GCOVR_EXCL_BR_START: unwrapping and settling only fail on allocation */
+                status = unwrap_element(s, frame->element, frame->action) < 0 ||
+                                 settle_hoisted(s, grandparent, before, frame->next, frame->element) < 0
+                             ? -1
+                             : 0;
+                /* GCOVR_EXCL_BR_STOP */
+            }
+            if (frame->role > ROLE_RECORDED) {
+                if (status == 0) { /* GCOVR_EXCL_BR_LINE: unwrapping and settling only fail on allocation */
+                    status = balance_leave(s, &walk, frames, depth, grandparent, before);
+                }
+            }
+            if (status < 0) {              /* GCOVR_EXCL_BR_LINE: balancing only fails on allocation */
+                PyMem_Free(frames);        /* GCOVR_EXCL_LINE: allocation-failure cleanup */
+                PyMem_Free(walk.verdicts); /* GCOVR_EXCL_LINE */
+                return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            bits = frame->context_bits;
+            parent_kept = frame->parent_kept;
+            child = frame->next;
+            continue;
+        }
+        th_node *next = child->next_sibling;
+        if (child->type != TH_NODE_ELEMENT) {
+            sanitize_leaf(s, child);
+            child = next;
+            continue;
+        }
+        enum sanitize_action action;
+        if (sanitize_element(s, child, parent_kept, &action) < 0) {
+            PyMem_Free(frames);
+            PyMem_Free(walk.verdicts);
+            return -1;
+        }
+        if (action == SANITIZE_DONE) {
+            child = next;
+            continue;
+        }
+        if (bits & CONTEXT_PENDING) {
+            /* the parent deferred them: its frame, on top, holds the bits the parent sits in */
+            bits = balancer_child_bits(frames[depth - 1].element, frames[depth - 1].context_bits);
+        }
+        uint32_t rule = 0;
+        int settled = action == SANITIZE_KEEP_CHILDREN &&
+                      ((bits & CONTEXT_QUIET) || balancer_passes(child, bits, rule = balancer_rule(child->atom)));
+        th_node *first_element = child->first_child;
+        if (settled) {
+            /* a kept element the balancer passes has no post-order step, so its leading leaf children are handled here
+               and it takes a frame only when an element child follows */
+            while (first_element != NULL && first_element->type != TH_NODE_ELEMENT) {
+                th_node *following = first_element->next_sibling;
+                sanitize_leaf(s, first_element);
+                first_element = following;
+            }
+            if (first_element == NULL) {
+                child = next;
+                continue;
+            }
+        }
+        if (depth == capacity) {
+            balanced_frame *grown = grow_one(frames, &capacity, sizeof *frames);
+            if (grown == NULL) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                PyMem_Free(frames);        /* GCOVR_EXCL_LINE: allocation-failure path */
+                PyMem_Free(walk.verdicts); /* GCOVR_EXCL_LINE */
+                return -1;                 /* GCOVR_EXCL_LINE */
+            }
+            frames = grown;
+        }
+        balanced_frame *frame = &frames[depth++];
+        *frame = (balanced_frame){child, next, bits, (uint8_t)action, (uint8_t)parent_kept, ROLE_NONE};
+        parent_kept = action == SANITIZE_KEEP_CHILDREN;
+        if (settled) {
+            if (!(bits & CONTEXT_QUIET) && balancer_shapes_context(child, rule)) {
+                bits = (bits & CONTEXT_RECORD) | CONTEXT_PENDING;
+            }
+        } else if (action != SANITIZE_KEEP_CHILDREN) {
+            if (!(bits & CONTEXT_QUIET)) {
+                /* a disallowed element goes, so its children keep its bits, as if already hoisted */
+                if (!(bits & CONTEXT_RECORD)) {
+                    int barrier = balancer_barrier(child);
+                    frame->role = barrier ? ROLE_BARRIER_RANGE : ROLE_RECORD_RANGE;
+                    bits |= barrier ? CONTEXT_QUIET : CONTEXT_RECORD;
+                    walk.spoiled = 0;
+                    s->balance_edited = 0;
+                }
+                bits |= CONTEXT_PARENT_GONE;
+            }
+        } else {
+            bits = balance_enter(&walk, frames, depth, rule);
+            if (bits == BALANCE_FAILED) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+                PyMem_Free(frames);        /* GCOVR_EXCL_LINE: allocation-failure path */
+                PyMem_Free(walk.verdicts); /* GCOVR_EXCL_LINE */
+                return -1;                 /* GCOVR_EXCL_LINE */
+            }
+        }
+        child = first_element;
+    }
+}
+
+/* Grow the full buffer `items` of `*capacity` `size`-byte items to hold one more. Returns the buffer to use, or NULL
+   with MemoryError set, leaving `items` to the caller to free. */
+static void *grow_one(void *items, Py_ssize_t *capacity, size_t size) {
+    size_t grown;
+    size_t bytes;
+    if (!th_grow_cap((size_t)*capacity + 1, (size_t)*capacity, 16, size, &grown, &bytes)) { /* GCOVR_EXCL_BR_LINE */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: no representable tree can overflow size_t here */
+    }
+    void *resized = PyMem_Realloc(items, bytes);
+    if (resized == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    *capacity = (Py_ssize_t)grown;
+    return resized;
+}
+
+/* Whether a kept element in `bits` passes the balancer on its atom's `rule` alone: an HTML element, outside a table
+   context, under the parent it stands in, with no rule the context sets off and no table part to defer. Most elements
+   settle here, inside the walk's loop. */
+static inline int balancer_passes(const th_node *element, uint32_t bits, uint32_t rule) {
+    return !(bits & (CONTEXT_FOSTERS | CONTEXT_PARENT_GONE)) && element->ns == TH_NS_HTML &&
+           !(rule & (bits | RULE_BEYOND_BITS | RULE_DEFERS));
+}
+
+/* Whether balancer_child_bits gives a child of this HTML element different bits from its own: any element its switch
+   names, a scoping one, and a special one other than address and div (p is in the switch). The rest pass their bits
+   down untouched, so the walk need not derive them. */
+static inline int balancer_shapes_context(const th_node *element, uint32_t rule) {
+    return (rule & RULE_SHAPES) || (element->tag_flags & TH_TAG_SCOPING) ||
+           ((element->tag_flags & TH_TAG_SPECIAL) && element->atom != TH_TAG_ADDRESS && element->atom != TH_TAG_DIV);
+}
+
+/* Judge the kept element just pushed on frames[depth - 1], which balancer_passes did not settle: record its role.
+   Returns the bits its children sit in, or BALANCE_FAILED. */
+static TH_NOINLINE uint32_t balance_enter(balance_walk *walk, balanced_frame *frames, Py_ssize_t depth, uint32_t rule) {
+    balanced_frame *frame = &frames[depth - 1];
+    th_node *element = frame->element;
+    uint32_t bits = frame->context_bits;
+    if (balancer_defers(element, rule)) {
+        frame->role = bits & CONTEXT_RECORD ? ROLE_NONE : ROLE_TABLE;
+        walk->spoiled |= (bits & CONTEXT_RECORD) != 0;
+        return bits | CONTEXT_QUIET;
+    }
+    if (!balancer_unstable_in_walk(element, bits, rule, frames, depth - 1, walk->root)) {
+        return (bits & CONTEXT_RECORD) | CONTEXT_PENDING;
+    }
+    if (!(bits & CONTEXT_RECORD)) {
+        frame->role = ROLE_ESCAPE;
+        return bits | CONTEXT_PARENT_GONE | CONTEXT_DETACHED; /* an escaped element's children keep its bits */
+    }
+    frame->role = ROLE_RECORDED;
+    if (walk->verdict_count == walk->verdict_capacity) {
+        th_node **grown = grow_one(walk->verdicts, &walk->verdict_capacity, sizeof *walk->verdicts);
+        if (grown == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return BALANCE_FAILED; /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        walk->verdicts = grown;
+    }
+    walk->verdicts[walk->verdict_count++] = element;
+    return bits | CONTEXT_PARENT_GONE | CONTEXT_DETACHED;
+}
+
+/* Whether the walk must escape a kept `element` that sits in `bits`: balancer_context_breaks, plus the namespace check
+   when the element's parent goes, so it lands under a different one. */
+static int balancer_unstable_in_walk(const th_node *element, uint32_t bits, uint32_t rule, const balanced_frame *frames,
+                                     Py_ssize_t depth, const th_node *root) {
+    if (!(bits & CONTEXT_PARENT_GONE)) {
+        return balancer_context_breaks(element, (balance_context){element->parent, bits}, rule);
+    }
+    const th_node *parent = balancer_view_parent(frames, depth, root);
+    return !namespace_reachable_under(element, parent) ||
+           balancer_context_breaks(element, (balance_context){parent, bits}, rule);
+}
+
+/* The parent the balancer judges a child of the element on frames[depth - 1] against: the nearest ancestor that stays
+   in the output, skipping the disallowed ones the walk unwraps and the kept ones it escapes, else the walk's root. */
+static const th_node *balancer_view_parent(const balanced_frame *frames, Py_ssize_t depth, const th_node *root) {
+    while (depth > 0) {
+        const balanced_frame *frame = &frames[--depth];
+        if (frame->action == SANITIZE_KEEP_CHILDREN && frame->role != ROLE_ESCAPE && frame->role != ROLE_RECORDED) {
+            return frame->element;
+        }
+    }
+    return root;
+}
+
+/* Run the balancing work (its role) the frame just popped off frames[depth] left. A disallowed element's `parent` and
+   `before` are where it stood before its unwrap. A barrier's deep settle already balanced its range against the tree's
+   real ancestors, which are the balancer's own unless an escaped ancestor still stands in the tree. A non-barrier
+   unwrap re-checked only the range's top level, and the walk recorded the verdicts below it, which hold unless a settle
+   edited the region or a table part in it needs its own pass. Otherwise the range balances afresh. Returns 0, or -1 on
+   error. */
+static inline int balance_leave(sanitizer *s, balance_walk *walk, const balanced_frame *frames, Py_ssize_t depth,
+                                th_node *parent, th_node *before) {
+    const balanced_frame *frame = &frames[depth];
+    switch (frame->role) {
+    case ROLE_ESCAPE:
+        return escape_element(s, frame->element);
+    case ROLE_TABLE:
+        return balance_walked_table(s, walk, frames, depth);
+    case ROLE_BARRIER_RANGE:
+        return frame->context_bits & CONTEXT_DETACHED ? balance_hoisted_range(s, walk, frames, depth, parent, before)
+                                                      : 0;
+    default: /* ROLE_RECORD_RANGE */
+        break;
+    }
+    Py_ssize_t verdict_count = walk->verdict_count;
+    walk->verdict_count = 0;
+    if (walk->spoiled || s->balance_edited) {
+        return balance_hoisted_range(s, walk, frames, depth, parent, before);
+    }
+    for (Py_ssize_t index = 0; index < verdict_count; index++) {
+        if (escape_element(s, walk->verdicts[index]) < 0) { /* GCOVR_EXCL_BR_LINE: escape only fails on allocation */
+            return -1;                                      /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+    }
+    return 0;
+}
+
+/* balance_range over what unwrapping the disallowed element popped off frames[depth] hoisted between `before` and its
+   next sibling under `parent`. Returns 0, or -1 on error. */
+static TH_NOINLINE int balance_hoisted_range(sanitizer *s, const balance_walk *walk, const balanced_frame *frames,
+                                             Py_ssize_t depth, th_node *parent, th_node *before) {
+    const balanced_frame *frame = &frames[depth];
+    balance_context context = {balancer_view_parent(frames, depth, walk->root), frame->context_bits};
+    return balance_range(s, before != NULL ? before->next_sibling : parent->first_child, frame->next, context);
+}
+
+/* balance_range over the table part popped off frames[depth], now that the walk has settled its subtree. Returns 0, or
+   -1 on error. */
+static TH_NOINLINE int balance_walked_table(sanitizer *s, const balance_walk *walk, const balanced_frame *frames,
+                                            Py_ssize_t depth) {
+    const balanced_frame *frame = &frames[depth];
+    balance_context context = {balancer_view_parent(frames, depth, walk->root), frame->context_bits};
+    return balance_range(s, frame->element, frame->element->next_sibling, context);
+}
+
+/* Parse-stability balancer.
+
+   The allowlist walk judges safety on the parsed tree, but HTML has no end tags in its abstract syntax: the serializer
+   emits only start tags and text, and a browser re-parsing that output runs the tree-construction rules again. Those
+   rules rewrite some kept nestings -- an element the sanitizer escaped or stripped was the "special" barrier that kept
+   a browser from auto-closing an ancestor, or the form-element pointer drops a nested form, or table content is
+   foster-parented -- so the re-parsed tree differs from the one judged. The gap is the mXSS surface: a nesting that
+   re-parses into live, un-scrubbed markup (WHATWG 13.2.6, tree construction).
+
+   The balancer re-applies those rules to the kept tree and neutralizes every element the serialized output would not
+   re-parse to its judged place: it escapes the element to inert text (so the output re-parses to exactly the text it
+   emits) and foster-parents table text out of the table. It runs inside the walk (see sanitize_children), on the
+   tree the walk leaves behind, as if it were a pass over the finished tree. It is modeled on OWASP
+   java-html-sanitizer's TagBalancingHtmlStreamEventReceiver (an output-side balancer driven by containment tables), but
+   the rules are read from the HTML Standard, and the predicates reuse the tree builder's own element categories
+   (TH_TAG_SPECIAL / TH_TAG_SCOPING / TH_TAG_FORMATTING from dom/tree.c). It is not a re-parse: no second parser runs.
+ */
+
+static int balancer_is_heading(uint16_t atom) {
+    return atom == TH_TAG_H1 || atom == TH_TAG_H2 || atom == TH_TAG_H3 || atom == TH_TAG_H4 || atom == TH_TAG_H5 ||
+           atom == TH_TAG_H6;
+}
+
+/* Everything balancer_structurally_unstable checks for a kept HTML element with this atom: the context bits that make
+   it unstable (an li under an open li, a dd or dt under an open dd or dt; a p-closing start tag under an open p, which
+   is the block and heading group plus li/dd/dt, form, hr, and table, each running "close a p element" in its own
+   handler, HTML 13.2.6.4.7; a nested option, optgroup, button, form, a, or nobr; a select-closing tag under a select),
+   and the RULE_* checks that also read the parent or need a context bit absent. */
+static const uint32_t BALANCER_RULES[TH_TAG_XMP + 1] = {
+    [TH_TAG_ADDRESS] = CONTEXT_PARAGRAPH,
+    [TH_TAG_ARTICLE] = CONTEXT_PARAGRAPH,
+    [TH_TAG_ASIDE] = CONTEXT_PARAGRAPH,
+    [TH_TAG_BLOCKQUOTE] = CONTEXT_PARAGRAPH,
+    [TH_TAG_CENTER] = CONTEXT_PARAGRAPH,
+    [TH_TAG_DETAILS] = CONTEXT_PARAGRAPH,
+    [TH_TAG_DIALOG] = CONTEXT_PARAGRAPH,
+    [TH_TAG_DIR] = CONTEXT_PARAGRAPH,
+    [TH_TAG_DIV] = CONTEXT_PARAGRAPH,
+    [TH_TAG_DL] = CONTEXT_PARAGRAPH,
+    [TH_TAG_FIELDSET] = CONTEXT_PARAGRAPH,
+    [TH_TAG_FIGCAPTION] = CONTEXT_PARAGRAPH,
+    [TH_TAG_FIGURE] = CONTEXT_PARAGRAPH,
+    [TH_TAG_FOOTER] = CONTEXT_PARAGRAPH,
+    [TH_TAG_HEADER] = CONTEXT_PARAGRAPH,
+    [TH_TAG_HGROUP] = CONTEXT_PARAGRAPH,
+    [TH_TAG_MAIN] = CONTEXT_PARAGRAPH,
+    [TH_TAG_MENU] = CONTEXT_PARAGRAPH,
+    [TH_TAG_NAV] = CONTEXT_PARAGRAPH,
+    [TH_TAG_OL] = CONTEXT_PARAGRAPH,
+    [TH_TAG_SEARCH] = CONTEXT_PARAGRAPH,
+    [TH_TAG_SECTION] = CONTEXT_PARAGRAPH,
+    [TH_TAG_SUMMARY] = CONTEXT_PARAGRAPH,
+    [TH_TAG_UL] = CONTEXT_PARAGRAPH,
+    [TH_TAG_PRE] = CONTEXT_PARAGRAPH,
+    [TH_TAG_LISTING] = CONTEXT_PARAGRAPH,
+    [TH_TAG_PLAINTEXT] = CONTEXT_PARAGRAPH,
+    [TH_TAG_P] = CONTEXT_PARAGRAPH | RULE_SHAPES,
+    [TH_TAG_H1] = CONTEXT_PARAGRAPH | RULE_HEADING,
+    [TH_TAG_H2] = CONTEXT_PARAGRAPH | RULE_HEADING,
+    [TH_TAG_H3] = CONTEXT_PARAGRAPH | RULE_HEADING,
+    [TH_TAG_H4] = CONTEXT_PARAGRAPH | RULE_HEADING,
+    [TH_TAG_H5] = CONTEXT_PARAGRAPH | RULE_HEADING,
+    [TH_TAG_H6] = CONTEXT_PARAGRAPH | RULE_HEADING,
+    [TH_TAG_LI] = CONTEXT_PARAGRAPH | CONTEXT_LIST_ITEM | RULE_SHAPES,
+    [TH_TAG_DD] = CONTEXT_PARAGRAPH | CONTEXT_DEFINITION | RULE_SHAPES,
+    [TH_TAG_DT] = CONTEXT_PARAGRAPH | CONTEXT_DEFINITION | RULE_SHAPES,
+    [TH_TAG_FORM] = CONTEXT_PARAGRAPH | CONTEXT_FORM | RULE_SHAPES,
+    [TH_TAG_HR] = CONTEXT_PARAGRAPH | RULE_IMPLIED_SELECT,
+    [TH_TAG_TABLE] = CONTEXT_PARAGRAPH | CONTEXT_SELECT | RULE_DEFERS | RULE_SHAPES,
+    [TH_TAG_OPTION] = CONTEXT_OPTION | RULE_IMPLIED_SELECT | RULE_SPARES_OPTGROUP | RULE_SHAPES,
+    [TH_TAG_OPTGROUP] = CONTEXT_OPTION_GROUP | RULE_IMPLIED_SELECT | RULE_SHAPES,
+    [TH_TAG_SELECT] = CONTEXT_SELECT | RULE_SHAPES,
+    [TH_TAG_INPUT] = CONTEXT_SELECT,
+    [TH_TAG_CAPTION] = CONTEXT_SELECT | RULE_SECTION | RULE_SHAPES,
+    [TH_TAG_TBODY] = CONTEXT_SELECT | RULE_SECTION | RULE_DEFERS | RULE_SHAPES,
+    [TH_TAG_TFOOT] = CONTEXT_SELECT | RULE_SECTION | RULE_DEFERS | RULE_SHAPES,
+    [TH_TAG_THEAD] = CONTEXT_SELECT | RULE_SECTION | RULE_DEFERS | RULE_SHAPES,
+    [TH_TAG_TR] = CONTEXT_SELECT | RULE_ROW | RULE_DEFERS | RULE_SHAPES,
+    [TH_TAG_TD] = CONTEXT_SELECT | RULE_CELL | RULE_SHAPES,
+    [TH_TAG_TH] = CONTEXT_SELECT | RULE_CELL | RULE_SHAPES,
+    [TH_TAG_COL] = RULE_SECTION,
+    [TH_TAG_COLGROUP] = RULE_SECTION | RULE_DEFERS | RULE_SHAPES,
+    [TH_TAG_BUTTON] = CONTEXT_BUTTON | RULE_SHAPES,
+    [TH_TAG_A] = CONTEXT_LINK | RULE_SHAPES,
+    [TH_TAG_NOBR] = CONTEXT_NOBR | RULE_SHAPES,
+    [TH_TAG_RB] = RULE_IMPLIED_RUBY,
+    [TH_TAG_RTC] = RULE_IMPLIED_RUBY,
+    [TH_TAG_RP] = RULE_IMPLIED_RUBY | RULE_SPARES_RTC,
+    [TH_TAG_RT] = RULE_IMPLIED_RUBY | RULE_SPARES_RTC,
+    [TH_TAG_RUBY] = RULE_SHAPES,
+    [TH_TAG_APPLET] = RULE_SHAPES,
+    [TH_TAG_MARQUEE] = RULE_SHAPES,
+    [TH_TAG_UNKNOWN] = RULE_REPARSED,
+};
+
+static uint32_t balancer_rule(uint16_t atom) {
+    return BALANCER_RULES[atom];
+}
+
+/* The table-context elements a browser keeps on its stack and foster-parents content out of (HTML 13.2.6.4.9): a table
+   and its row groups and rows, but not the cell/caption, inside which flow content nests normally. */
+static int balancer_is_table_context(const th_node *node) {
+    return node->ns == TH_NS_HTML &&
+           (node->atom == TH_TAG_TABLE || node->atom == TH_TAG_TBODY || node->atom == TH_TAG_TFOOT ||
+            node->atom == TH_TAG_THEAD || node->atom == TH_TAG_TR);
+}
+
+/* A position a browser foster-parents flow content out of: directly inside a table context; inside a colgroup, which
+   anything but a col, a template, or whitespace pops before the table rules foster it (HTML 13.2.6.4.12); or inside a
+   form that is a direct child of a table context. Such a form is inserted but never pushed onto the open stack, so
+   content written after it -- even content the output nests inside it -- re-parses as foster-parented out. */
+static int balancer_fosters_from(const th_node *parent) {
+    if (balancer_is_table_context(parent)) {
+        return 1;
+    }
+    if (parent->ns != TH_NS_HTML) {
+        return 0;
+    }
+    if (parent->atom == TH_TAG_COLGROUP) {
+        return 1;
+    }
+    return parent->atom == TH_TAG_FORM && parent->parent != NULL && balancer_is_table_context(parent->parent);
+}
+
+/* The nearest open table a browser foster-parents before, so moved content lands as the table's previous sibling, or
+   NULL when the table is the balancer's root (a table passed straight to sanitize_node) and so has nowhere to foster
+   before. */
+static th_node *balancer_enclosing_table(const th_node *node) {
+    th_node *ancestor = node->parent;
+    while (ancestor != NULL && ancestor->atom != TH_TAG_TABLE) {
+        ancestor = ancestor->parent;
+    }
+    return ancestor != NULL && ancestor->parent != NULL ? ancestor : NULL;
+}
+
+/* Walk the kept element's ancestors (its serialized-output context) for a matching HTML element, stopping at a barrier.
+   The li/dd/dt start-tag rules (HTML 13.2.6.4.7) close an ancestor list item unless a special element other than
+   address/div/p intervenes; a foreign ancestor bounds the HTML content, so the scan ends there. */
+static int balancer_autocloses_item(const th_node *element, uint16_t match_a, uint16_t match_b) {
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns != TH_NS_HTML) {
+            return 0;
+        }
+        uint16_t atom = ancestor->atom;
+        if (atom == match_a || atom == match_b) {
+            return 1;
+        }
+        if ((ancestor->tag_flags & TH_TAG_SPECIAL) && atom != TH_TAG_ADDRESS && atom != TH_TAG_DIV &&
+            atom != TH_TAG_P) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* A kept p-closing block (or heading) with an open p reachable in button scope: a browser closes that p before the
+   block, making them siblings, so the kept nesting re-parses apart (HTML 13.2.6.4.7, "close a p element"). */
+static int balancer_block_closes_open_p(const th_node *element) {
+    if (!(balancer_rule(element->atom) & CONTEXT_PARAGRAPH)) {
+        return 0;
+    }
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns != TH_NS_HTML) {
+            return 0;
+        }
+        if (ancestor->atom == TH_TAG_P) {
+            return 1;
+        }
+        if ((ancestor->tag_flags & TH_TAG_SCOPING) || ancestor->atom == TH_TAG_BUTTON) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* A kept option/optgroup with an open option (or, for optgroup, option/optgroup) reachable in select scope: the
+   in-body option/optgroup start-tag rules close it, splitting the kept nesting on re-parse (HTML 13.2.6.4.7). */
+static int balancer_option_autocloses(const th_node *element) {
+    if (element->atom != TH_TAG_OPTION && element->atom != TH_TAG_OPTGROUP) {
+        return 0;
+    }
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns != TH_NS_HTML) {
+            return 0;
+        }
+        uint16_t atom = ancestor->atom;
+        if (atom == TH_TAG_OPTION || (element->atom == TH_TAG_OPTGROUP && atom == TH_TAG_OPTGROUP)) {
+            return 1;
+        }
+        if (atom == TH_TAG_SELECT || (ancestor->tag_flags & TH_TAG_SCOPING)) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* Whether an HTML `atom` element is an ancestor of `element` in the default scope: the scan stops at a scoping
+   element, and at a foreign one, which only an integration point (itself scoping) can hold HTML content under. */
+static int balancer_in_scope(const th_node *element, uint16_t atom) {
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns != TH_NS_HTML) {
+            return 0;
+        }
+        if (ancestor->atom == atom) {
+            return 1;
+        }
+        if (ancestor->tag_flags & TH_TAG_SCOPING) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* A kept button nested in another with no scoping element between does not nest on re-parse: the inner start tag
+   closes the outer button first (HTML 13.2.6.4.7, "A start tag whose tag name is button"). */
+static int balancer_button_nested(const th_node *element) {
+    return element->atom == TH_TAG_BUTTON && balancer_in_scope(element, TH_TAG_BUTTON);
+}
+
+/* A select, input, or table-structure start tag closes an open select in scope before inserting itself (HTML
+   13.2.6.4.7, "select" and "input"; the table-family tags close it when the select sits in a table, and a table
+   inside a select elsewhere is escaped too, which only over-approximates), so a kept one inside a select re-parses
+   as the select's sibling. */
+static int balancer_closes_select(const th_node *element) {
+    return (balancer_rule(element->atom) & CONTEXT_SELECT) && balancer_in_scope(element, TH_TAG_SELECT);
+}
+
+/* The elements "generate implied end tags" pops (HTML 13.2.6.3). */
+static int balancer_implied_end(uint16_t atom) {
+    switch (atom) {
+    case TH_TAG_DD:
+    case TH_TAG_DT:
+    case TH_TAG_LI:
+    case TH_TAG_OPTION:
+    case TH_TAG_OPTGROUP:
+    case TH_TAG_P:
+    case TH_TAG_RB:
+    case TH_TAG_RP:
+    case TH_TAG_RT:
+    case TH_TAG_RTC:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* An option, optgroup, or hr start tag with a select in scope, and an rb, rtc, rp, or rt start tag with a ruby in
+   scope, first generates implied end tags (HTML 13.2.6.4.7), so a kept one directly inside an open dd, dt, li, option,
+   optgroup, p, rb, rp, rt, or rtc closes that parent and re-parses as its sibling. An option spares an optgroup parent
+   and an rp or rt spares an rtc one. Returns the context bit of the scope that triggers this when an `atom` start tag
+   would close `parent`, else 0. */
+static uint32_t balancer_implied_end_scope(uint16_t atom, const th_node *parent) {
+    uint32_t rule = balancer_rule(atom);
+    if (!(rule & RULE_IMPLIED_END)) {
+        return 0;
+    }
+    uint16_t spared = rule & RULE_SPARES_OPTGROUP ? TH_TAG_OPTGROUP
+                      : rule & RULE_SPARES_RTC    ? TH_TAG_RTC
+                                                  : TH_TAG_UNKNOWN;
+    if (parent->ns != TH_NS_HTML || parent->atom == spared || !balancer_implied_end(parent->atom)) {
+        return 0;
+    }
+    return rule & RULE_IMPLIED_SELECT ? CONTEXT_SELECT : CONTEXT_RUBY;
+}
+
+static int balancer_implied_end_closes_parent(const th_node *element) {
+    uint32_t scope = balancer_implied_end_scope(element->atom, element->parent);
+    return scope != 0 && balancer_in_scope(element, scope == CONTEXT_SELECT ? TH_TAG_SELECT : TH_TAG_RUBY);
+}
+
+/* A kept form nested in another form is dropped by the form-element pointer on re-parse (HTML 13.2.6.4.7, "A start tag
+   whose tag name is form"); the pointer is document-wide, so the scan crosses foreign ancestors. The spec's template
+   exception needs no arm: the safety baseline escapes every template before the balancer runs, so a kept form never has
+   a template ancestor. */
+static int balancer_form_dropped(const th_node *element) {
+    if (element->atom != TH_TAG_FORM) {
+        return 0;
+    }
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns == TH_NS_HTML && ancestor->atom == TH_TAG_FORM) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* A kept a or nobr with an open a/nobr of the same name reachable before a formatting-marker scope: the adoption agency
+   / nobr rules restructure it on re-parse (HTML 13.2.6.4.7). The markers are applet, marquee, a cell and caption;
+   object and template are also markers but the safety baseline escapes both, so neither is ever a kept ancestor here.
+ */
+static int balancer_formatting_reopens(const th_node *element) {
+    if (element->atom != TH_TAG_A && element->atom != TH_TAG_NOBR) {
+        return 0;
+    }
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns != TH_NS_HTML) {
+            return 0;
+        }
+        uint16_t atom = ancestor->atom;
+        if (atom == element->atom) {
+            return 1;
+        }
+        if (atom == TH_TAG_APPLET || atom == TH_TAG_MARQUEE || atom == TH_TAG_TD || atom == TH_TAG_TH ||
+            atom == TH_TAG_CAPTION) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+enum table_part { TABLE_PART_NONE, TABLE_PART_CELL, TABLE_PART_ROW, TABLE_PART_SECTION };
+
+static enum table_part table_part_kind(uint16_t atom) {
+    uint32_t rule = balancer_rule(atom);
+    return rule & RULE_CELL      ? TABLE_PART_CELL
+           : rule & RULE_ROW     ? TABLE_PART_ROW
+           : rule & RULE_SECTION ? TABLE_PART_SECTION
+                                 : TABLE_PART_NONE;
+}
+
+/* a cell lives in a row, a row in a row group (the implied-wrapper step has already moved one that sat directly in a
+   table into a tbody), and a section/caption/column in a table */
+static int table_part_fits(enum table_part part, uint16_t context) {
+    switch (context) {
+    case TH_TAG_TR:
+        return part == TABLE_PART_CELL;
+    case TH_TAG_TBODY:
+    case TH_TAG_TFOOT:
+    case TH_TAG_THEAD:
+        return part == TABLE_PART_ROW;
+    case TH_TAG_TABLE:
+        return part == TABLE_PART_SECTION;
+    default:
+        return 0;
+    }
+}
+
+/* A kept table-structure element outside the context its insertion mode requires: a cell or row with no row/table
+   ancestor, or a table section/caption/column with no table ancestor, is an "in body" stray table tag that a browser
+   ignores on re-parse (HTML 13.2.6.4.7), so the kept element would vanish. A foreign ancestor or the fragment root ends
+   the search the same way. */
+static int balancer_table_part_orphaned(const th_node *element) {
+    enum table_part part = table_part_kind(element->atom);
+    if (part == TABLE_PART_NONE) {
+        return 0;
+    }
+    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
+        if (ancestor->ns != TH_NS_HTML) {
+            return 1;
+        }
+        if (table_part_fits(part, ancestor->atom)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The one input a table keeps in place is a hidden one (HTML 13.2.6.4.9), judged on the type attribute the policy left:
+   its value must still read "hidden", ASCII case-insensitively. */
+static int balancer_hidden_input(const th_node *element) {
+    for (Py_ssize_t index = 0; index < element->attr_count; index++) {
+        const th_node_attr *attr = &element->attrs[index];
+        if (attr->name_atom != TH_ATTR_TYPE) {
+            continue;
+        }
+        if (attr->value_len != 6) {
+            return 0;
+        }
+        for (Py_ssize_t pos = 0; pos < 6; pos++) {
+            if (lower_ascii(attr->value[pos]) != (Py_UCS4) "hidden"[pos]) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* A kept element sitting directly in a table context where it is not valid table structure is foster-parented out of
+   the table on re-parse (HTML 13.2.6.4.9, "anything else"): a flow or foreign element under a table/row-group/row,
+   outside the cell and caption that hold flow content, and anything but a col under a colgroup. A kept
+   <style>/<form> or hidden <input> a browser leaves in the table is exempt,
+   and the valid structural children (caption/colgroup/row groups under a table, rows under a row group, cells under a
+   row) are left for the implied-wrapper step. The caller escapes the offender, whose text the table-text rule then
+   foster-parents out, matching where a browser puts it. The caller has established that `parent` fosters, and whether
+   it is a table context. */
+static int balancer_misplaced_under(const th_node *element, const th_node *parent, int table_context) {
+    if (element->ns != TH_NS_HTML) {
+        return 1; /* a foreign element under a table is fostered out just like flow content */
+    }
+    uint16_t atom = element->atom;
+    if (parent->atom == TH_TAG_COLGROUP) {
+        return atom != TH_TAG_COL; /* a template, the one other element a colgroup keeps, is never kept */
+    }
+    if (!table_context) {
+        return 1; /* inside a form that is a direct table child: the form is off the stack, so all its content fosters
+                   */
+    }
+    if (atom == TH_TAG_STYLE || atom == TH_TAG_FORM) {
+        return 0;
+    }
+    if (atom == TH_TAG_INPUT) {
+        return !balancer_hidden_input(element);
+    }
+    switch (parent->atom) {
+    case TH_TAG_TABLE:
+        return atom != TH_TAG_CAPTION && atom != TH_TAG_COLGROUP && atom != TH_TAG_TBODY && atom != TH_TAG_THEAD &&
+               atom != TH_TAG_TFOOT;
+    case TH_TAG_TBODY:
+    case TH_TAG_THEAD:
+    case TH_TAG_TFOOT:
+        return atom != TH_TAG_TR;
+    default: /* a row */
+        return atom != TH_TAG_TD && atom != TH_TAG_TH;
+    }
+}
+
+static int balancer_table_misplaced(const th_node *element) {
+    const th_node *parent = element->parent;
+    return parent->type == TH_NODE_ELEMENT && balancer_fosters_from(parent) &&
+           balancer_misplaced_under(element, parent, balancer_is_table_context(parent));
+}
+
+/* Would the serialized output re-parse this kept element to a different place than the tree judged it, by a rule other
+   than namespace confusion? Each arm names a tree-construction rule the serializer's start-tag-only output cannot
+   reproduce; the caller escapes a true result to inert text so the emitted markup re-parses to exactly what it writes.
+   Namespace reachability is checked separately (balancer_element_unstable), because the settle path disposes a
+   namespace-confused node per the policy rather than escaping it. */
+static int balancer_structurally_unstable(const th_node *element) {
+    if (balancer_table_misplaced(element)) {
+        return 1; /* runs for both namespaces: a foreign element fosters out of a table like flow content */
+    }
+    if (element->ns != TH_NS_HTML) {
+        return 0;
+    }
+    uint16_t atom = reparsed_atom(element);
+    const th_node *parent = element->parent;
+    if (atom == TH_TAG_LI && balancer_autocloses_item(element, TH_TAG_LI, TH_TAG_UNKNOWN)) {
+        return 1;
+    }
+    if ((atom == TH_TAG_DD || atom == TH_TAG_DT) && balancer_autocloses_item(element, TH_TAG_DD, TH_TAG_DT)) {
+        return 1;
+    }
+    if (balancer_is_heading(atom) && parent->ns == TH_NS_HTML && balancer_is_heading(parent->atom)) {
+        return 1;
+    }
+    return balancer_block_closes_open_p(element) || balancer_option_autocloses(element) ||
+           balancer_closes_select(element) || balancer_button_nested(element) ||
+           balancer_implied_end_closes_parent(element) || balancer_form_dropped(element) ||
+           balancer_formatting_reopens(element) || balancer_table_part_orphaned(element);
+}
+
+/* The whole-tree check for the node path: a namespace-confused node is as unstable as a structurally-misplaced one. */
+static int balancer_element_unstable(const th_node *element) {
+    return !namespace_reachable(element) || balancer_structurally_unstable(element);
+}
+
+/* balancer_structurally_unstable, reading each ancestor scan's answer from `context` rather than walking the ancestors,
+   and the parent from context.parent rather than the tree. `rule` is balancer_rule of the element's atom. */
+static int balancer_context_breaks(const th_node *element, balance_context context, uint32_t rule) {
+    uint32_t bits = context.bits;
+    const th_node *parent = context.parent;
+    if ((bits & CONTEXT_FOSTERS) && balancer_misplaced_under(element, parent, (bits & CONTEXT_TABLE_PARENT) != 0)) {
+        return 1;
+    }
+    if (element->ns != TH_NS_HTML) {
+        return 0;
+    }
+    uint16_t atom = element->atom;
+    if (atom == TH_TAG_UNKNOWN) {
+        /* only the list-item and heading rules read the name a reparse lowercases into a known tag */
+        rule = balancer_rule(reparsed_atom(element)) & (CONTEXT_LIST_ITEM | CONTEXT_DEFINITION | RULE_HEADING);
+    }
+    if (rule & bits) {
+        return 1;
+    }
+    if (!(rule & RULE_BEYOND_BITS)) {
+        return 0;
+    }
+    if ((rule & RULE_HEADING) && parent->ns == TH_NS_HTML && balancer_is_heading(parent->atom)) {
+        return 1;
+    }
+    if ((rule & RULE_IMPLIED_END) && (balancer_implied_end_scope(atom, parent) & bits)) {
+        return 1;
+    }
+    return ((rule & RULE_CELL) && !(bits & CONTEXT_IN_ROW)) || ((rule & RULE_ROW) && !(bits & CONTEXT_IN_ROW_GROUP)) ||
+           ((rule & RULE_SECTION) && !(bits & CONTEXT_IN_TABLE));
+}
+
+/* balancer_context_breaks, after the test that settles nearly every element: an HTML element whose atom has no rule the
+   context sets off, outside a table context. */
+static inline int balancer_structurally_unstable_in(const th_node *element, balance_context context, uint32_t rule) {
+    if (!(rule & (context.bits | RULE_BEYOND_BITS)) && !(context.bits & CONTEXT_FOSTERS) && element->ns == TH_NS_HTML) {
+        return 0;
+    }
+    return balancer_context_breaks(element, context, rule);
+}
+
+/* The context bits a child of `element` sits in, given `outer`, the bits `element` itself sits in. Each bit follows its
+   scan's own order: an ancestor the scan matches sets it before one that stops the scan clears it, and a foreign
+   ancestor ends every scan but the form pointer's. */
+static uint32_t balancer_child_bits(const th_node *element, uint32_t outer) {
+    if (element->ns != TH_NS_HTML) {
+        return outer & (CONTEXT_FORM | CONTEXT_DETACHED | CONTEXT_RECORD | CONTEXT_QUIET);
+    }
+    uint16_t atom = element->atom;
+    uint8_t flags = element->tag_flags;
+    uint32_t bits = outer & ~(CONTEXT_TABLE_PARENT | CONTEXT_FOSTERS | CONTEXT_PARENT_GONE);
+    if ((flags & TH_TAG_SPECIAL) && atom != TH_TAG_ADDRESS && atom != TH_TAG_DIV && atom != TH_TAG_P) {
+        bits &= ~(uint32_t)(CONTEXT_LIST_ITEM | CONTEXT_DEFINITION);
+    }
+    if (flags & TH_TAG_SCOPING) {
+        bits &= ~(uint32_t)(CONTEXT_PARAGRAPH | CONTEXT_OPTION | CONTEXT_OPTION_GROUP | CONTEXT_SELECT |
+                            CONTEXT_BUTTON | CONTEXT_RUBY);
+    }
+    switch (atom) {
+    case TH_TAG_LI:
+        bits |= CONTEXT_LIST_ITEM;
+        break;
+    case TH_TAG_DD:
+    case TH_TAG_DT:
+        bits |= CONTEXT_DEFINITION;
+        break;
+    case TH_TAG_P:
+        bits |= CONTEXT_PARAGRAPH;
+        break;
+    case TH_TAG_OPTION:
+        bits |= CONTEXT_OPTION | CONTEXT_OPTION_GROUP;
+        break;
+    case TH_TAG_OPTGROUP:
+        bits |= CONTEXT_OPTION_GROUP;
+        break;
+    case TH_TAG_SELECT:
+        bits = (bits & ~(uint32_t)(CONTEXT_OPTION | CONTEXT_OPTION_GROUP)) | CONTEXT_SELECT;
+        break;
+    case TH_TAG_BUTTON:
+        bits = (bits & ~(uint32_t)CONTEXT_PARAGRAPH) | CONTEXT_BUTTON;
+        break;
+    case TH_TAG_RUBY:
+        bits |= CONTEXT_RUBY;
+        break;
+    case TH_TAG_FORM:
+        bits |= CONTEXT_FORM | (outer & CONTEXT_TABLE_PARENT ? CONTEXT_FOSTERS : 0);
+        break;
+    case TH_TAG_A:
+        bits |= CONTEXT_LINK;
+        break;
+    case TH_TAG_NOBR:
+        bits |= CONTEXT_NOBR;
+        break;
+    case TH_TAG_APPLET:
+    case TH_TAG_MARQUEE:
+    case TH_TAG_TD:
+    case TH_TAG_TH:
+    case TH_TAG_CAPTION:
+        bits &= ~(uint32_t)(CONTEXT_LINK | CONTEXT_NOBR);
+        break;
+    case TH_TAG_TR:
+        bits |= CONTEXT_IN_ROW | CONTEXT_TABLE_PARENT | CONTEXT_FOSTERS;
+        break;
+    case TH_TAG_TBODY:
+    case TH_TAG_TFOOT:
+    case TH_TAG_THEAD:
+        bits |= CONTEXT_IN_ROW_GROUP | CONTEXT_TABLE_PARENT | CONTEXT_FOSTERS;
+        break;
+    case TH_TAG_TABLE:
+        bits |= CONTEXT_IN_TABLE | CONTEXT_TABLE_PARENT | CONTEXT_FOSTERS;
+        break;
+    case TH_TAG_COLGROUP:
+        bits |= CONTEXT_FOSTERS;
+        break;
+    default:
+        break;
+    }
+    return bits;
+}
+
+/* Non-whitespace text directly inside a table context is foster-parented out of the table on re-parse (HTML 13.2.6.4.10
+   "in table text"): move the whole text node to just before the enclosing table, where a browser places it, so the
+   output re-parses stably. A U+0000 the parser drops cannot occur in a sanitized text node. The caller has established
+   that the text's parent fosters. Returns 1 when the text moved, 0 when it stays, -1 on error. */
+static int balancer_foster_text(sanitizer *s, th_node *text) {
+    const Py_UCS4 *data = th_node_realize_text(s->tree, text);
+    if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int visible = 0;
+    for (Py_ssize_t index = 0; index < text->text_len && !visible; index++) {
+        visible = !is_space(data[index]);
+    }
+    if (!visible) {
+        return 0;
+    }
+    th_node *table = balancer_enclosing_table(text);
+    if (table == NULL) { /* the table is the balancer root: there is no sibling slot before it to foster into */
+        return 0;
+    }
+    th_node_remove(text);
+    th_node_insert_before(table->parent, text, table);
+    s->balance_edited = 1;
+    return 1;
+}
+
+static int balancer_table_text_fostered(sanitizer *s, th_node *text) {
+    return balancer_fosters_from(text->parent) ? balancer_foster_text(s, text) : 0;
+}
+
+static int balancer_child_matches(const th_node *child, uint16_t match_a, uint16_t match_b) {
+    return child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML &&
+           (child->atom == match_a || (match_b != TH_TAG_UNKNOWN && child->atom == match_b));
+}
+
+/* Wrap each maximal run of matching HTML children of `parent` between `before` and `stop` (NULL for the first and last
+   child) in a freshly implied wrapper element, so a table part the policy left without its required ancestor re-parses
+   to where it sits instead of the parser implying the wrapper around it. The wrapper is marked implied and NOT
+   closed-by-end-tag, exactly like the tbody/tr/colgroup the tree builder implies: a kept one still serializes with its
+   end tag, but one a later strip orphans escapes to nothing rather than a stray `</tbody>`. Returns 0, or -1 on
+   allocation failure. */
+static int balancer_wrap_runs(sanitizer *s, th_node *parent, th_node *before, th_node *stop, uint16_t match_a,
+                              uint16_t match_b, uint16_t wrapper_atom) {
+    th_node *child = before != NULL ? before->next_sibling : parent->first_child;
+    while (child != stop) {
+        if (!balancer_child_matches(child, match_a, match_b)) {
+            child = child->next_sibling;
+            continue;
+        }
+        th_node *wrapper = th_tree_make_element(s->tree, NULL, 0, wrapper_atom, 0);
+        if (wrapper == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        wrapper->tag_flags = (uint8_t)((wrapper->tag_flags | TH_ELEM_IMPLIED) & ~TH_ELEM_CLOSED_BY_END_TAG);
+        th_node_insert_before(parent, wrapper, child);
+        s->balance_edited = 1;
+        while (child != stop && balancer_child_matches(child, match_a, match_b)) {
+            th_node *next = child->next_sibling;
+            th_node_remove(child);
+            th_node_append_child(wrapper, child);
+            child = next;
+        }
+    }
+    return 0;
+}
+
+/* Re-create the implied table-structure wrappers (HTML 13.2.6.4.9) a browser inserts on re-parse: a cell directly in a
+   table implies tbody>tr, a cell in a row group implies tr, a row in a table implies tbody, and a col implies colgroup.
+   Done top-down before descending, so the children are in their re-parse context when the walk reaches them. Only the
+   children between `before` and `stop` (NULL for the first and last) are wrapped. Returns 0, or -1 on error. */
+static int balancer_normalize_table_children(sanitizer *s, th_node *container, th_node *before, th_node *stop) {
+    switch (container->atom) {
+    case TH_TAG_TABLE:
+        /* GCOVR_EXCL_BR_START: the < 0 arms are allocation failures that cannot be forced from a test */
+        if (balancer_wrap_runs(s, container, before, stop, TH_TAG_TD, TH_TAG_TH, TH_TAG_TR) < 0 ||
+            balancer_wrap_runs(s, container, before, stop, TH_TAG_TR, TH_TAG_UNKNOWN, TH_TAG_TBODY) < 0) {
+            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        /* GCOVR_EXCL_BR_STOP */
+        return balancer_wrap_runs(s, container, before, stop, TH_TAG_COL, TH_TAG_UNKNOWN, TH_TAG_COLGROUP);
+    case TH_TAG_TBODY:
+    case TH_TAG_THEAD:
+    case TH_TAG_TFOOT:
+        return balancer_wrap_runs(s, container, before, stop, TH_TAG_TD, TH_TAG_TH, TH_TAG_TR);
+    default:
+        return 0;
+    }
+}
+
+/* Make `root`'s subtree parse-stable: escape each kept descendant the output would not re-parse to its place,
+   foster-parent table text, and re-create implied table wrappers, so parse_fragment(serialize(root))'s subtree rebuilds
+   exactly root's. Escaping hoists an element's children into its place; the traversal then revisits them against their
+   new ancestors, so a cascade (a form that exposes a namespace-confused child) settles in one pass. settle_hoisted
+   calls this on each element a barrier's unwrap hoists, and a balanced walk whose root is a table part calls it once on
+   the whole tree. Returns 0, or -1 on error. */
+static int balance_subtree(sanitizer *s, th_node *root) {
+    /* root is itself an edited parent, so normalize its own table structure (a removed tbody/tr leaves orphan rows or
+       cells directly under it) */
+    if (balancer_normalize_table_children(s, root, NULL, NULL) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+        return -1;                                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    th_node *node = root->first_child;
+    while (node != NULL) {
+        th_node *parent = node->parent;
+        if (node->type == TH_NODE_ELEMENT) {
+            if (balancer_element_unstable(node)) {
+                th_node *before = node->prev_sibling;
+                s->balance_edited = 1;
+                if (escape_element(s, node) < 0) { /* GCOVR_EXCL_BR_LINE: escape only fails on allocation */
+                    return -1;                     /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                /* escaping leaves the element's start tag (or, for an element with no start tag, its hoisted children)
+                   in place, so the slot is never empty; revisit from there against the new ancestors */
+                node = before != NULL ? before->next_sibling : parent->first_child;
+                continue;
+            } else {
+                if (balancer_normalize_table_children(s, node, NULL, NULL) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
+                if (node->first_child != NULL) {
+                    node = node->first_child;
+                    continue;
+                }
+            }
+        } else if (node->type == TH_NODE_TEXT) {
+            th_node *after = node->next_sibling; /* fostering moves node before the table, so capture its place first */
+            int fostered = balancer_table_text_fostered(s, node);
+            if (fostered < 0) { /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
+                return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            if (fostered) {
+                if (after != NULL) {
+                    node = after;
+                    continue;
+                }
+                node = parent; /* the text was its context's last child: climb from the table context it left */
+            }
+        }
+        while (node != root && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        node = node == root ? NULL : node->next_sibling;
+    }
+    return 0;
+}
+
+/* A kept HTML table part leaves its subtree to balance_range at its post-order: a browser fosters table text and
+   implies table wrappers from the element's final children, which the walk has not settled yet when it reaches the
+   element. A foreign element named like one has no such content: HTML reaches it only through an integration point,
+   whose own table parts defer. `rule` is balancer_rule of its atom. */
+static int balancer_defers(const th_node *element, uint32_t rule) {
+    return (rule & RULE_DEFERS) && element->ns == TH_NS_HTML;
+}
+
+typedef struct {
+    th_node *element;
+    balance_context context;
+} balance_frame;
+
+/* balance_subtree over the siblings from `first` up to `stop`, judged in `context` rather than against the tree's
+   ancestors, which may still hold elements the walk escapes later. Each element's context is carried down instead of
+   rescanned. Returns 0, or -1 on error. */
+static int balance_range(sanitizer *s, th_node *first, th_node *stop, balance_context context) {
+    balance_frame *frames = NULL;
+    Py_ssize_t depth = 0;
+    Py_ssize_t capacity = 0;
+    th_node *node = first;
+    for (;;) {
+        if (node == (depth == 0 ? stop : NULL)) {
+            if (depth == 0) {
+                PyMem_Free(frames);
+                return 0;
+            }
+            balance_frame frame = frames[--depth];
+            context = frame.context;
+            node = frame.element->next_sibling;
+            continue;
+        }
+        if (node->type == TH_NODE_ELEMENT) {
+            if (!namespace_reachable_under(node, context.parent) ||
+                balancer_structurally_unstable_in(node, context, balancer_rule(node->atom))) {
+                th_node *parent = node->parent;
+                th_node *before = node->prev_sibling;
+                if (escape_element(s, node) < 0) { /* GCOVR_EXCL_BR_LINE: escape only fails on allocation */
+                    PyMem_Free(frames);            /* GCOVR_EXCL_LINE: allocation-failure path */
+                    return -1;                     /* GCOVR_EXCL_LINE */
+                }
+                node = before != NULL ? before->next_sibling : parent->first_child;
+                continue;
+            }
+            if (balancer_normalize_table_children(s, node, NULL, NULL) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure path */
+                return -1;          /* GCOVR_EXCL_LINE */
+            }
+            if (node->first_child != NULL) {
+                if (depth == capacity) {
+                    balance_frame *grown = grow_one(frames, &capacity, sizeof *frames);
+                    if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                        PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure path */
+                        return -1;          /* GCOVR_EXCL_LINE */
+                    }
+                    frames = grown;
+                }
+                frames[depth++] = (balance_frame){node, context};
+                context = (balance_context){node, balancer_child_bits(node, context.bits)};
+                node = node->first_child;
+                continue;
+            }
+        } else if (node->type == TH_NODE_TEXT && (context.bits & CONTEXT_FOSTERS)) {
+            th_node *after = node->next_sibling; /* fostering moves the text before the table: capture its place */
+            int fostered = balancer_foster_text(s, node);
+            if (fostered < 0) {     /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
+                PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure path */
+                return -1;          /* GCOVR_EXCL_LINE */
+            }
+            if (fostered) {
+                node = after;
+                continue;
+            }
+        }
+        node = node->next_sibling;
     }
 }
 
@@ -3495,13 +4766,13 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
     PyObject *source;
     PyObject *removed = NULL;
     sanitizer s = {0};
-    if (!PyArg_ParseTuple(args, "OOOOppipOOOOOOOOpOOOpOOppppOp:_sanitize", &source, &s.tags, &s.attributes,
-                          &s.url_schemes, &s.allow_relative, &s.allow_fragments, &s.on_disallowed, &s.strip_comments,
-                          &s.add_link_rel, &s.attribute_filter, &s.set_attributes, &s.remove_with_content,
-                          &s.css_properties, &s.attribute_prefixes, &s.attribute_values, &s.media_hosts,
-                          &s.strip_templates, &removed, &s.allowed_styles, &s.transform_tags, &s.isolate_named_props,
-                          &s.custom_element_check, &s.custom_attribute_check, &s.allow_customized_builtins,
-                          &s.allow_html, &s.allow_svg, &s.allow_mathml, &s.attribute_predicate, &s.bleach_url_policy)) {
+    if (!PyArg_ParseTuple(
+            args, "OOOOppipOOOOOOOOpOOOpOOppppOpp:_sanitize", &source, &s.tags, &s.attributes, &s.url_schemes,
+            &s.allow_relative, &s.allow_fragments, &s.on_disallowed, &s.strip_comments, &s.add_link_rel,
+            &s.attribute_filter, &s.set_attributes, &s.remove_with_content, &s.css_properties, &s.attribute_prefixes,
+            &s.attribute_values, &s.media_hosts, &s.strip_templates, &removed, &s.allowed_styles, &s.transform_tags,
+            &s.isolate_named_props, &s.custom_element_check, &s.custom_attribute_check, &s.allow_customized_builtins,
+            &s.allow_html, &s.allow_svg, &s.allow_mathml, &s.attribute_predicate, &s.bleach_url_policy, &s.xml)) {
         return NULL;
     }
     s.removed = removed == Py_None ? NULL : removed;
@@ -3528,6 +4799,7 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
         }
         root = th_tree_document(s.tree);
         retained_source = source;
+        s.from_parse = 1;
     } else {
         th_tree *source_tree;
         th_node *source_root;
@@ -3571,8 +4843,19 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
         retained_source != NULL) {                     /* GCOVR_EXCL_BR_LINE: raw checks require source text */
         failed = collect_bleach_origins(&s, root) < 0; /* GCOVR_EXCL_BR_LINE: origin-map allocation failure */
     }
+    /* balance the HTML output before any template collapse joins escaped tags into neighboring text. Fresh parser
+       output needs it only after a flagged reparse hazard (settle_hoisted handles the walk's own edits); a
+       node-entrypoint tree, hand built or mutated after a parse, carries no stability guarantee, so it always gets it.
+       A table-part root balances after the walk, since its own fostering and implied wrappers need its final children.
+     */
+    int balance = !s.xml && (!s.from_parse || th_tree_reparse_hazard(s.tree));
+    int balance_in_walk = balance && !balancer_defers(root, balancer_rule(root->atom));
     if (!failed) { /* GCOVR_EXCL_BR_LINE: only origin-map allocation failure skips the walk */
-        failed = sanitize_children(&s, root, 1) < 0; /* the fragment root is kept context */
+        /* the fragment root is kept context */
+        failed = (balance_in_walk ? sanitize_balanced_children(&s, root) : sanitize_children(&s, root, 1)) < 0;
+    }
+    if (!failed && balance && !balance_in_walk) {
+        failed = balance_subtree(&s, root) < 0;
     }
     if (!failed && s.strip_templates) {
         failed = strip_tree_templates(&s, root) < 0;
