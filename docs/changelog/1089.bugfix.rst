@@ -1,0 +1,1 @@
+``source_locations=True`` no longer reports an end tag the source never wrote.
