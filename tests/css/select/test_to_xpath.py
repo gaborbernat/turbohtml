@@ -50,6 +50,13 @@ from turbohtml.convert import (
             "'abcdefghijklmnopqrstuvwxyz') = '']",
             id="literal-empty-ci",
         ),
+        pytest.param(
+            '[d|="" i]',
+            "descendant-or-self::*[@d and (translate(@d, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz') = '' or starts-with(translate(@d, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz'), '-'))]",
+            id="dash-empty-ci",
+        ),
         pytest.param("div, p", "descendant-or-self::div | descendant-or-self::p", id="group-union"),
         pytest.param(":scope > div", "descendant-or-self::*[1]/div", id="scope-leading"),
         pytest.param("li:nth-child(n)", "descendant-or-self::li", id="nth-trivial"),
@@ -305,6 +312,8 @@ SELECTORS = (
     '[foobar~=""]',
     '*[lang|="En"]',
     '[lang|="en"]',
+    '[lang|=""]',
+    '[rel|="" i]',
     "[data-x|=y]",
     "[type=CHECKBOX]",
     "[type=checkbox s]",
@@ -596,6 +605,7 @@ _ORACLE_SELECTORS: Final = (
     'div[foobar~="cde"]',
     '[foobar~="ab bc"]',
     '[foobar~=""]',
+    '[lang|=""]',
     "li:nth-child(3)",
     "li:nth-child(10)",
     "li:nth-child(2n)",

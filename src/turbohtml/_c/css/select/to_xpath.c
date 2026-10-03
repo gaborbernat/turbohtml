@@ -204,6 +204,16 @@ static void xt_attr_value_ref(xt_ctx *ctx, const sel_simple *simple, int fold) {
     xt_text(&ctx->out, ", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')");
 }
 
+/* translate() of an absent attribute is also '', so a folded comparison against the
+   empty value ([att="" i], [att|="" i]) would match elements without the attribute;
+   guard such a match on the attribute's presence. */
+static void xt_empty_folded_guard(xt_ctx *ctx, const sel_simple *simple, int fold) {
+    if (fold && simple->value_len == 0) {
+        xt_attr_ref(ctx, simple);
+        xt_text(&ctx->out, " and ");
+    }
+}
+
 /* Emit translate(@name, upper, lower) for a known safe ASCII attribute name (the
    input pseudo-classes compare @type and friends case-insensitively). */
 static void xt_folded_attr(xt_ctx *ctx, const char *name) {
@@ -664,12 +674,7 @@ static int xt_simple_cond(xt_ctx *ctx, const sel_simple *simple, const sel_compo
             xt_attr_ref(ctx, simple);
             return 1;
         case OP_EQ:
-            if (fold && simple->value_len == 0) {
-                /* translate() of an absent attribute is also '', so [att="" i] would match
-                   elements without the attribute; guard the match on its presence */
-                xt_attr_ref(ctx, simple);
-                xt_text(&ctx->out, " and ");
-            }
+            xt_empty_folded_guard(ctx, simple, fold);
             xt_attr_value_ref(ctx, simple, fold);
             xt_text(&ctx->out, " = ");
             xt_value_literal(ctx, simple->value, simple->value_len, fold, 0, 0);
@@ -687,6 +692,7 @@ static int xt_simple_cond(xt_ctx *ctx, const sel_simple *simple, const sel_compo
             xt_char(&ctx->out, ')');
             return 1;
         case OP_DASH:
+            xt_empty_folded_guard(ctx, simple, fold);
             xt_char(&ctx->out, '(');
             xt_attr_value_ref(ctx, simple, fold);
             xt_text(&ctx->out, " = ");
