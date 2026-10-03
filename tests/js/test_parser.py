@@ -511,6 +511,92 @@ def test_let_computed_member_statement_keeps_parens(source: str) -> None:
 @pytest.mark.parametrize(
     ("source", "match"),
     [
+        pytest.param("if(a)let x", "offset 5 near 'let'", id="if-let"),
+        pytest.param("if(a);else let x", "offset 11 near 'let'", id="else-let"),
+        pytest.param("for(;;)let x", "offset 7 near 'let'", id="for-let"),
+        pytest.param("for(x of y)let x", "offset 11 near 'let'", id="for-of-let"),
+        pytest.param("while(a)const x=1", "offset 8 near 'const'", id="while-const"),
+        pytest.param("do let x\nwhile(0)", "offset 3 near 'let'", id="do-let"),
+        pytest.param("with(a)let x", "offset 7 near 'let'", id="with-let"),
+        pytest.param("L:let x", "offset 2 near 'let'", id="label-let"),
+        pytest.param("L:M:let x", "offset 4 near 'let'", id="nested-label-let"),
+        pytest.param("L:const x=1", "offset 2 near 'const'", id="label-const"),
+        pytest.param("if(a)class C{}", "offset 5 near 'class'", id="if-class"),
+        pytest.param("L:class C{}", "offset 2 near 'class'", id="label-class"),
+        pytest.param("if(a)let {a}=b", "offset 5 near 'let'", id="let-object-pattern"),
+        pytest.param("if(a)let\n[x]=b", "offset 5 near 'let'", id="let-bracket-after-line-break"),
+    ],
+)
+def test_declaration_in_single_statement_body_raises(source: str, match: str) -> None:
+    with pytest.raises(
+        ValueError, match=re.escape(f"declaration not allowed in a single-statement context at {match}")
+    ):
+        minify(source)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("if(1)let\nx", "if(1)let;x", id="if"),
+        pytest.param("if(a);else let\nx", "if(a);else let;x", id="else"),
+        pytest.param("while(a)let\nx", "while(a)let;x", id="while"),
+        pytest.param("for(x in y)let\nz", "for(x in y)let;z", id="for-in"),
+        pytest.param("do let\nwhile(0)", "do let;while(0)", id="do"),
+        pytest.param("with(a)let\nx", "with(a)let;x", id="with"),
+        pytest.param("L:let\nx", "L:let;x", id="label"),
+        pytest.param("if(a)let\n{}", "if(a)let;{}", id="block-after-line-break"),
+        pytest.param("if(a)var x", "if(a)var x", id="var"),
+        pytest.param("if(a){let x}", "if(a){let x}", id="block-statement-list"),
+        pytest.param("switch(a){case 1:let x}", "switch(a){case 1:let x}", id="case-statement-list"),
+    ],
+)
+def test_let_in_single_statement_body_minifies_to(source: str, expected: str) -> None:
+    assert (minify(source), minify(expected)) == (expected, expected)
+
+
+@pytest.mark.parametrize(
+    ("source", "match"),
+    [
+        pytest.param("let [0]=[1]", "offset 4 near '['", id="array-literal-element"),
+        pytest.param("var [0]=[1]", "offset 4 near '['", id="var-array-literal-element"),
+        pytest.param("let {a:0}={}", "offset 4 near '{'", id="object-literal-value"),
+        pytest.param("let\n[0]=[1]", "offset 4 near '['", id="array-after-line-break"),
+        pytest.param("let[0]", "offset 3 near '['", id="array-without-initializer"),
+        pytest.param("var 0=1", "offset 4 near '0'", id="literal-target"),
+        pytest.param("var [a]=b,[0]=c", "offset 10 near '['", id="second-declarator"),
+        pytest.param("let [a.b]=c", "offset 4 near '['", id="member-element"),
+        pytest.param("let [a+=1]=b", "offset 4 near '['", id="compound-assign-default"),
+        pytest.param("let [0=1]=b", "offset 4 near '['", id="literal-with-default"),
+        pytest.param('let {"a"}=b', "offset 4 near '{'", id="string-shorthand"),
+        pytest.param("let {[a]=1}=b", "offset 4 near '{'", id="computed-shorthand"),
+        pytest.param("let {a(){}}=b", "offset 4 near '{'", id="method"),
+        pytest.param("let [...0]=b", "offset 4 near '['", id="array-rest-literal"),
+        pytest.param("let [...a,b]=c", "offset 4 near '['", id="array-rest-not-last"),
+        pytest.param("let [...a=1]=b", "offset 4 near '['", id="array-rest-default"),
+        pytest.param("let {...{a}}=b", "offset 4 near '{'", id="object-rest-pattern"),
+        pytest.param("for(let [0] of a);", "offset 8 near '['", id="for-of-head"),
+    ],
+)
+def test_invalid_binding_pattern_raises(source: str, match: str) -> None:
+    with pytest.raises(ValueError, match=re.escape(f"invalid binding pattern at {match}")):
+        minify(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("let [a=1,,[b],{c}]=d", id="array-elements"),
+        pytest.param("let [...[a]]=b", id="array-rest-pattern"),
+        pytest.param("let {a,b=1,c:d,e:f=2,[g]:h,1:i,...j}=k", id="object-properties"),
+    ],
+)
+def test_binding_pattern_minifies(source: str) -> None:
+    assert minify(source) == source
+
+
+@pytest.mark.parametrize(
+    ("source", "match"),
+    [
         pytest.param('function f(a,a){"use strict"}', "offset 10", id="own-directive"),
         pytest.param("function f(a,a){'use strict'}", "offset 10", id="own-directive-single-quotes"),
         pytest.param('function f(a,a){"a";"use strict"}', "offset 10", id="second-directive"),

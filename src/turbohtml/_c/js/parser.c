@@ -140,8 +140,8 @@ static void reset(P *parser, jm_mark saved) {
     parser->err = saved.err;
 }
 
-static int32_t parse_stmt(P *parser);
-static int32_t parse_stmt_body(P *parser);
+static int32_t parse_stmt(P *parser, int single);
+static int32_t parse_stmt_body(P *parser, int single);
 static int32_t parse_block(P *parser, int body);
 static int32_t parse_assign(P *parser, int no_in);
 static int32_t parse_assign_body(P *parser, int no_in);
@@ -150,11 +150,11 @@ static int32_t parse_expr(P *parser, int no_in);
 /* parse_stmt and parse_assign are the two recursion hubs every nested statement and expression passes
    through, so metering depth at their entry (paired with the operator/chain-loop caps below) bounds the
    whole parse; the _body functions hold the grammar, these thin wrappers hold the depth accounting. */
-static int32_t parse_stmt(P *parser) {
+static int32_t parse_stmt(P *parser, int single) {
     if (!enter(parser)) {
         return -1;
     }
-    int32_t result = parse_stmt_body(parser);
+    int32_t result = parse_stmt_body(parser, single);
     leave(parser);
     return result;
 }
@@ -186,6 +186,8 @@ static int32_t parse_class_rest(P *parser, int is_expr);
 static void parse_static_block(P *parser, int32_t member);
 static int parse_params(P *parser, int32_t fn);
 static int each_bound_name(P *parser, int32_t idx, int (*visit)(P *parser, const jm_node *name));
+static int is_binding_target(P *parser, int32_t target);
+static int is_binding_element(P *parser, int32_t element);
 static int binds_let(P *parser, int32_t target);
 static int is_let(P *parser, const jm_node *name);
 static void parse_key(P *parser, int32_t owner);
@@ -275,6 +277,11 @@ static int32_t parse_var(P *parser, int no_in) {
         if (parser->err) {
             return -1;
         }
+        /* a lone identifier, the common target, skips the pattern walk */
+        if (parser->prog->nodes[target].kind != JN_IDENT && !is_binding_target(parser, target)) {
+            fail_at(parser, target_start, "invalid binding pattern");
+            return -1;
+        }
         /* let and const may not bind `let` (ECMA-262 14.3.1.1, 14.7.5.1 for a for-in/of head) */
         if (decl != 0 && binds_let(parser, target)) {
             fail_at(parser, target_start, "let is disallowed as a lexically bound name");
@@ -298,6 +305,50 @@ static int32_t parse_var(P *parser, int no_in) {
         }
     }
     return node;
+}
+
+/* Whether a target parsed as an expression is a BindingIdentifier or a BindingPattern (ECMA-262 14.3.3). `[0]`,
+   `{a:b.c}` and `[a+=1]` parse as literals but bind nothing. */
+static int is_binding_target(P *parser, int32_t target) {
+    const jm_node *node = &parser->prog->nodes[target];
+    if (node->kind != JN_ARRAY && node->kind != JN_OBJECT) {
+        return node->kind == JN_IDENT;
+    }
+    for (int32_t child = node->a; child >= 0; child = parser->prog->nodes[child].next) {
+        const jm_node *element = &parser->prog->nodes[child];
+        if (element->kind == JN_HOLE) {
+            continue;
+        }
+        if (element->kind == JN_SPREAD) {
+            /* a rest element comes last, takes no default, and in an object binds only a name */
+            if (element->next >= 0 || (node->kind == JN_OBJECT ? parser->prog->nodes[element->a].kind != JN_IDENT
+                                                               : !is_binding_target(parser, element->a))) {
+                return 0;
+            }
+            continue;
+        }
+        int32_t bound = child;
+        if (element->kind == JN_PROP) {
+            /* a shorthand binds its key, which a computed `[a]` key cannot be */
+            if ((element->flags & JN_F_SHORTHAND) != 0 && (element->flags & JN_F_COMPUTED) != 0) {
+                return 0;
+            }
+            bound = element->b < 0 ? element->a : element->b;
+        }
+        if (!is_binding_element(parser, bound)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* A BindingElement: a binding target with an optional `=` initializer, which a compound `+=` is not. */
+static int is_binding_element(P *parser, int32_t element) {
+    const jm_node *node = &parser->prog->nodes[element];
+    if (node->kind == JN_ASSIGN) {
+        return node->op == JT_ASSIGN && is_binding_target(parser, node->a);
+    }
+    return is_binding_target(parser, element);
 }
 
 /* Whether a binding target binds `let`; a lone identifier, the common target, skips the pattern walk. */
@@ -346,13 +397,13 @@ static int32_t parse_if(P *parser) {
     if (parser->err) {
         return -1;
     }
-    set_b(parser, node, parse_stmt(parser));
+    set_b(parser, node, parse_stmt(parser, 1));
     if (parser->err) {
         return -1;
     }
     if (kw(parser, "else")) {
         advance(parser);
-        set_c(parser, node, parse_stmt(parser));
+        set_c(parser, node, parse_stmt(parser, 1));
     }
     return parser->err ? -1 : node;
 }
@@ -394,7 +445,7 @@ static int32_t parse_for(P *parser) {
         if (parser->err) {
             return -1;
         }
-        set_c(parser, node, parse_stmt(parser));
+        set_c(parser, node, parse_stmt(parser, 1));
         return parser->err ? -1 : node;
     }
     int32_t node = jm_node_new(parser->prog, JN_FOR);
@@ -411,7 +462,7 @@ static int32_t parse_for(P *parser) {
     if (parser->err) {
         return -1;
     }
-    set_d(parser, node, parse_stmt(parser));
+    set_d(parser, node, parse_stmt(parser, 1));
     return parser->err ? -1 : node;
 }
 
@@ -424,14 +475,14 @@ static int32_t parse_while(P *parser) {
     if (parser->err) {
         return -1;
     }
-    set_b(parser, node, parse_stmt(parser));
+    set_b(parser, node, parse_stmt(parser, 1));
     return parser->err ? -1 : node;
 }
 
 static int32_t parse_do(P *parser) {
     int32_t node = jm_node_new(parser->prog, JN_DOWHILE);
     advance(parser);
-    set_a(parser, node, parse_stmt(parser));
+    set_a(parser, node, parse_stmt(parser, 1));
     if (parser->err) {
         return -1;
     }
@@ -476,7 +527,7 @@ static int32_t parse_switch(P *parser) {
         }
         int32_t stail = -1;
         while (!at(parser, JT_RBRACE) && !kw(parser, "case") && !kw(parser, "default") && !at(parser, JT_EOF)) {
-            int32_t stmt = parse_stmt(parser);
+            int32_t stmt = parse_stmt(parser, 0);
             if (parser->err) {
                 return -1;
             }
@@ -570,7 +621,7 @@ static void parse_statements(P *parser, int32_t parent, jm_tok end, int prologue
     int32_t tail = -1;
     while (!at(parser, end) && !at(parser, JT_EOF)) {
         int bare_string = prologue && at(parser, JT_STRING);
-        int32_t stmt = parse_stmt(parser);
+        int32_t stmt = parse_stmt(parser, 0);
         if (parser->err) {
             return;
         }
@@ -610,21 +661,27 @@ static int32_t parse_block(P *parser, int body) {
    statement is an ExpressionStatement, so `let`, `let.x`, `let-1`, `let/x/g`, `let(f)` and `let,x`
    all parse (`let` is reserved only in strict code, ECMA-262 13.1.1). The one binding form the
    ExpressionStatement grammar still excludes is `let [` (its negative lookahead, 14.5), left a
-   declaration here. The lookahead ignores line terminators, so `let\n[0]` stays a declaration, as in
-   acorn's isLet
-   (https://github.com/acornjs/acorn/blob/c912cf2611079812638a49bc38292557a1096be8/acorn/src/statement.js#L768-L788). */
-static int let_starts_declaration(P *parser) {
+   declaration here. The lookahead ignores line terminators, so `let\n[0]` stays a declaration. A
+   single-statement body (`single`) takes no declaration, as in acorn's isLet(context)
+   (https://github.com/acornjs/acorn/blob/c912cf2611079812638a49bc38292557a1096be8/acorn/src/statement.js#L36-L58):
+   there a `let` that a line break follows is an identifier ended by ASI unless `[` comes next, while a
+   binding on the same line still reads as a declaration for the caller to reject. */
+static int let_starts_declaration(P *parser, int single) {
     jm_mark saved = mark(parser);
     advance(parser); /* past `let`, to its following token */
-    int declaration = at(parser, JT_LBRACK) || at(parser, JT_LBRACE) ||
-                      (at(parser, JT_IDENT) && !kw(parser, "in") && !kw(parser, "instanceof"));
+    int declaration =
+        at(parser, JT_LBRACK) ||
+        (!(single && parser->lx.newline_before) &&
+         (at(parser, JT_LBRACE) || (at(parser, JT_IDENT) && !kw(parser, "in") && !kw(parser, "instanceof"))));
     reset(parser, saved);
     return declaration;
 }
 
 /* A bare `{` is a block; an expression statement never starts with one (an object
-   literal in statement position is parenthesized). */
-static int32_t parse_stmt_body(P *parser) {
+   literal in statement position is parenthesized). `single` marks the body of an if/else, a loop, a
+   label or `with`: a Statement there, which excludes a LexicalDeclaration and a ClassDeclaration
+   (ECMA-262 14.6, 14.7, 14.11, 14.13). */
+static int32_t parse_stmt_body(P *parser, int single) {
     if (parser->err) { /* GCOVR_EXCL_BR_LINE: callers guard against re-entry on error */
         return -1;     /* GCOVR_EXCL_LINE: callers guard, but keep the recursion safe */
     }
@@ -636,7 +693,11 @@ static int32_t parse_stmt_body(P *parser) {
         advance(parser);
         return node;
     }
-    if (kw(parser, "var") || kw(parser, "const") || (kw(parser, "let") && let_starts_declaration(parser))) {
+    if (kw(parser, "var") || kw(parser, "const") || (kw(parser, "let") && let_starts_declaration(parser, single))) {
+        if (single && !kw(parser, "var")) {
+            fail(parser, "declaration not allowed in a single-statement context");
+            return -1;
+        }
         int32_t node = parse_var(parser, 0);
         semicolon(parser);
         return parser->err ? -1 : node;
@@ -683,6 +744,10 @@ static int32_t parse_stmt_body(P *parser) {
         reset(parser, save);
     }
     if (kw(parser, "class")) {
+        if (single) {
+            fail(parser, "declaration not allowed in a single-statement context");
+            return -1;
+        }
         return parse_class(parser, 0);
     }
     if (kw(parser, "with")) {
@@ -694,7 +759,7 @@ static int32_t parse_stmt_body(P *parser) {
         if (parser->err) {
             return -1;
         }
-        set_b(parser, node, parse_stmt(parser));
+        set_b(parser, node, parse_stmt(parser, 1));
         return parser->err ? -1 : node;
     }
     if (kw(parser, "debugger")) {
@@ -718,7 +783,7 @@ static int32_t parse_stmt_body(P *parser) {
             int32_t node = jm_node_new(parser->prog, JN_LABEL);
             parser->prog->nodes[node].str = label;
             parser->prog->nodes[node].str_len = label_len;
-            set_a(parser, node, parse_stmt(parser));
+            set_a(parser, node, parse_stmt(parser, 1));
             return parser->err ? -1 : node;
         }
         reset(parser, save); /* not a label: rewind and parse as an expression statement */
