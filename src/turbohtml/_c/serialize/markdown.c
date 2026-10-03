@@ -288,6 +288,9 @@ typedef struct {
     int escape_prose;           /* escape what a reader would parse in prose; off under Escaping(mode="none") */
     uint8_t escape_mask;        /* the MD_ASCII classes the options escape */
     uint8_t run_stop;           /* the MD_ASCII classes that end a bulk-copied run */
+    Py_ssize_t break_start;     /* where the last hard break was written in out... */
+    Py_ssize_t break_end;       /* ...and where it ended, -1 before the first */
+    const Py_UCS4 *break_data;  /* the buffer it was written to */
 } md_ctx;
 
 /* Emit a configured option string, which may hold non-ASCII (a typographic
@@ -367,6 +370,31 @@ static void md_newline(md_ctx *ctx) {
     ctx->line_has_content = 0;
     ctx->space_pending = 0;
     ctx->drop_space = 1;
+}
+
+/* Write a hard break, remembering where it sits so an emphasis run that closes right
+   after it can put its closing delimiter in front of it (md_put_close). */
+static void md_write_break(md_ctx *ctx) {
+    ctx->break_start = ctx->out.len;
+    sbuf_puts(&ctx->out, ctx->opt->line_break == TH_MD_BREAK_BACKSLASH ? "\\" : "  ");
+    md_newline(ctx);
+    ctx->break_end = ctx->out.len;
+    ctx->break_data = ctx->out.data;
+}
+
+/* Write an emphasis run's closing delimiter. When the run's content ended with a hard
+   break that nothing has followed yet, the delimiter would open the next line, where it
+   is not right-flanking (CommonMark 6.2) and cannot close, so it goes in front of the
+   break and the break is written again after it. The buffer check keeps a break written
+   to output a converter or table set aside from matching. */
+static void md_put_close(md_ctx *ctx, const char *close) {
+    if (ctx->out.len == ctx->break_end && ctx->out.data == ctx->break_data) {
+        ctx->out.len = ctx->break_start;
+        md_puts8(&ctx->out, close);
+        md_write_break(ctx);
+        return;
+    }
+    md_puts8(&ctx->out, close);
 }
 
 static Py_ssize_t md_line_column(md_ctx *ctx) {
@@ -1364,6 +1392,37 @@ static void md_emit_image(md_ctx *ctx, th_node *node) {
     ctx->line_has_content = 1;
 }
 
+/* Whether a <br> sits at the end of its block, where a hard break does nothing
+   (CommonMark 6.7): no visible content follows it before a block boundary. Scanning
+   forward, a following non-space text run or inline element is visible content and a
+   following block ends the run; climbing out of an inline wrapper reaches the block
+   that encloses the break. A parsed tree always wraps a break in a block (the body at
+   least), so the climb meets that block and never a parentless node. */
+static int md_br_trailing(md_ctx *ctx, th_node *node) {
+    for (th_node *cursor = node;; cursor = cursor->parent) {
+        for (th_node *sibling = cursor->next_sibling; sibling != NULL; sibling = sibling->next_sibling) {
+            if (sibling->type == TH_NODE_TEXT) {
+                const Py_UCS4 *text = need_text(ctx->tree, sibling);
+                for (Py_ssize_t index = 0; index < sibling->text_len; index++) {
+                    if (!is_space(text[index])) {
+                        return 0;
+                    }
+                }
+            } else if (sibling->type == TH_NODE_ELEMENT && !is_md_skipped(sibling)) {
+                uint16_t atom = sibling->ns == TH_NS_HTML ? sibling->atom : TH_TAG_UNKNOWN;
+                if (atom == TH_TAG_BR) {
+                    continue; /* another break is not visible content; keep looking past it */
+                }
+                return is_md_block(atom); /* a block ends the run (trailing); any other element is content */
+            }
+        }
+        th_node *parent = cursor->parent;
+        if (is_md_block(parent->ns == TH_NS_HTML ? parent->atom : TH_TAG_UNKNOWN)) {
+            return 1;
+        }
+    }
+}
+
 /* Render an element (or content node) by its tag, the common path shared by the
    plain walk and the google_doc CSS wrapper. Text is handled by the caller. */
 static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
@@ -1427,8 +1486,12 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
             ctx->space_pending = 1;
             return;
         }
-        sbuf_puts(&ctx->out, opt->line_break == TH_MD_BREAK_BACKSLASH ? "\\" : "  ");
-        md_newline(ctx);
+        if (md_br_trailing(ctx, node)) {
+            /* a hard break at the end of a block does nothing (CommonMark 6.7); emitting
+               it would leave a line of spaces that reads as a blank line */
+            return;
+        }
+        md_write_break(ctx);
         return;
     case TH_TAG_WBR:
         return;
@@ -1515,11 +1578,11 @@ static void md_leave_google(md_ctx *ctx, md_frame *frame) {
     ctx->g_italic = frame->google.outer_italic;
     const char *close = md_pop_marker(ctx, frame->marker);
     if (close != NULL) {
-        md_puts8(&ctx->out, close);
+        md_put_close(ctx, close);
     }
     close = md_pop_marker(ctx, frame->google.italic_marker);
     if (close != NULL) {
-        md_puts8(&ctx->out, close);
+        md_put_close(ctx, close);
     }
 }
 
@@ -1681,6 +1744,9 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
         return;
     }
     if (!*in_run) {
+        if (atom == TH_TAG_BR) {
+            return; /* a hard break with no content before it in the block does nothing */
+        }
         int only_ws = child->type == TH_NODE_TEXT;
         if (only_ws) {
             const Py_UCS4 *text = need_text(ctx->tree, child);
@@ -2854,7 +2920,7 @@ static void md_leave(md_ctx *ctx) {
     case MD_LEAVE_WRAP: {
         const char *close = md_pop_marker(ctx, frame->marker);
         if (close != NULL) {
-            md_puts8(&ctx->out, close);
+            md_put_close(ctx, close);
         }
         break;
     }
@@ -2988,6 +3054,7 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     ctx.frame_cap = MD_INLINE_FRAMES;
     ctx.markers = ctx.inline_markers = inline_markers;
     ctx.marker_cap = MD_INLINE_MARKERS;
+    ctx.break_end = -1;
     /* mode="none" leaves prose as written apart from the asterisk and underscore
        choices, keeping only the cell pipe escape a pipe table cannot do without */
     ctx.escape_prose = opt->escape_mode != TH_MD_ESCAPE_NONE;

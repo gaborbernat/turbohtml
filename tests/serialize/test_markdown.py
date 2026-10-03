@@ -505,10 +505,52 @@ def test_selected_item_keeps_nested_list_depth() -> None:
         ),
         pytest.param("<blockquote><span></span></blockquote>", ">", id="empty-quote-with-empty-element"),
         pytest.param("<blockquote></blockquote>", "", id="empty-quote"),
+        pytest.param("<p>a<br><br>b</p>", "a  \n  \nb", id="double-break-kept"),
+        pytest.param("<ul><li>a<br></li><li>b</li></ul>", "- a\n- b", id="item-trailing-break-stays-tight"),
+        pytest.param("<ul><li>a</li><br><li>b</li></ul>", "- a\n- b", id="break-between-items-dropped"),
+        pytest.param("<ul><li>a<br>b</li><li>c</li></ul>", "- a  \n  b\n- c", id="item-inner-break-kept"),
+        pytest.param("<p>a<br></p><p>c</p>", "a\n\nc", id="paragraph-trailing-break-dropped"),
+        pytest.param("<blockquote>a<br></blockquote><p>c</p>", "> a\n\nc", id="quote-trailing-break-dropped"),
+        pytest.param("<p>a<br> <i>c</i></p>", "a  \n*c*", id="break-before-space-then-inline-is-kept"),
+        pytest.param("<p>a<br><!--x-->b</p>", "a  \nb", id="break-looks-past-a-comment"),
+        pytest.param("<p>a<br><script>s</script>b</p>", "a  \nb", id="break-looks-past-a-skipped-element"),
+        pytest.param("<p>a<br><svg></svg>b</p>", "a  \nb", id="break-before-a-foreign-element-is-kept"),
+        pytest.param("<p>a<b>x<br></b>c</p>", "a**x**  \nc", id="break-climbs-out-of-inline-wrapper"),
+        pytest.param("<p>a<i><b>x<br></b></i>c</p>", "a***x***  \nc", id="break-closes-nested-emphasis-first"),
+        pytest.param("<ul><li><b>x<br></b>c</li></ul>", "- **x**  \n  c", id="break-closes-emphasis-in-item-first"),
+        pytest.param("<p>a<b>x<br><!--c--></b>c</p>", "a**x**  \nc", id="break-closes-emphasis-past-a-comment"),
+        pytest.param("<p>a<b>x<br>y</b>c</p>", "a**x  \ny**c", id="break-inside-emphasis-stays-inside"),
+        pytest.param("<p>a<a href='u'>x<br></a>c</p>", "a[x  \n](u)c", id="break-stays-inside-link-text"),
+        pytest.param("<math><mtext>x<br></mtext></math>", "x", id="break-climbs-out-of-a-foreign-parent"),
     ],
 )
 def test_breaks_quotes_rules(html: str, expected: str) -> None:
     assert md(html) == expected
+
+
+@pytest.mark.parametrize(
+    ("html", "options", "expected"),
+    [
+        pytest.param(
+            '<p><span style="font-weight:700">x<br></span>c</p>',
+            Markdown.google_doc(),
+            "**x**  \nc",
+            id="google-doc-bold-closes-before-break",
+        ),
+        pytest.param(
+            "<p>a<br><span><b>xy</b></span></p>",
+            Markdown(converters={"span": lambda _element, content: f"|{content}|"}),
+            "a  \n|**xy**|",
+            id="converted-emphasis-ignores-an-outer-break",
+        ),
+    ],
+)
+def test_break_before_emphasis_close(html: str, options: Markdown, expected: str) -> None:
+    assert parse(html).to_markdown(options) == expected
+
+
+def test_trailing_break_at_an_inline_root_is_dropped() -> None:
+    assert parse_fragment("x<br>").to_markdown() == "x"
 
 
 @pytest.mark.parametrize(
