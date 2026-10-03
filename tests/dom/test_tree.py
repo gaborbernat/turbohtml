@@ -436,6 +436,21 @@ def test_leading_newline_skip_only_immediately_after_start_tag(html: str, expect
 
 
 @pytest.mark.parametrize(
+    ("source", "pre"),
+    [
+        pytest.param("<template><tr><pre>\n", "<pre></pre>", id="leading-newline-dropped"),
+        pytest.param("<template><tr><pre>X", "<pre>X</pre>", id="non-newline-first-char-kept"),
+    ],
+)
+def test_pre_in_template_row_content_newline_rule(source: str, pre: str) -> None:
+    # a pre opened in a template's table-row content reaches a table text mode, which drops the
+    # leading LF (only the LF) so serialize/parse does not grow a newline each round (issue #1037)
+    once = parse(source).serialize()
+    assert pre in once
+    assert parse(once).serialize() == once
+
+
+@pytest.mark.parametrize(
     ("html", "expected"),
     [
         # a CR from a character reference is decoded after preprocessing, so it reaches tree
