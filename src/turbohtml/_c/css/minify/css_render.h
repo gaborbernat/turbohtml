@@ -115,6 +115,30 @@ static int css_prop_is_color(const css_char *prop, Py_ssize_t len) {
     return 0;
 }
 
+/* Write a `}` for each `{` block a value running to the end of input leaves open: consuming a simple block returns it
+   there (CSS Syntax 3 §5.5.9), and without the closer the `}` ending the rule would close the block instead. Kept out
+   of line: only a value ending the input reaches it, which includes the last value of every merged rule body, so a
+   value without a `{` returns before allocating the block stack. */
+CSS_NOINLINE static void css_close_open_braces(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *out) {
+    Py_ssize_t first_brace = start;
+    while (first_brace < end && vec->items[first_brace].delim != '{') {
+        first_brace++;
+    }
+    if (first_brace == end) {
+        return;
+    }
+    css_buf blocks = {NULL, 0, 0, 0};
+    css_open_blocks(vec, start, end, &blocks);
+    Py_ssize_t braces = 0;
+    for (Py_ssize_t index = 0; index < blocks.len; index++) {
+        braces += blocks.data[index] == '{';
+    }
+    for (; braces > 0; braces--) {
+        cbuf_putc(out, '}');
+    }
+    cbuf_free(&blocks);
+}
+
 /* Render a custom property or otherwise-raw value: collapse whitespace and comments, keep everything else verbatim. */
 static void css_render_raw_value(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *out) {
     int pending_ws = 0;
@@ -154,6 +178,9 @@ static void css_render_raw_value(token_vec *vec, Py_ssize_t start, Py_ssize_t en
      */
     if (written == 0 && any_ws) {
         cbuf_putc(out, ' ');
+    }
+    if (end == vec->len) {
+        css_close_open_braces(vec, start, end, out);
     }
 }
 

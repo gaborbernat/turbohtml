@@ -170,6 +170,21 @@ static int css_name_is_custom(const css_char *name, Py_ssize_t len) {
     return css_name_code_point(name, len, &pos) == '-' && css_name_code_point(name, len, &pos) == '-';
 }
 
+/* Whether tokens [start, end) leave a block open, nesting them as css_read_until does. At the end of input such a
+   block runs on over the `!important` after it (CSS Syntax 3 §5.5.9), so the flag stays value text. */
+static int css_leaves_block_open(const token_vec *vec, Py_ssize_t start, Py_ssize_t end) {
+    Py_ssize_t depth = 0;
+    for (Py_ssize_t index = start; index < end; index++) {
+        css_char delim = vec->items[index].delim;
+        if (delim == '(' || delim == '[' || delim == '{') {
+            depth++;
+        } else if ((delim == ')' || delim == ']' || delim == '}') && depth > 0) {
+            depth--;
+        }
+    }
+    return depth > 0;
+}
+
 /* Build a declaration from a segment [start, end). Returns 1 if a declaration was produced. */
 static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end, comp_vec *scratch,
                                 css_decl *decl) {
@@ -244,7 +259,8 @@ static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start,
         while (bang > value_start && (vec->items[bang].kind == CSS_WS || vec->items[bang].kind == CSS_COMMENT)) {
             bang--;
         }
-        if (vec->items[bang].kind == CSS_DELIM && vec->items[bang].delim == '!') {
+        if (vec->items[bang].kind == CSS_DELIM && vec->items[bang].delim == '!' &&
+            (end < vec->len || !css_leaves_block_open(vec, value_start, bang))) {
             important = 1;
             value_end = bang;
         }

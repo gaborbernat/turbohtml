@@ -761,6 +761,19 @@ static Py_ssize_t css_read_until(cursor *cur, const char *stops) {
     return cur->index;
 }
 
+/* Collect into blocks the `(`, `[` and `{` tokens [start, end) leave open, innermost last. A closer of any kind ends
+   the innermost open block, as css_read_until nests them, so the blocks match how the parser split the value. */
+static void css_open_blocks(const token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *blocks) {
+    for (Py_ssize_t index = start; index < end; index++) {
+        css_char delim = vec->items[index].delim;
+        if (delim == '(' || delim == '[' || delim == '{') {
+            cbuf_putc(blocks, delim);
+        } else if ((delim == ')' || delim == ']' || delim == '}') && blocks->len > 0) {
+            blocks->len--;
+        }
+    }
+}
+
 /* Find the index of the ')' matching an opening '(' that sits at open_paren, scanning over delim tokens. */
 static Py_ssize_t css_match_paren(token_vec *vec, Py_ssize_t open_paren, Py_ssize_t end) {
     int depth = 1;

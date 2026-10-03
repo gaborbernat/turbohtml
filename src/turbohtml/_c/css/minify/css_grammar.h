@@ -513,6 +513,21 @@ static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
     css_at_prelude(pool, cur->vec, prelude_start, prelude_end, allow_url_string, out);
 }
 
+/* Whether the item at index opens with a custom property name and a colon, which CSS Syntax 3 §5.5.5 makes a
+   declaration that is never reparsed as a nested rule. The caller found a `{` after the item's first token, so the
+   colon scan past a name stops inside the vector. */
+static int css_starts_custom_property(const token_vec *vec, Py_ssize_t index) {
+    const css_token *name = &vec->items[index];
+    if (name->kind != CSS_IDENT) {
+        return 0;
+    }
+    Py_ssize_t colon = index + 1;
+    while (vec->items[colon].kind == CSS_WS || vec->items[colon].kind == CSS_COMMENT) {
+        colon++;
+    }
+    return vec->items[colon].delim == ':' && css_name_is_custom(name->text, vec->items[colon].text + 1 - name->text);
+}
+
 /* Parse a declaration list (between { }); appends declarations (and nested rules) to decls. */
 static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) {
     if (!css_nesting_enter(cur->vec)) {
@@ -549,6 +564,12 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
         Py_ssize_t segment_end = css_read_until(cur, ";{}");
         css_token *terminator = cursor_peek(cur);
         /* css_read_until stops only on a stop DELIM (or EOF -> NULL peek), so a non-NULL peek is always that DELIM */
+        if (terminator && terminator->delim == '{' && css_starts_custom_property(cur->vec, segment_start)) {
+            /* a custom property's value is any token sequence, {} blocks included (CSS Variables 1 §2), so the `{`
+               opens a block inside the value */
+            segment_end = css_read_until(cur, ";}");
+            terminator = cursor_peek(cur);
+        }
         if (terminator && terminator->delim == '{') {
             cur->index++;
             decl_vec inner = {NULL, 0, 0, 0};
