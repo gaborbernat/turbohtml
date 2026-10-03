@@ -1075,6 +1075,14 @@ static int32_t dead_store_value(jm_program *prog, int32_t node) {
     return prog->nodes[node].b;
 }
 
+/* The unlinked original drops its binding, so a binding whose cached read still points there reads
+   as stale: inline_single_use would otherwise rewrite the original and drop the declaration the
+   copy still reads (#1035). */
+static void move_node(jm_program *prog, int32_t dst, int32_t src) {
+    jm_node_replace(prog, dst, src);
+    prog->nodes[src].sym = -1;
+}
+
 /* Simplify a comma sequence: replace a dead store `x=EXPR` (x never read) with EXPR, fold `(x=EXPR, x)`
    -- the shape the fold pass leaves after merging `x=EXPR; return x` -- down to EXPR when x is a local
    written once (this assignment) and read once (the trailing element), and drop any non-final element
@@ -1085,7 +1093,7 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
     for (int32_t elem = prog->nodes[seq].a; elem >= 0; elem = prog->nodes[elem].next) {
         int32_t init = dead_store_value(prog, elem);
         if (init >= 0) { /* `x=EXPR` with x never read is just EXPR (value and effects preserved) */
-            jm_node_replace(prog, elem, init);
+            move_node(prog, elem, init);
             *changed = 1;
             continue;
         }
@@ -1101,7 +1109,7 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
         }
         int32_t after = prog->nodes[use].next;
         if (prog->syms[target].refs == 1 && prog->syms[target].writes == 1) {
-            jm_node_replace(prog, elem, prog->nodes[elem].b); /* `(t=EXPR, t)` with t used once -> EXPR */
+            move_node(prog, elem, prog->nodes[elem].b); /* `(t=EXPR, t)` with t used once -> EXPR */
             prog->nodes[elem].next = after;
             prog->syms[target].refs = 0;
             prog->syms[target].writes = 0;
@@ -1132,7 +1140,7 @@ static void collapse_sequence(jm_program *prog, int32_t seq, int *changed) {
     int32_t only = prog->nodes[seq].a; /* a sequence always keeps its last element; if that is the only
                                           one left, the sequence is just that element */
     if (prog->nodes[only].next < 0) {
-        jm_node_replace(prog, seq, only);
+        move_node(prog, seq, only);
         *changed = 1;
     }
 }
@@ -1436,8 +1444,8 @@ static int inline_single_use(jm_program *prog, int32_t global) {
             /* a function used once becomes an expression at that use, dropping the declaration and the
                name (refs == 1 means no self-reference). Only into its own scope: a use in a loop body or
                a nested function runs repeatedly and would build a fresh closure each time (13.2.4). */
-            if (prog->syms[sym].ref_scope != prog->syms[sym].scope) {
-                continue;
+            if (prog->syms[sym].ref_scope != prog->syms[sym].scope || prog->nodes[ref].sym != sym) {
+                continue; /* a read that moved this pass waits for the next pass to resolve its new node */
             }
             if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
                 continue;                           /* GCOVR_EXCL_LINE */
@@ -1473,10 +1481,13 @@ static int inline_single_use(jm_program *prog, int32_t global) {
                 continue; /* the one read is not where the adjacent jump's value comes from */
             }
         }
+        if (prog->nodes[ref].sym != sym) {
+            continue; /* the read moved this pass; the next pass resolves its new node */
+        }
         if (!expand_shorthand_ref(prog, sym)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             continue;                           /* GCOVR_EXCL_LINE */
         }
-        jm_node_replace(prog, ref, init);
+        move_node(prog, ref, init);
         unlink_declarator(prog, sym);
         changed = 1;
     }
