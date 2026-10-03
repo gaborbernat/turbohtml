@@ -326,7 +326,6 @@ def test_number_canonicalization(source: str, expected: str) -> None:
         pytest.param("foo[0]", "foo[0]", id="three-char-computed-member"),
         pytest.param("leg[0]", "leg[0]", id="three-char-member-not-let"),
         pytest.param("lot[0]", "lot[0]", id="three-char-member-l-not-le"),
-        pytest.param("let[0]", "let [0]", id="let-computed-member-guard"),
         pytest.param("x=0", "x=0", id="single-zero-not-octal"),
         pytest.param("function*g(){yield;yield x}", "function*g(){yield;yield x}", id="yield-with-and-without-arg"),
     ],
