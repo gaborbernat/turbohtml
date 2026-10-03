@@ -5,8 +5,7 @@
 #include <stdint.h>
 
 #include "core/vec.h"
-
-struct th_node;
+#include "dom/tree.h"
 
 typedef struct {
     const struct th_node *node;
@@ -19,9 +18,22 @@ typedef struct {
     size_t count;
 } th_node_map;
 
+/* Fibonacci hashing with Linux's GOLDEN_RATIO_32 (2^32 / phi^2): the top bits of the
+   product spread any evenly spaced run of keys, such as a document-order subset of node
+   sequences, across the table. */
+static inline uint32_t th_fibonacci_hash(uint32_t key) {
+    return key * 0x61C88647U;
+}
+
+/* Reduce a 32-bit hash to a slot of a power-of-two table by keeping its top bits. */
+static inline size_t th_hash_slot(uint32_t hash, size_t capacity) {
+    return (size_t)(((uint64_t)hash * capacity) >> 32);
+}
+
+/* Hash the node's creation sequence, not its address, so probe counts depend on the
+   input document and not on where the allocator placed the tree. */
 static inline size_t th_node_map_slot(const th_node_map *map, const struct th_node *node) {
-    const uintptr_t address = (uintptr_t)node;
-    size_t slot = ((address >> 4) ^ (address >> 13)) & (map->capacity - 1);
+    size_t slot = th_hash_slot(th_fibonacci_hash(node->seq), map->capacity);
     while (map->entries[slot].node != NULL && map->entries[slot].node != node) {
         slot = (slot + 1) & (map->capacity - 1);
     }

@@ -5284,6 +5284,13 @@ def indexed_transform() -> Callable[[int, str, str], Transform]:
             id="mode-content-and-default",
         ),
         pytest.param(
+            "<root><p/></root>",
+            '<xsl:apply-templates select="root/p" mode="caa"/><xsl:apply-templates select="root/p"/>',
+            '<xsl:template match="p">D</xsl:template><xsl:template match="p" mode="caa">M</xsl:template>',
+            "MD",
+            id="named-mode-hashes-to-default-slot",
+        ),
+        pytest.param(
             '<root><p a="1" b="2"/></root>',
             '<xsl:apply-templates select="root/p/@*"/>' * 2,
             '<xsl:template match="@a">A<xsl:value-of select="."/></xsl:template>'

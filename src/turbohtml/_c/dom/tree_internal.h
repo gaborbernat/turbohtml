@@ -97,6 +97,8 @@ struct th_tree {
     uint64_t *afe_hashes;
     size_t afe_hash_count, afe_hash_capacity;
     int afe_hash_valid;
+    uint32_t node_seq; /* next value for node_new to stamp onto th_node::seq; fills the
+                          padding after afe_hash_valid so th_tree stays <= 512 bytes */
     Py_ssize_t afe_cap;
     th_node *head;          /* the <head> element once inserted */
     th_node *fragment_root; /* the html root in fragment parsing; NULL otherwise */
@@ -301,13 +303,16 @@ static inline th_src_loc **node_loc(th_node *node) {
 static inline th_node *node_new(th_tree *tree, enum th_node_type type) {
     int positioned = tree->track_positions && type == TH_NODE_ELEMENT;
     int located = tree->track_locations && type == TH_NODE_ELEMENT;
-    Py_ssize_t size = type == TH_NODE_TEXT ? (Py_ssize_t)offsetof(th_node, attrs) : (Py_ssize_t)sizeof(th_node);
-    size += (positioned ? 2 * (Py_ssize_t)sizeof(uint32_t) : 0) + (located ? (Py_ssize_t)sizeof(th_src_loc *) : 0);
-    th_node *node = arena_alloc(tree, size);
+    const size_t fixed = type == TH_NODE_TEXT ? offsetof(th_node, attrs) : sizeof(th_node);
+    th_node *node = arena_alloc(tree, (Py_ssize_t)fixed + (positioned ? 2 * (Py_ssize_t)sizeof(uint32_t) : 0) +
+                                          (located ? (Py_ssize_t)sizeof(th_src_loc *) : 0));
     if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
-    memset(node, 0, (size_t)size);
+    /* Zero only the fixed part: its size follows from the node type alone, a constant at
+       most call sites, so the compiler inlines the stores instead of calling memset. The
+       position and location slots are set below. */
+    memset(node, 0, fixed);
     if (positioned) {
         node_pos(node)[0] = 0; /* line; 0 = no source until insert_element sets it */
         node_pos(node)[1] = 0; /* col */
@@ -317,6 +322,7 @@ static inline th_node *node_new(th_tree *tree, enum th_node_type type) {
     }
     node->type = (uint8_t)type;
     node->atom = TH_TAG_UNKNOWN;
+    node->seq = tree->node_seq++;
     return node;
 }
 
