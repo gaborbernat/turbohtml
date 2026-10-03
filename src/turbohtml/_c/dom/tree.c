@@ -3638,6 +3638,14 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
     if (tok->kind == TH_TEXT) {
         Py_ssize_t len;
         Py_UCS4 *text = token_text(tree, tok, &len);
+        /* a pre/listing/textarea opened in table content drops its leading newline here
+           too: the token after the start tag is this text, whatever table mode foster
+           parenting left active, so a round trip does not grow the newline (#1037) */
+        if (tree->drop_newline && len > 0 /* GCOVR_EXCL_BR_LINE */ && text[0] == '\n') {
+            text++;
+            len--;
+        }
+        tree->drop_newline = 0;
         if (all_whitespace_or_nul(text, len)) {
             insert_text(tree, text, len);
         } else {
