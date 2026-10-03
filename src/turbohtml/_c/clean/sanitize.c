@@ -170,6 +170,16 @@ static inline uint16_t reparsed_atom(const th_node *element) {
 #define TH_WALK_INLINE
 #endif
 
+/* The rarer balancing steps run out of line, so the walk's loop keeps its registers for the policy work every element
+   pays for. */
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
 /* SVG animation elements can rewrite any attribute of their target, href included. A parse_xml name counts as the HTML
    reparse reads it, lowercased and in SVG under any `svg` ancestor. */
 static TH_WALK_INLINE int is_unsafe_svg_animation(const th_node *element) {
@@ -2732,7 +2742,8 @@ enum sanitize_action { SANITIZE_DONE, SANITIZE_KEEP_CHILDREN, SANITIZE_STRIP_CHI
 /* Record a disallowed element and pick its disposition: drop the whole subtree for a content-removal tag (e.g.
    script/style, so its text never leaks), in REMOVE mode, or for foreign content under STRIP (unwrapping it would
    invite namespace confusion); otherwise strip or escape it once its children are done. Returns 0, or -1 on error. */
-static int dispose_disallowed(sanitizer *s, th_node *element, PyObject *tag, enum sanitize_action *action) {
+static TH_WALK_INLINE int dispose_disallowed(sanitizer *s, th_node *element, PyObject *tag,
+                                             enum sanitize_action *action) {
     if (record_removed(s, tag, NULL, 0) < 0) { /* GCOVR_EXCL_BR_LINE: record only fails on alloc */
         return -1;                             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -2975,7 +2986,8 @@ static int balancer_structurally_unstable(const th_node *element);
 static int balancer_table_text_fostered(sanitizer *s, th_node *text);
 static int balancer_normalize_table_children(sanitizer *s, th_node *container, th_node *before, th_node *stop);
 static int balancer_fosters_from(const th_node *parent);
-static int balance_subtree(sanitizer *s, th_node *root);
+static const th_node *balancer_table_around(const th_node *parent);
+static int balance_subtree(sanitizer *s, th_node *root, int foster);
 static uint32_t balancer_child_bits(const th_node *element, uint32_t outer);
 static uint32_t balancer_rule(uint16_t atom);
 static int balancer_structurally_unstable_in(const th_node *element, balance_context context, uint32_t rule);
@@ -2990,32 +3002,15 @@ static int balancer_barrier(const th_node *element) {
     return element->ns != TH_NS_HTML || (element->tag_flags & TH_TAG_SPECIAL) != 0;
 }
 
-/* The walk validated each child against the parent it was parsed under, but unwrapping that parent moved the children
-   into the grandparent: an HTML <style> hoisted out of an escaped svg <desc> now sits directly under <svg>, where a
-   reparse reads its body as markup. Re-check every node between `before` (NULL for the parent's start) and `stop`
-   against its new parent: dispose a namespace-confused element per the policy and, for HTML output, escape a
-   structurally unstable one to inert text. When the `unwrapped` element (detached, but its fields intact) was a
-   barrier, the hoist can also expose deeper descendants, or leave orphan rows or table text under a table context (only
-   a barrier sits directly in one; the parser fosters anything else out), so the range is balanced in depth. An element
-   escaped here after a non-barrier unwrap broke a parent rule (a heading under a heading), and that parent stops the
-   same scans the escaped element did, so the depth stays as the unwrapped element set it. An escaped or unwrapped
-   node's own children land in the same range, so the scan resumes just before it and checks them in turn, without
-   recursion. XML output round-trips through parse_xml and takes only the namespace check. Returns 0, or -1 on error. */
-static TH_WALK_INLINE int settle_hoisted(sanitizer *s, th_node *parent, th_node *before, th_node *stop,
-                                         const th_node *unwrapped) {
-    int balance = !s->xml;
-    int deep = balance && balancer_barrier(unwrapped);
-    int table_parent = deep && balancer_fosters_from(parent);
-    if (table_parent) {
-        /* only the hoisted range: a run reaching past it would move `before` or `stop`, the walk's place in the tree */
-        if (balancer_normalize_table_children(s, parent, before, stop) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
-            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-    }
+/* settle_hoisted's re-check of the nodes between `before` and `stop` under `parent`. `deep` balances each kept
+   element's subtree too, `foster` moves table text out of the range, and `subtree_foster` lets those subtrees foster
+   theirs. Returns 0, or -1 on error. */
+static TH_WALK_INLINE int settle_range(sanitizer *s, th_node *parent, th_node *before, th_node *stop, int balance,
+                                       int deep, int foster, int subtree_foster) {
     th_node *cursor = before == NULL ? parent->first_child : before->next_sibling;
     while (cursor != stop) {
         if (cursor->type != TH_NODE_ELEMENT) {
-            if (table_parent && cursor->type == TH_NODE_TEXT) {
+            if (foster && cursor->type == TH_NODE_TEXT) {
                 th_node *after = cursor->next_sibling; /* fostering moves cursor out of the range: capture its place */
                 int fostered = balancer_table_text_fostered(s, cursor);
                 if (fostered < 0) { /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
@@ -3030,8 +3025,8 @@ static TH_WALK_INLINE int settle_hoisted(sanitizer *s, th_node *parent, th_node 
         int reachable = namespace_reachable(cursor);
         if (reachable && !(balance && balancer_structurally_unstable(cursor))) {
             if (deep) {
-                if (balance_subtree(s, cursor) < 0) { /* GCOVR_EXCL_BR_LINE: balance only fails on allocation */
-                    return -1;                        /* GCOVR_EXCL_LINE: allocation-failure path */
+                if (balance_subtree(s, cursor, subtree_foster) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+                    return -1;                                        /* GCOVR_EXCL_LINE: allocation-failure path */
                 }
             }
             cursor = cursor->next_sibling;
@@ -3064,6 +3059,47 @@ static TH_WALK_INLINE int settle_hoisted(sanitizer *s, th_node *parent, th_node 
     return 0;
 }
 
+/* settle_range for a barrier hoisted straight into a table context, which the walk rarely meets, so it stays out of
+   line. Returns 0, or -1 on error. */
+static TH_NOINLINE int settle_table_range(sanitizer *s, th_node *parent, th_node *before, th_node *stop,
+                                          int (*unwrap_pending)(const void *, Py_ssize_t, const th_node *),
+                                          const void *frames, Py_ssize_t depth) {
+    const th_node *table = balancer_table_around(parent);
+    /* with no table to foster before, nothing moves, and the range's own nested tables still foster */
+    int foster = table == NULL || !unwrap_pending(frames, depth, table);
+    /* only the hoisted range: a run reaching past it would move `before` or `stop`, the walk's place in the tree */
+    if (balancer_normalize_table_children(s, parent, before, stop) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+        return -1;                                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return settle_range(s, parent, before, stop, 1, 1, foster, foster);
+}
+
+/* The walk validated each child against the parent it was parsed under, but unwrapping that parent moved the children
+   into the grandparent: an HTML <style> hoisted out of an escaped svg <desc> now sits directly under <svg>, where a
+   reparse reads its body as markup. Re-check every node between `before` (NULL for the parent's start) and `stop`
+   against its new parent: dispose a namespace-confused element per the policy and, for HTML output, escape a
+   structurally unstable one to inert text. When the `unwrapped` element (detached, but its fields intact) was a
+   barrier, the hoist can also expose deeper descendants, or leave orphan rows or table text under a table context (only
+   a barrier sits directly in one; the parser fosters anything else out), so the range is balanced in depth. An element
+   escaped here after a non-barrier unwrap broke a parent rule (a heading under a heading), and that parent stops the
+   same scans the escaped element did, so the depth stays as the unwrapped element set it. An escaped or unwrapped
+   node's own children land in the same range, so the scan resumes just before it and checks them in turn, without
+   recursion. Table text waits to foster while `unwrap_pending` reports an element between `parent` and its table that
+   the walk unwraps later: that element's escaped tags precede and follow this range in document order, and its own
+   settle fosters the whole range after them. XML output round-trips through parse_xml and takes only the namespace
+   check. Returns 0, or -1 on error. */
+static TH_WALK_INLINE int settle_hoisted(sanitizer *s, th_node *parent, th_node *before, th_node *stop,
+                                         const th_node *unwrapped,
+                                         int (*unwrap_pending)(const void *, Py_ssize_t, const th_node *),
+                                         const void *frames, Py_ssize_t depth) {
+    int balance = !s->xml;
+    int deep = balance && balancer_barrier(unwrapped);
+    if (deep && balancer_fosters_from(parent)) {
+        return settle_table_range(s, parent, before, stop, unwrap_pending, frames, depth);
+    }
+    return settle_range(s, parent, before, stop, balance, deep, 0, 1);
+}
+
 /* The balancing work an element's frame leaves for its post-order step. */
 enum balance_role {
     ROLE_NONE,
@@ -3093,16 +3129,6 @@ typedef struct {
     int spoiled; /* the CONTEXT_RECORD region holds a table part, so its verdicts cannot stand */
 } balance_walk;
 
-/* The rarer balancing steps run out of line, so the walk's loop keeps its registers for the policy work every element
-   pays for. */
-#if defined(_MSC_VER)
-#define TH_NOINLINE __declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-#define TH_NOINLINE __attribute__((noinline))
-#else
-#define TH_NOINLINE
-#endif
-
 /* balance_enter's result on an allocation failure: no context word sets every bit. */
 #define BALANCE_FAILED UINT32_MAX
 
@@ -3127,6 +3153,31 @@ typedef struct {
     int parent_kept;
 } sanitize_frame;
 
+/* Whether a frame from the top one, the parent of the range an unwrap just hoisted, down to the `table` that range's
+   text fosters before still waits for its own unwrap. The table has a parent, so it is one of the frames: the walk's
+   root is either the document or a detached node. */
+static int plain_unwrap_pending(const void *stack, Py_ssize_t depth, const th_node *table) {
+    const sanitize_frame *frames = stack;
+    Py_ssize_t index = depth;
+    do {
+        if (frames[--index].action != SANITIZE_KEEP_CHILDREN) {
+            return 1;
+        }
+    } while (frames[index].element != table);
+    return 0;
+}
+
+static int balanced_unwrap_pending(const void *stack, Py_ssize_t depth, const th_node *table) {
+    const balanced_frame *frames = stack;
+    Py_ssize_t index = depth;
+    do {
+        if (frames[--index].action != SANITIZE_KEEP_CHILDREN) {
+            return 1;
+        }
+    } while (frames[index].element != table);
+    return 0;
+}
+
 /* Walk descendants with an explicit stack. A frame keeps the post-order strip/escape action and the sibling that
    follows the element, so mutations cannot invalidate traversal state. */
 static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
@@ -3146,7 +3197,8 @@ static int sanitize_children(sanitizer *s, th_node *parent, int parent_kept) {
                 th_node *before = frame.element->prev_sibling;
                 /* GCOVR_EXCL_BR_START: unwrapping and settling only fail on allocation */
                 if (unwrap_element(s, frame.element, frame.action) < 0 ||
-                    settle_hoisted(s, grandparent, before, frame.next, frame.element) < 0) {
+                    settle_hoisted(s, grandparent, before, frame.next, frame.element, plain_unwrap_pending, frames,
+                                   depth) < 0) {
                     PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure cleanup */
                     return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
                 }
@@ -3236,7 +3288,8 @@ static int sanitize_balanced_children(sanitizer *s, th_node *root) {
                 before = frame->element->prev_sibling;
                 /* GCOVR_EXCL_BR_START: unwrapping and settling only fail on allocation */
                 status = unwrap_element(s, frame->element, frame->action) < 0 ||
-                                 settle_hoisted(s, grandparent, before, frame->next, frame->element) < 0
+                                 settle_hoisted(s, grandparent, before, frame->next, frame->element,
+                                                balanced_unwrap_pending, frames, depth) < 0
                              ? -1
                              : 0;
                 /* GCOVR_EXCL_BR_STOP */
@@ -3603,6 +3656,14 @@ static th_node *balancer_enclosing_table(const th_node *node) {
         ancestor = ancestor->parent;
     }
     return ancestor != NULL && ancestor->parent != NULL ? ancestor : NULL;
+}
+
+/* balancer_enclosing_table for content directly under `parent`, which may be the table itself. */
+static const th_node *balancer_table_around(const th_node *parent) {
+    if (parent->atom != TH_TAG_TABLE) {
+        return balancer_enclosing_table(parent);
+    }
+    return parent->parent != NULL ? parent : NULL;
 }
 
 /* Walk the kept element's ancestors (its serialized-output context) for a matching HTML element, stopping at a barrier.
@@ -4082,6 +4143,14 @@ static int balancer_child_matches(const th_node *child, uint16_t match_a, uint16
            (child->atom == match_a || (match_b != TH_TAG_UNKNOWN && child->atom == match_b));
 }
 
+/* The walk has already dropped every leaf but text and comments here. */
+static int balancer_run_continues(const th_node *node, uint16_t match_a, uint16_t match_b, uint16_t wrapper_atom) {
+    if (node->type == TH_NODE_ELEMENT) {
+        return balancer_child_matches(node, match_a, match_b);
+    }
+    return node->type != TH_NODE_TEXT || wrapper_atom != TH_TAG_COLGROUP;
+}
+
 /* Wrap each maximal run of matching HTML children of `parent` between `before` and `stop` (NULL for the first and last
    child) in a freshly implied wrapper element, so a table part the policy left without its required ancestor re-parses
    to where it sits instead of the parser implying the wrapper around it. The wrapper is marked implied and NOT
@@ -4103,7 +4172,17 @@ static int balancer_wrap_runs(sanitizer *s, th_node *parent, th_node *before, th
         wrapper->tag_flags = (uint8_t)((wrapper->tag_flags | TH_ELEM_IMPLIED) & ~TH_ELEM_CLOSED_BY_END_TAG);
         th_node_insert_before(parent, wrapper, child);
         s->balance_edited = 1;
-        while (child != stop && balancer_child_matches(child, match_a, match_b)) {
+        /* a browser keeps the row or row group open across text it fosters out and a comment, so they stay inside the
+           run; text pops a column group, so only a comment does there. The run still ends at its last match. */
+        th_node *last = child;
+        for (th_node *scan = child; scan != stop && balancer_run_continues(scan, match_a, match_b, wrapper_atom);
+             scan = scan->next_sibling) {
+            if (scan->type == TH_NODE_ELEMENT) {
+                last = scan;
+            }
+        }
+        th_node *end = last->next_sibling;
+        while (child != end) {
             th_node *next = child->next_sibling;
             th_node_remove(child);
             th_node_append_child(wrapper, child);
@@ -4141,8 +4220,8 @@ static int balancer_normalize_table_children(sanitizer *s, th_node *container, t
    exactly root's. Escaping hoists an element's children into its place; the traversal then revisits them against their
    new ancestors, so a cascade (a form that exposes a namespace-confused child) settles in one pass. settle_hoisted
    calls this on each element a barrier's unwrap hoists, and a balanced walk whose root is a table part calls it once on
-   the whole tree. Returns 0, or -1 on error. */
-static int balance_subtree(sanitizer *s, th_node *root) {
+   the whole tree. Table text stays put unless `foster` is set. Returns 0, or -1 on error. */
+static int balance_subtree(sanitizer *s, th_node *root, int foster) {
     /* root is itself an edited parent, so normalize its own table structure (a removed tbody/tr leaves orphan rows or
        cells directly under it) */
     if (balancer_normalize_table_children(s, root, NULL, NULL) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
@@ -4171,7 +4250,7 @@ static int balance_subtree(sanitizer *s, th_node *root) {
                     continue;
                 }
             }
-        } else if (node->type == TH_NODE_TEXT) {
+        } else if (foster && node->type == TH_NODE_TEXT) {
             th_node *after = node->next_sibling; /* fostering moves node before the table, so capture its place first */
             int fostered = balancer_table_text_fostered(s, node);
             if (fostered < 0) { /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
@@ -4855,7 +4934,7 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
         failed = (balance_in_walk ? sanitize_balanced_children(&s, root) : sanitize_children(&s, root, 1)) < 0;
     }
     if (!failed && balance && !balance_in_walk) {
-        failed = balance_subtree(&s, root) < 0;
+        failed = balance_subtree(&s, root, 1) < 0;
     }
     if (!failed && s.strip_templates) {
         failed = strip_tree_templates(&s, root) < 0;

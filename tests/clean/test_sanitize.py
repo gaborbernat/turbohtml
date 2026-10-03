@@ -3552,6 +3552,85 @@ def test_node_pass_keeps_valid_table_structure(group: str) -> None:
     assert sanitize_node(parse_fragment(html), policy).inner_html == html
 
 
+_ESCAPED_TABLE_ORDER_CASES: Final = [
+    pytest.param(
+        "<table><tbody><tr><td>x</td></tr></tbody></table>",
+        frozenset({"table", "td"}),
+        "&lt;tbody&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/tbody&gt;<table><tbody><tr><td>x</td></tr></tbody></table>",
+        id="row-group",
+    ),
+    pytest.param(
+        "<table><thead><tr><th>h</th></tr></thead><tfoot><tr><td>f</td></tr></tfoot></table>",
+        frozenset({"table", "td", "th"}),
+        "&lt;thead&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tfoot&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/tfoot&gt;"
+        "<table><tbody><tr><th>h</th></tr></tbody><tbody><tr><td>f</td></tr></tbody></table>",
+        id="head-and-foot",
+    ),
+    pytest.param(
+        "<table><colgroup><col></colgroup><tbody><tr><td>x</td></tr></tbody></table>",
+        frozenset({"table", "td", "col"}),
+        "&lt;colgroup&gt;&lt;/colgroup&gt;&lt;tbody&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/tbody&gt;"
+        "<table><colgroup><col></colgroup><tbody><tr><td>x</td></tr></tbody></table>",
+        id="column-group",
+    ),
+    pytest.param(
+        "<table><tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>",
+        frozenset({"table", "td"}),
+        "&lt;tbody&gt;&lt;tr&gt;&lt;/tr&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/tbody&gt;"
+        "<table><tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>",
+        id="two-rows",
+    ),
+    pytest.param(
+        "<table><tbody><tr><td><table><tbody><tr><td>y</td></tr></tbody></table></td></tr></tbody></table>",
+        frozenset({"table", "td"}),
+        "&lt;tbody&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/tbody&gt;<table><tbody><tr><td>&lt;tbody&gt;&lt;tr&gt;&lt;/tr&gt;&lt;/tbody&gt;"
+        "<table><tbody><tr><td>y</td></tr></tbody></table></td></tr></tbody></table>",
+        id="nested-table",
+    ),
+    pytest.param(
+        "<table><tbody><tr><td>x</td></tr></tbody></table>",
+        frozenset({"td"}),
+        "&lt;table&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;x&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;",
+        id="escaped-table",
+    ),
+]
+
+
+@pytest.mark.parametrize(("source", "tags", "expected"), _ESCAPED_TABLE_ORDER_CASES)
+def test_escaped_table_parts_keep_document_order(source: str, tags: frozenset[str], expected: str) -> None:
+    # the escaped tags of table parts foster out of the table in the order the source wrote them
+    policy = Policy(tags=tags)
+    assert (sanitize(source, policy), sanitize_node(parse_fragment(source), policy).inner_html) == (expected, expected)
+
+
+_TABLE_CONTENT_CASES: Final = [
+    pytest.param(
+        lambda: E.div(E.table(E.tbody(E.td("a"), Comment("c"), E.td("b")))),
+        "<div><table><tbody><tr><td>a</td><!--c--><td>b</td></tr></tbody></table></div>",
+        id="comment-between-cells-keeps-one-row",
+    ),
+    pytest.param(
+        lambda: E.div(E.table(E.col(), "x", E.col())),
+        "<div>x<table><colgroup><col></colgroup><colgroup><col></colgroup></table></div>",
+        id="text-between-columns-closes-the-group",
+    ),
+]
+
+
+@pytest.mark.parametrize(("build", "expected"), _TABLE_CONTENT_CASES)
+def test_node_table_content_reparses_in_place(build: Callable[[], Element], expected: str) -> None:
+    policy = Policy(tags=frozenset({"div", "table", "tbody", "td", "col"}), strip_comments=False)
+    assert sanitize_node(build(), policy).html == expected
+
+
+def test_node_table_root_keeps_escaped_parts_inside() -> None:
+    # a table passed in as the root has no sibling slot to foster before, so the escaped tags stay inside it
+    policy = Policy(tags=frozenset({"table", "td"}))
+    assert sanitize_node(E.table(E.tbody(E.tr(E.td("x")))), policy).html == (
+        "<table>&lt;tbody&gt;&lt;tr&gt;<tbody><tr><td>x</td></tr></tbody>&lt;/tr&gt;&lt;/tbody&gt;</table>"
+    )
+
+
 def test_node_unwrap_beside_a_bare_cell_keeps_the_walk_in_place() -> None:
     # unwrapping a barrier straight under a row group re-wraps only the cells it hoists: a run reaching the bare cell
     # after it would move the walk's next node into the new row
