@@ -4326,6 +4326,11 @@ static void run_drain(th_tree *tree, th_tokenizer *sm, th_run_state *run_state) 
 /* Stop parsing at EOF: pop the remaining open elements, which runs the
    option-into-selectedcontent clone for a still-open selected option. */
 static void run_close(th_tree *tree) {
+    /* EOF closes the remaining open elements; none was closed by an end tag. The
+       last token buffer may still hold a partial tag the tokenizer never emitted
+       (EOF in a tag name), so clear the end-tag pointer before popping or an
+       element whose name matches that leftover gets a span the source never wrote. */
+    tree->closing_end_tag = NULL;
     while (tree->open_len > 0) {
         stack_pop(tree);
     }

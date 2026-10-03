@@ -739,6 +739,12 @@ def test_implicitly_closed_element_has_no_end_tag() -> None:
     assert location("<p>hi<div>x</div>", "p").end_tag is None
 
 
+def test_ignored_end_tag_then_eof_in_tag_name_leaves_no_end_tag() -> None:
+    # </x> is ignored and the trailing <div has no '>' so EOF emits no token; the open
+    # div is closed only by end of input, so its end tag span stays absent
+    assert location("<div></x><div", "div").end_tag is None
+
+
 def test_multiline_spans_carry_line_and_column() -> None:
     loc = location("<p>a\n<b\n c=1>x</b>", "b")
     assert (loc.start_tag.start_line, loc.start_tag.start_col) == (2, 0)
