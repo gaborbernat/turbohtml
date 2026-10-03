@@ -234,7 +234,7 @@ _NEWLY = CSSMinify(baseline=2021)
         pytest.param("@media screen{a{color:red}}", "@media screen{a{color:red}}", id="keep-non-empty-media"),
         pytest.param("@layer x{}", "@layer x{}", id="keep-empty-layer"),
         pytest.param("@keyframes x{}", "@keyframes x{}", id="keep-empty-keyframes"),
-        pytest.param('@import "x"', '@import "x"', id="keep-import-statement"),
+        pytest.param('@import "x"', '@import "x";', id="keep-import-statement"),
         pytest.param("{--x:\n}", "", id="selector-less-custom-property"),
         pytest.param("{color:red}", "", id="selector-less-declaration"),
         pytest.param("  \t {color:red}", "", id="whitespace-only-selector"),
@@ -460,7 +460,7 @@ def test_minify_css_property_name_whitespace_not_fused(source: str, expected: st
     [
         pytest.param(".a\\ {color:red}", ".a\\ {color:red}", id="selector-escaped-space"),
         pytest.param("\\ {color:red}", "\\ {color:red}", id="selector-only-escaped-space"),
-        pytest.param("@x \\ ;", "@x \\ ", id="at-prelude-escaped-space"),
+        pytest.param("@x \\ ;", "@x \\ ;", id="at-prelude-escaped-space"),
         pytest.param(".a\\  b{x:1}", ".a\\  b{x:1}", id="escaped-space-then-descendant"),
         pytest.param(".a\\\\ {x:1}", ".a\\\\{x:1}", id="escaped-backslash-trailing-space-trimmed"),
         pytest.param("a b{x:1}", "a b{x:1}", id="descendant-space-kept"),
@@ -608,7 +608,7 @@ def _max_decls_per_rule(rule_count: int) -> int:
             "@media-foo{a{b:c}}@media-foo{d{e:f}}",
             id="no-merge-media-prefixed-keyword",
         ),
-        pytest.param('@import "a";@import "b";', '@import "a";@import "b"', id="no-merge-at-statements"),
+        pytest.param('@import "a";@import "b";', '@import "a";@import "b";', id="no-merge-at-statements"),
         pytest.param("@x{}@media (a:b){c{d:e}}", "@x{}@media(a:b){c{d:e}}", id="short-at-block-before-media"),
         pytest.param("a::before{x:1}", "a:before{x:1}", id="legacy-pseudo-before-single-colon"),
         pytest.param("a::after{x:1}", "a:after{x:1}", id="legacy-pseudo-after-single-colon"),
@@ -692,7 +692,7 @@ def _max_decls_per_rule(rule_count: int) -> int:
         pytest.param(r"@a\,b{c:d}", r"@a\,b{c:d}", id="escaped-at-keyword-kept"),
         pytest.param("/*a*b*/x{y:1}", "x{y:1}", id="comment-with-lone-star"),
         pytest.param("a{x:1}/* unterminated", "a{x:1}", id="unterminated-comment"),
-        pytest.param("@a\\", "@a\ufffd", id="escaped-at-keyword-backslash-at-eof"),
+        pytest.param("@a\\", "@a\ufffd;", id="escaped-at-keyword-backslash-at-eof"),
         pytest.param("x{}#a\\", "#a\ufffd", id="escaped-hash-backslash-at-eof"),
         pytest.param("a{x:1!important/*c*/}", "a{x:1!important}", id="important-trailing-comment"),
         pytest.param("a{x:1 !/*c*/important}", "a{x:1!important}", id="important-comment-between-bang"),
@@ -849,13 +849,13 @@ def _max_decls_per_rule(rule_count: int) -> int:
         pytest.param('a { b : "</style" }', 'a{b:"</style"}', id="end-tag-from-source-still-minified"),
         # an @import/@namespace url() with a <url-modifier> keeps its function form (CSS Values 4 §4.5.4): moving the
         # modifier outside the url() would make @import read it as a media query and @namespace as the prefix
-        pytest.param('@import url("a.css" screen);', '@import url("a.css" screen)', id="import-url-modifier-kept"),
-        pytest.param('@namespace url("" e);', '@namespace url("" e)', id="namespace-url-modifier-kept"),
-        pytest.param("@import url('a.css' x);", "@import url('a.css' x)", id="import-url-modifier-single-quote-kept"),
-        pytest.param("@import url(a b);", "@import url(a b)", id="import-bare-url-modifier-kept"),
-        pytest.param('@import url("a.css");', '@import "a.css"', id="import-url-no-modifier-unwrapped"),
-        pytest.param("@import url(a.css);", '@import "a.css"', id="import-bare-url-unwrapped"),
-        pytest.param("@import url();", '@import ""', id="import-empty-url-unwrapped"),
+        pytest.param('@import url("a.css" screen);', '@import url("a.css" screen);', id="import-url-modifier-kept"),
+        pytest.param('@namespace url("" e);', '@namespace url("" e);', id="namespace-url-modifier-kept"),
+        pytest.param("@import url('a.css' x);", "@import url('a.css' x);", id="import-url-modifier-single-quote-kept"),
+        pytest.param("@import url(a b);", "@import url(a b);", id="import-bare-url-modifier-kept"),
+        pytest.param('@import url("a.css");', '@import "a.css";', id="import-url-no-modifier-unwrapped"),
+        pytest.param("@import url(a.css);", '@import "a.css";', id="import-bare-url-unwrapped"),
+        pytest.param("@import url();", '@import "";', id="import-empty-url-unwrapped"),
         # a `*` universal or a combinator before an attribute selector keeps its descendant-combinator space (#1034): a
         # `[` opens a fresh attribute, so a `*` before it is the universal selector, not the `*=` operator
         pytest.param("* [lang]{c:d}", "* [lang]{c:d}", id="universal-descendant-attribute"),
@@ -919,7 +919,7 @@ _BACKSLASH_AT_EOF: Final[list[ParameterSet]] = [
     pytest.param("a{e:\\", "a{e:\ufffd}", id="lone"),
     pytest.param("a{e:#f\\", "a{e:#f\ufffd}", id="hash"),
     pytest.param("a{e:f(\\", "a{e:f(\ufffd)}", id="function-argument"),
-    pytest.param("@media x\\", "@media x\ufffd", id="at-rule-prelude"),
+    pytest.param("@media x\\", "@media x\ufffd;", id="at-rule-prelude"),
     pytest.param('a{e:"abc\\', 'a{e:"abc"}', id="double-quoted-string"),
     pytest.param("a{e:'abc\\", "a{e:'abc'}", id="single-quoted-string"),
     pytest.param('a{e:"abc\\\\', 'a{e:"abc\\\\"}', id="string-escaped-backslash"),
@@ -951,7 +951,7 @@ _OPEN_AT_EOF: Final[list[ParameterSet]] = [
     pytest.param('a{e:url("x)', 'a{e:url("x)")}', id="url-paren-in-string"),
     pytest.param('a{e:url("x\\")', 'a{e:url("x\\")")}', id="url-escaped-quote"),
     pytest.param("a{e:f(url(x", "a{e:f(url(x))}", id="url-in-function"),
-    pytest.param("@import url(x", '@import "x"', id="import-url"),
+    pytest.param("@import url(x", '@import "x";', id="import-url"),
     pytest.param('a{e:"x\\"', 'a{e:"x\\""}', id="string-escaped-quote"),
     pytest.param('a{e:"x\\\\"', 'a{e:"x\\\\"}', id="string-escaped-backslash"),
     pytest.param('a{e:"', 'a{e:""}', id="lone-quote"),
@@ -1018,6 +1018,48 @@ def test_minify_css_custom_property_block_is_a_fixed_point(source: str, expected
 )
 def test_minify_css_inline_custom_property_block(source: str, expected: str) -> None:
     assert minify_css_inline(source) == expected
+
+
+# a stylesheet ending in a statement at-rule keeps its `;`, so another sheet appended to it starts a new rule instead of
+# becoming the at-rule's block (CSS Syntax 3 §5.5.2); blocks its prelude leaves open close first (§5.5.9)
+_FINAL_AT_STATEMENT: Final[list[ParameterSet]] = [
+    pytest.param('@import "a";', '@import "a";', id="import"),
+    pytest.param('@import "a"', '@import "a";', id="import-without-semicolon"),
+    pytest.param('@namespace svg "x"', '@namespace svg "x";', id="namespace"),
+    pytest.param('@charset "utf-8";', '@charset "utf-8";', id="charset"),
+    pytest.param("@layer a, b;", "@layer a,b;", id="layer-statement"),
+    pytest.param('a{b:c}@import "a"', 'a{b:c}@import "a";', id="after-rule"),
+    pytest.param('/*! c */@import "a"', '/*! c */@import "a";', id="after-bang-comment"),
+    pytest.param('@import "a";/*! c */', '@import "a";/*! c */', id="before-bang-comment"),
+    pytest.param("@layer a{}", "@layer a{}", id="block-form"),
+    pytest.param("@media x{@layer a;}", "@media x{@layer a}", id="nested"),
+    pytest.param("@x (a", "@x(a);", id="open-paren-in-prelude"),
+    pytest.param("@x [a", "@x [a];", id="open-bracket-in-prelude"),
+    pytest.param("@x ({", "@x({});", id="open-brace-in-prelude"),
+    pytest.param("@x ({))", "@x({));", id="open-brace-closed-by-paren-in-prelude"),
+    pytest.param("@x (]", "@x(]);", id="open-paren-over-stray-bracket-in-prelude"),
+    pytest.param("@x [a](b", "@x [a](b);", id="closed-bracket-before-open-paren-in-prelude"),
+    pytest.param("@x ](b", "@x ](b);", id="stray-bracket-before-open-paren-in-prelude"),
+    pytest.param("@media x{@x (a", "@media x{@x(a)}", id="nested-open-paren-in-prelude"),
+    pytest.param("@x (}", "@x(});", id="close-brace-in-open-paren-in-prelude"),
+    pytest.param("@x (};a{b:c}", "@x(};a{b:c}", id="prelude-ending-in-close-brace"),
+    pytest.param('x;@import "a"', 'x@import "a"', id="after-stray-text"),
+    pytest.param('x;/*! c */@import "a"', 'x/*! c */@import "a"', id="after-stray-text-and-bang-comment"),
+]
+
+
+@pytest.mark.parametrize(("source", "expected"), _FINAL_AT_STATEMENT)
+def test_minify_css_final_at_statement(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(("source", "expected"), _FINAL_AT_STATEMENT)
+def test_minify_css_final_at_statement_is_a_fixed_point(source: str, expected: str) -> None:
+    assert minify_css(minify_css(source)) == expected
+
+
+def test_minify_css_final_at_statement_survives_concatenation() -> None:
+    assert minify_css(minify_css('@import "a"') + "b{c:d}") == '@import "a";b{c:d}'
 
 
 _STRING_CUT_BY_NEWLINE: Final[list[ParameterSet]] = [
@@ -1374,8 +1416,8 @@ def test_minify_css_dimension_unit_is_a_fixed_point(source: str, expected: str) 
 # shortening a number (dropping a zero unit or a sign) must keep a separator so it does not read as the neighboring
 # token, in an at-rule prelude and inside calc(), as the declaration-value path already does
 _NUMBER_BOUNDARY: Final[list[ParameterSet]] = [
-    pytest.param("@x 0px.5;", "@x 0 .5", id="at-prelude-zero-unit-before-fraction"),
-    pytest.param("@x a.-0;", "@x a. 0", id="at-prelude-dot-before-signed-zero"),
+    pytest.param("@x 0px.5;", "@x 0 .5;", id="at-prelude-zero-unit-before-fraction"),
+    pytest.param("@x a.-0;", "@x a. 0;", id="at-prelude-dot-before-signed-zero"),
     pytest.param("@x (a)0px.5{b:c}", "@x(a)0 .5{b:c}", id="at-prelude-with-block"),
     pytest.param("a{width:calc(0-0)}", "a{width:calc(0 0)}", id="calc-minus-zero"),
     pytest.param("a{width:calc(0+0)}", "a{width:calc(0 0)}", id="calc-plus-zero"),
@@ -1458,12 +1500,12 @@ def test_minify_output_is_a_fixed_point(stylesheet: str, inline: str) -> None:
         ),
         pytest.param(
             "@media screen{a{x:1}}@media screen",
-            "@media screen{a{x:1}}@media screen",
+            "@media screen{a{x:1}}@media screen;",
             id="media-followed-by-blockless-at-eof",
         ),
         pytest.param(
             "@media screen{a{x:1}}@media screen;",
-            "@media screen{a{x:1}}@media screen",
+            "@media screen{a{x:1}}@media screen;",
             id="media-followed-by-at-statement",
         ),
         pytest.param("@media screen{a{x:1}}/*", "@media screen{a{x:1}}", id="media-followed-by-unterminated-comment"),

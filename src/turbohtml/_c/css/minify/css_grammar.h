@@ -476,7 +476,37 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
     }
 }
 
-static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
+/* Write a closer for each block a statement at-rule's prelude leaves open at the end of input, where consuming a simple
+   block returns it (CSS Syntax 3 §5.5.9); the `;` ending the stylesheet would otherwise land inside the block. A closer
+   ends only a block of its kind, as css_collect_open_blocks matches them, unless the prelude holds a `{`: then each
+   closer ends the innermost block of any kind, as css_read_until nests them, since a `}` written for a `{` that a `)`
+   already closed would end the reparsed prelude early. Kept out of line: only an at-rule ending the input reaches it.
+ */
+CSS_NOINLINE static void css_close_prelude_blocks(const token_vec *vec, Py_ssize_t start, Py_ssize_t end,
+                                                  css_buf *out) {
+    int braced = 0;
+    for (Py_ssize_t index = start; index < end; index++) {
+        braced |= vec->items[index].delim == '{';
+    }
+    css_buf blocks = {NULL, 0, 0, 0};
+    for (Py_ssize_t index = start; index < end; index++) {
+        css_char delim = vec->items[index].delim;
+        if (delim == '(' || delim == '[' || delim == '{') {
+            cbuf_putc(&blocks, delim);
+        } else if ((delim == ')' || delim == ']' || delim == '}') && blocks.len > 0 &&
+                   (braced || blocks.data[blocks.len - 1] == (delim == ')' ? '(' : delim - 2))) {
+            /* `[` and `{` sit two code points before their closers, `(` one */
+            blocks.len--;
+        }
+    }
+    for (Py_ssize_t depth = blocks.len - 1; depth >= 0; depth--) {
+        cbuf_putc(out, blocks.data[depth] == '(' ? ')' : blocks.data[depth] + 2);
+    }
+    cbuf_free(&blocks);
+}
+
+/* Render the at-rule at the cursor into out; returns 1 for a statement at-rule, 0 for one with a block. */
+static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
     if (cur->index == cur->media_at) {
         /* out is the caller's fresh piece buffer, so it can take over the prelude css_media_continues rendered */
         *out = cur->media_next;
@@ -484,7 +514,7 @@ static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
         cur->index = cur->media_body;
         css_parse_rules(pool, cur, 0, 0, 1, out);
         cbuf_putc(out, '}');
-        return;
+        return 0;
     }
     css_token *name_token = &cur->vec->items[cur->index];
     const css_char *name = name_token->text;
@@ -518,7 +548,7 @@ static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
             css_free(decls.items);
         }
         cbuf_putc(out, '}');
-        return;
+        return 0;
     }
     if (token && token->delim == ';') {
         cur->index++;
@@ -527,6 +557,10 @@ static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
         cbuf_putc(out, css_lower(name[pos]));
     }
     css_at_prelude(pool, cur->vec, prelude_start, prelude_end, allow_url_string, out);
+    if (token == NULL) {
+        css_close_prelude_blocks(cur->vec, prelude_start, prelude_end, out);
+    }
+    return 1;
 }
 
 /* Whether the item at index opens with a custom property name and a colon, which CSS Syntax 3 §5.5.5 makes a
@@ -627,9 +661,11 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
 
 /* A top-level node collected before serialization, so adjacent qualified rules can be merged. is_rule holds a
    selector + rendered body (no braces); otherwise it is opaque text (an at-rule, a bang comment, or stray recovery
-   text), which breaks rule adjacency. at_statement marks an at-statement that needs a ';' before the next node. */
+   text), which breaks rule adjacency. at_statement marks an at-statement that needs a ';' before the next node, and
+   stray marks recovered stray text. */
 typedef struct {
     int is_rule;
+    int stray; /* fills the padding after is_rule, keeping the item at 64 bytes */
     Py_ssize_t sel_off;
     Py_ssize_t sel_len;
     Py_ssize_t body_off;
@@ -647,7 +683,9 @@ typedef struct {
     int failed;
 } rule_vec;
 
-static void rule_vec_push(rule_vec *vec, rule_item item) {
+/* Inlined into css_parse_rules, its only caller: out of line, passing the 64-byte item by value costs more than the
+   push. */
+static CSS_FORCEINLINE void rule_vec_push(rule_vec *vec, rule_item item) {
     if (vec->len == vec->cap) {
         size_t cap;
         size_t bytes;
@@ -773,6 +811,7 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
     }
     item->text_off = pool_run(pool, text.data, text.len);
     item->text_len = text.len;
+    item->stray = 1;
     cbuf_free(&text);
 }
 
@@ -1380,6 +1419,18 @@ static int css_media_continues(cursor *cur, css_buf *pool, css_buf *out) {
     return 0;
 }
 
+/* Whether stray text comes before a rule list's last item. Top-level stray text reads on through the bang comments and
+   at-statements after it when reparsed, and a block after it is dropped with it, so only those can follow it and a
+   last at-statement there is not an at-rule. Kept out of line: only a sheet ending in an at-statement reaches it. */
+CSS_NOINLINE static int css_follows_stray(const rule_vec *items) {
+    for (Py_ssize_t index = items->len - 2; index >= 0; index--) {
+        if (items->items[index].stray) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Parse a rule list, collecting nodes so adjacent rules can be merged, then serialize. At the top level, declarations
    between rules are stray text; nested (inside an at-block) a '}' ends the list. */
 static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, int media, css_buf *out) {
@@ -1419,14 +1470,13 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
         }
         if (token->kind == CSS_AT) {
             css_buf piece = {NULL, 0, 0, 0};
-            css_parse_at(pool, cur, &piece);
+            int at_statement = css_parse_at(pool, cur, &piece);
             /* css_parse_at always emits at least the lowercased at-rule name, so piece is never empty */
             if (!css_is_empty_conditional_atrule(piece.data, piece.len)) {
                 rule_item item = {0};
                 item.text_off = pool_run(pool, piece.data, piece.len);
                 item.text_len = piece.len;
-                /* an at-statement produced no block: detect by the absence of a closing '}' */
-                item.at_statement = piece.data[piece.len - 1] != '}';
+                item.at_statement = at_statement;
                 rule_vec_push(&items, item);
             }
             cbuf_free(&piece);
@@ -1458,6 +1508,11 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
             cbuf_put_run(out, pool->data + item->text_off, item->text_len);
             prev_at_statement = item->at_statement;
         }
+    }
+    if (prev_at_statement && top && !css_follows_stray(&items)) {
+        /* a stylesheet ending in a statement at-rule keeps its `;`: once another sheet is appended, consume an at-rule
+           (CSS Syntax 3 §5.5.2) would otherwise read on into the next rule and take its block */
+        cbuf_putc(out, ';');
     }
     css_free(items.items);
     css_nesting_leave(cur->vec);
