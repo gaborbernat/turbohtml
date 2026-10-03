@@ -968,6 +968,58 @@ def test_minify_css_closes_token_open_at_eof_is_a_fixed_point(source: str, expec
     assert minify_css(minify_css(source)) == expected
 
 
+# a custom property's value is any token sequence, {} blocks included (CSS Variables 1 §2), so a `{` after `--name:`
+# opens a block in the value instead of a nested rule (CSS Syntax 3 §5.5.5), closed at the end of input (§5.5.9)
+_CUSTOM_PROPERTY_BLOCK: Final[list[ParameterSet]] = [
+    pytest.param("a{--d:{1}}", "a{--d:{1}}", id="number"),
+    pytest.param("a{--d:{a b}}", "a{--d:{a b}}", id="idents"),
+    pytest.param("a{--d:{color:red}}", "a{--d:{color:red}}", id="declaration"),
+    pytest.param("a{--d:x{1}y}", "a{--d:x{1}y}", id="between-tokens"),
+    pytest.param("a{--d:{;}}", "a{--d:{;}}", id="semicolon-inside"),
+    pytest.param("a{--d:{1};color:red}", "a{--d:{1};color:red}", id="declaration-after"),
+    pytest.param("a{--d: { a  b } }", "a{--d:{ a b }}", id="whitespace-collapsed"),
+    pytest.param("a{--d :{1}}", "a{--d:{1}}", id="space-before-colon"),
+    pytest.param("a{--d/**/:{1}}", "a{--d/**/:{1}}", id="comment-before-colon"),
+    pytest.param("a{\\2d-d:{1}}", "a{\\2d-d:{1}}", id="escaped-name"),
+    pytest.param("a{--d:hover{color:red}}", "a{--d:hover{color:red}}", id="reads-like-nested-rule"),
+    pytest.param("a{--d x{color:red}}", "a{--d x{color:red}}", id="no-colon-nested-rule"),
+    pytest.param("a{-d:{c d}}", "a{-d:{}}", id="standard-property-nested-rule"),
+    pytest.param("a{--d:{1", "a{--d:{1}}", id="open-at-eof"),
+    pytest.param("a{--d:{{1", "a{--d:{{1}}}", id="nested-open-at-eof"),
+    pytest.param("a{--d:{(1)[2]}", "a{--d:{(1)[2]}}", id="closed-blocks-at-eof"),
+    pytest.param("a{--d:{1!important", "a{--d:{1!important}}", id="important-inside-open-block"),
+    pytest.param("a{--d:{1} ! important", "a{--d:{1}!important}", id="important-after-closed-block"),
+    pytest.param("a{--d:(1) ! important", "a{--d:(1)!important}", id="important-after-closed-paren"),
+    pytest.param("a{--d:[1] ! important", "a{--d:[1]!important}", id="important-after-closed-bracket"),
+    pytest.param("a{--d:{(1)!important", "a{--d:{(1)!important}}", id="important-after-paren-in-open-block"),
+    pytest.param("a{--d:{[1]!important", "a{--d:{[1]!important}}", id="important-after-bracket-in-open-block"),
+    pytest.param("a{--d:){1!important", "a{--d:){1!important}}", id="important-in-open-block-after-stray-close"),
+    pytest.param("a{--d:){1", "a{--d:){1}}", id="stray-close-then-open-at-eof"),
+]
+
+
+@pytest.mark.parametrize(("source", "expected"), _CUSTOM_PROPERTY_BLOCK)
+def test_minify_css_custom_property_block(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(("source", "expected"), _CUSTOM_PROPERTY_BLOCK)
+def test_minify_css_custom_property_block_is_a_fixed_point(source: str, expected: str) -> None:
+    assert minify_css(minify_css(source)) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("--d:{1}", "--d:{1}", id="block"),
+        pytest.param("--d:{1", "--d:{1}", id="open-at-eof"),
+        pytest.param("--d:{1!important", "--d:{1!important}", id="important-inside-open-block"),
+    ],
+)
+def test_minify_css_inline_custom_property_block(source: str, expected: str) -> None:
+    assert minify_css_inline(source) == expected
+
+
 _STRING_CUT_BY_NEWLINE: Final[list[ParameterSet]] = [
     pytest.param('a{e:"\n}', 'a{e:""}', id="lone-quote"),
     pytest.param('a{e:f("\n)}', 'a{e:f("")}', id="lone-quote-in-function"),

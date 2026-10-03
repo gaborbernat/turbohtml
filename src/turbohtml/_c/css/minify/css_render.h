@@ -25,11 +25,34 @@ static void css_collect_open_blocks(token_vec *vec, Py_ssize_t start, Py_ssize_t
     }
 }
 
-/* Whether a declaration's tokens [start, end) that run to the end of the input leave a `(` or `[` open. Kept out of
-   line: only the last declaration of an unterminated stylesheet reaches it. */
+/* Collect into blocks the blocks tokens [start, end) of a value or at-rule prelude leave open, innermost last, reading
+   functions as plain delimiters. Tokens holding a `{` are read as css_read_until reads them, each closer ending the
+   innermost block of any kind: a `}` at depth 0 ends the run, so a `}` written for a `{` that a `)` already closed
+   there would end it early. */
+static void css_collect_raw_blocks(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *blocks) {
+    Py_ssize_t first_brace = start;
+    while (first_brace < end && vec->items[first_brace].delim != '{') {
+        first_brace++;
+    }
+    if (first_brace == end) {
+        css_collect_open_blocks(vec, start, end, 0, blocks);
+        return;
+    }
+    for (Py_ssize_t index = start; index < end; index++) {
+        css_char delim = vec->items[index].delim;
+        if (delim == '(' || delim == '[' || delim == '{') {
+            cbuf_putc(blocks, delim);
+        } else if ((delim == ')' || delim == ']' || delim == '}') && blocks->len > 0) {
+            blocks->len--;
+        }
+    }
+}
+
+/* Whether a declaration's tokens [start, end) that run to the end of the input leave a block open. Kept out of line:
+   only the last declaration of an unterminated stylesheet reaches it. */
 CSS_NOINLINE static int css_leaves_block_open(token_vec *vec, Py_ssize_t start, Py_ssize_t end) {
     css_buf blocks = {NULL, 0, 0, 0};
-    css_collect_open_blocks(vec, start, end, 0, &blocks);
+    css_collect_raw_blocks(vec, start, end, &blocks);
     int open = blocks.len > 0;
     cbuf_free(&blocks);
     return open;
@@ -56,9 +79,10 @@ CSS_NOINLINE static void css_close_bare_blocks(css_buf *pool, token_vec *vec, Py
    plain delimiter. Kept out of line: only a value that runs to the end of the input reaches it. */
 CSS_NOINLINE static void css_close_raw_blocks(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *out) {
     css_buf blocks = {NULL, 0, 0, 0};
-    css_collect_open_blocks(vec, start, end, 0, &blocks);
+    css_collect_raw_blocks(vec, start, end, &blocks);
     for (Py_ssize_t depth = blocks.len - 1; depth >= 0; depth--) {
-        cbuf_putc(out, blocks.data[depth] == '(' ? ')' : ']');
+        /* `]` and `}` sit two code points past their openers, `)` one */
+        cbuf_putc(out, blocks.data[depth] == '(' ? ')' : blocks.data[depth] + 2);
     }
     cbuf_free(&blocks);
 }
