@@ -24,6 +24,7 @@ import pytest
 
 import turbohtml
 from turbohtml import Document, Element, Text, XPath, XPathString, parse, parse_xml
+from turbohtml.convert import css_to_xpath
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -83,6 +84,23 @@ def test_descendant_name(doc: turbohtml.Node) -> None:
 
 def test_descendant_wildcard_is_elements_only(doc: turbohtml.Node) -> None:
     assert tags(doc.xpath("//div/*")) == ["p", "p", "span", "span"]
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        pytest.param("//* or 1", id="descendant-star-or"),
+        pytest.param("(* or 1)", id="grouped-star-or"),
+    ],
+)
+def test_operator_after_star_name_test_evaluates(doc: turbohtml.Node, expr: str) -> None:
+    # a '*' name test followed by or/and/div/mod is a boolean/arithmetic operator, not a syntax error
+    assert doc.xpath(expr) is True
+
+
+def test_css_has_translation_evaluates(doc: turbohtml.Node) -> None:
+    # css_to_xpath emits "descendant::* or descendant::p", which xpath must accept
+    assert tags(doc.xpath(css_to_xpath(":has(*, p)"))) == tags(doc.select(":has(*, p)"))
 
 
 def test_absolute_path(doc: turbohtml.Node) -> None:

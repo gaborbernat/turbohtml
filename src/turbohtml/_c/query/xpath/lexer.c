@@ -229,5 +229,8 @@ void lex_next(lexer *lx) {
             break;
         }
     }
-    lx->op_context = xp_op_follows(lx->kind);
+    /* A '*' is a NameTest in value position and a MultiplyOperator in operator position
+       (XPath 1.0 lexical structure). After a NameTest the next token is an operator, so
+       the following or/and/div/mod is an OperatorName; after a multiply it is a value. */
+    lx->op_context = lx->kind == TK_STAR ? !prev_op : xp_op_follows(lx->kind);
 }
