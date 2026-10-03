@@ -216,6 +216,18 @@ parse = _html._xpath_parse
         # the operator-name disambiguation: a leading 'and' is a name test, not an operator
         pytest.param("//and", "(path abs (step descendant name 'and'))", id="and-as-name"),
         pytest.param("div/mod", "(path rel (step child name 'div') (step child name 'mod'))", id="opnames-as-names"),
+        # a '*' name test is value position, so a following or/and/div/mod is an operator
+        pytest.param("//* or 1", "(or (path abs (step descendant *)) (num 1))", id="star-then-or"),
+        pytest.param("* and 1", "(and (path rel (step child *)) (num 1))", id="star-then-and"),
+        pytest.param("* div 1", "(div (path rel (step child *)) (num 1))", id="star-then-div"),
+        pytest.param("* mod 1", "(mod (path rel (step child *)) (num 1))", id="star-then-mod"),
+        # a '*' in operator position stays a multiply operator
+        pytest.param("3 * 4", "(* (num 3) (num 4))", id="number-times-number"),
+        pytest.param(
+            "a * b",
+            "(* (path rel (step child name 'a')) (path rel (step child name 'b')))",
+            id="name-times-name",
+        ),
         # name character classes
         pytest.param("DIV", "(path rel (step child name 'DIV'))", id="uppercase-name"),
         pytest.param("_x", "(path rel (step child name '_x'))", id="underscore-name"),
