@@ -347,3 +347,8 @@ def test_matcher_filter_long_runs_out_of_order(html: str, expected: list[str | N
 def test_select_descendant_retries_ancestor_sibling(selector: str, expected: list[str | None]) -> None:
     document: Final = parse("<div><b class=x></b><b class=y><div class=y><i id=deep></i></div></b></div>")
     assert _ids(document.select(selector)) == expected
+
+
+def test_select_sibling_alternatives_preserve_match() -> None:
+    document: Final = parse("<section class=x></section><div><b></b><b></b><a class=x></a><b id=hit></b></div>")
+    assert _ids(document.select(".x ~ b, .y ~ b")) == ["hit"]
