@@ -134,10 +134,14 @@ typedef struct {
     size_t mask; /* capacity - 1 (capacity a power of two); 0 while slots == NULL */
     size_t count;
     int failed; /* an allocation failed while growing: fall back to the direct walk */
+} sel_memo;
+
+typedef struct {
+    sel_memo table;
     /* A query in document order reaches the node the last walk started from before any
        entry of the table, so the sibling walks stop there. */
     sel_sibling_record last_walks[SEL_SIBLING_RECORDS];
-} sel_memo;
+} sel_sibling_memo;
 
 typedef struct {
     th_node *node;
@@ -161,7 +165,7 @@ typedef struct {
     sel_memo *has_memo;
     sel_nth_memo *nth_memo;
     sel_default_memo *default_memo;
-    sel_memo *sibling_memo;
+    sel_sibling_memo *sibling_memo;
 } sel_ctx;
 
 typedef struct {
