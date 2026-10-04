@@ -178,10 +178,11 @@ static int append_selected(PyObject *out, module_state *state, PyObject *handle,
     int error = 0;
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
-    sel_memo memo = {0};
+    sel_sibling_memo memo = {0};
     HandleObject *handle_obj = (HandleObject *)handle;
-    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo : NULL, &nth_memo,
-                   &default_memo,  &memo};
+    sel_ctx ctx = {
+        compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
+        &default_memo,  &memo};
     if (selector_use_index(handle_obj, origin, compiled)) {
         Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
         for (Py_ssize_t pos = handle_obj->index_offsets[compiled->subject_atom]; pos < end; pos++) {
@@ -211,7 +212,7 @@ static int append_selected(PyObject *out, module_state *state, PyObject *handle,
             }
         }
     }
-    sel_memo_free(&memo);
+    sel_memo_free(&memo.table);
     if (error) { /* GCOVR_EXCL_START: append_wrapped failed to allocate */
         return -1;
     } /* GCOVR_EXCL_STOP */
@@ -336,8 +337,8 @@ PyObject *turbohtml_matches_many(PyObject *module, PyObject *args) {
             moved = 1;
         } else {
             /* each candidate is its own :scope, so the sibling memo serves only a selector without one */
-            sel_memo sibling_memo = {0};
-            sel_memo *memo = selector_uses_scope(compiled) ? NULL : &sibling_memo;
+            sel_sibling_memo sibling_memo = {0};
+            sel_sibling_memo *memo = selector_uses_scope(compiled) ? NULL : &sibling_memo;
             for (; index < count; index++) {
                 item = PyList_GET_ITEM(nodes, index);
                 if (!Py_IS_TYPE(item, (PyTypeObject *)state->element_type)) {
@@ -354,7 +355,7 @@ PyObject *turbohtml_matches_many(PyObject *module, PyObject *args) {
                 results[index] = (unsigned char)matched;
                 matched_count += matched;
             }
-            sel_memo_free(&sibling_memo);
+            sel_memo_free(&sibling_memo.table);
         }
         Py_END_CRITICAL_SECTION();
         Py_DECREF(handle);
@@ -684,7 +685,7 @@ retry:;
     int moved = 0;
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
-    sel_memo memo = {0};               /* shared across the walk so :has() and ~ memoize their scans */
+    sel_sibling_memo memo = {0};       /* shared across the walk so :has() and ~ memoize their scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock around the walk */
     HandleObject *handle_obj = (HandleObject *)handle;
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, handle_obj, arg);
@@ -696,7 +697,7 @@ retry:;
         th_node *origin = ((NodeObject *)self)->node;
         const sel_simple *single = sel_single_simple(compiled);
         sel_ctx ctx = {
-            compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo : NULL, &nth_memo,
+            compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
             &default_memo,  &memo};
         if (selector_use_index(handle_obj, origin, compiled)) {
             Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
@@ -724,7 +725,7 @@ retry:;
     if (moved) {
         goto retry;
     }
-    sel_memo_free(&memo);
+    sel_memo_free(&memo.table);
     if (error) {
         return NULL;
     }
@@ -2332,7 +2333,7 @@ retry:;
     int moved = 0;
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
-    sel_memo memo = {0};               /* shared across the walk so :has() and ~ memoize their scans */
+    sel_sibling_memo memo = {0};       /* shared across the walk so :has() and ~ memoize their scans */
     Py_BEGIN_CRITICAL_SECTION(handle); /* per-tree lock: match and edit must see one stable tree */
     sel_compiled *compiled = cached_compile(state_of(self)->selector_error, (HandleObject *)handle, arg);
     if (compiled == NULL) {
@@ -2347,7 +2348,7 @@ retry:;
            pass 2 edit in pure C without dereferencing a stale pointer. */
         const sel_simple *single = sel_single_simple(compiled);
         sel_ctx ctx = {
-            compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo : NULL, &nth_memo,
+            compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
             &default_memo,  &memo};
         for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
             if (node->type != TH_NODE_ELEMENT) {
@@ -2401,7 +2402,7 @@ retry:;
     if (moved) {
         goto retry;
     }
-    sel_memo_free(&memo);
+    sel_memo_free(&memo.table);
     PyMem_Free(keep);
     PyMem_Free(ancestors.entries);
     if (error) {
@@ -2448,9 +2449,10 @@ static int snapshot_matches(sel_compiled *compiled, th_node *origin, node_snapsh
     const sel_simple *single = sel_single_simple(compiled);
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
-    sel_memo memo = {0}; /* shared across the walk so :has() and ~ memoize their scans */
-    sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo : NULL, &nth_memo,
-                   &default_memo,  &memo};
+    sel_sibling_memo memo = {0}; /* shared across the walk so :has() and ~ memoize their scans */
+    sel_ctx ctx = {
+        compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
+        &default_memo,  &memo};
     int result = 0;
     for (th_node *node = origin->first_child; node != NULL; node = preorder_next(node, origin)) {
         if (node->type != TH_NODE_ELEMENT) {
@@ -2464,7 +2466,7 @@ static int snapshot_matches(sel_compiled *compiled, th_node *origin, node_snapsh
             break;                               /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
-    sel_memo_free(&memo);
+    sel_memo_free(&memo.table);
     return result;
 }
 
