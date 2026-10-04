@@ -2037,6 +2037,35 @@ enum sel_status {
    so the sibling runs of ordinary markup never pay for a hash probe. */
 #define SEL_SIBLING_MEMO_MIN_RUN 32
 
+static enum sel_status sel_match_anchor(th_node *node, const sel_compound *compound, th_node *anchor) {
+    /* an explicit :scope in the leftmost compound already matched the anchor (the
+       scope was rebound to it), so it pins the compound to the anchor: :has(:scope >
+       p) equals :has(> p), and the leading combinator adds nothing (issue #431) */
+    if (sel_compound_has_scope(compound)) {
+        return SEL_MATCHES;
+    }
+    switch (compound->combinator) {
+    case '>':
+        return node->parent == anchor;
+    case '+':
+        return sel_prev_element(node) == anchor;
+    case '~':
+        for (th_node *prev = sel_prev_element(node); prev != NULL; prev = sel_prev_element(prev)) {
+            if (prev == anchor) {
+                return SEL_MATCHES;
+            }
+        }
+        return SEL_FAILS_LOCALLY;
+    default: /* descendant */
+        for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
+            if (ancestor == anchor) {
+                return SEL_MATCHES;
+            }
+        }
+        return SEL_FAILS_LOCALLY;
+    }
+}
+
 static enum sel_status sel_match_left(th_node *node, const sel_complex *complex, int index, th_node *anchor,
                                       const sel_ctx *ctx);
 
@@ -2046,8 +2075,8 @@ static enum sel_status sel_match_left(th_node *node, const sel_complex *complex,
    walks. */
 static inline enum sel_status sel_match_from(th_node *node, const sel_complex *complex, int index, th_node *anchor,
                                              const sel_ctx *ctx) {
-    if (index == 0 && anchor == NULL) {
-        return SEL_MATCHES;
+    if (index == 0) {
+        return anchor == NULL ? SEL_MATCHES : sel_match_anchor(node, &complex->compounds[0], anchor);
     }
     return sel_match_left(node, complex, index, anchor, ctx);
 }
@@ -2116,41 +2145,10 @@ static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_comple
     return sel_match_sibling_walk(node, complex, index, anchor, ctx, 0);
 }
 
-/* The combinator walks behind sel_match_from, with backtracking on the descendant and
-   general-sibling axes. anchor is NULL for an ordinary selector; for a :has() relative
-   selector it is the element :has() tests, and the leftmost compound's leading
-   combinator must connect to it, so the :has() callers enter here directly. The
-   interior-combinator machinery is shared by both. */
+/* Leftmost relative compounds connect to their anchor separately, keeping them out
+   of the interior-combinator frame. */
 static enum sel_status sel_match_left(th_node *node, const sel_complex *complex, int index, th_node *anchor,
                                       const sel_ctx *ctx) {
-    if (index == 0) {
-        /* an explicit :scope in the leftmost compound already matched the anchor (the
-           scope was rebound to it), so it pins the compound to the anchor: :has(:scope >
-           p) equals :has(> p), and the leading combinator adds nothing (issue #431) */
-        if (sel_compound_has_scope(&complex->compounds[0])) {
-            return SEL_MATCHES;
-        }
-        switch (complex->compounds[0].combinator) {
-        case '>':
-            return node->parent == anchor;
-        case '+':
-            return sel_prev_element(node) == anchor;
-        case '~':
-            for (th_node *prev = sel_prev_element(node); prev != NULL; prev = sel_prev_element(prev)) {
-                if (prev == anchor) {
-                    return SEL_MATCHES;
-                }
-            }
-            return SEL_FAILS_LOCALLY;
-        default: /* descendant */
-            for (th_node *ancestor = node->parent; ancestor != NULL; ancestor = ancestor->parent) {
-                if (ancestor == anchor) {
-                    return SEL_MATCHES;
-                }
-            }
-            return SEL_FAILS_LOCALLY;
-        }
-    }
     const sel_compound *target = &complex->compounds[index - 1];
     uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
     switch (complex->compounds[index].combinator) {
@@ -2442,7 +2440,7 @@ static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, t
     th_node *current = sel_first_element_child(node);
     while (current != NULL) {
         if (sel_match_compound(current, &rel->compounds[subject], ctx) &&
-            sel_match_left(current, rel, subject, anchor, ctx) == SEL_MATCHES) {
+            sel_match_from(current, rel, subject, anchor, ctx) == SEL_MATCHES) {
             return 1;
         }
         th_node *child = sel_first_element_child(current);
@@ -2584,7 +2582,7 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
                 continue;
             }
             if ((sel_match_compound(sibling, &rel->compounds[subject], &scoped) &&
-                 sel_match_left(sibling, rel, subject, anchor, &scoped) == SEL_MATCHES) ||
+                 sel_match_from(sibling, rel, subject, anchor, &scoped) == SEL_MATCHES) ||
                 sel_has_subtree(sibling, rel, subject, anchor, &scoped)) {
                 return 1;
             }
