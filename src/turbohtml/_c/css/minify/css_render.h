@@ -164,15 +164,14 @@ static void css_assemble(css_buf *pool, comp_vec *comps, css_buf *out) {
         css_comp *comp = &comps->items[index];
         if (index > 0) {
             css_comp *prev = &comps->items[index - 1];
-            int starts_paren = pool->data[comp->off] == '('; /* every assembled comp has len >= 1 */
+            const css_char *text = pool->data + comp->off;
+            int starts_paren = text[0] == '('; /* every assembled comp has len >= 1 */
             /* inside an HTML <style>, a joined `</` would start the `</style` end tag */
-            int opens_end_tag = pool->data[prev->off + prev->len - 1] == '<' && pool->data[comp->off] == '/';
+            int opens_end_tag = pool->data[prev->off + prev->len - 1] == '<' && text[0] == '/';
             int glued = !opens_end_tag && (comp->isfunc == 2 || prev->isfunc == 1 || prev->isfunc == 2 ||
                                            starts_paren || comp->kind == CK_DELIM || prev->kind == CK_DELIM);
-            /* the position normalizer labels a length CK_NUM as well, so prev is read back as one number token */
-            int negative_after_number = pool->data[comp->off] == '-' && prev->kind == CK_NUM &&
-                                        css_starts_number(pool->data + comp->off, 0, comp->len) &&
-                                        css_scan_number(pool->data + prev->off, 0, prev->len) == prev->len;
+            int negative_after_number =
+                prev->kind == CK_NUM && comp->len > 1 && text[0] == '-' && (css_is_digit(text[1]) || text[1] == '.');
             if (!negative_after_number &&
                 (!glued || css_would_merge(pool->data[prev->off + prev->len - 1], prev->kind == CK_IDENT,
                                            pool->data + comp->off, comp->len))) {

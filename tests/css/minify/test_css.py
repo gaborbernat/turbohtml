@@ -557,6 +557,10 @@ def test_minify_css_decoded_name_is_a_fixed_point(source: str, expected: str) ->
 
 
 _NEGATIVE_AFTER_NUMBER: Final[list[ParameterSet]] = [
+    pytest.param("a{e:1e-128 -1e-128}", "a{e:1e-128-1e-128}", id="signed-exponent-boundaries"),
+    pytest.param("a{e:1 -.}", "a{e:1 -.}", id="bare-minus-dot"),
+    pytest.param("a{e:1 -.x}", "a{e:1 -.x}", id="minus-dot-before-ident"),
+    pytest.param("a{background-position:1 -f(x)}", "a{background-position:1 -f(x)}", id="negative-function-name"),
     pytest.param("a{e:1 -1}", "a{e:1-1}", id="number"),
     pytest.param("a{e:1 -.5}", "a{e:1-.5}", id="fraction"),
     pytest.param("a{e:1e3 -1}", "a{e:1000-1}", id="after-exponent"),
