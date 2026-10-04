@@ -470,6 +470,9 @@ def test_minify_css_escaped_space_kept(source: str, expected: str) -> None:
 
 
 _ESCAPED_NAME: Final[list[ParameterSet]] = [
+    pytest.param("a{e:\\7b x}", "a{e:\\{x}", id="leading-brace"),
+    pytest.param("a{e:\\fec0}", "a{e:\ufec0}", id="non-bom-final-byte"),
+    pytest.param("a{e:1E3p\\78}", "a{e:1e3px}", id="uppercase-exponent-unit"),
     pytest.param("a{e:x\\\ry}", "a{e:x\\\ry}", id="escaped-carriage-return"),
     pytest.param("a{e:x\\\fy}", "a{e:x\\\fy}", id="escaped-form-feed"),
     pytest.param("a{e:\\61\rb}", "a{e:ab}", id="escape-terminated-by-carriage-return"),
