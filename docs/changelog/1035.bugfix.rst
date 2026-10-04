@@ -1,0 +1,1 @@
+:func:`~turbohtml.clean.minify_js` no longer drops a declaration whose binding is still read.

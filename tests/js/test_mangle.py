@@ -77,6 +77,61 @@ def test_renames(source: str, expected: str) -> None:
     assert minify_js(source) == expected
 
 
+@pytest.mark.parametrize(
+    ("source", "options", "expected"),
+    [
+        pytest.param(
+            "!function(){var x=i;const y=5;x,y}",
+            JSMinify(mangle=True, fold=False),
+            "!function(){var a=i;5}",
+            id="sequence-drops-earlier-read",
+        ),
+        pytest.param(
+            "function f(){var x=i;const y=5;return x,y}",
+            JSMinify(mangle=True, fold=False),
+            "function f(){var a=i;return 5}",
+            id="return-sequence",
+        ),
+        pytest.param(
+            "function f(){var p=1;const y=5;p,y}",
+            JSMinify(mangle=True, fold=False),
+            "function f(){5}",
+            id="dropped-local-read",
+        ),
+        # fold first merges `0;$` into the sequence `0,$`, which the mangler then collapses
+        pytest.param("{let $=1;0;$}", JSMinify(mangle=True, fold=True), "1", id="pure-statement-merged-then-collapsed"),
+        pytest.param("{let $=1;/a/;$}", JSMinify(mangle=True, fold=True), "1", id="regex-statement-dropped"),
+        pytest.param(
+            "function f(){const y=5;var x;return 0,x=y}",
+            JSMinify(mangle=True, fold=False),
+            "function f(){return 5}",
+            id="dead-store-value",
+        ),
+        pytest.param(
+            "function f(){const y=5;var t;return t=y,t}",
+            JSMinify(mangle=True, fold=False),
+            "function f(){return 5}",
+            id="assign-then-read",
+        ),
+        pytest.param(
+            "function f(){const t=5;var s=t;return s}",
+            JSMinify(mangle=True, fold=False),
+            "function f(){return 5}",
+            id="inlined-initializer",
+        ),
+        pytest.param(
+            "function g(){function f(){return 1}return 0,f}",
+            JSMinify(mangle=True, fold=False),
+            "function g(){return function(){return 1}}",
+            id="function-declaration",
+        ),
+    ],
+)
+def test_binding_read_that_moved_survives(source: str, options: JSMinify, expected: str) -> None:
+    # a rewrite that moves a read must not leave the mangler inlining a binding at the read's old node (#1035)
+    assert minify_js(source, options) == expected
+
+
 def _run(code: str) -> str:
     assert _NODE is not None  # the callers are skipped when node is unavailable
     # the first node start on a cold Windows runner has taken over a minute on its own; the timeout
@@ -155,6 +210,15 @@ def _run(code: str) -> str:
         pytest.param(
             "(function(){" + "".join(f"L{depth}:" for depth in range(53)) + "for(;;){break L0}})();console.log('ok')",
             id="label-depth-cap",
+        ),
+        # a binding read after a dropped pure sequence element keeps its value, not an outer name (#1035)
+        pytest.param(
+            "var i=7;console.log((function(){var x=i;const y=5;return x,y})())",
+            id="read-survives-sequence-collapse",
+        ),
+        pytest.param(
+            "var t=7;console.log((function(){const t=5;var s=t;return s})())",
+            id="read-survives-inlined-initializer",
         ),
     ],
 )
