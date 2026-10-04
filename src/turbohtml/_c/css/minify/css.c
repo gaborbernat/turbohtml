@@ -140,6 +140,11 @@ static int css_spell_eof(const css_token *last, const css_char *view, Py_ssize_t
 static css_char *css_minify_spelled(token_vec *tokens, css_buf *spelled, int inline_mode, int baseline,
                                     Py_ssize_t *out_len) {
     css_free(tokens->items);
+    if (spelled->failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        cbuf_free(spelled); /* GCOVR_EXCL_LINE */
+        *out_len = 1;       /* GCOVR_EXCL_LINE */
+        return NULL;        /* GCOVR_EXCL_LINE */
+    }
     css_char *minified = th_minify_css_bytes(spelled->data, spelled->len, inline_mode, baseline, out_len);
     cbuf_free(spelled);
     return minified;
@@ -222,7 +227,7 @@ static void css_serialize_name(const css_char *name, Py_ssize_t len, int mode, i
     for (Py_ssize_t pos = 0; pos < len; pos++) {
         css_char byte = name[pos];
         uint32_t code_point = byte;
-        int byte_order_mark = byte == 0xEF && pos + 2 < len && name[pos + 1] == 0xBB && name[pos + 2] == 0xBF;
+        int byte_order_mark = byte == 0xEF && name[pos + 1] == 0xBB && name[pos + 2] == 0xBF;
         int hex = byte < 0x20 || byte == 0x7F || byte_order_mark || (pos == 0 && escape_first == 2) ||
                   (pos == 0 && escape_first && css_is_digit(byte));
         if (byte_order_mark) {
@@ -271,18 +276,26 @@ static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssi
             (token->kind == CSS_AT && decoded.len == 7 && memcmp(decoded.data, "charset", 7) == 0)) {
             continue;
         }
+        if (decoded.failed) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            spelled->failed = 1; /* GCOVR_EXCL_LINE */
+            break;               /* GCOVR_EXCL_LINE */
+        }
         int mode = token->kind == CSS_NUM ? CSS_SPELL_UNIT : starts_ident ? CSS_SPELL_IDENT : CSS_SPELL_HASH;
         int exponent = mode == CSS_SPELL_UNIT && (memchr(token->text, 'e', (size_t)token->text_len) != NULL ||
                                                   memchr(token->text, 'E', (size_t)token->text_len) != NULL);
         cbuf_put_run(spelled, view + copied, name - view - copied);
         Py_ssize_t written = spelled->len;
         css_serialize_name(decoded.data, decoded.len, mode, exponent, spelled);
+        if (spelled->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            break;             /* GCOVR_EXCL_LINE */
+        }
         changed |= spelled->len - written != name_len || memcmp(spelled->data + written, name, (size_t)name_len) != 0;
         copied = name - view + name_len;
     }
+    spelled->failed |= decoded.failed;
     cbuf_free(&decoded);
     cbuf_put_run(spelled, view + copied, length - copied);
-    return changed;
+    return changed || spelled->failed; /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
 }
 
 /* The tokenizer lowercases an end tag name, so `</STYLE` counts too; OR-ing 0x20 folds the ASCII letters and no other

@@ -470,6 +470,15 @@ def test_minify_css_escaped_space_kept(source: str, expected: str) -> None:
 
 
 _ESCAPED_NAME: Final[list[ParameterSet]] = [
+    pytest.param("a{e:x\\\ry}", "a{e:x\\\ry}", id="escaped-carriage-return"),
+    pytest.param("a{e:x\\\fy}", "a{e:x\\\fy}", id="escaped-form-feed"),
+    pytest.param("a{e:\\61\rb}", "a{e:ab}", id="escape-terminated-by-carriage-return"),
+    pytest.param("a{e:\\5fx}", "a{e:_x}", id="leading-underscore"),
+    pytest.param("a{e:-\\5f}", "a{e:-_}", id="hyphen-underscore"),
+    pytest.param("a{e:1\\65-}", "a{e:1e-}", id="unit-e-hyphen"),
+    pytest.param("a{e:\\61", "a{e:a}", id="escape-at-eof"),
+    pytest.param("a{e:\\61\r", "a{e:a}", id="escape-terminated-at-eof"),
+    pytest.param("@\\61 bcdefg;", "@abcdefg;", id="seven-letter-at-keyword"),
     pytest.param("a{colo\\r:red}", "a{color:red}", id="property"),
     pytest.param("a{e:\\72 ed}", "a{e:red}", id="value"),
     pytest.param("a{color:\\72 ed}", "a{color:red}", id="color-keyword"),
