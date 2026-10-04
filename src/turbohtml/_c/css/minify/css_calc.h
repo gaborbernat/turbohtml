@@ -502,7 +502,7 @@ CSS_NOINLINE static void css_refold_color(css_buf *pool, Py_ssize_t *out_off, Py
     /* the fold appends to the pool, so the tokens read a copy of the rendered call */
     css_buf call = {NULL, 0, 0, 0};
     cbuf_put_run(&call, pool->data + *out_off, *out_len);
-    token_vec tokens = {NULL, 0, 0, 0, 0};
+    token_vec tokens = {0};
     css_tokenize(call.data, call.len, &tokens);
     Py_ssize_t off;
     Py_ssize_t len;

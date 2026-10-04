@@ -1538,7 +1538,7 @@ CSS_NOINLINE static int css_join_media(const css_buf *pool, const rule_vec *item
 CSS_NOINLINE static void css_rejoin_media(css_buf *pool, cursor *cur, rule_vec *items, media_run *run) {
     cbuf_putc(&run->text, '}');
     /* the block parses where the first one did, so it inherits the rule list's depth */
-    token_vec tokens = {NULL, 0, 0, 0, cur->vec->depth};
+    token_vec tokens = {.depth = cur->vec->depth};
     css_tokenize(run->text.data, run->text.len, &tokens);
     cursor inner = {&tokens, 0, cur->baseline, -1, 0, {NULL, 0, 0, 0}};
     css_buf merged = {NULL, 0, 0, 0};
