@@ -114,10 +114,8 @@ static CSS_FORCEINLINE void css_render_components(css_buf *pool, token_vec *vec,
         if (token->kind == CSS_IDENT && index + 1 < end && vec->items[index + 1].kind == CSS_DELIM &&
             vec->items[index + 1].delim == '(') {
             Py_ssize_t close_index = css_match_paren(vec, index + 1, end);
-            int ends_paren;
-            css_emit_function(pool, vec, index, close_index, &comp.off, &comp.len, &ends_paren);
-            comp.isfunc = ends_paren ? 1 : 0;
-            comp.kind = ends_paren ? CK_FUNC : CK_IDENT;
+            css_emit_function(pool, vec, index, close_index, &comp.off, &comp.len, &comp.kind);
+            comp.isfunc = comp.kind == CK_FUNC;
             comp_vec_push(comps, comp);
             index = close_index + 1;
             continue;

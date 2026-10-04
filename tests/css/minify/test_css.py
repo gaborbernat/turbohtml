@@ -1108,6 +1108,50 @@ def test_minify_css_stray_top_token_is_a_fixed_point(source: str, expected: str)
     assert minify_css(minify_css(source)) == expected
 
 
+# A rewrite that a calc() or color fold enables applies in the same call: the color fold reads the folded arguments,
+# the shorthand handlers see a folded hex, number or dimension as such, and a comment (no token, CSS Syntax 3 §4.3.2)
+# does not hide a legacy pseudo-element.
+_ONE_CALL_REWRITE: Final[list[ParameterSet]] = [
+    pytest.param("a{color:rgb(calc(1),0,0)}", "a{color:#010000}", id="calc-in-rgb"),
+    pytest.param("a{color:hsl(calc(120),100%,50%)}", "a{color:#0f0}", id="calc-in-hsl"),
+    pytest.param("a{color:rgba(calc(255),0,0,calc(1))}", "a{color:red}", id="calc-in-alpha"),
+    pytest.param(
+        "a{background:linear-gradient(rgb(calc(1),0,0),red)}",
+        "a{background:linear-gradient(#010000,red)}",
+        id="calc-in-nested-color",
+    ),
+    pytest.param("a{color:rgb(calc(var(--a)),0,0)}", "a{color:rgb(calc(var(--a)),0,0)}", id="calc-kept-in-color"),
+    pytest.param("a{color:rgb(calc(1),0)}", "a{color:rgb(1,0)}", id="calc-in-color-of-no-shape"),
+    pytest.param("a{background:rgba(0,0,0,0) url(x)}", "a{background:url(x)}", id="folded-transparent"),
+    pytest.param("a{background:calc(2px) 50%/10px}", "a{background:2px/10px}", id="folded-length"),
+    pytest.param("a{box-shadow:calc(0px) 0 0 rgba(0,0,0,0)}", "a{box-shadow:0 0 #0000}", id="folded-zero"),
+    pytest.param("a{background-position:calc(0%) calc(0%)}", "a{background-position:0 0}", id="folded-percentage"),
+    pytest.param("a{font:calc(400) 1em x}", "a{font:1em x}", id="folded-number"),
+    pytest.param("a{background:rgb(255,0,0) 0 0}", "a{background:red}", id="folded-keyword"),
+    pytest.param("a{x:rgb(1,0,0) (y)}", "a{x:#010000(y)}", id="folded-hex-before-block"),
+    pytest.param("a{x:rgb(255,0,0) (y)}", "a{x:red (y)}", id="folded-keyword-before-block"),
+    pytest.param("a{background-position:calc(50%) calc(50%)}", "a{background-position:50%}", id="folded-dimension"),
+    pytest.param("a::/**/before{color:red}", "a:before{color:red}", id="comment-before-pseudo-element"),
+    pytest.param("a:/**/:before{color:red}", "a:before{color:red}", id="comment-between-colons"),
+    pytest.param("a:/**/:/**/first-letter{color:red}", "a:first-letter{color:red}", id="comments-around-colon"),
+    pytest.param("a::/**/selection{color:red}", "a::selection{color:red}", id="comment-before-modern-pseudo"),
+    pytest.param("a:/**/hover{color:red}", "a:hover{color:red}", id="comment-before-pseudo-class"),
+    pytest.param("a:/**/.b{color:red}", "a:.b{color:red}", id="comment-before-delimiter"),
+    pytest.param("a::{color:red}", "a::{color:red}", id="colons-without-name"),
+    pytest.param("a:/**/{color:red}", "a:{color:red}", id="colon-before-comment"),
+]
+
+
+@pytest.mark.parametrize(("source", "expected"), _ONE_CALL_REWRITE)
+def test_minify_css_one_call_rewrite(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(("source", "expected"), _ONE_CALL_REWRITE)
+def test_minify_css_one_call_rewrite_is_a_fixed_point(source: str, expected: str) -> None:
+    assert minify_css(minify_css(source)) == expected
+
+
 @pytest.mark.parametrize(
     "value",
     [
