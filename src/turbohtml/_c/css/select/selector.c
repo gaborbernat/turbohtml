@@ -2055,16 +2055,25 @@ static inline enum sel_status sel_match_from(th_node *node, const sel_complex *c
 static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_complex *complex, int index, th_node *anchor,
                                                  const sel_ctx *ctx) {
     const sel_compound *target = &complex->compounds[index - 1];
+    const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
+    th_node *nearest = sel_prev_element(node);
+    th_node *prev = nearest;
+    int walked = 0;
+    if (nearest != NULL && target_atom != TH_TAG_UNKNOWN && nearest->atom == target_atom) {
+        const enum sel_status left = sel_match_from(nearest, complex, index - 1, anchor, ctx);
+        if (left != SEL_FAILS_LOCALLY) {
+            return left;
+        }
+        prev = sel_prev_element(nearest);
+        walked = 1;
+    }
     sel_memo *memo = anchor == NULL ? ctx->sibling_memo : NULL;
     sel_sibling_record *last = memo != NULL ? &memo->last_walks[(unsigned)index % SEL_SIBLING_RECORDS] : NULL;
     if (last != NULL && last->node == node && last->key == target) {
         return (enum sel_status)last->status;
     }
-    const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
-    th_node *nearest = sel_prev_element(node);
     enum sel_status status = SEL_FAILS_ALL_SIBLINGS;
-    int walked = 0;
-    for (th_node *prev = nearest; prev != NULL; prev = sel_prev_element(prev), walked++) {
+    for (; prev != NULL; prev = sel_prev_element(prev), walked++) {
         int cached;
         if (memo != NULL && walked >= SEL_SIBLING_MEMO_MIN_RUN && sel_memo_get(memo, target, prev, &cached)) {
             status = cached ? SEL_MATCHES : SEL_FAILS_ALL_SIBLINGS;
