@@ -1309,7 +1309,7 @@ static int sel_sibling_index(th_node *node, int from_end, int of_type) {
 /* The 1-based position of node among its inclusive siblings that match the
    :nth-child(... of S) selector list (from the end when from_end), or 0 when node
    itself does not match S, so a non-matching element is never selected. */
-static int sel_nth_of_index(th_node *node, int from_end, const sel_simple *simple, const sel_ctx *ctx) {
+static TH_NOINLINE int sel_nth_of_index(th_node *node, int from_end, const sel_simple *simple, const sel_ctx *ctx) {
     int index = 1;
     for (th_node *sibling = from_end ? node->next_sibling : node->prev_sibling; sibling != NULL;
          sibling = from_end ? sibling->next_sibling : sibling->prev_sibling) {
