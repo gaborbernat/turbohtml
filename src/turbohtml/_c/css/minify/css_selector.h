@@ -275,18 +275,19 @@ static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start,
             !(end == vec->len && css_leaves_block_open(vec, value_start, bang))) {
             important = 1;
             value_end = bang;
+            if (!is_custom) {
+                last = bang - 1;
+                while (last >= value_start &&
+                       (vec->items[last].kind == CSS_WS || vec->items[last].kind == CSS_COMMENT)) {
+                    last--;
+                }
+            }
         }
     }
 
-    if (!is_custom) {
-        while (value_start < value_end &&
-               (vec->items[value_start].kind == CSS_WS || vec->items[value_start].kind == CSS_COMMENT)) {
-            value_start++;
-        }
-        if (value_start == value_end) {
-            pool->len = prop_off;
-            return 0;
-        }
+    if (!is_custom && last < value_start) {
+        pool->len = prop_off;
+        return 0;
     }
 
     css_buf value = {NULL, 0, 0, 0};
