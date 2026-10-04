@@ -1640,6 +1640,83 @@ def test_minify_output_is_a_fixed_point(stylesheet: str, inline: str) -> None:
             "@media screen{a{x:1}}/*!keep*/@media screen{b{x:2}}",
             id="media-comment-barrier",
         ),
+        pytest.param("@media a{x{y:z}}.a{}@media a{b{y:z}}", "@media a{x,b{y:z}}", id="media-merge-across-empty-rule"),
+        pytest.param(
+            "@media a{x{y:z}}{c:d}@media a{b{y:z}}", "@media a{x,b{y:z}}", id="media-merge-across-invalid-rule"
+        ),
+        pytest.param(
+            "@media a{x{y:z}}@media b{}@media a{b{y:z}}", "@media a{x,b{y:z}}", id="media-merge-across-empty-media"
+        ),
+        pytest.param(
+            "@media a{x{y:z}}@media b{.e{}}@media a{b{y:z}}",
+            "@media a{x,b{y:z}}",
+            id="media-merge-across-emptied-media",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}@supports (q:r){}@media a{b{y:z}}",
+            "@media a{x,b{y:z}}",
+            id="media-merge-across-empty-supports",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}@media a{x{q:r}}", "@media a{x{y:z;q:r}}", id="media-merge-across-empty-same-selector"
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}@media a{b{y:z}}.b{}@media a{c{y:z}}",
+            "@media a{x,b,c{y:z}}",
+            id="media-merge-chain-across-empty-rules",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}@media a{b{y:z}}@media c{d{y:z}}",
+            "@media a{x,b{y:z}}@media c{d{y:z}}",
+            id="media-merge-across-empty-rule-then-other-query",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}@media a{b{y:z}}@font-face{f:g}",
+            "@media a{x,b{y:z}}@font-face{f:g}",
+            id="media-merge-across-empty-rule-then-other-at-rule",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}@media a{b{y:z}}@media c{d{y:z}}.a{}@media c{f{y:z}}",
+            "@media a{x,b{y:z}}@media c{d,f{y:z}}",
+            id="media-merge-two-runs-across-empty-rules",
+        ),
+        pytest.param(
+            "@media a{@import b}.a{}@media a{@import c}",
+            "@media a{@import b;@import c}",
+            id="media-merge-across-empty-rule-after-at-statement",
+        ),
+        pytest.param(
+            "@supports (q:r){@media a{x{y:z}}.a{}@media a{b{y:z}}}",
+            "@supports(q:r){@media a{x,b{y:z}}}",
+            id="media-merge-across-empty-rule-nested",
+        ),
+        pytest.param("@media a{x{y:z}}.a{}@media a{}", "@media a{x{y:z}}", id="media-empty-twin-across-empty-rule"),
+        pytest.param(
+            "@media a{@media b{x{y:z}}}@media a{@media b{q{y:z}}}",
+            "@media a{@media b{x,q{y:z}}}",
+            id="media-merge-nested-twins-of-merged-blocks",
+        ),
+        pytest.param(".a{}@media a{x{y:z}}", "@media a{x{y:z}}", id="media-after-leading-empty-rule"),
+        pytest.param(
+            '@import "x";.a{}@media screen{a{x:1}}',
+            '@import"x";@media screen{a{x:1}}',
+            id="media-after-empty-rule-after-short-node",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}@media bb{y{y:z}}",
+            "@media a{x{y:z}}@media bb{y{y:z}}",
+            id="media-different-length-prelude-across-empty-rule",
+        ),
+        pytest.param(
+            "@media screen{a{x:1}}.a{}@media speech{b{x:2}}",
+            "@media screen{a{x:1}}@media speech{b{x:2}}",
+            id="media-equal-length-different-prelude-across-empty-rule",
+        ),
+        pytest.param(
+            "@media a{x{y:z}}.a{}/*!k*/@media a{b{y:z}}",
+            "@media a{x{y:z}}/*!k*/@media a{b{y:z}}",
+            id="media-comment-barrier-after-empty-rule",
+        ),
     ],
 )
 def test_minify_css_batch_merge_order(source: str, expected: str) -> None:
@@ -1655,6 +1732,7 @@ def test_minify_css_batch_merge_order(source: str, expected: str) -> None:
             id="same-selector",
         ),
         pytest.param("@media all{a{x:1}}@media all{b{x:1}}", "@media all{a,b{x:1}}", id="same-body"),
+        pytest.param("@media a{x{y:z}}.a{}@media a{b{y:z}}", "@media a{x,b{y:z}}", id="across-empty-rule"),
     ],
 )
 def test_minify_css_merged_media_is_a_fixed_point(source: str, expected: str) -> None:

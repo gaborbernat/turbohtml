@@ -1,0 +1,1 @@
+:func:`~turbohtml.clean.minify_css` merges same-query ``@media`` blocks separated by a rule it drops.
