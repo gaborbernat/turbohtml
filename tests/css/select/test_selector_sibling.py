@@ -105,6 +105,92 @@ def test_select_sibling_runs(selector: str, html: str, expected: list[str | None
     assert _ids(parse(html).select(selector)) == expected
 
 
+@pytest.mark.parametrize(
+    ("selector", "html", "expected"),
+    [
+        pytest.param("a ~ b", "<a></a><div><b id=b1></b><b id=b2></b></div>", [], id="left-tag-elsewhere"),
+        pytest.param(
+            "em ~ b, a ~ b",
+            "<div><a></a><b id=b1></b><b id=b2></b></div>",
+            ["b1", "b2"],
+            id="one-alternative-left-absent",
+        ),
+        pytest.param(
+            "em ~ b, a ~ b.y",
+            "<div><a></a><b class=y id=b1></b><b id=b2></b></div>",
+            ["b1"],
+            id="alternatives-keep-own-answers",
+        ),
+        pytest.param(
+            ".x ~ .y",
+            "<div><b class=y id=b1></b><b class='x y' id=b2></b><b class=y id=b3></b></div>",
+            ["b3"],
+            id="previous-candidate-is-left-match",
+        ),
+        pytest.param(
+            "a ~ b",
+            "<div><a></a><b id=o1><b id=i1></b><b id=i2></b></b><b id=o2></b></div>",
+            ["o1", "o2"],
+            id="nested-run-without-left",
+        ),
+        pytest.param(
+            "a ~ b",
+            "<div><b id=o1><a></a><b id=i1></b></b><b id=o2></b></div>",
+            ["i1"],
+            id="nested-run-with-left",
+        ),
+        pytest.param(
+            "a ~ b c",
+            "<div><b><c id=c1></c><c id=c2></c></b><a></a><b><c id=c3></c><c id=c4></c></b></div>",
+            ["c3", "c4"],
+            id="sibling-tested-per-descendant",
+        ),
+        pytest.param(
+            "a ~ b ~ i",
+            "<div><b></b><i id=i1></i><a></a><i id=i2></i><b></b><i id=i3></i><i id=i4></i></div>",
+            ["i3", "i4"],
+            id="chained-short-run",
+        ),
+        pytest.param(
+            ":is(a ~ b) > i",
+            "<div><b><i id=i1></i></b><a></a><b><i id=i2></i></b><b><i id=i3></i></b></div>",
+            ["i2", "i3"],
+            id="nested-selector",
+        ),
+    ],
+)
+def test_select_reuses_earlier_sibling_answer(selector: str, html: str, expected: list[str | None]) -> None:
+    assert _ids(parse(html).select(selector)) == expected
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param("<div><b id=b1></b><a></a><b id=b2></b></div>", ["b2"], id="left-present"),
+        pytest.param("<div><b id=b1></b><b id=b2></b></div>", [None], id="left-absent"),
+    ],
+)
+def test_select_one_left_tag(html: str, expected: list[str | None]) -> None:
+    assert _ids([parse(html).select_one("a ~ b")]) == expected
+
+
+def test_matcher_filter_out_of_document_order() -> None:
+    document = parse("<div><b class='x y' id=b1></b><b class=y id=b2></b></div>")
+    later, earlier = document.select_one("#b2"), document.select_one("#b1")
+    assert later is not None
+    assert earlier is not None
+    assert _ids(compile(".x ~ .y").filter([later, earlier])) == ["b2"]
+
+
+def test_select_after_inserting_left_tag() -> None:
+    document = parse("<div><b id=b1></b><b id=b2></b></div>")
+    before = _ids(document.select("a ~ b"))
+    first = document.select_one("#b1")
+    assert first is not None
+    first.insert_before(Element("a"))
+    assert (before, _ids(document.select("a ~ b"))) == ([], ["b1", "b2"])
+
+
 def test_select_descendant_of_general_sibling() -> None:
     document = parse(_siblings(("b", 40), ("a", 1), ("b", 40), filled=range(81)))
     assert _ids(document.select("a ~ b i")) == [f"c{index}" for index in range(41, 81)]
