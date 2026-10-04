@@ -2097,8 +2097,9 @@ static TH_NOINLINE enum sel_status sel_match_sibling_walk(th_node *node, const s
     th_node *nearest = sel_prev_element(node);
     th_node *prev = skip_nearest ? sel_prev_element(nearest) : nearest;
     int walked = skip_nearest;
-    sel_memo *memo = anchor == NULL ? ctx->sibling_memo : NULL;
-    sel_sibling_record *last = memo != NULL ? &memo->last_walks[(unsigned)index % SEL_SIBLING_RECORDS] : NULL;
+    sel_sibling_memo *siblings = anchor == NULL ? ctx->sibling_memo : NULL;
+    sel_memo *memo = siblings != NULL ? &siblings->table : NULL;
+    sel_sibling_record *last = siblings != NULL ? &siblings->last_walks[(unsigned)index % SEL_SIBLING_RECORDS] : NULL;
     if (last != NULL && last->node == node && last->key == target) {
         return (enum sel_status)last->status;
     }
@@ -2478,7 +2479,7 @@ static int sel_has_later_sibling(th_node *anchor, const sel_complex *rel, const 
        relative selector by its first compound instead, which outlives the frame. Without
        :scope in rel, nothing below depends on the scope, so the sibling memo carries over. */
     sel_ctx scoped = {ctx->tree, anchor, ctx->quirks, NULL, ctx->nth_memo, ctx->default_memo, ctx->sibling_memo};
-    sel_memo *memo = lead == '~' ? ctx->sibling_memo : NULL;
+    sel_memo *memo = lead == '~' ? &ctx->sibling_memo->table : NULL;
     const uint16_t target_atom = sel_compound_known_type_atom(&rel->compounds[0], ctx->tree);
     th_node *memo_from = NULL;
     int found = 0;
