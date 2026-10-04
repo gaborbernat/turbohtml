@@ -1101,22 +1101,60 @@ def test_minify_css_at_prelude_string_is_a_fixed_point(source: str, expected: st
     assert minify_css(minify_css(source)) == expected
 
 
-# a newline ends a string cut short (CSS Syntax 3 §4.3.5), so the whitespace after one is kept
+# a string cut short keeps its newline (CSS Syntax 3 §4.3.5), which separates it from the next token
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        pytest.param('@x "a\n "b";', '@x"a "b";', id="before-string"),
-        pytest.param('@x "a\n (b);', '@x"a (b);', id="before-paren"),
+        pytest.param('@x "a\n "b";', '@x"a\n"b";', id="before-string"),
+        pytest.param('@x "a\n (b);', '@x"a\n (b);', id="before-paren"),
     ],
 )
-def test_minify_css_at_prelude_cut_string_keeps_space(source: str, expected: str) -> None:
+def test_minify_css_at_prelude_cut_string_keeps_newline(source: str, expected: str) -> None:
     assert minify_css(source) == expected
 
 
+# A newline ends a string as a <bad-string-token> (CSS Syntax 3 §4.3.5). No declaration value or selector admits one, so
+# the declaration or rule holding it is dropped, as a browser drops it; the rules around it stay. An at-rule prelude
+# keeps it with its newline: `@media all,"a` still matches `all` (Media Queries 4 §3.2 reads the bad query as `not
+# all`), and a prelude whose grammar fails as a whole is dropped by the browser either way.
 _STRING_CUT_BY_NEWLINE: Final[list[ParameterSet]] = [
-    pytest.param('a{e:"\n}', 'a{e:""}', id="lone-quote"),
-    pytest.param('a{e:f("\n)}', 'a{e:f("")}', id="lone-quote-in-function"),
+    pytest.param('a{e:"\n}', "", id="lone-quote"),
+    pytest.param('a{e:f("\n)}', "", id="lone-quote-in-function"),
+    pytest.param('a{e:"x\\"\n}', "", id="escaped-quote-before-newline"),
+    pytest.param('a::before{content:"x"}a::before{content:"\n}', 'a:before{content:"x"}', id="earlier-value-wins"),
+    pytest.param('a{x:"a\n;color:red}b{c:d}', "a{color:red}b{c:d}", id="next-declaration-kept"),
+    pytest.param('a{color:red;x:"a\n}b{c:d}', "a{color:red}b{c:d}", id="next-rule-kept"),
+    pytest.param("a{x:'a\n;color:red}", "a{color:red}", id="single-quote"),
+    pytest.param('a{x:"a\r\n;color:red}', "a{color:red}", id="crlf"),
+    pytest.param('a{x:"a\r;color:red}', "a{color:red}", id="carriage-return"),
+    pytest.param('a{x:"a\f;color:red}', "a{color:red}", id="form-feed"),
+    pytest.param('a{x:"a\n', "", id="last-declaration"),
+    pytest.param('a{x:f("a\n);color:blue}', "a{color:blue}", id="in-function"),
+    pytest.param('a{b:url("x\n);color:red}e{color:blue}', "a{color:red}e{color:blue}", id="in-url"),
+    pytest.param('a{b:url(x"\n);color:red}e{color:blue}', "a{color:red}e{color:blue}", id="in-unquoted-url"),
+    pytest.param('a{"x\n:red;color:blue}', "a{color:blue}", id="in-property-name"),
+    pytest.param('a{--x:"a\n;color:red}', "a{color:red}", id="custom-property"),
+    pytest.param('a{--x:{"a\n};color:red}', "a{color:red}", id="custom-property-block"),
+    pytest.param('a{--x:/**/ {b:"a\n};color:red}', "a{color:red}", id="custom-property-block-after-space"),
+    pytest.param('a{--x:{b:c};y:"a\n}', "a{--x:{b:c}}", id="custom-property-block-kept"),
+    pytest.param('a{color:{"a\n};color:red}', "a{color:red}", id="standard-property-block"),
+    pytest.param('a{color: /**/{"a\n};color:red}', "a{color:red}", id="standard-property-block-after-space"),
+    pytest.param('@font-face{font-family:"a\n;src:url(x)}', "@font-face{src:url(x)}", id="at-rule-declaration"),
+    pytest.param('a{color:red;&:hover{x:"a\n;color:blue}}', "a{color:red;&:hover{color:blue}}", id="nested-rule-body"),
+    pytest.param('a{color:red;b"c\n{color:blue}}', "a{color:red}", id="nested-rule-prelude"),
+    pytest.param('a{b[c]{x:"a\n;color:blue}}', "a{b[c]{color:blue}}", id="nested-rule-attribute-prelude"),
+    pytest.param('a{{x:"a\n}c:d}', "a{{};c:d}", id="nested-rule-empty-prelude"),
+    pytest.param('a"b\n{c:d}e{f:g}', "e{f:g}", id="selector"),
+    pytest.param('a[b="c\n]{color:red}e{color:blue}', "e{color:blue}", id="attribute-selector"),
+    pytest.param('"a\n;b{c:d}', "", id="top-level-semicolon-joins-prelude"),
+    pytest.param('"a\nb{c:d}', "", id="top-level-prelude"),
+    pytest.param('@keyframes k{"a\nfrom{color:red}to{color:blue}}', "@keyframes k{to{color:blue}}", id="keyframe"),
+    pytest.param('@x "a\n;b{c:d}', '@x"a\n;b{c:d}', id="at-statement-prelude"),
+    pytest.param('@import "a\n;b{c:d}', '@import"a\n;b{c:d}', id="import-prelude"),
+    pytest.param('@media all,"a\n{b{color:red}}', '@media all,"a\n{b{color:red}}', id="media-query-list"),
+    pytest.param('@media (x:"a\n),print{b{color:red}}', '@media(x:"a\n),print{b{color:red}}', id="media-feature"),
     pytest.param('"x\n', '"x\n', id="stray-segment"),
+    pytest.param('"x\n ', '"x\n', id="stray-segment-trailing-space"),
     pytest.param('"x" ', '"x"', id="stray-segment-closed"),
 ]
 
@@ -1129,6 +1167,10 @@ def test_minify_css_string_cut_by_newline(source: str, expected: str) -> None:
 @pytest.mark.parametrize(("source", "expected"), _STRING_CUT_BY_NEWLINE)
 def test_minify_css_string_cut_by_newline_is_a_fixed_point(source: str, expected: str) -> None:
     assert minify_css(minify_css(source)) == expected
+
+
+def test_minify_css_inline_string_cut_by_newline() -> None:
+    assert minify_css_inline('color:red;x:"a\n;--y:{"b\n}') == "color:red"
 
 
 # A top-level ';' or '}' is a prelude component value, so a qualified rule carrying one has an invalid selector list

@@ -234,6 +234,9 @@ CSS_NOINLINE static int css_token_ends_hex_escape(const css_token *token) {
 /* Build a declaration from a segment [start, end). Returns 1 if a declaration was produced. */
 static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end, comp_vec *scratch,
                                 css_decl *decl) {
+    if (vec->bad && css_holds_bad(vec, start, end)) {
+        return 0;
+    }
     Py_ssize_t colon = -1;
     for (Py_ssize_t index = start; index < end; index++) {
         if (vec->items[index].kind == CSS_DELIM && vec->items[index].delim == ':') {

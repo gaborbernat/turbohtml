@@ -455,15 +455,14 @@ static int css_string_closed(const css_char *text, Py_ssize_t len) {
     return len > 1 && text[len - 1] == text[0] && !css_escapes(text, len - 1);
 }
 
+/* A CSS_STR token ends in its closing quote: th_minify_css_bytes closes a string the input leaves open at its end, and
+   a newline makes the token CSS_BAD. */
 static void css_minify_string(css_buf *pool, const css_char *text, Py_ssize_t len, Py_ssize_t *out_off,
                               Py_ssize_t *out_len) {
     Py_ssize_t off = pool->len;
-    css_char quote = text[0];
-    int closed = len > 1 && text[len - 1] == quote;
-    Py_ssize_t body_len = closed ? len - 2 : len - 1;
-    cbuf_putc(pool, quote);
-    css_strip_continuations(pool, text + 1, body_len);
-    cbuf_putc(pool, quote);
+    cbuf_putc(pool, text[0]);
+    css_strip_continuations(pool, text + 1, len - 2);
+    cbuf_putc(pool, text[0]);
     *out_off = off;
     *out_len = pool->len - off;
 }
