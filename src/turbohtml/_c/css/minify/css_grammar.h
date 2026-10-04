@@ -534,16 +534,19 @@ CSS_NOINLINE static void css_close_prelude_blocks(const token_vec *vec, Py_ssize
     cbuf_free(&blocks);
 }
 
-/* Render the at-rule at the cursor into out; returns 1 for a statement at-rule, 0 for one with a block. */
-static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
+/* Render the at-rule at the cursor into out. Returns -1 for a statement at-rule, the length of an @media block's header
+   (name, prelude and '{'), or 0 for another at-rule with a block. */
+static Py_ssize_t css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
+    Py_ssize_t media_head = 0;
     if (cur->index == cur->media_at) {
         /* out is the caller's fresh piece buffer, so it can take over the prelude css_media_continues rendered */
         *out = cur->media_next;
         cur->media_next = (css_buf){NULL, 0, 0, 0};
         cur->index = cur->media_body;
+        media_head = out->len;
         css_parse_rules(pool, cur, 0, 0, 1, out);
         cbuf_putc(out, '}');
-        return 0;
+        return media_head;
     }
     css_token *name_token = &cur->vec->items[cur->index];
     const css_char *name = name_token->text;
@@ -569,7 +572,8 @@ static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
                a declaration list, which would wrongly join the keyframe blocks with ';'. For @media, out holds the
                rendered prelude, so the inner parse pulls in the rules of an immediately following same-query @media
                (#1065), merging them in this pass instead of leaving adjacent blocks for the next call. */
-            css_parse_rules(pool, cur, 0, is_keyframes, css_run_ieq(name, name_len, "@media"), out);
+            media_head = css_run_ieq(name, name_len, "@media") ? out->len : 0;
+            css_parse_rules(pool, cur, 0, is_keyframes, media_head > 0, out);
         } else {
             decl_vec decls = {NULL, 0, 0, 0};
             css_parse_declarations(pool, cur, &decls);
@@ -577,7 +581,7 @@ static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
             css_free(decls.items);
         }
         cbuf_putc(out, '}');
-        return 0;
+        return media_head;
     }
     if (token && token->delim == ';') {
         cur->index++;
@@ -589,7 +593,7 @@ static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
     if (token == NULL) {
         css_close_prelude_blocks(cur->vec, prelude_start, prelude_end, out);
     }
-    return 1;
+    return -1;
 }
 
 /* Skip the rest of a block whose '{' the cursor has passed, through its closing '}'. Out of line: only a dropped or
@@ -1308,7 +1312,8 @@ CSS_NOINLINE static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items
         rule_item *it = &items->items[index];
         if (!it->is_rule) {
             /* opaque node (at-rule, bang comment, stray text): kept as-is. Adjacent same-query @media blocks are
-               already folded together while parsing (css_media_continues), so there is nothing to merge here. */
+               already folded together while parsing (css_media_continues, css_parse_rules), so there is nothing to
+               merge here. */
             continue;
         }
         uint32_t selector_hash = css_rule_hash(pool, it->sel_off, it->sel_len);
@@ -1491,6 +1496,63 @@ CSS_NOINLINE static int css_follows_stray(const rule_vec *items) {
     return 0;
 }
 
+/* Same-query @media blocks joined across dropped nodes: the index of the first block's item, and the blocks' text
+   without the closing '}'. */
+typedef struct {
+    Py_ssize_t item;
+    css_buf text;
+} media_run;
+
+/* Join piece, an @media block whose header is head long, to the last node pushed to items when that node is an @media
+   block with the same header; returns whether it did. A header ends at its first '{' outside parentheses, so only an
+   @media block with the same header starts with it. Kept out of line with the run on the heap: css_parse_rules recurses
+   per nesting level, so its frame stays as small as a list without a run needs. */
+CSS_NOINLINE static int css_join_media(const css_buf *pool, const rule_vec *items, const css_buf *piece,
+                                       Py_ssize_t head, media_run **run) {
+    if (items->len == 0) {
+        return 0;
+    }
+    const rule_item *last = &items->items[items->len - 1];
+    const css_char *text = pool->data + last->text_off;
+    if (last->text_len <= head || text[head - 1] != '{' ||
+        memcmp(text, piece->data, (size_t)head * sizeof(css_char)) != 0) {
+        return 0;
+    }
+    if (*run == NULL) {
+        *run = css_malloc(sizeof(media_run));
+        if (*run == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return 0;       /* GCOVR_EXCL_LINE: the block stays unjoined */
+        }
+        (*run)->item = items->len - 1;
+        (*run)->text = (css_buf){NULL, 0, 0, 0};
+        cbuf_put_run(&(*run)->text, text, last->text_len - 1);
+    }
+    /* a block's last at-statement is rendered without its ';', which the next body must not extend */
+    cbuf_putc(&(*run)->text, ';');
+    cbuf_put_run(&(*run)->text, piece->data + head, piece->len - head - 1);
+    return 1;
+}
+
+/* Re-minify the joined text of run into its first block's item, so the later blocks' rules merge with the first
+   block's as they would inside one block, then free the run. */
+CSS_NOINLINE static void css_rejoin_media(css_buf *pool, cursor *cur, rule_vec *items, media_run *run) {
+    cbuf_putc(&run->text, '}');
+    /* the block parses where the first one did, so it inherits the rule list's depth */
+    token_vec tokens = {NULL, 0, 0, 0, cur->vec->depth};
+    css_tokenize(run->text.data, run->text.len, &tokens);
+    cursor inner = {&tokens, 0, cur->baseline, -1, 0, {NULL, 0, 0, 0}};
+    css_buf merged = {NULL, 0, 0, 0};
+    css_parse_at(pool, &inner, &merged);
+    cbuf_free(&inner.media_next);
+    rule_item *block = &items->items[run->item];
+    block->text_off = pool_run(pool, merged.data, merged.len);
+    block->text_len = merged.len;
+    css_free(tokens.items);
+    cbuf_free(&merged);
+    cbuf_free(&run->text);
+    css_free(run);
+}
+
 /* Parse a rule list, collecting nodes so adjacent rules can be merged, then serialize. At the top level, declarations
    between rules are stray text; nested (inside an at-block) a '}' ends the list. */
 static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, int media, css_buf *out) {
@@ -1501,6 +1563,12 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
         return;
     }
     rule_vec items = {NULL, 0, 0, 0};
+    /* css_media_continues folds only blocks that whitespace and comments separate, since it cannot tell a node that
+       minifies away, and the blocks it folds may each end and start with a nested same-query block. joinable_at is
+       items.len after a dropped node or a folded block boundary; an @media block pushed then that repeats the last
+       item's query joins the run, re-minified at the next at-rule or the end of the list. */
+    Py_ssize_t joinable_at = -1;
+    media_run *run = NULL;
     while (cur->index < cur->vec->len) {
         css_token *token = cursor_peek(cur);
         if (token->kind == CSS_WS || token->kind == CSS_COMMENT) {
@@ -1521,19 +1589,26 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
             /* a same-query @media right after this block's '}' is pulled into this rule list so its rules merge
                with ours now, not on the next call (#1065) */
             if (media && css_media_continues(cur, pool, out)) {
+                joinable_at = items.len;
                 continue;
             }
             break;
         }
         if (token->kind == CSS_AT) {
             css_buf piece = {NULL, 0, 0, 0};
-            int at_statement = css_parse_at(pool, cur, &piece);
+            Py_ssize_t kind = css_parse_at(pool, cur, &piece);
             /* css_parse_at always emits at least the lowercased at-rule name, so piece is never empty */
-            if (!css_is_empty_conditional_atrule(piece.data, piece.len)) {
+            if (css_is_empty_conditional_atrule(piece.data, piece.len)) {
+                joinable_at = items.len;
+            } else if (kind <= 0 || joinable_at != items.len || !css_join_media(pool, &items, &piece, kind, &run)) {
+                if (run != NULL) {
+                    css_rejoin_media(pool, cur, &items, run);
+                    run = NULL;
+                }
                 rule_item item = {0};
                 item.text_off = pool_run(pool, piece.data, piece.len);
                 item.text_len = piece.len;
-                item.at_statement = at_statement;
+                item.at_statement = kind < 0;
                 rule_vec_push(&items, item);
             }
             cbuf_free(&piece);
@@ -1542,8 +1617,13 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
             css_parse_qualified(pool, cur, top, keyframe, &item);
             if (item.is_rule || item.text_len > 0) {
                 rule_vec_push(&items, item);
+            } else {
+                joinable_at = items.len;
             }
         }
+    }
+    if (run != NULL) {
+        css_rejoin_media(pool, cur, &items, run);
     }
     css_merge_adjacent_rules(pool, &items, cur->baseline, cur->vec->depth);
     int prev_at_statement = 0;
