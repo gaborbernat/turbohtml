@@ -360,3 +360,27 @@ def test_select_nth_sibling_skips_nonmatching_elements() -> None:
         "<i class=x id=c></i><i class=y></i><i class=x id=d></i></div>"
     )
     assert _ids(document.select("i:nth-child(odd of .x)")) == ["a", "c"]
+
+
+@pytest.mark.parametrize("selection_first", [False, True], ids=["match-first", "select-first"])
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        pytest.param("a ~ b", ["hit"], id="indexed"),
+        pytest.param(".x ~ .y", ["hit", "tail"], id="classes"),
+        pytest.param("a ~ b, a ~ p", ["hit", "tail"], id="different-subjects"),
+        pytest.param("q ~ b", [], id="missing-known-left"),
+        pytest.param("widget ~ b", [], id="unknown-left"),
+    ],
+)
+def test_select_sibling_mixed_api_cache(selector: str, expected: list[str], *, selection_first: bool) -> None:
+    document: Final = parse("<div><a class=x></a><b class=y id=hit></b><p class=y id=tail></p></div>")
+    target: Final = document.select("#hit")[0]
+    if selection_first:
+        document.select(selector)
+    assert (
+        target.matches(selector),
+        _ids(document.select(selector)),
+        _ids([document.select_one(selector)]),
+        _ids([target.closest(selector)]),
+    ) == (bool(expected), expected, [expected[0] if expected else None], ["hit" if expected else None])
