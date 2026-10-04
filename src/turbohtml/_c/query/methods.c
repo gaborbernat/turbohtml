@@ -61,6 +61,40 @@ static uint16_t selector_subject_atom(const sel_compiled *compiled) {
     return atom;
 }
 
+/* A missing required tag rules out a match before the sibling walk. */
+static uint16_t selector_left_atom(const sel_compiled *compiled) {
+    if (compiled->count != 1) {
+        return TH_TAG_UNKNOWN;
+    }
+    const sel_complex *complex = &compiled->alts[0];
+    for (int compound = complex->count - 2; compound >= 0; compound--) {
+        for (int index = 0; index < complex->compounds[compound].count; index++) {
+            const uint16_t atom = complex->compounds[compound].simples[index].tag_atom;
+            if (atom != TH_TAG_UNKNOWN) {
+                return atom;
+            }
+        }
+    }
+    return TH_TAG_UNKNOWN;
+}
+
+static sel_compiled *query_compile(PyObject *selector_error, th_tree *tree, PyObject *arg) {
+    sel_compiled *compiled = selector_compile(selector_error, tree, arg);
+    if (compiled != NULL) {
+        compiled->subject_atom = selector_subject_atom(compiled);
+        compiled->left_atom = selector_left_atom(compiled);
+    }
+    return compiled;
+}
+
+static Py_ssize_t indexed_candidates_end(const HandleObject *handle, const sel_compiled *compiled) {
+    const Py_ssize_t *offsets = handle->index_offsets;
+    if (compiled->left_atom != TH_TAG_UNKNOWN && offsets[compiled->left_atom] == offsets[compiled->left_atom + 1]) {
+        return offsets[compiled->subject_atom];
+    }
+    return offsets[compiled->subject_atom + 1];
+}
+
 /* Type-check arg as a selector str, returning 0, or -1 with a TypeError set. */
 static int check_selector_arg(PyObject *arg) {
     if (!PyUnicode_Check(arg)) {
@@ -85,7 +119,7 @@ restart:;
             continue;
         }
         if (entry.attr_gen != gen) {
-            sel_compiled *fresh = selector_compile(selector_error, handle->tree, arg);
+            sel_compiled *fresh = query_compile(selector_error, handle->tree, arg);
             if (fresh == NULL) { /* GCOVR_EXCL_BR_LINE: recompiling a valid selector fails only on alloc */
                 return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
             }
@@ -107,7 +141,7 @@ restart:;
         }
         Py_DECREF(evicted.key);
     }
-    sel_compiled *compiled = selector_compile(selector_error, handle->tree, arg);
+    sel_compiled *compiled = query_compile(selector_error, handle->tree, arg);
     if (compiled == NULL) {
         return NULL;
     }
@@ -140,13 +174,12 @@ static int append_selected(PyObject *out, module_state *state, PyObject *handle,
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
     sel_memo memo = {0};
-    uint16_t subject = selector_subject_atom(compiled);
     HandleObject *handle_obj = (HandleObject *)handle;
     sel_ctx ctx = {compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo : NULL, &nth_memo,
                    &default_memo,  &memo};
-    if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
-        Py_ssize_t end = handle_obj->index_offsets[subject + 1];
-        for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
+    if (handle_use_index(handle_obj, origin, compiled->subject_atom != TH_TAG_UNKNOWN)) {
+        Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
+        for (Py_ssize_t pos = handle_obj->index_offsets[compiled->subject_atom]; pos < end; pos++) {
             th_node *node = handle_obj->index_nodes[pos];
             int matched = selector_matches_c(node, compiled, &ctx);
             if (matched && append_wrapped(out, state, handle, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
@@ -657,13 +690,12 @@ retry:;
     } else {
         th_node *origin = ((NodeObject *)self)->node;
         const sel_simple *single = sel_single_simple(compiled);
-        uint16_t subject = selector_subject_atom(compiled);
         sel_ctx ctx = {
             compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo : NULL, &nth_memo,
             &default_memo,  &memo};
-        if (handle_use_index(handle_obj, origin, subject != TH_TAG_UNKNOWN)) {
-            Py_ssize_t end = handle_obj->index_offsets[subject + 1];
-            for (Py_ssize_t pos = handle_obj->index_offsets[subject]; pos < end; pos++) {
+        if (handle_use_index(handle_obj, origin, compiled->subject_atom != TH_TAG_UNKNOWN)) {
+            Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
+            for (Py_ssize_t pos = handle_obj->index_offsets[compiled->subject_atom]; pos < end; pos++) {
                 th_node *node = handle_obj->index_nodes[pos];
                 if (single != NULL ? sel_match_simple(node, single, &ctx) : selector_matches_c(node, compiled, &ctx)) {
                     found = node;
