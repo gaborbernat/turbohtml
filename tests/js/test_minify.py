@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - Node executes the fixed benchmark corpus
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TypeAlias, cast
 
@@ -436,6 +437,28 @@ def test_unparseable_input_raises() -> None:
 def test_non_string_argument_rejected() -> None:
     with pytest.raises(TypeError, match="source must be a str"):
         minify(123)  # ty: ignore[invalid-argument-type]  # wrong type on purpose, to test the guard
+
+
+def test_minify_js_long_statement_list_keeps_arena_valid() -> None:
+    # Each `a();b();var v=0;` run folds to one comma sequence, so the output stays flat while the
+    # fold pass appends enough sequence nodes to reallocate (move) the node arena mid-list. The list
+    # head has to be read back after that call, so a build that addressed the slot first would write
+    # through the freed arena: run out of process so that crash is a non-zero exit, not a dead suite.
+    # The counts straddle the 65,536-node arena growth where the reallocation lands (verified gcc).
+    program = (
+        "import sys\n"
+        "from turbohtml.clean import minify_js\n"
+        "for count in (6000, 6250, 6500):\n"
+        "    body = ''.join(f'a{i}();b{i}();var v{i}=0;' for i in range(count))\n"
+        "    out = minify_js(f'function f(){{{body}}}')\n"
+        "    expected = 'function f(){' + ','.join(f'a{i}(),b{i}()' for i in range(count)) + '}'\n"
+        "    assert out == expected, count\n"
+        "sys.stdout.write('ok')\n"
+    )
+    result = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true] - fixed argv, generated script
+        [sys.executable, "-c", program], capture_output=True, text=True, timeout=300, check=False
+    )
+    assert (result.returncode, result.stdout) == (0, "ok"), result.stderr
 
 
 _SOURCE = "function f(){var longName=true;return longName}"

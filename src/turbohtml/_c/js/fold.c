@@ -1181,6 +1181,9 @@ static void splice_abrupt_else(F *folder, int32_t first) {
     }
 }
 
+/* Run the statement-list folds and return the list's new head. They can append nodes and so move
+   prog->nodes, so a caller stores the head after the call returns, never as
+   `prog->nodes[owner].a = optimize_chain(...)`, whose slot address may be taken before the call. */
 static int32_t optimize_chain(F *folder, int32_t first) {
     first = drop_empties(folder, first);
     splice_abrupt_else(folder, first);
@@ -1410,7 +1413,8 @@ static void walk(F *folder, int32_t idx) {
         for (int32_t clause = child_b; clause >= 0; clause = folder->prog->nodes[clause].next) {
             walk(folder, folder->prog->nodes[clause].a);
             walk_chain(folder, folder->prog->nodes[clause].b);
-            folder->prog->nodes[clause].b = optimize_chain(folder, folder->prog->nodes[clause].b);
+            int32_t consequent = optimize_chain(folder, folder->prog->nodes[clause].b);
+            folder->prog->nodes[clause].b = consequent;
         }
         return;
     case JN_VAR:
@@ -1418,10 +1422,12 @@ static void walk(F *folder, int32_t idx) {
             walk(folder, folder->prog->nodes[declr].b);
         }
         return;
-    case JN_BLOCK:
+    case JN_BLOCK: {
         walk_chain(folder, child_a);
-        folder->prog->nodes[idx].a = optimize_chain(folder, folder->prog->nodes[idx].a);
+        int32_t first = optimize_chain(folder, folder->prog->nodes[idx].a);
+        folder->prog->nodes[idx].a = first;
         return;
+    }
     case JN_FUNC:
     case JN_ARROW:
         walk_chain(folder, child_a); /* params (default values may fold) */
@@ -1676,7 +1682,8 @@ int jm_fold(jm_program *prog) {
         /* GCOVR_EXCL_BR_STOP */
         folder.changed = 0;
         walk_chain(&folder, prog->nodes[prog->root].a);
-        prog->nodes[prog->root].a = optimize_chain(&folder, prog->nodes[prog->root].a);
+        int32_t first = optimize_chain(&folder, prog->nodes[prog->root].a);
+        prog->nodes[prog->root].a = first;
         if (!folder.changed) {
             break;
         }
