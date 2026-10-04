@@ -339,7 +339,7 @@ static int css_is_nested_rule_at(const css_char *name, Py_ssize_t len) {
 }
 
 static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls);
-static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, css_buf *out);
+static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, int media, css_buf *out);
 
 /* Whether an @import/@namespace url() carries a <url-modifier> after its URL (CSS Values 4 §4.5.4): any content beyond
    trailing whitespace past the quoted or bare URL. text[start, end) is the url()'s whitespace-trimmed interior. A url()
@@ -477,6 +477,15 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
 }
 
 static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
+    if (cur->index == cur->media_at) {
+        /* out is the caller's fresh piece buffer, so it can take over the prelude css_media_continues rendered */
+        *out = cur->media_next;
+        cur->media_next = (css_buf){NULL, 0, 0, 0};
+        cur->index = cur->media_body;
+        css_parse_rules(pool, cur, 0, 0, 1, out);
+        cbuf_putc(out, '}');
+        return;
+    }
     css_token *name_token = &cur->vec->items[cur->index];
     const css_char *name = name_token->text;
     Py_ssize_t name_len = name_token->text_len;
@@ -498,8 +507,10 @@ static void css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
             css_run_ieq(name, name_len, "@-moz-keyframes") || css_run_ieq(name, name_len, "@-o-keyframes");
         if (is_keyframes || css_is_nested_rule_at(name, name_len)) {
             /* a @keyframes body is a rule list (its "selectors" are keyframe selectors), so parse it as rules -- not as
-               a declaration list, which would wrongly join the keyframe blocks with ';' */
-            css_parse_rules(pool, cur, 0, is_keyframes, out);
+               a declaration list, which would wrongly join the keyframe blocks with ';'. For @media, out holds the
+               rendered prelude, so the inner parse pulls in the rules of an immediately following same-query @media
+               (#1065), merging them in this pass instead of leaving adjacent blocks for the next call. */
+            css_parse_rules(pool, cur, 0, is_keyframes, css_run_ieq(name, name_len, "@media"), out);
         } else {
             decl_vec decls = {NULL, 0, 0, 0};
             css_parse_declarations(pool, cur, &decls);
@@ -782,9 +793,10 @@ static void css_merge_rule_bodies(css_buf *pool, rule_item *prev, const rule_ite
     /* the merged body parses below the rule list that holds it, so it inherits that list's depth */
     token_vec tokens = {NULL, 0, 0, 0, depth};
     css_tokenize(combined.data, combined.len, &tokens);
-    cursor inner = {&tokens, 0, baseline};
+    cursor inner = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, 0}};
     decl_vec decls = {NULL, 0, 0, 0};
     css_parse_declarations(pool, &inner, &decls);
+    cbuf_free(&inner.media_next);
     css_buf body = {NULL, 0, 0, 0};
     css_render_declarations(pool, &decls, baseline, &body);
     prev->body_off = pool_run(pool, body.data, body.len);
@@ -793,23 +805,6 @@ static void css_merge_rule_bodies(css_buf *pool, rule_item *prev, const rule_ite
     css_free(decls.items);
     cbuf_free(&body);
     cbuf_free(&combined);
-}
-
-/* For a rendered at-rule node, the length of an @media block's prelude through the first '{', or -1 when the node is
-   not a mergeable @media block. @media is the only conditional-group rule merged here: @layer declares cascade order,
-   and @supports/@keyframes/@font-face have no safe identical-prelude merge in this corpus. The char after "@media"
-   must end the keyword (space, '(' or '{'), so "@media-foo" is excluded. */
-static Py_ssize_t css_media_prelude_len(const css_char *text, Py_ssize_t len, int at_statement) {
-    if (at_statement || len < 7 || memcmp(text, "@media", 6) != 0 ||
-        (text[6] != ' ' && text[6] != '(' && text[6] != '{')) {
-        return -1;
-    }
-    for (Py_ssize_t index = 6; index < len; index++) { /* GCOVR_EXCL_BR_LINE: a non-statement @media block has a '{' */
-        if (text[index] == '{') {
-            return index + 1;
-        }
-    }
-    return -1; /* GCOVR_EXCL_LINE: a rendered @media block always carries its '{' */
 }
 
 /* A plain identifier byte: ASCII alnum, '-' or '_', the bytes css_ident_plain_run skips. */
@@ -1192,38 +1187,8 @@ CSS_NOINLINE static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items
     for (Py_ssize_t index = 0; index < items->len; index++) {
         rule_item *it = &items->items[index];
         if (!it->is_rule) {
-            Py_ssize_t prelude = css_media_prelude_len(pool->data + it->text_off, it->text_len, it->at_statement);
-            if (prelude < 0) {
-                continue;
-            }
-            Py_ssize_t end = index + 1;
-            Py_ssize_t length = it->text_len;
-            while (end < items->len) {
-                rule_item *next = &items->items[end];
-                if (next->is_rule ||
-                    css_media_prelude_len(pool->data + next->text_off, next->text_len, next->at_statement) != prelude ||
-                    memcmp(pool->data + it->text_off, pool->data + next->text_off, (size_t)prelude) != 0) {
-                    break;
-                }
-                length += next->text_len - prelude - 1;
-                end++;
-            }
-            if (end == index + 1) {
-                continue;
-            }
-            css_buf merged = {NULL, 0, 0, 0};
-            cbuf_reserve(&merged, length);
-            cbuf_put_run(&merged, pool->data + it->text_off, it->text_len - 1);
-            for (Py_ssize_t next = index + 1; next < end; next++) {
-                rule_item *item = &items->items[next];
-                cbuf_put_run(&merged, pool->data + item->text_off + prelude, item->text_len - prelude - 1);
-                item->dropped = 1;
-            }
-            cbuf_putc(&merged, '}');
-            it->text_off = pool_run(pool, merged.data, merged.len);
-            it->text_len = merged.len;
-            cbuf_free(&merged);
-            index = end - 1;
+            /* opaque node (at-rule, bang comment, stray text): kept as-is. Adjacent same-query @media blocks are
+               already folded together while parsing (css_media_continues), so there is nothing to merge here. */
             continue;
         }
         uint32_t selector_hash = css_rule_hash(pool, it->sel_off, it->sel_len);
@@ -1337,9 +1302,66 @@ static int css_is_empty_conditional_atrule(const css_char *text, Py_ssize_t len)
            css_run_ieq(text + 1, keyword - 1, "container");
 }
 
+/* Just past an @media block's '}', test whether the next node is another @media with the same query. out holds the
+   "@media <query>{" text of the block we are inside and nothing else. Whitespace and ordinary comments are skipped as
+   they are between any two rules; a bang comment, a qualified rule, or a different at-rule ends the run, so the cursor
+   is restored and 0 returned. On a match the cursor is left just past the following block's '{', so the caller keeps
+   collecting its rules into the same list -- merging them in this pass (#1065). */
+static int css_media_continues(cursor *cur, css_buf *pool, css_buf *out) {
+    Py_ssize_t restore = cur->index;
+    while (cur->index < cur->vec->len) {
+        css_token *token = &cur->vec->items[cur->index];
+        if (token->kind == CSS_WS) {
+            cur->index++;
+            continue;
+        }
+        if (token->kind == CSS_COMMENT) {
+            if (token->text_len >= 3 && token->text[2] == '!') {
+                break; /* a bang comment is a barrier between rules, so the blocks do not merge */
+            }
+            cur->index++;
+            continue;
+        }
+        break;
+    }
+    css_token *name = cursor_peek(cur);
+    /* out starts with the lowercased "@media", so a name of another length can neither match nor be handed over */
+    if (!name || name->kind != CSS_AT || name->text_len != 6) {
+        cur->index = restore;
+        return 0;
+    }
+    Py_ssize_t name_index = cur->index;
+    cur->index++;
+    Py_ssize_t prelude_start = cur->index;
+    Py_ssize_t prelude_end = css_read_until(cur, ";{}");
+    css_token *stop = cursor_peek(cur);
+    if (!stop || stop->delim != '{') {
+        cur->index = restore;
+        return 0;
+    }
+    css_buf *candidate = &cur->media_next;
+    candidate->len = 0;
+    for (Py_ssize_t pos = 0; pos < name->text_len; pos++) {
+        cbuf_putc(candidate, css_lower(name->text[pos]));
+    }
+    css_at_prelude(pool, cur->vec, prelude_start, prelude_end, 0, candidate);
+    cbuf_putc(candidate, '{');
+    if (candidate->len == out->len && memcmp(candidate->data, out->data, (size_t)out->len * sizeof(css_char)) == 0) {
+        cur->index++;
+        return 1;
+    }
+    if (memcmp(candidate->data, out->data, 6 * sizeof(css_char)) == 0) {
+        /* the caller parses this @media next and takes over the prelude rendered here rather than reading it twice */
+        cur->media_at = name_index;
+        cur->media_body = cur->index + 1;
+    }
+    cur->index = restore;
+    return 0;
+}
+
 /* Parse a rule list, collecting nodes so adjacent rules can be merged, then serialize. At the top level, declarations
    between rules are stray text; nested (inside an at-block) a '}' ends the list. */
-static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, css_buf *out) {
+static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, int media, css_buf *out) {
     if (!css_nesting_enter(cur->vec)) {
         /* over-nested: drop the remaining rules rather than overflow the C stack; only a nested call bails, so
            consume its closing brace when the input has one */
@@ -1367,6 +1389,11 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, c
         }
         if (token->kind == CSS_DELIM && token->delim == '}' && !top) {
             cur->index++;
+            /* a same-query @media right after this block's '}' is pulled into this rule list so its rules merge
+               with ours now, not on the next call (#1065) */
+            if (media && css_media_continues(cur, pool, out)) {
+                continue;
+            }
             break;
         }
         if (token->kind == CSS_AT) {

@@ -66,15 +66,16 @@ css_char *th_minify_css_bytes(const css_char *view, Py_ssize_t length, int inlin
     /* the pool holds the value scratch plus every interned selector and body, so it runs to roughly twice the input */
     cbuf_reserve(&pool, length * 2);
     cbuf_reserve(&out, length);
-    cursor cur = {&tokens, 0, baseline};
+    cursor cur = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, 0}};
     if (inline_mode) {
         decl_vec decls = {NULL, 0, 0, 0};
         css_parse_declarations(&pool, &cur, &decls);
         css_render_declarations(&pool, &decls, baseline, &out);
         css_free(decls.items);
     } else {
-        css_parse_rules(&pool, &cur, 1, 0, &out);
+        css_parse_rules(&pool, &cur, 1, 0, 0, &out);
     }
+    cbuf_free(&cur.media_next);
     css_free(tokens.items);
     cbuf_free(&pool);
     /* Dropping a string line continuation, or a comment in a declaration kept as written, can join a `</style` that

@@ -775,11 +775,16 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
 
 /* A token cursor for the grammar. baseline is the Baseline year the caller targets (0 = only long-interoperable
    syntax), so the renderer can gate a transform on the year its output syntax reached Baseline: a transform tagged
-   with year Y is emitted only when baseline >= Y. */
+   with year Y is emitted only when baseline >= Y. media_next holds the rendered prelude (name through '{') of the
+   @media at token index media_at, which css_media_continues read and found to carry a different query; media_body is
+   the index just past its '{'. media_at is -1 until then. */
 typedef struct {
     token_vec *vec;
     Py_ssize_t index;
     int baseline;
+    Py_ssize_t media_at;
+    Py_ssize_t media_body;
+    css_buf media_next;
 } cursor;
 
 static css_token *cursor_peek(cursor *cur) {
