@@ -2538,8 +2538,11 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
             }
             const uint16_t target_atom = sel_compound_known_type_atom(&rel->compounds[0], ctx->tree);
             for (; candidate != NULL; candidate = sel_next_element_sibling(candidate)) {
-                if (target_atom != TH_TAG_UNKNOWN ? candidate->atom == target_atom
-                                                  : sel_match_compound(candidate, &rel->compounds[0], &scoped)) {
+                if (target_atom != TH_TAG_UNKNOWN) {
+                    if (candidate->atom == target_atom) {
+                        return 1;
+                    }
+                } else if (sel_match_compound(candidate, &rel->compounds[0], &scoped)) {
                     return 1;
                 }
                 if (lead_combinator == '+') {
