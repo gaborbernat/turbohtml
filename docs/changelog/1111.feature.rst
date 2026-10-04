@@ -1,0 +1,1 @@
+:func:`~turbohtml.clean.minify_js` shortens empty static blocks, ``new X()``, ``async ()=>`` and nested ``if``/``else``.

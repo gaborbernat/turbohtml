@@ -1175,9 +1175,64 @@ static void splice_abrupt_else(F *folder, int32_t first) {
             continue;
         }
         nodes[idx].c = -1;
+        int32_t head = alt;
+        if (nodes[alt].kind == JN_BLOCK && block_is_transparent(folder, alt)) {
+            head = nodes[alt].a; /* Avoid another fold pass for the spliced block. */
+            alt = head;
+            while (nodes[alt].next >= 0) {
+                alt = nodes[alt].next;
+            }
+        }
         nodes[alt].next = nodes[idx].next;
-        nodes[idx].next = alt;
+        nodes[idx].next = head;
         folder->changed = 1;
+    }
+}
+
+static void splice_lone_else(F *folder, int32_t idx);
+
+static inline void splice_branch_else(F *folder, int32_t idx) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_IF && node->c >= 0) {
+        splice_lone_else(folder, idx);
+    }
+}
+
+/* A single-statement body needs a block to retain the alternate after an abrupt branch. */
+static void splice_lone_else(F *folder, int32_t idx) {
+    jm_program *prog = folder->prog;
+    int32_t alt = prog->nodes[idx].c;
+    if (!ends_abruptly(folder, prog->nodes[idx].b) || prog->nodes[alt].kind == JN_FUNC) {
+        return;
+    }
+    int32_t inner = jm_node_new(prog, JN_IF);
+    if (inner < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the else */
+        return;      /* GCOVR_EXCL_LINE */
+    }
+    prog->nodes[inner] = prog->nodes[idx];
+    prog->nodes[inner].c = -1;
+    prog->nodes[inner].next = alt;
+    jm_node *block = &prog->nodes[idx];
+    block->kind = JN_BLOCK;
+    block->a = inner;
+    block->b = block->c = block->d = -1;
+    folder->changed = 1;
+}
+
+/* Empty static blocks have no observable effect (ECMA-262 15.7.14). */
+static void drop_empty_static_blocks(F *folder, int32_t cls) {
+    jm_node *nodes = folder->prog->nodes;
+    int32_t prev = -1;
+    for (int32_t member = nodes[cls].b; member >= 0; member = nodes[member].next) {
+        if (nodes[member].decl != 4 || nodes[nodes[nodes[member].b].b].a >= 0) {
+            prev = member;
+        } else if (prev < 0) {
+            nodes[cls].b = nodes[member].next;
+            folder->changed = 1;
+        } else {
+            nodes[prev].next = nodes[member].next;
+            folder->changed = 1;
+        }
     }
 }
 
@@ -1375,6 +1430,7 @@ static void walk(F *folder, int32_t idx) {
         folder->with_depth++;
         walk(folder, child_b);
         folder->with_depth--;
+        splice_branch_else(folder, child_b);
         return;
     case JN_ASSIGN:
         walk_target(folder, child_a);
@@ -1404,9 +1460,13 @@ static void walk(F *folder, int32_t idx) {
         return;
     case JN_CALL:
     case JN_NEW:
+        walk(folder, child_a);
+        walk_chain(folder, child_b);
+        return;
     case JN_CLASS:
         walk(folder, child_a);
         walk_chain(folder, child_b);
+        drop_empty_static_blocks(folder, idx);
         return;
     case JN_SWITCH:
         walk(folder, child_a);
@@ -1420,7 +1480,7 @@ static void walk(F *folder, int32_t idx) {
     case JN_EXPR_STMT:
         walk(folder, child_a);
         /* a constant has no side effect, so the statement only matters as a directive (11.2.1) */
-        if (is_pure_const(folder, child_a) && !(flags & JN_F_DIRECTIVE)) {
+        if (is_pure_const(folder, child_a) && !(folder->prog->nodes[idx].flags & JN_F_DIRECTIVE)) {
             jm_node_empty(folder->prog, idx);
             folder->changed = 1;
         }
@@ -1465,7 +1525,8 @@ static void walk(F *folder, int32_t idx) {
         int32_t body = kind == JN_DOWHILE ? child_a
                        : kind == JN_WHILE ? child_b
                        : kind == JN_FOR   ? child_d
-                                          : child_c;      /* for-in / for-of */
+                                          : child_c; /* for-in / for-of */
+        splice_branch_else(folder, body);
         if (folder->prog->nodes[body].kind == JN_BLOCK) { /* a loop always has a body statement */
             fold_guard_jump(folder, folder->prog->nodes[body].a, JN_CONTINUE);
         }
@@ -1609,6 +1670,11 @@ static void walk(F *folder, int32_t idx) {
         return;
     }
     case JN_IF: {
+        splice_branch_else(folder, node->b);
+        if (folder->prog->nodes[idx].c >= 0) {
+            splice_branch_else(folder, folder->prog->nodes[idx].c);
+        }
+        node = &folder->prog->nodes[idx]; /* Splicing may move the node arena. */
         if (node->c >= 0 && is_empty_branch(folder, node->c)) {
             node->c = -1; /* an empty else does nothing: if(a)b();else{} -> if(a)b() -> a&&b() */
             folder->changed = 1;
@@ -1634,6 +1700,9 @@ static void walk(F *folder, int32_t idx) {
         }
         return;
     }
+    case JN_LABEL:
+        splice_branch_else(folder, node->a);
+        return;
     case JN_BINARY:
         if (node->op == JT_PLUS) {
             fold_concat(folder, idx); /* string operands; turns the node into a string literal */

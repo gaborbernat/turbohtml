@@ -73,7 +73,7 @@ def minify(source: str) -> str:
         # §13.3.1 / §13.3.5: an optional chain may not be a template tag or `new` callee, so the
         # parens that terminate the chain are load-bearing.
         pytest.param("( a ?. b ) `t`", "(a?.b)`t`", id="optional-chain-tag-keeps-parens"),
-        pytest.param("new ( a ?. b ) ( )", "new (a?.b)()", id="optional-chain-new-callee-keeps-parens"),
+        pytest.param("new ( a ?. b ) ( )", "new (a?.b)", id="optional-chain-new-callee-keeps-parens"),
         pytest.param("y = ( 1 )", "y=1", id="redundant-parens"),
     ],
 )
@@ -241,7 +241,17 @@ def test_statements(source: str, expected: str) -> None:
         pytest.param("class C extends B { #p = 1 ; m ( ) { } }", "class C extends B{#p=1;m(){}}", id="class"),
         pytest.param("s = `a ${ x + 1 } b`", "s=`a ${x+1} b`", id="template"),
         pytest.param("new Foo ( 1 )", "new Foo(1)", id="new-with-args"),
-        pytest.param("new a . b . C ( )", "new a.b.C()", id="new-member-callee"),
+        pytest.param("new a . b . C ( )", "new a.b.C", id="new-member-callee"),
+        pytest.param("x = new X ( ) . y", "x=new X().y", id="new-before-member"),
+        pytest.param("x = new X ( ) [ k ]", "x=new X()[k]", id="new-before-computed-member"),
+        pytest.param("x = new X ( ) ?. y", "x=new X()?.y", id="new-before-optional-chain"),
+        pytest.param("x = new X ( ) ( )", "x=new X()()", id="new-before-call"),
+        pytest.param("x = new X ( ) `t`", "x=new X()`t`", id="new-before-template"),
+        pytest.param("x = new X ( ) ** 2", "x=new X**2", id="new-before-operator"),
+        pytest.param("class A extends new X ( ) { }", "class A extends new X{}", id="new-heritage"),
+        pytest.param("x = async ( ) => 1", "x=async()=>1", id="async-arrow-parens"),
+        pytest.param("x = async ( a , b ) => a", "x=async(a,b)=>a", id="async-arrow-params"),
+        pytest.param("x = async a => a", "x=async a=>a", id="async-arrow-bare-param"),
         pytest.param("x = a ??= b", "x=a??=b", id="nullish-assign"),
     ],
 )

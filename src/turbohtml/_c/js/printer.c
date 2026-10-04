@@ -314,6 +314,16 @@ static void print_as_value(St *st, int32_t index) {
     put_char(st, ')');
 }
 
+static void print_new(St *st, int32_t index, int followed);
+
+static void print_lhs(St *st, int32_t index) {
+    if (st->prog->nodes[index].kind == JN_NEW) {
+        print_new(st, index, 1);
+    } else {
+        print_sub(st, index, 18);
+    }
+}
+
 /* Print a call's callee or a template's tag. */
 static void print_callee(St *st, int32_t index) {
     if (folded_to_reference(st, index, 0)) {
@@ -323,7 +333,7 @@ static void print_callee(St *st, int32_t index) {
         print_expr(st, index);
         put_char(st, ')');
     } else {
-        print_sub(st, index, 18);
+        print_lhs(st, index);
     }
 }
 
@@ -900,7 +910,7 @@ static void print_expr(St *st, int32_t index) {
             print_expr(st, node->a);
             put_char(st, ')');
         } else {
-            print_sub(st, node->a, 18);
+            print_lhs(st, node->a);
         }
         if (name != NULL) {
             put_ascii(st, (node->flags & JN_F_OPTIONAL) ? "?." : ".");
@@ -926,20 +936,11 @@ static void print_expr(St *st, int32_t index) {
         print_args(st, node->b);
         break;
     case JN_NEW:
-        put_ascii(st, "new ");
-        /* an optional chain may not be a `new` callee (§13.3.5), so keep its load-bearing parens */
-        if (new_callee_needs_parens(st->prog, node->a) || (st->prog->nodes[node->a].flags & JN_F_PAREN)) {
-            put_char(st, '(');
-            print_expr(st, node->a);
-            put_char(st, ')');
-        } else {
-            print_sub(st, node->a, 18);
-        }
-        print_args(st, node->b);
+        print_new(st, index, 0);
         break;
     case JN_ARROW: {
         if (node->flags & JN_F_ASYNC) {
-            put_ascii(st, "async ");
+            put_ascii(st, "async");
         }
         int32_t param = node->a;
         int single = param >= 0 && st->prog->nodes[param].kind == JN_IDENT && st->prog->nodes[param].next < 0;
@@ -970,6 +971,27 @@ static void print_expr(St *st, int32_t index) {
         break;
     default:   /* GCOVR_EXCL_LINE: every expression kind is handled above */
         break; /* GCOVR_EXCL_LINE */
+    }
+}
+
+/* `new X` builds the same empty argument list as `new X()` (ECMA-262 §13.3.5.1), but only the form with
+   Arguments is a MemberExpression, so the empty `()` stays where a `.`, `[`, `(` or template follows. */
+static void print_new(St *st, int32_t index, int followed) {
+    const jm_node *node = &st->prog->nodes[index];
+    int args = node->b >= 0 || followed;
+    put_ascii(st, "new ");
+    /* an optional chain may not be a `new` callee (§13.3.5), so keep its load-bearing parens */
+    if (new_callee_needs_parens(st->prog, node->a) || (st->prog->nodes[node->a].flags & JN_F_PAREN)) {
+        put_char(st, '(');
+        print_expr(st, node->a);
+        put_char(st, ')');
+    } else if (args) {
+        print_lhs(st, node->a);
+    } else {
+        print_sub(st, node->a, 18);
+    }
+    if (args) {
+        print_args(st, node->b);
     }
 }
 

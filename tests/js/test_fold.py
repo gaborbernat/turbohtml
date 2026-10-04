@@ -926,7 +926,7 @@ def test_constant_and_empty_body_reach_fixpoint(source: str, expected: str) -> N
         pytest.param("typeof(0,o.f)", "typeof(0,o.f)", id="typeof-member"),
         pytest.param("(0,f)()", "f()", id="plain-name-callee-unwraps"),
         pytest.param("(0,o).f()", "o.f()", id="object-unwraps"),
-        pytest.param("new(0,o.f)", "new o.f()", id="new-callee-unwraps"),
+        pytest.param("new(0,o.f)", "new o.f", id="new-callee-unwraps"),
         pytest.param("void(0,o.f)", "void o.f", id="void-operand-unwraps"),
         pytest.param("x=(0,o.f)", "x=o.f", id="assigned-value-unwraps"),
         pytest.param("o.f()", "o.f()", id="member-callee"),
@@ -1081,6 +1081,24 @@ def _run(code: str) -> str:
         pytest.param('function f(){"use strict";"a";return typeof this}console.log(f())', id="directive-strict"),
         pytest.param('function f(){{"use strict";return typeof this}}console.log(f())', id="block-string-no-strict"),
         pytest.param("var n=0;do{}while(n++<3);for(;n++<9;){}console.log(n)", id="empty-loop-bodies"),
+        pytest.param(
+            "function f(g,x){if(g)if(x)return'r';else console.log('h');return'e'}console.log(f(1,0),f(1,1),f(0,0))",
+            id="lone-else-splice",
+        ),
+        pytest.param(
+            "function f(x,c){var n=0;do if(x)break;else n++;while(n<c);return n}console.log(f(0,3),f(1,3))",
+            id="lone-else-splice-do-while",
+        ),
+        pytest.param(
+            "var log=[];class C{static a=log.push(1);static{};static b=log.push(2)}console.log(log.join())",
+            id="empty-static-block",
+        ),
+        pytest.param(
+            "function X(a){if(!arguments.length)return function(b){this.b=b};this.a=a}"
+            "console.log(JSON.stringify([new(new X)(1),new X(2).a,typeof new X]))",
+            id="new-arguments",
+        ),
+        pytest.param("var f=async()=>1;f().then(console.log)", id="async-arrow"),
     ],
 )
 def test_folding_preserves_behavior(snippet: str) -> None:
@@ -1537,12 +1555,40 @@ def test_arguments_alias_preserves_behavior(snippet: str) -> None:
     ("source", "expected"),
     [
         pytest.param(
-            "function f(){if(g())if(x)return;else h()}", "function f(){if(g())if(x)return;else h()}", id="if-branch"
+            "function f(){if(g())if(x)return;else h()}", "function f(){if(g()){if(x)return;h()}}", id="if-branch"
+        ),
+        pytest.param(
+            "function f(){if(a)if(x)return;else h();else k()}",
+            "function f(){if(a){if(x)return;h()}else k()}",
+            id="if-branch-before-else",
+        ),
+        pytest.param(
+            "function f(){if(a)k();else if(x)return;else h()}",
+            "function f(){if(a)k();else{if(x)return;h()}}",
+            id="else-branch",
         ),
         pytest.param(
             "L:while(++b<2)while(1)if(!b)continue L;else break L",
-            "L:for(;++b<2;)for(;;)if(!b)continue L;else break L",
+            "L:for(;++b<2;)for(;;){if(!b)continue L;break L}",
             id="loop-body",
+        ),
+        pytest.param("do if(x)break;else h();while(c)", "do{if(x)break;h()}while(c)", id="do-while-body"),
+        pytest.param("function f(){L:if(x)break L;else h()}", "function f(){L:{if(x)break L;h()}}", id="label-body"),
+        pytest.param(
+            "function f(){with(o)if(x)return;else h()}", "function f(){with(o){if(x)return;h()}}", id="with-body"
+        ),
+        pytest.param(
+            "function f(){for(;;)if(x)return 1;else return 2}", "function f(){for(;;)return x?1:2}", id="returns-fold"
+        ),
+        pytest.param(
+            "function f(){if(g())if(x)return;else{let a=h();k(a)}}",
+            "function f(){if(g()){if(x)return;{let a=h();k(a)}}}",
+            id="lexical-alternate-keeps-its-block",
+        ),
+        pytest.param(
+            "function f(){if(g())if(x)return;else function k(){}}",
+            "function f(){if(g())if(x)return;else function k(){}}",
+            id="annex-b-lone-else-function",
         ),
         pytest.param(
             "function f(){if(a)return 1;else if(b)return 2;else h()}",
@@ -1555,10 +1601,53 @@ def test_arguments_alias_preserves_behavior(snippet: str) -> None:
             id="annex-b-else-function",
         ),
         pytest.param("function f(){if(a)g();else h();i()}", "function f(){a?g():h(),i()}", id="falling-through"),
+        pytest.param(
+            "function f(){if(a)return;else{b();c()}d()}", "function f(){a||(b(),c(),d())}", id="block-alternate"
+        ),
+        pytest.param(
+            "function f(){if(a)return;else{let x=g();h(x)}d()}",
+            "function f(){if(a)return;{let x=g();h(x)}d()}",
+            id="lexical-block-alternate",
+        ),
     ],
 )
-def test_fold_splices_abrupt_else_only_in_statement_list(source: str, expected: str) -> None:
+def test_fold_splices_abrupt_else(source: str, expected: str) -> None:
     assert minify_js(source, JSMinify(mangle=False)) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("class C{static{}}", "class C{}", id="only-member"),
+        pytest.param("class C{static{;}}", "class C{}", id="empty-statement-body"),
+        pytest.param("class C{static{}x=1;static{}static y}", "class C{x=1;static y}", id="between-fields"),
+        pytest.param("class C{static{f()}static{}}", "class C{static{f()}}", id="last-member"),
+        pytest.param("x=class{static{if(0)f()}}", "x=class{}", id="body-folds-away"),
+    ],
+)
+def test_fold_drops_empty_static_block(source: str, expected: str) -> None:
+    assert minify_js(source, JSMinify(mangle=False)) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("class C{static{}x=1}", "class C{x=1}", id="empty-static-block"),
+        pytest.param("x=async ()=>1", "x=async()=>1", id="async-arrow"),
+        pytest.param(
+            "x=new X();y=new X().z;w=new(new X)(1)", "x=new X,y=new X().z,w=new new X()(1)", id="new-arguments"
+        ),
+        pytest.param(
+            "function f(){if(g())if(x)return;else h()}", "function f(){if(g()){if(x)return;h()}}", id="lone-else-splice"
+        ),
+        pytest.param(
+            "e:for(;;)if(b)break e;else continue e", "a:for(;;){if(b)break a;continue a}", id="lone-else-splice-loop"
+        ),
+    ],
+)
+def test_size_transforms_reach_fixpoint(source: str, expected: str) -> None:
+    once: Final[str] = minify_js(source)
+    assert (once, minify_js(once)) == (expected, expected)
 
 
 @pytest.mark.parametrize(
