@@ -98,6 +98,10 @@ typedef struct {
     int quirks;         /* the tree was parsed in quirks mode: class/ID match case-insensitively */
     int has_relational; /* the selector contains a :has() somewhere: a match may want the subtree memo */
     th_tree *tree;      /* the tree the selector runs on; :empty and :dir(auto) read text spans through it */
+    /* Filled by the query drivers' compile cache, TH_TAG_UNKNOWN elsewhere: the tag every alternative's
+       subject names, and for a single alternative the tag a compound left of the subject names. */
+    uint16_t subject_atom;
+    uint16_t left_atom;
 } sel_compiled;
 
 /* One memoized bit: key names the question (a :has() argument, or the compound a general
@@ -108,6 +112,18 @@ typedef struct {
     const th_node *node;
     unsigned char result;
 } sel_memo_slot;
+
+/* How the last general-sibling walk for one compound ended: the compound it looked for,
+   the node it started from and its match status. */
+typedef struct {
+    const void *key;
+    const th_node *node;
+    int status;
+} sel_sibling_record;
+
+/* One record per combinator position (mod this count), so the nested walks of a chain such
+   as a ~ b ~ c keep their own. */
+#define SEL_SIBLING_RECORDS 4
 
 /* A per-query open-addressing memo of (key, node) answers that hold for the whole query,
    so a driver walking many candidates computes each answer once. The :has() memo turns the
@@ -121,6 +137,9 @@ typedef struct {
     size_t mask; /* capacity - 1 (capacity a power of two); 0 while slots == NULL */
     size_t count;
     int failed; /* an allocation failed while growing: fall back to the direct walk */
+    /* A query in document order reaches the node the last walk started from before any
+       entry of the table, so the sibling walks stop there. */
+    sel_sibling_record last_walks[SEL_SIBLING_RECORDS];
 } sel_memo;
 
 typedef struct {
