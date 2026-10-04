@@ -130,6 +130,7 @@ def test_invalid_attribute_name_is_rejected(name: str) -> None:
         pytest.param(lambda: E.img("x", E.span("y")), "img", id="img-mixed-children"),
         pytest.param(lambda: E.hr(E.span("y")), "hr", id="hr-node-child"),
         pytest.param(lambda: E("input", "x"), "input", id="call-form-input"),
+        pytest.param(lambda: E.frame(E.b()), "frame", id="frame-serializes-as-void"),
     ],
 )
 def test_void_element_rejects_children(build: Callable[[], Element], tag: str) -> None:

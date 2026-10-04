@@ -3059,7 +3059,9 @@ static int append_build_children(PyObject *element, PyObject *tag, PyObject *chi
     }
     Py_ssize_t count = PySequence_Fast_GET_SIZE(sequence);
     NodeObject *self = (NodeObject *)element;
-    if (count > 0 && th_tag_is_void(self->node->atom)) {
+    uint16_t atom = self->node->atom;
+    /* the fragment serializer writes `frame` without children too, though the parser keeps it an ordinary element */
+    if (count > 0 && (atom == TH_TAG_FRAME || th_tag_is_void(atom))) {
         Py_DECREF(sequence);
         PyErr_Format(PyExc_ValueError, "void element %R cannot have children", tag);
         return -1;

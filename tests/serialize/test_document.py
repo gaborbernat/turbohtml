@@ -708,14 +708,20 @@ def test_inner_keyword_only(method: str, arguments: tuple[object, ...]) -> None:
         getattr(Element("p"), method)(*arguments)
 
 
+@pytest.fixture
+def frame_with_child() -> Element:
+    frame = Element("frame")
+    frame.append(Text("not emitted"))
+    return frame
+
+
 @pytest.mark.parametrize("layout", [None, Indent(), Minify()])
-def test_inner_frame_ignores_children(layout: Indent | Minify | None) -> None:
-    root: Final = Element("frame", children=[Text("not emitted")])
-    assert not root.serialize(Html(layout=layout), inner=True)
+def test_inner_frame_ignores_children(frame_with_child: Element, layout: Indent | Minify | None) -> None:
+    assert not frame_with_child.serialize(Html(layout=layout), inner=True)
 
 
-def test_inner_html_frame_ignores_children() -> None:
-    assert not Element("frame", children=[Text("not emitted")]).inner_html
+def test_inner_html_frame_ignores_children(frame_with_child: Element) -> None:
+    assert not frame_with_child.inner_html
 
 
 @pytest.mark.parametrize(
