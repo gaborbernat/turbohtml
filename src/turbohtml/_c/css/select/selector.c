@@ -2050,12 +2050,20 @@ static inline enum sel_status sel_match_from(th_node *node, const sel_complex *c
    SEL_SIBLING_MEMO_MIN_RUN siblings the walk stops at the first one whose answer the
    sibling memo holds, and it stores its own answer under node's nearest earlier sibling.
    A query walking the siblings in document order then visits each one a bounded number of
-   times. Inside :has() the answer also depends on the anchor, so the memo stays out. */
+   times. Past the node the last walk started from, a walk goes on exactly as that walk
+   did, so it takes that walk's answer there; Blink's querySelectorAll carries a sibling
+   match forward the same way
+   (https://github.com/chromium/chromium/blob/98efee7338d7c5a17952aab8887d8212fc35fb0c/third_party/blink/renderer/core/css/selector_query.cc#L674-L679).
+   Inside :has() the answer also depends on the anchor, so the memo stays out. */
 static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_complex *complex, int index, th_node *anchor,
                                                  const sel_ctx *ctx) {
     const sel_compound *target = &complex->compounds[index - 1];
-    const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
     sel_memo *memo = anchor == NULL ? ctx->sibling_memo : NULL;
+    sel_sibling_record *last = memo != NULL ? &memo->last_walks[(unsigned)index % SEL_SIBLING_RECORDS] : NULL;
+    if (last != NULL && last->node == node && last->key == target) {
+        return (enum sel_status)last->status;
+    }
+    const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
     th_node *nearest = sel_prev_element(node);
     enum sel_status status = SEL_FAILS_ALL_SIBLINGS;
     int walked = 0;
@@ -2072,9 +2080,16 @@ static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_comple
                 break;
             }
         }
+        if (last != NULL && last->node == prev && last->key == target) {
+            status = (enum sel_status)last->status;
+            break;
+        }
     }
-    if (memo != NULL && walked >= SEL_SIBLING_MEMO_MIN_RUN) {
-        sel_memo_put(memo, target, nearest, status == SEL_MATCHES);
+    if (memo != NULL) {
+        if (walked >= SEL_SIBLING_MEMO_MIN_RUN) {
+            sel_memo_put(memo, target, nearest, status == SEL_MATCHES);
+        }
+        *last = (sel_sibling_record){target, node, status};
     }
     return status;
 }
