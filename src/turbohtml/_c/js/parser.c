@@ -17,6 +17,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
 typedef struct {
     const Py_UCS4 *str;
     Py_ssize_t len;
@@ -140,8 +150,20 @@ static void reset(P *parser, jm_mark saved) {
     parser->err = saved.err;
 }
 
-static int32_t parse_stmt(P *parser, int single);
-static int32_t parse_stmt_body(P *parser, int single);
+/* Where a statement sits. A statement list takes any declaration; every other position takes only a Statement (ECMA-262
+   14.6, 14.7, 14.11, 14.13), where sloppy code may still put a plain function declaration in an `if` branch (Annex
+   B.3.3) or a label body (B.3.1), but not in a label that is itself an `if`, loop or `with` body (14.6.1, 14.7,
+   14.11.1). */
+typedef enum {
+    JM_STMT_LIST,  /* a script, block, function body or case clause */
+    JM_STMT_IF,    /* an if/else branch */
+    JM_STMT_LABEL, /* a label body reached from a statement list or another label */
+    JM_STMT_BODY,  /* a loop or `with` body, or a label body under an if, loop or `with` */
+} jm_stmt_context;
+
+static int32_t parse_stmt(P *parser, jm_stmt_context context);
+static int32_t parse_stmt_body(P *parser, jm_stmt_context context);
+static int rejects_body_function(P *parser, jm_stmt_context context, Py_ssize_t start, int32_t fn);
 static int32_t parse_block(P *parser, int body);
 static int32_t parse_assign(P *parser, int no_in);
 static int32_t parse_assign_body(P *parser, int no_in);
@@ -149,14 +171,33 @@ static int32_t parse_expr(P *parser, int no_in);
 
 /* parse_stmt and parse_assign are the two recursion hubs every nested statement and expression passes
    through, so metering depth at their entry (paired with the operator/chain-loop caps below) bounds the
-   whole parse; the _body functions hold the grammar, these thin wrappers hold the depth accounting. */
-static int32_t parse_stmt(P *parser, int single) {
+   whole parse; the _body functions hold the grammar, these thin wrappers hold the depth accounting. parse_stmt also
+   checks a function declaration outside a statement list, where it sees every such body without a wrapper of its own.
+ */
+static int32_t parse_stmt(P *parser, jm_stmt_context context) {
     if (!enter(parser)) {
         return -1;
     }
-    int32_t result = parse_stmt_body(parser, single);
+    Py_ssize_t start = parser->lx.start;
+    int32_t result = parse_stmt_body(parser, context);
     leave(parser);
+    if (context != JM_STMT_LIST && result >= 0 && parser->prog->nodes[result].kind == JN_FUNC &&
+        rejects_body_function(parser, context, start, result)) {
+        return -1;
+    }
     return result;
+}
+
+/* Whether a function declaration that a single-statement body parsed is an early error: an if or label body takes only
+   a plain function, and only in sloppy code (Annex B.3.3, B.3.1). Out of line: only a function declaration gets here.
+ */
+static TH_NOINLINE int rejects_body_function(P *parser, jm_stmt_context context, Py_ssize_t start, int32_t fn) {
+    if (context == JM_STMT_BODY || parser->strict ||
+        (parser->prog->nodes[fn].flags & (JN_F_GENERATOR | JN_F_ASYNC)) != 0) {
+        fail_at(parser, start, "declaration not allowed in a single-statement context");
+        return 1;
+    }
+    return 0;
 }
 
 static int32_t parse_assign(P *parser, int no_in) {
@@ -186,6 +227,11 @@ static int32_t parse_class_rest(P *parser, int is_expr);
 static void parse_static_block(P *parser, int32_t member);
 static int parse_params(P *parser, int32_t fn);
 static int each_bound_name(P *parser, int32_t idx, int (*visit)(P *parser, const jm_node *name));
+static int is_binding_identifier(const P *parser, const jm_node *node);
+static int is_reserved_word(const P *parser, const jm_node *name);
+static int reserved_word_matches(const P *parser, const jm_node *name, Py_UCS4 letter);
+static int name_in(const jm_node *name, const char *const *words);
+static int name_is(const jm_node *name, const char *word);
 static int is_binding_target(P *parser, int32_t target);
 static int is_binding_element(P *parser, int32_t element);
 static int binds_let(P *parser, int32_t target);
@@ -278,7 +324,8 @@ static int32_t parse_var(P *parser, int no_in) {
             return -1;
         }
         /* a lone identifier, the common target, skips the pattern walk */
-        if (parser->prog->nodes[target].kind != JN_IDENT && !is_binding_target(parser, target)) {
+        const jm_node *bound = &parser->prog->nodes[target];
+        if (bound->kind == JN_IDENT ? !is_binding_identifier(parser, bound) : !is_binding_target(parser, target)) {
             fail_at(parser, target_start, "invalid binding pattern");
             return -1;
         }
@@ -307,12 +354,107 @@ static int32_t parse_var(P *parser, int no_in) {
     return node;
 }
 
+/* A BindingIdentifier (ECMA-262 13.1): a name outside parentheses that is not a reserved word. */
+static int is_binding_identifier(const P *parser, const jm_node *node) {
+    return node->kind == JN_IDENT && (node->flags & JN_F_GROUPED) == 0 && !is_reserved_word(parser, node);
+}
+
+/* Whether a name is a ReservedWord no BindingIdentifier may be (ECMA-262 12.7.2, 13.1.1): an unconditional word, a
+   strict-mode word in strict code, `yield` in a generator, or `await` in an async function or module. Each first letter
+   carries the lengths and second letters of its words, so a name that matches none of them, as nearly all do, skips the
+   comparisons. */
+static int is_reserved_word(const P *parser, const jm_node *name) {
+#define JM_LETTER(letter) (1u << ((letter) - 'a'))
+    static const struct {
+        uint16_t lengths; /* bit n: a word n characters long */
+        uint32_t seconds; /* JM_LETTER of each word's second character */
+    } shapes[26] = {
+        ['a' - 'a'] = {1 << 5, JM_LETTER('w')},
+        ['b' - 'a'] = {1 << 5, JM_LETTER('r')},
+        ['c' - 'a'] = {1 << 4 | 1 << 5 | 1 << 8, JM_LETTER('a') | JM_LETTER('l') | JM_LETTER('o')},
+        ['d' - 'a'] = {1 << 2 | 1 << 6 | 1 << 7 | 1 << 8, JM_LETTER('e') | JM_LETTER('o')},
+        ['e' - 'a'] = {1 << 4 | 1 << 6 | 1 << 7, JM_LETTER('l') | JM_LETTER('n') | JM_LETTER('x')},
+        ['f' - 'a'] = {1 << 3 | 1 << 5 | 1 << 7 | 1 << 8,
+                       JM_LETTER('a') | JM_LETTER('i') | JM_LETTER('o') | JM_LETTER('u')},
+        ['i' - 'a'] = {1 << 2 | 1 << 6 | 1 << 9 | 1 << 10, JM_LETTER('f') | JM_LETTER('m') | JM_LETTER('n')},
+        ['l' - 'a'] = {1 << 3, JM_LETTER('e')},
+        ['n' - 'a'] = {1 << 3 | 1 << 4, JM_LETTER('e') | JM_LETTER('u')},
+        ['p' - 'a'] = {1 << 6 | 1 << 7 | 1 << 9, JM_LETTER('a') | JM_LETTER('r') | JM_LETTER('u')},
+        ['r' - 'a'] = {1 << 6, JM_LETTER('e')},
+        ['s' - 'a'] = {1 << 5 | 1 << 6, JM_LETTER('t') | JM_LETTER('u') | JM_LETTER('w')},
+        ['t' - 'a'] = {1 << 3 | 1 << 4 | 1 << 5 | 1 << 6, JM_LETTER('h') | JM_LETTER('r') | JM_LETTER('y')},
+        ['v' - 'a'] = {1 << 3 | 1 << 4, JM_LETTER('a') | JM_LETTER('o')},
+        ['w' - 'a'] = {1 << 4 | 1 << 5, JM_LETTER('h') | JM_LETTER('i')},
+        ['y' - 'a'] = {1 << 5, JM_LETTER('i')},
+    };
+#undef JM_LETTER
+    Py_UCS4 letter = name->str[0] - 'a'; /* wraps past 25 for anything but a-z */
+    if (letter >= 26 || name->str_len > 10 || (shapes[letter].lengths >> name->str_len & 1) == 0) {
+        return 0;
+    }
+    Py_UCS4 second = name->str[1] - 'a'; /* every word has two characters or more, so the length bit implies one */
+    return second < 26 && (shapes[letter].seconds >> second & 1) != 0 && reserved_word_matches(parser, name, letter);
+}
+
+/* The comparisons behind is_reserved_word, out of line so the length filter inlines into its callers. */
+static TH_NOINLINE int reserved_word_matches(const P *parser, const jm_node *name, Py_UCS4 letter) {
+    static const char *const reserved[26][6] = {
+        ['b' - 'a'] = {"break"},
+        ['c' - 'a'] = {"case", "catch", "class", "const", "continue"},
+        ['d' - 'a'] = {"debugger", "default", "delete", "do"},
+        ['e' - 'a'] = {"else", "enum", "export", "extends"},
+        ['f' - 'a'] = {"false", "finally", "for", "function"},
+        ['i' - 'a'] = {"if", "import", "in", "instanceof"},
+        ['n' - 'a'] = {"new", "null"},
+        ['r' - 'a'] = {"return"},
+        ['s' - 'a'] = {"super", "switch"},
+        ['t' - 'a'] = {"this", "throw", "true", "try", "typeof"},
+        ['v' - 'a'] = {"var", "void"},
+        ['w' - 'a'] = {"while", "with"},
+    };
+    static const char *const strict_reserved[26][5] = {
+        ['i' - 'a'] = {"implements", "interface"},
+        ['l' - 'a'] = {"let"},
+        ['p' - 'a'] = {"package", "private", "protected", "public"},
+        ['s' - 'a'] = {"static"},
+        ['y' - 'a'] = {"yield"},
+    };
+    if (name_in(name, reserved[letter]) || (parser->strict && name_in(name, strict_reserved[letter]))) {
+        return 1;
+    }
+    if (letter == 'y' - 'a') {
+        return parser->yield_keyword && name_is(name, "yield");
+    }
+    return letter == 'a' - 'a' && parser->await_keyword && name_is(name, "await");
+}
+
+/* Whether a name equals one of the words in a NULL-terminated list. */
+static int name_in(const jm_node *name, const char *const *words) {
+    for (; *words != NULL; words++) {
+        if (name_is(name, *words)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int name_is(const jm_node *name, const char *word) {
+    Py_ssize_t index = 0;
+    while (word[index] != '\0' && index < name->str_len && name->str[index] == (Py_UCS4)(unsigned char)word[index]) {
+        index++;
+    }
+    return word[index] == '\0' && index == name->str_len;
+}
+
 /* Whether a target parsed as an expression is a BindingIdentifier or a BindingPattern (ECMA-262 14.3.3). `[0]`,
-   `{a:b.c}` and `[a+=1]` parse as literals but bind nothing. */
+   `{a:b.c}`, `[a+=1]` and `[(a)]` parse as literals but bind nothing. */
 static int is_binding_target(P *parser, int32_t target) {
     const jm_node *node = &parser->prog->nodes[target];
     if (node->kind != JN_ARRAY && node->kind != JN_OBJECT) {
-        return node->kind == JN_IDENT;
+        return is_binding_identifier(parser, node);
+    }
+    if ((node->flags & JN_F_GROUPED) != 0) {
+        return 0;
     }
     for (int32_t child = node->a; child >= 0; child = parser->prog->nodes[child].next) {
         const jm_node *element = &parser->prog->nodes[child];
@@ -321,8 +463,9 @@ static int is_binding_target(P *parser, int32_t target) {
         }
         if (element->kind == JN_SPREAD) {
             /* a rest element comes last, takes no default, and in an object binds only a name */
-            if (element->next >= 0 || (node->kind == JN_OBJECT ? parser->prog->nodes[element->a].kind != JN_IDENT
-                                                               : !is_binding_target(parser, element->a))) {
+            if (element->next >= 0 ||
+                (node->kind == JN_OBJECT ? !is_binding_identifier(parser, &parser->prog->nodes[element->a])
+                                         : !is_binding_target(parser, element->a))) {
                 return 0;
             }
             continue;
@@ -346,7 +489,7 @@ static int is_binding_target(P *parser, int32_t target) {
 static int is_binding_element(P *parser, int32_t element) {
     const jm_node *node = &parser->prog->nodes[element];
     if (node->kind == JN_ASSIGN) {
-        return node->op == JT_ASSIGN && is_binding_target(parser, node->a);
+        return node->op == JT_ASSIGN && (node->flags & JN_F_GROUPED) == 0 && is_binding_target(parser, node->a);
     }
     return is_binding_target(parser, element);
 }
@@ -397,13 +540,13 @@ static int32_t parse_if(P *parser) {
     if (parser->err) {
         return -1;
     }
-    set_b(parser, node, parse_stmt(parser, 1));
+    set_b(parser, node, parse_stmt(parser, JM_STMT_IF));
     if (parser->err) {
         return -1;
     }
     if (kw(parser, "else")) {
         advance(parser);
-        set_c(parser, node, parse_stmt(parser, 1));
+        set_c(parser, node, parse_stmt(parser, JM_STMT_IF));
     }
     return parser->err ? -1 : node;
 }
@@ -445,7 +588,7 @@ static int32_t parse_for(P *parser) {
         if (parser->err) {
             return -1;
         }
-        set_c(parser, node, parse_stmt(parser, 1));
+        set_c(parser, node, parse_stmt(parser, JM_STMT_BODY));
         return parser->err ? -1 : node;
     }
     int32_t node = jm_node_new(parser->prog, JN_FOR);
@@ -462,7 +605,7 @@ static int32_t parse_for(P *parser) {
     if (parser->err) {
         return -1;
     }
-    set_d(parser, node, parse_stmt(parser, 1));
+    set_d(parser, node, parse_stmt(parser, JM_STMT_BODY));
     return parser->err ? -1 : node;
 }
 
@@ -475,14 +618,14 @@ static int32_t parse_while(P *parser) {
     if (parser->err) {
         return -1;
     }
-    set_b(parser, node, parse_stmt(parser, 1));
+    set_b(parser, node, parse_stmt(parser, JM_STMT_BODY));
     return parser->err ? -1 : node;
 }
 
 static int32_t parse_do(P *parser) {
     int32_t node = jm_node_new(parser->prog, JN_DOWHILE);
     advance(parser);
-    set_a(parser, node, parse_stmt(parser, 1));
+    set_a(parser, node, parse_stmt(parser, JM_STMT_BODY));
     if (parser->err) {
         return -1;
     }
@@ -527,7 +670,7 @@ static int32_t parse_switch(P *parser) {
         }
         int32_t stail = -1;
         while (!at(parser, JT_RBRACE) && !kw(parser, "case") && !kw(parser, "default") && !at(parser, JT_EOF)) {
-            int32_t stmt = parse_stmt(parser, 0);
+            int32_t stmt = parse_stmt(parser, JM_STMT_LIST);
             if (parser->err) {
                 return -1;
             }
@@ -559,7 +702,16 @@ static int32_t parse_try(P *parser) {
     if (kw(parser, "catch")) {
         advance(parser);
         if (eat(parser, JT_LPAREN)) {
-            set_b(parser, node, parse_primary(parser)); /* catch binding */
+            Py_ssize_t param_start = parser->lx.start;
+            int32_t param = parse_primary(parser); /* catch binding */
+            if (parser->err) {
+                return -1;
+            }
+            if (!is_binding_target(parser, param)) {
+                fail_at(parser, param_start, "invalid binding pattern");
+                return -1;
+            }
+            set_b(parser, node, param);
             expect(parser, JT_RPAREN, "expected )");
         }
         set_c(parser, node, parse_block(parser, 0));
@@ -621,7 +773,7 @@ static void parse_statements(P *parser, int32_t parent, jm_tok end, int prologue
     int32_t tail = -1;
     while (!at(parser, end) && !at(parser, JT_EOF)) {
         int bare_string = prologue && at(parser, JT_STRING);
-        int32_t stmt = parse_stmt(parser, 0);
+        int32_t stmt = parse_stmt(parser, JM_STMT_LIST);
         if (parser->err) {
             return;
         }
@@ -662,26 +814,25 @@ static int32_t parse_block(P *parser, int body) {
    all parse (`let` is reserved only in strict code, ECMA-262 13.1.1). The one binding form the
    ExpressionStatement grammar still excludes is `let [` (its negative lookahead, 14.5), left a
    declaration here. The lookahead ignores line terminators, so `let\n[0]` stays a declaration. A
-   single-statement body (`single`) takes no declaration, as in acorn's isLet(context)
+   single-statement body (any context but a statement list) takes no declaration, as in acorn's isLet(context)
    (https://github.com/acornjs/acorn/blob/c912cf2611079812638a49bc38292557a1096be8/acorn/src/statement.js#L36-L58):
    there a `let` that a line break follows is an identifier ended by ASI unless `[` comes next, while a
    binding on the same line still reads as a declaration for the caller to reject. */
-static int let_starts_declaration(P *parser, int single) {
+static int let_starts_declaration(P *parser, jm_stmt_context context) {
     jm_mark saved = mark(parser);
     advance(parser); /* past `let`, to its following token */
     int declaration =
         at(parser, JT_LBRACK) ||
-        (!(single && parser->lx.newline_before) &&
+        (!(context != JM_STMT_LIST && parser->lx.newline_before) &&
          (at(parser, JT_LBRACE) || (at(parser, JT_IDENT) && !kw(parser, "in") && !kw(parser, "instanceof"))));
     reset(parser, saved);
     return declaration;
 }
 
 /* A bare `{` is a block; an expression statement never starts with one (an object
-   literal in statement position is parenthesized). `single` marks the body of an if/else, a loop, a
-   label or `with`: a Statement there, which excludes a LexicalDeclaration and a ClassDeclaration
-   (ECMA-262 14.6, 14.7, 14.11, 14.13). */
-static int32_t parse_stmt_body(P *parser, int single) {
+   literal in statement position is parenthesized). Outside a statement list `context` admits no LexicalDeclaration or
+   ClassDeclaration and limits function declarations as jm_stmt_context describes. */
+static int32_t parse_stmt_body(P *parser, jm_stmt_context context) {
     if (parser->err) { /* GCOVR_EXCL_BR_LINE: callers guard against re-entry on error */
         return -1;     /* GCOVR_EXCL_LINE: callers guard, but keep the recursion safe */
     }
@@ -693,8 +844,8 @@ static int32_t parse_stmt_body(P *parser, int single) {
         advance(parser);
         return node;
     }
-    if (kw(parser, "var") || kw(parser, "const") || (kw(parser, "let") && let_starts_declaration(parser, single))) {
-        if (single && !kw(parser, "var")) {
+    if (kw(parser, "var") || kw(parser, "const") || (kw(parser, "let") && let_starts_declaration(parser, context))) {
+        if (context != JM_STMT_LIST && !kw(parser, "var")) {
             fail(parser, "declaration not allowed in a single-statement context");
             return -1;
         }
@@ -744,7 +895,7 @@ static int32_t parse_stmt_body(P *parser, int single) {
         reset(parser, save);
     }
     if (kw(parser, "class")) {
-        if (single) {
+        if (context != JM_STMT_LIST) {
             fail(parser, "declaration not allowed in a single-statement context");
             return -1;
         }
@@ -759,7 +910,7 @@ static int32_t parse_stmt_body(P *parser, int single) {
         if (parser->err) {
             return -1;
         }
-        set_b(parser, node, parse_stmt(parser, 1));
+        set_b(parser, node, parse_stmt(parser, JM_STMT_BODY));
         return parser->err ? -1 : node;
     }
     if (kw(parser, "debugger")) {
@@ -783,7 +934,8 @@ static int32_t parse_stmt_body(P *parser, int single) {
             int32_t node = jm_node_new(parser->prog, JN_LABEL);
             parser->prog->nodes[node].str = label;
             parser->prog->nodes[node].str_len = label_len;
-            set_a(parser, node, parse_stmt(parser, 1));
+            jm_stmt_context body = context == JM_STMT_LIST || context == JM_STMT_LABEL ? JM_STMT_LABEL : JM_STMT_BODY;
+            set_a(parser, node, parse_stmt(parser, body));
             return parser->err ? -1 : node;
         }
         reset(parser, save); /* not a label: rewind and parse as an expression statement */
@@ -1542,6 +1694,7 @@ static int32_t parse_primary(P *parser) {
         if (parser->err) {
             return -1;
         }
+        parser->prog->nodes[expr].flags |= JN_F_GROUPED;
         /* parentheses around an optional chain are load-bearing - they end the chain
            so a following access always evaluates - so keep them through the printer. */
         for (int32_t walk = expr; walk >= 0;) {

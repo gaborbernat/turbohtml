@@ -229,6 +229,7 @@ enum {
     JN_F_VALUE = 1 << 15,     /* a callee, tag or delete/typeof operand the source wrote as a plain value
                                  (`(0,o.f)()`): marks the slot, so it survives an in-place rewrite */
     JN_F_DIRECTIVE = 1 << 16, /* an expression statement the source wrote in a directive prologue */
+    JN_F_GROUPED = 1 << 17,   /* an expression the source wrote in parentheses, which no binding may be */
 };
 
 typedef struct {
