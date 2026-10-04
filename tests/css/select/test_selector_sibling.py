@@ -352,3 +352,11 @@ def test_select_descendant_retries_ancestor_sibling(selector: str, expected: lis
 def test_select_sibling_alternatives_preserve_match() -> None:
     document: Final = parse("<section class=x></section><div><b></b><b></b><a class=x></a><b id=hit></b></div>")
     assert _ids(document.select(".x ~ b, .y ~ b")) == ["hit"]
+
+
+def test_select_nth_sibling_skips_nonmatching_elements() -> None:
+    document: Final = parse(
+        "<div><i class=x id=a></i><i class=y></i><i class=x></i><i class=y></i>"
+        "<i class=x id=c></i><i class=y></i><i class=x id=d></i></div>"
+    )
+    assert _ids(document.select("i:nth-child(odd of .x)")) == ["a", "c"]
