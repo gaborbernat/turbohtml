@@ -58,15 +58,17 @@ typedef struct {
 } th_shadow_link;
 
 /* What maybe_clone_option needs from one select, kept while the tree is built:
-   the first enabled descendant selectedcontent (the clone destination) and the
-   select's first option in tree order. */
+   the enabled descendant selectedcontent elements (the clone destinations) and the
+   option the select shows. */
 typedef struct {
     th_node *select;
     th_node **targets; /* the enabled descendant selectedcontent elements, the clone destinations */
+    th_node *selected; /* the option the select shows, NULL until one closes */
     Py_ssize_t target_count;
     Py_ssize_t target_cap;
     uint8_t valid;
     uint8_t multiple;
+    uint8_t disabled; /* an option, selectedcontent or second select above the select disables its targets */
 } th_select_cache;
 
 /* The select caches of one parse, allocated on the first selected-option clone so a
