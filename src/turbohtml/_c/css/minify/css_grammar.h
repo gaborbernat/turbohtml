@@ -363,9 +363,47 @@ static int css_url_has_modifier(const css_char *text, Py_ssize_t start, Py_ssize
     return 0;
 }
 
-/* Render an at-rule prelude into out (a leading space unless it opens with '('). */
+/* Whether an @import/@namespace url() token prints as its quoted body, setting [*body_start, *body_end) to the body
+   with its whitespace trimmed: it does unless a <url-modifier> follows the URL. th_minify_css_bytes closed a url the
+   input left open, so the text ends in its `)`. */
+static int css_url_unwraps(const css_token *token, Py_ssize_t *body_start, Py_ssize_t *body_end) {
+    *body_start = 4;
+    *body_end = token->text_len - 1;
+    while (*body_start < *body_end && css_is_ws(token->text[*body_start])) {
+        (*body_start)++;
+    }
+    while (*body_end > *body_start && css_is_ws(token->text[*body_end - 1])) {
+        (*body_end)--;
+    }
+    return !css_url_has_modifier(token->text, *body_start, *body_end);
+}
+
+/* Whether the space before prelude token index can go because a closed string sits on one side of it: a string ends at
+   its quote and nothing reads past one (CSS Syntax 3 §4.3.5). The token before, past whitespace and comments, printed a
+   closed string when it is a string token ending in its quote or an @import/@namespace url() printed as its body; a
+   string a newline cut short keeps the space after it, the newline having ended it. The caller has written output for
+   an earlier token, so the scan back stops on one. Kept out of line: only a space next to a quote reaches it. */
+CSS_NOINLINE static int css_prelude_space_optional(const token_vec *vec, Py_ssize_t index, int allow_url_string) {
+    Py_ssize_t prev = index - 1;
+    while (vec->items[prev].kind == CSS_WS || vec->items[prev].kind == CSS_COMMENT) {
+        prev--;
+    }
+    const css_token *before = &vec->items[prev];
+    if (before->kind == CSS_STR) {
+        return css_string_closed(before->text, before->text_len);
+    }
+    Py_ssize_t body_start;
+    Py_ssize_t body_end;
+    if (before->kind == CSS_URL && allow_url_string && css_url_unwraps(before, &body_start, &body_end)) {
+        return 1;
+    }
+    return vec->items[index].kind == CSS_STR;
+}
+
+/* Render an at-rule prelude into out: a leading space unless it opens with '(' or a string, where only @charset keeps
+   one, since a stylesheet's encoding is sniffed from the exact bytes `@charset "` (CSS Syntax 3 §3.2). */
 static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end, int allow_url_string,
-                           css_buf *out) {
+                           const css_char *name, Py_ssize_t name_len, css_buf *out) {
     Py_ssize_t mark = out->len;
     int pending_ws = 0;
     for (Py_ssize_t index = start; index < end; index++) {
@@ -381,31 +419,18 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
             continue;
         }
         if (token->kind == CSS_URL) {
-            if (pending_ws && out->len > mark && out->data[out->len - 1] != '(' && out->data[out->len - 1] != ',') {
+            /* outside @import/@namespace the url() is part of a tested value (e.g. @supports (background:url(x))), so
+               it is minified in place: unwrapping it to a string would change the condition the rule tests */
+            Py_ssize_t body_start;
+            Py_ssize_t body_end;
+            int unwrap = allow_url_string && css_url_unwraps(token, &body_start, &body_end);
+            css_char last = out->len > mark ? out->data[out->len - 1] : '(';
+            if (pending_ws && !unwrap && last != '(' && last != ',' &&
+                !((last == '"' || last == '\'') && css_prelude_space_optional(vec, index, allow_url_string))) {
                 cbuf_putc(out, ' ');
             }
             pending_ws = 0;
-            if (!allow_url_string) {
-                /* outside @import/@namespace the url() is part of a tested value (e.g. @supports (background:url(x))),
-                   so minify it in place; unwrapping it to a string would change the condition the rule tests */
-                Py_ssize_t off;
-                Py_ssize_t len;
-                css_minify_url(pool, token->text, token->text_len, &off, &len);
-                cbuf_put_run(out, pool->data + off, len);
-                continue;
-            }
-            /* an @import/@namespace url() keeps a quoted body, or wraps a bare body in quotes; th_minify_css_bytes
-               closed a url the input left open, so the text ends in its `)` */
-            Py_ssize_t body_start = 4;
-            Py_ssize_t body_end = token->text_len - 1;
-            while (body_start < body_end && css_is_ws(token->text[body_start])) {
-                body_start++;
-            }
-            while (body_end > body_start && css_is_ws(token->text[body_end - 1])) {
-                body_end--;
-            }
-            if (css_url_has_modifier(token->text, body_start, body_end)) {
-                /* a <url-modifier> follows the URL: keep the url() function, minified in place */
+            if (!unwrap) {
                 Py_ssize_t off;
                 Py_ssize_t len;
                 css_minify_url(pool, token->text, token->text_len, &off, &len);
@@ -428,7 +453,9 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
             continue;
         }
         if (token->kind == CSS_DELIM && token->delim == '(') {
-            if (pending_ws && out->len > mark && out->data[out->len - 1] != '(' && out->data[out->len - 1] != ',') {
+            if (pending_ws && out->len > mark && out->data[out->len - 1] != '(' && out->data[out->len - 1] != ',' &&
+                !((out->data[out->len - 1] == '"' || out->data[out->len - 1] == '\'') &&
+                  css_prelude_space_optional(vec, index, allow_url_string))) {
                 cbuf_putc(out, ' ');
             }
             cbuf_putc(out, '(');
@@ -457,7 +484,9 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
             out->len > mark && out->data[out->len - 1] == ')' && token->kind == CSS_IDENT &&
             (css_run_ieq(token->text, token->text_len, "and") || css_run_ieq(token->text, token->text_len, "or"));
         int spaced = pending_ws && !after_paren_combinator && out->len > mark && out->data[out->len - 1] != '(' &&
-                     out->data[out->len - 1] != ',' && out->data[out->len - 1] != ':';
+                     out->data[out->len - 1] != ',' && out->data[out->len - 1] != ':' &&
+                     !((out->data[out->len - 1] == '"' || out->data[out->len - 1] == '\'' || token->kind == CSS_STR) &&
+                       css_prelude_space_optional(vec, index, allow_url_string));
         /* with no source whitespace, shortening a number (dropping a zero unit or sign) can glue it onto the previous
            token to read as one different token (CSS Syntax 3 §9.1), so keep the boundary the value path keeps */
         if (spaced || (out->len > mark && css_would_merge(out->data[out->len - 1], 0, next_text, next_len))) {
@@ -467,8 +496,8 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
         cbuf_put_run(out, next_text, next_len);
     }
     css_rtrim(out);
-    /* a non-empty prelude not opening with '(' is preceded by a single space */
-    if (out->len > mark && out->data[mark] != '(') {
+    if (out->len > mark && out->data[mark] != '(' &&
+        ((out->data[mark] != '"' && out->data[mark] != '\'') || css_run_ieq(name, name_len, "@charset"))) {
         cbuf_reserve(out, 1);
         memmove(out->data + mark + 1, out->data + mark, (size_t)(out->len - mark) * sizeof(css_char));
         out->data[mark] = ' ';
@@ -530,7 +559,7 @@ static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
         for (Py_ssize_t pos = 0; pos < name_len; pos++) {
             cbuf_putc(out, css_lower(name[pos]));
         }
-        css_at_prelude(pool, cur->vec, prelude_start, prelude_end, allow_url_string, out);
+        css_at_prelude(pool, cur->vec, prelude_start, prelude_end, allow_url_string, name, name_len, out);
         cbuf_putc(out, '{');
         int is_keyframes =
             css_run_ieq(name, name_len, "@keyframes") || css_run_ieq(name, name_len, "@-webkit-keyframes") ||
@@ -556,7 +585,7 @@ static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
     for (Py_ssize_t pos = 0; pos < name_len; pos++) {
         cbuf_putc(out, css_lower(name[pos]));
     }
-    css_at_prelude(pool, cur->vec, prelude_start, prelude_end, allow_url_string, out);
+    css_at_prelude(pool, cur->vec, prelude_start, prelude_end, allow_url_string, name, name_len, out);
     if (token == NULL) {
         css_close_prelude_blocks(cur->vec, prelude_start, prelude_end, out);
     }
@@ -1404,7 +1433,7 @@ static int css_media_continues(cursor *cur, css_buf *pool, css_buf *out) {
     for (Py_ssize_t pos = 0; pos < name->text_len; pos++) {
         cbuf_putc(candidate, css_lower(name->text[pos]));
     }
-    css_at_prelude(pool, cur->vec, prelude_start, prelude_end, 0, candidate);
+    css_at_prelude(pool, cur->vec, prelude_start, prelude_end, 0, name->text, name->text_len, candidate);
     cbuf_putc(candidate, '{');
     if (candidate->len == out->len && memcmp(candidate->data, out->data, (size_t)out->len * sizeof(css_char)) == 0) {
         cur->index++;

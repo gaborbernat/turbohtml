@@ -1,0 +1,1 @@
+:func:`~turbohtml.clean.minify_css` drops the space next to a string in an at-rule prelude.
