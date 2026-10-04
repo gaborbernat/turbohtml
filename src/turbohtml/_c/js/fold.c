@@ -1177,7 +1177,7 @@ static void splice_abrupt_else(F *folder, int32_t first) {
         nodes[idx].c = -1;
         int32_t head = alt;
         if (nodes[alt].kind == JN_BLOCK && block_is_transparent(folder, alt)) {
-            head = nodes[alt].a; /* a transparent block splices its statements, in this pass rather than the next */
+            head = nodes[alt].a; /* Avoid another fold pass for the spliced block. */
             alt = head;
             while (nodes[alt].next >= 0) {
                 alt = nodes[alt].next;
@@ -1189,14 +1189,20 @@ static void splice_abrupt_else(F *folder, int32_t first) {
     }
 }
 
-/* The same splice for an if in a single-statement position (an if branch or a loop, label or with body), which has
-   no list to splice into: the if becomes a block holding itself and its alternate, `if(t)return;else a()` ->
-   `{if(t)return;a()}`, which costs the braces but saves the `else`. The list folds then run on the new block. */
+static void splice_lone_else(F *folder, int32_t idx);
+
+static inline void splice_branch_else(F *folder, int32_t idx) {
+    const jm_node *node = &folder->prog->nodes[idx];
+    if (node->kind == JN_IF && node->c >= 0) {
+        splice_lone_else(folder, idx);
+    }
+}
+
+/* A single-statement body needs a block to retain the alternate after an abrupt branch. */
 static void splice_lone_else(F *folder, int32_t idx) {
     jm_program *prog = folder->prog;
     int32_t alt = prog->nodes[idx].c;
-    if (prog->nodes[idx].kind != JN_IF || alt < 0 || !ends_abruptly(folder, prog->nodes[idx].b) ||
-        prog->nodes[alt].kind == JN_FUNC) {
+    if (!ends_abruptly(folder, prog->nodes[idx].b) || prog->nodes[alt].kind == JN_FUNC) {
         return;
     }
     int32_t inner = jm_node_new(prog, JN_IF);
@@ -1213,8 +1219,7 @@ static void splice_lone_else(F *folder, int32_t idx) {
     folder->changed = 1;
 }
 
-/* A static block runs its body once as a method of the class (ECMA-262 15.7.14), so one whose folded body holds no
-   statement does nothing and leaves the class. */
+/* Empty static blocks have no observable effect (ECMA-262 15.7.14). */
 static void drop_empty_static_blocks(F *folder, int32_t cls) {
     jm_node *nodes = folder->prog->nodes;
     int32_t prev = -1;
@@ -1425,7 +1430,7 @@ static void walk(F *folder, int32_t idx) {
         folder->with_depth++;
         walk(folder, child_b);
         folder->with_depth--;
-        splice_lone_else(folder, child_b);
+        splice_branch_else(folder, child_b);
         return;
     case JN_ASSIGN:
         walk_target(folder, child_a);
@@ -1521,7 +1526,7 @@ static void walk(F *folder, int32_t idx) {
                        : kind == JN_WHILE ? child_b
                        : kind == JN_FOR   ? child_d
                                           : child_c; /* for-in / for-of */
-        splice_lone_else(folder, body);
+        splice_branch_else(folder, body);
         if (folder->prog->nodes[body].kind == JN_BLOCK) { /* a loop always has a body statement */
             fold_guard_jump(folder, folder->prog->nodes[body].a, JN_CONTINUE);
         }
@@ -1665,11 +1670,11 @@ static void walk(F *folder, int32_t idx) {
         return;
     }
     case JN_IF: {
-        splice_lone_else(folder, node->b);
+        splice_branch_else(folder, node->b);
         if (folder->prog->nodes[idx].c >= 0) {
-            splice_lone_else(folder, folder->prog->nodes[idx].c);
+            splice_branch_else(folder, folder->prog->nodes[idx].c);
         }
-        node = &folder->prog->nodes[idx]; /* the splices allocate; re-read */
+        node = &folder->prog->nodes[idx]; /* Splicing may move the node arena. */
         if (node->c >= 0 && is_empty_branch(folder, node->c)) {
             node->c = -1; /* an empty else does nothing: if(a)b();else{} -> if(a)b() -> a&&b() */
             folder->changed = 1;
@@ -1696,7 +1701,7 @@ static void walk(F *folder, int32_t idx) {
         return;
     }
     case JN_LABEL:
-        splice_lone_else(folder, node->a);
+        splice_branch_else(folder, node->a);
         return;
     case JN_BINARY:
         if (node->op == JT_PLUS) {

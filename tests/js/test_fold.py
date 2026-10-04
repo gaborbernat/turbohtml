@@ -1630,18 +1630,24 @@ def test_fold_drops_empty_static_block(source: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected"),
     [
-        pytest.param("class C{static{}x=1}", id="empty-static-block"),
-        pytest.param("x=async()=>1", id="async-arrow"),
-        pytest.param("x=new X();y=new X().z;w=new(new X)(1)", id="new-arguments"),
-        pytest.param("function f(){if(g())if(x)return;else h()}", id="lone-else-splice"),
-        pytest.param("e:for(;;)if(b)break e;else continue e", id="lone-else-splice-loop"),
+        pytest.param("class C{static{}x=1}", "class C{x=1}", id="empty-static-block"),
+        pytest.param("x=async ()=>1", "x=async()=>1", id="async-arrow"),
+        pytest.param(
+            "x=new X();y=new X().z;w=new(new X)(1)", "x=new X,y=new X().z,w=new new X()(1)", id="new-arguments"
+        ),
+        pytest.param(
+            "function f(){if(g())if(x)return;else h()}", "function f(){if(g()){if(x)return;h()}}", id="lone-else-splice"
+        ),
+        pytest.param(
+            "e:for(;;)if(b)break e;else continue e", "a:for(;;){if(b)break a;continue a}", id="lone-else-splice-loop"
+        ),
     ],
 )
-def test_size_transforms_reach_fixpoint(source: str) -> None:
-    once = minify_js(source)
-    assert minify_js(once) == once
+def test_size_transforms_reach_fixpoint(source: str, expected: str) -> None:
+    once: Final[str] = minify_js(source)
+    assert (once, minify_js(once)) == (expected, expected)
 
 
 @pytest.mark.parametrize(

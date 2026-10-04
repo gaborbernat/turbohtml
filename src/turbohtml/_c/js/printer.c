@@ -316,7 +316,6 @@ static void print_as_value(St *st, int32_t index) {
 
 static void print_new(St *st, int32_t index, int followed);
 
-/* Print an expression that a `.`, `?.`, `[`, `(` or template follows: a member object, a callee, a tag. */
 static void print_lhs(St *st, int32_t index) {
     if (st->prog->nodes[index].kind == JN_NEW) {
         print_new(st, index, 1);
@@ -941,7 +940,7 @@ static void print_expr(St *st, int32_t index) {
         break;
     case JN_ARROW: {
         if (node->flags & JN_F_ASYNC) {
-            put_ascii(st, "async"); /* the guard spaces a bare parameter name, `async(` needs none */
+            put_ascii(st, "async");
         }
         int32_t param = node->a;
         int single = param >= 0 && st->prog->nodes[param].kind == JN_IDENT && st->prog->nodes[param].next < 0;
