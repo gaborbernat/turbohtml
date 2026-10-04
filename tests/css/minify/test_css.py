@@ -343,48 +343,44 @@ def test_minify_css_merge_passes_rule_without_property(filler_rules: str, body: 
 
 
 @pytest.mark.parametrize(
-    ("first", "blocker", "last"),
+    ("first", "blocker", "decoded", "last"),
     [
-        pytest.param("color:blue", "colo\\r:red", "color:green", id="escaped-letter"),
-        pytest.param("color:blue", "\\63olor:red", "color:green", id="hex-escape"),
-        pytest.param("color:blue", "\\43olor:red", "color:green", id="hex-escape-upper-case"),
-        pytest.param("color:blue", "co\\6cor:red", "color:green", id="hex-escape-letter-digit"),
-        pytest.param("color:blue", "\\000063olor:red", "color:green", id="hex-escape-six-digits"),
-        pytest.param("color:blue", "colo\\72:red", "color:green", id="hex-escape-at-end"),
-        pytest.param("color:blue", "\\61ll:initial", "color:green", id="escaped-all"),
-        pytest.param("margin-top:1px", "marg\\in:0", "margin-top:2px", id="escaped-shorthand"),
-        pytest.param("margin:1px", "margin-t\\op:0", "margin:2px", id="escaped-longhand"),
-        pytest.param("colo\\r:blue", "color:red", "colo\\r:green", id="escaped-moving-rule"),
-        pytest.param("--\u00e9:blue", "--\\e9:red", "--\u00e9:green", id="non-ascii-escape"),
-        pytest.param("ca:blue", "\\63 a:red", "ca:green", id="hex-escape-space"),
+        pytest.param("color:blue", "colo\\r:red", "color:red", "color:green", id="escaped-letter"),
+        pytest.param("color:blue", "\\61ll:initial", "all:initial", "color:green", id="escaped-all"),
+        pytest.param("margin-top:1px", "marg\\in:0", "margin:0", "margin-top:2px", id="escaped-shorthand"),
+        pytest.param("margin:1px", "margin-t\\op:0", "margin-top:0", "margin:2px", id="escaped-longhand"),
+        pytest.param("--\u00e9:blue", "--\\e9:red", "--\u00e9:red", "--\u00e9:green", id="non-ascii-escape"),
     ],
 )
-def test_minify_css_merge_reads_escaped_property_names(filler_rules: str, first: str, blocker: str, last: str) -> None:
+def test_minify_css_merge_reads_escaped_property_names(
+    filler_rules: str, first: str, blocker: str, decoded: str, last: str
+) -> None:
     # .u sets the property .t sets, spelled through an escape, so the last .t cannot fold back past it
     source: Final = f".t{{{first}}}{filler_rules}.u{{{blocker}}}.t{{{last}}}"
-    assert minify_css(source) == source
+    assert minify_css(source) == f".t{{{first}}}{filler_rules}.u{{{decoded}}}.t{{{last}}}"
 
 
 @pytest.mark.parametrize(
-    "body",
+    ("body", "decoded"),
     [
-        pytest.param("c\\olour:red", id="other-name"),
-        pytest.param("--\\e9:red", id="non-ascii-escape"),
-        pytest.param("--abcdefghijklmnopqrstuvwxyz0123456789\\78:red", id="long-name"),
+        pytest.param("c\\olorr:red", "colorr:red", id="other-name"),
+        pytest.param("--\\e9:red", "--\u00e9:red", id="non-ascii-escape"),
+        pytest.param("\\31 color:red", "\\31 color:red", id="name-keeping-an-escape"),
     ],
 )
-def test_minify_css_merge_passes_escaped_property_name(filler_rules: str, body: str) -> None:
+def test_minify_css_merge_passes_escaped_property_name(filler_rules: str, body: str, decoded: str) -> None:
     source: Final = f".t{{color:blue}}{filler_rules}.u{{{body}}}.t{{color:green}}"
-    assert minify_css(source) == f".t{{color:blue;color:green}}{filler_rules}.u{{{body}}}"
+    assert minify_css(source) == f".t{{color:blue;color:green}}{filler_rules}.u{{{decoded}}}"
 
 
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        pytest.param("a{\\63 a:red}", "a{\\63 a:red}", id="hex-digit-after"),
-        pytest.param("a{\\63 A:red}", "a{\\63 a:red}", id="upper-case-hex-digit-after"),
-        pytest.param("a{\\63\ta:red}", "a{\\63 a:red}", id="tab"),
-        pytest.param("a{\\63 z:red}", "a{\\63z:red}", id="other-letter-after"),
+        pytest.param("a{\\63 a:red}", "a{ca:red}", id="hex-digit-after"),
+        pytest.param("a{\\63 A:red}", "a{ca:red}", id="upper-case-hex-digit-after"),
+        pytest.param("a{\\63\ta:red}", "a{ca:red}", id="tab"),
+        pytest.param("a{\\63\r\na:red}", "a{ca:red}", id="crlf"),
+        pytest.param("a{\\63 z:red}", "a{cz:red}", id="other-letter-after"),
     ],
 )
 def test_minify_css_property_name_hex_escape_space(source: str, expected: str) -> None:
@@ -394,14 +390,14 @@ def test_minify_css_property_name_hex_escape_space(source: str, expected: str) -
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        pytest.param("a{\\2d-X:1}", "a{\\2d-X:1}", id="hex-escape"),
-        pytest.param("a{\\2d -X:1}", "a{\\2d-X:1}", id="hex-escape-space"),
-        pytest.param("a{-\\2d X:1}", "a{-\\2dX:1}", id="second-hyphen-escaped"),
-        pytest.param("a{\\-\\-X:1}", "a{\\-\\-X:1}", id="escaped-hyphens"),
-        pytest.param("a{\\2d-X: 0px }", "a{\\2d-X:0px}", id="value-kept-raw"),
-        pytest.param("a{\\2dX:1}", "a{\\2dx:1}", id="one-hyphen"),
-        pytest.param("a{-\\X:1}", "a{-\\x:1}", id="escaped-letter-after-hyphen"),
-        pytest.param("a{\\58-Y:1}", "a{\\58-y:1}", id="escaped-letter-before-hyphen"),
+        pytest.param("a{\\2d-X:1}", "a{--X:1}", id="hex-escape"),
+        pytest.param("a{\\2d -X:1}", "a{--X:1}", id="hex-escape-space"),
+        pytest.param("a{-\\2d X:1}", "a{--X:1}", id="second-hyphen-escaped"),
+        pytest.param("a{\\-\\-X:1}", "a{--X:1}", id="escaped-hyphens"),
+        pytest.param("a{\\2d-X: 0px }", "a{--X:0px}", id="value-kept-raw"),
+        pytest.param("a{\\2dX:1}", "a{-x:1}", id="one-hyphen"),
+        pytest.param("a{-\\X:1}", "a{-x:1}", id="escaped-letter-after-hyphen"),
+        pytest.param("a{\\58-Y:1}", "a{x-y:1}", id="escaped-letter-before-hyphen"),
     ],
 )
 def test_minify_css_escaped_custom_property_name(source: str, expected: str) -> None:
@@ -442,7 +438,7 @@ def test_minify_css_rgb_argument_shape(source: str, expected: str) -> None:
         pytest.param("a{\\63x z:red}", "", id="hex-escape-not-at-name-end"),
         pytest.param("a{\\z z:red}", "", id="non-hex-escape-then-space"),
         pytest.param("a{ab z:1}", "", id="hex-byte-end-is-not-an-escape"),
-        pytest.param("a{\\000063 z:red}", "a{\\000063z:red}", id="six-digit-hex-escape-space"),
+        pytest.param("a{\\000063 z:red}", "a{cz:red}", id="six-digit-hex-escape-space"),
         pytest.param("a{\\0000631 z:red}", "", id="hex-escape-past-six-digits-then-space"),
         pytest.param("a{*zoom:1px}", "a{*zoom:1px}", id="star-hack-kept"),
         pytest.param("a{_color:red}", "a{_color:red}", id="underscore-hack-kept"),
@@ -471,6 +467,108 @@ def test_minify_css_escaped_space_kept(source: str, expected: str) -> None:
     # a backslash-space escapes U+0020, a name code point, so it survives minification (#1061)
     assert minify_css(source) == expected
     assert minify_css(expected) == expected
+
+
+_ESCAPED_NAME: Final[list[ParameterSet]] = [
+    pytest.param("a{colo\\r:red}", "a{color:red}", id="property"),
+    pytest.param("a{e:\\72 ed}", "a{e:red}", id="value"),
+    pytest.param("a{color:\\72 ed}", "a{color:red}", id="color-keyword"),
+    pytest.param("a{color:#\\66 00}", "a{color:red}", id="hash-color"),
+    pytest.param(".\\61\\62{x:1}", ".ab{x:1}", id="class"),
+    pytest.param("#\\66 00{x:1}", "#f00{x:1}", id="id"),
+    pytest.param("D\\49V{x:1}", "div{x:1}", id="type-selector"),
+    pytest.param("[d\\61ta-x=\\61]{x:1}", "[data-x=a]{x:1}", id="attribute"),
+    pytest.param("@m\\65 dia screen{a{x:1}}", "@media screen{a{x:1}}", id="at-keyword"),
+    pytest.param("a{e:x !imp\\6frtant}", "a{e:x!important}", id="important"),
+    pytest.param("a{e:u\\72l(x)}", "a{e:url(x)}", id="url-function"),
+    pytest.param("a{--x:\\72 ed}", "a{--x:red}", id="custom-property-value"),
+    pytest.param("a{e:\\E9 t\\E9}", "a{e:\u00e9t\u00e9}", id="non-ascii"),
+    pytest.param("a{e:\\1F600}", "a{e:\U0001f600}", id="astral"),
+    pytest.param("a{e:\\\u00e9}", "a{e:\u00e9}", id="escaped-non-ascii"),
+    pytest.param("a{e:x\\0 y}", "a{e:x\ufffdy}", id="zero"),
+    pytest.param("a{e:x\\d800 y}", "a{e:x\ufffdy}", id="surrogate"),
+    pytest.param("a{e:x\\110000 y}", "a{e:x\ufffdy}", id="past-unicode"),
+    pytest.param("a{e:x\\\x00y}", "a{e:x\ufffdy}", id="escaped-null"),
+    pytest.param("a{e:x\\00000a y}", "a{e:x\\ay}", id="six-digit-line-feed"),
+    pytest.param("a{e:x\\00000d}", "a{e:x\\d }", id="carriage-return-ends-name"),
+    pytest.param("a{e:x\\9 y}", "a{e:x\\9y}", id="tab"),
+    pytest.param("a{e:x\\7f y}", "a{e:x\\7fy}", id="delete"),
+    pytest.param("a{e:\\61\\62}", "a{e:ab}", id="adjacent"),
+    pytest.param("a{e:a\\31 b}", "a{e:a1b}", id="digit-inside"),
+    pytest.param("a{e:\\31 a}", "a{e:\\31 a}", id="leading-digit-before-hex-letter"),
+    pytest.param("a{e:\\31 x}", "a{e:\\31x}", id="leading-digit-before-other-letter"),
+    pytest.param("a{e:\\31\\32}", "a{e:\\31 2}", id="leading-digit-before-digit"),
+    pytest.param("a{e:\\31}", "a{e:\\31 }", id="lone-digit"),
+    pytest.param(".\\31{x:1}", ".\\31{x:1}", id="lone-digit-class"),
+    pytest.param("a{e:-\\31}", "a{e:\\-1}", id="hyphen-digit"),
+    pytest.param("a{e:\\2d}", "a{e:\\-}", id="lone-hyphen"),
+    pytest.param("a{e:\\2d x}", "a{e:-x}", id="hyphen-letter"),
+    pytest.param("a{e:\\-\\-}", "a{e:\\--}", id="two-hyphens"),
+    pytest.param("a{e:\\-\\->b}", "a{e:\\-->b}", id="two-hyphens-before-greater-than"),
+    pytest.param("a{e:x\\,y}", "a{e:x\\,y}", id="delimiter"),
+    pytest.param("a{e:x\\2c y}", "a{e:x\\,y}", id="hex-delimiter"),
+    pytest.param("a{e:\\\\}", "a{e:\\\\}", id="backslash"),
+    pytest.param("a{e:\\feff}", "a{e:\\feff }", id="byte-order-mark"),
+    pytest.param("a{e:\\3c\\2fstyle}", "a{e:\\<\\/style}", id="end-tag"),
+    pytest.param("#\\31 23{x:1}", "#\\31 23{x:1}", id="id-hash-leading-digit"),
+    pytest.param("a{e:#-\\31}", "a{e:#\\-1}", id="id-hash-hyphen-digit"),
+    pytest.param("a{e:#1\\32 3}", "a{e:#123}", id="unrestricted-hash"),
+    pytest.param("@\\31 x;", "@\\31x;", id="at-keyword-leading-digit"),
+    pytest.param("a{e:1p\\78}", "a{e:1px}", id="unit"),
+    pytest.param("a{e:1\\2e 5}", "a{e:1\\.5}", id="unit-dot"),
+    pytest.param("a{e:1\\25}", "a{e:1\\%}", id="unit-percent"),
+    pytest.param("a{e:1\\31 x}", "a{e:1\\31x}", id="unit-leading-digit"),
+    pytest.param("a{e:1\\65}", "a{e:1e}", id="unit-e"),
+    pytest.param("a{e:1\\65 2}", "a{e:1\\65 2}", id="unit-e-digit"),
+    pytest.param("a{e:1E\\31}", "a{e:1\\45 1}", id="unit-upper-e-digit"),
+    pytest.param("a{e:1\\65 -2}", "a{e:1\\65-2}", id="unit-e-hyphen-digit"),
+    pytest.param("a{e:1\\65 -x}", "a{e:1e-x}", id="unit-e-hyphen-letter"),
+    pytest.param("a{e:1e3\\65 2}", "a{e:1e3e2}", id="unit-e-digit-after-exponent"),
+    pytest.param("a{e:\\31  a}", "a{e:\\31  a}", id="whitespace-after-escape-space"),
+    pytest.param("a{e:a\\31  b}", "a{e:a1 b}", id="whitespace-after-inner-escape-space"),
+    pytest.param(".\\31  a{x:1}", ".\\31  a{x:1}", id="descendant-after-escape-space"),
+    pytest.param("a{e:\\31/**/a}", "a{e:\\31  a}", id="comment-after-escape"),
+    pytest.param('@ch\\61rset "x";a{b:c}', '@ch\\61rset"x";a{b:c}', id="charset"),
+    pytest.param("@1\\78;a{b:c}", "@1\\78;a{b:c}", id="at-keyword-not-an-ident"),
+    pytest.param("a{e:x\\\ny}", "a{e:x\\\ny}", id="escaped-newline"),
+]
+
+
+@pytest.mark.parametrize(("source", "expected"), _ESCAPED_NAME)
+def test_minify_css_decodes_escaped_name(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(("source", "expected"), _ESCAPED_NAME)
+def test_minify_css_decoded_name_is_a_fixed_point(source: str, expected: str) -> None:
+    assert minify_css(minify_css(source)) == expected
+
+
+_NEGATIVE_AFTER_NUMBER: Final[list[ParameterSet]] = [
+    pytest.param("a{e:1 -1}", "a{e:1-1}", id="number"),
+    pytest.param("a{e:1 -.5}", "a{e:1-.5}", id="fraction"),
+    pytest.param("a{e:1e3 -1}", "a{e:1000-1}", id="after-exponent"),
+    pytest.param("a{margin:0 -1px}", "a{margin:0-1px}", id="dimension"),
+    pytest.param("a{e:1px -1}", "a{e:1px -1}", id="after-dimension"),
+    pytest.param("a{e:1% -1}", "a{e:1% -1}", id="after-percentage"),
+    pytest.param("a{e:a -1}", "a{e:a -1}", id="after-ident"),
+    pytest.param("a{e:1 -a}", "a{e:1 -a}", id="ident"),
+    pytest.param("a{background-position:1px -1px}", "a{background-position:1px -1px}", id="position-length"),
+    pytest.param("a{background-position:1 -1}", "a{background-position:1-1}", id="position-number"),
+    pytest.param("a{e:f(1-1)}", "a{e:f(1-1)}", id="function"),
+    pytest.param("a{e:f(1 -1)}", "a{e:f(1 -1)}", id="function-whitespace"),
+    pytest.param("a{e:f(1px -1)}", "a{e:f(1px -1)}", id="function-after-dimension"),
+]
+
+
+@pytest.mark.parametrize(("source", "expected"), _NEGATIVE_AFTER_NUMBER)
+def test_minify_css_negative_after_number(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(("source", "expected"), _NEGATIVE_AFTER_NUMBER)
+def test_minify_css_negative_after_number_is_a_fixed_point(source: str, expected: str) -> None:
+    assert minify_css(minify_css(source)) == expected
 
 
 # past 32 rules the merge pass finds repeated selectors and bodies through a hash table before scanning back
@@ -980,7 +1078,7 @@ _CUSTOM_PROPERTY_BLOCK: Final[list[ParameterSet]] = [
     pytest.param("a{--d: { a  b } }", "a{--d:{ a b }}", id="whitespace-collapsed"),
     pytest.param("a{--d :{1}}", "a{--d:{1}}", id="space-before-colon"),
     pytest.param("a{--d/**/:{1}}", "a{--d/**/:{1}}", id="comment-before-colon"),
-    pytest.param("a{\\2d-d:{1}}", "a{\\2d-d:{1}}", id="escaped-name"),
+    pytest.param("a{\\2d-d:{1}}", "a{--d:{1}}", id="escaped-name"),
     pytest.param("a{--d:hover{color:red}}", "a{--d:hover{color:red}}", id="reads-like-nested-rule"),
     pytest.param("a{--d x{color:red}}", "a{--d x{color:red}}", id="no-colon-nested-rule"),
     pytest.param("a{-d:{c d}}", "a{-d:{}}", id="standard-property-nested-rule"),
@@ -1509,16 +1607,16 @@ def test_non_int_baseline_raises_type_error() -> None:
 _DIMENSION_UNIT: Final[list[ParameterSet]] = [
     pytest.param("a{e:1px\u00e9}", "a{e:1px\u00e9}", id="non-ascii"),
     pytest.param("a{e:1\u00e9}", "a{e:1\u00e9}", id="non-ascii-first"),
-    pytest.param("a{e:1p\\78}", "a{e:1p\\78}", id="escape"),
+    pytest.param("a{e:1p\\78}", "a{e:1px}", id="escape"),
     pytest.param("a{e:1x2}", "a{e:1x2}", id="digit"),
     pytest.param("a{e:1_x}", "a{e:1_x}", id="underscore"),
     pytest.param("a{e:1-x}", "a{e:1-x}", id="hyphen"),
     pytest.param("a{e:1--x}", "a{e:1--x}", id="two-hyphens"),
-    pytest.param("a{e:1-\\78}", "a{e:1-\\78}", id="hyphen-escape"),
+    pytest.param("a{e:1-\\78}", "a{e:1-x}", id="hyphen-escape"),
     pytest.param("a{e:1px-2px}", "a{e:1px-2px}", id="hyphen-dimension"),
     pytest.param("a{e:1px\\", "a{e:1px\ufffd}", id="backslash-at-eof"),
     pytest.param("a{e:1\\", "a{e:1\ufffd}", id="unit-backslash-at-eof"),
-    pytest.param("a{e:1-1}", "a{e:1 -1}", id="hyphen-digit"),
+    pytest.param("a{e:1-1}", "a{e:1-1}", id="hyphen-digit"),
     pytest.param("a{e:1-}", "a{e:1 -}", id="hyphen-delimiter"),
     pytest.param("a{e:1-", "a{e:1 -}", id="hyphen-at-eof"),
     pytest.param("a{e:1\\\n}", "a{e:1 \\\n}", id="escaped-line-feed"),
@@ -1559,7 +1657,7 @@ _NUMBER_BOUNDARY: Final[list[ParameterSet]] = [
     pytest.param("a{width:calc(0-0)}", "a{width:calc(0 0)}", id="calc-minus-zero"),
     pytest.param("a{width:calc(0+0)}", "a{width:calc(0 0)}", id="calc-plus-zero"),
     pytest.param("a{width:calc(1px+2px)}", "a{width:calc(1px 2px)}", id="calc-dim-plus-dim"),
-    pytest.param("a{width:calc(5-.5)}", "a{width:calc(5 -.5)}", id="calc-digit-before-neg-fraction"),
+    pytest.param("a{width:calc(5-.5)}", "a{width:calc(5-.5)}", id="calc-digit-before-neg-fraction"),
 ]
 
 

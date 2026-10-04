@@ -210,8 +210,9 @@ typedef struct {
     Py_ssize_t len;
     Py_ssize_t cap;
     int failed;
-    int depth; /* parser recursion depth, kept on the vector every parser holds to avoid a thread-local lookup */
-    int bad;   /* whether any token is CSS_BAD, so valid input skips the per-declaration scan for one */
+    int depth;   /* parser recursion depth, kept on the vector every parser holds to avoid a thread-local lookup */
+    int bad;     /* whether any token is CSS_BAD, so valid input skips the per-declaration scan for one */
+    int escaped; /* whether a name holds an escape, so input without one skips css_spell_names */
 } token_vec;
 
 /* Untrusted nesting drives the parsers into C recursion. 100 sits between rust-cssparser's 75 and WebKit's 128; the
@@ -422,15 +423,38 @@ static inline int css_starts_ident(const css_char *source, Py_ssize_t pos, Py_ss
     return pos + 1 < length && source[pos + 1] != '\n' && source[pos + 1] != '\r' && source[pos + 1] != '\f';
 }
 
-/* The end of the ident sequence at scan (CSS Syntax 3 §4.3.12): the plain run, then a `\` escape (two bytes) or a
-   non-ASCII byte, repeated. */
-static inline Py_ssize_t css_scan_ident(const css_char *source, Py_ssize_t scan, Py_ssize_t length) {
+/* The end of the escape whose `\` sits at pos (CSS Syntax 3 §4.3.7): a hex escape takes up to six hex digits and one
+   whitespace after them, a CRLF counting as one (§3.3); any other escape takes the byte after the `\`. Out of line,
+   which keeps it off the identifier scan. */
+CSS_NOINLINE static Py_ssize_t css_scan_escape(const css_char *source, Py_ssize_t pos, Py_ssize_t length) {
+    Py_ssize_t scan = pos + 1;
+    if (scan == length || !css_is_hex(source[scan])) {
+        return scan + (scan < length);
+    }
+    Py_ssize_t limit = scan + 6 < length ? scan + 6 : length;
+    while (scan < limit && css_is_hex(source[scan])) {
+        scan++;
+    }
+    if (scan < length && css_is_ws(source[scan])) {
+        scan += source[scan] == '\r' && scan + 1 < length && source[scan + 1] == '\n' ? 2 : 1;
+    }
+    return scan;
+}
+
+/* The end of the ident sequence at scan (CSS Syntax 3 §4.3.12): the plain run, then an escape or a non-ASCII byte,
+   repeated. An escape sets *escaped. */
+static inline Py_ssize_t css_scan_ident(const css_char *source, Py_ssize_t scan, Py_ssize_t length, int *escaped) {
     for (;;) {
         scan += css_ident_plain_run(source + scan, length - scan);
         if (scan >= length || !css_is_ident(source[scan])) {
             return scan;
         }
-        scan += (source[scan] == '\\' && scan + 1 < length) ? 2 : 1;
+        if (source[scan] == '\\') {
+            *escaped = 1;
+            scan = css_scan_escape(source, scan, length);
+        } else {
+            scan++;
+        }
     }
 }
 
@@ -438,9 +462,9 @@ static inline Py_ssize_t css_scan_ident(const css_char *source, Py_ssize_t scan,
    of the ident sequence, if the letters began one or the unit starts one here. Out of line, which keeps it off the
    tokenizer's loop. */
 CSS_NOINLINE static Py_ssize_t css_scan_unit(const css_char *source, Py_ssize_t after_number, Py_ssize_t scan,
-                                             Py_ssize_t length) {
+                                             Py_ssize_t length, int *escaped) {
     if (scan > after_number || css_starts_ident(source, scan, length)) {
-        return css_scan_ident(source, scan, length);
+        return css_scan_ident(source, scan, length, escaped);
     }
     return scan;
 }
@@ -526,20 +550,14 @@ static void css_tokenize(const css_char *source, Py_ssize_t length, token_vec *v
             token_vec_push(vec, token);
             pos = scan;
         } else if (character == '@' && pos + 1 < length && css_is_ident(source[pos + 1])) {
-            Py_ssize_t scan = pos + 1;
-            while (scan < length && css_is_ident(source[scan])) {
-                scan += (source[scan] == '\\' && scan + 1 < length) ? 2 : 1; /* keep an escaped char in the name */
-            }
+            Py_ssize_t scan = css_scan_ident(source, pos + 1, length, &vec->escaped);
             token.kind = CSS_AT;
             token.text = &source[pos];
             token.text_len = scan - pos;
             token_vec_push(vec, token);
             pos = scan;
         } else if (character == '#' && pos + 1 < length && css_is_ident(source[pos + 1])) {
-            Py_ssize_t scan = pos + 1;
-            while (scan < length && css_is_ident(source[scan])) {
-                scan += (source[scan] == '\\' && scan + 1 < length) ? 2 : 1; /* keep an escaped char in the hash */
-            }
+            Py_ssize_t scan = css_scan_ident(source, pos + 1, length, &vec->escaped);
             token.kind = CSS_HASH;
             token.text = &source[pos];
             token.text_len = scan - pos;
@@ -560,7 +578,7 @@ static void css_tokenize(const css_char *source, Py_ssize_t length, token_vec *v
                         continue;
                     }
                     if (css_is_ident(unit_char)) {
-                        unit_end = css_scan_unit(source, after_number, unit_end, length);
+                        unit_end = css_scan_unit(source, after_number, unit_end, length, &vec->escaped);
                     }
                     break;
                 }
@@ -593,7 +611,7 @@ static void css_tokenize(const css_char *source, Py_ssize_t length, token_vec *v
             token_vec_push(vec, token);
             pos = scan;
         } else if (css_is_ident(character)) {
-            Py_ssize_t scan = css_scan_ident(source, pos, length);
+            Py_ssize_t scan = css_scan_ident(source, pos, length, &vec->escaped);
             int is_url = scan - pos == 3 && css_lower(source[pos]) == 'u' && css_lower(source[pos + 1]) == 'r' &&
                          css_lower(source[pos + 2]) == 'l' && scan < length && source[scan] == '(';
             if (is_url) {

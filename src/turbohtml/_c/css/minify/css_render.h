@@ -157,7 +157,8 @@ static CSS_FORCEINLINE void css_render_components(css_buf *pool, token_vec *vec,
 }
 
 /* Assemble components into the value buffer: a single space between components, except after a function/url/separator,
-   before a parenthesised piece, or around a bare delimiter. */
+   before a parenthesised piece, around a bare delimiter, or between a unitless number and a negative one: a `-` before
+   a digit starts no unit, so `1-1` reads as the two numbers (CSS Syntax 3 §4.3.3). */
 static void css_assemble(css_buf *pool, comp_vec *comps, css_buf *out) {
     for (Py_ssize_t index = 0; index < comps->len; index++) {
         css_comp *comp = &comps->items[index];
@@ -168,8 +169,14 @@ static void css_assemble(css_buf *pool, comp_vec *comps, css_buf *out) {
             int opens_end_tag = pool->data[prev->off + prev->len - 1] == '<' && pool->data[comp->off] == '/';
             int glued = !opens_end_tag && (comp->isfunc == 2 || prev->isfunc == 1 || prev->isfunc == 2 ||
                                            starts_paren || comp->kind == CK_DELIM || prev->kind == CK_DELIM);
-            if (!glued || css_would_merge(pool->data[prev->off + prev->len - 1], prev->kind == CK_IDENT,
-                                          pool->data + comp->off, comp->len)) {
+            /* the position normalizer labels a length CK_NUM as well, so prev is read back as one number token */
+            int negative_after_number = pool->data[comp->off] == '-' && prev->kind == CK_NUM &&
+                                        css_starts_number(pool->data + comp->off, 0, comp->len) &&
+                                        css_starts_number(pool->data + prev->off, 0, prev->len) &&
+                                        css_scan_number(pool->data + prev->off, 0, prev->len) == prev->len;
+            if (!negative_after_number &&
+                (!glued || css_would_merge(pool->data[prev->off + prev->len - 1], prev->kind == CK_IDENT,
+                                           pool->data + comp->off, comp->len))) {
                 cbuf_putc(out, ' ');
             }
         }
