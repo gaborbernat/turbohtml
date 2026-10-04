@@ -115,9 +115,16 @@ def test_set_inner_html_leaves_selectedcontent_in_option_empty() -> None:
         pytest.param(
             "<select><button><selectedcontent></button><datalist><option selected>D</option></datalist>"
             "<option>B</option></select>",
-            "<select><button><selectedcontent></selectedcontent></button>"
+            "<select><button><selectedcontent>B</selectedcontent></button>"
             '<datalist><option selected="">D</option></datalist><option>B</option></select>',
             id="datalist-option-has-no-nearest-select",
+        ),
+        pytest.param(
+            "<select><button><selectedcontent></button><datalist><option>D</option></datalist>"
+            "<option>B</option></select>",
+            "<select><button><selectedcontent>B</selectedcontent></button>"
+            "<datalist><option>D</option></datalist><option>B</option></select>",
+            id="default-selected-skips-datalist-option",
         ),
         pytest.param(
             "<select><button><selectedcontent></button><optgroup><option selected>G</option></optgroup></select>",
@@ -129,8 +136,19 @@ def test_set_inner_html_leaves_selectedcontent_in_option_empty() -> None:
             "<select><optgroup><optgroup><option selected>N</option></optgroup></optgroup>"
             "<button><selectedcontent></button></select>",
             '<select><optgroup></optgroup><optgroup><option selected="">N</option></optgroup>'
-            "<button><selectedcontent></selectedcontent></button></select>",
-            id="second-optgroup-drops-nearest-select",
+            "<button><selectedcontent>N</selectedcontent></button></select>",
+            id="sibling-optgroups-keep-nearest-select",
+        ),
+        pytest.param(
+            "<select><button><selectedcontent></button><option disabled selected>A</option><option>B</option></select>",
+            '<select><button><selectedcontent>A</selectedcontent></button><option disabled="" selected="">A</option>'
+            "<option>B</option></select>",
+            id="selected-disabled-option-stays-selected",
+        ),
+        pytest.param(
+            "<select><button><selectedcontent><option>I</option></selectedcontent></button><option>B</option></select>",
+            "<select><button><selectedcontent>B</selectedcontent></button><option>B</option></select>",
+            id="default-moves-past-an-option-the-clone-removed",
         ),
         pytest.param(
             "<select><button><selectedcontent></button><option selected>o<div><option selected>p</div></option>"
@@ -325,3 +343,122 @@ def test_default_first_option_without_selected_attribute_clones() -> None:
 )
 def test_parse_selectedcontent_cache_invalidation(markup: str, body: str) -> None:
     assert parse(markup).html == f"<html><head></head><body>{body}</body></html>"
+
+
+@pytest.mark.parametrize(
+    ("markup", "body"),
+    [
+        pytest.param(
+            "<select><option selected>a</option><button><selectedcontent></button></select>",
+            '<select><option selected="">a</option><button><selectedcontent>a</selectedcontent></button></select>',
+            id="selected-option",
+        ),
+        pytest.param(
+            "<select><option>a</option><button><selectedcontent></button></select>",
+            "<select><option>a</option><button><selectedcontent>a</selectedcontent></button></select>",
+            id="default-option",
+        ),
+        pytest.param(
+            "<select><option>a</option><option selected>b</option><button><selectedcontent></button></select>",
+            '<select><option>a</option><option selected="">b</option>'
+            "<button><selectedcontent>b</selectedcontent></button></select>",
+            id="later-selected-option",
+        ),
+        pytest.param(
+            "<select><option selected>a</option><option>b</option><button><selectedcontent></button></select>",
+            '<select><option selected="">a</option><option>b</option>'
+            "<button><selectedcontent>a</selectedcontent></button></select>",
+            id="earlier-selected-option",
+        ),
+        pytest.param(
+            "<select><option disabled selected>a</option><option>b</option><button><selectedcontent></button></select>",
+            '<select><option disabled="" selected="">a</option><option>b</option>'
+            "<button><selectedcontent>a</selectedcontent></button></select>",
+            id="selected-disabled-option",
+        ),
+        pytest.param(
+            "<select><datalist><option selected>D</option></datalist><option>B</option>"
+            "<button><selectedcontent></button></select>",
+            '<select><datalist><option selected="">D</option></datalist><option>B</option>'
+            "<button><selectedcontent>B</selectedcontent></button></select>",
+            id="past-datalist-option",
+        ),
+        pytest.param(
+            "<select><option>a</option><button><selectedcontent>z</selectedcontent></button></select>",
+            "<select><option>a</option><button><selectedcontent>az</selectedcontent></button></select>",
+            id="parsed-content-follows-clone",
+        ),
+        pytest.param(
+            "<select><option>a</option><button><selectedcontent></button><selectedcontent></selectedcontent></select>",
+            "<select><option>a</option><button><selectedcontent>a</selectedcontent></button>"
+            "<selectedcontent>a</selectedcontent></select>",
+            id="every-late-selectedcontent",
+        ),
+        pytest.param(
+            "<select><option>a</option><svg><foreignObject><button><selectedcontent></button></foreignObject></svg>"
+            "</select>",
+            "<select><option>a</option><svg><foreignObject><button><selectedcontent>a</selectedcontent></button>"
+            "</foreignObject></svg></select>",
+            id="through-foreign-content",
+        ),
+        pytest.param(
+            "<select><option selected>a</option><b><p>q</b><button><selectedcontent></button></select>",
+            '<select><option selected="">a</option><b></b><p><b>q</b>'
+            "<button><selectedcontent>a</selectedcontent></button></p></select>",
+            id="after-adoption-agency-move",
+        ),
+        pytest.param(
+            "<select><option>a</option><button><selectedcontent><selectedcontent></selectedcontent></selectedcontent>"
+            "</button></select>",
+            "<select><option>a</option><button><selectedcontent>a<selectedcontent></selectedcontent></selectedcontent>"
+            "</button></select>",
+            id="inner-selectedcontent-disabled",
+        ),
+        pytest.param(
+            "<select><option>a</option><template><button><selectedcontent></button></template></select>",
+            "<select><option>a</option><template><button><selectedcontent></selectedcontent></button></template>"
+            "</select>",
+            id="template-content-is-not-the-select",
+        ),
+        pytest.param(
+            "<select><svg><foreignObject><select><option>i</option><button><selectedcontent></button></select>"
+            "</foreignObject></svg></select>",
+            "<select><svg><foreignObject><select><option>i</option><button><selectedcontent></selectedcontent>"
+            "</button></select></foreignObject></svg></select>",
+            id="second-select-ancestor",
+        ),
+        pytest.param(
+            "<select><button><selectedcontent></button></select>",
+            "<select><button><selectedcontent></selectedcontent></button></select>",
+            id="no-option",
+        ),
+        pytest.param(
+            "<select><option disabled>a</option><button><selectedcontent></button></select>",
+            '<select><option disabled="">a</option><button><selectedcontent></selectedcontent></button></select>',
+            id="no-enabled-option",
+        ),
+        pytest.param(
+            "<select multiple><option selected>a</option><button><selectedcontent></button></select>",
+            '<select multiple=""><option selected="">a</option><button><selectedcontent></selectedcontent></button>'
+            "</select>",
+            id="multiple-select",
+        ),
+        pytest.param(
+            "<select><option selected>a</option><button><selectedcontent disabled></button></select>",
+            '<select><option selected="">a</option><button><selectedcontent disabled=""></selectedcontent></button>'
+            "</select>",
+            id="disabled-attribute",
+        ),
+    ],
+)
+def test_parse_fills_selectedcontent_inserted_after_the_option(markup: str, body: str) -> None:
+    assert parse(markup).html == f"<html><head></head><body>{body}</body></html>"
+
+
+def test_set_inner_html_fills_selectedcontent_inserted_after_the_option() -> None:
+    host = parse("<div></div>").find("div")
+    assert isinstance(host, Element)
+    host.set_inner_html("<select><option>pick</option><button><selectedcontent></button></select>")
+    assert host.inner_html == (
+        "<select><option>pick</option><button><selectedcontent>pick</selectedcontent></button></select>"
+    )

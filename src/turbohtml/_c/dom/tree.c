@@ -1385,30 +1385,6 @@ static int option_is_disabled(const th_node *option) {
            (is_html_element(parent, TH_TAG_OPTGROUP) && node_has_attr(parent, TH_ATTR_DISABLED));
 }
 
-/* The first enabled option in tree order below the select, not descending into nested
-   selects, or NULL when every option is disabled. This is the option "reset a select's
-   selectedness" makes selected by default when no option carries the selected attribute. */
-static th_node *first_enabled_option_below(th_node *select) {
-    th_node *node = select->first_child;
-    while (node != NULL) {
-        if (is_html_element(node, TH_TAG_OPTION)) {
-            if (!option_is_disabled(node)) {
-                return node;
-            }
-        } else if (node->type != TH_NODE_CONTENT && !is_html_element(node, TH_TAG_SELECT) &&
-                   node->first_child != NULL) {
-            /* a template's content fragment is not part of the select's list of options */
-            node = node->first_child;
-            continue;
-        }
-        while (node != select && node->next_sibling == NULL) {
-            node = node->parent;
-        }
-        node = node == select ? NULL : node->next_sibling;
-    }
-    return NULL;
-}
-
 /* An HTML select, option, or selectedcontent element: a selectedcontent below one
    of these, other than its nearest select, is disabled. */
 static int disables_selectedcontent(const th_node *node) {
@@ -1479,13 +1455,14 @@ static void select_cache_fill(th_tree *tree, th_select_cache *cache) {
         }
         node = node == root ? NULL : node->next_sibling;
     }
+    cache->disabled = (uint8_t)select_disabled_by_ancestor(root);
     cache->valid = 1;
 }
 
-/* The select's cached first option and selectedcontent target, filled on first use
-   and refilled after the adoption agency moved nodes under it. Every popped
-   selected option needs both, and finding them walks the select's subtree, so
-   without the cache a run of options costs quadratic time. */
+/* The select's cached selectedcontent targets, filled on first use and refilled after
+   the adoption agency moved nodes under it. Every popped selected option needs them,
+   and finding them walks the select's subtree, so without the cache a run of options
+   costs quadratic time. */
 static th_select_cache *select_cache_get(th_tree *tree, th_node *select) {
     if (tree->select_state == NULL) {
         tree->select_state = PyMem_Calloc(1, sizeof(th_select_state));
@@ -1524,6 +1501,7 @@ static th_select_cache *select_cache_get(th_tree *tree, th_node *select) {
         cache->targets = NULL;
         cache->target_count = 0;
         cache->target_cap = 0;
+        cache->selected = NULL;
         cache->multiple = (uint8_t)node_has_attr(select, TH_ATTR_MULTIPLE);
         cache->valid = 0;
     }
@@ -1532,28 +1510,6 @@ static th_select_cache *select_cache_get(th_tree *tree, th_node *select) {
         select_cache_fill(tree, cache);
     }
     return cache;
-}
-
-/* Keep the cache of the select an option or selectedcontent was just inserted
-   under current: the new element is a leaf, so it can only take over as the first
-   option or as the target. */
-/* A new selectedcontent under the select can change the cached clone target, so drop
-   the cache and let the next pop recompute it. Only the target is cached; the first
-   option is cheap to find fresh each time, so option inserts need no bookkeeping. The
-   walk stops at an ancestor option: a selectedcontent inside an option is disabled and
-   never the target, which keeps a chain of nested options O(1) each. */
-static void select_cache_note_insert(th_select_state *state, th_node *inserted) {
-    th_node *select = inserted->parent;
-    while (select != NULL && !is_html_element(select, TH_TAG_SELECT)) {
-        if (is_html_element(select, TH_TAG_OPTION)) {
-            return;
-        }
-        select = select->parent;
-    }
-    Py_ssize_t slot = select != NULL ? th_node_map_find(&state->index, select) : 0;
-    if (slot != 0) {
-        state->caches[slot - 1].valid = 0;
-    }
 }
 
 /* The adoption agency is the one place that reorders existing nodes, so a select
@@ -1638,9 +1594,6 @@ static void deep_copy_children(th_tree *tree, const th_node *src, th_node *dst) 
     }
 }
 
-/* "Maybe clone an option into selectedcontent": when a selected option (the
-   selected attribute, or the select's first option by default) is popped, its
-   children are mirrored into the select's selectedcontent element. */
 /* The HTML Standard's "nearest ancestor select" for element: walking ancestors
    nearest first, a datalist, hr, or option returns null, a second optgroup returns
    null, and the first select is the answer. An option nested in another option (or
@@ -1677,6 +1630,16 @@ static th_node *option_nearest_select(th_node *option) {
     return NULL;
 }
 
+/* The option the select shows, or NULL once a clone into a selectedcontent removed it
+   (an option written inside the target) or the adoption agency moved it out. */
+static th_node *select_cache_shown_option(const th_select_cache *cache) {
+    th_node *option = cache->selected;
+    return option != NULL && option_nearest_select(option) == cache->select ? option : NULL;
+}
+
+/* "Update descendant selectedcontent elements for an option": when the option the
+   select shows is popped, its children are mirrored into the select's enabled
+   selectedcontent elements. */
 static void maybe_clone_option(th_tree *tree, th_node *option) {
     th_node *select = option_nearest_select(option);
     if (select == NULL) {
@@ -1689,10 +1652,14 @@ static void maybe_clone_option(th_tree *tree, th_node *option) {
     if (cache->multiple) {
         return;
     }
-    if (!node_has_attr(option, TH_ATTR_SELECTED) && first_enabled_option_below(select) != option) {
+    /* the selectedness setting algorithm: the last selected option wins, and the first
+       enabled one is selected only while no option is */
+    if (!node_has_attr(option, TH_ATTR_SELECTED) &&
+        (option_is_disabled(option) || select_cache_shown_option(cache) != NULL)) {
         return;
     }
-    if (cache->target_count == 0 || select_disabled_by_ancestor(select)) {
+    cache->selected = option;
+    if (cache->target_count == 0 || cache->disabled) {
         return;
     }
     for (Py_ssize_t index = 0; index < cache->target_count; index++) {
@@ -1701,6 +1668,33 @@ static void maybe_clone_option(th_tree *tree, th_node *option) {
             node_remove(target->first_child);
         }
         deep_copy_children(tree, option, target);
+    }
+}
+
+/* The selectedcontent post-connection steps: a selectedcontent inserted under a select
+   it is enabled for joins the select's clone targets and copies the option the select
+   already shows. A select with no cache has had no option closed, so it shows none.
+   The walk stops at an ancestor option, so a chain of nested options stays O(1) each. */
+static void selectedcontent_inserted(th_tree *tree, th_node *selectedcontent) {
+    th_node *select = selectedcontent->parent;
+    while (select != NULL && !is_html_element(select, TH_TAG_SELECT)) {
+        /* a template's content fragment holds its own selectedcontent, not the select's */
+        if (select->type == TH_NODE_CONTENT || disables_selectedcontent(select)) {
+            return;
+        }
+        select = select->parent;
+    }
+    Py_ssize_t slot = select != NULL ? th_node_map_find(&tree->select_state->index, select) : 0;
+    if (slot == 0 || node_has_attr(selectedcontent, TH_ATTR_DISABLED)) {
+        return;
+    }
+    th_select_cache *cache = &tree->select_state->caches[slot - 1];
+    if (cache->valid) { /* an invalid cache refills on the next pop and finds it then */
+        select_cache_add_target(tree, cache, selectedcontent);
+    }
+    th_node *option = select_cache_shown_option(cache);
+    if (option != NULL && !cache->disabled) {
+        deep_copy_children(tree, option, selectedcontent);
     }
 }
 
@@ -3498,7 +3492,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
         /* every HTML selectedcontent the parser creates lands here, so a select cached before
            it arrived learns of it without a test on every other element's insert or push */
         if (atom == TH_TAG_SELECTEDCONTENT && tree->select_state != NULL) {
-            select_cache_note_insert(tree->select_state, node);
+            selectedcontent_inserted(tree, node);
         }
         return TH_DRAIN_NEXT;
     }
