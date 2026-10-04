@@ -94,14 +94,11 @@ typedef struct {
     Py_UCS4 *source; /* an owned copy of the selector text the slices point into */
     sel_complex *alts;
     int count;
-    int failed;         /* an allocation or a syntax error happened during compile */
+    uint16_t subject_atom; /* 0 before index preparation, UINT16_MAX without a common subject tag */
+    uint16_t left_atom;
     int quirks;         /* the tree was parsed in quirks mode: class/ID match case-insensitively */
     int has_relational; /* the selector contains a :has() somewhere: a match may want the subtree memo */
     th_tree *tree;      /* the tree the selector runs on; :empty and :dir(auto) read text spans through it */
-    /* Filled by the query drivers' compile cache, TH_TAG_UNKNOWN elsewhere: the tag every alternative's
-       subject names, and for a single alternative the tag a compound left of the subject names. */
-    uint16_t subject_atom;
-    uint16_t left_atom;
 } sel_compiled;
 
 /* One memoized bit: key names the question (a :has() argument, or the compound a general
