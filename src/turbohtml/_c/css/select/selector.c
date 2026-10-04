@@ -5,6 +5,14 @@
 #include "core/vec.h"
 #include "css/select/selector.h"
 
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
 /* Record a parse failure with the position and reason for the error message. Set
    unconditionally: an error propagates up through early returns without another
    failure being recorded, so the first (deepest) call keeps its position. */
@@ -2052,8 +2060,8 @@ static inline enum sel_status sel_match_from(th_node *node, const sel_complex *c
    A query walking the siblings in document order then visits each one a bounded number of
    times. Reusing the last walk avoids the hash lookup in document order. Inside :has(),
    the answer depends on the anchor, so the memo stays out. */
-static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_complex *complex, int index, th_node *anchor,
-                                                 const sel_ctx *ctx) {
+static TH_NOINLINE enum sel_status sel_match_earlier_sibling(th_node *node, const sel_complex *complex, int index,
+                                                             th_node *anchor, const sel_ctx *ctx) {
     const sel_compound *target = &complex->compounds[index - 1];
     const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
     th_node *nearest = sel_prev_element(node);
