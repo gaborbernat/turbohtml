@@ -1,0 +1,1 @@
+:func:`~turbohtml.clean.minify_css` no longer leaves some value and selector rewrites for a second call.

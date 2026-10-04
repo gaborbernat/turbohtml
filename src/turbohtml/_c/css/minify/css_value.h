@@ -615,11 +615,15 @@ static void css_append_color_number(css_buf *out, const css_token *raw, int is_p
     cbuf_free(&scratch);
 }
 
-/* Try to fold an rgb()/rgba()/hsl()/hsla() call to a hex, keyword, transparent or shortest functional form. Returns 1
-   and sets (off, len) on success, 0 when the name is not a color function or the argument shape is not a color. */
+/* Try to fold the rgb()/rgba()/hsl()/hsla() call whose arguments are [start, end) (its name token sits at start - 2) to
+   a hex, keyword, transparent or shortest functional form. Returns 1 and sets (off, len) and the component kind on
+   success, 0 when the name is not a color function or the argument shape is not a color, and -1 when a calc(), which
+   rendering the arguments may fold, stands where a number belongs. The name comes from the tokens so the call passes
+   every argument in a register. */
 CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end,
-                                           const css_char *name, Py_ssize_t name_len, Py_ssize_t *out_off,
-                                           Py_ssize_t *out_len) {
+                                           Py_ssize_t *out_off, Py_ssize_t *out_len, css_compkind *kind) {
+    const css_char *name = vec->items[start - 2].text;
+    Py_ssize_t name_len = vec->items[start - 2].text_len;
     int is_rgb = css_run_ieq(name, name_len, "rgb") || css_run_ieq(name, name_len, "rgba");
     int is_hsl = css_run_ieq(name, name_len, "hsl") || css_run_ieq(name, name_len, "hsla");
     if (!is_rgb && !is_hsl) {
@@ -649,7 +653,7 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
         if (token->kind != CSS_NUM || count >= 4) {
             /* a var()/env()/none/calc() argument (or a 5th component) means this is not a plain numeric color we can
                fold; keep the function verbatim rather than drop or reorder its arguments */
-            return 0;
+            return token->kind == CSS_IDENT && css_run_ieq(token->text, token->text_len, "calc") ? -1 : 0;
         }
         double magnitude = css_run_to_double(token->text, token->text_len);
         int is_pct = token->unit_len == 1 && (token->text + token->text_len)[0] == '%';
@@ -689,6 +693,7 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
         if (all_zero) { /* rgba(0,0,0,0) is the keyword transparent, whose shortest form is the 4-digit hex #0000 */
             *out_off = pool_cstr(pool, "#0000");
             *out_len = 5;
+            *kind = CK_HASH;
             return 1;
         }
         if (values[3] >= 1.0) { /* alpha clamps to [0,1] (Color 4 §17), so any alpha >= 1 is opaque and droppable */
@@ -725,6 +730,7 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
         }
         if (foldable) {
             css_rgb_to_hex(pool, bits[0], bits[1], bits[2], out_off, out_len);
+            *kind = pool->data[*out_off] == '#' ? CK_HASH : CK_IDENT;
             return 1;
         }
     }
@@ -769,6 +775,7 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
     cbuf_putc(&result, ')');
     *out_off = pool_run(pool, result.data, result.len);
     *out_len = result.len;
+    *kind = CK_FUNC;
     cbuf_free(&result);
     return 1;
 }

@@ -16,6 +16,26 @@ static int css_is_legacy_pseudo_element(const css_token *token) {
     return 0;
 }
 
+/* The index of the first token at or after index in [index, end) that is not a comment. */
+static Py_ssize_t css_skip_comments(const token_vec *vec, Py_ssize_t index, Py_ssize_t end) {
+    while (index < end && vec->items[index].kind == CSS_COMMENT) {
+        index++;
+    }
+    return index;
+}
+
+/* The index of the legacy pseudo-element name that the second colon at or after index (in [index, end)) introduces, or
+   -1. Comments make no token (CSS Syntax 3 §4.3.2), so one between the colons or before the name still spells it. Out
+   of line: only a `::` or a comment after a `:` reaches it. */
+CSS_NOINLINE static Py_ssize_t css_legacy_pseudo_name(const token_vec *vec, Py_ssize_t index, Py_ssize_t end) {
+    Py_ssize_t second = css_skip_comments(vec, index, end);
+    if (second == end || vec->items[second].kind != CSS_DELIM || vec->items[second].delim != ':') {
+        return -1;
+    }
+    Py_ssize_t name = css_skip_comments(vec, second + 1, end);
+    return name < end && css_is_legacy_pseudo_element(&vec->items[name]) ? name : -1;
+}
+
 /* Minify a selector token run [start, end) into out. */
 static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end, int keyframe, css_buf *out) {
     int pending_ws = 0;
@@ -79,12 +99,15 @@ static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end
         pending_ws = 0;
         comment_gap = 0;
         last_is_ident = token->kind == CSS_IDENT;
-        if (token->kind == CSS_DELIM && token->delim == ':' && attr_depth == 0 && index + 2 < end &&
-            vec->items[index + 1].kind == CSS_DELIM && vec->items[index + 1].delim == ':' &&
-            css_is_legacy_pseudo_element(&vec->items[index + 2])) {
-            cbuf_putc(out, ':'); /* legacy pseudo-element: emit one colon, drop the second; the name renders next */
-            index++;
-            continue;
+        if (token->kind == CSS_DELIM && token->delim == ':' && attr_depth == 0 && index + 1 < end &&
+            (vec->items[index + 1].kind == CSS_COMMENT ||
+             (vec->items[index + 1].kind == CSS_DELIM && vec->items[index + 1].delim == ':'))) {
+            Py_ssize_t name = css_legacy_pseudo_name(vec, index + 1, end);
+            if (name >= 0) {
+                cbuf_putc(out, ':'); /* legacy pseudo-element: emit one colon, drop the second; the name renders next */
+                index = name - 1;
+                continue;
+            }
         }
         if (token->kind == CSS_DELIM && token->delim == '*' && index + 1 < end &&
             (vec->items[index + 1].kind == CSS_HASH ||
