@@ -1,0 +1,1 @@
+Deeply nested :meth:`~turbohtml.Node.to_markdown` output reads back in full with markdown-it's CommonMark preset.
