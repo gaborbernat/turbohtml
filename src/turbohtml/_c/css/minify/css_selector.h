@@ -36,6 +36,56 @@ CSS_NOINLINE static Py_ssize_t css_legacy_pseudo_name(const token_vec *vec, Py_s
     return name < end && css_is_legacy_pseudo_element(&vec->items[name]) ? name : -1;
 }
 
+static int css_selector_function_start(const token_vec *vec, Py_ssize_t start, Py_ssize_t index) {
+    if (index - start < 2) {
+        return 0;
+    }
+    const css_token *name = &vec->items[index - 1];
+    if (name->kind != CSS_IDENT ||
+        !(css_run_ieq(name->text, name->text_len, "is") || css_run_ieq(name->text, name->text_len, "where") ||
+          css_run_ieq(name->text, name->text_len, "not") || css_run_ieq(name->text, name->text_len, "has"))) {
+        return 0;
+    }
+    index -= 2;
+    while (index > start && vec->items[index].kind == CSS_COMMENT) {
+        index--;
+    }
+    return vec->items[index].kind == CSS_DELIM && vec->items[index].delim == ':';
+}
+
+/* Comments make no token; a namespace bar cannot start an unqualified universal (Selectors 4 §5.2). */
+static int css_universal_starts_compound(const token_vec *vec, Py_ssize_t start, Py_ssize_t index) {
+    int whitespace = 0;
+    while (index > start) {
+        const css_token *previous = &vec->items[--index];
+        if (previous->kind == CSS_COMMENT) {
+            continue;
+        }
+        if (previous->kind == CSS_WS) {
+            whitespace = 1;
+            continue;
+        }
+        if (previous->kind == CSS_DELIM && previous->delim == '(') {
+            return css_selector_function_start(vec, start, index);
+        }
+        if (previous->kind == CSS_DELIM && previous->delim == '|') {
+            return 0;
+        }
+        return whitespace || (previous->kind == CSS_DELIM && (previous->delim == '>' || previous->delim == '+' ||
+                                                              previous->delim == '~' || previous->delim == ','));
+    }
+    return 1;
+}
+
+/* Selectors 4 §6.1 permits a string value after a matcher, but requires an identifier as the name. */
+static int css_attribute_value_position(const token_vec *vec, Py_ssize_t index) {
+    const css_token *previous;
+    do {
+        previous = &vec->items[--index];
+    } while (previous->kind == CSS_WS || previous->kind == CSS_COMMENT);
+    return previous->kind == CSS_DELIM && previous->delim == '=';
+}
+
 /* Minify a selector token run [start, end) into out. */
 static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end, int keyframe, css_buf *out) {
     int pending_ws = 0;
@@ -113,9 +163,9 @@ static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end
             (vec->items[index + 1].kind == CSS_HASH ||
              (vec->items[index + 1].kind == CSS_DELIM &&
               (vec->items[index + 1].delim == '.' || vec->items[index + 1].delim == '[' ||
-               vec->items[index + 1].delim == ':')))) {
-            /* a `*` only reaches here at attr-depth 0; inside [...] the `*=` operator is consumed above. A universal
-               `*` glued to a subclass/pseudo is redundant (Selectors 4 §5.2): *:hover -> :hover */
+               vec->items[index + 1].delim == ':'))) &&
+            css_universal_starts_compound(vec, start, index)) {
+            /* Only an unqualified universal at the compound start is redundant (Selectors 4 §5.2). */
             continue;
         }
         /* '#' before an ident always merges into a single HASH token, so the prior char is never a bare '#' here */
@@ -127,7 +177,7 @@ static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end
             for (Py_ssize_t pos = 0; pos < token->text_len; pos++) {
                 cbuf_putc(out, css_lower(token->text[pos]));
             }
-        } else if (token->kind == CSS_STR && attr_depth > 0) {
+        } else if (token->kind == CSS_STR && attr_depth > 0 && css_attribute_value_position(vec, index)) {
             /* Selectors 4 §6.1: an attribute-selector value is an <ident-token> or a <string>; the quotes drop only
                when the inner text is a valid <ident-token> (so [x="123"] keeps its quotes -- 123 is not an ident). */
             const css_char *inner = token->text + 1;
