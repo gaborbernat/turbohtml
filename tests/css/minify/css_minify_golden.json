@@ -46,28 +46,28 @@
 ],
 [
 "@import 'file';",
-"@import 'file';",
-"@import 'file'"
+"@import'file';",
+"@import'file'"
 ],
 [
 "@import url('file');",
-"@import 'file';",
-"@import 'file'"
+"@import'file';",
+"@import'file'"
 ],
 [
 "@import url(//url);",
-"@import \"//url\";",
-"@import \"//url\""
+"@import\"//url\";",
+"@import\"//url\""
 ],
 [
 "@import url(\n//url\n);",
-"@import \"//url\";",
-"@import \"//url\""
+"@import\"//url\";",
+"@import\"//url\""
 ],
 [
 "@import url();",
-"@import \"\";",
-"@import \"\""
+"@import\"\";",
+"@import\"\""
 ],
 [
 "@font-face { x:y; }",
@@ -206,18 +206,18 @@
 ],
 [
 "@import url(",
-"@import \"\";",
-"@import \"\""
+"@import\"\";",
+"@import\"\""
 ],
 [
 "@import url( ",
-"@import \"\";",
-"@import \"\""
+"@import\"\";",
+"@import\"\""
 ],
 [
 "@import url(  )",
-"@import \"\";",
-"@import \"\""
+"@import\"\";",
+"@import\"\""
 ],
 [
 "a{@media screen and (min-width:1024px){ width: 40%; } & h1 { font-size: clamp(2.5rem, 1rem + 3vw, 3.5rem)}}",
@@ -2021,13 +2021,13 @@
 ],
 [
 "@namespace foo url(\"http://e.com\");",
-"@namespace foo \"http://e.com\";",
-"@namespace foo \"http://e.com\""
+"@namespace foo\"http://e.com\";",
+"@namespace foo\"http://e.com\""
 ],
 [
 "@import a url(b",
-"@import a \"b\";",
-"@import a \"b\""
+"@import a\"b\";",
+"@import a\"b\""
 ],
 [
 "a{p0:0px;p1:1px;p2:2px;p3:3px;p4:4px;p5:5px;p6:6px;p7:7px;p8:8px;p9:9px;p10:10px;p11:11px;p12:12px;p13:13px;p14:14px;p15:15px;p16:16px;p17:17px;p18:18px;p19:19px;p20:20px;p21:21px;p22:22px;p23:23px;p24:24px;p25:25px;p26:26px;p27:27px;p28:28px;p29:29px;p30:30px;p31:31px;p32:32px;color:red;color:blue}",
@@ -2091,8 +2091,8 @@
 ],
 [
 "@import \"x.css\";a{color:red}",
-"@import \"x.css\";a{color:red}",
-"@import \"x.css\";a{color:red}"
+"@import\"x.css\";a{color:red}",
+"@import\"x.css\";a{color:red}"
 ],
 [
 "@charset \"utf-8\";a{color:red}",
@@ -3766,18 +3766,18 @@
 ],
 [
 "@import \"x.css\";a{x:1}",
-"@import \"x.css\";a{x:1}",
-"@import \"x.css\";a{x:1}"
+"@import\"x.css\";a{x:1}",
+"@import\"x.css\";a{x:1}"
 ],
 [
 "@namespace svg url(http://x);a{x:1}",
-"@namespace svg \"http://x\";a{x:1}",
-"@namespace svg \"http://x\";a{x:1}"
+"@namespace svg\"http://x\";a{x:1}",
+"@namespace svg\"http://x\";a{x:1}"
 ],
 [
 "@import \"y.css\"",
-"@import \"y.css\";",
-"@import \"y.css\""
+"@import\"y.css\";",
+"@import\"y.css\""
 ],
 [
 "@media screen{a{x:1}}",
@@ -3831,23 +3831,23 @@
 ],
 [
 "@import url(x.css);a{x:1}",
-"@import \"x.css\";a{x:1}",
-"@import \"x.css\";a{x:1}"
+"@import\"x.css\";a{x:1}",
+"@import\"x.css\";a{x:1}"
 ],
 [
 "@import url(\"x.css\");a{x:1}",
-"@import \"x.css\";a{x:1}",
-"@import \"x.css\";a{x:1}"
+"@import\"x.css\";a{x:1}",
+"@import\"x.css\";a{x:1}"
 ],
 [
 "@import url( x.css );a{x:1}",
-"@import \"x.css\";a{x:1}",
-"@import \"x.css\";a{x:1}"
+"@import\"x.css\";a{x:1}",
+"@import\"x.css\";a{x:1}"
 ],
 [
 "@import url();a{x:1}",
-"@import \"\";a{x:1}",
-"@import \"\";a{x:1}"
+"@import\"\";a{x:1}",
+"@import\"\";a{x:1}"
 ],
 [
 "@supports(display:grid){a{x:1}}",
@@ -3866,13 +3866,13 @@
 ],
 [
 "a{@import \"x\"}",
-"a{@import \"x\"}",
-"a{@import \"x\"}"
+"a{@import\"x\"}",
+"a{@import\"x\"}"
 ],
 [
 "@media x{@import \"y\"}",
-"@media x{@import \"y\"}",
-"@media x{@import \"y\"}"
+"@media x{@import\"y\"}",
+"@media x{@import\"y\"}"
 ],
 [
 "a{font:inherit serif}",
@@ -4241,8 +4241,8 @@
 ],
 [
 "@import url(x.css)",
-"@import \"x.css\";",
-"@import \"x.css\""
+"@import\"x.css\";",
+"@import\"x.css\""
 ],
 [
 "@supports ( url(b) ){a{x:1}}",
@@ -4276,8 +4276,8 @@
 ],
 [
 "@import url(a),url(b)",
-"@import \"a\",\"b\";",
-"@import \"a\",\"b\""
+"@import\"a\",\"b\";",
+"@import\"a\",\"b\""
 ],
 [
 "@x (a , url(b) )",
@@ -4286,8 +4286,8 @@
 ],
 [
 "@import url(unclosed",
-"@import \"unclosed\";",
-"@import \"unclosed\""
+"@import\"unclosed\";",
+"@import\"unclosed\""
 ],
 [
 "@x ( url(unclosed",
@@ -4456,8 +4456,8 @@
 ],
 [
 "@import url(a),url(b",
-"@import \"a\",\"b\";",
-"@import \"a\",\"b\""
+"@import\"a\",\"b\";",
+"@import\"a\",\"b\""
 ],
 [
 "r0{x:0}r1{x:1}r2{x:2}r3{x:3}r4{x:4}r5{x:5}r6{x:6}r7{x:7}r8{x:8}r9{x:9}r10{x:10}r11{x:11}r12{x:12}r13{x:13}r14{x:14}r15{x:15}r16{x:16}r17{x:17}r18{x:18}r19{x:19}",
