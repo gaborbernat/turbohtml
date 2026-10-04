@@ -46,27 +46,27 @@
 ],
 [
 "@import 'file';",
-"@import 'file'",
+"@import 'file';",
 "@import 'file'"
 ],
 [
 "@import url('file');",
-"@import 'file'",
+"@import 'file';",
 "@import 'file'"
 ],
 [
 "@import url(//url);",
-"@import \"//url\"",
+"@import \"//url\";",
 "@import \"//url\""
 ],
 [
 "@import url(\n//url\n);",
-"@import \"//url\"",
+"@import \"//url\";",
 "@import \"//url\""
 ],
 [
 "@import url();",
-"@import \"\"",
+"@import \"\";",
 "@import \"\""
 ],
 [
@@ -206,17 +206,17 @@
 ],
 [
 "@import url(",
-"@import \"\"",
+"@import \"\";",
 "@import \"\""
 ],
 [
 "@import url( ",
-"@import \"\"",
+"@import \"\";",
 "@import \"\""
 ],
 [
 "@import url(  )",
-"@import \"\"",
+"@import \"\";",
 "@import \"\""
 ],
 [
@@ -2021,12 +2021,12 @@
 ],
 [
 "@namespace foo url(\"http://e.com\");",
-"@namespace foo \"http://e.com\"",
+"@namespace foo \"http://e.com\";",
 "@namespace foo \"http://e.com\""
 ],
 [
 "@import a url(b",
-"@import a \"b\"",
+"@import a \"b\";",
 "@import a \"b\""
 ],
 [
@@ -2421,7 +2421,7 @@
 ],
 [
 "@a",
-"@a",
+"@a;",
 "@a"
 ],
 [
@@ -3776,7 +3776,7 @@
 ],
 [
 "@import \"y.css\"",
-"@import \"y.css\"",
+"@import \"y.css\";",
 "@import \"y.css\""
 ],
 [
@@ -4241,7 +4241,7 @@
 ],
 [
 "@import url(x.css)",
-"@import \"x.css\"",
+"@import \"x.css\";",
 "@import \"x.css\""
 ],
 [
@@ -4261,43 +4261,43 @@
 ],
 [
 "@namespace ( url(e) )",
-"@namespace(\"e\")",
+"@namespace(\"e\");",
 "@namespace(\"e\")"
 ],
 [
 "@x ( url(b) )",
-"@x(url(b))",
+"@x(url(b));",
 "@x(url(b))"
 ],
 [
 "@import ( url(b) )",
-"@import(\"b\")",
+"@import(\"b\");",
 "@import(\"b\")"
 ],
 [
 "@import url(a),url(b)",
-"@import \"a\",\"b\"",
+"@import \"a\",\"b\";",
 "@import \"a\",\"b\""
 ],
 [
 "@x (a , url(b) )",
-"@x(a,url(b))",
+"@x(a,url(b));",
 "@x(a,url(b))"
 ],
 [
 "@import url(unclosed",
-"@import \"unclosed\"",
+"@import \"unclosed\";",
 "@import \"unclosed\""
 ],
 [
 "@x ( url(unclosed",
-"@x(url(unclosed)",
-"@x(url(unclosed)"
+"@x(url(unclosed));",
+"@x(url(unclosed))"
 ],
 [
 "@x ( url(open ",
-"@x(url(open)",
-"@x(url(open)"
+"@x(url(open));",
+"@x(url(open))"
 ],
 [
 "@supports(a:b){x{y:1}}",
@@ -4311,22 +4311,22 @@
 ],
 [
 "@x ( ,url(b) )",
-"@x(,url(b))",
+"@x(,url(b));",
 "@x(,url(b))"
 ],
 [
 "@x ( :url(b) )",
-"@x(:url(b))",
+"@x(:url(b));",
 "@x(:url(b))"
 ],
 [
 "@x ( a, url(unterminated",
-"@x(a,url(unterminated)",
-"@x(a,url(unterminated)"
+"@x(a,url(unterminated));",
+"@x(a,url(unterminated))"
 ],
 [
 "@x ( a ,url(b) )",
-"@x(a,url(b))",
+"@x(a,url(b));",
 "@x(a,url(b))"
 ],
 [
@@ -4341,7 +4341,7 @@
 ],
 [
 "@x ( a, b )",
-"@x(a,b)",
+"@x(a,b);",
 "@x(a,b)"
 ],
 [
@@ -4451,12 +4451,12 @@
 ],
 [
 "@x(url(unterm",
-"@x(url(unterm)",
-"@x(url(unterm)"
+"@x(url(unterm));",
+"@x(url(unterm))"
 ],
 [
 "@import url(a),url(b",
-"@import \"a\",\"b\"",
+"@import \"a\",\"b\";",
 "@import \"a\",\"b\""
 ],
 [
