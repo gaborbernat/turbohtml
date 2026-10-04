@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -323,3 +323,27 @@ def test_select_descendant_walks_past_sibling_failure(selector: str, html: str) 
 
 def test_matches_deep_descendant_chain() -> None:
     assert _element(_DEEP, "leaf").matches("a div div div div p") is False
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param(_siblings(("a", 1), ("b", 120)), ["e61", "e120", "e119"], id="cached-match"),
+        pytest.param(_siblings(("b", 120)), [], id="cached-failure"),
+    ],
+)
+def test_matcher_filter_long_runs_out_of_order(html: str, expected: list[str | None]) -> None:
+    elements: Final = parse(html).select("b")
+    assert _ids(compile("a ~ b").filter([elements[60], elements[119], elements[118]])) == expected
+
+
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        pytest.param(".x ~ .y i", ["deep"], id="matched-ancestor"),
+        pytest.param(".missing .x ~ .y i", [], id="absent-ancestor"),
+    ],
+)
+def test_select_descendant_retries_ancestor_sibling(selector: str, expected: list[str | None]) -> None:
+    document: Final = parse("<div><b class=x></b><b class=y><div class=y><i id=deep></i></div></b></div>")
+    assert _ids(document.select(selector)) == expected
