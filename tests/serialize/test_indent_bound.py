@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 import pytest
+from markdown_it import MarkdownIt
 
 from turbohtml import Markdown, parse
 
@@ -12,7 +13,7 @@ _NESTED_ITEMS: Final = "<ul><li>" * 12 + "x"
 
 
 def _capped_lines(marker: str) -> str:
-    return "\n".join("  " * min(level, 10) + marker for level in range(12)) + "x"
+    return "\n".join("  " * min(level, 8) + marker for level in range(12)) + "x"
 
 
 def test_markdown_list_indent_stops_at_the_nesting_cap() -> None:
@@ -26,8 +27,8 @@ def test_text_list_indent_stops_at_the_nesting_cap() -> None:
 @pytest.mark.parametrize(
     ("method", "expected"),
     [
-        pytest.param("to_markdown", "> " * 20 + "x", id="markdown"),
-        pytest.param("to_text", " " * 80 + "x", id="text"),
+        pytest.param("to_markdown", "> " * 17 + "x", id="markdown"),
+        pytest.param("to_text", " " * 68 + "x", id="text"),
     ],
 )
 def test_blockquote_indent_stops_at_the_nesting_cap(method: str, expected: str) -> None:
@@ -37,10 +38,10 @@ def test_blockquote_indent_stops_at_the_nesting_cap(method: str, expected: str) 
 @pytest.mark.parametrize(
     ("source", "method", "expected"),
     [
-        pytest.param("<ol><li>" * 8192, "to_markdown", 301_068, id="ordered-items-markdown"),
-        pytest.param("<ol><li>" * 8192, "to_text", 301_068, id="ordered-items-text"),
-        pytest.param("<blockquote>x<br>" * 4096, "to_markdown", 621_951, id="quoted-lines-markdown"),
-        pytest.param("<blockquote>x<br>" * 4096, "to_text", 670_141, id="quoted-lines-text"),
+        pytest.param("<ol><li>" * 8192, "to_markdown", 251_973, id="ordered-items-markdown"),
+        pytest.param("<ol><li>" * 8192, "to_text", 251_973, id="ordered-items-text"),
+        pytest.param("<blockquote>x<br>" * 4096, "to_markdown", 529_989, id="quoted-lines-markdown"),
+        pytest.param("<blockquote>x<br>" * 4096, "to_text", 572_281, id="quoted-lines-text"),
     ],
 )
 def test_deep_nesting_output_stays_linear(source: str, method: str, expected: int) -> None:
@@ -49,4 +50,26 @@ def test_deep_nesting_output_stays_linear(source: str, method: str, expected: in
 
 def test_google_doc_margin_indent_stops_at_the_nesting_cap() -> None:
     document = parse("<ul><li style='margin-left:99999999999px'>x</li><li style='margin-left:72px'>y</li></ul>")
-    assert document.to_markdown(Markdown.google_doc()) == "  " * 10 + "- x\n    - y"
+    assert document.to_markdown(Markdown.google_doc()) == "  " * 8 + "- x\n    - y"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("".join(f"<ul><li>L{level}" for level in range(12)), id="lists"),
+        pytest.param("".join(f"<blockquote>Q{level}" for level in range(22)), id="quotes"),
+        pytest.param(
+            "".join(f"<blockquote>Q{level}" for level in range(3)) + "".join(f"<ul><li>L{level}" for level in range(9)),
+            id="lists-in-quotes",
+        ),
+        pytest.param(
+            "".join(f"<ul><li>L{level}" for level in range(8)) + "".join(f"<blockquote>Q{level}" for level in range(4)),
+            id="quotes-in-lists",
+        ),
+    ],
+)
+def test_markdown_past_the_cap_reads_back_under_commonmark_nesting(source: str) -> None:
+    # markdown-it's CommonMark preset stops reading blocks at nesting level 20
+    labels = sorted(source.replace("<ul><li>", " ").replace("<blockquote>", " ").split())
+    tokens = MarkdownIt("commonmark").parse(parse(source).to_markdown())
+    assert sorted(token.content for token in tokens if token.type == "inline") == labels
