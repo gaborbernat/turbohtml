@@ -607,8 +607,12 @@ static void css_minify_func_args(css_buf *pool, token_vec *vec, Py_ssize_t start
                 css_format_dimension(pool, token, !keep_ws, &off, &len);
                 /* dropping a sign or unit (e.g. +0/-0/0px -> 0) can glue the number onto the token before it to read as
                    one different token (CSS Syntax 3 §9.1), including a second adjacent number in an invalid calc, so
-                   keep a boundary as the declaration-value path does */
-                if (out->len > 0 && css_would_merge(out->data[out->len - 1], 0, pool->data + off, len)) {
+                   keep a boundary as the declaration-value path does; a negative number after a unitless one starts
+                   no unit (§4.3.3), so `1-1` stays two numbers */
+                const css_token *before = &vec->items[index - 1];
+                int negative_after_number = pool->data[off] == '-' && before->kind == CSS_NUM && before->unit_len == 0;
+                if (out->len > 0 && !negative_after_number &&
+                    css_would_merge(out->data[out->len - 1], 0, pool->data + off, len)) {
                     cbuf_putc(out, ' ');
                 }
                 cbuf_put_run(out, pool->data + off, len);

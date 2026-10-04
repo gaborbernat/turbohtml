@@ -217,7 +217,10 @@ static void css_emit_position_run(comp_vec *result, const pos_val *run, Py_ssize
         comp.off = run[index].off;
         comp.len = run[index].len;
         comp.isfunc = 0;
-        comp.kind = run[index].kind == PVK_PCT ? CK_PCT : (run[index].kind == PVK_IDENT ? CK_IDENT : CK_NUM);
+        comp.kind = run[index].kind == PVK_PCT     ? CK_PCT
+                    : run[index].kind == PVK_IDENT ? CK_IDENT
+                    : run[index].kind == PVK_LEN   ? CK_DIM
+                                                   : CK_NUM;
         comp_vec_push(result, comp);
     }
 }

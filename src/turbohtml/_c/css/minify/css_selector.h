@@ -186,49 +186,10 @@ static void decl_vec_push(decl_vec *vec, css_decl decl) {
     vec->items[vec->len++] = decl;
 }
 
-static uint32_t css_name_code_point(const css_char *name, Py_ssize_t len, Py_ssize_t *pos);
-
-/* Whether a property name starts with `--` once its escapes are read (CSS Syntax 3 §4.3.7), as `\2d-X` does, making it
-   a custom property. The name runs through the declaration's colon, so it holds two bytes at least, and one without a
-   `\` in its first two takes the byte test. */
-static int css_name_is_custom(const css_char *name, Py_ssize_t len) {
-    if (name[0] != '\\' && name[1] != '\\') {
-        return name[0] == '-' && name[1] == '-';
-    }
-    Py_ssize_t pos = 0;
-    return css_name_code_point(name, len, &pos) == '-' && css_name_code_point(name, len, &pos) == '-';
-}
-
-/* Whether a token ends with a hex escape (CSS Syntax 3 §4.3.7: `\` then 1-6 hex digits), the only escape that consumes
-   a following whitespace. It runs on the token before a whitespace in a name, which the tokenizer never leaves ending
-   in a bare `\` (an escape keeps its following byte in the same token), so every `\` here has an escaped byte after it.
-   Walking the escapes forward resolves `\\` (an escaped backslash, not an escape start) so literal hex digits trailing
-   one are not read as an escape. */
-CSS_NOINLINE static int css_token_ends_hex_escape(const css_token *token) {
-    const css_char *text = token->text;
-    Py_ssize_t len = token->text_len;
-    int ends_hex_escape = 0;
-    Py_ssize_t index = 0;
-    while (index < len) {
-        if (text[index] != '\\') {
-            ends_hex_escape = 0;
-            index++;
-            continue;
-        }
-        if (!css_is_hex(text[index + 1])) {
-            ends_hex_escape = 0;
-            index += 2;
-            continue;
-        }
-        Py_ssize_t hex = index + 1;
-        Py_ssize_t limit = index + 7 < len ? index + 7 : len;
-        while (hex < limit && css_is_hex(text[hex])) {
-            hex++;
-        }
-        ends_hex_escape = hex == len;
-        index = hex;
-    }
-    return ends_hex_escape;
+/* Whether a property name starts with `--`, making it a custom property. css_spell_names has decoded the name, so the
+   bytes tell (`\2d-X` reads `--X`). The name runs through the declaration's colon, so it holds two bytes at least. */
+static int css_name_is_custom(const css_char *name) {
+    return name[0] == '-' && name[1] == '-';
 }
 
 /* Build a declaration from a segment [start, end). Returns 1 if a declaration was produced. */
@@ -259,8 +220,7 @@ static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start,
     }
     /* the raw property text spans from the first to the last non-ws token; build it for the --* check and interning */
     const css_token *first = &vec->items[prop_start];
-    int is_custom =
-        first->kind == CSS_IDENT && css_name_is_custom(first->text, vec->items[colon].text + 1 - first->text);
+    int is_custom = first->kind == CSS_IDENT && css_name_is_custom(first->text);
     Py_ssize_t prop_off = pool->len;
     for (Py_ssize_t index = prop_start; index < prop_end; index++) {
         css_token *token = &vec->items[index];
@@ -281,19 +241,6 @@ static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start,
                 for (Py_ssize_t pos = 0; pos < token->text_len; pos++) {
                     cbuf_putc(pool, css_lower(token->text[pos]));
                 }
-            }
-        } else if (css_token_ends_hex_escape(&vec->items[index - 1])) {
-            /* a declaration name is a single <ident-token> (CSS Syntax 3 §5.4.4); the only whitespace inside one is the
-               single space a hex escape consumes (§4.3.7). This run is real source whitespace (a synthetic
-               end-tag-splitting space never follows an escape), so its length is the gap to the next token: a single
-               space is kept only when the next byte is a hex digit the escape would otherwise read on into, dropped
-               otherwise, and a longer run joins a second token, so the name is invalid and the declaration drops. */
-            if (vec->items[index + 1].text - vec->items[index].text != 1) {
-                pool->len = prop_off;
-                return 0;
-            }
-            if (css_is_hex(vec->items[index + 1].text[0])) {
-                cbuf_putc(pool, ' ');
             }
         } else if (vec->items[index - 1].kind == CSS_DELIM && vec->items[index - 1].delim == '<') {
             /* the tokenizer turns a comment that would join `</` into a space; drop it and keep the declaration so the

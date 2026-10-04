@@ -35,13 +35,16 @@
 #include "css/minify/css.h"
 
 static int css_spell_eof(const css_token *last, const css_char *view, Py_ssize_t length, css_buf *spelled);
+static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssize_t length, css_buf *spelled);
+static css_char *css_minify_spelled(token_vec *tokens, css_buf *spelled, int inline_mode, int baseline,
+                                    Py_ssize_t *out_len);
 static int css_spells_style_end(const css_char *text, Py_ssize_t len);
 
 /* The allocator-agnostic core: minify a code-point view into a freshly allocated buffer (free with css_free). The
    harness and the CPython binding both call this; it touches no CPython runtime. */
 css_char *th_minify_css_bytes(const css_char *view, Py_ssize_t length, int inline_mode, int baseline,
                               Py_ssize_t *out_len) {
-    token_vec tokens = {NULL, 0, 0, 0, 0, 0};
+    token_vec tokens = {0};
     /* presize from the input: tokens average a few code points each and the output never exceeds the input, so one
        allocation up front avoids the geometric realloc churn (and its repeated copies) on a large stylesheet */
     Py_ssize_t token_guess = length / 4 < 64 ? 64 : length / 4;
@@ -55,11 +58,15 @@ css_char *th_minify_css_bytes(const css_char *view, Py_ssize_t length, int inlin
                            tokens.items[tokens.len - 1].kind == CSS_URL)) {
         css_buf spelled = {NULL, 0, 0, 0};
         if (css_spell_eof(&tokens.items[tokens.len - 1], view, length, &spelled)) {
-            css_free(tokens.items);
-            css_char *minified = th_minify_css_bytes(spelled.data, spelled.len, inline_mode, baseline, out_len);
-            cbuf_free(&spelled);
-            return minified;
+            return css_minify_spelled(&tokens, &spelled, inline_mode, baseline, out_len);
         }
+    }
+    if (tokens.escaped) {
+        css_buf spelled = {NULL, 0, 0, 0};
+        if (css_spell_names(&tokens, view, length, &spelled)) {
+            return css_minify_spelled(&tokens, &spelled, inline_mode, baseline, out_len);
+        }
+        cbuf_free(&spelled);
     }
     css_buf pool = {NULL, 0, 0, 0};
     css_buf out = {NULL, 0, 0, 0};
@@ -128,6 +135,167 @@ static int css_spell_eof(const css_token *last, const css_char *view, Py_ssize_t
         cbuf_putc(spelled, ')');
     }
     return 1;
+}
+
+static css_char *css_minify_spelled(token_vec *tokens, css_buf *spelled, int inline_mode, int baseline,
+                                    Py_ssize_t *out_len) {
+    css_free(tokens->items);
+    if (spelled->failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        cbuf_free(spelled); /* GCOVR_EXCL_LINE */
+        *out_len = 1;       /* GCOVR_EXCL_LINE */
+        return NULL;        /* GCOVR_EXCL_LINE */
+    }
+    css_char *minified = th_minify_css_bytes(spelled->data, spelled->len, inline_mode, baseline, out_len);
+    cbuf_free(spelled);
+    return minified;
+}
+
+static void css_put_code_point(css_buf *out, uint32_t code_point) {
+    if (code_point < 0x80) {
+        cbuf_putc(out, (css_char)code_point);
+    } else if (code_point < 0x800) {
+        cbuf_putc(out, (css_char)(0xC0 | (code_point >> 6)));
+        cbuf_putc(out, (css_char)(0x80 | (code_point & 0x3F)));
+    } else if (code_point < 0x10000) {
+        cbuf_putc(out, (css_char)(0xE0 | (code_point >> 12)));
+        cbuf_putc(out, (css_char)(0x80 | ((code_point >> 6) & 0x3F)));
+        cbuf_putc(out, (css_char)(0x80 | (code_point & 0x3F)));
+    } else {
+        cbuf_putc(out, (css_char)(0xF0 | (code_point >> 18)));
+        cbuf_putc(out, (css_char)(0x80 | ((code_point >> 12) & 0x3F)));
+        cbuf_putc(out, (css_char)(0x80 | ((code_point >> 6) & 0x3F)));
+        cbuf_putc(out, (css_char)(0x80 | (code_point & 0x3F)));
+    }
+}
+
+/* CSS Syntax 3 §4.3.7 replaces zero, surrogates and out-of-range escapes with U+FFFD.
+   Backslash-newline is invalid (§4.3.8); preserve that input for the existing parser. */
+static int css_decode_name(const css_char *name, Py_ssize_t len, css_buf *decoded) {
+    Py_ssize_t pos = 0;
+    while (pos < len) {
+        css_char byte = name[pos++];
+        if (byte != '\\') {
+            cbuf_putc(decoded, byte);
+            continue;
+        }
+        byte = name[pos];
+        if (byte == '\n' || byte == '\r' || byte == '\f') {
+            return 0;
+        }
+        if (!css_is_hex(byte)) {
+            /* a non-ASCII code point's continuation bytes follow as plain bytes */
+            if (byte == 0) {
+                css_put_code_point(decoded, 0xFFFD);
+            } else {
+                cbuf_putc(decoded, byte);
+            }
+            pos++;
+            continue;
+        }
+        uint32_t value = 0;
+        for (int digits = 0; digits < 6 && pos < len && css_is_hex(name[pos]); digits++) {
+            css_char hex = name[pos++];
+            value = value * 16 + (hex <= '9' ? (uint32_t)(hex - '0') : (uint32_t)((hex | 0x20) - 'a' + 10));
+        }
+        if (pos < len && css_is_ws(name[pos])) {
+            pos += name[pos] == '\r' && pos + 1 < len && name[pos + 1] == '\n' ? 2 : 1;
+        }
+        css_put_code_point(decoded,
+                           value == 0 || (value >= 0xD800 && value <= 0xDFFF) || value > 0x10FFFF ? 0xFFFD : value);
+    }
+    return 1;
+}
+
+enum { CSS_SPELL_IDENT, CSS_SPELL_UNIT, CSS_SPELL_HASH };
+
+/* Hex escapes keep control bytes out of HTML style elements; escaping U+FEFF prevents BOM sniffing.
+   Preserve token boundaries for CDC and dimension exponents (CSS Syntax 3 §4.3.1 and §4.3.3). */
+static void css_serialize_name(const css_char *name, Py_ssize_t len, int mode, int exponent, css_buf *out) {
+    int escape_first = 0;
+    if (mode != CSS_SPELL_HASH) {
+        css_char first = name[0];
+        css_char second = len > 1 ? name[1] : 0;
+        int name_start = first >= 0x80 || first == '_' || (css_lower(first) >= 'a' && css_lower(first) <= 'z');
+        int second_start =
+            second >= 0x80 || second == '_' || second == '-' || (css_lower(second) >= 'a' && css_lower(second) <= 'z');
+        escape_first = !(name_start || (first == '-' && second_start)) || (len == 2 && first == '-' && second == '-');
+        if (mode == CSS_SPELL_UNIT && !exponent && css_lower(first) == 'e' &&
+            (css_is_digit(second) || (second == '-' && len > 2 && css_is_digit(name[2])))) {
+            escape_first = 2;
+        }
+    }
+    for (Py_ssize_t pos = 0; pos < len; pos++) {
+        css_char byte = name[pos];
+        uint32_t code_point = byte;
+        int byte_order_mark = byte == 0xEF && name[pos + 1] == 0xBB && name[pos + 2] == 0xBF;
+        int hex = byte < 0x20 || byte == 0x7F || byte_order_mark || (pos == 0 && escape_first == 2) ||
+                  (pos == 0 && escape_first && css_is_digit(byte));
+        if (byte_order_mark) {
+            code_point = 0xFEFF;
+            pos += 2;
+        }
+        if (hex) {
+            char digits[8];
+            int written = snprintf(digits, sizeof(digits), "\\%x", (unsigned int)code_point);
+            cbuf_put_run(out, (const css_char *)digits, written);
+            if (pos + 1 == len || css_is_hex(name[pos + 1])) {
+                cbuf_putc(out, ' ');
+            }
+            continue;
+        }
+        if ((pos == 0 && escape_first) || (byte < 0x80 && (byte == '\\' || !(css_charmask[byte] & CSS_CM_IDENT)))) {
+            cbuf_putc(out, '\\');
+        }
+        cbuf_putc(out, byte);
+    }
+}
+
+/* Preserve hash type and raw @charset spelling: encoding sniffing precedes tokenization
+   (CSS Syntax 3 §3.2 and §4.3.1). */
+static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssize_t length, css_buf *spelled) {
+    css_buf decoded = {NULL, 0, 0, 0};
+    Py_ssize_t copied = 0;
+    int changed = 0;
+    for (Py_ssize_t index = 0; index < tokens->len; index++) {
+        const css_token *token = &tokens->items[index];
+        Py_ssize_t prefix = token->kind == CSS_AT || token->kind == CSS_HASH;
+        Py_ssize_t name_len = token->text_len - prefix;
+        if (token->kind == CSS_NUM) {
+            prefix = token->text_len;
+            name_len = token->unit_len;
+        } else if (token->kind != CSS_IDENT && token->kind != CSS_AT && token->kind != CSS_HASH) {
+            continue;
+        }
+        const css_char *name = token->text + prefix;
+        if (name_len == 0 || memchr(name, '\\', (size_t)name_len) == NULL) {
+            continue;
+        }
+        int starts_ident = css_starts_ident(name, 0, name_len);
+        decoded.len = 0;
+        if ((!starts_ident && token->kind != CSS_HASH) || !css_decode_name(name, name_len, &decoded) ||
+            (token->kind == CSS_AT && decoded.len == 7 && memcmp(decoded.data, "charset", 7) == 0)) {
+            continue;
+        }
+        if (decoded.failed) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            spelled->failed = 1; /* GCOVR_EXCL_LINE */
+            break;               /* GCOVR_EXCL_LINE */
+        }
+        int mode = token->kind == CSS_NUM ? CSS_SPELL_UNIT : starts_ident ? CSS_SPELL_IDENT : CSS_SPELL_HASH;
+        int exponent = mode == CSS_SPELL_UNIT && (memchr(token->text, 'e', (size_t)token->text_len) != NULL ||
+                                                  memchr(token->text, 'E', (size_t)token->text_len) != NULL);
+        cbuf_put_run(spelled, view + copied, name - view - copied);
+        Py_ssize_t written = spelled->len;
+        css_serialize_name(decoded.data, decoded.len, mode, exponent, spelled);
+        if (spelled->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            break;             /* GCOVR_EXCL_LINE */
+        }
+        changed |= spelled->len - written != name_len || memcmp(spelled->data + written, name, (size_t)name_len) != 0;
+        copied = name - view + name_len;
+    }
+    spelled->failed |= decoded.failed;
+    cbuf_free(&decoded);
+    cbuf_put_run(spelled, view + copied, length - copied);
+    return changed || spelled->failed; /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
 }
 
 /* The tokenizer lowercases an end tag name, so `</STYLE` counts too; OR-ing 0x20 folds the ASCII letters and no other
