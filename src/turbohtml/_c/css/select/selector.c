@@ -5,6 +5,14 @@
 #include "core/vec.h"
 #include "css/select/selector.h"
 
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
 /* Record a parse failure with the position and reason for the error message. Set
    unconditionally: an error propagates up through early returns without another
    failure being recorded, so the first (deepest) call keeps its position. */
@@ -2051,22 +2059,15 @@ static inline enum sel_status sel_match_from(th_node *node, const sel_complex *c
    sibling memo holds, and it stores its own answer under node's nearest earlier sibling.
    A query walking the siblings in document order then visits each one a bounded number of
    times. Reusing the last walk avoids the hash lookup in document order. Inside :has(),
-   the answer depends on the anchor, so the memo stays out. */
-static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_complex *complex, int index, th_node *anchor,
-                                                 const sel_ctx *ctx) {
+   the answer depends on the anchor, so the memo stays out. Memo bookkeeping stays out
+   of line to limit saved registers in other combinators. */
+static TH_NOINLINE enum sel_status sel_match_sibling_walk(th_node *node, const sel_complex *complex, int index,
+                                                          th_node *anchor, const sel_ctx *ctx, int skip_nearest) {
     const sel_compound *target = &complex->compounds[index - 1];
     const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
     th_node *nearest = sel_prev_element(node);
-    th_node *prev = nearest;
-    int walked = 0;
-    if (nearest != NULL && target_atom != TH_TAG_UNKNOWN && nearest->atom == target_atom) {
-        const enum sel_status left = sel_match_from(nearest, complex, index - 1, anchor, ctx);
-        if (left != SEL_FAILS_LOCALLY) {
-            return left;
-        }
-        prev = sel_prev_element(nearest);
-        walked = 1;
-    }
+    th_node *prev = skip_nearest ? sel_prev_element(nearest) : nearest;
+    int walked = skip_nearest;
     sel_memo *memo = anchor == NULL ? ctx->sibling_memo : NULL;
     sel_sibling_record *last = memo != NULL ? &memo->last_walks[(unsigned)index % SEL_SIBLING_RECORDS] : NULL;
     if (last != NULL && last->node == node && last->key == target) {
@@ -2098,6 +2099,21 @@ static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_comple
         *last = (sel_sibling_record){target, node, status};
     }
     return status;
+}
+
+static enum sel_status sel_match_earlier_sibling(th_node *node, const sel_complex *complex, int index, th_node *anchor,
+                                                 const sel_ctx *ctx) {
+    const sel_compound *target = &complex->compounds[index - 1];
+    const uint16_t target_atom = sel_compound_known_type_atom(target, ctx->tree);
+    th_node *nearest = sel_prev_element(node);
+    if (nearest != NULL && target_atom != TH_TAG_UNKNOWN && nearest->atom == target_atom) {
+        const enum sel_status left = sel_match_from(nearest, complex, index - 1, anchor, ctx);
+        if (left != SEL_FAILS_LOCALLY) {
+            return left;
+        }
+        return sel_match_sibling_walk(node, complex, index, anchor, ctx, 1);
+    }
+    return sel_match_sibling_walk(node, complex, index, anchor, ctx, 0);
 }
 
 /* The combinator walks behind sel_match_from, with backtracking on the descendant and
