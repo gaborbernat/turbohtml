@@ -8,6 +8,8 @@ import pytest
 
 from turbohtml.clean import minify_css, minify_css_inline
 
+_OVERFLOW_EXPONENT: Final = "999999999999999999999"
+
 
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -48,34 +50,50 @@ def test_empty_inline_declarations(source: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("property_name", "edge", "expected_edge"),
+    ("property_name", "edge"),
     [
-        pytest.param("margin", "x", "x", id="margin-unknown-keyword"),
-        pytest.param("margin", "auto auto", "auto auto", id="margin-extra-keyword"),
-        pytest.param("margin", "1", "1", id="margin-nonzero-unitless"),
-        pytest.param("margin", "12", "12", id="margin-multidigit-unitless"),
-        pytest.param("margin", "1s", "1s", id="margin-time"),
-        pytest.param("margin", "1furlong", "1furlong", id="margin-unknown-unit"),
-        pytest.param("margin", "0furlong", "0furlong", id="margin-unknown-zero-unit"),
-        pytest.param("margin", "min(1px,2%)", "min(1px,2%)", id="margin-function-fallback"),
-        pytest.param("margin", "calc(1px + 2%)", "calc(1px + 2%)", id="margin-calc-fallback"),
-        pytest.param("margin", "var(--edge)", "var(--edge)", id="margin-substitution"),
-        pytest.param("padding", "auto", "auto", id="padding-auto"),
-        pytest.param("padding", "-1px", "-1px", id="padding-negative-length"),
-        pytest.param("padding", "-.5%", "-.5%", id="padding-negative-percentage"),
-        pytest.param("padding", "1", "1", id="padding-nonzero-unitless"),
-        pytest.param("padding", "x", "x", id="padding-unknown-keyword"),
-        pytest.param("padding", "1deg", "1deg", id="padding-angle"),
-        pytest.param("padding", "min(1px,2%)", "min(1px,2%)", id="padding-function-fallback"),
+        pytest.param("margin", "x", id="margin-unknown-keyword"),
+        pytest.param("margin", ".", id="margin-dot"),
+        pytest.param("margin", ".x", id="margin-dot-ident"),
+        pytest.param("margin", "+", id="margin-plus-alone"),
+        pytest.param("margin", "-", id="margin-minus-alone"),
+        pytest.param("margin", "+x", id="margin-plus-ident"),
+        pytest.param("margin", "-x", id="margin-minus-ident"),
+        pytest.param("margin", "-.", id="margin-minus-dot"),
+        pytest.param("margin", "-.x", id="margin-minus-dot-ident"),
+        pytest.param("margin", "1e", id="margin-exponent-unit"),
+        pytest.param("margin", "1e+", id="margin-incomplete-positive-exponent"),
+        pytest.param("margin", "1e-", id="margin-incomplete-negative-exponent"),
+        pytest.param("margin", "1e-x", id="margin-malformed-exponent"),
+        pytest.param("margin", ".5", id="margin-fraction-unitless"),
+        pytest.param("margin", ".51", id="margin-multiple-fraction-digits-unitless"),
+        pytest.param("margin", "1.5", id="margin-decimal-unitless"),
+        pytest.param("margin", f"1e{_OVERFLOW_EXPONENT}", id="margin-overflow-unitless"),
+        pytest.param("margin", "auto auto", id="margin-extra-keyword"),
+        pytest.param("margin", "1", id="margin-nonzero-unitless"),
+        pytest.param("margin", "12", id="margin-multidigit-unitless"),
+        pytest.param("margin", "1s", id="margin-time"),
+        pytest.param("margin", "1furlong", id="margin-unknown-unit"),
+        pytest.param("margin", "0furlong", id="margin-unknown-zero-unit"),
+        pytest.param("margin", "min(1px,2%)", id="margin-function-fallback"),
+        pytest.param("margin", "calc(1px + 2%)", id="margin-calc-fallback"),
+        pytest.param("margin", "var(--edge)", id="margin-substitution"),
+        pytest.param("padding", "auto", id="padding-auto"),
+        pytest.param("padding", "-1px", id="padding-negative-length"),
+        pytest.param("padding", "-.5%", id="padding-negative-percentage"),
+        pytest.param("padding", "1", id="padding-nonzero-unitless"),
+        pytest.param("padding", "x", id="padding-unknown-keyword"),
+        pytest.param("padding", "1deg", id="padding-angle"),
+        pytest.param("padding", "min(1px,2%)", id="padding-function-fallback"),
     ],
 )
-def test_box_merge_unsupported_edge(property_name: str, edge: str, expected_edge: str) -> None:
+def test_box_merge_unsupported_edge(property_name: str, edge: str) -> None:
     source: Final = (
-        f"a{{{property_name}-top:1px;{property_name}-right:2px;{property_name}-bottom:3px;{property_name}-left:{edge}}}"
+        f"a {{ {property_name}-top: 1px; {property_name}-right: 2px; "
+        f"{property_name}-bottom: 3px; {property_name}-left: {edge} }}"
     )
     expected: Final = (
-        f"a{{{property_name}-top:1px;{property_name}-right:2px;"
-        f"{property_name}-bottom:3px;{property_name}-left:{expected_edge}}}"
+        f"a{{{property_name}-top:1px;{property_name}-right:2px;{property_name}-bottom:3px;{property_name}-left:{edge}}}"
     )
     first: Final = minify_css(source)
     assert (first, minify_css(first)) == (expected, expected)
@@ -95,6 +113,60 @@ def test_box_merge_empty_edge(property_name: str) -> None:
     ("property_name", "edges", "expected"),
     [
         pytest.param("margin", ("1px", "2px", "3px", "4px"), "1px 2px 3px 4px", id="margin-lengths"),
+        pytest.param("margin", ("1px", "2px", "3px", ".5px"), "1px 2px 3px .5px", id="margin-leading-fraction"),
+        pytest.param("margin", ("1px", "2px", "3px", "-.5px"), "1px 2px 3px -.5px", id="margin-negative-fraction"),
+        pytest.param("margin", ("1px", "2px", "3px", "1.5px"), "1px 2px 3px 1.5px", id="margin-decimal"),
+        pytest.param(
+            "margin", ("1px", "2px", "3px", ".51px"), "1px 2px 3px .51px", id="margin-multiple-fraction-digits"
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"+1e{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px +1e{_OVERFLOW_EXPONENT}px",
+            id="margin-positive-overflow-length",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"-1e-{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px -1e-{_OVERFLOW_EXPONENT}px",
+            id="margin-negative-underflow-length",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"+.5e{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px +.5e{_OVERFLOW_EXPONENT}px",
+            id="margin-positive-fraction-overflow",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"-.5e{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px -.5e{_OVERFLOW_EXPONENT}px",
+            id="margin-negative-fraction-overflow",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"1.5E{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px 1.5E{_OVERFLOW_EXPONENT}px",
+            id="margin-uppercase-exponent-overflow",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"1e{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px 1e{_OVERFLOW_EXPONENT}px",
+            id="margin-exponent-overflow",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"1e-{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px 1e-{_OVERFLOW_EXPONENT}px",
+            id="margin-exponent-underflow",
+        ),
+        pytest.param(
+            "margin",
+            ("1px", "2px", "3px", f"1e+{_OVERFLOW_EXPONENT}px"),
+            f"1px 2px 3px 1e+{_OVERFLOW_EXPONENT}px",
+            id="margin-positive-exponent-overflow",
+        ),
         pytest.param("padding", ("1px", "2px", "3px", "4px"), "1px 2px 3px 4px", id="padding-lengths"),
         pytest.param("margin", ("1px", "2px", "3px", "auto"), "1px 2px 3px auto", id="margin-auto"),
         pytest.param("margin", ("-1px", "2px", "3px", "-4%"), "-1px 2px 3px -4%", id="margin-negatives"),
