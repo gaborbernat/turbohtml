@@ -592,6 +592,40 @@ static int css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
     return 1;
 }
 
+/* Skip the rest of a block whose '{' the cursor has passed, through its closing '}'. Out of line: only a dropped or
+   over-nested block reaches it, and its own copy of css_read_until would keep LTO from inlining the one that reads
+   each declaration. */
+CSS_NOINLINE static void css_skip_block(cursor *cur) {
+    css_read_until(cur, "}");
+    if (cur->index < cur->vec->len) {
+        cur->index++;
+    }
+}
+
+/* Skip a block whose '{' the cursor has passed when a bad token invalidates it: one in its prelude [start, end), which
+   no selector admits, or one inside the block when the prelude ends in ':'. Such a prelude (`color:{...}`; a custom
+   property's block never gets here) is no selector either, so the block reads as a declaration value, which a bad token
+   invalidates as a whole. Returns whether it skipped. Out of line: only input with a bad token reaches it. */
+CSS_NOINLINE static int css_skip_bad_nested_block(cursor *cur, Py_ssize_t start, Py_ssize_t end) {
+    int bad = css_holds_bad(cur->vec, start, end);
+    if (!bad && start < end) {
+        /* the caller skips leading whitespace and comments, so the backward scan stops at start at the latest */
+        Py_ssize_t last = end - 1;
+        while (cur->vec->items[last].kind == CSS_WS || cur->vec->items[last].kind == CSS_COMMENT) {
+            last--;
+        }
+        if (cur->vec->items[last].kind == CSS_DELIM && cur->vec->items[last].delim == ':') {
+            cursor block = *cur;
+            css_skip_block(&block);
+            bad = css_holds_bad(cur->vec, cur->index, block.index);
+        }
+    }
+    if (bad) {
+        css_skip_block(cur);
+    }
+    return bad;
+}
+
 /* Whether the item at index opens with a custom property name and a colon, which CSS Syntax 3 §5.5.5 makes a
    declaration that is never reparsed as a nested rule. The caller found a `{` after the item's first token, so the
    colon scan past a name stops inside the vector. */
@@ -611,10 +645,7 @@ static int css_starts_custom_property(const token_vec *vec, Py_ssize_t index) {
 static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) {
     if (!css_nesting_enter(cur->vec)) {
         /* over-nested: drop this block's remaining declarations rather than recurse into a C stack overflow */
-        css_read_until(cur, "}");
-        if (cur->index < cur->vec->len) {
-            cur->index++;
-        }
+        css_skip_block(cur);
         return;
     }
     comp_vec scratch = {NULL, 0, 0, 0}; /* reused across this list's values, freed once below */
@@ -651,6 +682,9 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
         }
         if (terminator && terminator->delim == '{') {
             cur->index++;
+            if (cur->vec->bad && css_skip_bad_nested_block(cur, segment_start, segment_end)) {
+                continue;
+            }
             decl_vec inner = {NULL, 0, 0, 0};
             css_parse_declarations(pool, cur, &inner);
             css_buf selector = {NULL, 0, 0, 0};
@@ -770,6 +804,10 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
     /* css_read_until stops only on a stop DELIM (or EOF -> NULL peek), so a non-NULL peek is always that DELIM */
     if (token && token->delim == '{') {
         cur->index++;
+        if (cur->vec->bad && css_holds_bad(cur->vec, prelude_start, prelude_end)) {
+            css_skip_block(cur);
+            return;
+        }
         decl_vec decls = {NULL, 0, 0, 0};
         css_parse_declarations(pool, cur, &decls);
         css_buf body = {NULL, 0, 0, 0};
@@ -806,10 +844,7 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
         Py_ssize_t block = css_find_top_block(cur->vec, prelude_end);
         if (block >= 0) {
             cur->index = block + 1;
-            css_read_until(cur, "}");
-            if (cur->index < cur->vec->len) {
-                cur->index++;
-            }
+            css_skip_block(cur);
             return;
         }
         if (token->delim == '}') {
@@ -820,14 +855,10 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
         cur->index++;
     }
     /* a stray segment with no block: keep its trimmed text verbatim (error recovery). The caller (css_parse_rules)
-       consumes leading whitespace/comments before dispatching here, so only the trailing edge needs trimming, and a
-       whitespace token there follows another token. The newline that cut a string short stays: without it the string
-       would run to the end of the input (CSS Syntax 3 §4.3.5). */
+       consumes leading whitespace/comments before dispatching here, so only the trailing edge needs trimming. */
     Py_ssize_t start = prelude_start;
     Py_ssize_t end = prelude_end;
-    while (end > start && cur->vec->items[end - 1].kind == CSS_WS &&
-           (cur->vec->items[end - 2].kind != CSS_STR ||
-            css_string_closed(cur->vec->items[end - 2].text, cur->vec->items[end - 2].text_len))) {
+    while (end > start && cur->vec->items[end - 1].kind == CSS_WS) {
         end--;
     }
     css_buf text = {NULL, 0, 0, 0};
@@ -880,7 +911,7 @@ static void css_merge_rule_bodies(css_buf *pool, rule_item *prev, const rule_ite
     cbuf_putc(&combined, ';');
     cbuf_put_run(&combined, pool->data + it->body_off, it->body_len);
     /* the merged body parses below the rule list that holds it, so it inherits that list's depth */
-    token_vec tokens = {NULL, 0, 0, 0, depth};
+    token_vec tokens = {NULL, 0, 0, 0, depth, 0};
     css_tokenize(combined.data, combined.len, &tokens);
     cursor inner = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, 0}};
     decl_vec decls = {NULL, 0, 0, 0};
@@ -1466,10 +1497,7 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
     if (!css_nesting_enter(cur->vec)) {
         /* over-nested: drop the remaining rules rather than overflow the C stack; only a nested call bails, so
            consume its closing brace when the input has one */
-        css_read_until(cur, "}");
-        if (cur->index < cur->vec->len) {
-            cur->index++;
-        }
+        css_skip_block(cur);
         return;
     }
     rule_vec items = {NULL, 0, 0, 0};

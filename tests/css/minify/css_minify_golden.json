@@ -2286,8 +2286,8 @@
 ],
 [
 "a{content:\"x\ny\"}",
-"a{content:\"x\" y \"}\"}",
-"a{content:\"x\" y \"}\"}"
+"",
+"a{}"
 ],
 [
 "a{font-family:\"a.b\"}",
@@ -3901,8 +3901,8 @@
 ],
 [
 "a{font-family:\"unterminated\n}",
-"a{font-family:unterminated}",
-"a{font-family:unterminated}"
+"",
+"a{}"
 ],
 [
 "a{font:bold 1em \"abc",
