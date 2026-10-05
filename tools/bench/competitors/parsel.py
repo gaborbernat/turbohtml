@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import functools
 from html import escape
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 from urllib.parse import urljoin
 
 from cssselect import HTMLTranslator
-from lxml import html as _lxml_html
+from lxml import etree as _lxml_etree
 from parsel import Selector
 
 if TYPE_CHECKING:
@@ -131,7 +131,7 @@ def _first_two_ext(_context: object, nodes: list[object]) -> list[object]:
 _SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
 _COUNT_EXTENSIONS = {(None, "ext_count"): _count_ext}
 _NODESET_EXTENSIONS = {(None, "ext_first_two"): _first_two_ext}
-_PRECOMPILED = _lxml_html.etree.XPath("//a[@href]")
+_PRECOMPILED: Final = _lxml_etree.XPath("//a[@href]")
 
 
 @functools.cache

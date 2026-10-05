@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from bench.timing import Mutating
     from lxml.html import HtmlElement
+    from pytest_mock import MockerFixture
     from selectolax.lexbor import LexborHTMLParser
 
 _MUTATORS: Final = ("lxml", "beautifulsoup4", "beautifulsoup4_lxml", "selectolax")
@@ -47,7 +48,7 @@ def test_mutation(library: str, operation: str, fragment: str) -> None:
     tree: Final = mutation.setup(source)
     mutation.run(tree)
     if library == "lxml":
-        output: Final = import_module("lxml.html").tostring(tree, encoding="unicode")
+        output: Final = import_module("lxml.html").tostring(cast("HtmlElement", tree), encoding="unicode")
     elif library == "selectolax":
         output = cast("str", cast("LexborHTMLParser", tree).html)
     else:
@@ -157,3 +158,105 @@ def test_existing_node_stage_ownership(operation: str) -> None:
         assert (output is tree, len(tree.xpath(".//script")), len(output.xpath(".//script"))) == (False, 1, 0)
     else:
         assert (output is tree, output.xpath(".//a/@href")) == (True, ["https://example.com"])
+
+
+@pytest.mark.parametrize(
+    ("operation", "serializer", "source", "expected"),
+    [
+        pytest.param(
+            "build-e",
+            "lxml.etree",
+            0,
+            b"<ul></ul>",
+            id="builder-html",
+        ),
+        pytest.param(
+            "emit",
+            "lxml.html",
+            2,
+            b'<ul><li class="item" data-i="0">item 0</li><li class="item" data-i="1">item 1</li></ul>',
+            id="cached-html",
+        ),
+        pytest.param(
+            "canonicalize",
+            "lxml.etree",
+            '<p z="2" a="1">a<br></p>',
+            b'<html><body><p a="1" z="2">a<br></br></p></body></html>',
+            id="c14n",
+        ),
+        pytest.param(
+            "strip-remove",
+            "lxml.html",
+            "<p>a<code>x</code>b</p>",
+            b"<html><body><p>ab</p></body></html>",
+            id="preserve-tail",
+        ),
+        pytest.param(
+            "strip-tags",
+            "lxml.html",
+            "<p>a<code>x</code>b</p>",
+            b"<html><body><p>axb</p></body></html>",
+            id="unwrap-text",
+        ),
+        pytest.param(
+            "rewrite",
+            "lxml.html",
+            '<p><a href="/x">one</a><!--note--><img src="x"></p>',
+            b'<html><body><p><a href="/x" rel="nofollow">one</a><img src="x" loading="lazy"></p></body></html>',
+            id="rewrite-attributes",
+        ),
+    ],
+)
+def test_lxml_serialized_output(
+    operation: str, serializer: str, source: str | int, expected: bytes, mocker: MockerFixture
+) -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    output: Final = mocker.spy(import_module(serializer), "tostring")
+    cast("Callable[[str | int], None]", module.OPERATIONS[operation][0])(source)
+    assert output.spy_return == expected
+
+
+def test_lxml_set_html_output() -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    mutation: Final = cast("Mutating", module.OPERATIONS["set-html"][0])
+    tree: Final = cast("HtmlElement", mutation.setup("<p>original</p>"))
+    mutation.run(tree)
+    assert import_module("lxml.html").tostring(tree, encoding="unicode") == (
+        '<html><body><p>Updated <a href="/x">link</a> and <b>bold</b>.</p>'
+        "<ul><li>one</li><li>two</li></ul></body></html>"
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "source"),
+    [
+        pytest.param("parse-xml", "<root>", id="xml"),
+        pytest.param(
+            "is-valid",
+            ('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="root"/></xs:schema>', "<root>"),
+            id="schema-document",
+        ),
+    ],
+)
+def test_lxml_rejects_malformed_xml(operation: str, source: str | tuple[str, str]) -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    etree: Final = import_module("lxml.etree")
+    with pytest.raises(etree.XMLSyntaxError, match="Premature end"):
+        cast("Callable[[str | tuple[str, str]], None]", module.OPERATIONS[operation][0])(source)
+
+
+def test_lxml_rejects_invalid_schema() -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    etree: Final = import_module("lxml.etree")
+    schema: Final = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="root" type="xs:missing"/></xs:schema>'
+    )
+    with pytest.raises(etree.XMLSchemaParseError, match="does not resolve"):
+        cast("Callable[[tuple[str, str]], None]", module.OPERATIONS["is-valid"][0])((schema, "<root/>"))
+
+
+def test_lxml_parser_target_counts_real_events(mocker: MockerFixture) -> None:
+    module: Final = pytest.importorskip("bench.competitors.lxml", exc_type=ImportError)
+    parser: Final = mocker.spy(import_module("lxml.etree"), "HTMLParser")
+    cast("Callable[[str], None]", module.OPERATIONS["htmlparser"][0])('<p a="1">text</p>')
+    assert parser.call_args.kwargs["target"].close() == 10
