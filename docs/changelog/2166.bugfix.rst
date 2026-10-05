@@ -1,0 +1,1 @@
+Accept empty element content for RELAX NG empty string patterns.

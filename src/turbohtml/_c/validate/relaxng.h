@@ -995,7 +995,7 @@ static pattern *rng_children_deriv(valctx *ctx, pattern *p, th_node *element) {
         }
     }
     if (element_children == 0 && text_children == 0) {
-        return p;
+        return pat_choice(schema, p, rng_text_deriv(schema, p, EMPTY_UCS4, 0));
     }
     if (element_children == 0) {
         Py_ssize_t len = 0;

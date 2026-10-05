@@ -1474,9 +1474,9 @@ def test_compiled_patterns_reuse(
     [
         pytest.param("inline", "", ("", "a", ""), [True, False, True], id="xsd-empty"),
         pytest.param("inline", "(a?)*b", ("aaab", "aaa", "b"), [True, False, True], id="epsilon-revisit"),
-        pytest.param("rng", "", ("", "a", ""), [False, False, False], id="rng-empty"),
+        pytest.param("rng", "", ("", "a", ""), [True, False, True], id="rng-empty"),
         pytest.param("inline", "(ab|cd)*", ("abcd", "abc", ""), [True, False, True], id="xsd-epsilon-cycle"),
-        pytest.param("rng", "(ab|cd)*", ("abcd", "abc", ""), [True, False, False], id="rng-epsilon-cycle"),
+        pytest.param("rng", "(ab|cd)*", ("abcd", "abc", ""), [True, False, True], id="rng-epsilon-cycle"),
         pytest.param("inline", "é+[0-9]?", ("éé1", "ee1", "é"), [True, False, True], id="xsd-unicode"),
         pytest.param("rng", "é+[0-9]?", ("éé1", "ee1", "é"), [True, False, True], id="rng-unicode"),
     ],
