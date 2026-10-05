@@ -20,6 +20,14 @@
 
 #include <string.h>
 
+#if defined(_MSC_VER)
+#define TH_FORCEINLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define TH_FORCEINLINE inline
+#endif
+
 /* The knobs of turbohtml.extract.UrlCleaning, plus the two vocabularies the shim holds as configuration. `allow` is a
    lowercased name set or None, `deny` a lowercased name set; `language` is an ISO 639-1 code or None. */
 typedef struct {
@@ -122,7 +130,7 @@ static int web_host_holds(PyObject *text, unsigned char needle) {
     return str_holds(text, needle);
 }
 
-static int is_web_host(PyObject *host, PyObject *netloc) {
+static TH_FORCEINLINE int is_web_host(PyObject *host, PyObject *netloc) {
     return PyUnicode_GET_LENGTH(host) > 0 && (web_host_holds(host, '.') || web_host_holds(netloc, ':'));
 }
 
