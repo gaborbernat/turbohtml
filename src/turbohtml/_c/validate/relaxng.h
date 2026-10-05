@@ -537,7 +537,7 @@ static int nc_contains(const nameclass *nc, const qname *name) {
     }
 }
 
-static int rng_datatype_id(th_schema *schema, th_node *node) {
+static int rng_datatype_id(th_schema *schema, th_node *node, int default_datatype) {
     th_tree *tree = schema->tree;
     const th_node_attr *type = attr_exact(tree, node, "type", 4);
     const th_node_attr *library = NULL;
@@ -551,7 +551,7 @@ static int rng_datatype_id(th_schema *schema, th_node *node) {
         xsd_library = u_eq_ascii(library->value, library->value_len, XSD_DT_NS);
     }
     if (type == NULL) {
-        return DT_STRING;
+        return default_datatype;
     }
     if (!xsd_library) {
         return u_eq_ascii(type->value, type->value_len, "token") ? DT_TOKEN : DT_STRING;
@@ -665,7 +665,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
     }
     if (is_schema_el(schema, node, RNG_NS, "data")) {
         pattern *node_pat = pat_new(schema, P_DATA);
-        node_pat->datatype_id = rng_datatype_id(schema, node);
+        node_pat->datatype_id = rng_datatype_id(schema, node, DT_STRING);
         facetset *facets = arena_alloc(&schema->mem, sizeof(*facets));
         if (facets == NULL) {            /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return schema->p_notallowed; /* GCOVR_EXCL_LINE */
@@ -686,7 +686,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
     }
     if (is_schema_el(schema, node, RNG_NS, "value")) {
         pattern *node_pat = pat_new(schema, P_VALUE);
-        node_pat->datatype_id = rng_datatype_id(schema, node);
+        node_pat->datatype_id = rng_datatype_id(schema, node, DT_TOKEN);
         node_pat->value = element_text_raw(tree, node, &node_pat->value_len);
         node_pat->value_ws = dt_default_ws(node_pat->datatype_id);
         return node_pat;
