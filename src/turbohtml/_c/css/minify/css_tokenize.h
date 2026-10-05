@@ -369,7 +369,6 @@ static CSS_FORCEINLINE int css_starts_number(const css_char *text, Py_ssize_t po
     return 0;
 }
 
-/* Match [+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)? at pos, returning the end index. */
 static CSS_FORCEINLINE Py_ssize_t css_scan_number(const css_char *text, Py_ssize_t pos, Py_ssize_t length) {
     /* callers pass a numeric token, so its optional sign and first digit/dot need no bounds check */
     Py_ssize_t scan = pos;
@@ -382,10 +381,11 @@ static CSS_FORCEINLINE Py_ssize_t css_scan_number(const css_char *text, Py_ssize
             scan++;
         }
     } else {
+        scan++;
         while (scan < length && css_is_digit(text[scan])) {
             scan++;
         }
-        if (scan < length && text[scan] == '.') {
+        if (scan < length && text[scan] == '.' && scan + 1 < length && css_is_digit(text[scan + 1])) {
             scan++;
             while (scan < length && css_is_digit(text[scan])) {
                 scan++;
