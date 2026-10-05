@@ -135,6 +135,12 @@ def _run_round_trip(mode: str, minutes: float, rng_seed: int, crash_dir: Path, p
     preloading the runtime would only slow it. Both run as modules of ``tools/`` so the differential can reuse the
     oracles' generators; arguments ``fuzz.py`` does not know (``--oracle``, ``--errors``) pass through to them.
     """
+    url_oracles = {"normalize-url-fixpoint", "clean-url-fixpoint"}
+    if mode == "round-trip" and (
+        not any(arg == "--oracle" or arg.startswith("--oracle=") for arg in passthrough)
+        or any(arg.removeprefix("--oracle=") in url_oracles for arg in passthrough)
+    ):
+        _checkout_sparse_wpt()
     module = "fuzz.round_trip_oracles" if mode == "round-trip" else "fuzz.release_diff"
     env = {
         **(_asan_preload() if mode == "round-trip" else os.environ),
@@ -152,12 +158,13 @@ def _run_round_trip(mode: str, minutes: float, rng_seed: int, crash_dir: Path, p
 
 def _checkout_sparse_wpt() -> None:
     """
-    Check out only ``sanitizer-api/`` of the pinned WPT submodule.
+    Check out the sanitizer and URL seeds of the pinned WPT submodule.
 
     A depth-1 WPT clone is about 1 GB, so ``.gitmodules`` marks the submodule ``update = none`` (plain and recursive
     ``git submodule update`` skip it) and this fetches the recorded commit blob-less with a sparse checkout instead.
     """
-    if (target := _ROOT / _WPT / "sanitizer-api").is_dir():
+    target = _ROOT / _WPT / "sanitizer-api"
+    if target.is_dir() and (_ROOT / _WPT / "url/resources/urltestdata.json").is_file():
         return
     commit = _git("rev-parse", f"HEAD:{_WPT}")
     url = _git("config", "--file", ".gitmodules", f"submodule.{_WPT}.url")
@@ -165,7 +172,16 @@ def _checkout_sparse_wpt() -> None:
     # actions/checkout's post-job cleanup reads remote.origin.url in every submodule and fails on one without it
     _git("-C", _WPT, "config", "remote.origin.url", url)
     _git("-C", _WPT, "fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", commit)
-    _git("-C", _WPT, "sparse-checkout", "set", "--no-cone", "/sanitizer-api/", "/LICENSE.md")
+    _git(
+        "-C",
+        _WPT,
+        "sparse-checkout",
+        "set",
+        "--no-cone",
+        "/sanitizer-api/",
+        "/url/resources/urltestdata.json",
+        "/LICENSE.md",
+    )
     _git("-C", _WPT, "checkout", "--quiet", "FETCH_HEAD")
     print(f"checked out {target.relative_to(_ROOT)} at {commit[:12]}")
 
