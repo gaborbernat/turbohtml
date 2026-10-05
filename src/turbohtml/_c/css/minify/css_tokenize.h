@@ -384,8 +384,8 @@ static CSS_FORCEINLINE Py_ssize_t css_scan_number(const css_char *text, Py_ssize
         while (scan < length && css_is_digit(text[scan])) {
             scan++;
         }
-        if (scan + 1 < length && text[scan] == '.' && css_is_digit(text[scan + 1])) {
-            scan++;
+        if (scan < length && text[scan] == '.' && scan + 1 < length && css_is_digit(text[scan + 1])) {
+            scan += 2;
             while (scan < length && css_is_digit(text[scan])) {
                 scan++;
             }
