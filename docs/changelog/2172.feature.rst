@@ -1,0 +1,1 @@
+Add bounded XML generation with literal comment and CDATA expectations.
