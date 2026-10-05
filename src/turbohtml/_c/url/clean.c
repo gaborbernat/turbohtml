@@ -115,8 +115,15 @@ static int str_holds(PyObject *text, Py_UCS4 needle) {
     return PyUnicode_FindChar(text, needle, 0, PyUnicode_GET_LENGTH(text), 1) >= 0;
 }
 
+static int web_host_holds(PyObject *text, unsigned char needle) {
+    if (PyUnicode_KIND(text) == PyUnicode_1BYTE_KIND) {
+        return memchr(PyUnicode_1BYTE_DATA(text), needle, (size_t)PyUnicode_GET_LENGTH(text)) != NULL;
+    }
+    return str_holds(text, needle);
+}
+
 static int is_web_host(PyObject *host, PyObject *netloc) {
-    return PyUnicode_GET_LENGTH(host) > 0 && (str_holds(host, '.') || str_holds(netloc, ':'));
+    return PyUnicode_GET_LENGTH(host) > 0 && (web_host_holds(host, '.') || web_host_holds(netloc, ':'));
 }
 
 /* The ":port" suffix, or "" for an absent, empty, or scheme-default port (port state, URL standard 4.4). A port of
