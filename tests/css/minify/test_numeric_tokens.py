@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
 from turbohtml.clean import minify_css
 
-_NUMERIC_CASES: Final = [
+if TYPE_CHECKING:
+    from _pytest.mark.structures import ParameterSet
+
+_NUMERIC_CASES: Final[list[ParameterSet]] = [
     pytest.param("a { z-index:1. }", "a{z-index:1.}", id="trailing-dot"),
+    pytest.param("a { width:1.", "a{width:1.}", id="trailing-dot-at-eof"),
+    pytest.param(
+        "a { margin-top:1.; margin-right:2px; margin-bottom:3px; margin-left:4px }",
+        "a{margin-top:1.;margin-right:2px;margin-bottom:3px;margin-left:4px}",
+        id="trailing-dot-edge-keeps-longhands",
+    ),
     pytest.param("a { z-index:+1. }", "a{z-index:1.}", id="positive-dot"),
     pytest.param("a { z-index:-1. }", "a{z-index:-1.}", id="negative-dot"),
     pytest.param("a { z-index:0. }", "a{z-index:0.}", id="zero-dot"),
