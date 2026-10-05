@@ -824,7 +824,7 @@ static void css_minify_value(css_buf *pool, token_vec *vec, Py_ssize_t start, Py
     if (css_run_ieq(name, name_len, "unicode-range") && css_handle_unicode_range(vec, start, end, out)) {
         return;
     }
-    int is_z_index = css_run_ieq(name, name_len, "z-index");
+    int is_z_index = name_len == 7 && css_run_ieq(name, name_len, "z-index");
     int whole_calc = 0;
     if (is_z_index && css_z_index_needs_raw(vec, start, end, &whole_calc)) {
         css_render_raw_value(vec, start, end, out);
