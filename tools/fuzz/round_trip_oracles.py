@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import cache, partial
@@ -119,6 +120,7 @@ __all__ = [
     "encoding_stream_check",
     "fixpoint_check",
     "html_check",
+    "idna_host_check",
     "js_names_check",
     "main",
     "markdown_check",
@@ -412,6 +414,68 @@ def _iterator_sequence_check(case: str) -> str | None:
         return iterator_sequence_check(case)
     except UnsupportedIteratorCaseError as error:
         raise OutOfScopeError from error
+
+
+_IDNA_LABELS: Final[dict[str, tuple[str, str]]] = {
+    "umlaut": ("münchen", "münchen"),
+    "sharp-s": ("faß", "faß"),
+    "acute-decomposed": ("a\u0301", "á"),
+    "acute-precomposed": ("á", "á"),
+    "umlaut-decomposed": ("u\u0308", "ü"),
+    "japanese": ("日本語", "日本語"),
+    "greek": ("δοκιμή", "δοκιμή"),
+    "ignored": ("ex\u00adample", "example"),
+    "fullwidth": ("\uff26\uff2f\uff2f", "foo"),
+    "mapped-dot": ("日本語。\uff2a\uff30", "日本語.jp"),
+}
+
+
+def idna_host_check(case: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
+    """Pin supported Unicode 16 host mappings through the public URL normalizer."""
+    variant, separator, affix = case.partition("\n")
+    if (mapping := _IDNA_LABELS.get(variant)) is None or not separator or not re.fullmatch(r"[a-z0-9]{0,8}", affix):
+        raise OutOfScopeError(case)
+    source, mapped = mapping
+    mapped = affix + mapped
+    expected: Final = (
+        "https://"
+        + ".".join(
+            label if label.isascii() else "xn--" + label.encode("punycode").decode("ascii")
+            for label in mapped.split(".")
+        )
+        + ".example/"
+    )
+    try:
+        once = normalize(f"https://{affix}{source}.example/")
+    except ValueError:
+        return "rejects known-valid Unicode host"
+    if (problem := _idna_output_problem(once)) is not None:
+        return problem
+    if once != expected:
+        return "IDNA host differs from expected mapping"
+    try:
+        twice = normalize(once)
+    except ValueError:
+        return "rejects canonical IDNA output"
+    return None if twice == once else "IDNA output is not a fixpoint"
+
+
+def _idna_output_problem(once: str) -> str | None:
+    if not once.isascii():
+        return "IDNA output is not ASCII"
+    for label in once.removeprefix("https://").removesuffix("/").split("."):
+        if not label.startswith("xn--"):
+            continue
+        payload = label[4:]
+        try:
+            decoded = payload.encode("ascii").decode("punycode")
+        except UnicodeError:
+            return "IDNA output has undecodable Punycode"
+        if not unicodedata.is_normalized("NFC", decoded):
+            return "IDNA decoded label is not NFC"
+        if decoded.encode("punycode").decode("ascii") != payload:
+            return "IDNA Punycode is not canonical"
+    return None
 
 
 def normalize_url_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
@@ -1943,6 +2007,26 @@ def _encoding_seeds() -> list[str]:
     return ["empty\n", *(f"{variant}\ncafé €" for variant in _ENCODING_FORMATS), *_generated(_generate_encoding, 150)()]
 
 
+def _generate_idna_host(rng: random.Random) -> str:
+    return f"{rng.choice(tuple(_IDNA_LABELS))}\n{''.join(rng.choices('abc012', k=rng.randint(0, 8)))}"
+
+
+def _idna_host_seeds() -> list[str]:
+    return [*(f"{variant}\n" for variant in _IDNA_LABELS), *_generated(_generate_idna_host, 150)()]
+
+
+def _idna_host_controls() -> dict[str, bool]:
+    return {
+        "unchanged Unicode host": idna_host_check("umlaut\n", lambda text: text) is not None,
+        "wrong mapping": idna_host_check("umlaut\n", lambda _text: "https://wrong.example/") is not None,
+        "non-NFC label": idna_host_check("umlaut\n", lambda _text: "https://xn--u-ccb.example/") is not None,
+        "changed canonical output": idna_host_check(
+            "umlaut\n", lambda text: normalize_url(text) if not text.isascii() else text + "a"
+        )
+        is not None,
+    }
+
+
 def _normalize_url_controls() -> dict[str, bool]:
     return {
         "growing output": normalize_url_check("https://example.org/", lambda text: text + "a") is not None,
@@ -2160,6 +2244,7 @@ ORACLES: Final[dict[str, Oracle]] = {
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
+    "idna-host": Oracle(idna_host_check, _generate_idna_host, _idna_host_seeds, _idna_host_controls, Floor(100, 0.95)),
     "clean-url-fixpoint": Oracle(clean_url_check, _generate_url, _seeds_url, _clean_url_controls, Floor(100, 0.25)),
     "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85)),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
