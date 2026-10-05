@@ -292,7 +292,7 @@ static PyObject *normalize_parts(const th_url_parts *parts, const clean_options 
     if (netloc == NULL) { /* GCOVR_EXCL_BR_LINE: the authority rebuild only fails on allocation failure */
         goto done;        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    if (str_equals(scheme, "file")) {
+    if (PyUnicode_GET_LENGTH(scheme) == 4 && PyUnicode_READ_CHAR(scheme, 0) == 'f' && str_equals(scheme, "file")) {
         /* A literal backslash can become an authority delimiter on the next parse. */
         PyObject *file_path = normalize_file_path(parts->part[TH_URL_PATH]);
         if (file_path == NULL) { /* GCOVR_EXCL_BR_LINE: file-path rewriting only fails on allocation failure */

@@ -26,6 +26,7 @@ from turbohtml.extract import UrlCleaning, normalize_url
         pytest.param("file:///a\\\u0100", "file:///a/%C4%80", id="two-byte-unicode"),
         pytest.param("file:///a\\\U0001f600", "file:///a/%F0%9F%98%80", id="four-byte-unicode"),
         pytest.param("file:///a\\\x00b", "file:///a/%00b", id="embedded-null"),
+        pytest.param("FIZZ://EXAMPLE.ORG/a\\b?x=1#part", "fizz://example.org/a\\b?x=1#part", id="f-prefixed-non-file"),
         pytest.param("HTTPS://EXAMPLE.ORG/a\\b?x=1#part", "https://example.org/a\\b?x=1#part", id="web-path-policy"),
         pytest.param(
             "CUSTOM://EXAMPLE.ORG/a\\b?x=1#part", "custom://example.org/a\\b?x=1#part", id="custom-path-policy"
