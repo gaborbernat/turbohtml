@@ -1,0 +1,1 @@
+Reject cleaned URLs whose canonical authority loses its web-host shape.
