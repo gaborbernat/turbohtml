@@ -283,6 +283,29 @@ static PyObject *trim_trailing_slash(PyObject *path) {
     return PyUnicode_Substring(path, 0, end);
 }
 
+static PyObject *normalize_file_path(PyObject *path) {
+    Py_ssize_t length = PyUnicode_GET_LENGTH(path);
+    if (length == 0) {
+        return PyUnicode_FromString("/");
+    }
+    if (!str_holds(path, '\\')) {
+        return Py_NewRef(path);
+    }
+    PyObject *result = PyUnicode_New(length, PyUnicode_MAX_CHAR_VALUE(path));
+    if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int kind = PyUnicode_KIND(path);
+    void *data = PyUnicode_DATA(path);
+    int result_kind = PyUnicode_KIND(result);
+    void *result_data = PyUnicode_DATA(result);
+    for (Py_ssize_t index = 0; index < length; index++) {
+        Py_UCS4 character = PyUnicode_READ(kind, data, index);
+        PyUnicode_WRITE(result_kind, result_data, index, character == '\\' ? '/' : character);
+    }
+    return result;
+}
+
 /* Rebuild the URL from spec-normalized components plus the beyond-spec query/fragment canonicalization. Returns NULL
    with a ValueError when a component cannot be percent-encoded (a lone surrogate). */
 static PyObject *normalize_parts(const th_url_parts *parts, const clean_options *options, int web_only) {
@@ -299,7 +322,17 @@ static PyObject *normalize_parts(const th_url_parts *parts, const clean_options 
     if (netloc == Py_None) {
         return netloc;
     }
-    path = th_url_encode_component(parts->part[TH_URL_PATH], TH_URL_SET_PATH);
+    if (PyUnicode_GET_LENGTH(scheme) == 4 && PyUnicode_READ_CHAR(scheme, 0) == 'f' && str_equals(scheme, "file")) {
+        /* A literal backslash can become an authority delimiter on the next parse. */
+        PyObject *file_path = normalize_file_path(parts->part[TH_URL_PATH]);
+        if (file_path == NULL) { /* GCOVR_EXCL_BR_LINE: file-path rewriting only fails on allocation failure */
+            goto done;           /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        path = th_url_encode_component(file_path, TH_URL_SET_PATH);
+        Py_DECREF(file_path);
+    } else {
+        path = th_url_encode_component(parts->part[TH_URL_PATH], TH_URL_SET_PATH);
+    }
     if (path == NULL) {
         goto done;
     }
