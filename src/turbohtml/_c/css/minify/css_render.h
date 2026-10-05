@@ -501,7 +501,9 @@ static void css_handle_text_shadow(css_buf *pool, comp_vec *comps) {
 /* Collapse a two-keyword background-repeat run (repeat repeat -> repeat, repeat no-repeat -> repeat-x, ...). */
 static Py_ssize_t css_collapse_repeat_run(css_buf *pool, css_comp *items, Py_ssize_t count) {
     if (count == 2 && items[0].kind == CK_IDENT && items[1].kind == CK_IDENT) {
-        if (css_comp_text_eq(pool, &items[0], &items[1])) {
+        if (css_comp_text_eq(pool, &items[0], &items[1]) &&
+            (comp_ieq(pool, &items[0], "repeat") || comp_ieq(pool, &items[0], "no-repeat") ||
+             comp_ieq(pool, &items[0], "round") || comp_ieq(pool, &items[0], "space"))) {
             return 1;
         }
         if (comp_ieq(pool, &items[0], "repeat") && comp_ieq(pool, &items[1], "no-repeat")) {
@@ -542,7 +544,8 @@ static void css_handle_runs(css_buf *pool, comp_vec *comps, css_run_transform tr
 }
 
 static Py_ssize_t css_collapse_size_run(css_buf *pool, css_comp *items, Py_ssize_t count) {
-    if (count == 2 && items[0].kind != CK_FUNC && comp_ieq(pool, &items[1], "auto")) {
+    if (count == 2 && items[0].kind != CK_FUNC && comp_ieq(pool, &items[1], "auto") &&
+        (items[0].kind != CK_IDENT || comp_ieq(pool, &items[0], "auto"))) {
         return 1;
     }
     return count;
