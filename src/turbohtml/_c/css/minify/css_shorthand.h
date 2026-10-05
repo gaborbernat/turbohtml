@@ -760,6 +760,48 @@ static void css_apply_handler(css_buf *pool, const css_char *prop, Py_ssize_t pr
     }
 }
 
+static int css_z_index_needs_raw(token_vec *vec, Py_ssize_t start, Py_ssize_t end, int *whole_calc) {
+    while (vec->items[start].kind == CSS_WS || vec->items[start].kind == CSS_COMMENT) {
+        start++;
+    }
+    while (vec->items[end - 1].kind == CSS_WS || vec->items[end - 1].kind == CSS_COMMENT) {
+        end--;
+    }
+    const css_token *first = &vec->items[start];
+    if (end == start + 1 && first->kind == CSS_NUM && first->unit_len == 0) {
+        for (Py_ssize_t index = 0; index < first->text_len; index++) {
+            if (first->text[index] == '.' || first->text[index] == 'e' || first->text[index] == 'E') {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    *whole_calc = first->kind == CSS_IDENT && css_run_ieq(first->text, first->text_len, "calc") && start + 1 < end &&
+                  vec->items[start + 1].kind == CSS_DELIM && vec->items[start + 1].delim == '(' &&
+                  css_match_paren(vec, start + 1, end) >= end - 1;
+    if (*whole_calc) {
+        for (Py_ssize_t index = start; index < end; index++) {
+            if (vec->items[index].kind == CSS_NUM && vec->items[index].unit_len > 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int css_z_index_fold_is_integer(const css_buf *pool, const css_comp *comp) {
+    if (comp->kind != CK_NUM) {
+        return 0;
+    }
+    const css_char *text = pool->data + comp->off;
+    for (Py_ssize_t index = 0; index < comp->len; index++) {
+        if (!css_is_digit(text[index]) && (index != 0 || text[index] != '-')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Minify a declaration value's tokens [start, end) into out. raw covers custom properties (--*). */
 /* scratch is a reusable component vector owned by the caller: resetting its length and reusing its backing buffer
    across declarations avoids a malloc/free for every value. */
@@ -782,10 +824,26 @@ static void css_minify_value(css_buf *pool, token_vec *vec, Py_ssize_t start, Py
     if (css_run_ieq(name, name_len, "unicode-range") && css_handle_unicode_range(vec, start, end, out)) {
         return;
     }
+    int is_z_index = css_run_ieq(name, name_len, "z-index");
+    int whole_calc = 0;
+    if (is_z_index && css_z_index_needs_raw(vec, start, end, &whole_calc)) {
+        css_render_raw_value(vec, start, end, out);
+        return;
+    }
     scratch->len = 0;
     /* Flexbox 1 §7.1: a unitless zero not preceded by two flex factors is a flex factor, so flex keeps zero units */
     css_render_components(pool, vec, start, end, css_prop_is_color(name, name_len),
-                          !css_run_ieq(name, name_len, "flex"), scratch);
+                          !is_z_index && !css_run_ieq(name, name_len, "flex"), scratch);
+    if (whole_calc) {
+        if (pool->failed || scratch->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            out->failed = 1;                   /* GCOVR_EXCL_LINE: allocation failure cannot be forced from a test */
+            return;                            /* GCOVR_EXCL_LINE: allocation failure cannot be forced from a test */
+        }
+        if (!css_z_index_fold_is_integer(pool, &scratch->items[0])) {
+            css_render_raw_value(vec, start, end, out);
+            return;
+        }
+    }
     css_apply_handler(pool, name, name_len, scratch);
     css_assemble(pool, scratch, out);
 }
