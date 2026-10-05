@@ -833,7 +833,7 @@ static void css_minify_value(css_buf *pool, token_vec *vec, Py_ssize_t start, Py
     scratch->len = 0;
     /* Flexbox 1 §7.1: a unitless zero not preceded by two flex factors is a flex factor, so flex keeps zero units */
     css_render_components(pool, vec, start, end, css_prop_is_color(name, name_len),
-                          !is_z_index && !css_run_ieq(name, name_len, "flex"), scratch);
+                          !is_z_index && (name_len != 4 || !css_run_ieq(name, name_len, "flex")), scratch);
     if (whole_calc) {
         if (pool->failed || scratch->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             out->failed = 1;                   /* GCOVR_EXCL_LINE: allocation failure cannot be forced from a test */
