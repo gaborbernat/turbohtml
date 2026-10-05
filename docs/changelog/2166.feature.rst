@@ -1,0 +1,1 @@
+Add bounded DOM sequence and observer callback invariant checks.
