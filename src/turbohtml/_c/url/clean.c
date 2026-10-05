@@ -20,6 +20,16 @@
 
 #include <string.h>
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
 /* The knobs of turbohtml.extract.UrlCleaning, plus the two vocabularies the shim holds as configuration. `allow` is a
    lowercased name set or None, `deny` a lowercased name set; `language` is an ISO 639-1 code or None. */
 typedef struct {
@@ -121,7 +131,7 @@ static int is_web_host(PyObject *host, PyObject *netloc) {
 
 /* The ":port" suffix, or "" for an absent, empty, or scheme-default port (port state, URL standard 4.4). A port of
    digits is read as the integer it spells, so leading zeros fall away and "0080" is the http default. */
-static PyObject *port_suffix(const th_url_parts *parts) {
+static TH_NOINLINE PyObject *port_suffix(const th_url_parts *parts) {
     PyObject *port = parts->part[TH_URL_PORT];
     Py_ssize_t len = PyUnicode_GET_LENGTH(port);
     if (!parts->has_port || len == 0) {
