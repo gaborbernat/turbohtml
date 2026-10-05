@@ -1,1 +1,0 @@
-Preserve quoted components in malformed background-position declarations.
