@@ -1,0 +1,1 @@
+Detect URL output changes and rejection during invariant fuzzing.

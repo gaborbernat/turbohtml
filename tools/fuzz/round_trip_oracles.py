@@ -62,6 +62,7 @@ from turbohtml import (
 from turbohtml.clean import JSMinify, minify_css, minify_js
 from turbohtml.convert import ExpressionError, css_to_xpath
 from turbohtml.cssom import StyleDeclaration, StyleSheet, computed_style
+from turbohtml.extract import clean_url, normalize_url
 from turbohtml.query import Matcher
 from turbohtml.query import compile as compile_selector
 
@@ -76,12 +77,14 @@ __all__ = [
     "JsNames",
     "Oracle",
     "OutOfScopeError",
+    "clean_url_check",
     "css_semantics_check",
     "fixpoint_check",
     "html_check",
     "js_names_check",
     "main",
     "markdown_check",
+    "normalize_url_check",
     "selector_entry_check",
     "span_check",
     "style_check",
@@ -350,6 +353,28 @@ def fixpoint_check(text: str, printer: Callable[[str], str], *, numeric: bool) -
     if numeric and _NUMBER.sub("0", twice) == _NUMBER.sub("0", once) and printer(twice) == twice:
         return None
     return f"not a fixpoint: {_divergence(once, twice)}"
+
+
+def normalize_url_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
+    """URL normalization promises a stable representation after one successful pass."""
+    return fixpoint_check(text, normalize, numeric=False)
+
+
+def clean_url_check(text: str, clean: Callable[[str], str | None] = clean_url) -> str | None:
+    """Skip rejected inputs; flag rejection of a cleaned URL."""
+    try:
+        once = clean(text)
+    except ValueError as error:
+        raise OutOfScopeError from error
+    if once is None:
+        raise OutOfScopeError(text)
+    try:
+        twice = clean(once)
+    except ValueError:
+        return "rejects its own output"
+    if twice is None:
+        return "rejects its own output"
+    return None if twice == once else f"not a fixpoint: {_divergence(once, twice)}"
 
 
 def _divergence(left: str, right: str) -> str:
@@ -1738,6 +1763,50 @@ def _generate_js(rng: random.Random) -> str:
     return _program(rng)
 
 
+def _generate_url(rng: random.Random) -> str:
+    host = rng.choice(("Example.COM", "bücher.example", "127.0.0.1", "[::1]", "sub.example.org"))
+    path = "/".join(rng.choices(("a", "..", ".", "%2e", "café", "a b", "%7e", ""), k=rng.randint(1, 6)))
+    query = rng.choice(("", "?b=2&a=1", "?utm_source=x&id=2", "?q=a+b", "?q=%E2%9C%93"))
+    fragment = rng.choice(("", "#frag", "#a b"))
+    url = f"{rng.choice(('http', 'HTTPS'))}://{host}{rng.choice(('', ':80', ':443', ':8080'))}/{path}{query}{fragment}"
+    return rng.choice((url, f" <{url}> ", url.replace("&", "&amp;")))
+
+
+def _normalize_url_controls() -> dict[str, bool]:
+    return {
+        "growing output": normalize_url_check("https://example.org/", lambda text: text + "a") is not None,
+        "rejects normalized output": normalize_url_check("raw", _reject_url_output) is not None,
+    }
+
+
+def _reject_url_output(text: str) -> str:
+    if text == "raw":
+        return "https://example.org/"
+    msg = "rejected"
+    raise ValueError(msg)
+
+
+def _clean_url_controls() -> dict[str, bool]:
+    return {
+        "growing output": clean_url_check("https://example.org/", lambda text: text + "a") is not None,
+        "drops cleaned output": clean_url_check("raw", lambda text: "https://example.org/" if text == "raw" else None)
+        is not None,
+        "rejects cleaned output": clean_url_check("raw", _reject_url_output) is not None,
+    }
+
+
+def _seeds_url() -> list[str]:
+    # WPT supplies inputs: crawl cleaning differs from WHATWG serialization.
+    wpt = _require(_ROOT / "tools/fuzz-data/wpt/url/resources/urltestdata.json")
+    return list(
+        dict.fromkeys([
+            *(row["input"] for row in json.loads(wpt.read_text(encoding="utf-8")) if isinstance(row, dict)),
+            *_texts((_ROOT / "tools/fuzz/corpus/url").iterdir()),
+            *_generated(_generate_url, 500)(),
+        ])
+    )
+
+
 def _html_controls() -> dict[str, bool]:
     return {
         "unescaped text": html_check("<p>&lt;b&gt;x</p>", lambda node: _unescape(node.serialize())) is not None,
@@ -1876,6 +1945,10 @@ def _seeds_style() -> list[str]:
 
 
 ORACLES: Final[dict[str, Oracle]] = {
+    "normalize-url-fixpoint": Oracle(
+        normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
+    ),
+    "clean-url-fixpoint": Oracle(clean_url_check, _generate_url, _seeds_url, _clean_url_controls, Floor(100, 0.25)),
     "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85)),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
     "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95)),
