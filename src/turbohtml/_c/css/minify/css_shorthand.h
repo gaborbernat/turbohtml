@@ -226,14 +226,19 @@ static void css_emit_position_run(comp_vec *result, const pos_val *run, Py_ssize
 }
 
 static void css_handle_background_position(css_buf *pool, comp_vec *comps) {
+    for (Py_ssize_t index = 0; index < comps->len; index++) {
+        const css_comp *comp = &comps->items[index];
+        if (comp->kind == CK_DELIM || (comp->kind == CK_SEP && pool->data[comp->off] != ',')) {
+            return;
+        }
+    }
     comp_vec result = {NULL, 0, 0, 0};
     css_comp run_items[64];
     pos_val run[64];
     Py_ssize_t run_count = 0;
     int first_run = 1;
     for (Py_ssize_t index = 0; index <= comps->len; index++) {
-        int at_comma = index < comps->len && comps->items[index].kind == CK_SEP &&
-                       pool->data[comps->items[index].off] == ','; /* a SEP comp is always len 1 */
+        int at_comma = index < comps->len && comps->items[index].kind == CK_SEP;
         if (index == comps->len || at_comma) {
             Py_ssize_t resolved = css_position_run(pool, run_items, run_count, run);
             if (!first_run) {
