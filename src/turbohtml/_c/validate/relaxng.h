@@ -1089,7 +1089,7 @@ static int rng_compile(th_schema *schema) {
     schema->p_empty = pat_new(schema, P_EMPTY);
     schema->p_notallowed = pat_new(schema, P_NOTALLOWED);
     schema->p_text = pat_new(schema, P_TEXT);
-    if (!is_schema_el(schema, schema->root, RNG_NS, "grammar")) {
+    if (!u_eq_ascii(root_name.local, root_name.local_len, "grammar")) {
         /* no defines, so no ref cycles; rng_build checks 4.10 and 7.4 inline instead of a second walk */
         schema->start = rng_build(schema, schema->root);
         return PyErr_Occurred() ? 0 : 1;
