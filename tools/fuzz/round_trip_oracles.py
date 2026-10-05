@@ -48,19 +48,19 @@ from fuzz.observer_oracles import (
     observer_sequence_generate,
     observer_sequence_seeds,
 )
-from fuzz.xml_island_oracles import (
-    UnsupportedXmlIslandCaseError,
-    xml_island_check,
-    xml_island_controls,
-    xml_island_generate,
-    xml_island_seeds,
-)
 from fuzz.xml_grammar_oracles import (
     UnsupportedXmlLiteralCaseError,
     xml_literal_check,
     xml_literal_controls,
     xml_literal_generate,
     xml_literal_seeds,
+)
+from fuzz.xml_island_oracles import (
+    UnsupportedXmlIslandCaseError,
+    xml_island_check,
+    xml_island_controls,
+    xml_island_generate,
+    xml_island_seeds,
 )
 from markdown_it import MarkdownIt
 from typing_extensions import override
