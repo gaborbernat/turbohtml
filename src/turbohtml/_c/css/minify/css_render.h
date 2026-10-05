@@ -542,7 +542,7 @@ static void css_handle_runs(css_buf *pool, comp_vec *comps, css_run_transform tr
 }
 
 static Py_ssize_t css_collapse_size_run(css_buf *pool, css_comp *items, Py_ssize_t count) {
-    if (count == 2 && comp_ieq(pool, &items[1], "auto")) {
+    if (count == 2 && items[0].kind != CK_FUNC && comp_ieq(pool, &items[1], "auto")) {
         return 1;
     }
     return count;
