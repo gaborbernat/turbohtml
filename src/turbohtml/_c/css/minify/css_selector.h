@@ -54,7 +54,7 @@ static int css_selector_function_start(const token_vec *vec, Py_ssize_t start, P
 }
 
 /* Comments make no token; a namespace bar cannot start an unqualified universal (Selectors 4 §5.2). */
-static int css_universal_starts_compound(const token_vec *vec, Py_ssize_t start, Py_ssize_t index) {
+CSS_NOINLINE static int css_universal_starts_compound(const token_vec *vec, Py_ssize_t start, Py_ssize_t index) {
     int whitespace = 0;
     while (index > start) {
         const css_token *previous = &vec->items[--index];
@@ -78,7 +78,7 @@ static int css_universal_starts_compound(const token_vec *vec, Py_ssize_t start,
 }
 
 /* Selectors 4 §6.1 permits a string value after a matcher, but requires an identifier as the name. */
-static int css_attribute_value_position(const token_vec *vec, Py_ssize_t index) {
+CSS_NOINLINE static int css_attribute_value_position(const token_vec *vec, Py_ssize_t index) {
     const css_token *previous;
     do {
         previous = &vec->items[--index];
