@@ -1027,6 +1027,52 @@ def test_minify_css_spec_fixes(source: str, expected: str) -> None:
     assert minify_css(source) == expected
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param('["x"] { c : d }', '["x"]{c:d}', id="quoted-name"),
+        pytest.param(".a*.b { color : red }", ".a*.b{color:red}", id="universal-after-class"),
+        pytest.param("a*:hover { color : red }", "a*:hover{color:red}", id="universal-after-type"),
+        pytest.param('["x"="y"] { c : d }', '["x"=y]{c:d}', id="quoted-name-with-value"),
+        pytest.param('[x=foo "i"] { c : d }', '[x=foo "i"]{c:d}', id="trailing-string-after-ident"),
+        pytest.param('[x="foo" "i"] { c : d }', '[x=foo "i"]{c:d}', id="trailing-string-after-string"),
+        pytest.param('[x = /**/ "foo"] { c : d }', "[x=foo]{c:d}", id="value-after-trivia"),
+        pytest.param('[svg|x~="foo"] { c : d }', "[svg|x~=foo]{c:d}", id="qualified-attribute-value"),
+        pytest.param("svg|*.a { c : d }", "svg|*.a{c:d}", id="qualified-universal"),
+        pytest.param("*|*.a { c : d }", "*|*.a{c:d}", id="any-namespace-universal"),
+        pytest.param("|*.a { c : d }", "|*.a{c:d}", id="empty-namespace-universal"),
+        pytest.param(".a/**/*.b { c : d }", ".a*.b{c:d}", id="comment-is-not-compound-boundary"),
+        pytest.param(".a /**/ *.b { c : d }", ".a .b{c:d}", id="space-is-compound-boundary"),
+        pytest.param(".a >*.b { c : d }", ".a>.b{c:d}", id="child-compound-boundary"),
+        pytest.param(".a +*.b { c : d }", ".a+.b{c:d}", id="adjacent-compound-boundary"),
+        pytest.param(".a ~*.b { c : d }", ".a~.b{c:d}", id="sibling-compound-boundary"),
+        pytest.param(".a,*.b { c : d }", ".a,.b{c:d}", id="selector-list-boundary"),
+        pytest.param(".a * .b { c : d }", ".a * .b{c:d}", id="standalone-universal"),
+        pytest.param(":is(.a*.b,.c) { c : d }", ":is(.a*.b,.c){c:d}", id="invalid-is-arm"),
+        pytest.param(":where(a*:hover,.c) { c : d }", ":where(a*:hover,.c){c:d}", id="invalid-where-arm"),
+        pytest.param(":is(*.a) { c : d }", ":is(.a){c:d}", id="is-functional-start"),
+        pytest.param(":where(*.a) { c : d }", ":where(.a){c:d}", id="where-functional-start"),
+        pytest.param(":not(*.a) { c : d }", ":not(.a){c:d}", id="not-functional-start"),
+        pytest.param(":has(*.a) { c : d }", ":has(.a){c:d}", id="has-functional-start"),
+        pytest.param(":is( /**/ *.a) { c : d }", ":is(.a){c:d}", id="is-functional-leading-trivia"),
+        pytest.param(":/**/is(*.a) { c : d }", ":is(.a){c:d}", id="comment-before-function-name"),
+        pytest.param(":unknown(*.a) { c : d }", ":unknown(*.a){c:d}", id="unknown-functional-start"),
+        pytest.param(":unknown( *.a) { c : d }", ":unknown(*.a){c:d}", id="unknown-functional-leading-space"),
+        pytest.param(".is(*.a) { c : d }", ".is(*.a){c:d}", id="function-without-pseudo-colon"),
+        pytest.param("(*.a) { c : d }", "(*.a){c:d}", id="non-function-parenthesis"),
+        pytest.param(":is/**/(*.a) { c : d }", ":is/**/(*.a){c:d}", id="comment-splits-function-token"),
+        pytest.param(":is (*.a) { c : d }", ":is (*.a){c:d}", id="space-splits-function-token"),
+        pytest.param("a is(*.a) { c : d }", "a is(*.a){c:d}", id="function-name-after-whitespace"),
+        pytest.param("[x]*.b { c : d }", "[x]*.b{c:d}", id="universal-after-attribute"),
+        pytest.param(".a:is(*.b) { c : d }", ".a:is(.b){c:d}", id="function-inside-compound"),
+        pytest.param("*.a { c : d }", ".a{c:d}", id="valid-leading-universal"),
+    ],
+)
+def test_minify_css_selector_roles(source: str, expected: str) -> None:
+    result: Final = minify_css(source)
+    assert (result, minify_css(result)) == (expected, expected)
+
+
 _BACKSLASH_AT_EOF: Final[list[ParameterSet]] = [
     pytest.param("a{e:f\\", "a{e:f\ufffd}", id="ident"),
     pytest.param("a{e:\\", "a{e:\ufffd}", id="lone"),
