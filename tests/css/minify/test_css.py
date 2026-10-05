@@ -697,7 +697,7 @@ def _max_decls_per_rule(rule_count: int) -> int:
         pytest.param("a{color:hsl(120,100%,50%)}", "a{color:#0f0}", id="fold-exact-hsl"),
         pytest.param("a{color:rgb(50%,0,0)}", "a{color:rgb(50%,0,0)}", id="no-fold-inexact-percentage"),
         pytest.param("a{color:rgba(1,2,3,.5)}", "a{color:rgb(1,2,3,.5)}", id="rgba-alias-to-rgb"),
-        pytest.param("a{width:calc(1px+ 2px)}", "a{width:calc(1px + 2px)}", id="calc-one-sided-operator-not-folded"),
+        pytest.param("a{width:calc(1px+ 2px)}", "a{width:calc(1px+ 2px)}", id="calc-one-sided-operator-not-folded"),
         pytest.param(
             "@supports (background:url(x)){a{c:d}}",
             "@supports(background:url(x)){a{c:d}}",
@@ -845,7 +845,7 @@ def _max_decls_per_rule(rule_count: int) -> int:
         pytest.param("a{x:1 *important}", "a{x:1*important}", id="trailing-important-after-non-bang-delim"),
         pytest.param("a{color:rgba(0,1,0,0)}", "a{color:rgb(0,1,0,0)}", id="non-zero-green-not-transparent"),
         pytest.param("a{color:rgba(0,0,1,0)}", "a{color:rgb(0,0,1,0)}", id="non-zero-blue-not-transparent"),
-        pytest.param("a{width:calc(1px +(2px))}", "a{width:calc(1px + (2px))}", id="calc-no-space-after-operator"),
+        pytest.param("a{width:calc(1px +(2px))}", "a{width:calc(1px +(2px))}", id="calc-no-space-after-operator"),
         pytest.param("a{width:calc(1px +)}", "a{width:calc(1px +)}", id="calc-operator-at-end"),
         pytest.param('[a="-9"]{x:1}', '[a="-9"]{x:1}', id="attr-keep-quotes-dash-digit"),
         pytest.param("a{color:red! important}", "a{color:red!important}", id="important-space-after-bang"),

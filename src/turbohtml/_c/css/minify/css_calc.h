@@ -562,6 +562,26 @@ static void css_minify_func_args(css_buf *pool, token_vec *vec, Py_ssize_t start
             index++;
             continue;
         }
+        if (keep_ws && ((token->kind == CSS_DELIM && token->delim == '+') ||
+                        (token->kind == CSS_IDENT && token->text_len == 1 && token->text[0] == '-'))) {
+            Py_ssize_t before = index;
+            while (before > start && vec->items[before - 1].kind == CSS_COMMENT) {
+                before--;
+            }
+            Py_ssize_t after = index + 1;
+            while (after < end && vec->items[after].kind == CSS_COMMENT) {
+                after++;
+            }
+            if (before == start || vec->items[before - 1].kind != CSS_WS || after == end ||
+                vec->items[after].kind != CSS_WS) {
+                const css_char *source = vec->items[start - 1].text + 1;
+                /* Synthetic end-tag whitespace precedes a slash, so it cannot end this argument range. */
+                const css_token *last = &vec->items[end - 1];
+                out->len = 0;
+                cbuf_put_run(out, source, last->text + last->text_len + last->unit_len - source);
+                return;
+            }
+        }
         /* a lone '-' tokenizes as an identifier, never a delim, so only '+' appears as a delim operator here */
         if (!is_var && keep_ws && token->kind == CSS_DELIM && token->delim == '+') {
             if (out->len > 0 && out->data[out->len - 1] != ' ') {
