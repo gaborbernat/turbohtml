@@ -556,6 +556,34 @@ def test_minify_css_decoded_name_is_a_fixed_point(source: str, expected: str) ->
     assert minify_css(minify_css(source)) == expected
 
 
+_POSITION_DELIMITERS: Final[list[ParameterSet]] = [
+    pytest.param("left ~ .5px", "left~.5px", id="tilde"),
+    pytest.param("left / .5px", "left/.5px", id="slash"),
+    pytest.param("left + .5px", "left+ .5px", id="plus"),
+    pytest.param("left top,right ~ .5px", "left top,right~.5px", id="whole-value"),
+    pytest.param("left 0 top .5px", "0 .5px", id="edge-offsets"),
+    pytest.param("left top,right bottom", "0 0,100% 100%", id="layers"),
+    pytest.param("calc(10% + 1px) center", "calc(10% + 1px)", id="function"),
+]
+
+
+@pytest.mark.parametrize(("value", "expected"), _POSITION_DELIMITERS)
+def test_minify_css_background_position_delimiters(value: str, expected: str) -> None:
+    assert minify_css(f"a{{background-position:{value}}}") == f"a{{background-position:{expected}}}"
+
+
+@pytest.mark.parametrize(("value", "expected"), _POSITION_DELIMITERS)
+def test_minify_css_background_position_delimiters_are_a_fixed_point(value: str, expected: str) -> None:
+    assert minify_css(minify_css(f"a{{background-position:{value}}}")) == f"a{{background-position:{expected}}}"
+
+
+@pytest.mark.parametrize(("value", "expected"), _POSITION_DELIMITERS)
+def test_minify_css_background_position_delimiters_preserve_cascade(value: str, expected: str) -> None:
+    assert minify_css(f"a{{background-position:10px 20px;background-position:{value}}}") == (
+        f"a{{background-position:10px 20px;background-position:{expected}}}"
+    )
+
+
 _NEGATIVE_AFTER_NUMBER: Final[list[ParameterSet]] = [
     pytest.param("a{e:1e-128 -1e-128}", "a{e:1e-128-1e-128}", id="signed-exponent-boundaries"),
     pytest.param("a{e:1 -.}", "a{e:1 -.}", id="bare-minus-dot"),
