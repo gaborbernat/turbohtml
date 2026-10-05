@@ -92,6 +92,25 @@ def test_clean_accepts_colon_hosts(url: str) -> None:
         pytest.param("HTTP://EXAMPLE\uff0eORG:/x", "http://example.org/x", id="fullwidth-dot"),
         pytest.param("HTTP://EXAMPLE｡ORG:80/x", "http://example.org/x", id="halfwidth-dot"),
         pytest.param("HTTP://user:pw@LOCALHOST:80/a/../x", "http://user:pw@localhost/x", id="userinfo-colon-kept"),
+        pytest.param("HTTP://m\xfcnchen.de:80/a/../x", "http://xn--mnchen-3ya.de/x", id="latin1-host"),
+        pytest.param("HTTP://\xe9:pw@LOCALHOST:80/a/../x", "http://\xe9:pw@localhost/x", id="latin1-userinfo-colon"),
+        pytest.param("HTTP://\xe9@LOCALHOST:80/a/../x", None, id="latin1-userinfo-no-colon"),
+        pytest.param("HTTP://\u0100:pw@LOCALHOST:80/a/../x", "http://\u0100:pw@localhost/x", id="bmp-userinfo-colon"),
+        pytest.param("HTTP://\u0100@LOCALHOST:80/a/../x", None, id="bmp-userinfo-no-colon"),
+        pytest.param(
+            "HTTP://\U00010000:pw@LOCALHOST:80/a/../x", "http://\U00010000:pw@localhost/x", id="astral-userinfo-colon"
+        ),
+        pytest.param("HTTP://\U00010000@LOCALHOST:80/a/../x", None, id="astral-userinfo-no-colon"),
+        pytest.param("HTTP://a\u202eb/a/../x", None, id="bmp-host-low-byte-dot"),
+        pytest.param("HTTP://a\U0001002eb/a/../x", None, id="astral-host-low-byte-dot"),
+        pytest.param("HTTP://\u203a@LOCALHOST:80/a/../x", None, id="bmp-userinfo-low-byte-colon"),
+        pytest.param("HTTP://\U0001003a@LOCALHOST:80/a/../x", None, id="astral-userinfo-low-byte-colon"),
+        pytest.param("HTTP://a\ufffeb.EXAMPLE:80/a/../x", "http://a\ufffeb.example/x", id="wide-host-dot"),
+        pytest.param(
+            "HTTP://u\x00:pw@LOCALHOST:80/a/../x", "http://u\x00:pw@localhost/x", id="nul-before-userinfo-colon"
+        ),
+        pytest.param("HTTP://a\x00b.EXAMPLE:80/a/../x", "http://a\x00b.example/x", id="nul-before-host-dot"),
+        pytest.param("HTTP://:8000/a/../x", None, id="empty-host"),
     ],
 )
 def test_clean_canonical_host_shape(url: str, expected: str | None) -> None:
