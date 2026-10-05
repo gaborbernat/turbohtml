@@ -25,6 +25,7 @@ enum {
     P_LIST,
     P_AFTER,
     P_REF,
+    P_DATA_EXCEPT,
 };
 
 enum { NC_ANY, NC_NAME, NC_NS, NC_CHOICE, NC_EXCEPT };
@@ -685,6 +686,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
                 }
             } else if (is_schema_el(schema, param, RNG_NS, "except")) {
                 node_pat->p1 = rng_build_choice_children(schema, param);
+                node_pat->type = P_DATA_EXCEPT;
             }
         }
         node_pat->facets = facets;
@@ -832,11 +834,12 @@ static pattern *rng_text_deriv(th_schema *schema, pattern *p, const Py_UCS4 *val
         return u_eq_u(norm, nl, vnorm, vl) ? schema->p_empty : schema->p_notallowed;
     }
     case P_DATA:
+        return rng_datatype_ok(schema, p->datatype_id, p->facets, value, len) ? schema->p_empty : schema->p_notallowed;
+    case P_DATA_EXCEPT:
         if (!rng_datatype_ok(schema, p->datatype_id, p->facets, value, len)) {
             return schema->p_notallowed;
         }
-        return p->p1 != NULL && rng_nullable(schema, rng_text_deriv(schema, p->p1, value, len)) ? schema->p_notallowed
-                                                                                                : schema->p_empty;
+        return rng_nullable(schema, rng_text_deriv(schema, p->p1, value, len)) ? schema->p_notallowed : schema->p_empty;
     case P_LIST: {
         pattern *derived = p->p1;
         Py_ssize_t index = 0;
