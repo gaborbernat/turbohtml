@@ -228,7 +228,7 @@ static void css_emit_position_run(comp_vec *result, const pos_val *run, Py_ssize
 static void css_handle_background_position(css_buf *pool, comp_vec *comps) {
     for (Py_ssize_t index = 0; index < comps->len; index++) {
         const css_comp *comp = &comps->items[index];
-        if (comp->kind == CK_DELIM || (comp->kind == CK_SEP && pool->data[comp->off] != ',')) {
+        if (comp->kind == CK_STR || comp->kind == CK_DELIM || (comp->kind == CK_SEP && pool->data[comp->off] != ',')) {
             return;
         }
     }
