@@ -103,6 +103,7 @@ test = [
 ]
 type = [
   "ty>=0.0.84",
+  "types-lxml>=2026.2.16",
   { include-group = "bench" }, # type-check the bench competitor modules in tools/bench/competitors
 ]
 docs = [

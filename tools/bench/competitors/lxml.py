@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import functools
 from html import escape
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final, cast
 from urllib.parse import urljoin
 
-import lxml.etree as lxml_etree  # ty: ignore[unresolved-import]  # C extension, ships no type stubs
+import lxml.etree as lxml_etree
 from lxml import html as lxml_html
 from lxml.builder import E
 
@@ -49,16 +49,16 @@ def fragment(text: str) -> None:
 
 def parse_xml(text: str) -> None:
     """Parse a whole XML document with lxml's libxml2-backed XML parser (etree.XMLParser)."""
-    lxml_html.etree.fromstring(text.encode())
+    lxml_etree.fromstring(text.encode())
 
 
-_VALIDATORS: dict[str, Any] = {}
+_VALIDATORS: Final[dict[str, lxml_etree.XMLSchema]] = {}
 
 
 def validate(case: tuple[str, str]) -> None:
     """Validate a parsed XML document against an XSD schema with lxml's etree.XMLSchema (compiled once)."""
     schema, document = case
-    etree = lxml_html.etree
+    etree: Final = lxml_etree
     validator = _VALIDATORS.get(schema)
     if validator is None:
         validator = _VALIDATORS[schema] = etree.XMLSchema(etree.fromstring(schema.encode()))
@@ -95,7 +95,7 @@ def build(count: int) -> None:
 def build_e(count: int) -> None:
     """Build the same ``<ul>`` with lxml.builder's nested ``E`` calls and serialize the tree."""
     rows = (E.li({"class": "item", "data-i": str(index)}, f"item {index}") for index in range(count))
-    _ = lxml_html.tostring(E.ul(*rows))
+    _ = lxml_etree.tostring(E.ul(*rows), method="html")
 
 
 def construct(count: int) -> None:
@@ -106,7 +106,7 @@ def construct(count: int) -> None:
 
 
 @functools.cache
-def _tree(count: int) -> object:
+def _tree(count: int) -> HtmlElement:
     """Return a built ``<ul>`` of ``count`` rows, cached so ``serialize`` times only the emit step."""
     ul = lxml_html.Element("ul")
     for index in range(count):
@@ -163,7 +163,7 @@ def serialize_xml(text: str) -> None:
 
 def canonicalize(text: str) -> None:
     """Canonicalize a parsed document to Canonical XML with lxml's tostring(method='c14n')."""
-    lxml_html.tostring(_parsed(text), method="c14n")
+    lxml_etree.tostring(_parsed(text), method="c14n")
 
 
 def extract_attr(text: str) -> None:
@@ -179,14 +179,14 @@ def extract_text(text: str) -> None:
 def strip_remove(text: str) -> None:
     """Drop every code/a/q subtree with lxml's strip_elements on a fresh parse, then serialize."""
     tree = lxml_html.document_fromstring(text)
-    lxml_html.etree.strip_elements(tree, "code", "a", "q", with_tail=False)
+    lxml_etree.strip_elements(tree, "code", "a", "q", with_tail=False)
     _ = lxml_html.tostring(tree)
 
 
 def strip_tags(text: str) -> None:
     """Unwrap every code/a/q element keeping its content with lxml's strip_tags on a fresh parse, then serialize."""
     tree = lxml_html.document_fromstring(text)
-    lxml_html.etree.strip_tags(tree, "code", "a", "q")
+    lxml_etree.strip_tags(tree, "code", "a", "q")
     _ = lxml_html.tostring(tree)
 
 
@@ -197,7 +197,7 @@ def rewrite(text: str) -> None:
         anchor.set("rel", "nofollow")
     for image in tree.findall(".//img"):
         image.set("loading", "lazy")
-    lxml_html.etree.strip_elements(tree, lxml_html.etree.Comment, with_tail=False)
+    lxml_etree.strip_elements(tree, lxml_etree.Comment, with_tail=False)
     _ = lxml_html.tostring(tree)
 
 
@@ -218,7 +218,7 @@ def set_html(tree: HtmlElement) -> None:
     """Clear a freshly parsed body and append a reparsed fragment, lxml's nearest inner-HTML shape."""
     body = tree.findall(".//body")[0]
     body.clear()
-    for piece in lxml_html.fragments_fromstring(_SET_HTML):
+    for piece in lxml_html.fragments_fromstring(_SET_HTML, no_leading_text=True):
         body.append(piece)
 
 
@@ -320,7 +320,7 @@ def _first_two_ext(_context: object, nodes: list[object]) -> list[object]:
 
 _COUNT_EXTENSIONS = {(None, "ext_count"): _count_ext}
 _NODESET_EXTENSIONS = {(None, "ext_first_two"): _first_two_ext}
-_REUSE = lxml_html.etree.XPath("//a[@href]")
+_REUSE: Final = lxml_etree.XPath("//a[@href]")
 
 
 @functools.cache
@@ -439,7 +439,8 @@ class _Counter:
 
 def htmlparser(text: str) -> None:
     """Drive lxml's incremental HTMLParser with the counting target."""
-    parser = lxml_html.etree.HTMLParser(target=_Counter())
+    # lxml accepts partial targets; its stub protocol also requires optional callbacks.
+    parser = lxml_etree.HTMLParser(target=cast("lxml_etree.ParserTarget[int]", _Counter()))
     parser.feed(text)
     parser.close()
 
@@ -453,7 +454,7 @@ def _serialize_inner(text: str) -> str:
 
 @functools.cache
 def _body(text: str) -> HtmlElement:
-    return _parsed(text).find("body")
+    return cast("HtmlElement", _parsed(text).find("body"))
 
 
 def _encode_inner(text: str) -> bytes:
