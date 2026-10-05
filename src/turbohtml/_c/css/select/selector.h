@@ -94,7 +94,8 @@ typedef struct {
     Py_UCS4 *source; /* an owned copy of the selector text the slices point into */
     sel_complex *alts;
     int count;
-    int failed;         /* an allocation or a syntax error happened during compile */
+    uint16_t subject_atom; /* 0 before index preparation, UINT16_MAX without a common subject tag */
+    uint16_t left_atom;
     int quirks;         /* the tree was parsed in quirks mode: class/ID match case-insensitively */
     int has_relational; /* the selector contains a :has() somewhere: a match may want the subtree memo */
     th_tree *tree;      /* the tree the selector runs on; :empty and :dir(auto) read text spans through it */
@@ -109,6 +110,18 @@ typedef struct {
     unsigned char result;
 } sel_memo_slot;
 
+/* How the last general-sibling walk for one compound ended: the compound it looked for,
+   the node it started from and its match status. */
+typedef struct {
+    const void *key;
+    const th_node *node;
+    int status;
+} sel_sibling_record;
+
+/* One record per combinator position (mod this count), so the nested walks of a chain such
+   as a ~ b ~ c keep their own. */
+#define SEL_SIBLING_RECORDS 4
+
 /* A per-query open-addressing memo of (key, node) answers that hold for the whole query,
    so a driver walking many candidates computes each answer once. The :has() memo turns the
    O(n^2) subtree re-walk into a single amortized-linear pass; the sibling memo does the
@@ -122,6 +135,13 @@ typedef struct {
     size_t count;
     int failed; /* an allocation failed while growing: fall back to the direct walk */
 } sel_memo;
+
+typedef struct {
+    sel_memo table;
+    /* A query in document order reaches the node the last walk started from before any
+       entry of the table, so the sibling walks stop there. */
+    sel_sibling_record last_walks[SEL_SIBLING_RECORDS];
+} sel_sibling_memo;
 
 typedef struct {
     th_node *node;
@@ -145,7 +165,7 @@ typedef struct {
     sel_memo *has_memo;
     sel_nth_memo *nth_memo;
     sel_default_memo *default_memo;
-    sel_memo *sibling_memo;
+    sel_sibling_memo *sibling_memo;
 } sel_ctx;
 
 typedef struct {
