@@ -55,6 +55,13 @@ from fuzz.observer_oracles import (
     observer_sequence_generate,
     observer_sequence_seeds,
 )
+from fuzz.parser_byte_oracles import (
+    UnsupportedParserCaseError,
+    parser_bytes_check,
+    parser_bytes_controls,
+    parser_bytes_generate,
+    parser_bytes_seeds,
+)
 from fuzz.xml_grammar_oracles import (
     UnsupportedXmlLiteralCaseError,
     xml_literal_check,
@@ -2115,6 +2122,13 @@ def _seeds_style() -> list[str]:
     return [body for css in _corpus().css for body in re.findall(r"\{([^{}]*)\}", css)]
 
 
+def _parser_bytes_check(case: str) -> str | None:
+    try:
+        return parser_bytes_check(case)
+    except UnsupportedParserCaseError as error:
+        raise OutOfScopeError from error
+
+
 def _xml_island(case: str) -> str | None:
     try:
         return xml_island_check(case)
@@ -2132,6 +2146,9 @@ def _xml_literal(case: str) -> str | None:
 ORACLES: Final[dict[str, Oracle]] = {
     "encoding-stream": Oracle(
         encoding_stream_check, _generate_encoding, _encoding_seeds, _encoding_stream_controls, Floor(100, 0.95)
+    ),
+    "parser-bytes": Oracle(
+        _parser_bytes_check, parser_bytes_generate, parser_bytes_seeds, parser_bytes_controls, Floor(100, 1)
     ),
     "encoding-decode": Oracle(
         encoding_decode_check, _generate_encoding, _encoding_seeds, _encoding_decode_controls, Floor(100, 0.95)
