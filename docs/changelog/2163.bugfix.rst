@@ -1,0 +1,1 @@
+RELAX NG rejects schemas whose root uses a foreign namespace.
