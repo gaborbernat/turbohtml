@@ -225,12 +225,19 @@ static void css_emit_position_run(comp_vec *result, const pos_val *run, Py_ssize
     }
 }
 
-static void css_handle_background_position(css_buf *pool, comp_vec *comps) {
+CSS_NOINLINE static int css_position_delimiters_supported(const css_buf *pool, const comp_vec *comps) {
     for (Py_ssize_t index = 0; index < comps->len; index++) {
         const css_comp *comp = &comps->items[index];
         if (comp->kind == CK_DELIM || (comp->kind == CK_SEP && pool->data[comp->off] != ',')) {
-            return;
+            return 0;
         }
+    }
+    return 1;
+}
+
+static void css_handle_background_position(css_buf *pool, comp_vec *comps) {
+    if (!css_position_delimiters_supported(pool, comps)) {
+        return;
     }
     comp_vec result = {NULL, 0, 0, 0};
     css_comp run_items[64];
