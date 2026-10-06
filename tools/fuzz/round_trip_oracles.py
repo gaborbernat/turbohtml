@@ -62,6 +62,7 @@ from turbohtml import (
 from turbohtml.clean import JSMinify, minify_css, minify_js
 from turbohtml.convert import ExpressionError, css_to_xpath
 from turbohtml.cssom import StyleDeclaration, StyleSheet, computed_style
+from turbohtml.detect import EncodingDetector, EncodingMatch, detect
 from turbohtml.extract import clean_url, normalize_url
 from turbohtml.query import Matcher
 from turbohtml.query import compile as compile_selector
@@ -79,6 +80,8 @@ __all__ = [
     "OutOfScopeError",
     "clean_url_check",
     "css_semantics_check",
+    "encoding_decode_check",
+    "encoding_stream_check",
     "fixpoint_check",
     "html_check",
     "js_names_check",
@@ -375,6 +378,88 @@ def clean_url_check(text: str, clean: Callable[[str], str | None] = clean_url) -
     if twice is None:
         return "rejects its own output"
     return None if twice == once else f"not a fixpoint: {_divergence(once, twice)}"
+
+
+_ENCODING_FORMATS: Final[dict[str, tuple[str, bytes, str, str]]] = {
+    "utf-8-bom": ("utf-8", b"\xef\xbb\xbf", "UTF-8-SIG", ""),
+    "utf-16le-bom": ("utf-16-le", b"\xff\xfe", "UTF-16LE", ""),
+    "utf-16be-bom": ("utf-16-be", b"\xfe\xff", "UTF-16BE", ""),
+    "utf-8-meta": ("utf-8", b"", "UTF-8", "<meta charset=utf-8>"),
+    "windows-1252-meta": ("cp1252", b"", "windows-1252", "<meta charset=windows-1252>"),
+}
+
+
+def encoding_stream_check(
+    case: str,
+    one_shot: Callable[[bytes], EncodingMatch] = detect,
+    stream: Callable[[bytes, int], EncodingMatch] | None = None,
+) -> str | None:
+    """Pin expected detection independently of the chunk-boundary comparison."""
+    expected: Final = _encoding_case(case)
+    if one_shot(expected.data) != expected.match:
+        return "one-shot detection differs from expected match"
+    for width in range(1, 6):
+        if (stream or _encoding_stream)(expected.data, width) != expected.match:
+            return "chunked detection differs from expected match"
+    return None
+
+
+def encoding_decode_check(
+    case: str,
+    detect_bytes: Callable[[bytes], EncodingMatch] = detect,
+    decode: Callable[[bytes, str], str] = bytes.decode,
+    parse_text: Callable[[bytes], str | None] | None = None,
+) -> str | None:
+    """Require the codec and byte parser to preserve fixture text."""
+    expected: Final = _encoding_case(case)
+    if expected.match.codec is None:
+        raise OutOfScopeError(case)
+    if detect_bytes(expected.data) != expected.match:
+        return "detection differs from expected match"
+    if decode(expected.data, expected.match.codec) != expected.decoded:
+        return "detected codec differs from expected text"
+    if (parse_text or _encoding_text)(expected.data) != expected.text:
+        return "byte parse differs from expected text"
+    return None
+
+
+def _encoding_case(case: str) -> _EncodingCase:
+    variant, separator, text = case.partition("\n")
+    if not separator or len(text) > 256 or (text and not text.isprintable()) or any(char in text for char in "<>&"):
+        raise OutOfScopeError(case)
+    if variant == "empty" and not text:
+        return _EncodingCase(b"", EncodingMatch(None, 0.0, None), "", "")
+    if (formatting := _ENCODING_FORMATS.get(variant)) is None:
+        raise OutOfScopeError(case)
+    codec, prefix, label, meta = formatting
+    markup: Final = f"{meta}<p>{text}</p>"
+    try:
+        data: Final = prefix + markup.encode(codec)
+    except UnicodeEncodeError as error:
+        raise OutOfScopeError from error
+    decoded: Final = ("\ufeff" if label in {"UTF-16LE", "UTF-16BE"} else "") + markup
+    return _EncodingCase(data, EncodingMatch(label, 1.0, None, bool(prefix), f"whatwg-{label.lower()}"), decoded, text)
+
+
+@dataclass(frozen=True)
+class _EncodingCase:
+    data: bytes
+    match: EncodingMatch
+    decoded: str
+    text: str
+
+
+def _encoding_stream(data: bytes, width: int) -> EncodingMatch:
+    detector: Final = EncodingDetector()
+    detector.feed(b"")
+    for start in range(0, len(data), width):
+        detector.feed(data[start : start + width])
+        detector.feed(b"")
+    return detector.close()
+
+
+def _encoding_text(data: bytes) -> str:
+    return parse(data).text
 
 
 def _divergence(left: str, right: str) -> str:
@@ -1772,6 +1857,36 @@ def _generate_url(rng: random.Random) -> str:
     return rng.choice((url, f" <{url}> ", url.replace("&", "&amp;")))
 
 
+def _generate_encoding(rng: random.Random) -> str:
+    variant: Final = rng.choice(tuple(_ENCODING_FORMATS))
+    alphabet: Final = "abc 123café€" if variant == "windows-1252-meta" else "abc 123café€中文𐐀"
+    return f"{variant}\n{''.join(rng.choices(alphabet, k=rng.randint(0, 64)))}"
+
+
+def _encoding_stream_controls() -> dict[str, bool]:
+    missing: Final = EncodingMatch(None, 0.0, None)
+    return {
+        "wrong one-shot label": encoding_stream_check("utf-8-bom\ncafé", lambda _data: missing) is not None,
+        "wrong chunked label": encoding_stream_check("utf-8-bom\ncafé", stream=lambda _data, _width: missing)
+        is not None,
+    }
+
+
+def _encoding_decode_controls() -> dict[str, bool]:
+    return {
+        "wrong codec text": encoding_decode_check("utf-8-meta\ncafé", decode=lambda _data, _codec: "") is not None,
+        "wrong parsed text": encoding_decode_check("utf-8-meta\ncafé", parse_text=lambda _data: "") is not None,
+        "wrong detected label": encoding_decode_check(
+            "utf-8-meta\ncafé", detect_bytes=lambda _data: EncodingMatch(None, 0.0, None)
+        )
+        is not None,
+    }
+
+
+def _encoding_seeds() -> list[str]:
+    return ["empty\n", *(f"{variant}\ncafé €" for variant in _ENCODING_FORMATS), *_generated(_generate_encoding, 150)()]
+
+
 def _normalize_url_controls() -> dict[str, bool]:
     return {
         "growing output": normalize_url_check("https://example.org/", lambda text: text + "a") is not None,
@@ -1945,6 +2060,12 @@ def _seeds_style() -> list[str]:
 
 
 ORACLES: Final[dict[str, Oracle]] = {
+    "encoding-stream": Oracle(
+        encoding_stream_check, _generate_encoding, _encoding_seeds, _encoding_stream_controls, Floor(100, 0.95)
+    ),
+    "encoding-decode": Oracle(
+        encoding_decode_check, _generate_encoding, _encoding_seeds, _encoding_decode_controls, Floor(100, 0.95)
+    ),
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
