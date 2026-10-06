@@ -1107,11 +1107,16 @@ static pattern *rng_child_element(valctx *ctx, pattern *p, th_node *element) {
 static int rng_scan(th_schema *schema, th_node *container, int depth);
 
 static int rng_compile(th_schema *schema) {
+    qname root_name = schema_direct_qname(schema, schema->root);
+    if (!u_eq_ascii(root_name.uri, root_name.uri_len, RNG_NS)) {
+        PyErr_SetString(PyExc_ValueError, "RELAX NG schema root must use the structure namespace");
+        return 0;
+    }
     th_tree *tree = schema->tree;
     schema->p_empty = pat_new(schema, P_EMPTY);
     schema->p_notallowed = pat_new(schema, P_NOTALLOWED);
     schema->p_text = pat_new(schema, P_TEXT);
-    if (!is_schema_el(schema, schema->root, RNG_NS, "grammar")) {
+    if (!u_eq_ascii(root_name.local, root_name.local_len, "grammar")) {
         /* no defines, so no ref cycles; rng_build checks 4.10 and 7.4 inline instead of a second walk */
         schema->start = rng_build(schema, schema->root);
         return PyErr_Occurred() ? 0 : 1;
