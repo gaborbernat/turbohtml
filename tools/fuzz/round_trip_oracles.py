@@ -41,6 +41,13 @@ from fuzz.css_custom_oracles import (
     css_custom_generate,
     css_custom_seeds,
 )
+from fuzz.iterator_oracles import (
+    UnsupportedIteratorCaseError,
+    iterator_sequence_check,
+    iterator_sequence_controls,
+    iterator_sequence_generate,
+    iterator_sequence_seeds,
+)
 from fuzz.observer_oracles import (
     UnsupportedObserverCaseError,
     observer_sequence_check,
@@ -397,6 +404,13 @@ def _observer_sequence_check(case: str) -> str | None:
     try:
         return observer_sequence_check(case)
     except UnsupportedObserverCaseError as error:
+        raise OutOfScopeError from error
+
+
+def _iterator_sequence_check(case: str) -> str | None:
+    try:
+        return iterator_sequence_check(case)
+    except UnsupportedIteratorCaseError as error:
         raise OutOfScopeError from error
 
 
@@ -2135,6 +2149,13 @@ ORACLES: Final[dict[str, Oracle]] = {
     "xml-island-grammar": Oracle(_xml_island, xml_island_generate, xml_island_seeds, xml_island_controls, Floor(54, 1)),
     "xml-literal-grammar": Oracle(
         _xml_literal, xml_literal_generate, xml_literal_seeds, xml_literal_controls, Floor(96, 1)
+    ),
+    "iterator-sequence": Oracle(
+        _iterator_sequence_check,
+        iterator_sequence_generate,
+        iterator_sequence_seeds,
+        iterator_sequence_controls,
+        Floor(100, 1),
     ),
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
