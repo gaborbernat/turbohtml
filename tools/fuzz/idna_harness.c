@@ -7,9 +7,8 @@
    accumulator and the output bound under the sanitizers with no interpreter -- the same jstypes.h / JM_STANDALONE
    decoupling tools/js_minify_harness.c uses.
 
-   The driver reimplements the th_url_to_ascii orchestration (map_host -> NFC -> per-label punycode) over the same
-   buffer sizing idna.c allocates, so any miss in that sizing is an ASan out-of-bounds write here, not a silent
-   corruption in the extension. Input bytes are UTF-8 decoded to code points (a lone byte that is not valid UTF-8 falls
+   The driver calls the shared production orchestration, including its NFC quick check. Input bytes are UTF-8
+   decoded to code points (a lone byte that is not valid UTF-8 falls
    back to its Latin-1 value), so multi-byte and astral seeds exercise the mapping, combining-class, and Hangul rows.
 
    Build (macOS, ASan+UBSan; LSan is unavailable on Apple clang):
@@ -56,55 +55,6 @@ static size_t utf8_next(const unsigned char *bytes, size_t len, size_t pos, Py_U
     return (size_t)extra + 1;
 }
 
-/* Run the WHATWG domain-to-ASCII pipeline over one host, mirroring th_url_to_ascii's buffer sizing so ASan bounds the
-   real allocation. Frees every buffer; a host map_host rejects, or a label punycode cannot encode, is ignored. */
-static void to_ascii(const Py_UCS4 *input, Py_ssize_t in_len) {
-    Py_UCS4 *mapped = malloc((size_t)(in_len * 18 + 1) * sizeof(Py_UCS4));
-    if (mapped == NULL) {
-        return;
-    }
-    Py_ssize_t mapped_len = map_host(input, in_len, mapped);
-    if (mapped_len < 0) {
-        free(mapped);
-        return;
-    }
-    Py_UCS4 *norm = malloc((size_t)(mapped_len * 4 + 1) * sizeof(Py_UCS4));
-    if (norm == NULL) {
-        free(mapped);
-        return;
-    }
-    Py_ssize_t norm_len = nfc(mapped, mapped_len, norm);
-    Py_UCS4 *out = malloc((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
-    Py_UCS4 *scratch = malloc((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
-    if (out == NULL || scratch == NULL) {
-        free(mapped);
-        free(norm);
-        free(out);
-        free(scratch);
-        return;
-    }
-    Py_ssize_t at = 0;
-    Py_ssize_t label_start = 0;
-    for (Py_ssize_t index = 0; index <= norm_len; index++) {
-        if (index < norm_len && norm[index] != '.') {
-            continue;
-        }
-        if (label_start > 0) {
-            out[at++] = '.';
-        }
-        Py_ssize_t next = emit_label(out, at, norm + label_start, index - label_start, scratch);
-        if (next < 0) {
-            break;
-        }
-        at = next;
-        label_start = index + 1;
-    }
-    free(mapped);
-    free(norm);
-    free(out);
-    free(scratch);
-}
-
 static void run_bytes(const unsigned char *bytes, size_t len) {
     Py_UCS4 *wide = malloc((len ? len : 1) * sizeof(Py_UCS4));
     if (wide == NULL) {
@@ -116,7 +66,13 @@ static void run_bytes(const unsigned char *bytes, size_t len) {
         pos += utf8_next(bytes, len, pos, &cp);
         wide[count++] = cp;
     }
-    to_ascii(wide, count);
+    if (count <= TH_IDNA_MAX_INPUT) {
+        Py_UCS4 *output;
+        Py_ssize_t output_len;
+        if (idna_to_ascii(wide, count, &output, &output_len) == IDNA_OK) {
+            free(output);
+        }
+    }
     free(wide);
 }
 

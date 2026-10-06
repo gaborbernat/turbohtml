@@ -1,0 +1,1 @@
+Share IDNA conversion between URL normalization and the standalone harness.
