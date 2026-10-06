@@ -37,6 +37,27 @@ if TYPE_CHECKING:
             id="utf16be-bom",
         ),
         pytest.param(
+            "utf-8-bom-conflicting-meta\ncafé",
+            b"\xef\xbb\xbf<meta charset=windows-1252><p>caf\xc3\xa9</p>",
+            "UTF-8-SIG",
+            "<meta charset=windows-1252><p>café</p>",
+            id="utf8-bom-conflicting-meta",
+        ),
+        pytest.param(
+            "utf-16le-bom-conflicting-meta\ncafé",
+            b"\xff\xfe" + "<meta charset=utf-8><p>café</p>".encode("utf-16-le"),
+            "UTF-16LE",
+            "\ufeff<meta charset=utf-8><p>café</p>",
+            id="utf16le-bom-conflicting-meta",
+        ),
+        pytest.param(
+            "utf-16be-bom-conflicting-meta\ncafé",
+            b"\xfe\xff" + "<meta charset=utf-8><p>café</p>".encode("utf-16-be"),
+            "UTF-16BE",
+            "\ufeff<meta charset=utf-8><p>café</p>",
+            id="utf16be-bom-conflicting-meta",
+        ),
+        pytest.param(
             "utf-8-meta\ncafé",
             b"<meta charset=utf-8><p>caf\xc3\xa9</p>",
             "UTF-8",
@@ -134,8 +155,19 @@ def test_encoding_decode_empty_sentinel_is_out_of_scope() -> None:
         ),
     ],
 )
-def test_encoding_invariants_discriminate_failures(check: Callable[[str], str | None], expected: str) -> None:
-    assert check("utf-8-meta\ncafé") == expected
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param("utf-8-meta\ncafé", id="meta"),
+        pytest.param("utf-8-bom-conflicting-meta\ncafé", id="utf8-conflict"),
+        pytest.param("utf-16le-bom-conflicting-meta\ncafé", id="utf16le-conflict"),
+        pytest.param("utf-16be-bom-conflicting-meta\ncafé", id="utf16be-conflict"),
+    ],
+)
+def test_encoding_invariants_discriminate_failures(
+    case: str, check: Callable[[str], str | None], expected: str
+) -> None:
+    assert check(case) == expected
 
 
 @pytest.mark.parametrize(
@@ -148,7 +180,7 @@ def test_encoding_registry_controls_seeds_and_floor(name: str) -> None:
         all(oracle.controls().values()),
         oracle.floor.count,
         len(oracle.seeds()),
-    ) == (None, True, 100, 156)
+    ) == (None, True, 100, 159)
 
 
 def test_encoding_cli_replays_seed_floor(tmp_path: Path) -> None:

@@ -556,6 +556,9 @@ _ENCODING_FORMATS: Final[dict[str, tuple[str, bytes, str, str]]] = {
     "utf-16be-bom": ("utf-16-be", b"\xfe\xff", "UTF-16BE", ""),
     "utf-8-meta": ("utf-8", b"", "UTF-8", "<meta charset=utf-8>"),
     "windows-1252-meta": ("cp1252", b"", "windows-1252", "<meta charset=windows-1252>"),
+    "utf-8-bom-conflicting-meta": ("utf-8", b"\xef\xbb\xbf", "UTF-8-SIG", "<meta charset=windows-1252>"),
+    "utf-16le-bom-conflicting-meta": ("utf-16-le", b"\xff\xfe", "UTF-16LE", "<meta charset=utf-8>"),
+    "utf-16be-bom-conflicting-meta": ("utf-16-be", b"\xfe\xff", "UTF-16BE", "<meta charset=utf-8>"),
 }
 
 
