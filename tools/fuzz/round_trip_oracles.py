@@ -41,6 +41,13 @@ from fuzz.css_custom_oracles import (
     css_custom_generate,
     css_custom_seeds,
 )
+from fuzz.observer_oracles import (
+    UnsupportedObserverCaseError,
+    observer_sequence_check,
+    observer_sequence_controls,
+    observer_sequence_generate,
+    observer_sequence_seeds,
+)
 from markdown_it import MarkdownIt
 from typing_extensions import override
 
@@ -369,6 +376,13 @@ def _css_custom_check(case: str) -> str | None:
     try:
         return css_custom_check(case)
     except UnsupportedCssCustomCaseError as error:
+        raise OutOfScopeError from error
+
+
+def _observer_sequence_check(case: str) -> str | None:
+    try:
+        return observer_sequence_check(case)
+    except UnsupportedObserverCaseError as error:
         raise OutOfScopeError from error
 
 
@@ -2082,6 +2096,13 @@ ORACLES: Final[dict[str, Oracle]] = {
     ),
     "css-custom-tokens": Oracle(
         _css_custom_check, css_custom_generate, css_custom_seeds, css_custom_controls, Floor(100, 1)
+    ),
+    "observer-sequence": Oracle(
+        _observer_sequence_check,
+        observer_sequence_generate,
+        observer_sequence_seeds,
+        observer_sequence_controls,
+        Floor(100, 1),
     ),
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
