@@ -752,7 +752,7 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
 
 /* A top-level node collected before serialization, so adjacent qualified rules can be merged. is_rule holds a
    selector + rendered body (no braces); otherwise it is opaque text (an at-rule, a bang comment, or stray recovery
-   text), which breaks rule adjacency. at_statement marks an at-statement that needs a ';' before the next node, and
+   text), which breaks rule adjacency. A statement separator prevents the next node from joining its prelude, and
    stray marks recovered stray text. */
 typedef struct {
     int is_rule;
@@ -881,6 +881,7 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
     }
     if (token && token->delim == ';') {
         cur->index++;
+        item->at_statement = !top;
     }
     /* a stray segment with no block: keep its trimmed text verbatim (error recovery). The caller (css_parse_rules)
        consumes leading whitespace/comments before dispatching here, so only the trailing edge needs trimming. */
