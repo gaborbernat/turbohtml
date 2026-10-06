@@ -58,6 +58,34 @@ if TYPE_CHECKING:
             id="utf16be-bom-conflicting-meta",
         ),
         pytest.param(
+            "utf-8-pragma-first\ncafé",
+            b'<meta http-equiv=Content-Type content="text/html; charset=utf-8"><p>caf\xc3\xa9</p>',
+            "UTF-8",
+            '<meta http-equiv=Content-Type content="text/html; charset=utf-8"><p>café</p>',
+            id="utf-8-pragma-first",
+        ),
+        pytest.param(
+            "utf-8-content-first\ncafé",
+            b'<meta content="text/html; charset=utf-8" http-equiv=Content-Type><p>caf\xc3\xa9</p>',
+            "UTF-8",
+            '<meta content="text/html; charset=utf-8" http-equiv=Content-Type><p>café</p>',
+            id="utf-8-content-first",
+        ),
+        pytest.param(
+            "windows-1252-pragma-first\ncafé",
+            b'<meta http-equiv=Content-Type content="text/html; charset=windows-1252"><p>caf\xe9</p>',
+            "windows-1252",
+            '<meta http-equiv=Content-Type content="text/html; charset=windows-1252"><p>café</p>',
+            id="windows-1252-pragma-first",
+        ),
+        pytest.param(
+            "windows-1252-content-first\ncafé",
+            b'<meta content="text/html; charset=windows-1252" http-equiv=Content-Type><p>caf\xe9</p>',
+            "windows-1252",
+            '<meta content="text/html; charset=windows-1252" http-equiv=Content-Type><p>café</p>',
+            id="windows-1252-content-first",
+        ),
+        pytest.param(
             "utf-8-meta\ncafé",
             b"<meta charset=utf-8><p>caf\xc3\xa9</p>",
             "UTF-8",
@@ -158,10 +186,14 @@ def test_encoding_decode_empty_sentinel_is_out_of_scope() -> None:
 @pytest.mark.parametrize(
     "case",
     [
-        pytest.param("utf-8-meta\ncafé", id="meta"),
         pytest.param("utf-8-bom-conflicting-meta\ncafé", id="utf8-conflict"),
         pytest.param("utf-16le-bom-conflicting-meta\ncafé", id="utf16le-conflict"),
         pytest.param("utf-16be-bom-conflicting-meta\ncafé", id="utf16be-conflict"),
+        pytest.param("utf-8-meta\ncafé", id="utf-8-meta"),
+        pytest.param("utf-8-pragma-first\ncafé", id="utf-8-pragma-first"),
+        pytest.param("utf-8-content-first\ncafé", id="utf-8-content-first"),
+        pytest.param("windows-1252-pragma-first\ncafé", id="windows-1252-pragma-first"),
+        pytest.param("windows-1252-content-first\ncafé", id="windows-1252-content-first"),
     ],
 )
 def test_encoding_invariants_discriminate_failures(
@@ -180,7 +212,7 @@ def test_encoding_registry_controls_seeds_and_floor(name: str) -> None:
         all(oracle.controls().values()),
         oracle.floor.count,
         len(oracle.seeds()),
-    ) == (None, True, 100, 159)
+    ) == (None, True, 100, 163)
 
 
 def test_encoding_cli_replays_seed_floor(tmp_path: Path) -> None:

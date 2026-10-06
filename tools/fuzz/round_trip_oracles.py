@@ -559,6 +559,20 @@ _ENCODING_FORMATS: Final[dict[str, tuple[str, bytes, str, str]]] = {
     "utf-8-bom-conflicting-meta": ("utf-8", b"\xef\xbb\xbf", "UTF-8-SIG", "<meta charset=windows-1252>"),
     "utf-16le-bom-conflicting-meta": ("utf-16-le", b"\xff\xfe", "UTF-16LE", "<meta charset=utf-8>"),
     "utf-16be-bom-conflicting-meta": ("utf-16-be", b"\xfe\xff", "UTF-16BE", "<meta charset=utf-8>"),
+    "utf-8-pragma-first": ("utf-8", b"", "UTF-8", '<meta http-equiv=Content-Type content="text/html; charset=utf-8">'),
+    "utf-8-content-first": ("utf-8", b"", "UTF-8", '<meta content="text/html; charset=utf-8" http-equiv=Content-Type>'),
+    "windows-1252-pragma-first": (
+        "cp1252",
+        b"",
+        "windows-1252",
+        '<meta http-equiv=Content-Type content="text/html; charset=windows-1252">',
+    ),
+    "windows-1252-content-first": (
+        "cp1252",
+        b"",
+        "windows-1252",
+        '<meta content="text/html; charset=windows-1252" http-equiv=Content-Type>',
+    ),
 }
 
 
@@ -2085,7 +2099,7 @@ def _resolve_changed_repeat(node: Node, base: str) -> None:
 
 def _generate_encoding(rng: random.Random) -> str:
     variant: Final = rng.choice(tuple(_ENCODING_FORMATS))
-    alphabet: Final = "abc 123café€" if variant == "windows-1252-meta" else "abc 123café€中文𐐀"
+    alphabet: Final = "abc 123café€" if _ENCODING_FORMATS[variant][0] == "cp1252" else "abc 123café€中文𐐀"
     return f"{variant}\n{''.join(rng.choices(alphabet, k=rng.randint(0, 64)))}"
 
 
