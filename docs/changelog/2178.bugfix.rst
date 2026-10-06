@@ -1,1 +1,0 @@
-Preserve universal selectors inside functions with default namespace meaning.
