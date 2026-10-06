@@ -212,7 +212,7 @@ def test_encoding_registry_controls_seeds_and_floor(name: str) -> None:
         all(oracle.controls().values()),
         oracle.floor.count,
         len(oracle.seeds()),
-    ) == (None, True, 100, 166)
+    ) == (None, True, 100, 169)
 
 
 def test_encoding_cli_replays_seed_floor(tmp_path: Path) -> None:
