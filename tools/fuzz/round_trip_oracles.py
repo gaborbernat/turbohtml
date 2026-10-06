@@ -49,6 +49,13 @@ from fuzz.html_grammar_oracles import (
     html_sibling_generate,
     html_sibling_seeds,
 )
+from fuzz.idna_nfc_oracles import (
+    UnsupportedIdnaNfcCaseError,
+    idna_nfc_check,
+    idna_nfc_controls,
+    idna_nfc_generate,
+    idna_nfc_seeds,
+)
 from fuzz.iterator_oracles import (
     UnsupportedIteratorCaseError,
     iterator_sequence_check,
@@ -498,6 +505,13 @@ def _idna_output_problem(once: str) -> str | None:
         if decoded.encode("punycode").decode("ascii") != payload:
             return "IDNA Punycode is not canonical"
     return None
+
+
+def _idna_nfc_check(case: str) -> str | None:
+    try:
+        return idna_nfc_check(case)
+    except UnsupportedIdnaNfcCaseError as error:
+        raise OutOfScopeError(str(error)) from error
 
 
 def normalize_url_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
@@ -2330,6 +2344,7 @@ ORACLES: Final[dict[str, Oracle]] = {
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
     "idna-host": Oracle(idna_host_check, _generate_idna_host, _idna_host_seeds, _idna_host_controls, Floor(100, 0.95)),
+    "idna-nfc": Oracle(_idna_nfc_check, idna_nfc_generate, idna_nfc_seeds, idna_nfc_controls, Floor(100, 1)),
     "clean-url-fixpoint": Oracle(clean_url_check, _generate_url, _seeds_url, _clean_url_controls, Floor(100, 0.25)),
     "resolve-links": Oracle(
         resolve_links_check,
