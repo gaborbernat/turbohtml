@@ -34,6 +34,13 @@ from itertools import pairwise, starmap
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from fuzz.css_custom_oracles import (
+    UnsupportedCssCustomCaseError,
+    css_custom_check,
+    css_custom_controls,
+    css_custom_generate,
+    css_custom_seeds,
+)
 from markdown_it import MarkdownIt
 from typing_extensions import override
 
@@ -356,6 +363,13 @@ def fixpoint_check(text: str, printer: Callable[[str], str], *, numeric: bool) -
     if numeric and _NUMBER.sub("0", twice) == _NUMBER.sub("0", once) and printer(twice) == twice:
         return None
     return f"not a fixpoint: {_divergence(once, twice)}"
+
+
+def _css_custom_check(case: str) -> str | None:
+    try:
+        return css_custom_check(case)
+    except UnsupportedCssCustomCaseError as error:
+        raise OutOfScopeError from error
 
 
 def normalize_url_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
@@ -2065,6 +2079,9 @@ ORACLES: Final[dict[str, Oracle]] = {
     ),
     "encoding-decode": Oracle(
         encoding_decode_check, _generate_encoding, _encoding_seeds, _encoding_decode_controls, Floor(100, 0.95)
+    ),
+    "css-custom-tokens": Oracle(
+        _css_custom_check, css_custom_generate, css_custom_seeds, css_custom_controls, Floor(100, 1)
     ),
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
