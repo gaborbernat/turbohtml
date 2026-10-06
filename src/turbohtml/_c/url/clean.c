@@ -20,6 +20,14 @@
 
 #include <string.h>
 
+#if defined(_MSC_VER)
+#define TH_FORCEINLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define TH_FORCEINLINE inline
+#endif
+
 /* The knobs of turbohtml.extract.UrlCleaning, plus the two vocabularies the shim holds as configuration. `allow` is a
    lowercased name set or None, `deny` a lowercased name set; `language` is an ISO 639-1 code or None. */
 typedef struct {
@@ -115,6 +123,17 @@ static int str_holds(PyObject *text, Py_UCS4 needle) {
     return PyUnicode_FindChar(text, needle, 0, PyUnicode_GET_LENGTH(text), 1) >= 0;
 }
 
+static int web_host_holds(PyObject *text, unsigned char needle) {
+    if (PyUnicode_KIND(text) == PyUnicode_1BYTE_KIND) {
+        return memchr(PyUnicode_1BYTE_DATA(text), needle, (size_t)PyUnicode_GET_LENGTH(text)) != NULL;
+    }
+    return str_holds(text, needle);
+}
+
+static TH_FORCEINLINE int is_web_host(PyObject *host, PyObject *netloc) {
+    return PyUnicode_GET_LENGTH(host) > 0 && (web_host_holds(host, '.') || web_host_holds(netloc, ':'));
+}
+
 /* The ":port" suffix, or "" for an absent, empty, or scheme-default port (port state, URL standard 4.4). A port of
    digits is read as the integer it spells, so leading zeros fall away and "0080" is the http default. */
 static PyObject *port_suffix(const th_url_parts *parts) {
@@ -153,7 +172,7 @@ static PyObject *port_suffix(const th_url_parts *parts) {
 }
 
 /* The authority rebuilt from its WHATWG-canonical host and port, keeping userinfo verbatim. */
-static PyObject *normalize_netloc(const th_url_parts *parts) {
+static PyObject *normalize_netloc(const th_url_parts *parts, int web_only) {
     PyObject *canonical = th_url_host_canonical(parts->part[TH_URL_HOST], parts->kind);
     if (canonical == NULL) { /* GCOVR_EXCL_BR_LINE: the host parse only fails on allocation failure */
         return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -171,8 +190,16 @@ static PyObject *normalize_netloc(const th_url_parts *parts) {
     PyObject *userinfo = parts->part[TH_URL_USERINFO];
     PyObject *netloc = PyUnicode_GET_LENGTH(userinfo) > 0 ? th_str_format("%U@%U%U", userinfo, host, suffix)
                                                           : th_str_format("%U%U", host, suffix);
-    Py_DECREF(host);
     Py_DECREF(suffix);
+    if (netloc == NULL) { /* GCOVR_EXCL_BR_LINE: rebuilding the authority only fails on allocation failure */
+        Py_DECREF(host);  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    /* Port normalization can erase the colon that admitted a dotless host. */
+    if (web_only && !is_web_host(host, netloc)) {
+        Py_SETREF(netloc, Py_NewRef(Py_None));
+    }
+    Py_DECREF(host);
     return netloc;
 }
 
@@ -258,16 +285,19 @@ static PyObject *trim_trailing_slash(PyObject *path) {
 
 /* Rebuild the URL from spec-normalized components plus the beyond-spec query/fragment canonicalization. Returns NULL
    with a ValueError when a component cannot be percent-encoded (a lone surrogate). */
-static PyObject *normalize_parts(const th_url_parts *parts, const clean_options *options) {
+static PyObject *normalize_parts(const th_url_parts *parts, const clean_options *options, int web_only) {
     PyObject *scheme = parts->part[TH_URL_SCHEME];
     int has_netloc = PyUnicode_GET_LENGTH(parts->part[TH_URL_NETLOC]) > 0;
-    PyObject *netloc = has_netloc ? normalize_netloc(parts) : PyUnicode_FromString("");
+    PyObject *netloc = has_netloc ? normalize_netloc(parts, web_only) : PyUnicode_FromString("");
     PyObject *path = NULL;
     PyObject *query = NULL;
     PyObject *fragment = NULL;
     PyObject *result = NULL;
     if (netloc == NULL) { /* GCOVR_EXCL_BR_LINE: the authority rebuild only fails on allocation failure */
         goto done;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (netloc == Py_None) {
+        return netloc;
     }
     path = th_url_encode_component(parts->part[TH_URL_PATH], TH_URL_SET_PATH);
     if (path == NULL) {
@@ -333,7 +363,7 @@ PyObject *turbohtml_url_normalize(PyObject *Py_UNUSED(module), PyObject *args) {
     }
     PyObject *result = NULL;
     if (clean_options_take(&options, allow, deny) == 0) {
-        result = normalize_parts(&parts, &options);
+        result = normalize_parts(&parts, &options, 0);
     }
     clean_options_clear(&options);
     th_url_parts_clear(&parts);
@@ -347,10 +377,7 @@ static int is_web_url(const th_url_parts *parts, PyObject *host) {
     if (!str_equals(scheme, "http") && !str_equals(scheme, "https")) {
         return 0;
     }
-    if (PyUnicode_GET_LENGTH(host) == 0) {
-        return 0;
-    }
-    return str_holds(host, '.') || str_holds(parts->part[TH_URL_NETLOC], ':');
+    return is_web_host(host, parts->part[TH_URL_NETLOC]);
 }
 
 /* clean_url's pipeline over one str: scrub, split, the web gate, the language gate, then normalization. Returns the
@@ -391,7 +418,7 @@ static PyObject *clean(PyObject *url, const clean_options *options) {
             goto done;
         }
     }
-    result = normalize_parts(&parts, options);
+    result = normalize_parts(&parts, options, 1);
     if (result == NULL) {
         if (!PyErr_ExceptionMatches(PyExc_ValueError)) { /* GCOVR_EXCL_BR_LINE: normalization raises nothing else */
             goto done;                                   /* GCOVR_EXCL_LINE: allocation-failure path */

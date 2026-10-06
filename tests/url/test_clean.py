@@ -73,6 +73,62 @@ def test_clean_accepts_colon_hosts(url: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        pytest.param("HTTP://LOCALHOST:/x", None, id="dotless-empty-port"),
+        pytest.param("HTTP://LOCALHOST:80/x", None, id="dotless-http-default"),
+        pytest.param("HTTPS://LOCALHOST:443/x", None, id="dotless-https-default"),
+        pytest.param("HTTP://LOCALHOST:0080/x", None, id="dotless-padded-default"),
+        pytest.param("HTTP://user.name@LOCALHOST:/x", None, id="userinfo-dot-is-not-host-dot"),
+        pytest.param("HTTP://\u00ad:8000/x", None, id="mapped-empty-host"),
+        pytest.param("HTTP://LOCALHOST:08000/a/../x", "http://localhost:8000/x", id="nondefault-port"),
+        pytest.param("HTTP://LOCALHOST:80x/a/../x", "http://localhost:80x/x", id="retained-port-spelling"),
+        pytest.param("HTTP://[0:0:0:0:0:0:0:1]:80/a/../x", "http://[::1]/x", id="ipv6-default-port"),
+        pytest.param("HTTP://[::1]:/a/../x", "http://[::1]/x", id="ipv6-empty-port"),
+        pytest.param("HTTP://EXAMPLE.ORG:80/a/../x", "http://example.org/x", id="dotted-default-port"),
+        pytest.param("HTTP://EXAMPLE.ORG:/a/../x", "http://example.org/x", id="dotted-empty-port"),
+        pytest.param("HTTP://2130706433:80/a/../x", "http://127.0.0.1/x", id="ipv4-integer-host"),
+        pytest.param("HTTP://EXAMPLE。ORG:80/x", "http://example.org/x", id="ideographic-dot"),
+        pytest.param("HTTP://EXAMPLE\uff0eORG:/x", "http://example.org/x", id="fullwidth-dot"),
+        pytest.param("HTTP://EXAMPLE｡ORG:80/x", "http://example.org/x", id="halfwidth-dot"),
+        pytest.param("HTTP://user:pw@LOCALHOST:80/a/../x", "http://user:pw@localhost/x", id="userinfo-colon-kept"),
+        pytest.param("HTTP://m\xfcnchen.de:80/a/../x", "http://xn--mnchen-3ya.de/x", id="latin1-host"),
+        pytest.param("HTTP://\xe9:pw@LOCALHOST:80/a/../x", "http://\xe9:pw@localhost/x", id="latin1-userinfo-colon"),
+        pytest.param("HTTP://\xe9@LOCALHOST:80/a/../x", None, id="latin1-userinfo-no-colon"),
+        pytest.param("HTTP://\u0100:pw@LOCALHOST:80/a/../x", "http://\u0100:pw@localhost/x", id="bmp-userinfo-colon"),
+        pytest.param("HTTP://\u0100@LOCALHOST:80/a/../x", None, id="bmp-userinfo-no-colon"),
+        pytest.param(
+            "HTTP://\U00010000:pw@LOCALHOST:80/a/../x", "http://\U00010000:pw@localhost/x", id="astral-userinfo-colon"
+        ),
+        pytest.param("HTTP://\U00010000@LOCALHOST:80/a/../x", None, id="astral-userinfo-no-colon"),
+        pytest.param("HTTP://a\u202eb/a/../x", None, id="bmp-host-low-byte-dot"),
+        pytest.param("HTTP://a\U0001002eb/a/../x", None, id="astral-host-low-byte-dot"),
+        pytest.param("HTTP://\u203a@LOCALHOST:80/a/../x", None, id="bmp-userinfo-low-byte-colon"),
+        pytest.param("HTTP://\U0001003a@LOCALHOST:80/a/../x", None, id="astral-userinfo-low-byte-colon"),
+        pytest.param("HTTP://a\ufffeb.EXAMPLE:80/a/../x", "http://a\ufffeb.example/x", id="wide-host-dot"),
+        pytest.param(
+            "HTTP://u\x00:pw@LOCALHOST:80/a/../x", "http://u\x00:pw@localhost/x", id="nul-before-userinfo-colon"
+        ),
+        pytest.param("HTTP://a\x00b.EXAMPLE:80/a/../x", "http://a\x00b.example/x", id="nul-before-host-dot"),
+        pytest.param("HTTP://:8000/a/../x", None, id="empty-host"),
+    ],
+)
+def test_clean_canonical_host_shape(url: str, expected: str | None) -> None:
+    assert ((cleaned := clean_url(url)), clean_url(cleaned) if cleaned is not None else None) == (expected, expected)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        pytest.param("HTTP://LOCALHOST:/a/../x", "http://localhost/x", id="empty-port"),
+        pytest.param("HTTPS://LOCALHOST:443/a/../x", "https://localhost/x", id="default-port"),
+    ],
+)
+def test_normalize_keeps_dotless_canonical_host(url: str, expected: str) -> None:
+    assert ((normalized := normalize_url(url)), normalize_url(normalized)) == (expected, expected)
+
+
+@pytest.mark.parametrize(
     ("url", "language", "expected"),
     [
         pytest.param("http://test.org/de/page", "de", "http://test.org/de/page", id="path-segment-match"),

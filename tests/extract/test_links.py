@@ -72,6 +72,20 @@ def test_unusable_hrefs_are_dropped() -> None:
     assert extract_links(html, _BASE) == {"https://ok.example/"}
 
 
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("HTTP://LOCALHOST:80/x", set(), id="dotless-default-port"),
+        pytest.param("HTTPS://LOCALHOST:/x", set(), id="dotless-empty-port"),
+        pytest.param("HTTP://EXAMPLE.ORG:80/a/../x", {"http://example.org/x"}, id="dotted-default-port"),
+        pytest.param("HTTP://[0:0:0:0:0:0:0:1]:80/x", {"http://[::1]/x"}, id="ipv6-default-port"),
+        pytest.param("HTTP://LOCALHOST:08000/x", {"http://localhost:8000/x"}, id="dotless-nondefault-port"),
+    ],
+)
+def test_links_keep_canonical_web_host_shape(href: str, expected: set[str]) -> None:
+    assert extract_links(f'<a href="{href}">x</a>') == expected
+
+
 def test_scheme_and_slash_variants_deduplicate_to_the_first_seen() -> None:
     html = (
         '<a href="https://test.org/example">a</a>'
