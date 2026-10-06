@@ -1,0 +1,1 @@
+Preserve namespace constraints when minifying universal selectors inside functions.
