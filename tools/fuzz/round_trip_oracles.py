@@ -91,6 +91,7 @@ from fuzz.parser_byte_oracles import (
     parser_bytes_generate,
     parser_bytes_seeds,
 )
+from fuzz.structure_generators import html_generate
 from fuzz.xml_grammar_oracles import (
     UnsupportedXmlLiteralCaseError,
     xml_literal_check,
@@ -1537,46 +1538,8 @@ def _mutate(rng: random.Random, text: str, tokens: Sequence[str]) -> str:
     return text
 
 
-_TAGS: Final = (
-    "div", "p", "span", "a", "b", "i", "em", "strong", "code", "pre", "ul", "ol", "li", "table", "tr", "td", "th",
-    "h1", "h2", "blockquote", "section", "img", "br", "hr", "input", "label", "select", "option", "textarea", "svg",
-    "math", "template", "del", "sup", "script", "style", "title", "dl", "dt", "dd", "caption", "button", "form",
-)  # fmt: skip
-_VOID: Final = frozenset({"img", "br", "hr", "input"})
-_TEXT: Final = (
-    "x", "hello world", "*", "_", "#", "|", "[", "]", "(", ")", "\\", "`", "&amp;", "&lt;", "<", ">", "1.", "-", "+",
-    "  ", "\n", "\xa0", "é", "&#0;", "&#x1F600;", "\r\n", "~", "!", "=", "'", '"', "&nbsp;", "---", "```", "> q",
-    "1) x", "a|b", "<!--c-->", "]]>", "--", "&#13;", "\t", "**b**", "[l](u)", "<?pi x?>", "\x0c", "&gt", "\U0001f600",
-)  # fmt: skip
-_ATTR_NAMES: Final = ("id", "class", "href", "src", "title", "lang", "data-x", "style", "alt", "name", "type", "value")
-_ATTR_VALUES: Final = ("a", "b c", "", "x y z", "&amp;", '"', "'", "1", "#f", "javascript:x", "\n", "a b", "é", "<>")
 _CLASSES: Final = ("a", "b", "c", "a b", "b c")
 _IDS: Final = ("x", "y", "z")
-
-
-def _html_tree(rng: random.Random, tags: Sequence[str] = _TAGS, budget: int = 30) -> str:
-    """Build markup from a tag vocabulary, nesting with a decaying chance and leaving some end tags implied."""
-    out: list[str] = []
-    stack: list[str] = []
-    for _ in range(rng.randint(1, budget)):
-        draw = rng.random()
-        if draw < 0.45:
-            tag = rng.choice(tags)
-            attrs = "".join(
-                f' {name}="{rng.choice(_CLASSES if name == "class" else _IDS if name == "id" else _ATTR_VALUES)}"'
-                for name in rng.sample(_ATTR_NAMES, rng.randint(0, 3))
-            )
-            out.append(f"<{tag.upper() if rng.random() < 0.05 else tag}{attrs}>")
-            if tag not in _VOID:
-                stack.append(tag)
-        elif draw < 0.7 and stack:
-            if rng.random() < 0.85:
-                out.append(f"</{stack[-1]}>")
-            stack.pop()
-        else:
-            out.append(rng.choice(_TEXT))
-    out.extend(f"</{tag}>" for tag in reversed(stack) if rng.random() < 0.8)
-    return "".join(out)
 
 
 _HTML_TOKENS: Final = (
@@ -1591,7 +1554,7 @@ _HTML_TOKENS: Final = (
 def _generate_html(rng: random.Random) -> str:
     if rng.random() < 0.5:
         return _mutate(rng, rng.choice(_corpus().html), _HTML_TOKENS)
-    return _html_tree(rng)
+    return html_generate(rng).data.decode("utf-8")
 
 
 _MARKDOWN_TEXT: Final = (
