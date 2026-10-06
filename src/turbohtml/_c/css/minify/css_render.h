@@ -331,6 +331,11 @@ static void css_handle_box(const css_buf *pool, comp_vec *comps) {
     if (count < 2 || count > 4) {
         return;
     }
+    for (Py_ssize_t index = 0; index < count; index++) {
+        if (comps->items[index].kind == CK_FUNC) {
+            return;
+        }
+    }
     if (count == 4 && css_comp_text_eq(pool, &comps->items[3], &comps->items[1])) {
         count = 3;
     }
