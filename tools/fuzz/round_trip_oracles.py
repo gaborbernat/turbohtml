@@ -130,6 +130,7 @@ __all__ = [
     "main",
     "markdown_check",
     "normalize_url_check",
+    "resolve_links_check",
     "selector_entry_check",
     "span_check",
     "style_check",
@@ -746,6 +747,22 @@ def _xml_leaf(node: Node) -> str:
         # DOM Parsing 3.2.1.3 writes an external ID only when non-empty, so empty and absent read the same
         return f"D{node.name} {node.public_id or None} {node.system_id or None}"
     return type(node).__name__
+
+
+def resolve_links_check(text: str, resolve: Callable[[Node, str], None] = Node.resolve_links) -> str | None:
+    """Check fixed RFC targets because stable wrong resolutions satisfy a fixed-point check."""
+    case, separator, leaf = text.partition(":")
+    if not separator or case not in _RESOLUTION_CASES or re.fullmatch(r"[a-z][a-z0-9]{0,15}", leaf) is None:
+        raise OutOfScopeError(text)
+    reference, target = _RESOLUTION_CASES[case]
+    document = parse_fragment('<a href="">link</a>')
+    document.select("a")[0].attrs["href"] = reference.format(leaf=leaf)
+    resolve(document, _RESOLUTION_BASE)
+    expected: Final = target.format(leaf=leaf)
+    if document.links()[0].url != expected:
+        return "resolution differs from RFC target"
+    resolve(document, _RESOLUTION_BASE)
+    return None if document.links()[0].url == expected else "resolved link changes on repeat"
 
 
 def style_check(text: str, read: Callable[[str], StyleDeclaration] = StyleDeclaration.parse) -> str | None:
@@ -1927,6 +1944,43 @@ def _generate_url(rng: random.Random) -> str:
     return rng.choice((url, f" <{url}> ", url.replace("&", "&amp;")))
 
 
+# RFC 3986 section 5.4 supplies independent targets; safe HTTP leaves avoid scheme-specific edge policies.
+_RESOLUTION_BASE: Final = "http://example.test/b/c/d;p?q"
+_RESOLUTION_CASES: Final[dict[str, tuple[str, str]]] = {
+    "child": ("{leaf}", "http://example.test/b/c/{leaf}"),
+    "current": ("./{leaf}", "http://example.test/b/c/{leaf}"),
+    "parent": ("../{leaf}", "http://example.test/b/{leaf}"),
+    "grandparent": ("../../{leaf}", "http://example.test/{leaf}"),
+    "root": ("/{leaf}", "http://example.test/{leaf}"),
+    "query": ("?{leaf}", "http://example.test/b/c/d;p?{leaf}"),
+    "fragment": ("#{leaf}", "http://example.test/b/c/d;p?q#{leaf}"),
+    "directory": ("{leaf}/", "http://example.test/b/c/{leaf}/"),
+}
+
+
+def _generate_resolution(rng: random.Random) -> str:
+    return f"{rng.choice(tuple(_RESOLUTION_CASES))}:g{rng.randrange(10000)}"
+
+
+def _resolution_controls() -> dict[str, bool]:
+    return {
+        "unchanged relative link": resolve_links_check("parent:g", lambda _node, _base: None) is not None,
+        "stable wrong target": resolve_links_check("parent:g", _resolve_wrong_target) is not None,
+        "changed repeat": resolve_links_check("parent:g", _resolve_changed_repeat) is not None,
+    }
+
+
+def _resolve_wrong_target(node: Node, _base: str) -> None:
+    node.select("a")[0].attrs["href"] = "http://wrong.example/"
+
+
+def _resolve_changed_repeat(node: Node, base: str) -> None:
+    if node.links()[0].url.startswith("http:"):
+        node.select("a")[0].attrs["href"] = node.links()[0].url + "a"
+    else:
+        node.resolve_links(base)
+
+
 def _generate_encoding(rng: random.Random) -> str:
     variant: Final = rng.choice(tuple(_ENCODING_FORMATS))
     alphabet: Final = "abc 123café€" if variant == "windows-1252-meta" else "abc 123café€中文𐐀"
@@ -2175,6 +2229,13 @@ ORACLES: Final[dict[str, Oracle]] = {
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
     "clean-url-fixpoint": Oracle(clean_url_check, _generate_url, _seeds_url, _clean_url_controls, Floor(100, 0.25)),
+    "resolve-links": Oracle(
+        resolve_links_check,
+        _generate_resolution,
+        _generated(_generate_resolution, 500),
+        _resolution_controls,
+        Floor(100, 1),
+    ),
     "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85)),
     "html-sibling-grammar": Oracle(
         _html_sibling_check, html_sibling_generate, html_sibling_seeds, html_sibling_controls, Floor(100, 1)
