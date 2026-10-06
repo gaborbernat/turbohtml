@@ -41,6 +41,13 @@ from fuzz.css_custom_oracles import (
     css_custom_generate,
     css_custom_seeds,
 )
+from fuzz.html_grammar_oracles import (
+    UnsupportedHtmlSiblingCaseError,
+    html_sibling_check,
+    html_sibling_controls,
+    html_sibling_generate,
+    html_sibling_seeds,
+)
 from fuzz.iterator_oracles import (
     UnsupportedIteratorCaseError,
     iterator_sequence_check,
@@ -391,6 +398,13 @@ def fixpoint_check(text: str, printer: Callable[[str], str], *, numeric: bool) -
     if numeric and _NUMBER.sub("0", twice) == _NUMBER.sub("0", once) and printer(twice) == twice:
         return None
     return f"not a fixpoint: {_divergence(once, twice)}"
+
+
+def _html_sibling_check(case: str) -> str | None:
+    try:
+        return html_sibling_check(case)
+    except UnsupportedHtmlSiblingCaseError as error:
+        raise OutOfScopeError from error
 
 
 def _css_custom_check(case: str) -> str | None:
@@ -2162,6 +2176,9 @@ ORACLES: Final[dict[str, Oracle]] = {
     ),
     "clean-url-fixpoint": Oracle(clean_url_check, _generate_url, _seeds_url, _clean_url_controls, Floor(100, 0.25)),
     "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85)),
+    "html-sibling-grammar": Oracle(
+        _html_sibling_check, html_sibling_generate, html_sibling_seeds, html_sibling_controls, Floor(100, 1)
+    ),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
     "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95)),
     "js-fixpoint": Oracle(_js_fixpoint, _generate_js, _seeds_js, _js_controls, Floor(300, 0.6)),
