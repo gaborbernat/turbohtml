@@ -1,0 +1,1 @@
+Keep trailing auto after unresolved background size functions.
