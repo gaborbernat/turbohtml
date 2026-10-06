@@ -291,19 +291,7 @@ static PyObject *normalize_file_path(PyObject *path) {
     if (!str_holds(path, '\\')) {
         return Py_NewRef(path);
     }
-    PyObject *result = PyUnicode_New(length, PyUnicode_MAX_CHAR_VALUE(path));
-    if (result == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    int kind = PyUnicode_KIND(path);
-    void *data = PyUnicode_DATA(path);
-    int result_kind = PyUnicode_KIND(result);
-    void *result_data = PyUnicode_DATA(result);
-    for (Py_ssize_t index = 0; index < length; index++) {
-        Py_UCS4 character = PyUnicode_READ(kind, data, index);
-        PyUnicode_WRITE(result_kind, result_data, index, character == '\\' ? '/' : character);
-    }
-    return result;
+    return PyObject_CallMethod(path, "replace", "ss", "\\", "/");
 }
 
 /* Rebuild the URL from spec-normalized components plus the beyond-spec query/fragment canonicalization. Returns NULL
