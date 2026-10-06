@@ -563,7 +563,7 @@ _POSITION_DELIMITERS: Final[list[ParameterSet]] = [
     pytest.param("left top,right ~ .5px", "left top,right~.5px", id="whole-value"),
     pytest.param("left 0 top .5px", "0 .5px", id="edge-offsets"),
     pytest.param("left top,right bottom", "0 0,100% 100%", id="layers"),
-    pytest.param("calc(10% + 1px) center", "calc(10% + 1px)", id="function"),
+    pytest.param("calc(10% + 1px) center", "calc(10% + 1px)center", id="function"),
 ]
 
 

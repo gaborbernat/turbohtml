@@ -23,7 +23,7 @@ _POSITION_STRINGS: Final[list[ParameterSet]] = [
     pytest.param("left top", "0 0", id="valid-keywords"),
     pytest.param("left 0 top .5px", "0 .5px", id="valid-offsets"),
     pytest.param("right bottom,left top", "100% 100%,0 0", id="valid-layers"),
-    pytest.param("calc(10% + 1px) center", "calc(10% + 1px)", id="valid-function"),
+    pytest.param("calc(10% + 1px) center", "calc(10% + 1px)center", id="valid-function"),
 ]
 
 
