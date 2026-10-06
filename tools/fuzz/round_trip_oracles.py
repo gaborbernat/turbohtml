@@ -63,6 +63,13 @@ from fuzz.html_list_oracles import (
     html_list_generate,
     html_list_seeds,
 )
+from fuzz.html_table_oracles import (
+    UnsupportedHtmlTableCaseError,
+    html_table_check,
+    html_table_controls,
+    html_table_generate,
+    html_table_seeds,
+)
 from fuzz.idna_nfc_oracles import (
     UnsupportedIdnaNfcCaseError,
     idna_nfc_check,
@@ -442,6 +449,13 @@ def _html_list_check(case: str) -> str | None:
     try:
         return html_list_check(case)
     except UnsupportedHtmlListCaseError as error:
+        raise OutOfScopeError from error
+
+
+def _html_table_check(case: str) -> str | None:
+    try:
+        return html_table_check(case)
+    except UnsupportedHtmlTableCaseError as error:
         raise OutOfScopeError from error
 
 
@@ -2402,6 +2416,9 @@ ORACLES: Final[dict[str, Oracle]] = {
         Floor(100, 1),
     ),
     "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85)),
+    "html-table-grammar": Oracle(
+        _html_table_check, html_table_generate, html_table_seeds, html_table_controls, Floor(24, 1)
+    ),
     "html-sibling-grammar": Oracle(
         _html_sibling_check, html_sibling_generate, html_sibling_seeds, html_sibling_controls, Floor(100, 1)
     ),
