@@ -48,6 +48,13 @@ from fuzz.observer_oracles import (
     observer_sequence_generate,
     observer_sequence_seeds,
 )
+from fuzz.xml_grammar_oracles import (
+    UnsupportedXmlLiteralCaseError,
+    xml_literal_check,
+    xml_literal_controls,
+    xml_literal_generate,
+    xml_literal_seeds,
+)
 from fuzz.xml_island_oracles import (
     UnsupportedXmlIslandCaseError,
     xml_island_check,
@@ -2101,6 +2108,13 @@ def _xml_island(case: str) -> str | None:
         raise OutOfScopeError(str(error)) from error
 
 
+def _xml_literal(case: str) -> str | None:
+    try:
+        return xml_literal_check(case)
+    except UnsupportedXmlLiteralCaseError as error:
+        raise OutOfScopeError(str(error)) from error
+
+
 ORACLES: Final[dict[str, Oracle]] = {
     "encoding-stream": Oracle(
         encoding_stream_check, _generate_encoding, _encoding_seeds, _encoding_stream_controls, Floor(100, 0.95)
@@ -2119,6 +2133,9 @@ ORACLES: Final[dict[str, Oracle]] = {
         Floor(100, 1),
     ),
     "xml-island-grammar": Oracle(_xml_island, xml_island_generate, xml_island_seeds, xml_island_controls, Floor(54, 1)),
+    "xml-literal-grammar": Oracle(
+        _xml_literal, xml_literal_generate, xml_literal_seeds, xml_literal_controls, Floor(96, 1)
+    ),
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
