@@ -636,6 +636,9 @@ static int css_comp_is_comma(css_buf *pool, const css_comp *comp) {
 static void css_handle_font(css_buf *pool, comp_vec *comps) {
     Py_ssize_t non_sep = 0;
     for (Py_ssize_t index = 0; index < comps->len; index++) {
+        if (comps->items[index].kind == CK_FUNC) {
+            return;
+        }
         if (comps->items[index].kind != CK_SEP) {
             non_sep++;
         }
