@@ -36,23 +36,6 @@ CSS_NOINLINE static Py_ssize_t css_legacy_pseudo_name(const token_vec *vec, Py_s
     return name < end && css_is_legacy_pseudo_element(&vec->items[name]) ? name : -1;
 }
 
-static int css_selector_function_start(const token_vec *vec, Py_ssize_t start, Py_ssize_t index) {
-    if (index - start < 2) {
-        return 0;
-    }
-    const css_token *name = &vec->items[index - 1];
-    if (name->kind != CSS_IDENT ||
-        !(css_run_ieq(name->text, name->text_len, "is") || css_run_ieq(name->text, name->text_len, "where") ||
-          css_run_ieq(name->text, name->text_len, "not") || css_run_ieq(name->text, name->text_len, "has"))) {
-        return 0;
-    }
-    index -= 2;
-    while (index > start && vec->items[index].kind == CSS_COMMENT) {
-        index--;
-    }
-    return vec->items[index].kind == CSS_DELIM && vec->items[index].delim == ':';
-}
-
 /* Comments make no token; a namespace bar cannot start an unqualified universal (Selectors 4 §5.2). */
 static int css_universal_starts_compound(const token_vec *vec, Py_ssize_t start, Py_ssize_t index) {
     int whitespace = 0;
@@ -64,9 +47,6 @@ static int css_universal_starts_compound(const token_vec *vec, Py_ssize_t start,
         if (previous->kind == CSS_WS) {
             whitespace = 1;
             continue;
-        }
-        if (previous->kind == CSS_DELIM && previous->delim == '(') {
-            return css_selector_function_start(vec, start, index);
         }
         if (previous->kind == CSS_DELIM && previous->delim == '|') {
             return 0;
@@ -92,6 +72,7 @@ static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end
     int comment_gap = 0;
     int last_is_ident = 0;
     int attr_depth = 0;
+    Py_ssize_t paren_depth = 0;
     for (Py_ssize_t index = start; index < end; index++) {
         css_token *token = &vec->items[index];
         if (token->kind == CSS_WS) {
@@ -107,6 +88,13 @@ static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end
         }
         if (token->kind == CSS_DELIM && token->delim == ']' && attr_depth > 0) {
             attr_depth--;
+        }
+        if (token->kind == CSS_DELIM && attr_depth == 0) {
+            if (token->delim == '(') {
+                paren_depth++;
+            } else if (token->delim == ')' && paren_depth > 0) {
+                paren_depth--;
+            }
         }
         if (token->kind == CSS_DELIM && attr_depth == 0 &&
             (token->delim == '>' || token->delim == '+' || token->delim == '~' || token->delim == ',')) {
@@ -164,8 +152,8 @@ static void css_minify_selector(token_vec *vec, Py_ssize_t start, Py_ssize_t end
              (vec->items[index + 1].kind == CSS_DELIM &&
               (vec->items[index + 1].delim == '.' || vec->items[index + 1].delim == '[' ||
                vec->items[index + 1].delim == ':'))) &&
-            css_universal_starts_compound(vec, start, index)) {
-            /* Only an unqualified universal at the compound start is redundant (Selectors 4 §5.2). */
+            css_universal_starts_compound(vec, start, index) && paren_depth == 0) {
+            /* An explicit universal inside a function can constrain the default namespace (Selectors 4 §4.2). */
             continue;
         }
         /* '#' before an ident always merges into a single HASH token, so the prior char is never a bare '#' here */
