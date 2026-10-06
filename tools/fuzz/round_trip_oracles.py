@@ -56,6 +56,13 @@ from fuzz.html_grammar_oracles import (
     html_sibling_generate,
     html_sibling_seeds,
 )
+from fuzz.html_list_oracles import (
+    UnsupportedHtmlListCaseError,
+    html_list_check,
+    html_list_controls,
+    html_list_generate,
+    html_list_seeds,
+)
 from fuzz.idna_nfc_oracles import (
     UnsupportedIdnaNfcCaseError,
     idna_nfc_check,
@@ -428,6 +435,13 @@ def _html_foreign_check(case: str) -> str | None:
     try:
         return html_foreign_check(case)
     except UnsupportedHtmlForeignCaseError as error:
+        raise OutOfScopeError from error
+
+
+def _html_list_check(case: str) -> str | None:
+    try:
+        return html_list_check(case)
+    except UnsupportedHtmlListCaseError as error:
         raise OutOfScopeError from error
 
 
@@ -2393,6 +2407,9 @@ ORACLES: Final[dict[str, Oracle]] = {
     ),
     "html-foreign-grammar": Oracle(
         _html_foreign_check, html_foreign_generate, html_foreign_seeds, html_foreign_controls, Floor(36, 1)
+    ),
+    "html-list-grammar": Oracle(
+        _html_list_check, html_list_generate, html_list_seeds, html_list_controls, Floor(24, 1)
     ),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
     "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95)),
