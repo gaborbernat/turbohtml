@@ -575,6 +575,16 @@ static pattern *rng_build_children(th_schema *schema, th_node *node, th_node *sk
     return combined;
 }
 
+static pattern *rng_build_choice_children(th_schema *schema, th_node *node) {
+    pattern *combined = schema->p_notallowed;
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            combined = pat_choice(schema, combined, rng_build(schema, child));
+        }
+    }
+    return combined;
+}
+
 static pattern *rng_build(th_schema *schema, th_node *node) {
     th_tree *tree = schema->tree;
     if (is_schema_el(schema, node, RNG_NS, "empty")) {
@@ -625,13 +635,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         return rng_build_children(schema, node, NULL);
     }
     if (is_schema_el(schema, node, RNG_NS, "choice")) {
-        pattern *combined = schema->p_notallowed;
-        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            if (child->type == TH_NODE_ELEMENT) {
-                combined = pat_choice(schema, combined, rng_build(schema, child));
-            }
-        }
-        return combined;
+        return rng_build_choice_children(schema, node);
     }
     if (is_schema_el(schema, node, RNG_NS, "interleave")) {
         /* compile time only: validation builds defines lazily, after the scan has checked them */
@@ -679,6 +683,8 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
                 if (pname != NULL) {
                     facet_add(&schema->mem, facets, pname->value, pname->value_len, value, vlen);
                 }
+            } else if (is_schema_el(schema, param, RNG_NS, "except")) {
+                node_pat->p1 = rng_build_choice_children(schema, param);
             }
         }
         node_pat->facets = facets;
@@ -843,7 +849,11 @@ static pattern *rng_text_deriv(th_schema *schema, pattern *p, const Py_UCS4 *val
         return u_eq_u(norm, nl, vnorm, vl) ? schema->p_empty : schema->p_notallowed;
     }
     case P_DATA:
-        return rng_datatype_ok(schema, p->datatype_id, p->facets, value, len) ? schema->p_empty : schema->p_notallowed;
+        if (!rng_datatype_ok(schema, p->datatype_id, p->facets, value, len)) {
+            return schema->p_notallowed;
+        }
+        return p->p1 != NULL && rng_nullable(schema, rng_text_deriv(schema, p->p1, value, len)) ? schema->p_notallowed
+                                                                                                : schema->p_empty;
     case P_LIST: {
         pattern *derived = p->p1;
         Py_ssize_t index = 0;
