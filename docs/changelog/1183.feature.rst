@@ -1,0 +1,1 @@
+Add encoding fuzz fixtures for UTF-16 declarations that HTML maps to UTF-8.
