@@ -606,14 +606,9 @@ PyObject *th_url_to_ascii(PyObject *host) {
                      in_len, TH_IDNA_MAX_INPUT);
         return NULL;
     }
-    Py_UCS4 *input = PyMem_Malloc((size_t)(in_len + 1) * sizeof(Py_UCS4));
-    if (input == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    int kind = PyUnicode_KIND(host);
-    const void *data = PyUnicode_DATA(host);
-    for (Py_ssize_t index = 0; index < in_len; index++) {
-        input[index] = PyUnicode_READ(kind, data, index);
+    Py_UCS4 *input = PyUnicode_AsUCS4Copy(host);
+    if (input == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_UCS4 *output;
     Py_ssize_t output_len;
