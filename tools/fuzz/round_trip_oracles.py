@@ -48,6 +48,13 @@ from fuzz.observer_oracles import (
     observer_sequence_generate,
     observer_sequence_seeds,
 )
+from fuzz.xml_island_oracles import (
+    UnsupportedXmlIslandCaseError,
+    xml_island_check,
+    xml_island_controls,
+    xml_island_generate,
+    xml_island_seeds,
+)
 from markdown_it import MarkdownIt
 from typing_extensions import override
 
@@ -2087,6 +2094,13 @@ def _seeds_style() -> list[str]:
     return [body for css in _corpus().css for body in re.findall(r"\{([^{}]*)\}", css)]
 
 
+def _xml_island(case: str) -> str | None:
+    try:
+        return xml_island_check(case)
+    except UnsupportedXmlIslandCaseError as error:
+        raise OutOfScopeError(str(error)) from error
+
+
 ORACLES: Final[dict[str, Oracle]] = {
     "encoding-stream": Oracle(
         encoding_stream_check, _generate_encoding, _encoding_seeds, _encoding_stream_controls, Floor(100, 0.95)
@@ -2104,6 +2118,7 @@ ORACLES: Final[dict[str, Oracle]] = {
         observer_sequence_controls,
         Floor(100, 1),
     ),
+    "xml-island-grammar": Oracle(_xml_island, xml_island_generate, xml_island_seeds, xml_island_controls, Floor(54, 1)),
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
