@@ -235,16 +235,12 @@ def test_html_list_generated_trees_obey_bounds() -> None:
 
     def capture(source: str) -> Element:
         root: Final = parse_fragment(source)
-        elements: Final = [node for node in root.iter_elements() if node is not root]
-        depths: Final[list[int]] = []
-        for element in elements:
-            depth = 0
-            parent = element
-            while parent is not root:
-                depth += 1
-                parent = cast("Element", parent.parent)
-            depths.append(depth)
-        bounds.add((len(elements), sum(isinstance(node, Text) for node in root.descendants), max(depths)))
+        elements: Final = [node for node in root.descendants if isinstance(node, Element)]
+        bounds.add((
+            len(elements),
+            sum(isinstance(node, Text) for node in root.descendants),
+            max(sum(isinstance(ancestor, Element) for ancestor in element.ancestors) for element in elements),
+        ))
         identifiers.update(cast("str", element.attrs["id"]) for element in elements)
         return root
 
