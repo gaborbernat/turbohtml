@@ -2183,7 +2183,7 @@ def test_minify_css_unicode_range_union(ranges: tuple[str, ...], expected: str) 
         pytest.param("width:calc(.000000000000000001e18px + 1px)", "width:2px", id="exponent-cancels-fraction"),
         pytest.param("width:calc(1e18px + 1px)", "width:1000000000000000001px", id="maximum-rational-integer-power"),
         pytest.param("width:calc(1e-18px)", "width:1e-18px", id="maximum-rational-fraction-power"),
-        pytest.param("z-index:1e4", "z-index:10000", id="bounded-unitless-expansion"),
+        pytest.param("z-index:1e4", "z-index:1e4", id="integer-role-exponent"),
         pytest.param("x:1e127", "x:1" + "0" * 127, id="maximum-integer-expansion"),
         pytest.param("x:1e-127", "x:." + "0" * 126 + "1", id="maximum-fraction-expansion"),
         pytest.param("x:" + "0" * 127 + "1", "x:1", id="maximum-mantissa"),
