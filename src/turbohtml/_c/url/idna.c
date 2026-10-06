@@ -20,10 +20,15 @@
 #ifdef TH_IDNA_STANDALONE
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#define TH_IDNA_ALLOC malloc
+#define TH_IDNA_FREE free
 typedef uint32_t Py_UCS4;
 typedef ptrdiff_t Py_ssize_t;
 #else
 #include "core/common.h"
+#define TH_IDNA_ALLOC PyMem_Malloc
+#define TH_IDNA_FREE PyMem_Free
 #endif
 
 #include "data/idna_table.h"
@@ -99,9 +104,6 @@ static uint8_t ccc_of(Py_UCS4 cp) {
     return 0;
 }
 
-/* The quick-check fast path serves th_url_to_ascii alone, which the standalone fuzz build drops with the rest of the
-   CPython boundary; gate these two helpers with it so that build has no unused function. */
-#ifndef TH_IDNA_STANDALONE
 /* Return `cp`'s NFC quick-check value: 0 Yes, 1 No, 2 Maybe. */
 static uint8_t qc_of(Py_UCS4 cp) {
     if (cp < th_idna_qc[0].first) {
@@ -134,8 +136,6 @@ static int nfc_is_normalized(const Py_UCS4 *input, Py_ssize_t len) {
     }
     return 1;
 }
-#endif /* TH_IDNA_STANDALONE */
-
 /* The full canonical decomposition row for `cp`, or NULL when it does not decompose (Hangul is handled by the caller).
  */
 static const th_idna_decomp_row *decomp_row(Py_UCS4 cp) {
@@ -531,62 +531,47 @@ static Py_ssize_t emit_label(Py_UCS4 *out, Py_ssize_t at, const Py_UCS4 *span, P
     return emit_encoded(out, at, scratch, decoded, scratch + decoded);
 }
 
-#ifndef TH_IDNA_STANDALONE
-/* th_url_to_ascii(host): the WHATWG domain-to-ASCII engine, a borrowed str host in, a new ASCII str out, or NULL with a
-   ValueError set when the host fails. The shim catches that to fall back to the lowercased host. */
-PyObject *th_url_to_ascii(PyObject *host) {
-    Py_ssize_t in_len = PyUnicode_GET_LENGTH(host);
-    if (in_len > TH_IDNA_MAX_INPUT) {
-        PyErr_Format(PyExc_ValueError, "host of %zd code points exceeds the IDNA input limit of %d; shorten the host",
-                     in_len, TH_IDNA_MAX_INPUT);
-        return NULL;
-    }
-    int kind = PyUnicode_KIND(host);
-    const void *data = PyUnicode_DATA(host);
-    Py_UCS4 *input = PyMem_Malloc((size_t)(in_len + 1) * sizeof(Py_UCS4));
-    Py_UCS4 *mapped = PyMem_Malloc((size_t)(in_len * 18 + 1) * sizeof(Py_UCS4));
-    if (input == NULL || mapped == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(input);                 /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(mapped);                /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory();           /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    for (Py_ssize_t index = 0; index < in_len; index++) {
-        input[index] = PyUnicode_READ(kind, data, index);
+typedef enum {
+    IDNA_OK,
+    IDNA_DISALLOWED,
+    IDNA_ENCODING,
+    IDNA_NO_MEMORY,
+} idna_status;
+
+static idna_status idna_to_ascii(const Py_UCS4 *input, Py_ssize_t in_len, Py_UCS4 **output, Py_ssize_t *output_len) {
+    Py_UCS4 *mapped = TH_IDNA_ALLOC((size_t)(in_len * 18 + 1) * sizeof(Py_UCS4));
+    if (mapped == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return IDNA_NO_MEMORY; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t norm_len = map_host(input, in_len, mapped);
     if (norm_len < 0) {
-        PyMem_Free(input);
-        PyMem_Free(mapped);
-        PyErr_SetString(PyExc_ValueError, "host contains a code point UTS #46 disallows; remove it");
-        return NULL;
+        TH_IDNA_FREE(mapped);
+        return IDNA_DISALLOWED;
     }
     const Py_UCS4 *norm = mapped;
     Py_UCS4 *normalized = NULL;
     if (!nfc_is_normalized(mapped, norm_len)) {
-        normalized = PyMem_Malloc((size_t)(norm_len * 4 + 1) * sizeof(Py_UCS4));
-        if (normalized == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            PyMem_Free(input);       /* GCOVR_EXCL_LINE: allocation-failure path */
-            PyMem_Free(mapped);      /* GCOVR_EXCL_LINE: allocation-failure path */
-            return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        normalized = TH_IDNA_ALLOC((size_t)(norm_len * 4 + 1) * sizeof(Py_UCS4));
+        if (normalized == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            TH_IDNA_FREE(mapped);  /* GCOVR_EXCL_LINE: allocation-failure path */
+            return IDNA_NO_MEMORY; /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         norm_len = nfc(mapped, norm_len, normalized);
         norm = normalized;
     }
-    /* punycode encoding expands a label by at most ~7x (a base-36 delta run per code point), and the xn-- re-encode
-       path holds the decoded label plus its re-encoding; 16x the normalized length bounds both with room to spare. */
-    Py_UCS4 *out = PyMem_Malloc((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
-    Py_UCS4 *scratch = PyMem_Malloc((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
+    /* 16x bounds both punycode expansion and decoded ACE re-encoding scratch. */
+    Py_UCS4 *out = TH_IDNA_ALLOC((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
+    Py_UCS4 *scratch = TH_IDNA_ALLOC((size_t)(norm_len * 16 + 64) * sizeof(Py_UCS4));
     if (out == NULL || scratch == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyMem_Free(input);                /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(mapped);               /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(normalized);           /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(out);                  /* GCOVR_EXCL_LINE: allocation-failure path */
-        PyMem_Free(scratch);              /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory();          /* GCOVR_EXCL_LINE: allocation-failure path */
+        TH_IDNA_FREE(mapped);             /* GCOVR_EXCL_LINE: allocation-failure path */
+        TH_IDNA_FREE(normalized);         /* GCOVR_EXCL_LINE: allocation-failure path */
+        TH_IDNA_FREE(out);                /* GCOVR_EXCL_LINE: allocation-failure path */
+        TH_IDNA_FREE(scratch);            /* GCOVR_EXCL_LINE: allocation-failure path */
+        return IDNA_NO_MEMORY;            /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t at = 0;
     Py_ssize_t label_start = 0;
-    int failed = 0;
+    idna_status status = IDNA_OK;
     for (Py_ssize_t index = 0; index <= norm_len; index++) {
         if (index < norm_len && norm[index] != '.') {
             continue;
@@ -596,23 +581,57 @@ PyObject *th_url_to_ascii(PyObject *host) {
         }
         at = emit_label(out, at, norm + label_start, index - label_start, scratch);
         if (at < 0) {
-            failed = 1;
+            status = IDNA_ENCODING;
             break;
         }
         label_start = index + 1;
     }
-    PyObject *result;
-    if (failed) {
-        PyErr_SetString(PyExc_ValueError, "host cannot be encoded to ASCII");
-        result = NULL;
+    TH_IDNA_FREE(mapped);
+    TH_IDNA_FREE(normalized);
+    TH_IDNA_FREE(scratch);
+    if (status == IDNA_OK) {
+        *output = out;
+        *output_len = at;
     } else {
-        result = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, out, at);
+        TH_IDNA_FREE(out);
     }
+    return status;
+}
+
+#ifndef TH_IDNA_STANDALONE
+PyObject *th_url_to_ascii(PyObject *host) {
+    Py_ssize_t in_len = PyUnicode_GET_LENGTH(host);
+    if (in_len > TH_IDNA_MAX_INPUT) {
+        PyErr_Format(PyExc_ValueError, "host of %zd code points exceeds the IDNA input limit of %d; shorten the host",
+                     in_len, TH_IDNA_MAX_INPUT);
+        return NULL;
+    }
+    Py_UCS4 *input = PyMem_Malloc((size_t)(in_len + 1) * sizeof(Py_UCS4));
+    if (input == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int kind = PyUnicode_KIND(host);
+    const void *data = PyUnicode_DATA(host);
+    for (Py_ssize_t index = 0; index < in_len; index++) {
+        input[index] = PyUnicode_READ(kind, data, index);
+    }
+    Py_UCS4 *output;
+    Py_ssize_t output_len;
+    idna_status status = idna_to_ascii(input, in_len, &output, &output_len);
     PyMem_Free(input);
-    PyMem_Free(mapped);
-    PyMem_Free(normalized);
-    PyMem_Free(out);
-    PyMem_Free(scratch);
+    if (status == IDNA_DISALLOWED) {
+        PyErr_SetString(PyExc_ValueError, "host contains a code point UTS #46 disallows; remove it");
+        return NULL;
+    }
+    if (status == IDNA_ENCODING) {
+        PyErr_SetString(PyExc_ValueError, "host cannot be encoded to ASCII");
+        return NULL;
+    }
+    if (status == IDNA_NO_MEMORY) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory();    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *result = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, output, output_len);
+    PyMem_Free(output);
     return result;
 }
 
