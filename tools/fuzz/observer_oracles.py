@@ -42,7 +42,7 @@ def _run(program: str, name: str) -> str:
     observer: Final = MutationObserver(callback if program in {"nested", "error"} else None)
     observer.observe(root, child_list=True)
     root.append(first)
-    alive = first.tag == name and first.parent is root
+    alive = first.tag == name and first.parent == root
     error: str | None = None
     if program.startswith("reuse"):
         batches.append(_records(observer.take_records(), registers))
@@ -51,12 +51,12 @@ def _run(program: str, name: str) -> str:
             alive = alive and first.tag == name and first.parent is None
             batches.append(_records(observer.take_records(), registers))
             root.append(first)
-            alive = alive and first.parent is root
+            alive = alive and first.parent == root
             batches.append(_records(observer.take_records(), registers))
     elif program == "replace":
         batches.append(_records(observer.take_records(), registers))
         first.replace_with(second)
-        alive = alive and first.tag == name and first.parent is None and second.parent is root
+        alive = alive and first.tag == name and first.parent is None and second.parent == root
         batches.append(_records(observer.take_records(), registers))
     else:
         try:
