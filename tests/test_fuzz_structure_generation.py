@@ -431,3 +431,76 @@ def test_generation_cli_rejects_invalid_bounds(
     with pytest.raises(SystemExit) as error:
         main(["--output", str(tmp_path), *arguments])
     assert (error.value.code, message in capsys.readouterr().err) == (2, True)
+
+
+@pytest.mark.parametrize(
+    "pool",
+    [
+        pytest.param((), id="empty"),
+        pytest.param(("x", "x"), id="duplicate"),
+        pytest.param(("x-y",), id="punctuation"),
+        pytest.param(("1x",), id="leading-digit"),
+        pytest.param(("é",), id="non-ascii"),
+        pytest.param(tuple(f"name{index}" for index in range(65)), id="too-large"),
+    ],
+)
+def test_generation_rejects_invalid_identifier_pool(pool: tuple[str, ...]) -> None:
+    with pytest.raises(GrammarError, match="1 to 64 distinct ASCII identifiers"):
+        compile_grammar((Production("root", "root", (b"x",), 1, "test"),), "root", identifiers=pool)
+
+
+def test_generation_uses_distinct_supplied_identifiers() -> None:
+    grammar: Final = compile_grammar(
+        (
+            Production(
+                "root",
+                "root",
+                (
+                    *(part for name in ("a", "b", "c", "d", "e") for part in (Identifier(name, definition=True), b" ")),
+                    *(
+                        part
+                        for name in ("e", "d", "c", "b", "a")
+                        for part in (Identifier(name, definition=False), b" ")
+                    ),
+                ),
+                1,
+                "test",
+            ),
+        ),
+        "root",
+        identifiers=("first", "second", "third", "fourth", "fifth"),
+    )
+    assert generate(grammar, random.Random(0), 1) == Generated(
+        b"first second third fourth fifth fifth fourth third second first ",
+        1,
+        0,
+        ("root",),
+        (("a", "first"), ("b", "second"), ("c", "third"), ("d", "fourth"), ("e", "fifth")),
+    )
+
+
+def test_generation_rejects_supplied_pool_exhaustion() -> None:
+    grammar: Final = compile_grammar(
+        (
+            Production(
+                "root",
+                "root",
+                (Identifier("a", definition=True), Identifier("b", definition=True)),
+                1,
+                "test",
+            ),
+        ),
+        "root",
+        identifiers=("only",),
+    )
+    with pytest.raises(GrammarError, match="identifier pool exhausted"):
+        generate(grammar, random.Random(0), 1)
+
+
+@pytest.mark.parametrize(
+    ("seed", "generated"),
+    [pytest.param(0, False, id="legacy-sheet"), pytest.param(1, True, id="structured-sheet")],
+)
+def test_generation_css_general_adapter(seed: int, *, generated: bool) -> None:
+    source: Final = ORACLES["css-fixpoint"].generate(random.Random(seed))
+    assert (":root{--x:red;" in source, source.endswith("}")) == (generated, True)

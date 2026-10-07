@@ -40,8 +40,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def compile_grammar(productions: Sequence[Production], root: str) -> Grammar:
+def compile_grammar(
+    productions: Sequence[Production], root: str, *, identifiers: tuple[str, ...] = ("x", "y", "z")
+) -> Grammar:
     """Reject incomplete grammars before consuming a finite input budget."""
+    if (
+        not 1 <= len(identifiers) <= 64
+        or len(set(identifiers)) != len(identifiers)
+        or any(not name.isascii() or not name.isidentifier() for name in identifiers)
+    ):
+        msg = "identifier pools require 1 to 64 distinct ASCII identifiers"
+        raise GrammarError(msg)
     rules: Final[dict[str, list[Production]]] = {}
     names: Final[set[str]] = set()
     for production in productions:
@@ -72,7 +81,9 @@ def compile_grammar(productions: Sequence[Production], root: str) -> Grammar:
     if missing := symbols - minimum.keys():
         msg = f"nonproductive symbols: {sorted(missing)}"
         raise GrammarError(msg)
-    return Grammar(tuple(productions), root, {name: tuple(items) for name, items in rules.items()}, minimum)
+    return Grammar(
+        tuple(productions), root, {name: tuple(items) for name, items in rules.items()}, minimum, identifiers
+    )
 
 
 def _reachable(root: str, rules: dict[str, list[Production]]) -> set[str]:
@@ -166,7 +177,7 @@ def generate(
     ]
     output: Final[list[bytes]] = []
     fired: Final[list[str]] = []
-    bindings: Final = _Bindings({}, set(), set())
+    bindings: Final = _Bindings({}, set(), set(), grammar.identifiers)
     depth = 0
     while pending:
         part, level, minimal, path = pending.pop()
@@ -218,10 +229,10 @@ def _available(
 
 def _identifier(part: Identifier, bindings: _Bindings) -> bytes:
     if part.name not in bindings.values:
-        if len(bindings.values) == len(_IDENTIFIERS):
+        if len(bindings.values) == len(bindings.pool):
             msg = "identifier pool exhausted"
             raise GrammarError(msg)
-        bindings.values[part.name] = _IDENTIFIERS[len(bindings.values)]
+        bindings.values[part.name] = bindings.pool[len(bindings.values)]
     if part.definition:
         if part.name in bindings.definitions:
             msg = f"duplicate identifier definition: {part.name}"
@@ -292,6 +303,7 @@ class _Bindings:
     values: dict[str, str]
     definitions: set[str]
     references: set[str]
+    pool: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -338,6 +350,7 @@ class Grammar:
     root: str
     rules: dict[str, tuple[Production, ...]]
     minimum: dict[str, tuple[int, int]]
+    identifiers: tuple[str, ...]
 
 
 @dataclass(frozen=True)

@@ -43,6 +43,7 @@ from fuzz.css_custom_oracles import (
     css_custom_generate,
     css_custom_seeds,
 )
+from fuzz.css_structure_generators import css_generate, css_source_generate, css_source_seeds
 from fuzz.html_foreign_oracles import (
     UnsupportedHtmlForeignCaseError,
     html_foreign_check,
@@ -1853,6 +1854,8 @@ def _stylesheet(rng: random.Random) -> str:
 
 
 def _generate_css(rng: random.Random) -> str:
+    if rng.random() < 0.25:
+        return css_generate(rng).data.decode("utf-8")
     if rng.random() < 0.5:
         return _mutate(rng, rng.choice(_corpus().css), _CSS_TOKENS)
     return _mutate(rng, _stylesheet(rng), _CSS_TOKENS) if rng.random() < 0.3 else _stylesheet(rng)
@@ -2493,6 +2496,9 @@ ORACLES: Final[dict[str, Oracle]] = {
         xml_document_check, xml_source_generate, xml_source_seeds, xml_source_controls, Floor(60, 1)
     ),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
+    "css-sheet-grammar": Oracle(
+        _css_fixpoint, css_source_generate, css_source_seeds, _css_controls, Floor(6356, 1), syntax="css"
+    ),
     "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95), syntax="css"),
     "js-fixpoint": Oracle(_js_fixpoint, _generate_js, _seeds_js, _js_controls, Floor(300, 0.6), syntax="js"),
     "style-fixpoint": Oracle(
