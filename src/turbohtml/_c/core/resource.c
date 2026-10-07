@@ -219,10 +219,14 @@ static int resource_windows_descriptor(HANDLE handle, PyObject *path) {
     return descriptor;
 }
 
+/* CreateFileW opens a directory only with FILE_FLAG_BACKUP_SEMANTICS and otherwise fails with ERROR_ACCESS_DENIED
+   (CreateFileW, "Directories"), so without it a directory target raised OSError where POSIX reaches the regular-file
+   check. CPython's os.stat opens with the same flag. */
+static const DWORD RESOURCE_OPEN_FLAGS = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS;
+
 static int resource_open_file(th_resource_policy *policy, PyObject *path) {
-    HANDLE handle =
-        resource_windows_open(path, GENERIC_READ | FILE_READ_ATTRIBUTES,
-                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_ATTRIBUTE_NORMAL);
+    HANDLE handle = resource_windows_open(path, GENERIC_READ | FILE_READ_ATTRIBUTES,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, RESOURCE_OPEN_FLAGS);
     if (handle == INVALID_HANDLE_VALUE) {
         return -1;
     }
@@ -244,7 +248,7 @@ static int resource_open_file(th_resource_policy *policy, PyObject *path) {
 
 static int resource_open_path(PyObject *path) {
     HANDLE handle = resource_windows_open(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                          FILE_ATTRIBUTE_NORMAL);
+                                          RESOURCE_OPEN_FLAGS);
     return handle == INVALID_HANDLE_VALUE ? -1 : resource_windows_descriptor(handle, path);
 }
 #else
@@ -366,9 +370,12 @@ static int resource_open_file(th_resource_policy *policy, PyObject *path) {
 
 static int resource_descriptor_is_regular(int descriptor) {
 #ifdef _WIN32
-    struct _stat64 info = {0};
-    (void)_fstat64(descriptor, &info);
-    return (info.st_mode & _S_IFMT) == _S_IFREG;
+    /* a disk handle without FILE_ATTRIBUTE_DIRECTORY is a regular file; pipes and character devices report another
+       GetFileType */
+    HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
+    BY_HANDLE_FILE_INFORMATION info;
+    return GetFileType(handle) == FILE_TYPE_DISK && GetFileInformationByHandle(handle, &info) &&
+           !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
 #else
     struct stat info = {0};
     (void)fstat(descriptor, &info);
