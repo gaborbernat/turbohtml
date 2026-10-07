@@ -10,6 +10,8 @@ from turbohtml.extract import normalize_url
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pytest_mock import MockerFixture
+
 
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -93,7 +95,16 @@ def test_url_reparse_controls_discriminate() -> None:
     }
 
 
-def test_url_reparse_cli_is_registered(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_url_reparse_cli_is_registered(
+    mocker: MockerFixture, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seeds = tmp_path / "tools/fuzz-data/wpt/url/resources/urltestdata.json"
+    seeds.parent.mkdir(parents=True)
+    seeds.write_text('[{"input": "HTTP://Example.COM:80/"}]', encoding="utf-8")
+    corpus = tmp_path / "tools/fuzz/corpus/url"
+    corpus.mkdir(parents=True)
+    (corpus / "url.txt").write_text("https://seed.example/", encoding="utf-8")
+    mocker.patch("fuzz.round_trip_oracles._ROOT", tmp_path)
     assert (
         main(["--oracle", "url-split-reparse", "--minutes", "0", "--crash-dir", str(tmp_path)]),
         capsys.readouterr().out.splitlines()[-1],
