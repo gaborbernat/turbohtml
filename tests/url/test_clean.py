@@ -109,7 +109,7 @@ def test_clean_accepts_colon_hosts(url: str) -> None:
         pytest.param(
             "HTTP://u\x00:pw@LOCALHOST:80/a/../x", "http://u\x00:pw@localhost/x", id="nul-before-userinfo-colon"
         ),
-        pytest.param("HTTP://a\x00b.EXAMPLE:80/a/../x", "http://a\x00b.example/x", id="nul-before-host-dot"),
+        pytest.param("HTTP://a\x00b.EXAMPLE:80/a/../x", None, id="nul-before-host-dot"),
         pytest.param("HTTP://:8000/a/../x", None, id="empty-host"),
     ],
 )

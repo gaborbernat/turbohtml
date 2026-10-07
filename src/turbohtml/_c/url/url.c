@@ -309,9 +309,9 @@ PyObject *th_url_host_canonical(PyObject *host, int kind) {
         Py_DECREF(ascii);
         return ipv4;
     }
-    if (PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: maybe_ipv4 only errors on the excluded allocation path */
-        Py_DECREF(ascii);   /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;        /* GCOVR_EXCL_LINE */
+    if (PyErr_Occurred()) {
+        Py_DECREF(ascii);
+        return NULL;
     }
     return ascii;
 }
@@ -459,7 +459,8 @@ static PyObject *domain_to_ascii(PyObject *host) {
 }
 
 /* The dotted-decimal form of `ascii` read by the WHATWG IPv4 parser (https://url.spec.whatwg.org/#concept-ipv4-parser),
-   or NULL with no error set when it is not an address, so the caller keeps the domain. */
+   or NULL with no error set when it is not an address, so the caller keeps the domain. Reject forbidden domain
+   characters before a serialization can reinterpret them as component delimiters. */
 static PyObject *maybe_ipv4(PyObject *ascii) {
     Py_ssize_t len = PyUnicode_GET_LENGTH(ascii);
     if (len == 0) {
@@ -473,6 +474,12 @@ static PyObject *maybe_ipv4(PyObject *ascii) {
     }
     for (Py_ssize_t index = 0; index < len; index++) {
         cp[index] = PyUnicode_READ(kind, data, index);
+        if (cp[index] <= 0x20 || cp[index] == 0x7F ||
+            (cp[index] < 0x80 && strchr("#%/:<>?@[\\]^|", (int)cp[index]) != NULL)) {
+            PyMem_Free(cp);
+            PyErr_SetString(PyExc_ValueError, "host contains a forbidden domain code point");
+            return NULL;
+        }
     }
     Py_ssize_t part_start[5];
     Py_ssize_t part_end[5];

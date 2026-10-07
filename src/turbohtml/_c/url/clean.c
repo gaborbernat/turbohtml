@@ -174,8 +174,8 @@ static PyObject *port_suffix(const th_url_parts *parts) {
 /* The authority rebuilt from its WHATWG-canonical host and port, keeping userinfo verbatim. */
 static PyObject *normalize_netloc(const th_url_parts *parts, int web_only) {
     PyObject *canonical = th_url_host_canonical(parts->part[TH_URL_HOST], parts->kind);
-    if (canonical == NULL) { /* GCOVR_EXCL_BR_LINE: the host parse only fails on allocation failure */
-        return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (canonical == NULL) {
+        return NULL;
     }
     PyObject *host = parts->kind == TH_HOST_IPV6 ? th_str_format("[%U]", canonical) : Py_NewRef(canonical);
     Py_DECREF(canonical);
@@ -485,8 +485,8 @@ static PyObject *site_of(PyObject *url) {
     }
     PyObject *host = th_url_host_canonical(parts.part[TH_URL_HOST], parts.kind);
     th_url_parts_clear(&parts);
-    if (host == NULL) { /* GCOVR_EXCL_BR_LINE: the host parse only fails on allocation failure */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (host == NULL) {
+        return NULL;
     }
     PyObject *site = turbohtml_registrable_domain(NULL, host);
     Py_DECREF(host);
