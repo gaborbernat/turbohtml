@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -41,7 +41,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def compile_grammar(
-    productions: Sequence[Production], root: str, *, identifiers: tuple[str, ...] = ("x", "y", "z")
+    productions: Sequence[Production],
+    root: str,
+    *,
+    identifiers: tuple[str, ...] = ("x", "y", "z"),
+    materialize: Callable[[Generated], Generated] | None = None,
 ) -> Grammar:
     """Reject incomplete grammars before consuming a finite input budget."""
     if (
@@ -82,7 +86,12 @@ def compile_grammar(
         msg = f"nonproductive symbols: {sorted(missing)}"
         raise GrammarError(msg)
     return Grammar(
-        tuple(productions), root, {name: tuple(items) for name, items in rules.items()}, minimum, identifiers
+        tuple(productions),
+        root,
+        {name: tuple(items) for name, items in rules.items()},
+        minimum,
+        identifiers,
+        materialize,
     )
 
 
@@ -163,15 +172,7 @@ def generate(
 ) -> Generated:
     """Reserve the canonical minimum-node derivation and its expansion steps."""
     route: Final = _route(grammar, force) if force is not None else ()
-    remaining = (
-        (budget.nodes, budget.steps)
-        if isinstance(budget, GenerationBudget)
-        else (budget, budget * max(cost[1] for cost in grammar.minimum.values()))
-    )
-    required: Final = _route_cost(grammar, route) if route else grammar.minimum[grammar.root]
-    if any(available < needed for available, needed in zip(remaining, required, strict=True)):
-        msg = "budget cannot complete the root"
-        raise BudgetError(msg)
+    remaining = _initial_budget(grammar, budget, route)
     pending: Final[list[tuple[bytes | Reference | Identifier, int, bool, tuple[tuple[Production, int], ...]]]] = [
         (Reference(grammar.root, 0), 0, leaf, route)
     ]
@@ -205,13 +206,29 @@ def generate(
     if missing := bindings.references - bindings.definitions:
         msg = f"undefined identifiers: {sorted(missing)}"
         raise GrammarError(msg)
-    return Generated(
+    case: Final = Generated(
         b"".join(output),
         (budget.nodes if isinstance(budget, GenerationBudget) else budget) - remaining[0],
         depth,
         tuple(fired),
         tuple(sorted(bindings.values.items())),
     )
+    return case if grammar.materialize is None else grammar.materialize(case)
+
+
+def _initial_budget(
+    grammar: Grammar, budget: int | GenerationBudget, route: tuple[tuple[Production, int], ...]
+) -> tuple[int, int]:
+    remaining: Final = (
+        (budget.nodes, budget.steps)
+        if isinstance(budget, GenerationBudget)
+        else (budget, budget * max(cost[1] for cost in grammar.minimum.values()))
+    )
+    required: Final = _route_cost(grammar, route) if route else grammar.minimum[grammar.root]
+    if any(available < needed for available, needed in zip(remaining, required, strict=True)):
+        msg = "budget cannot complete the root"
+        raise BudgetError(msg)
+    return remaining
 
 
 def _available(
@@ -351,6 +368,7 @@ class Grammar:
     rules: dict[str, tuple[Production, ...]]
     minimum: dict[str, tuple[int, int]]
     identifiers: tuple[str, ...]
+    materialize: Callable[[Generated], Generated] | None = None
 
 
 @dataclass(frozen=True)
