@@ -567,15 +567,15 @@ def normalize_url_check(text: str, normalize: Callable[[str], str] = normalize_u
 def url_reparse_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
     """Preserve delimiter presence when checking serialization through a reference split."""
     try:
-        normalized = normalize(text)
-        parts = urlsplit(normalized)
+        normalized: Final = normalize(text)
+        parts: Final = urlsplit(normalized)
     except ValueError as error:
         raise OutOfScopeError(str(error)) from error
     recomposed: Final = _url_recompose(parts, normalized)
     if recomposed != normalized:
         return f"split/recompose changes normalized URL: {_divergence(normalized, recomposed)}"
     try:
-        reparsed = normalize(recomposed)
+        reparsed: Final = normalize(recomposed)
     except ValueError:
         return "rejects recomposed output"
     return None if reparsed == normalized else f"reparse changes normalized URL: {_divergence(normalized, reparsed)}"

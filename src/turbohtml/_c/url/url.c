@@ -462,6 +462,12 @@ static PyObject *domain_to_ascii(PyObject *host) {
    or NULL with no error set when it is not an address, so the caller keeps the domain. Reject forbidden domain
    characters before a serialization can reinterpret them as component delimiters. */
 static PyObject *maybe_ipv4(PyObject *ascii) {
+    static const unsigned char FORBIDDEN_DOMAIN[128] = {
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1,
+    };
     Py_ssize_t len = PyUnicode_GET_LENGTH(ascii);
     if (len == 0) {
         return NULL;
@@ -474,8 +480,7 @@ static PyObject *maybe_ipv4(PyObject *ascii) {
     }
     for (Py_ssize_t index = 0; index < len; index++) {
         cp[index] = PyUnicode_READ(kind, data, index);
-        if (cp[index] <= 0x20 || cp[index] == 0x7F ||
-            (cp[index] < 0x80 && strchr("#%/:<>?@[\\]^|", (int)cp[index]) != NULL)) {
+        if (cp[index] < 0x80 && FORBIDDEN_DOMAIN[cp[index]]) {
             PyMem_Free(cp);
             PyErr_SetString(PyExc_ValueError, "host contains a forbidden domain code point");
             return NULL;
