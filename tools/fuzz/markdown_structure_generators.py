@@ -115,12 +115,23 @@ def _flow(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
             inline.append(record)
         else:
             if inline:
-                output.append(("p", (), tuple(inline)))
+                output.append(("p", (), _block_end(tuple(inline))))
                 inline.clear()
             output.append(record)
     if inline:
-        output.append(("p", (), tuple(inline)))
+        output.append(("p", (), _block_end(tuple(inline))))
     return tuple(output)
+
+
+def _block_end(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    # a hard break that ends a block draws no line in a browser and does nothing in CommonMark (6.7)
+    end = len(records)
+    while end and records[end - 1][0] == "br":
+        end -= 1
+    if end == len(records) or not end or records[end - 1][0] != "#text":
+        return records[:end]
+    text: Final = records[end - 1][1][0][1].rstrip(" \t\n\f\r")
+    return (*records[: end - 1], *((("#text", (("value", text),), ()),) if text else ()))
 
 
 def _children(element: XmlElement, *, preserve: bool) -> tuple[_Meaning, ...]:
@@ -134,7 +145,8 @@ def _children(element: XmlElement, *, preserve: bool) -> tuple[_Meaning, ...]:
             merged[-1] = ("#text", (("value", merged[-1][1][0][1] + record[1][0][1]),), ())
         else:
             merged.append(record)
-    return _spacing(tuple(merged), preserve=preserve, inline=element.tag in _INLINE_TEXT)
+    spaced: Final = _spacing(tuple(merged), preserve=preserve, inline=element.tag in _INLINE_TEXT)
+    return spaced if preserve or element.tag in _INLINE_TEXT else _block_end(spaced)
 
 
 def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> tuple[_Meaning, ...]:
@@ -160,23 +172,59 @@ def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> 
 def _element(element: XmlElement, parent: str, *, preserve: bool) -> tuple[_Meaning, ...]:
     if not isinstance(element.tag, str) or element.tag in {"script", "style", "head", "meta", "title"}:
         return ()
-    if element.tag not in _ALLOWED:
-        msg = f"HTML element has no declared Markdown meaning: {element.tag}"
-        raise MarkdownProfileError(msg)
+    _check_profile(element, parent)
     children: Final = _children(element, preserve=preserve or element.tag == "pre")
     if (
         element.tag in {"div", "span", "thead", "tbody"}
-        or (element.tag == "p" and parent == "li")
-        or (element.tag == "code" and parent == "pre")
+        or (element.tag, parent) in {("p", "li"), ("code", "pre")}
+        # an <a> without href is a placeholder (WHATWG 4.5.1) and Markdown has no link without a destination
+        or (element.tag == "a" and "href" not in element.attrib)
     ):
         return children
-    return (
-        (
-            {"b": "strong", "i": "em", "del": "s"}.get(element.tag, element.tag),
-            tuple(sorted((name, value) for name, value in element.attrib.items() if name in _SEMANTIC_ATTRIBUTES)),
-            children,
-        ),
-    )
+    tag: Final = {"b": "strong", "i": "em", "del": "s", "th": "td"}.get(element.tag, element.tag)
+    if tag in _CONTENT_REQUIRED and not children:
+        return ()
+    if tag in _EMPHASIS:
+        return _emphasis(tag, children)
+    return ((tag, _attributes(tag, element.attrib), _code_text(children) if tag == "pre" else children),)
+
+
+def _check_profile(element: XmlElement, parent: str) -> None:
+    if element.tag not in _ALLOWED:
+        msg = f"HTML element has no declared Markdown meaning: {element.tag}"
+        raise MarkdownProfileError(msg)
+    if (element.tag == "li" and parent not in {"ul", "ol"}) or (
+        (allowed := _CONTENT_MODEL.get(element.tag)) is not None
+        and (
+            any(isinstance(child.tag, str) and child.tag not in allowed for child in element)
+            or any(text.strip(" \t\n\f\r") for text in (element.text or "", *(child.tail or "" for child in element)))
+        )
+    ):
+        msg = f"HTML content model violated at {element.tag}"
+        raise MarkdownProfileError(msg)
+
+
+def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    if all(record[0] == "#text" and not record[1][0][1].strip(" \t\n\f\r") for record in children):
+        return children  # a delimiter run cannot wrap whitespace alone (CommonMark 6.2)
+    # emphasis does not style a hard break, so a break at its edge renders the same outside it
+    start: Final = next((index for index, record in enumerate(children) if record[0] != "br"), len(children))
+    end: Final = next((index for index in range(len(children), start, -1) if children[index - 1][0] != "br"), start)
+    return (*children[:start], *(((tag, (), children[start:end]),) if start < end else ()), *children[end:])
+
+
+def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    semantic: Final = {name: value for name, value in attributes.items() if name in _SEMANTIC_ATTRIBUTES.get(tag, ())}
+    # image syntax always writes both attributes (CommonMark 6.4)
+    return tuple(sorted((({"src": "", "alt": ""} if tag == "img" else {}) | semantic).items()))
+
+
+def _code_text(children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    if not children or children[-1][0] != "#text":
+        return children
+    # fenced content always ends in a newline (CommonMark 4.5) and a browser draws none for the last one
+    text: Final = children[-1][1][0][1].removesuffix("\n")
+    return (*children[:-1], *((("#text", (("value", text),), ()),) if text else ()))
 
 
 def _text(text: str | None, *, preserve: bool, keep: bool) -> tuple[_Meaning, ...]:
@@ -451,7 +499,25 @@ _ALLOWED: Final = _INLINE_HOSTS | {
     "img",
     "br",
 }
-_SEMANTIC_ATTRIBUTES: Final = frozenset({"href", "src", "alt", "title", "start", "align"})
+_SEMANTIC_ATTRIBUTES: Final[dict[str, frozenset[str]]] = {
+    "a": frozenset({"href", "title"}),
+    "img": frozenset({"src", "alt", "title"}),
+    "ol": frozenset({"start"}),
+    "td": frozenset({"align"}),
+}
+# CommonMark and GFM write none of these without content: emphasis and code spans need a character (6.1, 6.2), a
+# paragraph a non-blank line (4.8), a list an item (5.3) and a table a header cell (GFM 4.10)
+_CONTENT_REQUIRED: Final = frozenset({"p", "strong", "em", "s", "code", "ul", "ol", "table", "tr"})
+_EMPHASIS: Final = frozenset({"strong", "em", "s"})
+# the WHATWG content models of the containers whose Markdown syntax can hold nothing else (4.4.5-4.4.8, 4.9)
+_CONTENT_MODEL: Final[dict[str, frozenset[str]]] = {
+    "ul": frozenset({"li", "script"}),
+    "ol": frozenset({"li", "script"}),
+    "table": frozenset({"thead", "tbody", "tr", "script"}),
+    "thead": frozenset({"tr", "script"}),
+    "tbody": frozenset({"tr", "script"}),
+    "tr": frozenset({"td", "th", "script"}),
+}
 _READER: Final = _FaithfulMarkdown("gfm-like", {"linkify": False})
 _RAW_GRAMMAR: Final = _raw_grammar()
 _HTML_GRAMMAR: Final = _html_grammar()
