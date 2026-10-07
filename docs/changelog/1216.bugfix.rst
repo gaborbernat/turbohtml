@@ -1,0 +1,1 @@
+``to_markdown`` separates a list item's text from a paragraph or block before it with a blank line.
