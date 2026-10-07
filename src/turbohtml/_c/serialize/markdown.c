@@ -1154,6 +1154,13 @@ static void md_emit_code_span(md_ctx *ctx, th_node *node) {
         PyMem_Free(content.data);
         return;
     }
+    /* a reader turns a line ending in a code span into a space (CommonMark 6.1), and
+       written as a newline it could open a block on the next line, so write the space */
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (content.data[index] == '\n') {
+            content.data[index] = ' ';
+        }
+    }
     md_before_visible(ctx);
     if (ctx->out.len > 0 && ctx->out.data[ctx->out.len - 1] == '`') {
         /* a backtick right before this span would merge the two code runs into one

@@ -178,6 +178,8 @@ def test_links_and_images(html: str, expected: str) -> None:
         pytest.param("<p>say <code>x = 1</code></p>", "say `x = 1`", id="code-span"),
         pytest.param("<p><code>a`b</code></p>", "``a`b``", id="code-span-backtick"),
         pytest.param("<p><code>`edge`</code></p>", "`` `edge` ``", id="code-span-backtick-edge"),
+        pytest.param("<p><code>a\n> b</code></p>", "`a > b`", id="code-span-line-ending"),
+        pytest.param("<p>`<code>a\n# b</code></p>", "\\`<code>a \\# b</code>", id="code-span-html-line-ending"),
         pytest.param("<pre><code>line1\nline2</code></pre>", "```\nline1\nline2\n```", id="pre-code"),
         pytest.param(
             '<pre><code class="language-python">x=1</code></pre>',
