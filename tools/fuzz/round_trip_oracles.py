@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from functools import cache, partial
 from itertools import pairwise, starmap
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 from urllib.parse import urlsplit
 
 from fuzz.css_custom_oracles import (
@@ -100,6 +100,7 @@ from fuzz.parser_byte_oracles import (
     parser_bytes_generate,
     parser_bytes_seeds,
 )
+from fuzz.reduce import minimize
 from fuzz.xml_grammar_oracles import (
     UnsupportedXmlLiteralCaseError,
     xml_literal_check,
@@ -277,6 +278,7 @@ class Oracle:
     controls: Callable[[], dict[str, bool]]
     floor: Floor
     fields: tuple[str, ...] = ()
+    syntax: Literal["html", "css", "js"] | None = None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -359,7 +361,7 @@ class _Run:
     def report(self, rng_seed: int) -> int:
         for found in self.found.values():
             oracle = ORACLES[found.oracle]
-            text = _minimize(found.text, partial(_reproduces, oracle.check, found.detail), oracle.fields)
+            text = _minimize(found.text, partial(_reproduces, oracle.check, found.detail), oracle.fields, oracle.syntax)
             data = text.encode("utf-8", "surrogatepass")
             digest = hashlib.sha256(data).hexdigest()
             (self.crash_dir / f"crash-{digest}").write_bytes(data)
@@ -391,22 +393,45 @@ def _reproduces(check: Callable[[str], str | None], detail: str, text: str) -> b
         return False
 
 
-def _minimize(text: str, reproduces: Callable[[str], bool], fields: Sequence[str]) -> str:
+def _minimize(
+    text: str,
+    reproduces: Callable[[str], bool],
+    fields: Sequence[str],
+    syntax: Literal["html", "css", "js"] | None,
+) -> str:
+    remaining = _MINIMIZE_BUDGET
+
+    def check(candidate: str) -> bool:
+        nonlocal remaining
+        remaining -= 1
+        return reproduces(candidate)
+
+    def shrink(source: str, predicate: Callable[[str], bool], language: Literal["html", "css", "js"] | None) -> str:
+        if language is not None:
+            source = minimize(source, predicate, language, remaining)
+        return _ddmin(source, predicate, remaining)
+
     if not fields:
-        return _ddmin(text, reproduces)
+        return shrink(text, check, syntax)
     payload = json.loads(text)
     for name in fields:
-        payload[name] = _ddmin(payload[name], lambda value, name=name: reproduces(json.dumps({**payload, name: value})))
+        payload[name] = shrink(
+            payload[name],
+            lambda value, name=name: check(json.dumps({**payload, name: value})),
+            "html" if name == "html" else syntax,
+        )
     return json.dumps(payload)
 
 
-def _ddmin(text: str, reproduces: Callable[[str], bool]) -> str:
+def _ddmin(text: str, reproduces: Callable[[str], bool], budget: int) -> str:
     """Shrink ``text`` while ``reproduces`` holds, with Zeller and Hildebrandt's ddmin under a call budget."""
     calls = 0
     granularity = 2
-    while len(text) >= 2 and calls < _MINIMIZE_BUDGET:
+    while len(text) >= 2 and calls < budget:
         chunk = max(len(text) // granularity, 1)
         for start in range(0, len(text), chunk):
+            if calls == budget:
+                return text
             calls += 1
             if reproduces(candidate := text[:start] + text[start + chunk :]):
                 text = candidate
@@ -2423,34 +2448,63 @@ ORACLES: Final[dict[str, Oracle]] = {
         _generated(_generate_resolution, 500),
         _resolution_controls,
         Floor(100, 1),
+        syntax="html",
     ),
-    "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85)),
+    "html-fixpoint": Oracle(html_check, _generate_html, _seeds_html, _html_controls, Floor(500, 0.85), syntax="html"),
     "html-table-grammar": Oracle(
-        _html_table_check, html_table_generate, html_table_seeds, html_table_controls, Floor(24, 1)
+        _html_table_check,
+        html_table_generate,
+        html_table_seeds,
+        html_table_controls,
+        Floor(24, 1),
+        syntax="html",
     ),
     "html-sibling-grammar": Oracle(
-        _html_sibling_check, html_sibling_generate, html_sibling_seeds, html_sibling_controls, Floor(100, 1)
+        _html_sibling_check,
+        html_sibling_generate,
+        html_sibling_seeds,
+        html_sibling_controls,
+        Floor(100, 1),
+        syntax="html",
     ),
     "html-foreign-grammar": Oracle(
-        _html_foreign_check, html_foreign_generate, html_foreign_seeds, html_foreign_controls, Floor(36, 1)
+        _html_foreign_check,
+        html_foreign_generate,
+        html_foreign_seeds,
+        html_foreign_controls,
+        Floor(36, 1),
+        syntax="html",
     ),
     "html-list-grammar": Oracle(
-        _html_list_check, html_list_generate, html_list_seeds, html_list_controls, Floor(24, 1)
+        _html_list_check,
+        html_list_generate,
+        html_list_seeds,
+        html_list_controls,
+        Floor(24, 1),
+        syntax="html",
     ),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
-    "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95)),
-    "js-fixpoint": Oracle(_js_fixpoint, _generate_js, _seeds_js, _js_controls, Floor(300, 0.6)),
-    "style-fixpoint": Oracle(style_check, _generate_style, _seeds_style, _style_controls, Floor(300, 0.95)),
-    "markdown-fixpoint": Oracle(
-        markdown_check, _markdown_document, _generated(_markdown_document, 500), _markdown_controls, Floor(500, 0.95)
+    "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95), syntax="css"),
+    "js-fixpoint": Oracle(_js_fixpoint, _generate_js, _seeds_js, _js_controls, Floor(300, 0.6), syntax="js"),
+    "style-fixpoint": Oracle(
+        style_check, _generate_style, _seeds_style, _style_controls, Floor(300, 0.95), syntax="css"
     ),
-    "js-names": Oracle(_js_names, _generate_js, _seeds_js, _js_names_controls, Floor(300, 0.6)),
+    "markdown-fixpoint": Oracle(
+        markdown_check,
+        _markdown_document,
+        _generated(_markdown_document, 500),
+        _markdown_controls,
+        Floor(500, 0.95),
+        syntax="html",
+    ),
+    "js-names": Oracle(_js_names, _generate_js, _seeds_js, _js_names_controls, Floor(300, 0.6), syntax="js"),
     "css-semantics": Oracle(
         css_semantics_check,
         _generate_semantic,
         _generated(_generate_semantic),
         _css_semantics_controls,
         Floor(100, 0.95),
+        syntax="html",
     ),
     "xpath-entry": Oracle(
         xpath_entry_check,
@@ -2468,7 +2522,7 @@ ORACLES: Final[dict[str, Oracle]] = {
         Floor(100, 0.85),
         fields=("html", "css"),
     ),
-    "spans": Oracle(span_check, _generate_html, _seeds_html, _span_controls, Floor(500, 0.95)),
+    "spans": Oracle(span_check, _generate_html, _seeds_html, _span_controls, Floor(500, 0.95), syntax="html"),
 }
 
 
