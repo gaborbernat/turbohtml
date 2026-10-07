@@ -186,7 +186,9 @@ def _element(element: XmlElement, parent: str, *, preserve: bool) -> tuple[_Mean
         return ()
     if tag in _EMPHASIS:
         return _emphasis(tag, children)
-    return ((tag, _attributes(tag, element.attrib), _code_text(children) if tag == "pre" else children),)
+    if tag in {"pre", "code"}:
+        return ((tag, (), _code_text(children, block=tag == "pre")),)
+    return ((tag, _attributes(tag, element.attrib), children),)
 
 
 def _check_profile(element: XmlElement, parent: str) -> None:
@@ -210,21 +212,49 @@ def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     # emphasis does not style a hard break, so a break at its edge renders the same outside it
     start: Final = next((index for index, record in enumerate(children) if record[0] != "br"), len(children))
     end: Final = next((index for index in range(len(children), start, -1) if children[index - 1][0] != "br"), start)
-    return (*children[:start], *(((tag, (), children[start:end]),) if start < end else ()), *children[end:])
+    inner: list[_Meaning] = list(children[start:end])
+    before: Final[list[_Meaning]] = list(children[:start])
+    after: Final[list[_Meaning]] = list(children[end:])
+    # a delimiter run touching whitespace cannot open or close (CommonMark 6.2), so edge spaces sit outside it
+    if inner and inner[0][0] == "#text" and (text := inner[0][1][0][1]) != (stripped := text.lstrip(" \t\n\f\r")):
+        before.append(("#text", (("value", text[: len(text) - len(stripped)]),), ()))
+        inner[0] = ("#text", (("value", stripped),), ())
+    if inner and inner[-1][0] == "#text" and (text := inner[-1][1][0][1]) != (stripped := text.rstrip(" \t\n\f\r")):
+        after.insert(0, ("#text", (("value", text[len(stripped) :]),), ()))
+        inner[-1] = ("#text", (("value", stripped),), ())
+    return (*before, *(((tag, (), tuple(inner)),) if inner else ()), *after)
 
 
 def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], ...]:
-    semantic: Final = {name: value for name, value in attributes.items() if name in _SEMANTIC_ATTRIBUTES.get(tag, ())}
+    # an empty title gives no advisory information (WHATWG 3.2.6.1), the same as none
+    semantic: Final = {
+        name: value
+        for name, value in attributes.items()
+        if name in _SEMANTIC_ATTRIBUTES.get(tag, ()) and (value or name != "title")
+    }
     # image syntax always writes both attributes (CommonMark 6.4)
     return tuple(sorted((({"src": "", "alt": ""} if tag == "img" else {}) | semantic).items()))
 
 
-def _code_text(children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
-    if not children or children[-1][0] != "#text":
-        return children
-    # fenced content always ends in a newline (CommonMark 4.5) and a browser draws none for the last one
-    text: Final = children[-1][1][0][1].removesuffix("\n")
-    return (*children[:-1], *((("#text", (("value", text),), ()),) if text else ()))
+def _code_text(children: tuple[_Meaning, ...], *, block: bool) -> tuple[_Meaning, ...]:
+    # code holds literal text only (CommonMark 4.5, 6.1): a block keeps its line breaks, a span turns them to spaces,
+    # and fenced content always ends in a newline that a browser does not draw
+    text: Final = _plain_text(children).removesuffix("\n") if block else _plain_text(children).replace("\n", " ")
+    return (("#text", (("value", text),), ()),) if text else ()
+
+
+def _plain_text(records: tuple[_Meaning, ...]) -> str:
+    text = ""
+    for record in records:
+        if record[0] == "#text":
+            text += record[1][0][1]
+        elif record[0] == "br":
+            text += "\n"
+        elif record[0] in _FLOW_INLINE:
+            text += _plain_text(record[2])
+        elif inner := _plain_text(record[2]):
+            text += ("" if not text or text.endswith("\n") else "\n") + inner.removesuffix("\n") + "\n"
+    return text
 
 
 def _text(text: str | None, *, preserve: bool, keep: bool) -> tuple[_Meaning, ...]:

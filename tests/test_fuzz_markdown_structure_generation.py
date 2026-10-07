@@ -167,6 +167,11 @@ def test_markdown_unsupported_element() -> None:
         pytest.param("<p>x<br></p>", id="break-ending-block"),
         pytest.param("<p>x<strong>a<br></strong>y</p>", id="break-ending-emphasis"),
         pytest.param("<p>x<strong><br></strong>y</p>", id="emphasis-around-break"),
+        pytest.param("<p>x<em> y </em>z</p>", id="emphasis-edge-spaces"),
+        pytest.param('<p><img src="a" title=""></p>', id="empty-title"),
+        pytest.param("<pre><b>x</b></pre>", id="markup-in-code-block"),
+        pytest.param("<pre><p>x</p></pre>", id="block-in-code-block"),
+        pytest.param("<p><code><i>x</i></code></p>", id="markup-in-code-span"),
     ],
 )
 def test_markdown_supported_html_meaning(markup: str) -> None:
