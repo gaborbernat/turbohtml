@@ -174,6 +174,8 @@ def _element(element: XmlElement, parent: str, *, preserve: bool) -> tuple[_Mean
         return ()
     _check_profile(element, parent)
     children: Final = _children(element, preserve=preserve or element.tag == "pre")
+    if element.tag == "p" and not children:
+        return ()
     if (
         element.tag in {"div", "span", "thead", "tbody"}
         or (element.tag, parent) in {("p", "li"), ("code", "pre")}
