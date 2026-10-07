@@ -86,6 +86,14 @@ from fuzz.iterator_oracles import (
     iterator_sequence_generate,
     iterator_sequence_seeds,
 )
+from fuzz.markdown_structure_generators import (
+    MarkdownProfileError,
+    markdown_controls,
+    markdown_generate,
+    markdown_html_check,
+    markdown_source_check,
+    markdown_source_seeds,
+)
 from fuzz.observer_oracles import (
     UnsupportedObserverCaseError,
     observer_sequence_check,
@@ -1649,6 +1657,28 @@ _MARKDOWN_TEXT: Final = (
 )  # fmt: skip
 
 
+def _markdown_source_generate(rng: random.Random) -> str:
+    return markdown_generate(rng).data.decode("utf-8")
+
+
+def _markdown_html_generate(rng: random.Random) -> str:
+    return markdown_generate(rng, html=True).data.decode("utf-8")
+
+
+def _markdown_source_check(source: str) -> str | None:
+    try:
+        return markdown_source_check(source)
+    except MarkdownProfileError as error:
+        raise OutOfScopeError from error
+
+
+def _markdown_html_check(source: str) -> str | None:
+    try:
+        return markdown_html_check(source)
+    except MarkdownProfileError as error:
+        raise OutOfScopeError from error
+
+
 def _markdown_document(rng: random.Random) -> str:
     """
     Build conforming HTML that Markdown can express: flow blocks holding phrasing content, never a block inside it.
@@ -2506,6 +2536,21 @@ ORACLES: Final[dict[str, Oracle]] = {
     "js-fixpoint": Oracle(_js_fixpoint, _generate_js, _seeds_js, _js_controls, Floor(300, 0.6), syntax="js"),
     "style-fixpoint": Oracle(
         style_check, _generate_style, _seeds_style, _style_controls, Floor(300, 0.95), syntax="css"
+    ),
+    "markdown-source-grammar": Oracle(
+        _markdown_source_check,
+        _markdown_source_generate,
+        markdown_source_seeds,
+        markdown_controls,
+        Floor(48, 1),
+    ),
+    "markdown-html-grammar": Oracle(
+        _markdown_html_check,
+        _markdown_html_generate,
+        partial(markdown_source_seeds, html=True),
+        partial(markdown_controls, html=True),
+        Floor(29, 1),
+        syntax="html",
     ),
     "markdown-fixpoint": Oracle(
         markdown_check,
