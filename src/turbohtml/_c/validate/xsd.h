@@ -9,6 +9,16 @@
 #ifndef TURBOHTML_VALIDATE_XSD_H
 #define TURBOHTML_VALIDATE_XSD_H
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
 /* An expected element name plus the declaration that supplies its type. */
 typedef struct {
     const Py_UCS4 *uri;
@@ -471,6 +481,7 @@ static int xsd_cache_facets(th_schema *schema, th_node *node) {
 
 static int xsd_require_ref(th_schema *schema, th_node *node, named_vec *table, const char *kind);
 static int xsd_require_type(th_schema *schema, th_node *node, int allow_complex);
+static TH_NOINLINE int xsd_is_builtin_type(const Py_UCS4 *local, Py_ssize_t local_len);
 static int xsd_require_base(th_schema *schema, th_node *node);
 
 /* A dangling reference or an unenforced identity constraint would let validation accept documents the schema forbids,
@@ -534,18 +545,32 @@ static int xsd_require_type(th_schema *schema, th_node *node, int allow_complex)
     split_prefix(type, type_len, &local, &local_len, &prefix, &prefix_len);
     resolve_ns(tree, node, prefix, prefix_len, &uri, &uri_len);
     if (is_xsd_uri(uri, uri_len)) {
-        return 0;
-    }
-    if (named_find(&schema->simple_types, local, local_len) != NULL) {
-        return 0;
-    }
-    if (allow_complex && named_find(&schema->complex_types, local, local_len) != NULL) {
+        if (xsd_is_builtin_type(local, local_len)) {
+            return 0;
+        }
+    } else if (named_find(&schema->simple_types, local, local_len) != NULL ||
+               (allow_complex && named_find(&schema->complex_types, local, local_len) != NULL)) {
         return 0;
     }
     char buffer[256];
     PyErr_Format(PyExc_ValueError, "type '%s' does not resolve to a declared type",
                  name_utf8(type, type_len, buffer, sizeof(buffer)));
     return -1;
+}
+
+static TH_NOINLINE int xsd_is_builtin_type(const Py_UCS4 *local, Py_ssize_t local_len) {
+    if (dt_lookup(local, local_len) != DT_UNKNOWN) {
+        return 1;
+    }
+    /* These XSD 1.0 types retain the existing fallback without dedicated datatype handlers. */
+    static const char *const names[] = {"anyType",  "NOTATION",   "ID",    "IDREF",     "IDREFS", "ENTITY", "ENTITIES",
+                                        "NMTOKENS", "gYearMonth", "gYear", "gMonthDay", "gDay",   "gMonth"};
+    for (size_t index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+        if (u_eq_ascii(local, local_len, names[index])) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int xsd_require_base(th_schema *schema, th_node *node) {
@@ -1161,7 +1186,11 @@ static int xsd_compile(th_schema *schema) {
         }
         Py_ssize_t name_len = 0;
         const Py_UCS4 *name = xsd_attr(tree, child, "name", &name_len);
-        if (name == NULL) {
+        if (name == NULL || name_len == 0) {
+            if (is_schema_el(schema, child, XSD_NS, "element")) {
+                PyErr_SetString(PyExc_ValueError, "global element requires a name");
+                return 0;
+            }
             continue;
         }
         named_vec *bucket = NULL;

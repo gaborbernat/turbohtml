@@ -483,7 +483,6 @@ def pattern_ok(pattern: str, value: str) -> bool:
 @pytest.mark.parametrize(
     ("type_name", "value", "ok"),
     [
-        pytest.param("xs:weirdUnknownType", "anything", True, id="unknown-type-is-string"),
         pytest.param("xs:integer", "007", True, id="leading-zeros"),
         pytest.param("xs:decimal", "12", True, id="decimal-int-part"),
         pytest.param("xs:decimal", "0.5", True, id="decimal-frac"),
