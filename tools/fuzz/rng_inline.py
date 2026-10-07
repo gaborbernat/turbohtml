@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Final
 import lxml.etree
 
 from turbohtml import parse_xml
-from turbohtml.validate import XMLSchema
+from turbohtml.validate import RelaxNG
 
 from .schema_mutation import mutate
 
@@ -21,12 +21,12 @@ if TYPE_CHECKING:
 
 __all__: Final = ["Case", "Verdict", "compare", "generate", "main"]
 
-_XS: Final = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+_RNG: Final = 'xmlns:rng="http://relaxng.org/ns/structure/1.0"'
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Keep compiler and validation findings in the exit status."""
-    parser: Final = argparse.ArgumentParser(description="Compare bounded inline XSD schemas with libxml2.")
+    parser: Final = argparse.ArgumentParser(description="Compare bounded inline RELAX NG schemas with libxml2.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cases", type=int, default=32)
     parser.add_argument("--negative-control", action="store_true")
@@ -37,7 +37,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--cases must be between 1 and 256")
     if arguments.broken_references and not arguments.mutate:
         parser.error("--broken-references requires --mutate")
-    pool_seeds: Final = (0, 1, 2, 3, 4, 5, 8)
+    pool_seeds: Final = (0, 1, 2, 3, 4, 5)
     pool: Final = tuple(generate(seed).schema for seed in pool_seeds)
     findings = 0
     rows = 0
@@ -91,65 +91,66 @@ def compare(case: Case, *, negative_control: bool = False, reference_labels: boo
 
 
 def generate(seed: int) -> Case:
-    """Known labels distinguish shared mistakes from agreement."""
-    rng: Final = random.Random(seed)
-    number: Final = rng.randrange(1, 100)
+    """Explicit value types keep whitespace semantics independent of defaulting."""
+    number: Final = random.Random(seed).randrange(1, 100)
     word: Final = f"word{number}"
-    family: Final = seed % 9
+    family: Final = seed % 8
     if family == 0:
-        declarations: Final = '<xs:element name="v" type="xs:string"/>'
+        pattern: Final = "<rng:text/>"
         documents: Final = ((f"<v>{word}</v>", True), ("<v/>", True), ("<other/>", False))
     elif family == 1:
-        declarations = '<xs:element name="v" type="xs:integer"/>'
+        pattern = '<rng:data type="integer"/>'
         documents = ((f"<v>{number}</v>", True), ("<v>wrong</v>", False), ("<other/>", False))
     elif family == 2:
-        declarations = (
-            '<xs:element name="v"><xs:simpleType><xs:restriction base="xs:token">'
-            f'<xs:enumeration value="{word}"/></xs:restriction></xs:simpleType></xs:element>'
-        )
-        documents = ((f"<v>  {word}  </v>", True), ("<v>wrong</v>", False), ("<other/>", False))
+        pattern = f'<rng:value type="string">{word}</rng:value>'
+        documents = ((f"<v>{word}</v>", True), ("<v>wrong</v>", False), ("<other/>", False))
     elif family == 3:
-        declarations = (
-            '<xs:element name="v"><xs:complexType><xs:sequence><xs:element name="child" type="xs:integer"/>'
-            "</xs:sequence></xs:complexType></xs:element>"
+        pattern = (
+            '<rng:choice><rng:value type="string">a</rng:value><rng:value type="string">b</rng:value></rng:choice>'
         )
-        documents = ((f"<v><child>{number}</child></v>", True), ("<v/>", False), ("<other/>", False))
+        documents = (("<v>a</v>", True), ("<v>b</v>", True), ("<v>wrong</v>", False))
     elif family == 4:
-        declarations = (
-            '<xs:element name="v"><xs:complexType><xs:attribute name="key" type="xs:integer" use="required"/>'
-            "</xs:complexType></xs:element>"
+        pattern = (
+            '<rng:group><rng:element name="child"><rng:data type="integer"/></rng:element>'
+            '<rng:element name="tail"><rng:empty/></rng:element></rng:group>'
         )
-        documents = ((f'<v key="{number}"/>', True), ('<v key="wrong"/>', False), ("<v/>", False))
+        documents = (
+            (f"<v><child>{number}</child><tail/></v>", True),
+            (f"<v><tail/><child>{number}</child></v>", False),
+            ("<v/>", False),
+        )
     elif family == 5:
-        declarations = (
-            '<xs:element name="v"><xs:simpleType><xs:restriction base="xs:integer">'
-            f'<xs:minInclusive value="{number}"/><xs:maxInclusive value="{number + 2}"/>'
-            "</xs:restriction></xs:simpleType></xs:element>"
-        )
-        documents = ((f"<v>{number}</v>", True), (f"<v>{number + 3}</v>", False), ("<v>wrong</v>", False))
-    elif family == 8:
-        declarations = (
-            f'<xs:simpleType name="number{number}"><xs:restriction base="xs:integer"/></xs:simpleType>'
-            f'<xs:element name="v" type="number{number}"/>'
-        )
-        documents = ((f"<v>{number}</v>", True), ("<v>wrong</v>", False), ("<other/>", False))
+        pattern = '<rng:attribute name="key"><rng:data type="integer"/></rng:attribute><rng:empty/>'
+        documents = ((f'<v key="{number}"/>', True), ('<v key="wrong"/>', False), ("<v/>", False))
     else:
-        declarations = '<xs:element name="v" type="xs:notAType"/>' if family == 6 else '<xs:element type="xs:string"/>'
-        documents = ()
-    return Case(seed, f"<xs:schema {_XS}>{declarations}</xs:schema>", family < 6 or family == 8, documents)
+        schema: Final = (
+            f'<rng:grammar {_RNG}><rng:start><rng:ref name="missing"/></rng:start></rng:grammar>'
+            if family == 6
+            else "<foreign/>"
+        )
+        return Case(seed, schema, compiles=False, documents=())
+    name: Final = f"entry{number}"
+    return Case(
+        seed,
+        f'<rng:grammar {_RNG} datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">'
+        f'<rng:start><rng:ref name="{name}"/></rng:start>'
+        f'<rng:define name="{name}"><rng:element name="v">{pattern}</rng:element></rng:define></rng:grammar>',
+        compiles=True,
+        documents=documents,
+    )
 
 
-def _compile_turbohtml(schema: str) -> XMLSchema | None:
+def _compile_turbohtml(schema: str) -> RelaxNG | None:
     try:
-        return XMLSchema(schema)
+        return RelaxNG(schema)
     except ValueError:
         return None
 
 
-def _compile_lxml(schema: str) -> lxml.etree.XMLSchema | None:
+def _compile_lxml(schema: str) -> lxml.etree.RelaxNG | None:
     try:
-        return lxml.etree.XMLSchema(lxml.etree.fromstring(schema.encode(), _parser()))
-    except (lxml.etree.XMLSchemaParseError, lxml.etree.XMLSyntaxError):
+        return lxml.etree.RelaxNG(lxml.etree.fromstring(schema.encode(), _parser()))
+    except (lxml.etree.RelaxNGParseError, lxml.etree.XMLSyntaxError):
         return None
 
 

@@ -232,9 +232,10 @@ def test_missing_start_raises() -> None:
         RelaxNG(grammar('<define name="x"><empty/></define>'))
 
 
-def test_ref_to_unknown_define_never_matches() -> None:
+def test_ref_to_unknown_define_raises() -> None:
     schema = grammar('<start><element name="r"><ref name="missing"/></element></start>')
-    assert not check(schema, "<r/>").valid
+    with pytest.raises(ValueError, match="has no matching define"):
+        RelaxNG(schema)
 
 
 def test_malformed_schema_raises() -> None:
@@ -346,7 +347,8 @@ def test_rng_many_defines_growth() -> None:
 
 def test_rng_many_defines_missing_ref() -> None:
     defines = "".join(f'<define name="d{number}"><empty/></define>' for number in (*range(10), 19, 20))
-    assert not rng_ok(rgrammar(f'<start><ref name="missing"/></start>{defines}'), "<r/>")
+    with pytest.raises(ValueError, match="has no matching define"):
+        RelaxNG(rgrammar(f'<start><ref name="missing"/></start>{defines}'))
 
 
 def test_rng_start_requires_two_top_level() -> None:
@@ -691,8 +693,8 @@ def test_rng_forbidden_grammar_rejected_at_compile(schema: str, message: str) ->
         pytest.param(
             rgrammar('<start><element name="r"><f:ref xmlns:f="urn:y"/><text/></element></start>'),
             "<r>x</r>",
-            False,
-            id="foreign-ref-is-unmatchable-content",
+            True,
+            id="foreign-ref-is-ignored-annotation",
         ),
     ],
 )
