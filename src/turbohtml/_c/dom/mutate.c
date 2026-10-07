@@ -238,6 +238,9 @@ int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char 
                      const Py_UCS4 *value, Py_ssize_t value_len, int has_value) {
     th_node_attr *attr = &node->attrs[index];
     attr->name_atom = th_attr_intern_utf8(tree, name, name_len);
+    if (attr->name_atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+        return -1;                            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (!has_value) {
         return 0;
     }
@@ -282,6 +285,11 @@ static int node_attr_store(th_tree *tree, th_node *node, const char *name, Py_ss
         }
     }
     Py_ssize_t existing = append ? -1 : th_node_attr_find(tree, node, name, name_len);
+    /* tested after the lookup: right after interning, the test changed how LTO inlined the lookup, which cost a class
+       edit 150 more instructions under callgrind */
+    if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+        return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (existing >= 0) {
         th_mo_attr_changed(tree, node, atom, node->attrs[existing].value, node->attrs[existing].value_len, 1);
     } else {
@@ -965,6 +973,9 @@ th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_nod
                 Py_ssize_t name_len;
                 const char *name = th_attr_name(src, atom, &name_len);
                 atom = th_attr_intern_utf8(dest, name, name_len);
+                if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+                    return NULL;               /* GCOVR_EXCL_LINE: allocation-failure path */
+                }
             }
             node->attrs[index].name_atom = atom;
             if (from->value != NULL) {
