@@ -136,6 +136,8 @@ PyObject *turbohtml_phone_parse(PyObject *module, PyObject *args);
 PyObject *turbohtml_transform_node(PyObject *module, PyObject *const *args, Py_ssize_t count);
 PyObject *turbohtml_collapse_whitespace_node(PyObject *module, PyObject *owner);
 PyObject *turbohtml_strip_comments_node(PyObject *module, PyObject *owner);
+/* Implemented in dom/verify.c. _tree_verify(node) counts the broken tree invariants around node. METH_O. */
+PyObject *turbohtml_tree_verify(PyObject *module, PyObject *owner);
 PyObject *turbohtml_linkify_apply(PyObject *module, PyObject *args);
 
 /* Implemented in url/url.c. _url_split(url) breaks a URL into (scheme, netloc,

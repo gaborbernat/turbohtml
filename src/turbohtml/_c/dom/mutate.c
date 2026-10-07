@@ -11,6 +11,7 @@
 #include "dom/tree.h"
 #include "dom/tree_internal.h" /* arena_alloc, need_text, node_new, node_append/remove/insert_before, intern_attr_dynamic */
 #include "dom/observe.h"       /* th_mo_* mutation-record hooks */
+#include "dom/verify.h"
 
 #include "core/ascii.h" /* lower_ascii for the foreign case-insensitive attribute scan */
 #include "core/vec.h"   /* th_grow_cap for the shadow-table growth */
@@ -509,6 +510,47 @@ void th_node_remove_observed(th_tree *tree, th_node *child) {
 void th_node_append_child_observed(th_tree *tree, th_node *parent, th_node *child) {
     node_append(parent, child);
     th_mo_child_inserted(tree, parent, child);
+}
+
+void th_tree_verify(th_tree *tree, th_node *start, Py_ssize_t (*visit)(void *context, th_node *node), void *context,
+                    th_tree_violations *found) {
+    th_node *top = start;
+    while (top->parent != NULL) {
+        top = top->parent;
+    }
+    found->links = (top->prev_sibling != NULL) + (top->next_sibling != NULL);
+    found->identities = 0;
+    for (th_node *node = top;;) {
+        th_node *previous = NULL;
+        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+            found->links += (child->parent != node) + (child->prev_sibling != previous);
+            previous = child;
+        }
+        found->links += node->last_child != previous;
+        found->identities += (node->seq >= tree->node_seq) + visit(context, node);
+        if (node->first_child != NULL) {
+            node = node->first_child;
+            continue;
+        }
+        while (node != top && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        if (node == top) {
+            break;
+        }
+        node = node->next_sibling;
+    }
+    /* the DOM NodeIterator pre-removing steps keep both pointers inside root across every observed removal */
+    found->iterators = 0;
+    for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
+        const th_node_iterator *iterator = tree->node_iterators[index];
+        found->iterators += !is_inclusive_ancestor_of(iterator->root, iterator->reference);
+        if (iterator->candidate != NULL) {
+            found->iterators += !is_inclusive_ancestor_of(iterator->root, iterator->candidate);
+        }
+    }
+    /* every write that bumps id_version bumps attr_version with it (node_attr_store, th_node_attr_del) */
+    found->versions = tree->id_version > tree->attr_version;
 }
 
 /* Whether node sits in the sibling run [first, last] (never when first is NULL). */

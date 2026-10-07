@@ -198,6 +198,11 @@ compared. The JS oracle needs ``npm ci`` in ``tools/bench/node`` first; the sche
     $ tox r -e fuzz-round-trip -- --minutes 0   # the seed pass
     $ tox r -e fuzz-round-trip -- --minutes 10  # adds generated inputs
 
+The ``dom-lifecycle`` oracle runs byte programs over typed registers of nodes, walkers, parsers and observers. Filters,
+observers, rewrite, SAX and tokenizer handlers, and argument conversions run nested programs that edit the tree or
+reenter the same parser. After every step the ``_tree_verify`` hook checks links, wrapper slots, NodeIterator pointers
+and version stamps in C, and each program must replay identically.
+
 ``fuzz-release-diff`` feeds the same generated inputs to HEAD and the latest PyPI wheel, each in its own interpreter,
 and stores every operation whose result moved. Every fix since the release shows up too, so it is a triage aid before a
 release or after a refactor, not a CI gate. ``--errors`` sets how two failures compare: ``message``, ``type`` (the

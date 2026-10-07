@@ -75,6 +75,7 @@ py.extension_module(
         'src/turbohtml/_c/dom/traversal.c',
         'src/turbohtml/_c/dom/range.c',
         'src/turbohtml/_c/dom/observe.c',
+        'src/turbohtml/_c/dom/verify.c',
         'src/turbohtml/_c/dom/treebuild.c',
         'src/turbohtml/_c/dom/formatters.c',
         'src/turbohtml/_c/dom/document.c',
