@@ -269,6 +269,26 @@ dependency_groups = []
 commands_pre = []  # no extension install; the engine compiles standalone with the system allocator
 commands = [ [ "python", "{tox_root}{/}tools{/}js_sanitize.py" ] ]
 
+[env.atheris]
+description = "verify native Atheris rejection against its released Linux x86_64 runtime"
+base_python = [ "3.14" ]
+package = "skip"
+deps = [ "atheris==3.1", "pytest>=9.1.1" ]
+dependency_groups = []
+set_env = { PYTHONPATH = "{tox_root}/tools", PYTHONHASHSEED = "0" }
+platform = "linux"
+commands_pre = []
+commands = [
+  [
+    "python",
+    "-m",
+    "pytest",
+    "{tox_root}/tests/atheris",
+    "--confcutdir={tox_root}/tests/atheris",
+    "--basetemp={env_tmp_dir}/native",
+  ]
+]
+
 [env.bench]
 description = "benchmark turbohtml against each competitor isolated in its own uv venv (not run in CI)"
 package = "skip"
