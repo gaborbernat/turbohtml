@@ -478,6 +478,7 @@ typedef struct th_schema {
     /* RELAX NG */
     pattern *start;
     pattern *p_empty, *p_notallowed, *p_text;
+    int rng_references; /* the annotation pruning walk met an include or externalRef with href */
     def_vec defines;
     struct patintern *intern; /* per-validation pattern hash-consing table; NULL while compiling */
     /* every schema element node's resolved qname, sorted by node pointer for is_schema_el */
@@ -762,9 +763,13 @@ static const Py_UCS4 *element_text(valctx *ctx, th_node *element, Py_ssize_t *ou
     return buffer;
 }
 
+static th_tree *parse_schema_source(PyObject *source);
+static th_node *document_root(th_tree *tree);
+
 #include "validate/datatypes.h"
 #include "validate/xsd.h"
 #include "validate/relaxng.h"
+#include "validate/relaxng_resources.h"
 
 /* ======================= compiled-schema capsule ======================= */
 
@@ -816,9 +821,13 @@ PyObject *turbohtml_schema_compile(PyObject *module, PyObject *args) {
     (void)module;
     int kind;
     PyObject *source;
-    if (!PyArg_ParseTuple(args, "iU", &kind, &source)) { /* GCOVR_EXCL_BR_LINE: the shim always passes (int, str) */
-        return NULL;                                     /* GCOVR_EXCL_LINE */
+    PyObject *base_url = Py_None;
+    PyObject *include_root = Py_None;
+    /* GCOVR_EXCL_BR_START: the shim always passes (int, str) and RelaxNG adds the two resource options */
+    if (!PyArg_ParseTuple(args, "iU|OO", &kind, &source, &base_url, &include_root)) {
+        return NULL; /* GCOVR_EXCL_LINE */
     }
+    /* GCOVR_EXCL_BR_STOP */
     th_tree *tree = parse_schema_source(source);
     if (tree == NULL) {
         return NULL;
@@ -843,7 +852,7 @@ PyObject *turbohtml_schema_compile(PyObject *module, PyObject *args) {
         schema_free(schema);                                 /* GCOVR_EXCL_LINE */
         return PyErr_NoMemory();                             /* GCOVR_EXCL_LINE */
     }
-    int ok = kind == 0 ? xsd_compile(schema) : rng_compile(schema);
+    int ok = kind == 0 ? xsd_compile(schema) : rng_compile(schema, base_url, include_root);
     if (!ok) {
         schema_free(schema);
         return NULL;

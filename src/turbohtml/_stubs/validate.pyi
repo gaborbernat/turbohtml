@@ -1,9 +1,13 @@
 # Subsystem: validate (_c/validate) — XSD/RELAX NG schema validation and HTML5 conformance.
+from os import PathLike
+
 from turbohtml.conformance import ConformanceMessage
 
 from .dom import Node
 
-def _schema_compile(kind: int, source: str, /) -> object: ...
+def _schema_compile(
+    kind: int, source: str, base_url: str | None = None, include_root: str | PathLike[str] | None = None, /
+) -> object: ...
 def _schema_validate(
     schema: object, node: Node, /, *, collect_errors: bool = True
 ) -> tuple[bool, list[tuple[str, str, int, str]]]: ...

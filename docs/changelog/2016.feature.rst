@@ -1,0 +1,2 @@
+:class:`~turbohtml.validate.RelaxNG` reads ``include`` and ``externalRef`` files resolved against the new ``base_url``
+argument, confined to ``include_root`` when set.

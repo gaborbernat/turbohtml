@@ -40,6 +40,15 @@ bounded where it would otherwise double on each child. The compiler enforces the
 raises :class:`ValueError` for a ``<ref>`` with no name, for a reference cycle that never crosses an ``element``, and
 for an ``interleave`` whose branches compete for an element name or for text.
 
+A RELAX NG schema can span files through ``include`` and ``externalRef``. The compiler resolves both as the
+specification's simplification steps describe: each ``href`` resolves against the element's base URI, the referenced
+document loses its annotations and resolves its own references, then the compiler grafts its tree in place, an
+``externalRef`` as the pattern it names and an ``include`` as a ``div`` holding the included grammar with its overridden
+``start`` and ``define`` components removed. The grafted tree keeps its own ``datatypeLibrary`` scope and inherits the
+referrer's ``ns``, so one compiled grammar comes out and validation never reads a file. Files load through the same
+resolver as ``xsl:import``: ``include_root`` confines each read, symlinks included, and the compiler reports a loop by
+its chain of paths.
+
 ****************
  Why the C core
 ****************

@@ -25,6 +25,13 @@ with no ``name`` attribute (section 4.10), a reference cycle whose expansion nev
 (section 7.4). The message names the offending ``define`` or construct. Validating against a legal but ambiguous
 ``choice`` or ``interleave`` takes memory bounded by the schema size, not by the number of child elements.
 
+A RELAX NG ``include`` or ``externalRef`` reads its ``href`` from disk when the schema compiles, resolved against
+``base_url`` and any ``xml:base`` (sections 4.5 to 4.7). Compilation raises :class:`ValueError` when the schema
+references a file without a ``base_url``, when an ``href`` carries a fragment, names a remote URL or a UNC path, or
+resolves outside ``include_root``, when references form a loop, when an ``externalRef`` loads something other than a
+pattern or an ``include`` something other than a ``grammar``, and when an ``include`` overrides a ``start`` or
+``define`` the included grammar does not have. A file that cannot be read raises :class:`OSError`.
+
 Compiling an XSD schema raises :class:`ValueError` for a reference that does not resolve -- an ``xs:element``,
 ``xs:group``, ``xs:attribute``, or ``xs:attributeGroup`` ``ref``, an element or attribute ``type``, or an extension or
 restriction ``base`` whose QName names no built-in or declared component -- and the message names the unresolved QName.

@@ -95,23 +95,53 @@ def test_rng_labels_instance_names_are_not_resource_metadata(engines: tuple[Modu
 
 @pytest.mark.oracle
 @pytest.mark.parametrize(
-    "context",
+    ("case", "expected"),
     [
-        pytest.param('<resource name="other.rng"><root/></resource>', id="resource"),
-        pytest.param('<dir name="other"/>', id="directory"),
-        pytest.param(f'<correct><externalRef xmlns="{_RNG}" href="other.rng"/></correct>', id="external-reference"),
-        pytest.param(f'<correct><include xmlns="{_RNG}" href="other.rng"/></correct>', id="include"),
-        pytest.param(f'<incorrect><externalRef xmlns="{_RNG}" href=""/></incorrect>', id="empty-external-href"),
-        pytest.param(f'<incorrect><include xmlns="{_RNG}" href=""/></incorrect>', id="empty-include-href"),
-        pytest.param(f'<correct xml:base="other/"><empty xmlns="{_RNG}"/></correct>', id="base-uri"),
+        pytest.param(
+            f'<dir name="sub"><resource name="x"><element xmlns="{_RNG}" name="foo"><empty/></element></resource>'
+            f'</dir><correct><externalRef xmlns="{_RNG}" xml:base="sub/y" href="x"/></correct>'
+            "<valid><foo/></valid><invalid><bar/></invalid>",
+            [True, True, True, True, False, False],
+            id="base-uri-hierarchy",
+        ),
+        pytest.param(
+            f'<resource name="x"><grammar xmlns="{_RNG}"><start><element name="foo"><empty/></element></start>'
+            f'</grammar></resource><correct><grammar xmlns="{_RNG}"><include href="x"/></grammar></correct>'
+            "<valid><foo/></valid>",
+            [True, True, True, True],
+            id="include",
+        ),
+        pytest.param(
+            f'<resource name="x">not a schema</resource><incorrect><externalRef xmlns="{_RNG}" href="x"/></incorrect>',
+            [False, False],
+            id="text-resource",
+        ),
+        pytest.param(f'<incorrect><externalRef xmlns="{_RNG}" href=""/></incorrect>', [False, False], id="empty-href"),
     ],
 )
-def test_rng_labels_inventory_has_content_hash(engines: tuple[ModuleType, ModuleType], context: str) -> None:
+def test_rng_labels_resource_cases(engines: tuple[ModuleType, ModuleType], case: str, expected: list[bool]) -> None:
     rng_labels, etree = engines
-    rows: Final = list(rng_labels.compare(etree.fromstring(f"<testSuite><testCase>{context}</testCase></testSuite>")))
-    assert [(row.case_id, len(row.sha256), row.phase, row.expected, row.actual) for row in rows] == [
-        ("001", 64, "unsupported-inventory", None, None)
-    ]
+    suite: Final = etree.fromstring(f"<testSuite><testCase>{case}</testCase></testSuite>")
+    assert [row.actual for row in rng_labels.compare(suite)] == expected
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("..", id="parent"),
+        pytest.param("sub/x", id="nested"),
+    ],
+)
+def test_rng_labels_rejects_resource_name_outside_case(engines: tuple[ModuleType, ModuleType], name: str) -> None:
+    rng_labels, etree = engines
+    suite: Final = etree.fromstring(
+        f'<testSuite><testCase><resource name="{name}"/><correct><empty xmlns="{_RNG}"/></correct>'
+        "</testCase></testSuite>"
+    )
+    with pytest.raises(ValueError, match="one path component"):
+        list(rng_labels.compare(suite))
 
 
 @pytest.mark.oracle
@@ -175,9 +205,6 @@ def test_rng_labels_rejects_unsupported_extraction(engines: tuple[ModuleType, Mo
             (1, {"findings": 2, "unavailable": 2}),
             id="compilation-rejection",
         ),
-        pytest.param(
-            "<resource name='root'/><correct><junk/></correct>", (2, {"unsupported-inventory": 1}), id="no-work"
-        ),
         pytest.param("", (2, {}), id="empty-corpus"),
     ],
 )
@@ -222,18 +249,22 @@ def test_rng_labels_preserves_prefix_used_only_in_instance_text(engines: tuple[M
 
 
 @pytest.mark.oracle
-def test_rng_labels_inventory_hash_tracks_content(engines: tuple[ModuleType, ModuleType]) -> None:
+def test_rng_labels_hash_tracks_resources(engines: tuple[ModuleType, ModuleType]) -> None:
     rng_labels, etree = engines
-    first: Final = etree.fromstring("<testSuite><testCase><resource name='first'/></testCase></testSuite>")
-    second: Final = etree.fromstring("<testSuite><testCase><resource name='second'/></testCase></testSuite>")
-    first_row: Final = next(iter(rng_labels.compare(first)))
-    repeated_row: Final = next(iter(rng_labels.compare(first)))
-    second_row: Final = next(iter(rng_labels.compare(second)))
-    assert (
-        first_row == repeated_row,
-        first_row.case_id == second_row.case_id,
-        first_row.sha256 != second_row.sha256,
-    ) == (True, True, True)
+    rows: Final = [
+        next(
+            iter(
+                rng_labels.compare(
+                    etree.fromstring(
+                        f'<testSuite><testCase><resource name="{name}"/><incorrect><grammar xmlns="{_RNG}"/>'
+                        "</incorrect></testCase></testSuite>"
+                    )
+                )
+            )
+        )
+        for name in ("first", "first", "second")
+    ]
+    assert (rows[0] == rows[1], rows[0].sha256 != rows[2].sha256) == (True, True)
 
 
 @pytest.mark.oracle

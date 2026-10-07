@@ -207,4 +207,7 @@ document parsed with :func:`turbohtml.parse_xml`; the result carries a ``valid``
     False
     /order/qty datatype
 
+A RELAX NG schema split across files compiles the same way once you pass its path as ``base_url``; see
+:doc:`/how-to/validating`.
+
 With the string helpers in hand, continue to :doc:`tokenizing` to break whole documents into tokens.

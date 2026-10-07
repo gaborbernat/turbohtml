@@ -513,11 +513,6 @@ def test_rng_text_deriv_ref_and_nullable_ref() -> None:
     assert rng_ok(schema, "<e>words<x/></e>")
 
 
-def test_rng_unknown_pattern_element() -> None:
-    schema = f'<grammar xmlns="{R}"><start><externalRef href="other.rng"/></start></grammar>'
-    assert not rng_ok(schema, "<anything/>")
-
-
 def test_rng_nameless_define_skipped() -> None:
     schema = rgrammar('<start><element name="r"><text/></element></start><define><empty/></define>')
     assert rng_ok(schema, "<r>x</r>")
