@@ -400,7 +400,7 @@ def test_generation_html_provenance(name: str, origin: str) -> None:
 
 
 def test_generation_general_html_adapter() -> None:
-    assert ORACLES["html-fixpoint"].generate(random.Random(0)) == '<div id="x">x<a href="#x">x</a></div>'
+    assert ORACLES["html-fixpoint"].generate(random.Random(0)) == '<frameset id="x"><frame src="#x"></frameset>'
 
 
 def test_generation_cli_exports(tmp_path: Path) -> None:

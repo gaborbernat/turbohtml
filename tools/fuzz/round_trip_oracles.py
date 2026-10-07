@@ -63,6 +63,7 @@ from fuzz.html_list_oracles import (
     html_list_generate,
     html_list_seeds,
 )
+from fuzz.html_structure_generators import html_generate
 from fuzz.idna_nfc_oracles import (
     UnsupportedIdnaNfcCaseError,
     idna_nfc_check,
@@ -91,7 +92,6 @@ from fuzz.parser_byte_oracles import (
     parser_bytes_generate,
     parser_bytes_seeds,
 )
-from fuzz.structure_generators import html_generate
 from fuzz.xml_grammar_oracles import (
     UnsupportedXmlLiteralCaseError,
     xml_literal_check,

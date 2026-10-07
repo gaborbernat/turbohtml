@@ -1,0 +1,2 @@
+Expand HTML corpus generation with pinned Domato tag, attribute and value alternatives, document-only tag profiles, and
+formatting and SVG integration shapes.
