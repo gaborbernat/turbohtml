@@ -309,9 +309,9 @@ PyObject *th_url_host_canonical(PyObject *host, int kind) {
         Py_DECREF(ascii);
         return ipv4;
     }
-    if (PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: maybe_ipv4 only errors on the excluded allocation path */
-        Py_DECREF(ascii);   /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;        /* GCOVR_EXCL_LINE */
+    if (PyErr_Occurred()) {
+        Py_DECREF(ascii);
+        return NULL;
     }
     return ascii;
 }
@@ -459,14 +459,32 @@ static PyObject *domain_to_ascii(PyObject *host) {
 }
 
 /* The dotted-decimal form of `ascii` read by the WHATWG IPv4 parser (https://url.spec.whatwg.org/#concept-ipv4-parser),
-   or NULL with no error set when it is not an address, so the caller keeps the domain. */
+   or NULL with no error set when it is not an address, so the caller keeps the domain. Reject forbidden domain
+   characters before a serialization can reinterpret them as component delimiters. */
 static PyObject *maybe_ipv4(PyObject *ascii) {
+    static const unsigned char FORBIDDEN_DOMAIN[128] = {
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1,
+    };
     Py_ssize_t len = PyUnicode_GET_LENGTH(ascii);
     if (len == 0) {
         return NULL;
     }
     int kind = PyUnicode_KIND(ascii);
     const void *data = PyUnicode_DATA(ascii);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 codepoint = PyUnicode_READ(kind, data, index);
+        if (codepoint < 0x80 && FORBIDDEN_DOMAIN[codepoint]) {
+            PyErr_SetString(PyExc_ValueError, "host contains a forbidden domain code point");
+            return NULL;
+        }
+    }
+    Py_UCS4 first = PyUnicode_READ(kind, data, 0);
+    if (first < '0' || first > '9') {
+        return NULL;
+    }
     Py_UCS4 *cp = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
     if (cp == NULL) {            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */

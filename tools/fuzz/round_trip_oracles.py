@@ -34,6 +34,7 @@ from functools import cache, partial
 from itertools import pairwise, starmap
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
+from urllib.parse import urlsplit
 
 from fuzz.css_custom_oracles import (
     UnsupportedCssCustomCaseError,
@@ -148,6 +149,7 @@ from turbohtml.query import compile as compile_selector
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
+    from urllib.parse import SplitResult
 
 __all__ = [
     "MAX_INPUT",
@@ -172,6 +174,7 @@ __all__ = [
     "selector_entry_check",
     "span_check",
     "style_check",
+    "url_reparse_check",
     "xml_check",
     "xpath_entry_check",
 ]
@@ -560,6 +563,34 @@ def _idna_nfc_check(case: str) -> str | None:
 def normalize_url_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
     """URL normalization promises a stable representation after one successful pass."""
     return fixpoint_check(text, normalize, numeric=False)
+
+
+def url_reparse_check(text: str, normalize: Callable[[str], str] = normalize_url) -> str | None:
+    """Preserve delimiter presence when checking serialization through a reference split."""
+    try:
+        normalized: Final = normalize(text)
+        parts: Final = urlsplit(normalized)
+    except ValueError as error:
+        raise OutOfScopeError(str(error)) from error
+    recomposed: Final = _url_recompose(parts, normalized)
+    if recomposed != normalized:
+        return f"split/recompose changes normalized URL: {_divergence(normalized, recomposed)}"
+    try:
+        reparsed: Final = normalize(recomposed)
+    except ValueError:
+        return "rejects recomposed output"
+    return None if reparsed == normalized else f"reparse changes normalized URL: {_divergence(normalized, reparsed)}"
+
+
+def _url_recompose(parts: SplitResult, text: str) -> str:
+    body: Final = text[len(parts.scheme) + 1 :] if parts.scheme else text
+    return "".join((
+        f"{parts.scheme}:" if parts.scheme else "",
+        f"//{parts.netloc}" if body.startswith("//") else "",
+        parts.path,
+        f"?{parts.query}" if "?" in body.partition("#")[0] else "",
+        f"#{parts.fragment}" if "#" in body else "",
+    ))
 
 
 def clean_url_check(text: str, clean: Callable[[str], str | None] = clean_url) -> str | None:
@@ -2151,6 +2182,17 @@ def _normalize_url_controls() -> dict[str, bool]:
     }
 
 
+def _url_reparse_controls() -> dict[str, bool]:
+    return {
+        "stable uppercased scheme": url_reparse_check("raw", lambda _text: "HTTPS://example.test/") is not None,
+        "changes after recomposition": url_reparse_check(
+            "raw", lambda text: "https://example.test/" if text == "raw" else "https://changed.test/"
+        )
+        is not None,
+        "rejects recomposed output": url_reparse_check("raw", _reject_url_output) is not None,
+    }
+
+
 def _reject_url_output(text: str) -> str:
     if text == "raw":
         return "https://example.org/"
@@ -2371,6 +2413,7 @@ ORACLES: Final[dict[str, Oracle]] = {
     "normalize-url-fixpoint": Oracle(
         normalize_url_check, _generate_url, _seeds_url, _normalize_url_controls, Floor(100, 0.5)
     ),
+    "url-split-reparse": Oracle(url_reparse_check, _generate_url, _seeds_url, _url_reparse_controls, Floor(100, 0.5)),
     "idna-host": Oracle(idna_host_check, _generate_idna_host, _idna_host_seeds, _idna_host_controls, Floor(100, 0.95)),
     "idna-nfc": Oracle(_idna_nfc_check, idna_nfc_generate, idna_nfc_seeds, idna_nfc_controls, Floor(100, 1)),
     "clean-url-fixpoint": Oracle(clean_url_check, _generate_url, _seeds_url, _clean_url_controls, Floor(100, 0.25)),

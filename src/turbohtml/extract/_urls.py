@@ -76,7 +76,7 @@ class UrlCleaning:
         fragment can address content (``#page2``, text fragments).
     :param language: an ISO 639-1 code; :func:`clean_url` and :func:`extract_links` then reject URLs whose language
         markers (a leading path segment such as ``/de/``, a ``lang``/``language`` query parameter, or an anchor's
-        ``hreflang``) point at another language. :func:`normalize_url` never rejects, so it ignores this field.
+        ``hreflang``) point at another language. :func:`normalize_url` ignores this field.
     :param query_allow: when set, keep only these query parameters (matched case-insensitively against the decoded
         name), the ``w3lib.url.url_query_cleaner`` keep-list; a listed parameter survives even when it is a known
         tracker. Mutually exclusive with ``strict``, which is itself an allowlist.
@@ -141,7 +141,7 @@ def normalize_url(url: str, options: UrlCleaning | None = None, /) -> str:
     and a fragment shaped like a query string is scrubbed the same way. Unlike ``courlan``, repeated slashes are kept
     (the spec preserves them) and punycode is the output form, not the input form.
 
-    A Unicode host longer than 16384 code points, or holding a code point UTS #46 disallows in a domain (a C0/C1
+    A Unicode host longer than 16384 code points, or holding a code point UTS #46 disallows in a domain (a C1
     control, a noncharacter), keeps its lowercased Unicode form instead of punycode. The cap bounds the domain-to-ASCII
     step, whose combining-mark reorder and punycode encoder are quadratic in the host length. The WHATWG standard
     leaves overlong labels undefined (`whatwg/url#824 <https://github.com/whatwg/url/issues/824>`_), and DNS caps a
@@ -152,7 +152,8 @@ def normalize_url(url: str, options: UrlCleaning | None = None, /) -> str:
     :returns: the normalized URL.
     :raises TypeError: if ``url`` is not a ``str``.
     :raises ValueError: if the URL cannot be split into components (e.g. an unclosed IPv6 bracket) or carries a
-        character that cannot be percent-encoded (a lone surrogate).
+        forbidden domain character after host decoding or IDNA mapping, or a character that cannot be percent-encoded
+        (a lone surrogate).
     """
     return _url_normalize(url, *_knobs(options or _DEFAULT))
 
