@@ -48,6 +48,18 @@ jobs:
         env:
           UV_PYTHON_PREFERENCE: only-managed
           COV_GCOV: ${{ matrix.cov }}
+      - name: Report failed selector branches
+        if: ${{ failure() && runner.os == 'macOS' && contains(fromJSON('["3.10","3.11","3.12","3.13","3.14"]'), matrix.py) }}
+        run: |
+          xcrun clang --version
+          xcode-select -p
+          cat ".tox/$TOX_ENV/cbuild/meson-info/intro-compilers.json"
+          ".tox/$TOX_ENV/bin/gcovr" ".tox/$TOX_ENV/cbuild" --root "$PWD" \
+            --filter 'src/turbohtml/_c/css/select/selector.c' \
+            --gcov-executable 'xcrun llvm-cov gcov' --json ".tox/$TOX_ENV/tmp/selector-coverage.json"
+          jq '[.files[].lines[] | select(.line_number == 379)]' ".tox/$TOX_ENV/tmp/selector-coverage.json"
+        env:
+          TOX_ENV: ${{ matrix.py }}
   pypy:
     # PyPy stands outside the test matrix because it runs no coverage gate: gcovr reaches cpyext only through lxml,
     # which publishes no PyPy wheels, and a cpyext build has no gcov to feed it. Both gates run on the matrix above.
