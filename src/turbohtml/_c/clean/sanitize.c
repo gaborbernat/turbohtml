@@ -4945,7 +4945,8 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
     Py_DECREF(s.re_search);
     if (failed) {
         th_tree_free(s.tree);
-        return NULL;
+        /* a callback or Python API call sets its own exception; a failed tree allocation sets none */
+        return PyErr_Occurred() ? NULL : PyErr_NoMemory(); /* GCOVR_EXCL_BR_LINE: allocation failure */
     }
     if (retained_source == NULL) {
         return wrap_fresh_tree_node(PyModule_GetState(module), s.tree, root);
