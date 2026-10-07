@@ -87,6 +87,17 @@ static inline void node_guard_end(node_guard *guard) {
     Py_DECREF(guard->second);
 }
 
+/* Moving a node into another tree rebinds its handle and node under the owner's lock, so a caller that holds no tree
+   lock reads the two together here. Returns a new reference to the handle. */
+static inline PyObject *node_owner_pair(NodeObject *self, th_node **node) {
+    node_guard guard;
+    node_guard_begin(&guard, self, NULL);
+    *node = self->node;
+    PyObject *handle = Py_NewRef(self->handle);
+    node_guard_end(&guard);
+    return handle;
+}
+
 #define TH_NODE_API(storage, result_type, name, parameters, arguments, body_parameters, owner, other)                  \
     static result_type name##_guarded_body body_parameters;                                                            \
     storage result_type name parameters {                                                                              \
@@ -103,6 +114,10 @@ static inline PyObject *node_owner_ref(NodeObject *self) {
 }
 static inline int node_owned_by(NodeObject *self, PyObject *handle) {
     return self->handle == handle;
+}
+static inline PyObject *node_owner_pair(NodeObject *self, th_node **node) {
+    *node = self->node;
+    return Py_NewRef(self->handle);
 }
 #define TH_NODE_API(storage, result_type, name, parameters, arguments, body_parameters, owner, other)                  \
     storage result_type name body_parameters

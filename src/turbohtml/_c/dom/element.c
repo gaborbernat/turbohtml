@@ -2971,8 +2971,9 @@ static int import_all(PyObject *self, PyObject *list) {
 
 /* Append one node that is not a DocumentFragment as parent's last child: the same imports and checks as gathering it
    into a list (see gather_insert), without the list or the scratch array. A foreign node is imported first, which
-   suspends the caller's critical section, and every check below then reads the tree afresh, so one import is enough.
-   The imported copy is fresh and nothing links to it, so it needs no ancestor walk. Returns 0, or -1 with an exception.
+   suspends the caller's critical section, so another thread can move it again before the section resumes; the import
+   repeats until the node belongs to this tree, and every check below then reads the tree afresh. The imported copy is
+   fresh and nothing links to it, so it needs no ancestor walk. Returns 0, or -1 with an exception.
  */
 static int append_one(PyObject *self, th_node *parent, PyObject *item) {
     if (!PyObject_TypeCheck(item, (PyTypeObject *)state_of(self)->node_type)) {
@@ -2984,10 +2985,16 @@ static int append_one(PyObject *self, th_node *parent, PyObject *item) {
         PyErr_SetString(PyExc_TypeError, "a Document cannot be inserted as a child");
         return -1;
     }
-    th_tree *tree = tree_of(self);
-    int foreign = !node_owned_by(child, ((NodeObject *)self)->handle);
-    if (foreign && import_node(((NodeObject *)self)->handle, child) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
-        return -1;                                                             /* GCOVR_EXCL_LINE: OOM path */
+    /* the caller locked this handle with parent in its tree; self can move to another tree while an import suspends
+       that lock, so the import and the checks stay on the handle the caller locked */
+    PyObject *handle = ((NodeObject *)self)->handle;
+    th_tree *tree = ((HandleObject *)handle)->tree;
+    int foreign = 0;
+    while (!node_owned_by(child, handle)) {
+        foreign = 1;
+        if (import_node(handle, child) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
+            return -1;                            /* GCOVR_EXCL_LINE: OOM path */
+        }
     }
     th_node *node = child->node;
     const char *message = NULL;
@@ -3000,7 +3007,7 @@ static int append_one(PyObject *self, th_node *parent, PyObject *item) {
         PyErr_SetString(PyExc_ValueError, message);
         return -1;
     }
-    handle_drop_index(((NodeObject *)self)->handle);
+    handle_drop_index(handle);
     if (!foreign) {
         th_node_remove_observed(tree, node);
     }

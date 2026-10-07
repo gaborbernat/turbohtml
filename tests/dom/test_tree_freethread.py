@@ -21,6 +21,7 @@ import pytest
 import turbohtml
 from turbohtml.clean import sanitize_node
 from turbohtml.conformance import check
+from turbohtml.mutations import MutationObserver
 from turbohtml.query import Query
 from turbohtml.transform import Transform
 
@@ -722,3 +723,39 @@ def test_concurrent_sibling_memo_and_adoption(*, move_parent: bool) -> None:
                 (parent if index % 2 else destinations[1]).append(children[0])
 
     _run(reader, mover)
+
+
+def test_concurrent_extends_of_one_shared_child_keep_every_tree_intact() -> None:
+    child: Final = turbohtml.Element("b", children=[turbohtml.Element("i")])
+    parents: Final = [turbohtml.Element("p") for _ in range(4)]
+    start: Final = threading.Barrier(len(parents))
+
+    def mover(parent: turbohtml.Element) -> None:
+        start.wait()
+        for _ in range(2_000):
+            parent.extend([child])  # another thread can move child while this import waits for its source tree
+
+    _run(*(lambda parent=parent: mover(parent) for parent in parents))
+    assert sorted(parent.serialize() for parent in parents) == ["<p></p>"] * 3 + ["<p><b><i></i></b></p>"]
+
+
+def test_concurrent_traversal_and_observer_setup_while_the_root_moves_is_memory_safe() -> None:
+    root: Final = turbohtml.Element("section", children=[turbohtml.Element("b")])
+    destinations: Final = [turbohtml.Element("main"), turbohtml.Element("aside")]
+    start: Final = threading.Barrier(2)
+
+    def builder() -> None:
+        start.wait()
+        for _ in range(2_000):
+            # each reads root's tree handle and node, which a move rebinds together
+            turbohtml.NodeIterator(root).next_node()
+            turbohtml.TreeWalker(root).first_child()
+            MutationObserver().observe(root, child_list=True)
+
+    def mover() -> None:
+        start.wait()
+        for index in range(2_000):
+            destinations[index % 2].append(root)
+
+    _run(builder, mover)
+    assert destinations[1].children == (root,)

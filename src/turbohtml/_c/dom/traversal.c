@@ -344,17 +344,17 @@ static PyObject *tree_walker_previous_node(PyObject *op, PyObject *Py_UNUSED(ign
 }
 
 /* Reject a non-Node or a node from another tree so current stays a live pointer into the walker's own tree. */
-static int check_same_tree(PyObject *op, PyObject *value, module_state *state, NodeObject **out) {
+static int check_same_tree(PyObject *op, PyObject *value, module_state *state, th_node **out) {
     if (!is_node(value, state)) {
         PyErr_Format(PyExc_TypeError, "current_node must be a Node, not %.80s", Py_TYPE(value)->tp_name);
         return -1;
     }
-    NodeObject *node = (NodeObject *)value;
-    if (node->handle != ((TreeWalkerObject *)op)->handle) {
+    PyObject *handle = node_owner_pair((NodeObject *)value, out);
+    Py_DECREF(handle); /* the walker's own reference keeps the tree alive when the two match */
+    if (handle != ((TreeWalkerObject *)op)->handle) {
         PyErr_SetString(PyExc_ValueError, "current_node must belong to the walker's own tree");
         return -1;
     }
-    *out = node;
     return 0;
 }
 
@@ -382,11 +382,11 @@ static int tree_walker_set_current(PyObject *op, PyObject *value, void *Py_UNUSE
         PyErr_SetString(PyExc_TypeError, "cannot delete current_node");
         return -1;
     }
-    NodeObject *node;
+    th_node *node;
     if (check_same_tree(op, value, state_of(op), &node) < 0) {
         return -1;
     }
-    ((TreeWalkerObject *)op)->current = node->node;
+    ((TreeWalkerObject *)op)->current = node;
     return 0;
 }
 
@@ -412,9 +412,8 @@ static PyObject *tree_walker_new(PyTypeObject *type, PyObject *args, PyObject *k
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    self->handle = Py_NewRef(root->handle);
-    self->root = root->node;
-    self->current = root->node;
+    self->handle = node_owner_pair(root, &self->root);
+    self->current = self->root;
     self->what_to_show = what_to_show;
     self->filter = filter == Py_None ? NULL : Py_NewRef(filter);
     self->active = 0;
@@ -658,9 +657,8 @@ static PyObject *node_iterator_new(PyTypeObject *type, PyObject *args, PyObject 
     if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    self->handle = Py_NewRef(root->handle);
-    self->cursor.root = root->node;
-    self->cursor.reference = root->node;
+    self->handle = node_owner_pair(root, &self->cursor.root);
+    self->cursor.reference = self->cursor.root;
     self->cursor.candidate = NULL;
     self->cursor.reference_before = 1;
     self->what_to_show = what_to_show;
