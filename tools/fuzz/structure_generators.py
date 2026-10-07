@@ -17,13 +17,13 @@ if TYPE_CHECKING:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Keep corpus files as materialized inputs rather than oracle mode strings."""
-    parser = argparse.ArgumentParser()
+    parser: Final = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--count", type=int, default=64)
     parser.add_argument("--budget", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--sweep", action="store_true")
-    args = parser.parse_args(argv)
+    args: Final = parser.parse_args(argv)
     if args.count < 1:
         parser.error("count must be positive")
     try:
@@ -45,8 +45,8 @@ def compile_grammar(productions: Sequence[Production], root: str) -> Grammar:
     rules: Final[dict[str, list[Production]]] = {}
     names: Final[set[str]] = set()
     for production in productions:
-        if production.name in names or production.nodes < 1 or production.height < 0:
-            msg = "production names must be unique, node costs positive, and heights nonnegative"
+        if production.name in names or production.nodes < 0 or production.height < 0:
+            msg = "production names must be unique, node costs nonnegative, and heights nonnegative"
             raise GrammarError(msg)
         names.add(production.name)
         rules.setdefault(production.symbol, []).append(production)
@@ -143,11 +143,22 @@ def _route_cost(grammar: Grammar, route: tuple[tuple[Production, int], ...]) -> 
 
 
 def generate(
-    grammar: Grammar, rng: random.Random, budget: int = 30, *, leaf: bool = False, force: str | None = None
+    grammar: Grammar,
+    rng: random.Random,
+    budget: int | GenerationBudget = 30,
+    *,
+    leaf: bool = False,
+    force: str | None = None,
 ) -> Generated:
-    """Reserve minimum sibling costs so a selected branch cannot starve later children."""
+    """Reserve the canonical minimum-node derivation and its expansion steps."""
     route: Final = _route(grammar, force) if force is not None else ()
-    if budget < (_route_cost(grammar, route)[0] if route else grammar.minimum[grammar.root][0]):
+    remaining = (
+        (budget.nodes, budget.steps)
+        if isinstance(budget, GenerationBudget)
+        else (budget, budget * max(cost[1] for cost in grammar.minimum.values()))
+    )
+    required: Final = _route_cost(grammar, route) if route else grammar.minimum[grammar.root]
+    if any(available < needed for available, needed in zip(remaining, required, strict=True)):
         msg = "budget cannot complete the root"
         raise BudgetError(msg)
     pending: Final[list[tuple[bytes | Reference | Identifier, int, bool, tuple[tuple[Production, int], ...]]]] = [
@@ -156,7 +167,6 @@ def generate(
     output: Final[list[bytes]] = []
     fired: Final[list[str]] = []
     bindings: Final = _Bindings({}, set(), set())
-    remaining = budget
     depth = 0
     while pending:
         part, level, minimal, path = pending.pop()
@@ -165,14 +175,12 @@ def generate(
         elif isinstance(part, Identifier):
             output.append(_identifier(part, bindings))
         else:
-            available: Final = remaining - sum(
-                _route_cost(grammar, route)[0] if route else grammar.minimum[item.symbol][0]
-                for item, _, _, route in pending
-                if isinstance(item, Reference)
+            chosen, index, minimal = _choose(
+                grammar, rng, (part, level, minimal, path), _available(grammar, pending, remaining)
             )
-            chosen, index, minimal = _choose(grammar, rng, (part, level, minimal, path), available)
-            remaining -= chosen.nodes
-            depth = max(depth, level + chosen.height)
+            remaining = remaining[0] - chosen.nodes, remaining[1] - 1
+            if chosen.nodes:
+                depth = max(depth, level + chosen.height)
             fired.append(chosen.name)
             pending.extend(
                 (
@@ -186,7 +194,26 @@ def generate(
     if missing := bindings.references - bindings.definitions:
         msg = f"undefined identifiers: {sorted(missing)}"
         raise GrammarError(msg)
-    return Generated(b"".join(output), budget - remaining, depth, tuple(fired), tuple(sorted(bindings.values.items())))
+    return Generated(
+        b"".join(output),
+        (budget.nodes if isinstance(budget, GenerationBudget) else budget) - remaining[0],
+        depth,
+        tuple(fired),
+        tuple(sorted(bindings.values.items())),
+    )
+
+
+def _available(
+    grammar: Grammar,
+    pending: list[tuple[bytes | Reference | Identifier, int, bool, tuple[tuple[Production, int], ...]]],
+    remaining: tuple[int, int],
+) -> tuple[int, int]:
+    reserved: Final = [
+        _route_cost(grammar, route) if route else grammar.minimum[item.symbol]
+        for item, _, _, route in pending
+        if isinstance(item, Reference)
+    ]
+    return remaining[0] - sum(cost[0] for cost in reserved), remaining[1] - sum(cost[1] for cost in reserved)
 
 
 def _identifier(part: Identifier, bindings: _Bindings) -> bytes:
@@ -209,20 +236,22 @@ def _choose(
     grammar: Grammar,
     rng: random.Random,
     frame: tuple[Reference, int, bool, tuple[tuple[Production, int], ...]],
-    available: int,
+    available: tuple[int, int],
 ) -> tuple[Production, int, bool]:
     part, level, minimal, path = frame
     if path:
         return path[0][0], path[0][1], True
     eligible: Final = [
-        production for production in grammar.rules[part.symbol] if _cost(production, grammar.minimum)[0] <= available
+        production
+        for production in grammar.rules[part.symbol]
+        if all(cost <= limit for cost, limit in zip(_cost(production, grammar.minimum), available, strict=True))
     ]
     if minimal or rng.random() >= 0.75 ** (level + 1):
         return min(eligible, key=lambda production: _cost(production, grammar.minimum)), -1, True
     return rng.choice(eligible), -1, False
 
 
-def generation_sweep(grammar: Grammar, minimum: int = 1, budget: int = 30) -> tuple[Generated, ...]:
+def generation_sweep(grammar: Grammar, minimum: int = 1, budget: int | GenerationBudget = 30) -> tuple[Generated, ...]:
     """Force each declared production through a minimum-cost root path."""
     if minimum < 1:
         msg = "production floors must be positive"
@@ -263,6 +292,14 @@ class _Bindings:
     values: dict[str, str]
     definitions: set[str]
     references: set[str]
+
+
+@dataclass(frozen=True)
+class GenerationBudget:
+    """Bound lexical recursion separately from materialized DOM nodes."""
+
+    nodes: int
+    steps: int
 
 
 @dataclass(frozen=True)
@@ -472,6 +509,7 @@ _HTML_GRAMMAR: Final = html_grammar()
 __all__ = [
     "BudgetError",
     "Generated",
+    "GenerationBudget",
     "Grammar",
     "GrammarError",
     "Identifier",
