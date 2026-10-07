@@ -758,6 +758,9 @@ typedef struct engine {
     const char *error;
     int py_error;
     int owns_model;
+#ifdef TH_OPERATION_LIMIT
+    size_t operations; /* stylesheet elements compiled, then instructions applied in one run */
+#endif
 } engine;
 
 typedef struct {
@@ -928,6 +931,19 @@ static int fail_py(engine *eng) {
     eng->py_error = 1;
     return -1;
 }
+
+#ifdef TH_OPERATION_LIMIT
+/* Fuzz builds pass -DTH_OPERATION_LIMIT so a super-linear stylesheet stops with a ValueError instead of a timeout that
+   hides other findings. libxslt charges each parsed instruction (xslt.c xsltParseSequenceConstructor) and each
+   instantiated one (transform.c xsltApplySequenceConstructor) the same way; release builds compile none of this. */
+static int charge_operation(engine *eng, const char *phase) {
+    if (++eng->operations <= TH_OPERATION_LIMIT) {
+        return 0;
+    }
+    PyErr_Format(PyExc_ValueError, "xslt: %s exceeded the operation limit of %d", phase, TH_OPERATION_LIMIT);
+    return fail_py(eng);
+}
+#endif
 
 /* ---- compile a match pattern to an equivalent absolute expression --------- */
 
@@ -4833,6 +4849,11 @@ static int instantiate_body(engine *eng, th_node *body, th_node *out_parent) {
             if (is_xsl_dynamic(eng, child, "param") || is_xsl_dynamic(eng, child, "sort")) {
                 continue;
             }
+#ifdef TH_OPERATION_LIMIT
+            if ((rc = charge_operation(eng, "applying the stylesheet")) < 0) {
+                break;
+            }
+#endif
             rc = instantiate_one_dynamic(eng, child, out_parent);
         }
     } else {
@@ -4842,6 +4863,11 @@ static int instantiate_body(engine *eng, th_node *body, th_node *out_parent) {
             if (is_xsl_fast(eng, child, "param") || is_xsl_fast(eng, child, "sort")) {
                 continue;
             }
+#ifdef TH_OPERATION_LIMIT
+            if ((rc = charge_operation(eng, "applying the stylesheet")) < 0) {
+                break;
+            }
+#endif
             rc = instantiate_one_fast(eng, child, out_parent);
         }
     }
@@ -5625,6 +5651,9 @@ static int engine_start_run(engine *eng, const engine *model, th_tree *src_tree,
     eng->ns_counter = 0;
     eng->gen_counter = 0;
     eng->depth = 0;
+#ifdef TH_OPERATION_LIMIT
+    eng->operations = 0;
+#endif
     eng->number_count_match = (xslt_number_match){0};
     eng->number_from_match = (xslt_number_match){0};
     eng->explicit_any = (xslt_number_prefix){0};
@@ -6099,6 +6128,11 @@ static int precompile_stylesheet(engine *eng, th_node *root) {
         if (node->type != TH_NODE_ELEMENT) {
             continue;
         }
+#ifdef TH_OPERATION_LIMIT
+        if (charge_operation(eng, "compiling the stylesheet") < 0) {
+            return -1;
+        }
+#endif
         if (node_is_xsl(eng, node)) {
             if (precompile_instruction(eng, node) < 0) {
                 return -1;

@@ -147,6 +147,11 @@ ship this build. The ``preprocess-identity`` environment checks that its branche
 byte-identical, and the ``scalar`` environment runs the suite with ``-Dforce_scalar=true``, which swaps the SSE2 and
 NEON scan loops for the portable SWAR ones.
 
+The fuzz environments compile the extension with ``-DTH_OPERATION_LIMIT=100000``. XPath evaluation, XSLT stylesheet
+compilation and XSLT application then count their steps and raise ``ValueError`` past the limit, so a known super-linear
+input fails fast instead of timing out and hiding the next find. Release builds leave the macro undefined and compile no
+counter. ``fuzz-smoke`` runs ``tests/fuzz_build/`` to check that the limit stops those inputs.
+
 The in-process driver runs each input under pymalloc and again under ``PYTHONMALLOC=malloc``, because AddressSanitizer
 cannot see an over-read that stays inside a pymalloc pool. The deep run splits ``--minutes`` between the two passes.
 Both environments pin ``PYTHONHASHSEED=0``. ``--rng-seed`` (default ``$FUZZ_RNG_SEED``, else 0) fixes the mutation

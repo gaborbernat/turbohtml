@@ -403,6 +403,7 @@ run.omit = [
   "tests/conformance/test_cssom_jsdom_conformance.py",        # differential oracle: skips when the node/jsdom toolchain is absent
   "tests/conformance/test_dom_jsdom_differential.py",
   "tests/conformance/test_xml_conformance.py",
+  "tests/fuzz_build/*",                                       # needs the operation limit only the fuzz-smoke build compiles in
 ]
 run.parallel = true
 run.plugins = [
