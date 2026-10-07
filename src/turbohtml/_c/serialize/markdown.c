@@ -161,6 +161,7 @@ enum md_leave {
     MD_LEAVE_CONVERT, /* hand the rendered children to the converter */
     MD_LEAVE_CELL,    /* collapse the cell onto its row */
     MD_LEAVE_TABLE,
+    MD_LEAVE_BLOCKQUOTE, /* mark a quote that opened no block of its own */
 };
 
 enum md_table_phase {
@@ -2977,8 +2978,11 @@ static void md_render_pre(md_ctx *ctx, th_node *node) {
         }
         ctx->line_has_content = 1;
         md_newline(ctx);
-        md_emit_pre_text(ctx, text, end);
-        md_newline(ctx);
+        /* an empty body takes no content line, since a blank one reads as a newline of code */
+        if (text_len > 0) {
+            md_emit_pre_text(ctx, text, end);
+            md_newline(ctx);
+        }
         for (Py_ssize_t index = 0; index < fence; index++) {
             sbuf_putc(&ctx->out, '`');
         }
@@ -3077,7 +3081,7 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
         }
         int saved_tight = ctx->tight;
         ctx->tight = 0;
-        md_frame *frame = md_push(ctx, node, MD_WALK_BLOCK, MD_LEAVE_NONE);
+        md_frame *frame = md_push(ctx, node, MD_WALK_BLOCK, MD_LEAVE_BLOCKQUOTE);
         if (frame != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             frame->prefix_base = base;
             frame->saved_tight = saved_tight;
@@ -3173,6 +3177,15 @@ static void md_leave(md_ctx *ctx) {
         break;
     case MD_LEAVE_TABLE:
         md_leave_table(ctx, frame->table);
+        break;
+    case MD_LEAVE_BLOCKQUOTE:
+        /* a leading quote writes its marker only with its first block; CommonMark
+           reads a lone ">" as an empty quote, so keep one when no block came */
+        if (!ctx->started) {
+            ctx->started = 1;
+            md_write_blank_prefix(ctx);
+            ctx->pending_loose = 1;
+        }
         break;
     default:
         break;
