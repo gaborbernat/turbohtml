@@ -1107,7 +1107,9 @@ def js_names_check(source: str, names: JsNames, minify: Callable[[str, JSMinify]
     return None
 
 
-def css_semantics_check(markup: str, minify: Callable[[str], str] = minify_css) -> str | None:
+def css_semantics_check(
+    markup: str, minify: Callable[[str], str] = minify_css, *, stylesheet: str | None = None
+) -> str | None:
     """
     Require ``minify_css`` to keep every element's computed style and every selector's match set.
 
@@ -1118,8 +1120,7 @@ def css_semantics_check(markup: str, minify: Callable[[str], str] = minify_css) 
     own and must select the same elements.
     """
     document = parse(markup)
-    if (style := document.select_one("style")) is None:
-        raise OutOfScopeError
+    style = _css_style(document, stylesheet)
     sheet = style.text
     elements = list(document.iter_elements())
     before = [computed_style(element) for element in elements]
@@ -1143,6 +1144,14 @@ def css_semantics_check(markup: str, minify: Callable[[str], str] = minify_css) 
         except SelectorSyntaxError:
             return "minified selector does not parse"
     return None
+
+
+def _css_style(document: Document, stylesheet: str | None) -> Element:
+    if (style := document.select_one("style")) is None:
+        raise OutOfScopeError
+    if stylesheet is not None:
+        style.text = stylesheet
+    return style
 
 
 def _value_verdict(name: str, before: str, after: str) -> str | None:
