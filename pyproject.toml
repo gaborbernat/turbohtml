@@ -99,6 +99,7 @@ test = [
   "pytest-mock>=3.16",
   "pytest-run-parallel>=0.10", # runs each test in many threads to surface free-threaded data races
   "tenacity>=9.1.4",           # the retry policy wrapping every tools/ HTTP fetch (httpfetch.py)
+  "tinycss2>=1.5.1",           # preserve nested CSS contexts during structural reduction
   "typing-extensions>=4.16",
 ]
 type = [
