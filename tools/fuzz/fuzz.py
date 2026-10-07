@@ -32,7 +32,10 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
 _FUZZ: Final[Path] = _ROOT / "tools" / "fuzz"
@@ -47,10 +50,12 @@ _ALLOCATORS: Final[tuple[str, ...]] = ("pymalloc", "malloc")
 _WPT: Final = "tools/fuzz-data/wpt"
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Return 0 when every harness stays clean, nonzero on the first sanitizer abort or soft finding."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("smoke", "deep", "oracle", "round-trip", "release-diff"), default="smoke")
+    parser.add_argument(
+        "--mode", choices=("smoke", "deep", "oracle", "round-trip", "release-diff", "triage"), default="smoke"
+    )
     parser.add_argument(
         "--minutes", type=float, default=1.0, help="deep-mode budget per in-process target, split across the allocators"
     )
@@ -64,9 +69,12 @@ def main() -> int:
     parser.add_argument("--build", action="store_true", help="build the ASan extension here (tox builds it otherwise)")
     parser.add_argument("--extra-corpus", type=Path, default=None, help="a second seed directory (vendored test data)")
     parser.add_argument("--skip-inprocess", action="store_true", help="only run the standalone C harnesses")
-    args, passthrough = parser.parse_known_args()
-    if passthrough and args.mode not in {"round-trip", "release-diff"}:
+    args, passthrough = parser.parse_known_args(argv)
+    if passthrough and args.mode not in {"round-trip", "release-diff", "triage"}:
         parser.error(f"unrecognized arguments: {' '.join(passthrough)}")
+
+    if args.mode == "triage":
+        return subprocess.run([sys.executable, str(_FUZZ / "triage.py"), *passthrough], check=False).returncode
 
     if args.build:
         _build_extension(Path(tempfile.mkdtemp(prefix="th-fuzz-build-")))
