@@ -150,3 +150,34 @@ def test_rng_inline_foreign_annotation_preserves_explicit_name_class(engine: Mod
     )
     case: Final = engine.Case(0, schema, compiles=True, documents=(("<v/>", True), ("<wrong/>", False)))
     assert [row.actual == row.expected for row in engine.compare(case)] == [True] * 6
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    ("pattern", "documents"),
+    [
+        pytest.param(
+            '<element name="v"><interleave><element name="a"><empty/></element>'
+            '<doc:annotation><element name="a"><empty/></element></doc:annotation>'
+            '<element name="b"><empty/></element></interleave></element>',
+            (("<v><a/><b/></v>", True), ("<v><a/><a/><b/></v>", False)),
+            id="interleave-annotation-conflict",
+        ),
+        pytest.param(
+            "<element><doc:annotation><name>wrong</name></doc:annotation><name>v</name><empty/></element>",
+            (("<v/>", True), ("<wrong/>", False)),
+            id="annotation-before-name-class",
+        ),
+    ],
+)
+def test_rng_inline_foreign_annotations_preserve_grammar_constraints(
+    engine: ModuleType,
+    pattern: str,
+    documents: tuple[tuple[str, bool], ...],
+) -> None:
+    schema: Final = (
+        '<grammar xmlns="http://relaxng.org/ns/structure/1.0" xmlns:doc="urn:documentation">'
+        f"<start>{pattern}</start></grammar>"
+    )
+    case: Final = engine.Case(0, schema, compiles=True, documents=documents)
+    assert [row.actual == row.expected for row in engine.compare(case)] == [True] * 6

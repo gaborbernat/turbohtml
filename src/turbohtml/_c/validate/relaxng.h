@@ -1107,6 +1107,7 @@ static pattern *rng_child_element(valctx *ctx, pattern *p, th_node *element) {
 
 static int rng_scan(th_schema *schema, th_node *container, int depth);
 static int rng_check_unused_refs(th_schema *schema, th_node *container);
+static th_node *rng_pattern_child(th_schema *schema, th_node *child);
 static void rng_prune_annotations(th_schema *schema, th_node *container);
 
 static int rng_compile(th_schema *schema) {
@@ -1115,17 +1116,18 @@ static int rng_compile(th_schema *schema) {
         PyErr_SetString(PyExc_ValueError, "RELAX NG schema root must use the structure namespace");
         return 0;
     }
-    rng_prune_annotations(schema, schema->root);
     th_tree *tree = schema->tree;
     schema->p_empty = pat_new(schema, P_EMPTY);
     schema->p_notallowed = pat_new(schema, P_NOTALLOWED);
     schema->p_text = pat_new(schema, P_TEXT);
     if (!u_eq_ascii(root_name.local, root_name.local_len, "grammar")) {
+        rng_prune_annotations(schema, schema->root);
         /* no defines, so no ref cycles; rng_build checks 4.10 and 7.4 inline instead of a second walk */
         schema->start = rng_build(schema, schema->root);
         return PyErr_Occurred() ? 0 : 1;
     }
-    for (th_node *child = schema->root->first_child; child != NULL; child = child->next_sibling) {
+    for (th_node *child = rng_pattern_child(schema, schema->root->first_child); child != NULL;
+         child = rng_pattern_child(schema, child->next_sibling)) {
         if (is_schema_el(schema, child, RNG_NS, "define")) {
             const th_node_attr *name = attr_exact(tree, child, "name", 4);
             if (name == NULL) {
@@ -1167,28 +1169,32 @@ static int rng_compile(th_schema *schema) {
 }
 
 /* Section 4.1 removes annotation subtrees before pattern and name-class construction. */
-static void rng_prune_annotations(th_schema *schema, th_node *container) {
-    th_node *child = container->first_child;
+static th_node *rng_pattern_child(th_schema *schema, th_node *child) {
     while (child != NULL) {
         th_node *next = child->next_sibling;
         if (child->type == TH_NODE_ELEMENT) {
             qname name = schema_direct_qname(schema, child);
-            if (!u_eq_ascii(name.uri, name.uri_len, RNG_NS)) {
-                th_node_remove(child);
-            } else {
-                rng_prune_annotations(schema, child);
+            if (u_eq_ascii(name.uri, name.uri_len, RNG_NS)) {
+                return child;
             }
+            th_node_remove(child);
         }
         child = next;
+    }
+    return NULL;
+}
+
+static void rng_prune_annotations(th_schema *schema, th_node *container) {
+    for (th_node *child = rng_pattern_child(schema, container->first_child); child != NULL;
+         child = rng_pattern_child(schema, child->next_sibling)) {
+        rng_prune_annotations(schema, child);
     }
 }
 
 /* Section 4.18 resolves names before 4.19 removes unused definitions. */
 static int rng_check_unused_refs(th_schema *schema, th_node *container) {
-    for (th_node *child = container->first_child; child != NULL; child = child->next_sibling) {
-        if (child->type != TH_NODE_ELEMENT) {
-            continue;
-        }
+    for (th_node *child = rng_pattern_child(schema, container->first_child); child != NULL;
+         child = rng_pattern_child(schema, child->next_sibling)) {
         if (is_schema_el(schema, child, RNG_NS, "ref")) {
             const th_node_attr *name = attr_exact(schema->tree, child, "name", 4);
             if (name == NULL) {
@@ -1212,10 +1218,8 @@ static int rng_scan_node(th_schema *schema, th_node *node, int depth);
 /* Checks 4.10, 4.19 and 7.4 on reachable patterns only: an unreachable <define> is never built, so it can neither
    crash nor blow up, and dead definitions add no compile cost. */
 static int rng_scan(th_schema *schema, th_node *container, int depth) {
-    for (th_node *child = container->first_child; child != NULL; child = child->next_sibling) {
-        if (child->type != TH_NODE_ELEMENT) {
-            continue;
-        }
+    for (th_node *child = rng_pattern_child(schema, container->first_child); child != NULL;
+         child = rng_pattern_child(schema, child->next_sibling)) {
         if (rng_scan_node(schema, child, depth) < 0) {
             return -1;
         }
@@ -1244,7 +1248,7 @@ static int rng_scan_node(th_schema *schema, th_node *node, int depth) {
         return rng_scan_define(schema, index, depth);
     }
     case RNG_SCAN_INTERLEAVE:
-        return rng_check_interleave_node(schema, node) < 0 ? -1 : rng_scan(schema, node, depth);
+        return rng_scan(schema, node, depth) < 0 ? -1 : rng_check_interleave_node(schema, node);
     case RNG_SCAN_ELEMENT:
         return rng_scan(schema, node, depth + 1);
     default:

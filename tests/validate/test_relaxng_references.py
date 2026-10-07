@@ -16,6 +16,9 @@ _NAMESPACE: Final = 'xmlns="http://relaxng.org/ns/structure/1.0"'
     [
         pytest.param('<ref name="missing"/>', id="start"),
         pytest.param('<element name="root"><ref name="missing"/></element>', id="element"),
+        pytest.param(
+            '<element name="root"><interleave><ref name="missing"/><empty/></interleave></element>', id="interleave"
+        ),
     ],
 )
 def test_relaxng_undefined_reference_rejects_compilation(count: int, pattern: str) -> None:
