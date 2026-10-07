@@ -86,7 +86,8 @@ commands = [
     # env (the "🔬 conformance" CI job). Deselect them here so the normal matrix never runs an oracle suite
     # without its oracle -- a missing oracle must error there, not skip silently in the matrix.
     "--ignore={tox_root}{/}tests{/}conformance",
-    # tests/fuzz_build checks the operation limit only the sanitizer fuzz build compiles in; fuzz-smoke runs it
+    # this build compiles neither the operation limit nor the -Dfuzzing=true allocation-failure hook that
+    # tests/fuzz_build needs; fuzz-smoke runs it
     "--ignore={tox_root}{/}tests{/}fuzz_build",
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],

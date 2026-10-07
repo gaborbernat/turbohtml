@@ -974,6 +974,34 @@ TH_NODE_API(, PyObject *, node_find, (PyObject * self, PyObject *args, PyObject 
     return result;
 }
 
+/* Build the element index an unbounded document-rooted tag query reads before the query
+   runs, and raise MemoryError when the build fails, where node_find_all would fall back to
+   a walk. The same check inside node_find_all cost find 430 instructions a call. Flattened:
+   as an out-of-line clone the build cost parse-inner 11,000 instructions a call more than on
+   main, where it inlines into node_find_all. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((flatten))
+#endif
+static int find_index_prebuild(PyObject *self, const query_t *query) {
+    if (query->limit >= 0 && query->limit <= 8) {
+        return 0;
+    }
+    PyObject *handle = ((NodeObject *)self)->handle;
+    int failed = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    HandleObject *handle_obj = (HandleObject *)handle;
+    if (!handle_obj->index_built && handle_index_usable(handle_obj, ((NodeObject *)self)->node) &&
+        query_is_indexed_tag(query)) {
+        failed = handle_build_index(handle_obj) < 0; /* GCOVR_EXCL_BR_LINE: the build fails only to allocate */
+    }
+    Py_END_CRITICAL_SECTION();
+    if (failed) {         /* GCOVR_EXCL_BR_LINE: the build fails only to allocate */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
+}
+
 TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObject *kwargs), (self, args, kwargs),
             (PyObject * self, PyObject *args, PyObject *kwargs), (NodeObject *)self,
             args != NULL && is_node(args, state_of(self)) ? (NodeObject *)args : NULL) {
@@ -986,6 +1014,10 @@ TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObj
         PyObject *result = find_with_text(self, &query, 1);
         free_query(&query);
         return result;
+    }
+    if (find_index_prebuild(self, &query) < 0) { /* GCOVR_EXCL_BR_LINE: the build fails only to allocate */
+        free_query(&query);                      /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     module_state *state = state_of(self);
     PyObject *handle = ((NodeObject *)self)->handle;
