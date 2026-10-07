@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import random
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final
 
-import html5lib
 from fuzz.structure_generators import (
     BudgetError,
     Generated,
@@ -27,11 +27,10 @@ from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 from typing_extensions import override
 
-from turbohtml import Node, parse_fragment
+from turbohtml import Element, Namespace, Node, Text, parse_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
-    from xml.etree.ElementTree import Element as XmlElement
+    from collections.abc import Callable, Iterator, Sequence
 
 MarkdownRecord = tuple[str, str, str, tuple[tuple[str, str], ...], int]
 _Meaning = tuple[str, tuple[tuple[str, str], ...], tuple["_Meaning", ...]]
@@ -102,9 +101,24 @@ def markdown_html_check(markup: str, render: Callable[[Node], str] = Node.to_mar
 
 
 def _html_meaning(markup: str) -> tuple[_Meaning, ...]:
-    return _flow(
-        _children(cast("XmlElement", html5lib.parseFragment(markup, namespaceHTMLElements=False)), preserve=False)
+    # read the tree to_markdown converts, so a parser that lags the WHATWG tree builder cannot pose as a lost meaning
+    return _flow(_children(_tree(parse_fragment(markup)), preserve=False))
+
+
+def _tree(node: Element) -> _TreeNode:
+    element: Final = _TreeNode(
+        node.tag if node.namespace is Namespace.HTML else f"{{{node.namespace.value}}}{node.tag}",
+        {name: node.attr(name) or "" for name in node.attrs},
     )
+    for child in node.children:
+        if isinstance(child, Text):
+            if element.children:
+                element.children[-1].tail += child.text
+            else:
+                element.text += child.text
+        elif isinstance(child, Element):
+            element.children.append(_tree(child))
+    return element
 
 
 def _flow(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
@@ -135,7 +149,7 @@ def _block_end(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     return (*records[: end - 1], *((("#text", (("value", text),), ()),) if text else ()))
 
 
-def _children(element: XmlElement, *, preserve: bool) -> tuple[_Meaning, ...]:
+def _children(element: _TreeNode, *, preserve: bool) -> tuple[_Meaning, ...]:
     records: Final[list[_Meaning]] = list(_text(element.text, preserve=preserve, keep=element.tag in _INLINE_HOSTS))
     for child in element:
         records.extend(_element(child, element.tag, preserve=preserve))
@@ -170,8 +184,8 @@ def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> 
     return tuple(output)
 
 
-def _element(element: XmlElement, parent: str, *, preserve: bool) -> tuple[_Meaning, ...]:
-    if not isinstance(element.tag, str) or element.tag in {"script", "style", "head", "meta", "title"}:
+def _element(element: _TreeNode, parent: str, *, preserve: bool) -> tuple[_Meaning, ...]:
+    if element.tag in {"script", "style", "head", "meta", "title"}:
         return ()
     _check_profile(element, parent)
     children: Final = _children(element, preserve=preserve or element.tag == "pre")
@@ -187,22 +201,22 @@ def _element(element: XmlElement, parent: str, *, preserve: bool) -> tuple[_Mean
     return _record({"b": "strong", "i": "em", "del": "s", "th": "td"}.get(element.tag, element.tag), element, children)
 
 
-def _check_profile(element: XmlElement, parent: str) -> None:
+def _check_profile(element: _TreeNode, parent: str) -> None:
     if element.tag not in _ALLOWED:
         msg = f"HTML element has no declared Markdown meaning: {element.tag}"
         raise MarkdownProfileError(msg)
     if (element.tag == "li" and parent not in {"ul", "ol"}) or (
         (allowed := _CONTENT_MODEL.get(element.tag)) is not None
         and (
-            any(isinstance(child.tag, str) and child.tag not in allowed for child in element)
-            or any(text.strip(" \t\n\f\r") for text in (element.text or "", *(child.tail or "" for child in element)))
+            any(child.tag not in allowed for child in element)
+            or any(text.strip(" \t\n\f\r") for text in (element.text, *(child.tail for child in element)))
         )
     ):
         msg = f"HTML content model violated at {element.tag}"
         raise MarkdownProfileError(msg)
 
 
-def _record(tag: str, element: XmlElement, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+def _record(tag: str, element: _TreeNode, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     if tag in _CONTENT_REQUIRED and not children:
         return (_BOUNDARY,) if tag in _BLOCKS else ()
     if tag in _EMPHASIS:
@@ -269,7 +283,7 @@ def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], 
     return tuple(sorted((({"src": "", "alt": ""} if tag == "img" else {}) | semantic).items()))
 
 
-def _text(text: str | None, *, preserve: bool, keep: bool) -> tuple[_Meaning, ...]:
+def _text(text: str, *, preserve: bool, keep: bool) -> tuple[_Meaning, ...]:
     if not text:
         return ()
     if not preserve:
@@ -301,6 +315,20 @@ def markdown_controls(*, html: bool = False) -> dict[str, bool]:
         is not None,
         "empty conversion": check(sources[2], lambda _node: "") is not None,
     }
+
+
+@dataclass(slots=True)
+class _TreeNode:
+    """Mirror the element/text/tail shape the meaning walk reads, built from turbohtml's own tree."""
+
+    tag: str
+    attrib: dict[str, str]
+    text: str = ""
+    tail: str = ""
+    children: list[_TreeNode] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator[_TreeNode]:
+        return iter(self.children)
 
 
 class MarkdownProfileError(ValueError):
