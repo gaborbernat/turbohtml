@@ -115,6 +115,12 @@ from fuzz.xml_island_oracles import (
     xml_island_generate,
     xml_island_seeds,
 )
+from fuzz.xml_structure_generators import (
+    xml_document_check,
+    xml_source_controls,
+    xml_source_generate,
+    xml_source_seeds,
+)
 from markdown_it import MarkdownIt
 from typing_extensions import override
 
@@ -2482,6 +2488,9 @@ ORACLES: Final[dict[str, Oracle]] = {
         html_list_controls,
         Floor(24, 1),
         syntax="html",
+    ),
+    "xml-document-grammar": Oracle(
+        xml_document_check, xml_source_generate, xml_source_seeds, xml_source_controls, Floor(60, 1)
     ),
     "xml-fixpoint": Oracle(xml_check, _generate_html, _seeds_html, _xml_controls, Floor(500, 0.95)),
     "css-fixpoint": Oracle(_css_fixpoint, _generate_css, _seeds_css, _css_controls, Floor(500, 0.95), syntax="css"),

@@ -98,7 +98,7 @@ def test_generation_rejects_unknown_production(grammar: Grammar) -> None:
             "unique",
             id="duplicate-name",
         ),
-        pytest.param((Production("zero", "root", (b"x",), 0, "test"),), "root", "positive", id="zero-cost"),
+        pytest.param((Production("negative", "root", (b"x",), -1, "test"),), "root", "nonnegative", id="negative-cost"),
         pytest.param(
             (Production("negative-height", "root", (b"x",), 1, "test", -1),),
             "root",
