@@ -312,7 +312,7 @@ lint.per-file-ignores."tests/**/*.py" = [
 lint.per-file-ignores."tests/conformance/test_css_generation_ast_conformance.py" = [
   "suspicious-non-cryptographic-random-usage", # deterministic grammar seeds reproduce public parser cases
 ]
-lint.per-file-ignores."tests/{test_fuzz_structure_generation,test_fuzz_html_structure_generation,test_fuzz_xml_structure_generation,test_fuzz_css_structure_generation,test_fuzz_markdown_structure_generation}.py" = [
+lint.per-file-ignores."tests/{test_fuzz_structure_generation,test_fuzz_html_structure_generation,test_fuzz_xml_structure_generation,test_fuzz_css_structure_generation,test_fuzz_markdown_structure_generation,test_fuzz_encoding_structure_generation}.py" = [
   "suspicious-non-cryptographic-random-usage", # deterministic grammar seeds reproduce public parser cases
 ]
 lint.per-file-ignores."tools/**/*.py" = [
