@@ -1,0 +1,3 @@
+``Element.css_path`` no longer hangs on a detached element whose id the document lacks, ``MutationObserver.observe``
+watches the tree its ``attribute_filter`` iterator moved the target into, and a node filter that steps its own traverser
+raises instead of corrupting the outer step.

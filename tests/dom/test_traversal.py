@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import gc
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
@@ -610,6 +610,34 @@ def test_iterator_filter_reentrancy_rejected(root: Element) -> None:
     it = NodeIterator(root, SHOW_ELEMENT, reenter)
     with pytest.raises(ValueError, match="already running"):
         it.next_node()
+
+
+def test_iterator_reentry_error_caught_inside_filter_keeps_the_outer_step(root: Element) -> None:
+    errors: Final[list[str]] = []
+    it: NodeIterator = None  # ty: ignore[invalid-assignment]
+
+    def reenter(_node: Node) -> int:
+        try:
+            it.next_node()
+        except ValueError as error:
+            errors.append(str(error))
+        return ACCEPT
+
+    it = NodeIterator(root, SHOW_ELEMENT, reenter)
+    assert ([_tags(it.next_node()), _tags(it.next_node())], len(errors)) == (["div", "p"], 2)
+
+
+@pytest.mark.parametrize("kind", [pytest.param(TreeWalker, id="walker"), pytest.param(NodeIterator, id="iterator")])
+def test_filter_verdict_conversion_cannot_reenter(root: Element, kind: type[TreeWalker | NodeIterator]) -> None:
+    traverser: TreeWalker | NodeIterator = None  # ty: ignore[invalid-assignment]
+
+    class Verdict:
+        def __index__(self) -> int:
+            return int(traverser.next_node() is None)
+
+    traverser = kind(root, SHOW_ELEMENT, cast("Callable[[Node], int]", lambda _node: Verdict()))
+    with pytest.raises(ValueError, match="already running"):
+        traverser.next_node()
 
 
 def test_current_node_assignable(root: Element) -> None:

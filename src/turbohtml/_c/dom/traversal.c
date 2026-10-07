@@ -79,18 +79,14 @@ static int run_filter(module_state *state, PyObject *handle, PyObject *filter, u
     }
     *active = 1;
     PyObject *result = PyObject_CallOneArg(filter, wrapped);
-    *active = 0;
     Py_DECREF(wrapped);
-    if (result == NULL) {
-        return -1;
-    }
-    PyObject *index = PyNumber_Index(result);
-    Py_DECREF(result);
-    if (index == NULL) {
-        return -1;
-    }
-    long value = PyLong_AsLong(index);
-    Py_DECREF(index);
+    /* WebIDL converts a callback's return value inside "call a user object's operation", which the DOM filter
+       algorithm runs with the active flag set, so a verdict's __index__ cannot reenter the traversal either */
+    PyObject *index = result == NULL ? NULL : PyNumber_Index(result);
+    Py_XDECREF(result);
+    long value = index == NULL ? -1 : PyLong_AsLong(index);
+    Py_XDECREF(index);
+    *active = 0;
     if (value == -1 && PyErr_Occurred()) {
         return -1;
     }
@@ -527,6 +523,13 @@ static th_node *ni_preceding(th_node *node, th_node *root) {
    reference. The flat view has no subtree, so REJECT and SKIP both just keep looking. Returns the accepted node,
    NULL at an end, or NULL with *failed set on a filter error. */
 static th_node *ni_traverse(NodeIteratorObject *self, module_state *state, int *failed, int previous) {
+    /* the running traversal owns the registered candidate, so a filter that steps this iterator again fails before
+       it overwrites that pointer */
+    if (self->active) {
+        PyErr_SetString(PyExc_ValueError, "the node filter is already running (recursive traversal)");
+        *failed = 1;
+        return NULL;
+    }
     th_node_iterator *cursor = &self->cursor;
     cursor->candidate = cursor->reference;
     cursor->candidate_before = cursor->reference_before;

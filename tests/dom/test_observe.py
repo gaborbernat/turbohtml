@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import gc
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
@@ -9,7 +9,7 @@ from turbohtml import Comment, Element, Node, Text, parse
 from turbohtml.mutations import MutationObserver, MutationRecord
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 def _element(node: Node | None) -> Element:
@@ -520,6 +520,22 @@ def test_mutation_without_observers_still_works() -> None:
     text.data = "changed"
     span.extract()
     assert div.find("b") is not None
+
+
+def test_attribute_filter_iteration_that_moves_target_observes_its_new_tree() -> None:
+    target: Final = Element("p")
+    host: Final = Element("div")
+
+    class Names:
+        def __iter__(self) -> Iterator[str]:
+            host.append(target)
+            return iter(["id"])
+
+    observer: Final = MutationObserver()
+    observer.observe(target, attribute_filter=cast("Sequence[str]", Names()))
+    gc.collect()  # frees the tree target left, so an observer still holding it reads freed memory
+    target.attrs["id"] = "x"
+    assert [(record.type, record.attribute_name) for record in observer.take_records()] == [("attributes", "id")]
 
 
 def test_attribute_filter_none_is_no_filter() -> None:

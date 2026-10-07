@@ -2076,13 +2076,13 @@ static path_id_map *path_id_map_build(th_tree *tree, th_node *document) {
     return map;
 }
 
-/* Whether value names exactly one element, so #value selects it alone. The probed
-   candidate's own id is always present in the map, so a count of one means unique;
-   sel_eq returns false on an empty slot (a length mismatch) so the probe walks past
-   any collision and always terminates on the candidate's slot. */
+/* Whether value names exactly one element, so #value selects it alone. The map counts only the ids inside the
+   document, so a detached element's id can be absent; the probe stops at the first empty slot, whose zero count
+   reads as not unique, and the map keeps at least half its slots empty, so the probe always ends. */
 static int path_id_unique(const path_id_map *map, const Py_UCS4 *value, Py_ssize_t len) {
     size_t slot = (size_t)path_id_hash(value, len, map->ci) & map->mask;
-    while (!sel_eq(map->slots[slot].value, map->slots[slot].len, value, len, map->ci)) {
+    while (map->slots[slot].value != NULL &&
+           !sel_eq(map->slots[slot].value, map->slots[slot].len, value, len, map->ci)) {
         slot = (slot + 1) & map->mask;
     }
     return map->slots[slot].count == 1;

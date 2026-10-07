@@ -487,16 +487,18 @@ static PyObject *mo_observe(PyObject *self, PyObject *args, PyObject *kwds) {
         PyErr_SetString(PyExc_TypeError, "at least one of child_list, attributes, or character_data must be set");
         return NULL;
     }
-    MutationObserverObject *observer = (MutationObserverObject *)self;
-    PyObject *handle = ((NodeObject *)target_obj)->handle;
-    if (observer->handle != NULL && observer->handle != handle) {
-        PyErr_SetString(PyExc_ValueError, "target belongs to a different tree than an earlier one");
-        return NULL;
-    }
     int has_filter;
     th_mo_filter *filter;
     Py_ssize_t filter_count;
     if (build_filter(attribute_filter, &has_filter, &filter, &filter_count) < 0) {
+        return NULL;
+    }
+    /* iterating attribute_filter runs Python code that can move target into another tree, so read its handle after */
+    MutationObserverObject *observer = (MutationObserverObject *)self;
+    PyObject *handle = ((NodeObject *)target_obj)->handle;
+    if (observer->handle != NULL && observer->handle != handle) {
+        free_names(filter, filter_count);
+        PyErr_SetString(PyExc_ValueError, "target belongs to a different tree than an earlier one");
         return NULL;
     }
     if (observer->handle == NULL) {
