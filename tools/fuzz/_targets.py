@@ -20,6 +20,7 @@ import argparse
 import contextlib
 import dataclasses
 import hashlib
+import importlib
 import os
 import random
 import re
@@ -61,7 +62,7 @@ _MAX_TREE_DEPTH: Final = 512
 def main() -> int:
     """Drive one or all targets; return 1 on any soft finding, 0 if clean (an ASan abort exits nonzero on its own)."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("smoke", "deep"), required=True)
+    parser.add_argument("--mode", choices=("smoke", "deep", "alloc"), required=True)
     parser.add_argument("--target", default="all")
     parser.add_argument("--corpus-dir", type=Path, required=True)
     parser.add_argument("--regression-dir", type=Path, required=True)
@@ -74,20 +75,81 @@ def main() -> int:
 
     regressions = _inputs(args.regression_dir)
     findings: list[str] = []
-    for name in _TARGETS if args.target == "all" else [args.target]:
+    for name in (_ALLOC_TARGETS if args.mode == "alloc" else _TARGETS) if args.target == "all" else [args.target]:
         repro = args.repro_dir / name
         seeds = regressions + _inputs(args.corpus_dir / name)
-        findings += [
-            _finding(name, f"seed {index}", found, data, args.crash_dir)
-            for index, data in enumerate(seeds)
-            if (found := _run_one(_TARGETS[name], data, repro)) is not None
-        ]
-        if args.mode == "deep":
-            findings += _hunt(name, seeds, repro, args)
+        if args.mode == "alloc":
+            findings += _sweep(name, seeds, repro, args.crash_dir)
         else:
-            print(f"smoke {name}: {len(seeds)} seeds clean")
+            findings += [
+                _finding(name, f"seed {index}", found, data, args.crash_dir)
+                for index, data in enumerate(seeds)
+                if (found := _run_one(_TARGETS[name], data, repro)) is not None
+            ]
+            if args.mode == "deep":
+                findings += _hunt(name, seeds, repro, args)
+            else:
+                print(f"smoke {name}: {len(seeds)} seeds clean")
         repro.unlink()
     return 1 if findings else 0
+
+
+def _sweep(name: str, seeds: list[bytes], repro: Path, crash_dir: Path) -> list[str]:
+    """
+    Fail every PyMem allocation of every seed in turn and require ``MemoryError`` exactly when the failure fires.
+
+    libxml2's fuzzers inject failures the same way
+    (https://github.com/GNOME/libxml2/blob/c43dc98d27ac315a48d93dbd399c6c22cf7125b1/fuzz/fuzz.c#L83-L181), and its
+    ``malloc-fail`` fixes show where such bugs hide: cleanup paths. A ``failure_pos`` of 0 only counts the seed's N
+    allocations; positions 1..N then fail one each. An ASan report aborts the process, and ``fuzz.py`` keeps the framed
+    input it died on.
+    """
+    # only the fuzz-only build (meson -Dfuzzing=true) defines the hook, so the stubs omit it
+    inject: Callable[[int], tuple[int, bool]] = vars(importlib.import_module("turbohtml._html"))["_fuzz_inject_failure"]
+    func = _TARGETS[name]
+    findings: list[str] = []
+    swept = 0
+    for index, seed in enumerate(seeds):
+        found, allocations = _run_failing(inject, func, bytes(4) + seed, repro)
+        for position in range(allocations + 1):
+            data = position.to_bytes(4, "big") + seed
+            if position:
+                found, _ = _run_failing(inject, func, data, repro)
+            if found is not None:
+                findings.append(_finding(name, f"seed {index} failure_pos {position}", found, data, crash_dir))
+        swept += allocations
+    print(f"alloc {name}: {len(seeds)} seeds, {swept} failure positions swept")
+    return findings
+
+
+def _run_failing(
+    inject: Callable[[int], tuple[int, bool]], func: Callable[[bytes], None], data: bytes, repro: Path
+) -> tuple[str | None, int]:
+    """
+    Run ``func`` on the payload after a big-endian u32 ``failure_pos`` header and judge the outcome.
+
+    libxml2's fuzzers read the same 4-byte field with ``xmlFuzzReadInt(4)``. The ``finally`` closes the injection window
+    before any exception handling here can allocate. Returns the finding, or None, and the number of allocations the
+    call made.
+    """
+    repro.write_bytes(data)
+    error: Exception | None = None
+    inject(int.from_bytes(data[:4], "big"))
+    try:
+        try:
+            func(data[4:])
+        finally:
+            allocations, failed = inject(0)
+    except (MemoryError, SystemError, RecursionError, AssertionError, *_EXPECTED) as exc:
+        error = exc
+    outcome = "a result" if error is None else f"{type(error).__name__}: {error}"
+    if failed:
+        return (
+            None if isinstance(error, MemoryError) else f"{outcome} for an injected allocation failure"
+        ), allocations
+    if error is None or isinstance(error, _EXPECTED):
+        return None, allocations
+    return f"{outcome} without an injected allocation failure", allocations
 
 
 def _inputs(directory: Path) -> list[bytes]:
@@ -191,6 +253,8 @@ _TARGETS: Final[dict[str, Callable[[bytes], None]]] = {
     "minify_css": _minify_css,
     "minify_html": _minify_html,
 }
+# the targets whose every allocation failure raises MemoryError; sanitize, url, idna and the minifiers wait on #1275
+_ALLOC_TARGETS: Final[tuple[str, ...]] = ("phone", "parse", "serialize", "roundtrip")
 
 
 def _decode(data: bytes) -> str:

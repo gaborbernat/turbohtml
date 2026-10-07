@@ -15,16 +15,17 @@ Two mechanisms cover the untrusted-input entry points the security spike priorit
 ``smoke`` replays the past finds under ``tests/fuzz_regressions`` and a benign seed corpus once (fast, deterministic,
 gates every PR), then runs ``tests/fuzz_build`` against the operation limit and the allocation-failure hook the fuzz
 build compiles in. ``deep`` adds a mutation loop and structural probes for a per-target budget (the scheduled/manual run
-that hunts for crashes). ``oracle`` runs the sanitizer wrong-output oracles (``sanitize_oracles.py``) instead, because a
+that hunts for crashes). ``alloc`` replays the same seeds once per PyMem allocation, failing that allocation through a
+``failure_pos`` header. ``oracle`` runs the sanitizer wrong-output oracles (``sanitize_oracles.py``) instead, because a
 sanitizer bug usually returns unsafe markup without crashing. ``round-trip`` runs the printer, minifier, entry-point and
 source-span oracles (``round_trip_oracles.py``) and ``release-diff`` compares HEAD with the latest PyPI release
 (``release_diff.py``), for the bugs that return wrong text. A crashing input lands in ``--crash-dir`` as
 ``crash-<sha256>``, and the log names it only by hash, length and harness, because CI logs on a public repository are
 public. The in-process extension is expected to be pre-built by the tox env; ``--build`` builds it here for a local run.
 
-``smoke`` and ``deep`` build everything in the fuzz-only mode (meson ``-Dfuzzing=true``) and start with a self-test:
-each ``_fuzz_crash`` kind must draw its AddressSanitizer report, and an injected allocation failure must raise
-``MemoryError``.
+``smoke``, ``deep`` and ``alloc`` build everything in the fuzz-only mode (meson ``-Dfuzzing=true``) and start with a
+self-test: each ``_fuzz_crash`` kind must draw its AddressSanitizer report, and an injected allocation failure must
+raise ``MemoryError``.
 """
 
 from __future__ import annotations
@@ -79,7 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Return 0 when every harness stays clean, nonzero on the first sanitizer abort or soft finding."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--mode", choices=("smoke", "deep", "oracle", "round-trip", "release-diff", "triage"), default="smoke"
+        "--mode", choices=("smoke", "deep", "alloc", "oracle", "round-trip", "release-diff", "triage"), default="smoke"
     )
     parser.add_argument(
         "--minutes", type=float, default=1.0, help="deep-mode budget per in-process target, split across the allocators"
@@ -116,9 +117,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_round_trip(args.mode, args.minutes, args.rng_seed, args.crash_dir, passthrough)
     # MemorySanitizer builds only the standalone harnesses, so it has no extension to self-test or drive in-process
     inprocess = not args.skip_inprocess and args.sanitizer != "memory"
+    # the standalone harnesses allocate through malloc, out of the PyMem hook's reach, so the alloc sweep skips them
     if (inprocess and (code := _self_test()) != 0) or (
-        code := _run_standalone(args.mode, args.extra_corpus, args.crash_dir, args.sanitizer)
-    ) != 0:
+        args.mode != "alloc"
+        and (code := _run_standalone(args.mode, args.extra_corpus, args.crash_dir, args.sanitizer)) != 0
+    ):
         return code
     if not inprocess:
         return 0
@@ -376,7 +379,7 @@ def _files(directory: Path) -> list[str]:
 
 def _run_inprocess(mode: str, minutes: float, rng_seed: int, crash_dir: Path) -> int:
     env = {"PYTHONHASHSEED": "0", **_asan_preload()}
-    if mode == "deep":
+    if mode in {"deep", "alloc"}:
         env = _private_reports(env, crash_dir)
     status = 0
     for allocator in _ALLOCATORS:
@@ -411,7 +414,7 @@ def _run_inprocess(mode: str, minutes: float, rng_seed: int, crash_dir: Path) ->
                 data = repro.read_bytes()
                 digest = hashlib.sha256(data).hexdigest()
                 (crash_dir / f"crash-{digest}").write_bytes(data)
-                (crash_dir / f"crash-{digest}.replay").write_text(f"{context} rng-seed={rng_seed}\n")
+                (crash_dir / f"crash-{digest}.replay").write_text(f"{context} mode={mode} rng-seed={rng_seed}\n")
                 print(f"crashing input: [{repro.name}] sha256={digest} bytes={len(data)}", file=sys.stderr)
             return result.returncode
         status |= result.returncode
