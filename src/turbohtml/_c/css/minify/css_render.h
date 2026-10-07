@@ -701,7 +701,7 @@ static int css_unicode_range_cmp(const void *left_ptr, const void *right_ptr) {
 
 /* Minify a unicode-range value, returning 1 when handled (every token was a range), 0 to fall through. */
 static int css_handle_unicode_range(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *out) {
-    Py_ssize_t capacity = 16;
+    Py_ssize_t capacity = TH_INITIAL_CAPACITY(16);
     long long (*ranges)[2] = css_malloc((size_t)capacity * sizeof(*ranges));
     if (ranges == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return 0;         /* GCOVR_EXCL_LINE */

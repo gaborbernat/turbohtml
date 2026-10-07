@@ -95,6 +95,60 @@ jobs:
         run: uvx --with tox-uv tox run --skip-missing-interpreters false -e ${{ matrix.py }}
         env:
           UV_PYTHON_PREFERENCE: only-managed
+  scalar:
+    # TH_FORCE_SCALAR compiles the portable SWAR scan loops in place of SSE2 (x64) and NEON (arm64), so the suite's
+    # expectations, which the SIMD build already meets, diff the two arms on each architecture.
+    name: 🧪 SWAR scan loops (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: "ubuntu-24.04", arch: "x64"}
+          - {os: "ubuntu-24.04-arm", arch: "arm64"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: ⬇️ Install test data
+        id: test-data
+        background: true
+        run: git submodule update --init --depth 1 tests/html5lib-tests tests/conformance/unicodetools
+      - name: 🟢 Install Node
+        # zizmor: ignore[cache-poisoning] no cache: input is set, so setup-node writes no restorable cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - wait: test-data
+      - name: ✅ Run scalar
+        run: uvx --with tox-uv tox run --skip-missing-interpreters false -e scalar
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+  preprocess-identity:
+    name: 🧬 production preprocessing identity
+    runs-on: ubuntu-24.04
+    # the fuzz-only build adds #ifdef branches to production sources and headers; a production token change would shift
+    # LTO inlining and the CodSpeed gate, so this compares the production preprocessing with those branches stripped
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # meson project() derives the version from git history
+          persist-credentials: false
+      - name: 📦 Install unifdef
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends unifdef
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - name: ✅ Run preprocess-identity
+        run: uvx --with tox-uv tox run -e preprocess-identity
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
   check:
     name: 🔎 ${{ matrix.tox_env }}
     runs-on: ubuntu-24.04

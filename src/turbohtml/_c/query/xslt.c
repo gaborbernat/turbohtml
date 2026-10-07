@@ -328,7 +328,7 @@ static int nodevec_push(nodevec *vec, th_node *node) {
         return 0;
     }
     if (vec->len == vec->cap) {
-        Py_ssize_t cap = vec->cap == 0 ? 4 : vec->cap * 2;
+        Py_ssize_t cap = vec->cap == 0 ? TH_INITIAL_CAPACITY(4) : vec->cap * 2;
         th_node **grown = PyMem_Realloc(vec->nodes, (size_t)cap * sizeof(th_node *));
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
             return -1;       /* GCOVR_EXCL_LINE */
@@ -804,7 +804,7 @@ static int build_name_indexes(engine *eng) {
 
 /* Template calls, xsl:for-each, result-tree construction and use-attribute-sets chains recurse in C at about half a
    kilobyte per level, so 400 levels stay under ~200 KB, well inside a small (~256 KB) thread stack. */
-#define XSLT_MAX_DEPTH 400
+#define XSLT_MAX_DEPTH TH_DEPTH_LIMIT(400)
 
 /* ---- xsl element identification ------------------------------------------- */
 
@@ -1073,7 +1073,7 @@ static xp_program *compile_pattern_new(engine *eng, const Py_UCS4 *src, Py_ssize
 /* Each binding owns its value; the output tree owns its result tree fragment. */
 static int scope_push(engine *eng, const Py_UCS4 *name, Py_ssize_t name_len, xp_result value, th_node *rtf) {
     if (eng->scope_len == eng->scope_cap) {
-        Py_ssize_t cap = eng->scope_cap == 0 ? 8 : eng->scope_cap * 2;
+        Py_ssize_t cap = eng->scope_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->scope_cap * 2;
         var_bind *grown = PyMem_Realloc(eng->scope, (size_t)cap * sizeof(var_bind));
         if (grown == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
             xp_result_free(&value); /* GCOVR_EXCL_LINE */
@@ -4854,7 +4854,7 @@ static int instantiate_body(engine *eng, th_node *body, th_node *out_parent) {
 
 static int push_rule(engine *eng, xslt_rule rule) {
     if (eng->nrules == eng->rules_cap) {
-        Py_ssize_t cap = eng->rules_cap == 0 ? 16 : eng->rules_cap * 2;
+        Py_ssize_t cap = eng->rules_cap == 0 ? TH_INITIAL_CAPACITY(16) : eng->rules_cap * 2;
         xslt_rule *grown = PyMem_Realloc(eng->rules, (size_t)cap * sizeof(xslt_rule));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -4871,7 +4871,7 @@ static int parse_template(engine *eng, th_node *element, int *position) {
     const Py_UCS4 *name = attr_lookup(eng->sheet_tree, element, "name", 4, &name_len);
     if (name != NULL) {
         if (eng->nnamed == eng->named_cap) {
-            Py_ssize_t cap = eng->named_cap == 0 ? 8 : eng->named_cap * 2;
+            Py_ssize_t cap = eng->named_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->named_cap * 2;
             xslt_named *grown = PyMem_Realloc(eng->named, (size_t)cap * sizeof(xslt_named));
             if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
                 return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -4946,7 +4946,7 @@ static int parse_key(engine *eng, th_node *element) {
         return fail_py(eng);
     }
     if (eng->nkeys == eng->keys_cap) {
-        Py_ssize_t cap = eng->keys_cap == 0 ? 4 : eng->keys_cap * 2;
+        Py_ssize_t cap = eng->keys_cap == 0 ? TH_INITIAL_CAPACITY(4) : eng->keys_cap * 2;
         xslt_key *grown = PyMem_Realloc(eng->keys, (size_t)cap * sizeof(xslt_key));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -4971,7 +4971,7 @@ static int parse_attrset(engine *eng, th_node *element) {
         return fail(eng, "xsl:attribute-set requires a name attribute");
     }
     if (eng->nattrsets == eng->attrsets_cap) {
-        Py_ssize_t cap = eng->attrsets_cap == 0 ? 8 : eng->attrsets_cap * 2;
+        Py_ssize_t cap = eng->attrsets_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->attrsets_cap * 2;
         xslt_attrset *grown = PyMem_Realloc(eng->attrsets, (size_t)cap * sizeof(xslt_attrset));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -5112,7 +5112,7 @@ static int parse_namespace_alias(engine *eng, th_node *root, th_node *element) {
         return fail(eng, "xsl:namespace-alias result-prefix is not a declared namespace");
     }
     if (eng->naliases == eng->aliases_cap) {
-        Py_ssize_t cap = eng->aliases_cap == 0 ? 4 : eng->aliases_cap * 2;
+        Py_ssize_t cap = eng->aliases_cap == 0 ? TH_INITIAL_CAPACITY(4) : eng->aliases_cap * 2;
         xslt_nsalias *grown = PyMem_Realloc(eng->aliases, (size_t)cap * sizeof(xslt_nsalias));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -5154,7 +5154,7 @@ static const Py_UCS4 *alias_result_uri(const engine *eng, const char *prefix, Py
 
 static int push_global(engine *eng, const Py_UCS4 *name, Py_ssize_t name_len, th_node *node, int is_param) {
     if (eng->nglobals == eng->globals_cap) {
-        Py_ssize_t cap = eng->globals_cap == 0 ? 8 : eng->globals_cap * 2;
+        Py_ssize_t cap = eng->globals_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->globals_cap * 2;
         xslt_global *grown = PyMem_Realloc(eng->globals, (size_t)cap * sizeof(xslt_global));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -5204,7 +5204,7 @@ static int parse_space(engine *eng, th_node *element, int strip) {
             break;
         }
         if (eng->nspaces == eng->spaces_cap) {
-            Py_ssize_t cap = eng->spaces_cap == 0 ? 8 : eng->spaces_cap * 2;
+            Py_ssize_t cap = eng->spaces_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->spaces_cap * 2;
             xslt_space *grown = PyMem_Realloc(eng->spaces, (size_t)cap * sizeof(xslt_space));
             if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
                 return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -5873,7 +5873,7 @@ static int element_strips_space(const engine *eng, const th_node *element) {
 
 static int strip_record(engine *eng, th_node *node, th_node *parent, th_node *next) {
     if (eng->nstripped == eng->stripped_cap) {
-        Py_ssize_t cap = eng->stripped_cap == 0 ? 16 : eng->stripped_cap * 2;
+        Py_ssize_t cap = eng->stripped_cap == 0 ? TH_INITIAL_CAPACITY(16) : eng->stripped_cap * 2;
         struct strip_entry *grown = PyMem_Realloc(eng->stripped, (size_t)cap * sizeof(struct strip_entry));
         if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */

@@ -136,7 +136,7 @@ static void record(xml_parser *parser, const char *code, Py_ssize_t at) {
 
 static int scratch_push(xml_parser *parser, Py_UCS4 ch) {
     if (parser->scratch_len == parser->scratch_cap) {
-        Py_ssize_t cap = parser->scratch_cap ? parser->scratch_cap * 2 : 64;
+        Py_ssize_t cap = parser->scratch_cap ? parser->scratch_cap * 2 : TH_INITIAL_CAPACITY(64);
         Py_UCS4 *grown = PyMem_Realloc(parser->scratch, (size_t)cap * sizeof(Py_UCS4));
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -385,7 +385,7 @@ static th_node *current(const xml_parser *parser) {
 
 static int push_open(xml_parser *parser, th_node *element) {
     if (parser->stack_len == parser->stack_cap) {
-        Py_ssize_t cap = parser->stack_cap ? parser->stack_cap * 2 : 16;
+        Py_ssize_t cap = parser->stack_cap ? parser->stack_cap * 2 : TH_INITIAL_CAPACITY(16);
         th_node **grown = PyMem_Realloc(parser->stack, (size_t)cap * sizeof(th_node *));
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -494,7 +494,7 @@ static int index_binding(xml_parser *parser, Py_ssize_t index) {
     Py_ssize_t slot = prefix_slot(parser, hash, binding->start, binding->len);
     if (parser->prefix_slots[slot].gen != PREFIX_SLOT_LIVE) {
         if (parser->prefixes_len == parser->prefixes_cap) {
-            Py_ssize_t cap = parser->prefixes_cap ? parser->prefixes_cap * 2 : 8;
+            Py_ssize_t cap = parser->prefixes_cap ? parser->prefixes_cap * 2 : TH_INITIAL_CAPACITY(8);
             xml_nsprefix *grown = PyMem_Realloc(parser->prefixes, (size_t)cap * sizeof(xml_nsprefix));
             if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -518,7 +518,7 @@ static int index_binding(xml_parser *parser, Py_ssize_t index) {
 static TH_NOINLINE int declare_prefix(xml_parser *parser, Py_ssize_t start, Py_ssize_t len, const Py_UCS4 *uri,
                                       Py_ssize_t uri_len, Py_ssize_t depth) {
     if (parser->ns_len == parser->ns_cap) {
-        Py_ssize_t cap = parser->ns_cap ? parser->ns_cap * 2 : 8;
+        Py_ssize_t cap = parser->ns_cap ? parser->ns_cap * 2 : TH_INITIAL_CAPACITY(8);
         xml_nsdecl *grown = PyMem_Realloc(parser->ns, (size_t)cap * sizeof(xml_nsdecl));
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1367,7 +1367,7 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
     parser->dup[slot] = (xml_hashslot){parser->dup_gen, hash, element->attr_count - 1};
     parser->dup_count++;
     if (parser->attr_spans_len == parser->attr_spans_cap) {
-        Py_ssize_t cap = parser->attr_spans_cap ? parser->attr_spans_cap * 2 : 16;
+        Py_ssize_t cap = parser->attr_spans_cap ? parser->attr_spans_cap * 2 : TH_INITIAL_CAPACITY(16);
         xml_attr_span *grown = PyMem_Realloc(parser->attr_spans, (size_t)cap * sizeof(xml_attr_span));
         if (grown == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             parser->tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */

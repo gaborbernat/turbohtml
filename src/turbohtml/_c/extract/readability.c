@@ -384,7 +384,7 @@ static th_node *read_best(read_scorer *scorer, th_node *root) {
 
 /* Postorder totals avoid rescanning nested candidates; temporary storage grows with depth. */
 static void read_cache_densities(read_scorer *scorer, th_node *root) {
-    size_t capacity = 16;
+    size_t capacity = TH_INITIAL_CAPACITY(16);
     read_frame *frames = PyMem_Malloc(capacity * sizeof(*frames));
     if (frames == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure falls back to individual scans */
         return;           /* GCOVR_EXCL_LINE: allocation failure */

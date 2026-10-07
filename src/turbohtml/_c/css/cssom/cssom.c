@@ -496,7 +496,7 @@ static Py_ssize_t css_parse_block(const Py_UCS4 *data, Py_ssize_t start, Py_ssiz
             int important = css_take_important(&value, &value_len);
             if (name_len > 0 && value_len > 0) {
                 if (count == *capacity) {
-                    Py_ssize_t grown = *capacity == 0 ? 8 : *capacity * 2;
+                    Py_ssize_t grown = *capacity == 0 ? TH_INITIAL_CAPACITY(8) : *capacity * 2;
                     css_decl *bigger = PyMem_Realloc(*out, (size_t)grown * sizeof(css_decl));
                     if (bigger == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                         return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -735,7 +735,7 @@ static css_rule *css_parse_sheet(const Py_UCS4 *data, Py_ssize_t len, Py_ssize_t
         }
         if (selector_len > 0) {
             if (count == capacity) {
-                Py_ssize_t grown = capacity == 0 ? 8 : capacity * 2;
+                Py_ssize_t grown = capacity == 0 ? TH_INITIAL_CAPACITY(8) : capacity * 2;
                 css_rule *bigger = PyMem_Realloc(rules, (size_t)grown * sizeof(css_rule));
                 if (bigger == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                     PyMem_Free(decls); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1174,7 +1174,7 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
             }
         }
         if (count == capacity) {
-            Py_ssize_t grown = capacity == 0 ? 4 : capacity * 2;
+            Py_ssize_t grown = capacity == 0 ? TH_INITIAL_CAPACITY(4) : capacity * 2;
             css_sheet *bigger = PyMem_Realloc(sheets, (size_t)grown * sizeof(css_sheet));
             if (bigger == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 for (Py_ssize_t rule = 0; rule < rule_count; rule++) { /* GCOVR_EXCL_LINE: alloc-failure path */

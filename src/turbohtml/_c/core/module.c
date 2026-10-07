@@ -324,6 +324,11 @@ static int html_exec(PyObject *module) {
     if (range_register(module, state) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;                           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    if (th_fuzz_register(module) < 0) {
+        return -1;
+    }
+#endif
     return observe_register(module, state);
 }
 

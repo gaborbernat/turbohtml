@@ -842,7 +842,7 @@ static void record_meta_label(th_tree *tree, const th_token *token) {
         from_content = 1;
     }
     if (tree->meta_label_count == tree->meta_label_cap) {
-        Py_ssize_t cap = tree->meta_label_cap == 0 ? 4 : tree->meta_label_cap * 2;
+        Py_ssize_t cap = tree->meta_label_cap == 0 ? TH_INITIAL_CAPACITY(4) : tree->meta_label_cap * 2;
         th_meta_label *grown = PyMem_Realloc(tree->meta_labels, (size_t)cap * sizeof(*grown));
         if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
@@ -4724,6 +4724,10 @@ void th_tree_free(th_tree *tree) {
     arena_block *block = tree->arena;
     while (block != NULL) {
         arena_block *next = block->next;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        /* pymalloc hands a small freed block to its next caller without clearing the poison */
+        TH_FUZZ_UNPOISON(block->data, (size_t)block->cap);
+#endif
         PyMem_Free(block);
         block = next;
     }

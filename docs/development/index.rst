@@ -138,6 +138,15 @@ per-target budget; it is the continuous hunt, run daily and on demand, not a mer
     $ tox r -e fuzz-smoke            # the per-PR gate: past finds and benign corpus, no crash expected
     $ tox r -e fuzz -- --minutes 5   # the deep run: mutation + structural probes per target
 
+Both environments build the fuzz-only mode (``meson setup -Dfuzzing=true``, which defines
+``FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION``). It poisons the gaps between arena allocations and the parked node
+wrappers, cuts recursion caps to a tenth and starts arrays at one or two slots, so short inputs reach the limit and
+realloc paths. Before any target runs, ``fuzz.py`` commits seven memory errors in child processes and stops unless
+AddressSanitizer reports each one, then checks that an injected PyMem allocation failure raises ``MemoryError``. Never
+ship this build. The ``preprocess-identity`` environment checks that its branches leave the production preprocessing
+byte-identical, and the ``scalar`` environment runs the suite with ``-Dforce_scalar=true``, which swaps the SSE2 and
+NEON scan loops for the portable SWAR ones.
+
 The in-process driver runs each input under pymalloc and again under ``PYTHONMALLOC=malloc``, because AddressSanitizer
 cannot see an over-read that stays inside a pymalloc pool. The deep run splits ``--minutes`` between the two passes.
 Both environments pin ``PYTHONHASHSEED=0``. ``--rng-seed`` (default ``$FUZZ_RNG_SEED``, else 0) fixes the mutation

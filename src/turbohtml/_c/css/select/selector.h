@@ -10,6 +10,7 @@
 #define TURBOHTML_SELECTOR_H
 
 #include "core/ascii.h"
+#include "core/fuzzing.h"
 #include "dom/tree.h"
 
 enum sel_attr_op { OP_EXISTS, OP_EQ, OP_INCLUDE, OP_DASH, OP_PREFIX, OP_SUFFIX, OP_SUBSTR };
@@ -184,7 +185,7 @@ typedef struct {
    stack frame; the cap keeps a hostile, deeply nested selector from overflowing the C
    stack rather than raising a clean error (issue #421). Real selectors nest a handful
    of levels, far below this. */
-#define SEL_MAX_DEPTH 128
+#define SEL_MAX_DEPTH TH_DEPTH_LIMIT(128)
 
 /* Entry points compiled once in selector.c; the rest of the matcher and parser
    stays static there. query/methods.c drives the query bindings and to_xpath.c

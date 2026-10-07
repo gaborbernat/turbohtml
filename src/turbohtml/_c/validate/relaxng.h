@@ -362,7 +362,7 @@ static int def_add(th_schema *schema, const th_node_attr *name, th_node *node) {
         return 0;
     }
     if (defines->len == defines->cap) {
-        Py_ssize_t cap = defines->cap ? defines->cap * 2 : 8;
+        Py_ssize_t cap = defines->cap ? defines->cap * 2 : TH_INITIAL_CAPACITY(8);
         def_entry *items = arena_alloc(&schema->mem, (size_t)cap * sizeof(def_entry));
         if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return -1;       /* GCOVR_EXCL_LINE */
@@ -1397,7 +1397,7 @@ static nameclass *rng_pattern_nameclass(th_schema *schema, th_node *node, int is
 
 static int ncvec_push(th_schema *schema, ncvec *vec, nameclass *nc) {
     if (vec->len == vec->cap) {
-        Py_ssize_t cap = vec->cap ? vec->cap * 2 : 8;
+        Py_ssize_t cap = vec->cap ? vec->cap * 2 : TH_INITIAL_CAPACITY(8);
         nameclass **items = arena_alloc(&schema->mem, (size_t)cap * sizeof(nameclass *));
         if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return -1;       /* GCOVR_EXCL_LINE */

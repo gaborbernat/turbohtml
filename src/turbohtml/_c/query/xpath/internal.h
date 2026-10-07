@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 
+#include "core/fuzzing.h"
 #include "query/xpath/xpath.h"
 
 enum xn_kind {
@@ -161,7 +162,7 @@ int xp_name_eq(const lexer *lx, const char *kw);
    operator level costs a bounded number of C stack frames, so this caps the stack a
    pathological expression -- deeply nested groups, or a long left-associative operator
    spine -- can consume before it faults (issue #421). */
-#define XP_MAX_DEPTH 1024
+#define XP_MAX_DEPTH TH_DEPTH_LIMIT(1024)
 
 /* The evaluation context: the tree, the current node, its 1-based proximity
    position and the context size, plus where to report an unimplemented feature. */

@@ -19,6 +19,10 @@ entry-point and source-span oracles (``round_trip_oracles.py``) and ``release-di
 release (``release_diff.py``), for the bugs that return wrong text. A crashing input lands in ``--crash-dir`` as
 ``crash-<sha256>``, and the log names it only by hash, length and harness, because CI logs on a public repository are
 public. The in-process extension is expected to be pre-built by the tox env; ``--build`` builds it here for a local run.
+
+``smoke`` and ``deep`` build everything in the fuzz-only mode (meson ``-Dfuzzing=true``) and start with a self-test:
+each ``_fuzz_crash`` kind must draw its AddressSanitizer report, and an injected allocation failure must raise
+``MemoryError``.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -48,6 +53,17 @@ _JS_ENGINE: Final[tuple[str, ...]] = ("lexer", "ast", "parser", "printer", "fold
 # PYTHONMALLOC=malloc hands every PyMem call to the intercepted system allocator (v1 FUZZ-2 was silent under pymalloc)
 _ALLOCATORS: Final[tuple[str, ...]] = ("pymalloc", "malloc")
 _WPT: Final = "tools/fuzz-data/wpt"
+# Each _fuzz_crash kind and the ASan report it must raise: the plain heap faults prove the instrumentation, the poisoned
+# kinds prove the fuzz build's own arena and wrapper-pool poisoning.
+_CRASHES: Final[dict[str, str]] = {
+    "heap-buffer-overflow": "heap-buffer-overflow",
+    "heap-use-after-free": "heap-use-after-free",
+    "arena-overflow": "use-after-poison",
+    "arena-gap-overflow": "use-after-poison",
+    "schema-arena-overflow": "use-after-poison",
+    "schema-arena-gap-overflow": "use-after-poison",
+    "parked-wrapper": "use-after-poison",
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -83,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_oracles(args.minutes, args.rng_seed, args.crash_dir)
     if args.mode in {"round-trip", "release-diff"}:
         return _run_round_trip(args.mode, args.minutes, args.rng_seed, args.crash_dir, passthrough)
+    if not args.skip_inprocess and (code := _self_test()) != 0:
+        return code
     if (code := _run_standalone(args.mode, args.extra_corpus, args.crash_dir)) != 0:
         return code
     return 0 if args.skip_inprocess else _run_inprocess(args.mode, args.minutes, args.rng_seed, args.crash_dir)
@@ -102,6 +120,7 @@ def _build_extension(build_dir: Path) -> None:
         "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
         "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
         "--config-settings=setup-args=-Dbuildtype=debugoptimized",
+        "--config-settings=setup-args=-Dfuzzing=true",
     ]
     print("$", " ".join(cmd))
     subprocess.run(cmd, check=True, env={**os.environ, "CC": _CC})
@@ -198,6 +217,55 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True, text=True, check=True).stdout.strip()
 
 
+def _self_test() -> int:
+    """
+    Fail unless the sanitizer reports every injected fault and the allocator hook fails its position.
+
+    Fuzzilli runs the same startup check, so a run whose sanitizer is missing or blind cannot pass as clean. Each fault
+    kills its own child, and only the named ASan report counts: an unrelated crash also exits nonzero.
+    """
+    crash_child = "import sys; from turbohtml import _html; _html._fuzz_crash(sys.argv[1])"
+    injection_child = textwrap.dedent("""
+        import turbohtml
+        from turbohtml import _html
+
+        _html._fuzz_inject_failure(1)
+        try:
+            turbohtml.parse("<p>")
+        except MemoryError:
+            pass
+        else:
+            raise SystemExit("the injected allocation failure raised no MemoryError")
+        raise SystemExit(0 if _html._fuzz_inject_failure(0)[1] else "the allocator hook recorded no injected failure")
+    """)
+    env = _asan_preload()
+    for allocator in _ALLOCATORS:
+        for kind, report in _CRASHES.items():
+            result = subprocess.run(
+                [sys.executable, "-c", crash_child, kind],
+                env={**env, "PYTHONMALLOC": allocator},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 or f"ERROR: AddressSanitizer: {report}" not in result.stderr:
+                print(
+                    f"SELF-TEST FAILED: _fuzz_crash({kind!r}) under PYTHONMALLOC={allocator} exited "
+                    f"{result.returncode} without an AddressSanitizer {report} report",
+                    file=sys.stderr,
+                )
+                return 1
+        if (
+            code := subprocess.run(
+                [sys.executable, "-c", injection_child], env={**env, "PYTHONMALLOC": allocator}, check=False
+            ).returncode
+        ) != 0:
+            print(f"SELF-TEST FAILED: allocation-failure injection under PYTHONMALLOC={allocator}", file=sys.stderr)
+            return code
+    print(f"self-test: {len(_CRASHES)} faults reported and allocation failure injected under {', '.join(_ALLOCATORS)}")
+    return 0
+
+
 def _run_standalone(mode: str, extra: Path | None, crash_dir: Path) -> int:
     work = Path(tempfile.mkdtemp(prefix="th-fuzz-"))
     idna = work / "idna_harness"
@@ -230,6 +298,7 @@ def _compile(harness: Path, sources: list[Path], macro: str, binary: Path) -> No
     cmd = [
         _CC,
         macro,
+        "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION",
         "-fsanitize=address,undefined",
         "-fno-omit-frame-pointer",
         "-g",
