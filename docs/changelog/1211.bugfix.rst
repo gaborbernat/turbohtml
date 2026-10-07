@@ -1,0 +1,2 @@
+The Markdown conversion check treats every HTML block as a paragraph boundary and wraps quote and list item text in
+paragraphs.
