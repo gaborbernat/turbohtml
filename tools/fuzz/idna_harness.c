@@ -55,6 +55,103 @@ static size_t utf8_next(const unsigned char *bytes, size_t len, size_t pos, Py_U
     return (size_t)extra + 1;
 }
 
+static void require_property(int condition, const char *property) {
+    if (!condition) {
+        fprintf(stderr, "IDNA invariant failed: %s\n", property);
+        abort();
+    }
+}
+
+static idna_status mapped_nfc(const Py_UCS4 *input, Py_ssize_t len, Py_UCS4 **output, Py_ssize_t *output_len) {
+    Py_UCS4 *mapped = malloc((size_t)(len * 18 + 1) * sizeof(Py_UCS4));
+    if (mapped == NULL) {
+        return IDNA_NO_MEMORY;
+    }
+    Py_ssize_t mapped_len = map_host(input, len, mapped);
+    if (mapped_len < 0) {
+        free(mapped);
+        return IDNA_DISALLOWED;
+    }
+    Py_UCS4 *normalized = malloc((size_t)(mapped_len * 4 + 1) * sizeof(Py_UCS4));
+    if (normalized == NULL) {
+        free(mapped);
+        return IDNA_NO_MEMORY;
+    }
+    *output_len = nfc(mapped, mapped_len, normalized);
+    *output = normalized;
+    free(mapped);
+    return IDNA_OK;
+}
+
+static void check_normalization(const Py_UCS4 *input, Py_ssize_t len) {
+    Py_UCS4 *normalized = malloc((size_t)(len * 4 + 1) * sizeof(Py_UCS4));
+    if (normalized == NULL) {
+        return;
+    }
+    Py_ssize_t normalized_len = nfc(input, len, normalized);
+    if (nfc_is_normalized(input, len)) {
+        require_property(normalized_len == len && memcmp(input, normalized, (size_t)len * sizeof(Py_UCS4)) == 0,
+                         "NFC quick check");
+    }
+    free(normalized);
+    Py_UCS4 *mapped;
+    Py_ssize_t mapped_len;
+    if (mapped_nfc(input, len, &mapped, &mapped_len) != IDNA_OK) {
+        return;
+    }
+    Py_UCS4 *repeated;
+    Py_ssize_t repeated_len;
+    idna_status status = mapped_nfc(mapped, mapped_len, &repeated, &repeated_len);
+    if (status != IDNA_NO_MEMORY) {
+        require_property(status == IDNA_OK, "mapped NFC rejection");
+        require_property(mapped_len == repeated_len &&
+                             memcmp(mapped, repeated, (size_t)mapped_len * sizeof(Py_UCS4)) == 0,
+                         "mapped NFC fixpoint");
+        free(repeated);
+    }
+    free(mapped);
+}
+
+static void check_ascii(const Py_UCS4 *output, Py_ssize_t len) {
+    require_property(span_is_ascii(output, len), "ASCII output");
+    Py_UCS4 *decoded = malloc((size_t)(len + 1) * sizeof(Py_UCS4));
+    Py_UCS4 *encoded = malloc((size_t)(len * 16 + 64) * sizeof(Py_UCS4));
+    if (decoded == NULL || encoded == NULL) {
+        free(decoded);
+        free(encoded);
+        return;
+    }
+    Py_ssize_t start = 0;
+    for (Py_ssize_t end = 0; end <= len; end++) {
+        if (end < len && output[end] != '.') {
+            continue;
+        }
+        if (has_xn_prefix(output + start, end - start)) {
+            Py_ssize_t count = puny_decode(output + start + 4, end - start - 4, decoded);
+            if (count >= 0) {
+                Py_ssize_t encoded_len = puny_encode(decoded, count, encoded);
+                require_property(encoded_len == end - start - 4 &&
+                                     memcmp(output + start + 4, encoded, (size_t)encoded_len * sizeof(Py_UCS4)) == 0,
+                                 "Punycode round trip");
+            }
+        }
+        start = end + 1;
+    }
+    free(decoded);
+    free(encoded);
+    if (len <= TH_IDNA_MAX_INPUT) {
+        Py_UCS4 *repeated;
+        Py_ssize_t repeated_len;
+        idna_status status = idna_to_ascii(output, len, &repeated, &repeated_len);
+        if (status != IDNA_NO_MEMORY) {
+            require_property(status == IDNA_OK, "ASCII output rejection");
+            require_property(repeated_len == len && memcmp(output, repeated, (size_t)len * sizeof(Py_UCS4)) == 0,
+                             "ToASCII fixpoint");
+            free(repeated);
+        }
+    }
+}
+
 static void run_bytes(const unsigned char *bytes, size_t len) {
     Py_UCS4 *wide = malloc((len ? len : 1) * sizeof(Py_UCS4));
     if (wide == NULL) {
@@ -67,9 +164,11 @@ static void run_bytes(const unsigned char *bytes, size_t len) {
         wide[count++] = cp;
     }
     if (count <= TH_IDNA_MAX_INPUT) {
+        check_normalization(wide, count);
         Py_UCS4 *output;
         Py_ssize_t output_len;
         if (idna_to_ascii(wide, count, &output, &output_len) == IDNA_OK) {
+            check_ascii(output, output_len);
             free(output);
         }
     }
@@ -80,11 +179,28 @@ static void run_bytes(const unsigned char *bytes, size_t len) {
    no-non-ASCII equivalence label, long labels, empty labels, and the mapping/drop rows -- independent of any corpus. */
 static void run_builtins(void) {
     static const char *const hosts[] = {
-        "",         ".",         "..",          "a.b.c",         "xn--",          "xn---",
-        "xn--a",    "xn--a-",    "xn----",      "xn--nxasmq6b",  "xn--80ak6aa92e", "xn--example-.org",
-        "xn--zca",  "xn--0.com", "EXAMPLE.COM", "faß.de",        "\xe2\x80\x8b" /* ZWSP */,
-        "a\xcc\x81.com" /* combining acute */,  "\xe1\x84\x80\xe1\x85\xa1" /* Hangul jamo */,
-        "\xf0\x9f\x98\x80.com" /* astral */,    "xn--xn--xn--",  "xn--ls8h" /* pile of poo */,
+        "",
+        ".",
+        "..",
+        "a.b.c",
+        "xn--",
+        "xn---",
+        "xn--a",
+        "xn--a-",
+        "xn----",
+        "xn--nxasmq6b",
+        "xn--80ak6aa92e",
+        "xn--example-.org",
+        "xn--zca",
+        "xn--0.com",
+        "EXAMPLE.COM",
+        "faß.de",
+        "\xe2\x80\x8b" /* ZWSP */,
+        "a\xcc\x81.com" /* combining acute */,
+        "\xe1\x84\x80\xe1\x85\xa1" /* Hangul jamo */,
+        "\xf0\x9f\x98\x80.com" /* astral */,
+        "xn--xn--xn--",
+        "xn--ls8h" /* pile of poo */,
     };
     for (size_t index = 0; index < sizeof(hosts) / sizeof(hosts[0]); index++) {
         run_bytes((const unsigned char *)hosts[index], strlen(hosts[index]));
