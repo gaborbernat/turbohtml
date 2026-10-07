@@ -52,6 +52,8 @@ def test_normalize_rejects_saved_reparse_findings(source: str) -> None:
         pytest.param("http://a\u2028b.example/", "http://a\u2028b.example/", id="retained-disallowed-fallback"),
         pytest.param("file:///", "file:///", id="empty-file-host"),
         pytest.param("http://[::1]/", "http://[::1]/", id="ipv6"),
+        pytest.param("http://1g/", "http://1g/", id="numeric-prefix-fallback"),
+        pytest.param("http://-a/", "http://-a/", id="leading-hyphen-domain"),
     ],
 )
 def test_normalize_host_valid_and_fallback_forms(source: str, expected: str) -> None:

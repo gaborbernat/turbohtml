@@ -474,17 +474,23 @@ static PyObject *maybe_ipv4(PyObject *ascii) {
     }
     int kind = PyUnicode_KIND(ascii);
     const void *data = PyUnicode_DATA(ascii);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 codepoint = PyUnicode_READ(kind, data, index);
+        if (codepoint < 0x80 && FORBIDDEN_DOMAIN[codepoint]) {
+            PyErr_SetString(PyExc_ValueError, "host contains a forbidden domain code point");
+            return NULL;
+        }
+    }
+    Py_UCS4 first = PyUnicode_READ(kind, data, 0);
+    if (first < '0' || first > '9') {
+        return NULL;
+    }
     Py_UCS4 *cp = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
     if (cp == NULL) {            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (Py_ssize_t index = 0; index < len; index++) {
         cp[index] = PyUnicode_READ(kind, data, index);
-        if (cp[index] < 0x80 && FORBIDDEN_DOMAIN[cp[index]]) {
-            PyMem_Free(cp);
-            PyErr_SetString(PyExc_ValueError, "host contains a forbidden domain code point");
-            return NULL;
-        }
     }
     Py_ssize_t part_start[5];
     Py_ssize_t part_end[5];
