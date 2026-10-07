@@ -117,7 +117,8 @@ def _flow(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
             if inline:
                 output.append(("p", (), _block_end(tuple(inline))))
                 inline.clear()
-            output.append(record)
+            if record != _BOUNDARY:
+                output.append(record)
     if inline:
         output.append(("p", (), _block_end(tuple(inline))))
     return tuple(output)
@@ -174,23 +175,16 @@ def _element(element: XmlElement, parent: str, *, preserve: bool) -> tuple[_Mean
         return ()
     _check_profile(element, parent)
     children: Final = _children(element, preserve=preserve or element.tag == "pre")
-    if element.tag == "p" and not children:
-        return ()
+    if element.tag == "div":
+        return (_BOUNDARY, *children, _BOUNDARY)  # a block ends the paragraph around it even when it holds no text
     if (
-        element.tag in {"div", "span", "thead", "tbody"}
-        or (element.tag, parent) in {("p", "li"), ("code", "pre")}
+        element.tag in {"span", "thead", "tbody"}
+        or (element.tag, parent) == ("code", "pre")
         # an <a> without href is a placeholder (WHATWG 4.5.1) and Markdown has no link without a destination
         or (element.tag == "a" and "href" not in element.attrib)
     ):
         return children
-    tag: Final = {"b": "strong", "i": "em", "del": "s", "th": "td"}.get(element.tag, element.tag)
-    if tag in _CONTENT_REQUIRED and not children:
-        return ()
-    if tag in _EMPHASIS:
-        return _emphasis(tag, children)
-    if tag in {"pre", "code"}:
-        return ((tag, (), _code_text(children, block=tag == "pre")),)
-    return ((tag, _attributes(tag, element.attrib), children),)
+    return _record({"b": "strong", "i": "em", "del": "s", "th": "td"}.get(element.tag, element.tag), element, children)
 
 
 def _check_profile(element: XmlElement, parent: str) -> None:
@@ -206,6 +200,20 @@ def _check_profile(element: XmlElement, parent: str) -> None:
     ):
         msg = f"HTML content model violated at {element.tag}"
         raise MarkdownProfileError(msg)
+
+
+def _record(tag: str, element: XmlElement, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    if tag in _CONTENT_REQUIRED and not children:
+        return (_BOUNDARY,) if tag in _BLOCKS else ()
+    if tag in _EMPHASIS:
+        return _emphasis(tag, children)
+    if tag in {"pre", "code"}:
+        return ((tag, (), _code_text(children, block=tag == "pre")),)
+    if tag in {"blockquote", "li"}:
+        # quote and item content is a flow of blocks; a tight item's single paragraph renders bare (CommonMark 5.1-5.3),
+        # so items compare with every inline run wrapped
+        return ((tag, (), _flow(children)),)
+    return ((tag, _attributes(tag, element.attrib), children),)
 
 
 def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
@@ -227,17 +235,6 @@ def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     return (*before, *(((tag, (), tuple(inner)),) if inner else ()), *after)
 
 
-def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], ...]:
-    # an empty title gives no advisory information (WHATWG 3.2.6.1), the same as none
-    semantic: Final = {
-        name: value
-        for name, value in attributes.items()
-        if name in _SEMANTIC_ATTRIBUTES.get(tag, ()) and (value or name != "title")
-    }
-    # image syntax always writes both attributes (CommonMark 6.4)
-    return tuple(sorted((({"src": "", "alt": ""} if tag == "img" else {}) | semantic).items()))
-
-
 def _code_text(children: tuple[_Meaning, ...], *, block: bool) -> tuple[_Meaning, ...]:
     # code holds literal text only (CommonMark 4.5, 6.1): a block keeps its line breaks, a span turns them to spaces,
     # and fenced content always ends in a newline that a browser does not draw
@@ -254,9 +251,22 @@ def _plain_text(records: tuple[_Meaning, ...]) -> str:
             text += "\n"
         elif record[0] in _FLOW_INLINE:
             text += _plain_text(record[2])
-        elif inner := _plain_text(record[2]):
-            text += ("" if not text or text.endswith("\n") else "\n") + inner.removesuffix("\n") + "\n"
+        else:
+            # a block starts and ends a line even when it holds no text
+            inner = _plain_text(record[2]).removesuffix("\n")
+            text += ("" if not text or text.endswith("\n") else "\n") + (f"{inner}\n" if inner else "")
     return text
+
+
+def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    # an empty title gives no advisory information (WHATWG 3.2.6.1), the same as none
+    semantic: Final = {
+        name: value
+        for name, value in attributes.items()
+        if name in _SEMANTIC_ATTRIBUTES.get(tag, ()) and (value or name != "title")
+    }
+    # image syntax always writes both attributes (CommonMark 6.4)
+    return tuple(sorted((({"src": "", "alt": ""} if tag == "img" else {}) | semantic).items()))
 
 
 def _text(text: str | None, *, preserve: bool, keep: bool) -> tuple[_Meaning, ...]:
@@ -541,6 +551,8 @@ _SEMANTIC_ATTRIBUTES: Final[dict[str, frozenset[str]]] = {
 # paragraph a non-blank line (4.8), a list an item (5.3) and a table a header cell (GFM 4.10)
 _CONTENT_REQUIRED: Final = frozenset({"p", "strong", "em", "s", "code", "ul", "ol", "table", "tr"})
 _EMPHASIS: Final = frozenset({"strong", "em", "s"})
+_BLOCKS: Final = frozenset({"p", "ul", "ol", "table"})
+_BOUNDARY: Final[_Meaning] = ("#block", (), ())
 # the WHATWG content models of the containers whose Markdown syntax can hold nothing else (4.4.5-4.4.8, 4.9)
 _CONTENT_MODEL: Final[dict[str, frozenset[str]]] = {
     "ul": frozenset({"li", "script"}),
