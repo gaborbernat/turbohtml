@@ -56,9 +56,21 @@ def test_javascript_callback_rejects_input(source: bytes, error: type[Exception]
 
 
 @pytest.mark.oracle
-def test_javascript_rejects_independent_invalid_input_first() -> None:
-    with pytest.raises(OutOfScopeError):
-        javascript_observation(b"(", _unstable)
+@pytest.mark.parametrize(
+    ("source", "error", "message"),
+    [
+        pytest.param(b"(", OutOfScopeError, None, id="invalid-input-first"),
+        pytest.param(b'consume("kept",external);', AssertionError, "not a fixpoint", id="valid-input-nonfixpoint"),
+    ],
+)
+def test_javascript_rejects_independent_invalid_input_first(
+    source: bytes, error: type[Exception], message: str | None
+) -> None:
+    def unstable(source: str, _options: JSMinify) -> str:
+        return source + ";"
+
+    with pytest.raises(error, match=message):
+        javascript_observation(source, unstable)
 
 
 @pytest.mark.oracle
@@ -76,16 +88,6 @@ def test_javascript_rejects_wrong_stable_output(output: str, message: str) -> No
 
     with pytest.raises(AssertionError, match=message):
         javascript_observation(b'consume("kept",external);', wrong)
-
-
-@pytest.mark.oracle
-def test_javascript_rejects_nonfixpoint_output() -> None:
-    with pytest.raises(AssertionError, match="not a fixpoint"):
-        javascript_observation(b'consume("kept",external);', _unstable)
-
-
-def _unstable(source: str, _options: JSMinify) -> str:
-    return source + ";"
 
 
 @pytest.mark.oracle
