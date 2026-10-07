@@ -9,6 +9,16 @@
 #ifndef TURBOHTML_VALIDATE_XSD_H
 #define TURBOHTML_VALIDATE_XSD_H
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
 /* An expected element name plus the declaration that supplies its type. */
 typedef struct {
     const Py_UCS4 *uri;
@@ -471,7 +481,7 @@ static int xsd_cache_facets(th_schema *schema, th_node *node) {
 
 static int xsd_require_ref(th_schema *schema, th_node *node, named_vec *table, const char *kind);
 static int xsd_require_type(th_schema *schema, th_node *node, int allow_complex);
-static int xsd_is_builtin_type(const Py_UCS4 *local, Py_ssize_t local_len);
+static TH_NOINLINE int xsd_is_builtin_type(const Py_UCS4 *local, Py_ssize_t local_len);
 static int xsd_require_base(th_schema *schema, th_node *node);
 
 /* A dangling reference or an unenforced identity constraint would let validation accept documents the schema forbids,
@@ -548,7 +558,7 @@ static int xsd_require_type(th_schema *schema, th_node *node, int allow_complex)
     return -1;
 }
 
-static int xsd_is_builtin_type(const Py_UCS4 *local, Py_ssize_t local_len) {
+static TH_NOINLINE int xsd_is_builtin_type(const Py_UCS4 *local, Py_ssize_t local_len) {
     if (dt_lookup(local, local_len) != DT_UNKNOWN) {
         return 1;
     }
