@@ -520,13 +520,26 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
         cbuf_put_run(out, next_text, next_len);
     }
     css_rtrim(out);
-    if (out->len > mark && out->data[mark] != '(' &&
-        ((out->data[mark] != '"' && out->data[mark] != '\'') || css_run_ieq(name, name_len, "@charset"))) {
-        cbuf_reserve(out, 1);
-        memmove(out->data + mark + 1, out->data + mark, (size_t)(out->len - mark) * sizeof(css_char));
-        out->data[mark] = ' ';
-        out->len++;
+    if (out->len <= mark) {
+        return;
     }
+    if (out->data[mark] == '(') {
+        return;
+    }
+    switch (out->data[mark]) {
+    case '"':
+    case '\'':
+        if (!css_run_ieq(name, name_len, "@charset")) {
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+    cbuf_reserve(out, 1);
+    memmove(out->data + mark + 1, out->data + mark, (size_t)(out->len - mark) * sizeof(css_char));
+    out->data[mark] = ' ';
+    out->len++;
 }
 
 /* Write a closer for each block a statement at-rule's prelude leaves open at the end of input, where consuming a simple
