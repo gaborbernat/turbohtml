@@ -709,6 +709,7 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
             node_pat->def_index = (int)index;
             return node_pat;
         }
+        PyErr_SetString(PyExc_ValueError, "RELAX NG <ref> has no matching define");
         return schema->p_notallowed;
     }
     return schema->p_notallowed;
@@ -1105,6 +1106,8 @@ static pattern *rng_child_element(valctx *ctx, pattern *p, th_node *element) {
 /* ---- compile & entry ---- */
 
 static int rng_scan(th_schema *schema, th_node *container, int depth);
+static int rng_check_unused_refs(th_schema *schema, th_node *container);
+static void rng_prune_annotations(th_schema *schema, th_node *container);
 
 static int rng_compile(th_schema *schema) {
     qname root_name = schema_direct_qname(schema, schema->root);
@@ -1112,6 +1115,7 @@ static int rng_compile(th_schema *schema) {
         PyErr_SetString(PyExc_ValueError, "RELAX NG schema root must use the structure namespace");
         return 0;
     }
+    rng_prune_annotations(schema, schema->root);
     th_tree *tree = schema->tree;
     schema->p_empty = pat_new(schema, P_EMPTY);
     schema->p_notallowed = pat_new(schema, P_NOTALLOWED);
@@ -1144,8 +1148,63 @@ static int rng_compile(th_schema *schema) {
     if (rng_scan(schema, start, 0) < 0) {
         return 0;
     }
+    for (Py_ssize_t index = 0; index < schema->defines.len; index++) {
+        def_entry *entry = &schema->defines.items[index];
+        if (entry->cycle_depth != -1) {
+            continue;
+        }
+        if (rng_check_unused_refs(schema, entry->first) < 0) {
+            return 0;
+        }
+        for (def_part *part = entry->extra; part != NULL; part = part->next) {
+            if (rng_check_unused_refs(schema, part->node) < 0) {
+                return 0;
+            }
+        }
+    }
     schema->start = rng_build_children(schema, start, NULL);
     return 1;
+}
+
+/* Section 4.1 removes annotation subtrees before pattern and name-class construction. */
+static void rng_prune_annotations(th_schema *schema, th_node *container) {
+    th_node *child = container->first_child;
+    while (child != NULL) {
+        th_node *next = child->next_sibling;
+        if (child->type == TH_NODE_ELEMENT) {
+            qname name = schema_direct_qname(schema, child);
+            if (!u_eq_ascii(name.uri, name.uri_len, RNG_NS)) {
+                th_node_remove(child);
+            } else {
+                rng_prune_annotations(schema, child);
+            }
+        }
+        child = next;
+    }
+}
+
+/* Section 4.18 resolves names before 4.19 removes unused definitions. */
+static int rng_check_unused_refs(th_schema *schema, th_node *container) {
+    for (th_node *child = container->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type != TH_NODE_ELEMENT) {
+            continue;
+        }
+        if (is_schema_el(schema, child, RNG_NS, "ref")) {
+            const th_node_attr *name = attr_exact(schema->tree, child, "name", 4);
+            if (name == NULL) {
+                PyErr_SetString(PyExc_ValueError, "RELAX NG <ref> is missing the required name attribute");
+                return -1;
+            }
+            if (def_find(&schema->defines, name->value, name->value_len) < 0) {
+                PyErr_SetString(PyExc_ValueError, "RELAX NG <ref> has no matching define");
+                return -1;
+            }
+        }
+        if (rng_check_unused_refs(schema, child) < 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int rng_scan_node(th_schema *schema, th_node *node, int depth);
@@ -1166,11 +1225,11 @@ static int rng_scan(th_schema *schema, th_node *container, int depth) {
 
 enum { RNG_SCAN_OTHER, RNG_SCAN_REF, RNG_SCAN_INTERLEAVE, RNG_SCAN_ELEMENT };
 
-static int rng_scan_kind(const th_schema *schema, th_node *node);
+static int rng_scan_kind(th_node *node);
 static int rng_scan_define(th_schema *schema, Py_ssize_t def_index, int depth);
 
 static int rng_scan_node(th_schema *schema, th_node *node, int depth) {
-    switch (rng_scan_kind(schema, node)) {
+    switch (rng_scan_kind(node)) {
     case RNG_SCAN_REF: {
         const th_node_attr *name = attr_exact(schema->tree, node, "name", 4);
         if (name == NULL) {
@@ -1178,7 +1237,11 @@ static int rng_scan_node(th_schema *schema, th_node *node, int depth) {
             return -1;
         }
         Py_ssize_t index = def_find(&schema->defines, name->value, name->value_len);
-        return index >= 0 ? rng_scan_define(schema, index, depth) : 0;
+        if (index < 0) {
+            PyErr_SetString(PyExc_ValueError, "RELAX NG <ref> has no matching define");
+            return -1;
+        }
+        return rng_scan_define(schema, index, depth);
     }
     case RNG_SCAN_INTERLEAVE:
         return rng_check_interleave_node(schema, node) < 0 ? -1 : rng_scan(schema, node, depth);
@@ -1189,7 +1252,7 @@ static int rng_scan_node(th_schema *schema, th_node *node, int depth) {
     }
 }
 
-static int rng_scan_kind(const th_schema *schema, th_node *node) {
+static int rng_scan_kind(th_node *node) {
     const Py_UCS4 *local, *prefix;
     Py_ssize_t local_len = 0, prefix_len = 0;
     split_prefix(node->text, node->text_len, &local, &local_len, &prefix, &prefix_len);
@@ -1201,10 +1264,9 @@ static int rng_scan_kind(const th_schema *schema, th_node *node) {
     } else if (u_eq_ascii(local, local_len, "element")) {
         kind = RNG_SCAN_ELEMENT;
     } else {
-        return RNG_SCAN_OTHER; /* most nodes are not a restriction keyword: skip the namespace resolution */
+        return RNG_SCAN_OTHER;
     }
-    qname name = schema_direct_qname(schema, node);
-    return u_eq_ascii(name.uri, name.uri_len, RNG_NS) ? kind : RNG_SCAN_OTHER;
+    return kind;
 }
 
 /* RELAX NG 4.19: meeting a define again at the element depth where its expansion began is a ref loop with no

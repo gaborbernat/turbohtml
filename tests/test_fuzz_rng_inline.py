@@ -11,12 +11,12 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def engine() -> ModuleType:
-    return pytest.importorskip("fuzz.xsd_inline", exc_type=ImportError)
+    return pytest.importorskip("fuzz.rng_inline", exc_type=ImportError)
 
 
 @pytest.mark.oracle
-@pytest.mark.parametrize("seed", range(9))
-def test_xsd_inline_generated_labels(engine: ModuleType, seed: int) -> None:
+@pytest.mark.parametrize("seed", range(8))
+def test_rng_inline_generated_labels(engine: ModuleType, seed: int) -> None:
     case: Final = engine.generate(seed)
     assert [(row.engine, row.phase, row.expected, row.actual) for row in engine.compare(case)] == [
         ("turbohtml", "compilation", case.compiles, case.compiles),
@@ -31,8 +31,8 @@ def test_xsd_inline_generated_labels(engine: ModuleType, seed: int) -> None:
 
 @pytest.mark.oracle
 @pytest.mark.parametrize("schema", ["<", '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>'])
-def test_xsd_inline_compile_verdicts(engine: ModuleType, schema: str) -> None:
-    expected: Final = schema != "<"
+def test_rng_inline_compile_verdicts(engine: ModuleType, schema: str) -> None:
+    expected: Final = False
     case: Final = engine.Case(0, schema, expected, ())
     assert [(row.engine, row.phase, row.expected, row.actual) for row in engine.compare(case)] == [
         ("turbohtml", "compilation", expected, expected),
@@ -41,7 +41,7 @@ def test_xsd_inline_compile_verdicts(engine: ModuleType, schema: str) -> None:
 
 
 @pytest.mark.oracle
-def test_xsd_inline_unavailable_documents_remain_findings(engine: ModuleType) -> None:
+def test_rng_inline_unavailable_documents_remain_findings(engine: ModuleType) -> None:
     case: Final = engine.Case(0, "<", compiles=False, documents=(("<v/>", True),))
     assert [(row.engine, row.phase, row.expected, row.actual) for row in engine.compare(case)] == [
         ("turbohtml", "compilation", False, False),
@@ -52,7 +52,7 @@ def test_xsd_inline_unavailable_documents_remain_findings(engine: ModuleType) ->
 
 
 @pytest.mark.oracle
-def test_xsd_inline_negative_control_changes_public_verdict(engine: ModuleType) -> None:
+def test_rng_inline_negative_control_changes_public_verdict(engine: ModuleType) -> None:
     case: Final = engine.generate(0)
     assert [
         (row.engine, row.phase, row.expected, row.actual) for row in engine.compare(case, negative_control=True)
@@ -76,7 +76,7 @@ def test_xsd_inline_negative_control_changes_public_verdict(engine: ModuleType) 
         pytest.param(["--cases", "8", "--negative-control"], 1, 18, id="wrong-verdict"),
     ],
 )
-def test_xsd_inline_cli(
+def test_rng_inline_cli(
     engine: ModuleType,
     capsys: pytest.CaptureFixture[str],
     arguments: list[str],
@@ -96,6 +96,57 @@ def test_xsd_inline_cli(
 
 @pytest.mark.oracle
 @pytest.mark.parametrize("count", ["0", "257", "-1"])
-def test_xsd_inline_cli_rejects_unbounded_cases(engine: ModuleType, count: str) -> None:
+def test_rng_inline_cli_rejects_unbounded_cases(engine: ModuleType, count: str) -> None:
     with pytest.raises(SystemExit, match="2"):
         engine.main(["--cases", count])
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize(
+    ("pattern", "documents"),
+    [
+        pytest.param("<empty/>", (("<v/>", True), ("<v>wrong</v>", False)), id="group"),
+        pytest.param(
+            '<choice><value type="string">ok</value>{annotation}</choice>',
+            (("<v>ok</v>", True), ("<v/>", False)),
+            id="choice",
+        ),
+        pytest.param(
+            "<interleave><empty/>{annotation}</interleave>",
+            (("<v/>", True), ("<v>wrong</v>", False)),
+            id="interleave",
+        ),
+        pytest.param(
+            '<attribute name="key">{annotation}</attribute><empty/>',
+            (('<v key="anything"/>', True), ("<v/>", False)),
+            id="attribute-default-text",
+        ),
+    ],
+)
+def test_rng_inline_foreign_annotations_preserve_pattern_verdicts(
+    engine: ModuleType,
+    pattern: str,
+    documents: tuple[tuple[str, bool], ...],
+) -> None:
+    annotation: Final = '<doc:annotation><ref name="missing"/></doc:annotation>'
+    body: Final = pattern.replace("{annotation}", annotation)
+    schema: Final = (
+        '<grammar xmlns="http://relaxng.org/ns/structure/1.0" xmlns:doc="urn:documentation">'
+        f'<start><element name="v">{body}{annotation}</element></start></grammar>'
+    )
+    case: Final = engine.Case(0, schema, compiles=True, documents=documents)
+    assert [(row.engine, row.phase, row.expected, row.actual) for row in engine.compare(case)] == [
+        ("turbohtml", "compilation", True, True),
+        ("libxml2", "compilation", True, True),
+        *[(name, "validation", expected, expected) for _, expected in documents for name in ("turbohtml", "libxml2")],
+    ]
+
+
+@pytest.mark.oracle
+def test_rng_inline_foreign_annotation_preserves_explicit_name_class(engine: ModuleType) -> None:
+    schema: Final = (
+        '<element xmlns="http://relaxng.org/ns/structure/1.0" xmlns:doc="urn:documentation">'
+        '<doc:annotation><ref name="missing"/></doc:annotation><name>v</name><empty/></element>'
+    )
+    case: Final = engine.Case(0, schema, compiles=True, documents=(("<v/>", True), ("<wrong/>", False)))
+    assert [row.actual == row.expected for row in engine.compare(case)] == [True] * 6
