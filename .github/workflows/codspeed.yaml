@@ -31,10 +31,12 @@ jobs:
     steps:
       # GitHub rolls a new runner image out over days, so a base run and a head run can land on images that ship
       # different glibc builds. Upgrading to the archive's current build gives every run the same one.
+      # A stalled mirror otherwise holds apt until the six-hour job limit, and this job gates every merge.
       - name: 📦 Upgrade glibc to the archive build
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libc6-dbg
+          sudo apt-get update -q -o Acquire::Retries=3 -o Acquire::http::Timeout=30
+          sudo apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 libc6-dbg
       # Python lists every directory it imports from, and pytest finds its plugins by listing site-packages. ext4
       # returns entries in hash order under a per-filesystem seed that each runner image sets differently, so the
       # listing order, the allocation order behind it, and the heap addresses the benchmarks touch all followed the
