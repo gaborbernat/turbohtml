@@ -1210,6 +1210,8 @@ def test_minify_css_inline_custom_property_block(source: str, expected: str) -> 
 # a stylesheet ending in a statement at-rule keeps its `;`, so another sheet appended to it starts a new rule instead of
 # becoming the at-rule's block (CSS Syntax 3 §5.5.2); blocks its prelude leaves open close first (§5.5.9)
 _FINAL_AT_STATEMENT: Final[list[ParameterSet]] = [
+    pytest.param("@x ;", "@x;", id="whitespace-only-prelude"),
+    pytest.param("@x/**/;", "@x;", id="comment-only-prelude"),
     pytest.param('@import "a";', '@import"a";', id="import"),
     pytest.param('@import "a"', '@import"a";', id="import-without-semicolon"),
     pytest.param('@namespace svg "x"', '@namespace svg"x";', id="namespace"),
