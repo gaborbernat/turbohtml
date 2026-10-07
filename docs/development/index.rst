@@ -150,7 +150,8 @@ NEON scan loops for the portable SWAR ones.
 The fuzz environments compile the extension with ``-DTH_OPERATION_LIMIT=100000``. XPath evaluation, XSLT stylesheet
 compilation and XSLT application then count their steps and raise ``ValueError`` past the limit, so a known super-linear
 input fails fast instead of timing out and hiding the next find. Release builds leave the macro undefined and compile no
-counter. ``fuzz-smoke`` runs ``tests/fuzz_build/`` to check that the limit stops those inputs.
+counter. ``fuzz-smoke`` runs ``tests/fuzz_build/`` to check that the limit stops those inputs, and that a public call
+raises ``MemoryError`` whichever of its allocations the ``-Dfuzzing=true`` hook fails.
 
 The in-process driver runs each input under pymalloc and again under ``PYTHONMALLOC=malloc``, because AddressSanitizer
 cannot see an over-read that stays inside a pymalloc pool. The deep run splits ``--minutes`` between the two passes.

@@ -139,13 +139,23 @@ def test_find_empty_query_is_empty() -> None:
 
 
 @pytest.mark.parametrize(
-    ("selector", "error"),
-    [pytest.param("[", SelectorSyntaxError, id="syntax"), pytest.param(cast("str", 1), TypeError, id="type")],
+    ("roots", "selector", "error"),
+    [
+        pytest.param(lambda: parse("<main></main><main></main>").select("main"), "[", SelectorSyntaxError, id="syntax"),
+        pytest.param(lambda: parse("<main></main><main></main>").select("main"), cast("str", 1), TypeError, id="type"),
+        pytest.param(
+            lambda: cast("list[Element]", [parse("<main></main>"), parse("<main></main>")]),
+            "[",
+            SelectorSyntaxError,
+            id="syntax-documents",
+        ),
+    ],
 )
-def test_find_multiple_roots_rejects_invalid_selector(selector: str, error: type[Exception]) -> None:
-    roots = parse("<main></main><main></main>").select("main")
+def test_find_multiple_roots_rejects_invalid_selector(
+    roots: Callable[[], list[Element]], selector: str, error: type[Exception]
+) -> None:
     with pytest.raises(error):
-        Query(roots).find(selector)
+        Query(roots()).find(selector)
 
 
 def test_filter_keeps_matching_elements() -> None:
