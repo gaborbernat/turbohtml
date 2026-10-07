@@ -43,6 +43,13 @@ from fuzz.css_custom_oracles import (
     css_custom_generate,
     css_custom_seeds,
 )
+from fuzz.dom_program import (
+    UnsupportedDomProgramError,
+    dom_program_check,
+    dom_program_controls,
+    dom_program_generate,
+    dom_program_seeds,
+)
 from fuzz.html_foreign_oracles import (
     UnsupportedHtmlForeignCaseError,
     html_foreign_check,
@@ -512,6 +519,13 @@ def _observer_sequence_check(case: str) -> str | None:
     try:
         return observer_sequence_check(case)
     except UnsupportedObserverCaseError as error:
+        raise OutOfScopeError from error
+
+
+def _dom_program_check(case: str) -> str | None:
+    try:
+        return dom_program_check(case)
+    except UnsupportedDomProgramError as error:
         raise OutOfScopeError from error
 
 
@@ -2438,6 +2452,9 @@ ORACLES: Final[dict[str, Oracle]] = {
         observer_sequence_seeds,
         observer_sequence_controls,
         Floor(100, 1),
+    ),
+    "dom-program": Oracle(
+        _dom_program_check, dom_program_generate, dom_program_seeds, dom_program_controls, Floor(100, 1)
     ),
     "xml-island-grammar": Oracle(_xml_island, xml_island_generate, xml_island_seeds, xml_island_controls, Floor(54, 1)),
     "xml-literal-grammar": Oracle(
