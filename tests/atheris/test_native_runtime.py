@@ -13,7 +13,11 @@ import pytest
 from fuzz.atheris_runtime import build_runtime
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from typing import Protocol
+
+    class _Runtime(Protocol):
+        def path(self) -> str: ...
+
 
 _TARGET: Final = """
 from __future__ import annotations
@@ -74,8 +78,8 @@ fuzz(
 def test_atheris_native_corpus_rejection(tmp_path: Path) -> None:
     if sys.platform != "linux" or importlib.util.find_spec("atheris") is None:
         pytest.skip("Atheris's released runtime requires Linux and its optional wheel")
-    runtime = importlib.import_module("atheris")
-    archive = Path(cast("Callable[[], str]", runtime.path)()) / "libclang_rt.fuzzer_no_main.a"
+    runtime = cast("_Runtime", importlib.import_module("atheris"))
+    archive = Path(runtime.path()) / "libclang_rt.fuzzer_no_main.a"
     library = build_runtime(archive, tmp_path / "build", coverage=True)
     (tmp_path / "capability_target.py").write_text(_TARGET, encoding="utf-8")
     child = tmp_path / "child.py"
