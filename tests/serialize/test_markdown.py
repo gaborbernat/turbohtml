@@ -148,7 +148,10 @@ def test_code_elements_preserve_text(tag: str, content: str, expected: str) -> N
             id="block-image-in-anchor-flattens",
         ),
         pytest.param('<p><img src="i.png" alt="cat"></p>', "![cat](i.png)", id="image"),
-        pytest.param("<p><img></p>", "![]()", id="image-empty"),
+        pytest.param("<p><img></p>", "![](<>)", id="image-empty"),
+        pytest.param('<p><img title="t"></p>', '![](<> "t")', id="image-empty-src-with-title"),
+        pytest.param('<p><a href="">x</a></p>', "[x](<>)", id="link-empty-href"),
+        pytest.param('<p><a href="" title="t">x</a></p>', '[x](<> "t")', id="link-empty-href-with-title"),
         pytest.param('<p><img src="a b.png" alt="x"></p>', "![x](<a b.png>)", id="image-space-url"),
         pytest.param('<img src="/i.jpg" alt="a]b">', "![a\\]b](/i.jpg)", id="image-alt-escapes-bracket"),
         pytest.param(
@@ -1044,7 +1047,7 @@ def test_table_edge_cases(html: str, expected: str) -> None:
         pytest.param('<ol start="2x"><li>a</li></ol>', "2. a", id="ol-start-digits-then-letter"),
         pytest.param('<ol start="-5"><li>a</li></ol>', "1. a", id="ol-start-negative-ignored"),
         pytest.param("<pre><svg></svg>code</pre>", "```\ncode\n```", id="pre-foreign-first-child"),
-        pytest.param("<p><a href>x</a></p>", "x", id="link-valueless-href"),
+        pytest.param("<p><a href>x</a></p>", "[x](<>)", id="link-valueless-href"),
         pytest.param("<p><code></code></p>", "", id="code-span-empty"),
         pytest.param("<p><code>a`</code></p>", "`` a` ``", id="code-span-ends-with-backtick"),
         pytest.param("<p>before<template>t</template>after</p>", "beforetafter", id="template-inline-content"),
@@ -2271,6 +2274,12 @@ def test_code_blocks(html: str, opts: Markdown, expected: str) -> None:
             id="link-reference-multiple",
         ),
         pytest.param(
+            '<p><a href="">L</a></p>',
+            Markdown(links=Markdown.Links(style="reference")),
+            "[L][1]\n\n[1]: <>",
+            id="link-reference-empty-href",
+        ),
+        pytest.param(
             '<p><a href="http://x.com">http://x.com</a></p>', Markdown(), "<http://x.com>", id="autolink-match"
         ),
         pytest.param(
@@ -2677,7 +2686,7 @@ def test_text_options(html: str, opts: Markdown, expected: str) -> None:
             "\\< \\> \\# \\+ \\- \\= \\~ \\| \\! \\&",
             id="escape-all-every-char",
         ),
-        pytest.param('<p><a href="">e</a></p>', Markdown(), "e", id="link-empty-href-dropped"),
+        pytest.param('<p><a href="">e</a></p>', Markdown(), "[e](<>)", id="link-empty-href-kept"),
         pytest.param(
             '<p><a href="page">L</a></p>',
             Markdown(links=Markdown.Links(skip_internal=True)),
