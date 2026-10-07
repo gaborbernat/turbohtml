@@ -1,0 +1,1 @@
+Reject documented API errors from Atheris-generated corpora.
