@@ -264,8 +264,40 @@ retry:;
     return out;
 }
 
+/* Build the element index a document-rooted query reads before the query runs, and raise
+   MemoryError when the build fails, where the query itself would fall back to a walk. A
+   failure branch inside select_limited lowered GCC's estimated loop frequency enough that
+   LTO stopped inlining the matcher, costing select 3,000 instructions a call. */
+static int index_prebuild(PyObject *self, PyObject *arg) {
+    if (!PyUnicode_Check(arg)) {
+        return 0; /* the query raises the TypeError */
+    }
+    PyObject *handle = Py_NewRef(((NodeObject *)self)->handle);
+    int failed = 0;
+    Py_BEGIN_CRITICAL_SECTION(handle);
+    HandleObject *handle_obj = (HandleObject *)handle;
+    th_node *origin = ((NodeObject *)self)->node;
+    if (!handle_obj->index_built && handle_index_usable(handle_obj, origin)) {
+        sel_compiled *compiled = cached_compile(state_of(self)->selector_error, handle_obj, arg);
+        /* GCOVR_EXCL_BR_START: an eligible query reads the index unless its build failed to allocate */
+        if (compiled == NULL) {
+            failed = 1;
+        } else if (!selector_use_index(handle_obj, origin, compiled) && compiled->subject_atom != UINT16_MAX) {
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+            failed = 1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
+        /* GCOVR_EXCL_BR_STOP */
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_DECREF(handle);
+    return -failed;
+}
+
 TH_NODE_API(, PyObject *, node_select, (PyObject * self, PyObject *arg), (self, arg), (PyObject * self, PyObject *arg),
             (NodeObject *)self, arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
+    if (index_prebuild(self, arg) < 0) {
+        return NULL;
+    }
     return select_limited(self, arg, 0);
 }
 
@@ -283,6 +315,10 @@ TH_NODE_API(, PyObject *, turbohtml_select_limited, (PyObject * module, PyObject
     th_node *borrowed;
     if (turbohtml_node_borrow(module, node, &tree, &borrowed) < 0) {
         return NULL;
+    }
+    /* Matcher validated the selector on construction, so only an allocation fails here */
+    if (index_prebuild(node, selector) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return NULL;                          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return select_limited(node, selector, limit > 0 ? limit : 0);
 }
@@ -675,7 +711,7 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
 TH_NODE_API(, PyObject *, node_select_one, (PyObject * self, PyObject *arg), (self, arg),
             (PyObject * self, PyObject *arg), (NodeObject *)self,
             arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
-    if (check_selector_arg(arg) < 0) {
+    if (index_prebuild(self, arg) < 0 || check_selector_arg(arg) < 0) {
         return NULL;
     }
 retry:;

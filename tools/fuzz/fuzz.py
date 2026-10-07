@@ -12,14 +12,14 @@ Two mechanisms cover the untrusted-input entry points the security spike priorit
   fault aborts the interpreter with a stack trace. It calls the public API, so it survives the in-flight C refactors.
 
 ``smoke`` replays the past finds under ``tests/fuzz_regressions`` and a benign seed corpus once (fast, deterministic,
-gates every PR), then runs ``tests/fuzz_build`` against the operation limit the fuzz build compiles in. ``deep`` adds a
-mutation loop and structural probes for a per-target budget (the scheduled/manual run that hunts for crashes).
-``oracle`` runs the sanitizer wrong-output oracles (``sanitize_oracles.py``) instead, because a sanitizer bug usually
-returns unsafe markup without crashing. ``round-trip`` runs the printer, minifier, entry-point and source-span oracles
-(``round_trip_oracles.py``) and ``release-diff`` compares HEAD with the latest PyPI release (``release_diff.py``), for
-the bugs that return wrong text. A crashing input lands in ``--crash-dir`` as ``crash-<sha256>``, and the log names it
-only by hash, length and harness, because CI logs on a public repository are public. The in-process extension is
-expected to be pre-built by the tox env; ``--build`` builds it here for a local run.
+gates every PR), then runs ``tests/fuzz_build`` against the operation limit and the allocation-failure hook the fuzz
+build compiles in. ``deep`` adds a mutation loop and structural probes for a per-target budget (the scheduled/manual run
+that hunts for crashes). ``oracle`` runs the sanitizer wrong-output oracles (``sanitize_oracles.py``) instead, because a
+sanitizer bug usually returns unsafe markup without crashing. ``round-trip`` runs the printer, minifier, entry-point and
+source-span oracles (``round_trip_oracles.py``) and ``release-diff`` compares HEAD with the latest PyPI release
+(``release_diff.py``), for the bugs that return wrong text. A crashing input lands in ``--crash-dir`` as
+``crash-<sha256>``, and the log names it only by hash, length and harness, because CI logs on a public repository are
+public. The in-process extension is expected to be pre-built by the tox env; ``--build`` builds it here for a local run.
 
 ``smoke`` and ``deep`` build everything in the fuzz-only mode (meson ``-Dfuzzing=true``) and start with a self-test:
 each ``_fuzz_crash`` kind must draw its AddressSanitizer report, and an injected allocation failure must raise
@@ -105,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (code := _run_standalone(args.mode, args.extra_corpus, args.crash_dir)) != 0 or args.skip_inprocess:
         return code
     return _run_inprocess(args.mode, args.minutes, args.rng_seed, args.crash_dir) or (
-        _run_operation_limit() if args.mode == "smoke" else 0
+        _run_fuzz_build_tests() if args.mode == "smoke" else 0
     )
 
 
@@ -383,8 +383,8 @@ def _run_inprocess(mode: str, minutes: float, rng_seed: int, crash_dir: Path) ->
     return status
 
 
-def _run_operation_limit() -> int:
-    # the release build compiles no counters, so these checks run only here, against the fuzz build
+def _run_fuzz_build_tests() -> int:
+    # the release build compiles neither the counters nor the injection hook, so these checks run only here
     return subprocess.run(
         [sys.executable, "-m", "pytest", str(_ROOT / "tests" / "fuzz_build"), "--no-cov", "-p", "no:cacheprovider"],
         cwd=_ROOT,
