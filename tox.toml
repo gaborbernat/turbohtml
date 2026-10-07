@@ -110,6 +110,8 @@ commands = [
     "100",
     "--fail-under-branch",
     { replace = "if", condition = "factor['3.10']", then = "97", else = "100" },
+    "--json",
+    "{env_tmp_dir}{/}c_coverage.json",
     "--html-details",
     "{env_tmp_dir}{/}c_htmlcov.html",
     "--txt-metric",
@@ -131,6 +133,28 @@ commands = [
     "-c",
     "print('free-threaded parallel stress skipped (GIL build)')"
   ] },
+]
+commands_post = [
+  [
+    "python",
+    "-c",
+    """
+from pathlib import Path
+from typing import Final
+import json
+import sys
+
+report: Final = Path(r'{env_tmp_dir}/c_coverage.json')
+if sys.platform == 'darwin' and report.is_file():
+    print(json.dumps([
+        dict(file=source['file'], lines=[
+            line for line in source['lines'] if 521 <= line['line_number'] <= 524
+        ])
+        for source in json.loads(report.read_text())['files']
+        if source['file'].endswith('css/minify/css_grammar.h')
+    ], indent=2))
+    """,
+  ],
 ]
 
 [env."pypy3.11"]
