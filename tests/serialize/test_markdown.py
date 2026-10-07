@@ -941,6 +941,7 @@ def test_link_destination_renders_source_href(html: str) -> None:
     [
         pytest.param('<a href="a b">t</a>', "[t](<http://s/a b>)", id="space"),
         pytest.param('<a href="&lt;u">u</a>', "[u](http://s/<u)", id="leading-angle-after-base"),
+        pytest.param('<a href="">e</a>', "[e](http://s/)", id="empty-href-resolves-to-base"),
     ],
 )
 def test_link_destination_base_url(html: str, expected: str) -> None:
