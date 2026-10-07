@@ -24,7 +24,7 @@ def test_atheris_driver_connects_exception_boundary(mocker: MockerFixture) -> No
         accepted.append(data)
 
     target = Target("cli", consume, ("turbohtml.__main__.main",), (UnicodeError,))
-    runtime = mocker.MagicMock(spec=["Setup", "Fuzz", "instrument_func"])
+    runtime = mocker.MagicMock(spec=["Setup", "Fuzz", "instrument_func", "instrument_all"])
     runtime.instrument_func.side_effect = lambda callback: callback
     mocker.patch("fuzz.atheris_driver.import_module", autospec=True, return_value=runtime)
     mocker.patch("fuzz.atheris_driver.rejection_hook", autospec=True, return_value=partial(rejected.append, 1))
@@ -36,6 +36,7 @@ def test_atheris_driver_connects_exception_boundary(mocker: MockerFixture) -> No
 
     runtime.Fuzz.side_effect = native_loop
     fuzz([target], ["turbohtml.__main__"], "cli", ["driver", "-runs=2"])
+    runtime.instrument_all.assert_called_once_with()
     assert (accepted, rejected, runtime.Setup.call_args.args[0], runtime.Setup.call_args.kwargs) == (
         [b"valid"],
         [1],
