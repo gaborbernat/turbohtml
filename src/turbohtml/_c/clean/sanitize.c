@@ -4944,6 +4944,11 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
     Py_DECREF(s.star);
     Py_DECREF(s.re_search);
     if (failed) {
+        /* a Python callback or API call sets its own exception; a failed tree allocation (arena_alloc, node_new) sets
+           none, so report it here the way the rewriter does for its output buffer */
+        if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyErr_NoMemory();    /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
         th_tree_free(s.tree);
         return NULL;
     }
