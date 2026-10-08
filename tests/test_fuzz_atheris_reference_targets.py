@@ -76,6 +76,10 @@ def test_atheris_reference_css_records_left_open_at_end(
     assert cssom_observation(data) == expected
 
 
+def test_atheris_reference_custom_property_block_records() -> None:
+    assert cssom_observation(b"--x: {a}") == (("--x", "{a}", False),)
+
+
 def test_atheris_reference_selector_specificity() -> None:
     expression, specificity = selector_observation(b"div#a > p.x")
     assert (bool(expression), specificity) == (True, ((1, 1, 2),))

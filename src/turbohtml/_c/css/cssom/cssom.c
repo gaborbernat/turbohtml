@@ -411,13 +411,60 @@ static int css_take_important(const Py_UCS4 **value, Py_ssize_t *len) {
     return 1;
 }
 
-/* The offset of the top-level delimiter ch at or after pos in [pos, end), skipping
-   strings and () / [] nesting, or end when none remains. */
-static Py_ssize_t css_scan_to(const Py_UCS4 *data, Py_ssize_t pos, Py_ssize_t end, Py_UCS4 ch) {
-    int depth = 0;
+/* What css_scan_to does at each ASCII code point: 1, 2 and 3 open a (), [] or {} block and name its kind, 4 marks a
+   closer, a quote, `:` or `;`, and 0 lets the run of names and numbers between them skip the comparisons. */
+static const unsigned char CSS_SCAN_CLASS[128] = {
+    ['('] = 1, ['['] = 2, ['{'] = 3, [')'] = 4, [']'] = 4, ['}'] = 4, ['"'] = 4, ['\''] = 4, [':'] = 4, [';'] = 4,
+};
+
+/* The closer of each block kind; kind 0 stands for no open block and matches nothing. */
+static const Py_UCS4 CSS_BLOCK_CLOSERS[4] = {0, ')', ']', '}'};
+
+/* The offset of the first top-level stop or also_stop in [pos, end), skipping strings and (), [] and {} blocks,
+   or end when none remains, or -1 on allocation failure. A custom property's value holds {} blocks (CSS Variables 1
+   §2), so a `;` or `}` inside one is block content. A block ends only at the closer of its own opener; any other
+   closer is a token inside it (CSS Syntax 3 §5.5.8), so `{a)}` stays one block and the open kinds form a stack. The
+   innermost 32 kinds sit two bits each in a register, which keeps a stack array and its per-call setup out of the
+   common shallow scan; deeper kinds spill to the heap. */
+static Py_ssize_t css_scan_to(const Py_UCS4 *data, Py_ssize_t pos, Py_ssize_t end, Py_UCS4 stop, Py_UCS4 also_stop) {
+    uint64_t open_kinds = 0;
+    unsigned char *spilled = NULL;
+    Py_ssize_t spilled_capacity = 0;
+    Py_ssize_t depth = 0;
+    Py_ssize_t found = end;
     while (pos < end) {
         Py_UCS4 cur = data[pos];
-        if (cur == '"' || cur == '\'') {
+        unsigned char class_of = cur < 128 ? CSS_SCAN_CLASS[cur] : 0;
+        if (class_of == 0) {
+            pos++;
+            continue;
+        }
+        if (depth == 0 && (cur == stop || cur == also_stop)) {
+            found = pos;
+            break;
+        }
+        if (class_of < 4) {
+            if (depth >= 32) {
+                if (depth - 32 == spilled_capacity) {
+                    spilled_capacity = spilled_capacity == 0 ? TH_INITIAL_CAPACITY(32) : spilled_capacity * 2;
+                    unsigned char *grown = PyMem_Realloc(spilled, (size_t)spilled_capacity);
+                    if (grown == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                        PyMem_Free(spilled); /* GCOVR_EXCL_LINE: allocation-failure path */
+                        return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+                    }
+                    spilled = grown;
+                }
+                spilled[depth - 32] = (unsigned char)(open_kinds >> 62);
+            }
+            open_kinds = open_kinds << 2 | class_of;
+            depth++;
+        } else if (cur == CSS_BLOCK_CLOSERS[open_kinds & 3]) {
+            open_kinds >>= 2;
+            depth--;
+            if (depth >= 32) {
+                open_kinds |= (uint64_t)spilled[depth - 32] << 62;
+            }
+        } else if (cur == '"' || cur == '\'') {
             Py_UCS4 quote = cur;
             pos++;
             while (pos < end) {
@@ -430,18 +477,13 @@ static Py_ssize_t css_scan_to(const Py_UCS4 *data, Py_ssize_t pos, Py_ssize_t en
                 }
                 pos++;
             }
-        } else if (cur == '(' || cur == '[') {
-            depth++;
-        } else if (cur == ')' || cur == ']') {
-            if (depth > 0) {
-                depth--;
-            }
-        } else if (cur == ch && depth == 0) {
-            return pos;
         }
         pos++;
     }
-    return end;
+    if (spilled != NULL) {
+        PyMem_Free(spilled);
+    }
+    return found;
 }
 
 /* The offset just past the '}' matching the '{' at pos, tracking nested braces (so
@@ -484,8 +526,15 @@ static Py_ssize_t css_parse_block(const Py_UCS4 *data, Py_ssize_t start, Py_ssiz
     Py_ssize_t count = 0;
     Py_ssize_t pos = start;
     while (pos < end) {
-        Py_ssize_t semi = css_scan_to(data, pos, end, ';');
-        Py_ssize_t colon = css_scan_to(data, pos, semi, ':');
+        /* the value scan starts past the colon, so the name is read once */
+        Py_ssize_t colon = css_scan_to(data, pos, end, ':', ';');
+        if (colon < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;   /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        Py_ssize_t semi = colon < end && data[colon] == ':' ? css_scan_to(data, colon + 1, end, ';', ';') : colon;
+        if (semi < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
         if (colon < semi) {
             const Py_UCS4 *name = data + pos;
             Py_ssize_t name_len = colon - pos;
@@ -705,11 +754,18 @@ static css_rule *css_parse_sheet(const Py_UCS4 *data, Py_ssize_t len, Py_ssize_t
         if (pos >= len) {
             break;
         }
-        Py_ssize_t brace = css_scan_to(data, pos, len, '{');
+        Py_ssize_t brace = css_scan_to(data, pos, len, '{', '{');
+        if (brace < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            goto fail;   /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
         if (data[pos] == '@') {
             /* an at-rule: a statement one (@import, @charset) ends at ';', a block one
-               (@media, @supports) at its balanced '}'; either is skipped whole */
-            Py_ssize_t semi = css_scan_to(data, pos, len, ';');
+               (@media, @supports) at its balanced '}'; either is skipped whole. The scan stops at the brace, since
+               past it a ';' outside the block lies in a later statement. */
+            Py_ssize_t semi = css_scan_to(data, pos, brace, ';', ';');
+            if (semi < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                goto fail;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
             if (brace >= len || semi < brace) {
                 pos = semi < len ? semi + 1 : len;
                 continue;
@@ -720,18 +776,19 @@ static css_rule *css_parse_sheet(const Py_UCS4 *data, Py_ssize_t len, Py_ssize_t
         if (brace >= len) {
             break;
         }
-        Py_ssize_t close = css_scan_to(data, brace + 1, len, '}');
+        Py_ssize_t close = css_scan_to(data, brace + 1, len, '}', '}');
+        if (close < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            goto fail;   /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
         const Py_UCS4 *selector = data + pos;
         Py_ssize_t selector_len = brace - pos;
         css_trim(&selector, &selector_len);
         css_decl *decls = NULL;
         Py_ssize_t decl_cap = 0;
         Py_ssize_t decl_count = css_parse_block(data, brace + 1, close, &decls, &decl_cap);
-        if (decl_count < 0) {             /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            PyMem_Free(decls);            /* GCOVR_EXCL_LINE: allocation-failure path */
-            css_free_rules(rules, count); /* GCOVR_EXCL_LINE: allocation-failure path */
-            *out_count = -1;              /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (decl_count < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(decls); /* GCOVR_EXCL_LINE: allocation-failure path */
+            goto fail;         /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         if (selector_len > 0) {
             if (count == capacity) {
@@ -739,9 +796,7 @@ static css_rule *css_parse_sheet(const Py_UCS4 *data, Py_ssize_t len, Py_ssize_t
                 css_rule *bigger = PyMem_Realloc(rules, (size_t)grown * sizeof(css_rule));
                 if (bigger == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                     PyMem_Free(decls); /* GCOVR_EXCL_LINE: allocation-failure path */
-                    css_free_rules(rules, count); /* GCOVR_EXCL_LINE: allocation-failure path */
-                    *out_count = -1;              /* GCOVR_EXCL_LINE: allocation-failure path */
-                    return NULL;                  /* GCOVR_EXCL_LINE: allocation-failure path */
+                    goto fail;         /* GCOVR_EXCL_LINE: allocation-failure path */
                 }
                 rules = bigger;
                 capacity = grown;
@@ -754,6 +809,10 @@ static css_rule *css_parse_sheet(const Py_UCS4 *data, Py_ssize_t len, Py_ssize_t
     }
     *out_count = count;
     return rules;
+fail:                             /* GCOVR_EXCL_LINE: allocation-failure path */
+    css_free_rules(rules, count); /* GCOVR_EXCL_LINE: allocation-failure path */
+    *out_count = -1;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    return NULL;                  /* GCOVR_EXCL_LINE: allocation-failure path */
 }
 
 PyObject *turbohtml_css_parse_rules(PyObject *module, PyObject *text) {
