@@ -1,0 +1,1 @@
+Inserting or wrapping with nodes from another tree no longer races a concurrent move of the target.
