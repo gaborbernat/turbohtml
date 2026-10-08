@@ -2076,13 +2076,11 @@ static path_id_map *path_id_map_build(th_tree *tree, th_node *document) {
     return map;
 }
 
-/* Whether value names exactly one element, so #value selects it alone. The map counts only the ids inside the
-   document, so a detached element's id can be absent; the probe stops at the first empty slot, whose zero count
-   reads as not unique, and the map keeps at least half its slots empty, so the probe always ends. */
+/* Whether value names exactly one element, so #value selects it alone. Only an element inside the document probes,
+   and the map counts every id there, so the candidate's own id is present and the probe ends on its slot. */
 static int path_id_unique(const path_id_map *map, const Py_UCS4 *value, Py_ssize_t len) {
     size_t slot = (size_t)path_id_hash(value, len, map->ci) & map->mask;
-    while (map->slots[slot].value != NULL &&
-           !sel_eq(map->slots[slot].value, map->slots[slot].len, value, len, map->ci)) {
+    while (!sel_eq(map->slots[slot].value, map->slots[slot].len, value, len, map->ci)) {
         slot = (slot + 1) & map->mask;
     }
     return map->slots[slot].count == 1;
@@ -2154,7 +2152,9 @@ PyDoc_STRVAR(css_path_doc, "css_path()\n--\n\n"
                            "the nearest ancestor (or the element itself) carrying a document-unique id\n"
                            "(\"#main > ...\"), otherwise it descends from the root with positional\n"
                            ":nth-of-type() steps (\"html > body > div > p:nth-of-type(3)\"). Feeding the\n"
-                           "result back to select() on the document returns exactly this element.");
+                           "result back to select() on the document returns exactly this element.\n"
+                           "An element outside the document gets the positional path from its topmost\n"
+                           "ancestor, with no id anchor.");
 
 TH_NODE_API(static, PyObject *, element_css_path, (PyObject * self, PyObject *ignored), (self, ignored),
             (PyObject * self, PyObject *Py_UNUSED(ignored)), (NodeObject *)self, NULL) {
@@ -2172,13 +2172,20 @@ TH_NODE_API(static, PyObject *, element_css_path, (PyObject * self, PyObject *ig
         path_id_map_free(handle_obj->path_ids);
         handle_obj->path_ids = NULL;
     }
-    if (document != NULL && handle_obj->path_ids == NULL) {
+    th_node *root = node;
+    while (root->parent != NULL) {
+        root = root->parent;
+    }
+    /* select() on the document would match an attached element that carries the same id, so an element outside the
+       document gets no id anchor */
+    int attached = root == document;
+    if (attached && handle_obj->path_ids == NULL) {
         handle_obj->path_ids = path_id_map_build(tree, document);
     }
-    if (count < 0 || (document != NULL && handle_obj->path_ids == NULL)) { /* GCOVR_EXCL_BR_LINE: alloc failure */
-        error = 1;                                                         /* GCOVR_EXCL_LINE: alloc-failure */
+    if (count < 0 || (attached && handle_obj->path_ids == NULL)) { /* GCOVR_EXCL_BR_LINE: alloc failure */
+        error = 1;                                                 /* GCOVR_EXCL_LINE: alloc-failure */
     } else { /* GCOVR_EXCL_LINE: brace of the alloc-failure branch */
-        const path_id_map *id_map = handle_obj->path_ids;
+        const path_id_map *id_map = attached ? handle_obj->path_ids : NULL;
         Py_ssize_t top = count - 1;
         int anchored = 0;
         for (Py_ssize_t index = 0; index < count; index++) {
