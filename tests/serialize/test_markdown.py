@@ -784,6 +784,15 @@ def test_trailing_break_at_an_inline_root_is_dropped() -> None:
             "| a |  |\n| --- | --- |\n| b | c |",
             id="table-short-row-padded-with-empty-cells",
         ),
+        pytest.param("<em><table><tr><th>a</th></tr></table></em>", "| *a* |\n| --- |", id="table-in-emphasis"),
+        pytest.param(
+            "<strong><table><tr><td>a</td><td>b</td></tr></table></strong>",
+            "| **a** | **b** |\n| --- | --- |",
+            id="table-in-strong-every-cell",
+        ),
+        pytest.param(
+            "<del><table><tr><td>a</td></tr></table></del>", "| ~~a~~ |\n| --- |", id="table-in-strikethrough"
+        ),
     ],
 )
 def test_tables(html: str, expected: str) -> None:

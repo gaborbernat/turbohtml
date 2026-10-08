@@ -2624,8 +2624,20 @@ static void md_enter_cell(md_ctx *ctx, md_table *table) {
     table->saved_drop = ctx->drop_space;
     ctx->out = (sbuf){NULL, 0, 0, 0};
     ctx->prefix = (sbuf){NULL, 0, 0, 0};
-    ctx->marker_base = ctx->marker_count;
+    Py_ssize_t outer = ctx->marker_count;
+    ctx->marker_base = outer;
     ctx->pending = NULL;
+    /* a cell's text renders on its own, but emphasis around the table styles it too, and
+       a pipe cell holds inline content (GFM 4.10), so every enclosing run reopens in it */
+    for (Py_ssize_t index = table->saved_marker_base; index < outer; index++) {
+        md_marker copy = ctx->markers[index];
+        Py_ssize_t pushed = md_push_marker(ctx, copy.open);
+        if (pushed >= 0) { /* GCOVR_EXCL_BR_LINE: -1 only on an allocation failure */
+            copy.emitted = 0;
+            copy.flags &= MD_MARK_STRIKE; /* the flanking the element saw outside does not hold in the cell */
+            ctx->markers[pushed] = copy;
+        }
+    }
     ctx->line_has_content = 1;
     ctx->space_pending = 0;
     ctx->drop_space = 1;
@@ -2633,6 +2645,10 @@ static void md_enter_cell(md_ctx *ctx, md_table *table) {
 }
 
 static void md_leave_cell(md_ctx *ctx, md_table *table) {
+    if (ctx->marker_count > ctx->marker_base) {
+        md_suspend_markers(ctx); /* the runs reopened in the cell close inside it */
+        ctx->marker_count = ctx->marker_base;
+    }
     sbuf rendered = ctx->out;
     PyMem_Free(ctx->prefix.data);
     ctx->out = table->saved_out;
