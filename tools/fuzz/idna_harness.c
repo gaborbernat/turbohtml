@@ -152,16 +152,30 @@ static void check_ascii(const Py_UCS4 *output, Py_ssize_t len) {
     }
 }
 
+/* Count the code points, then allocate that many, so ASan flags a read one past the last. A block of one slot per byte
+   leaves a spare slot for each continuation byte, and ASan misses an over-read into it. */
+static Py_UCS4 *widen(const unsigned char *bytes, size_t len, Py_ssize_t *count) {
+    Py_UCS4 cp;
+    *count = 0;
+    for (size_t pos = 0; pos < len; ++*count) {
+        pos += utf8_next(bytes, len, pos, &cp);
+    }
+    Py_UCS4 *wide = malloc((size_t)*count * sizeof(Py_UCS4));
+    if (wide == NULL) {
+        return NULL;
+    }
+    Py_ssize_t index = 0;
+    for (size_t pos = 0; pos < len; index++) {
+        pos += utf8_next(bytes, len, pos, &wide[index]);
+    }
+    return wide;
+}
+
 static void run_bytes(const unsigned char *bytes, size_t len) {
-    Py_UCS4 *wide = malloc((len ? len : 1) * sizeof(Py_UCS4));
+    Py_ssize_t count;
+    Py_UCS4 *wide = widen(bytes, len, &count);
     if (wide == NULL) {
         return;
-    }
-    Py_ssize_t count = 0;
-    for (size_t pos = 0; pos < len;) {
-        Py_UCS4 cp = 0;
-        pos += utf8_next(bytes, len, pos, &cp);
-        wide[count++] = cp;
     }
     if (count <= TH_IDNA_MAX_INPUT) {
         check_normalization(wide, count);
@@ -224,12 +238,13 @@ static void run_file(const char *path) {
     fseek(handle, 0, SEEK_END);
     long size = ftell(handle);
     fseek(handle, 0, SEEK_SET);
-    unsigned char *buf = malloc(size > 0 ? (size_t)size : 1);
+    size_t capacity = size > 0 ? (size_t)size : 0;
+    unsigned char *buf = malloc(capacity);
     if (buf == NULL) {
         fclose(handle);
         return;
     }
-    size_t got = fread(buf, 1, size > 0 ? (size_t)size : 0, handle);
+    size_t got = fread(buf, 1, capacity, handle);
     fclose(handle);
     run_bytes(buf, got);
     free(buf);

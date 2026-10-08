@@ -27,9 +27,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Widen len bytes to a freshly malloc'd Py_UCS4 buffer (Latin-1: byte -> code point). */
+/* Widen len bytes to a freshly malloc'd Py_UCS4 buffer (Latin-1: byte -> code point). The block holds len code points,
+   none for an empty input, so ASan flags a read past the end. */
 static Py_UCS4 *widen(const unsigned char *bytes, size_t len, Py_ssize_t *out_len) {
-    Py_UCS4 *wide = malloc((len ? len : 1) * sizeof(Py_UCS4));
+    Py_UCS4 *wide = malloc(len * sizeof(Py_UCS4));
     if (wide == NULL) {
         perror("malloc");
         exit(2);
@@ -80,7 +81,7 @@ static void run_file(const char *path, long *files, long *minified) {
     fseek(handle, 0, SEEK_END);
     long size = ftell(handle);
     fseek(handle, 0, SEEK_SET);
-    unsigned char *buf = malloc(size > 0 ? (size_t)size : 1);
+    unsigned char *buf = malloc((size_t)size);
     if (buf == NULL) {
         perror("malloc");
         exit(2);

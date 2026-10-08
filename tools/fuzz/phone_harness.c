@@ -92,22 +92,31 @@ static void scan(const uint32_t *wide, size_t count, const th_phone_config *conf
     }
 }
 
-static size_t widen(const unsigned char *bytes, size_t len, uint32_t *wide) {
-    size_t count = 0;
-    for (size_t pos = 0; pos < len;) {
-        uint32_t cp = 0;
+/* Count the code points, then allocate that many, so ASan flags a read one past the last. A block of one slot per byte
+   leaves a spare slot for each continuation byte, and ASan misses an over-read into it. */
+static uint32_t *widen(const unsigned char *bytes, size_t len, size_t *count) {
+    uint32_t cp;
+    *count = 0;
+    for (size_t pos = 0; pos < len; ++*count) {
         pos += utf8_next(bytes, len, pos, &cp);
-        wide[count++] = cp;
     }
-    return count;
+    uint32_t *wide = malloc(*count * sizeof(uint32_t));
+    if (wide == NULL) {
+        return NULL;
+    }
+    size_t index = 0;
+    for (size_t pos = 0; pos < len; index++) {
+        pos += utf8_next(bytes, len, pos, &wide[index]);
+    }
+    return wide;
 }
 
 static void run_bytes(const unsigned char *bytes, size_t len) {
-    uint32_t *wide = malloc((len ? len : 1) * sizeof(uint32_t));
+    size_t count;
+    uint32_t *wide = widen(bytes, len, &count);
     if (wide == NULL) {
         return;
     }
-    size_t count = widen(bytes, len, wide);
     static const char *const region_sets[][3] = {
         {"US", NULL, NULL}, {"GB", "DE", NULL}, {NULL, NULL, NULL}, {"JP", "IN", "BR"}};
     for (size_t set = 0; set < sizeof(region_sets) / sizeof(region_sets[0]); set++) {
@@ -172,12 +181,13 @@ static void run_file(const char *path) {
     fseek(handle, 0, SEEK_END);
     long size = ftell(handle);
     fseek(handle, 0, SEEK_SET);
-    unsigned char *buf = malloc(size > 0 ? (size_t)size : 1);
+    size_t capacity = size > 0 ? (size_t)size : 0;
+    unsigned char *buf = malloc(capacity);
     if (buf == NULL) {
         fclose(handle);
         return;
     }
-    size_t got = fread(buf, 1, size > 0 ? (size_t)size : 0, handle);
+    size_t got = fread(buf, 1, capacity, handle);
     fclose(handle);
     run_bytes(buf, got);
     free(buf);
@@ -214,11 +224,12 @@ static int run_dump(int argc, char **argv) {
         if (got > 0 && line[got - 1] == '\n') {
             got--;
         }
-        uint32_t *wide = malloc((got > 0 ? (size_t)got : 1) * sizeof(uint32_t));
+        size_t count;
+        uint32_t *wide = widen((const unsigned char *)line, (size_t)got, &count);
         if (wide == NULL) {
             return 2;
         }
-        scan(wide, widen((const unsigned char *)line, (size_t)got, wide), &config, stdout);
+        scan(wide, count, &config, stdout);
         free(wide);
         puts("--");
     }
