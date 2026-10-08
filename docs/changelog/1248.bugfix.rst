@@ -1,0 +1,2 @@
+Write a link destination that holds an ASCII control character in the ``<...>`` form, the only form CommonMark reads it
+in.
