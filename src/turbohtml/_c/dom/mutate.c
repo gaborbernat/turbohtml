@@ -341,6 +341,9 @@ int th_node_attr_append(th_tree *tree, th_node *node, const char *name, Py_ssize
    is stored as none). Returns 0, or -1 on allocation failure. */
 int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize_t len) {
     const Py_UCS4 *old = node->text_len > 0 ? need_text(tree, node) : NULL;
+    if (old == NULL && node->text_len > 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;                           /* GCOVR_EXCL_LINE: the record needs the old text */
+    }
     th_mo_char_data_changed(tree, node, old, node->text_len);
     if (len == 0) {
         node->text = (Py_UCS4 *)th_empty_text;
@@ -772,14 +775,9 @@ static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right
     return equal;
 }
 
-/* Whether two nodes' own character data match, realizing a borrowed text span first. */
+/* Whether two nodes' own character data match, read in place. */
 static int data_equal(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right) {
-    if (left->text_len != right->text_len) {
-        return 0;
-    }
-    const Py_UCS4 *left_text = need_text(left_tree, left);
-    const Py_UCS4 *right_text = need_text(right_tree, right);
-    return left->text_len == 0 || memcmp(left_text, right_text, (size_t)left->text_len * sizeof(Py_UCS4)) == 0;
+    return text_view_equal(text_view(left_tree, left), text_view(right_tree, right));
 }
 
 static int node_data_equals(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right) {
@@ -946,12 +944,12 @@ th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_nod
     node->tag_flags = src_node->tag_flags;
     node->text = (Py_UCS4 *)th_empty_text;
     if (src_node->text_len > 0) {
-        const Py_UCS4 *text = need_text(src, src_node);
         Py_UCS4 *owned = arena_alloc(dest, src_node->text_len * (Py_ssize_t)sizeof(Py_UCS4));
         if (owned == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        memcpy(owned, text, (size_t)src_node->text_len * sizeof(Py_UCS4));
+        /* widen a borrowed span straight into the copy, since realizing it first would copy it twice */
+        text_view_copy(owned, text_view(src, src_node));
         node->text = owned;
         node->text_len = src_node->text_len;
     }
@@ -1161,7 +1159,7 @@ static inline void normalize_unlink(th_tree *tree, th_node *child, int iterators
     }
 }
 
-static void normalize_children(th_tree *tree, th_node *root, int iterators) {
+static int normalize_children(th_tree *tree, th_node *root, int iterators) {
     for (th_node *child = root->first_child; child != NULL;) {
         th_node *next = child->next_sibling;
         if (child->type == TH_NODE_TEXT) {
@@ -1185,15 +1183,11 @@ static void normalize_children(th_tree *tree, th_node *root, int iterators) {
             if (merged_len > child->text_len) {
                 Py_UCS4 *merged = arena_alloc(tree, merged_len * (Py_ssize_t)sizeof(Py_UCS4));
                 if (merged == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                    return;           /* GCOVR_EXCL_LINE: allocation-failure path */
+                    return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
                 }
                 Py_ssize_t offset = 0;
                 for (th_node *part = child; part != end; part = part->next_sibling) {
-                    const Py_UCS4 *text = need_text(tree, part);
-                    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: text realization fails only on allocation failure */
-                        return;         /* GCOVR_EXCL_LINE: allocation-failure path */
-                    }
-                    memcpy(merged + offset, text, (size_t)part->text_len * sizeof(Py_UCS4));
+                    text_view_copy(merged + offset, text_view(tree, part));
                     offset += part->text_len;
                 }
                 child->text = merged;
@@ -1207,25 +1201,27 @@ static void normalize_children(th_tree *tree, th_node *root, int iterators) {
         }
         child = next;
     }
+    return 0;
 }
 
-static void normalize_subtree(th_tree *tree, th_node *root, int iterators);
+static int normalize_subtree(th_tree *tree, th_node *root, int iterators);
 
 /* No Python code runs while normalize walks, so the iterator count cannot change mid-call: each literal below lets the
    compiler clone the walk, and a tree with no live iterator unlinks without testing for one. */
-void th_node_normalize(th_tree *tree, th_node *root) {
+int th_node_normalize(th_tree *tree, th_node *root) {
     if (th_tree_has_iterators(tree)) {
-        normalize_subtree(tree, root, 1);
-    } else {
-        normalize_subtree(tree, root, 0);
+        return normalize_subtree(tree, root, 1);
     }
+    return normalize_subtree(tree, root, 0);
 }
 
-static void normalize_subtree(th_tree *tree, th_node *root, int iterators) {
+static int normalize_subtree(th_tree *tree, th_node *root, int iterators) {
     th_node *node = root;
     for (;;) {
         if (node == root || node->type == TH_NODE_ELEMENT) {
-            normalize_children(tree, node, iterators);
+            if (normalize_children(tree, node, iterators) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return -1;                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
         }
         if (node->first_child != NULL) {
             node = node->first_child;
@@ -1235,7 +1231,7 @@ static void normalize_subtree(th_tree *tree, th_node *root, int iterators) {
             node = node->parent;
         }
         if (node == root) {
-            return;
+            return 0;
         }
         node = node->next_sibling;
     }

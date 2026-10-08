@@ -1,0 +1,2 @@
+Raise MemoryError when an allocation fails while reading, serializing, linkifying or editing parsed text, instead of
+crashing or returning a partial result.

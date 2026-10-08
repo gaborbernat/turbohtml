@@ -380,7 +380,7 @@ static int mini_end_closes_child(const th_node *parent) {
 /* Whether a following sibling begins with ASCII whitespace (used by the head/
    body/caption "not followed by whitespace" omission tests). */
 static int mini_starts_with_ws(th_tree *tree, th_node *node) {
-    return node->type == TH_NODE_TEXT && node->text_len > 0 && is_space(need_text(tree, node)[0]);
+    return node->type == TH_NODE_TEXT && node->text_len > 0 && is_space(text_view_at(text_view(tree, node), 0));
 }
 
 static int mini_is_comment_like(th_node *node) {
@@ -581,8 +581,14 @@ static int mini_emit_script_js(sbuf *out, th_tree *tree, th_node *node, const th
     }
     Py_ssize_t pos = 0;
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        memcpy(src + pos, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
-        pos += child->text_len;
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(out, tree, child, &len);
+        if (out->failed) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(src); /* GCOVR_EXCL_LINE: a text child could not be realized, so src is short */
+            return 0;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(src + pos, text, (size_t)len * sizeof(Py_UCS4));
+        pos += len;
     }
     Py_ssize_t out_len;
     char err[160]; /* empty after a NULL result only on allocation failure */
@@ -625,8 +631,14 @@ static TH_NOINLINE int mini_emit_style_css(sbuf *out, th_tree *tree, th_node *no
     }
     Py_ssize_t pos = 0;
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-        memcpy(src + pos, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
-        pos += child->text_len;
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(out, tree, child, &len);
+        if (out->failed) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(src); /* GCOVR_EXCL_LINE: a text child could not be realized, so src is short */
+            return 0;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(src + pos, text, (size_t)len * sizeof(Py_UCS4));
+        pos += len;
     }
     Py_ssize_t css_len;
     unsigned char *result = mini_css_bytes(src, total, 0, baseline, &css_len);
@@ -749,7 +761,7 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
                 } else if (!(opts->minify_js && mini_emit_script_js(out, tree, node, opts)) &&
                            !(opts->minify_css && mini_emit_style_css(out, tree, node, opts->minify_css_baseline))) {
                     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-                        sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
+                        ser_put_node_text(out, tree, child);
                     }
                 }
                 if (node->atom == TH_TAG_PLAINTEXT) {
@@ -782,14 +794,17 @@ static void serialize_minify(sbuf *out, th_tree *tree, th_node *root, const th_m
             }
             /* a CDATA section is a Text node, so its escaped text is the one HTML form that holds a ">" */
             TH_FALLTHROUGH;
-        case TH_NODE_TEXT:
+        case TH_NODE_TEXT: {
+            Py_ssize_t len;
+            const Py_UCS4 *text = ser_text(out, tree, node, &len);
             if (opts->collapse_whitespace && preserve == 0) {
-                mini_put_collapsed_text(out, need_text(tree, node), node->text_len, st->formatter, &last_was_space);
+                mini_put_collapsed_text(out, text, len, st->formatter, &last_was_space);
             } else {
-                sbuf_put_text(out, need_text(tree, node), node->text_len, 0, st->formatter);
+                sbuf_put_text(out, text, len, 0, st->formatter);
                 last_was_space = 0;
             }
             break;
+        }
         case TH_NODE_COMMENT:
             if (!opts->strip_comments) {
                 sbuf_puts(out, "<!--");

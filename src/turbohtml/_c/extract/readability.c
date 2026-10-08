@@ -4,7 +4,7 @@
    It scores the DOM by content density -- text length, comma count, tag weight
    and class/id weight, discounted by link density, the well-known readability
    heuristic -- and returns the single highest-scoring container element. It
-   shares need_text(), the tag atoms, and the attribute lookup from
+   shares the text views, the tag atoms, and the attribute lookup from
    serialize/internal.h. Everything here is pure C: the node bindings wrap the
    returned node (or render its text with th_node_layout_text) under the per-tree
    critical section, so no Python API is touched while the structure is walked. */
@@ -247,14 +247,7 @@ static void read_text_stats(th_tree *tree, th_node *node, int in_anchor, int str
             if (in_anchor > 0) {
                 stats->link_chars += current->text_len;
             }
-            if (current->text_len > 0) {
-                const Py_UCS4 *text = need_text(tree, current);
-                for (Py_ssize_t index = 0; index < current->text_len; index++) {
-                    if (text[index] == ',') {
-                        stats->commas++;
-                    }
-                }
-            }
+            stats->commas += text_view_count(text_view(tree, current), ',');
         }
         if (current->type == TH_NODE_ELEMENT && current->ns == TH_NS_HTML &&
             !read_is_skip_tag(current->atom, strip_landmarks) && current->first_child != NULL) {

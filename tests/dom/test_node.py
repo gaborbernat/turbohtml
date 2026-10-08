@@ -225,6 +225,9 @@ def test_equals_rejects_non_node() -> None:
             id="child-order",
         ),
         pytest.param(Text("x"), Text("y"), id="text"),
+        pytest.param(
+            parse_fragment("ab").children[0], parse_fragment("a\u20ac").children[0], id="text-of-mixed-widths"
+        ),
         pytest.param(Text("x"), Comment("x"), id="node-type"),
         pytest.param(Comment("x"), Comment("yy"), id="comment"),
         pytest.param(CData("x"), CData("y"), id="cdata"),
