@@ -114,19 +114,23 @@ static uint32_t fnv1a(const char *bytes, Py_ssize_t len) {
 }
 
 /* Ensure the dynamic table can take one more record: grow the record array, and
-   build or grow the hash slots past a 3/4 load factor (rehashing the records). */
+   build or grow the hash slots past a 3/4 load factor (rehashing the records). A
+   failure flags the parse as arena_alloc does, so the builder drops the tree instead
+   of keeping an attribute with no atom. */
 static int attr_table_reserve(th_tree *tree) {
     if (tree->attr_rec_count == tree->attr_rec_cap) {
         size_t cap;
         size_t bytes;
         int grew = th_grow_cap((size_t)tree->attr_rec_cap + 1, (size_t)tree->attr_rec_cap, 8, sizeof(th_attr_record),
                                &cap, &bytes);
-        if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            return -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        if (!grew) {          /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+            tree->failed = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return -1;        /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
         }
         th_attr_record *recs = PyMem_Realloc(tree->attr_recs, bytes);
-        if (recs == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;      /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        if (recs == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         }
         tree->attr_recs = recs;
         tree->attr_rec_cap = (uint32_t)cap;
@@ -134,8 +138,9 @@ static int attr_table_reserve(th_tree *tree) {
     if (tree->attr_slots == NULL || tree->attr_rec_count + 1 > (tree->attr_slot_mask + 1) * 3 / 4) {
         uint32_t new_cap = tree->attr_slots == NULL ? 16 : (tree->attr_slot_mask + 1) * 2;
         uint32_t *slots = PyMem_Calloc(new_cap, sizeof(uint32_t));
-        if (slots == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         uint32_t mask = new_cap - 1;
         for (uint32_t index = 0; index < tree->attr_rec_count; index++) {
@@ -177,9 +182,7 @@ uint32_t intern_attr_dynamic(th_tree *tree, const char *bytes, Py_ssize_t len) {
         return TH_ATTR__DYNAMIC_BASE + (found - 1);
     }
     if (attr_table_reserve(tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        /* flag the parse as arena_alloc does, so the builder drops the tree instead of keeping an atom-0 attribute */
-        tree->failed = 1;       /* GCOVR_EXCL_LINE: allocation-failure path */
-        return TH_ATTR_UNKNOWN; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return TH_ATTR_UNKNOWN;         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     char *stored = arena_alloc(tree, len + 1);
     if (stored == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
