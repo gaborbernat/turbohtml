@@ -184,6 +184,17 @@ def test_code_elements_preserve_text(tag: str, content: str, expected: str) -> N
         pytest.param("<a href='h'> t</a>", "[t](h)", id="link-leading-space-at-line-start-dropped"),
         pytest.param("x<a href='h'></a>y", "x[](h)y", id="link-empty-text-keeps-brackets"),
         pytest.param("x<b><a href='h'> t</a></b>", "x **[t](h)**", id="link-inside-emphasis-opens-both"),
+        pytest.param('<p><img src="/i" alt="<p>"></p>', "![\\<p>](/i)", id="image-alt-escapes-tag"),
+        pytest.param(
+            '<p><img src="/i" alt="a*b* x_y_"></p>', "![a\\*b\\* x\\_y\\_](/i)", id="image-alt-escapes-emphasis"
+        ),
+        pytest.param(
+            '<p><img src="/i" alt="&amp;amp; ~~s~~"></p>',
+            "![\\&amp; \\~\\~s\\~\\~](/i)",
+            id="image-alt-escapes-reference",
+        ),
+        pytest.param('<p><img src="/i" alt="a\n# b&#13;c"></p>', "![a&#10;# b&#13;c](/i)", id="image-alt-line-breaks"),
+        pytest.param('<p><img src="/i" alt="é*"></p>', "![é\\*](/i)", id="image-alt-escapes-after-non-ascii"),
     ],
 )
 def test_links_and_images(html: str, expected: str) -> None:
@@ -922,6 +933,9 @@ _NO_ESCAPING: Final[Markdown] = Markdown(escaping=Markdown.Escaping(mode="none")
             id="transliterated-arrow",
         ),
         pytest.param('<img alt="a]b" src="s">', _NO_ESCAPING, "![a\\]b](s)", id="alt-text-keeps-its-syntax"),
+        pytest.param(
+            '<img alt="<p> &amp;amp;" src="s">', _NO_ESCAPING, "![<p> &amp;](s)", id="alt-text-tag-and-reference-shapes"
+        ),
     ],
 )
 def test_escaping_none(html: str, options: Markdown, expected: str) -> None:
