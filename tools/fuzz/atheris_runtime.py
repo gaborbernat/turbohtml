@@ -22,12 +22,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--coverage", action="store_true")
+    parser.add_argument("--sanitizer", type=Path, help="a static sanitizer runtime to merge in, as atheris does")
     arguments: Final = parser.parse_args(argv)
-    build_runtime(arguments.archive, arguments.output, coverage=arguments.coverage)
+    build_runtime(arguments.archive, arguments.output, coverage=arguments.coverage, sanitizer=arguments.sanitizer)
     return 0
 
 
-def build_runtime(archive: Path, output: Path, *, coverage: bool = False) -> Path:
+def build_runtime(archive: Path, output: Path, *, coverage: bool = False, sanitizer: Path | None = None) -> Path:
     """Keep the original wheel archive intact for provenance checks."""
     output.mkdir(parents=True, exist_ok=True)
     runtime: Final = output / "runtime.a"
@@ -68,6 +69,7 @@ def build_runtime(archive: Path, output: Path, *, coverage: bool = False) -> Pat
             str(bridge),
             "-Wl,--whole-archive",
             str(runtime),
+            *([] if sanitizer is None else [str(_shared_sanitizer(sanitizer, output))]),
             "-Wl,--no-whole-archive",
             "-ldl",
             "-pthread",
@@ -76,6 +78,18 @@ def build_runtime(archive: Path, output: Path, *, coverage: bool = False) -> Pat
         check=True,
     )
     return library
+
+
+def _shared_sanitizer(sanitizer: Path, output: Path) -> Path:
+    # a preinit object registers the runtime through .preinit_array, which a shared object cannot carry; atheris drops
+    # it the same way when it merges libFuzzer with a sanitizer (setup_utils/merge_libfuzzer_sanitizer.sh)
+    merged: Final = output / "sanitizer.a"
+    shutil.copyfile(sanitizer, merged)
+    archiver: Final = os.environ.get("AR", "ar")
+    members: Final = subprocess.run([archiver, "t", str(merged)], check=True, capture_output=True, text=True).stdout
+    if preinit := [member for member in members.split() if "preinit" in member]:
+        subprocess.run([archiver, "d", str(merged), *preinit], check=True)
+    return merged
 
 
 def rejecting_callback(
