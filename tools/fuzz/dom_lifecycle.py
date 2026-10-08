@@ -14,6 +14,7 @@ from turbohtml import (
     Node,
     NodeFilter,
     NodeIterator,
+    Range,
     Text,
     Tokenizer,
     TreeWalker,
@@ -264,6 +265,22 @@ def _replace(machine: _Machine, slot: int, second: int, _third: int, _body: rang
     if (node := machine.nodes[slot]) is None or (other := machine.nodes[second % _SLOTS]) is None:
         return "empty"
     node.replace_with(other)
+    return "ok"
+
+
+def _normalize(machine: _Machine, slot: int, _second: int, _third: int, _body: range) -> str:
+    if not isinstance(node := machine.nodes[slot], Element):
+        return "empty"
+    node.normalize()
+    return "ok"
+
+
+def _range_extract(machine: _Machine, slot: int, second: int, _third: int, _body: range) -> str:
+    if (node := machine.nodes[slot]) is None:
+        return "empty"
+    selection: Final = Range(node)
+    selection.select_node_contents(node)
+    machine.nodes[second % _SLOTS] = selection.extract_contents()
     return "ok"
 
 
@@ -576,6 +593,8 @@ _OPERATIONS: Final[tuple[tuple[str, _Operation | None, bool], ...]] = (
     ("compare", _compare, True),
     ("select", _select, False),
     ("raise", None, False),
+    ("normalize", _normalize, False),
+    ("range-extract", _range_extract, False),
 )
 
 # element p, element div, text, parsed document, then html/body/p/b of that document, a tokenizer and a fed parser

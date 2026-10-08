@@ -80,7 +80,7 @@ def test_dom_lifecycle_rejects_unsupported_encoding(text: str) -> None:
 
 def test_dom_lifecycle_cli_seed_floor(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     status: Final = main(["--oracle", "dom-lifecycle", "--minutes", "0", "--crash-dir", str(tmp_path)])
-    assert (status, list(tmp_path.glob("crash-*")), "'compared': 224" in capsys.readouterr().out) == (0, [], True)
+    assert (status, list(tmp_path.glob("crash-*")), "'compared': 240" in capsys.readouterr().out) == (0, [], True)
 
 
 def test_dom_lifecycle_cli_emits_violation(mocker: MockerFixture, tmp_path: Path) -> None:
@@ -140,6 +140,30 @@ def test_dom_lifecycle_raise_unwinds_to_the_enclosing_operation(
 )
 def test_dom_lifecycle_operation_outcome(instructions: list[tuple[int, int, int, int]], outcome: str) -> None:
     assert _steps(*instructions)[-1].outcome == outcome
+
+
+@pytest.mark.parametrize(
+    ("removal", "operation"),
+    [
+        pytest.param((28, 0, 0, 0), "normalize", id="normalize"),
+        pytest.param((29, 0, 5, 0), "range-extract", id="range"),
+    ],
+)
+def test_dom_lifecycle_moves_an_iterator_out_of_removed_text(
+    removal: tuple[int, int, int, int], operation: str
+) -> None:
+    # p holds the texts "alpha" and "beta gamma"; an iterator over p steps to the second text, which the removal drops
+    steps: Final = _steps(
+        (0, 0, 0, 0),
+        (1, 1, 1, 0),
+        (1, 2, 2, 0),
+        (4, 0, 1, 0),
+        (4, 0, 2, 0),
+        (12, 3, 0, 0),
+        *[(14, 3, 1, 4)] * 3,
+        removal,
+    )
+    assert steps[-1] == LifecycleStep(0, operation, "ok", (0, 0, 0, 0))
 
 
 def test_tree_verify_keeps_an_iterator_reference_inside_its_root_across_normalize() -> None:
