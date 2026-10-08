@@ -115,38 +115,42 @@ typedef unsigned char css_char;
 #endif
 
 /* A growable code-point buffer, the engine's only output sink. It mirrors the shared serializer sbuf but routes its
-   allocation through css_realloc so the core stays allocator-agnostic without touching shared infrastructure. */
+   allocation through css_realloc so the core stays allocator-agnostic without touching shared infrastructure. Every
+   buffer and vector of one call points oom at that call's single flag: a failed growth anywhere sets it, the entry
+   point reports it, and readers of the pool check it before trusting an offset. */
 typedef struct {
     css_char *data;
     Py_ssize_t len;
     Py_ssize_t cap;
-    int failed;
+    int *oom;
 } css_buf;
 
-static inline void cbuf_reserve(css_buf *buffer, Py_ssize_t extra) {
+/* Whether extra more code points fit, growing the buffer (doubling, so a run of appends stays amortized O(1)) when
+   they do not. A failed growth sets the call's oom flag and leaves the buffer as it was. */
+static inline int cbuf_reserve(css_buf *buffer, Py_ssize_t extra) {
     if (buffer->len + extra <= buffer->cap) {
-        return;
+        return 1;
     }
     size_t cap;
     size_t bytes;
     int grew = th_grow_cap((size_t)(buffer->len + extra), (size_t)buffer->cap, 256, sizeof(css_char), &cap, &bytes);
-    if (!grew) {            /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-        buffer->failed = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-        return;             /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+    if (!grew) {          /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+        *buffer->oom = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        return 0;         /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
     }
     css_char *grown = css_realloc(buffer->data, bytes);
-    if (grown == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        buffer->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        return;             /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        *buffer->oom = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        return 0;         /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     buffer->data = grown;
     buffer->cap = (Py_ssize_t)cap;
+    return 1;
 }
 
 static inline void cbuf_putc(css_buf *buffer, css_char character) {
-    cbuf_reserve(buffer, 1);
-    if (buffer->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return;           /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (!cbuf_reserve(buffer, 1)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;                     /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     buffer->data[buffer->len++] = character;
 }
@@ -157,9 +161,8 @@ static inline void cbuf_put_run(css_buf *buffer, const css_char *text, Py_ssize_
     if (len <= 0) {
         return;
     }
-    cbuf_reserve(buffer, len);
-    if (buffer->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return;           /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (!cbuf_reserve(buffer, len)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;                       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     memcpy(buffer->data + buffer->len, text, (size_t)len * sizeof(css_char));
     buffer->len += len;
@@ -167,9 +170,8 @@ static inline void cbuf_put_run(css_buf *buffer, const css_char *text, Py_ssize_
 
 static inline void cbuf_puts(css_buf *buffer, const char *text) {
     Py_ssize_t len = (Py_ssize_t)strlen(text);
-    cbuf_reserve(buffer, len);
-    if (buffer->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return;           /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (!cbuf_reserve(buffer, len)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;                       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     memcpy(buffer->data + buffer->len, text, (size_t)len);
     buffer->len += len;
@@ -209,7 +211,7 @@ typedef struct {
     css_token *items;
     Py_ssize_t len;
     Py_ssize_t cap;
-    int failed;
+    int *oom;
     int depth;   /* parser recursion depth, kept on the vector every parser holds to avoid a thread-local lookup */
     int bad;     /* whether any token is CSS_BAD, so valid input skips the per-declaration scan for one */
     int escaped; /* whether a name holds an escape, so input without one skips css_spell_names */
@@ -240,31 +242,39 @@ static inline void css_nesting_leave(token_vec *vec) {
 #define CSS_NOINLINE
 #endif
 
-/* Keep hot helpers inline when additional callers would make the compiler outline them. */
+/* Keep hot helpers inline when additional callers would make the compiler outline them. The coverage build compiles at
+   -O0, where an inlined copy lands in every call site and gcc counts its branches once per copy, so a debug build keeps
+   one copy, as TH_HOT does in encoding/decode.h. */
 #if defined(_MSC_VER)
 #define CSS_FORCEINLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
+#elif defined(__OPTIMIZE__)
 #define CSS_FORCEINLINE inline __attribute__((always_inline))
 #else
 #define CSS_FORCEINLINE inline
 #endif
 
-static void token_vec_push(token_vec *vec, css_token token) {
-    if (vec->len == vec->cap) {
-        size_t cap;
-        size_t bytes;
-        int grew = th_grow_cap((size_t)(vec->len + 1), (size_t)vec->cap, 64, sizeof(css_token), &cap, &bytes);
-        if (!grew) {         /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            vec->failed = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-            return;          /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-        }
-        css_token *grown = css_realloc(vec->items, bytes);
-        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            vec->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-            return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        }
-        vec->items = grown;
-        vec->cap = (Py_ssize_t)cap;
+/* The growth path of token_vec_push, kept out of line so the push inlines into the tokenizer's hot loop. */
+static CSS_NOINLINE int token_vec_grow(token_vec *vec) {
+    size_t cap;
+    size_t bytes;
+    int grew = th_grow_cap((size_t)(vec->len + 1), (size_t)vec->cap, 64, sizeof(css_token), &cap, &bytes);
+    if (!grew) {       /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+        *vec->oom = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        return 0;      /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+    }
+    css_token *grown = css_realloc(vec->items, bytes);
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        *vec->oom = 1;   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        return 0;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    }
+    vec->items = grown;
+    vec->cap = (Py_ssize_t)cap;
+    return 1;
+}
+
+static CSS_FORCEINLINE void token_vec_push(token_vec *vec, css_token token) {
+    if (vec->len == vec->cap && !token_vec_grow(vec)) { /* GCOVR_EXCL_BR_LINE: allocation failure only */
+        return;                                         /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     vec->items[vec->len++] = token;
 }

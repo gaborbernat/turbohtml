@@ -34,6 +34,15 @@
 #include "css/minify/css_grammar.h"
 #include "css/minify/css.h"
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+/* The fuzz build starts the pool at one code point, as core/fuzzing.h starts arrays small, so the pool's growth and a
+   failure there run on short inputs. */
+#define CSS_POOL_RESERVE(length) ((Py_ssize_t)1)
+#else
+/* the pool holds the value scratch plus every interned selector and body, so it runs to roughly twice the input */
+#define CSS_POOL_RESERVE(length) ((length) * 2)
+#endif
+
 static int css_spell_eof(const css_token *last, const css_char *view, Py_ssize_t length, css_buf *spelled);
 static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssize_t length, css_buf *spelled);
 static css_char *css_minify_spelled(token_vec *tokens, css_buf *spelled, int inline_mode, int baseline,
@@ -44,47 +53,57 @@ static int css_spells_style_end(const css_char *text, Py_ssize_t len);
    harness and the CPython binding both call this; it touches no CPython runtime. */
 css_char *th_minify_css_bytes(const css_char *view, Py_ssize_t length, int inline_mode, int baseline,
                               Py_ssize_t *out_len) {
-    token_vec tokens = {0};
+    /* one flag for the whole call: every buffer and vector below points at it, so a failed allocation anywhere,
+       including one whose buffer the caller then drops, fails the call */
+    int oom = 0;
+    token_vec tokens = {.oom = &oom};
     /* presize from the input: tokens average a few code points each and the output never exceeds the input, so one
        allocation up front avoids the geometric realloc churn (and its repeated copies) on a large stylesheet */
     Py_ssize_t token_guess = length / 4 < 64 ? 64 : length / 4;
-    css_token *token_store = css_malloc((size_t)token_guess * sizeof(css_token));
-    if (token_store != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        tokens.items = token_store;
-        tokens.cap = token_guess;
+    tokens.items = css_malloc((size_t)token_guess * sizeof(css_token));
+    if (tokens.items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        *out_len = 1;           /* GCOVR_EXCL_LINE: a NULL result with a length reports the failure */
+        return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
     }
+    tokens.cap = token_guess;
     css_tokenize(view, length, &tokens);
     if (tokens.len > 0 && (view[length - 1] == '\\' || tokens.items[tokens.len - 1].kind == CSS_STR ||
                            tokens.items[tokens.len - 1].kind == CSS_URL)) {
-        css_buf spelled = {NULL, 0, 0, 0};
+        css_buf spelled = {NULL, 0, 0, &oom};
         if (css_spell_eof(&tokens.items[tokens.len - 1], view, length, &spelled)) {
             return css_minify_spelled(&tokens, &spelled, inline_mode, baseline, out_len);
         }
     }
     if (tokens.escaped) {
-        css_buf spelled = {NULL, 0, 0, 0};
+        css_buf spelled = {NULL, 0, 0, &oom};
         if (css_spell_names(&tokens, view, length, &spelled)) {
             return css_minify_spelled(&tokens, &spelled, inline_mode, baseline, out_len);
         }
         cbuf_free(&spelled);
     }
-    css_buf pool = {NULL, 0, 0, 0};
-    css_buf out = {NULL, 0, 0, 0};
-    /* the pool holds the value scratch plus every interned selector and body, so it runs to roughly twice the input */
-    cbuf_reserve(&pool, length * 2);
-    cbuf_reserve(&out, length);
-    cursor cur = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, 0}};
-    if (inline_mode) {
-        decl_vec decls = {NULL, 0, 0, 0};
-        css_parse_declarations(&pool, &cur, &decls);
-        css_render_declarations(&pool, &decls, baseline, &out);
-        css_free(decls.items);
-    } else {
-        css_parse_rules(&pool, &cur, 1, 0, 0, &out);
+    css_buf pool = {NULL, 0, 0, &oom};
+    css_buf out = {NULL, 0, 0, &oom};
+    cursor cur = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, &oom}};
+    /* readers index the pool from its start, so the parsers run only on complete tokens and an allocated pool */
+    if (!oom && cbuf_reserve(&pool, CSS_POOL_RESERVE(length)) && /* GCOVR_EXCL_BR_LINE: OOM only */
+        cbuf_reserve(&out, length)) {                            /* GCOVR_EXCL_BR_LINE: OOM only */
+        if (inline_mode) {
+            decl_vec decls = {NULL, 0, 0, &oom};
+            css_parse_declarations(&pool, &cur, &decls);
+            css_render_declarations(&pool, &decls, baseline, &out);
+            css_free(decls.items);
+        } else {
+            css_parse_rules(&pool, &cur, 1, 0, 0, &out);
+        }
     }
     cbuf_free(&cur.media_next);
     css_free(tokens.items);
     cbuf_free(&pool);
+    if (oom) {           /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        cbuf_free(&out); /* GCOVR_EXCL_LINE: allocation-failure path */
+        *out_len = 1;    /* GCOVR_EXCL_LINE: a NULL result with a length reports the failure */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     /* Dropping a string line continuation, or a comment in a declaration kept as written, can join a `</style` that
        closes an HTML <style>; the input then comes back unchanged. */
     if (css_spells_style_end(out.data, out.len) && !css_spells_style_end(view, length)) {
@@ -140,7 +159,7 @@ static int css_spell_eof(const css_token *last, const css_char *view, Py_ssize_t
 static css_char *css_minify_spelled(token_vec *tokens, css_buf *spelled, int inline_mode, int baseline,
                                     Py_ssize_t *out_len) {
     css_free(tokens->items);
-    if (spelled->failed) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    if (*spelled->oom) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         cbuf_free(spelled); /* GCOVR_EXCL_LINE */
         *out_len = 1;       /* GCOVR_EXCL_LINE */
         return NULL;        /* GCOVR_EXCL_LINE */
@@ -253,7 +272,7 @@ static void css_serialize_name(const css_char *name, Py_ssize_t len, int mode, i
 /* Preserve hash type and raw @charset spelling: encoding sniffing precedes tokenization
    (CSS Syntax 3 §3.2 and §4.3.1). */
 static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssize_t length, css_buf *spelled) {
-    css_buf decoded = {NULL, 0, 0, 0};
+    css_buf decoded = {NULL, 0, 0, tokens->oom};
     Py_ssize_t copied = 0;
     int changed = 0;
     for (Py_ssize_t index = 0; index < tokens->len; index++) {
@@ -276,9 +295,8 @@ static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssi
             (token->kind == CSS_AT && decoded.len == 7 && memcmp(decoded.data, "charset", 7) == 0)) {
             continue;
         }
-        if (decoded.failed) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            spelled->failed = 1; /* GCOVR_EXCL_LINE */
-            break;               /* GCOVR_EXCL_LINE */
+        if (*decoded.oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            break;          /* GCOVR_EXCL_LINE */
         }
         int mode = token->kind == CSS_NUM ? CSS_SPELL_UNIT : starts_ident ? CSS_SPELL_IDENT : CSS_SPELL_HASH;
         int exponent = mode == CSS_SPELL_UNIT && (memchr(token->text, 'e', (size_t)token->text_len) != NULL ||
@@ -286,16 +304,15 @@ static int css_spell_names(const token_vec *tokens, const css_char *view, Py_ssi
         cbuf_put_run(spelled, view + copied, name - view - copied);
         Py_ssize_t written = spelled->len;
         css_serialize_name(decoded.data, decoded.len, mode, exponent, spelled);
-        if (spelled->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            break;             /* GCOVR_EXCL_LINE */
+        if (*spelled->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            break;           /* GCOVR_EXCL_LINE */
         }
         changed |= spelled->len - written != name_len || memcmp(spelled->data + written, name, (size_t)name_len) != 0;
         copied = name - view + name_len;
     }
-    spelled->failed |= decoded.failed;
     cbuf_free(&decoded);
     cbuf_put_run(spelled, view + copied, length - copied);
-    return changed || spelled->failed; /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+    return changed || *spelled->oom; /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
 }
 
 /* The tokenizer lowercases an end tag name, so `</STYLE` counts too; OR-ing 0x20 folds the ASCII letters and no other

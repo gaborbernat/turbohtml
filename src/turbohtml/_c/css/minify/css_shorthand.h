@@ -233,7 +233,7 @@ static void css_handle_background_position(css_buf *pool, comp_vec *comps) {
             return;
         }
     }
-    comp_vec result = {NULL, 0, 0, 0};
+    comp_vec result = {NULL, 0, 0, pool->oom};
     css_comp run_items[64];
     pos_val run[64];
     Py_ssize_t run_count = 0;
@@ -392,7 +392,7 @@ static void css_background_run(css_buf *pool, comp_vec *run) {
                    (css_comp_is_position_keyword(pool, &run->items[scan]) || css_comp_is_lp(pool, &run->items[scan]))) {
                 scan++;
             }
-            comp_vec position = {NULL, 0, 0, 0};
+            comp_vec position = {NULL, 0, 0, pool->oom};
             css_position_single(pool, &run->items[index], scan - index, &position);
             /* in a single background layer run the only SEP is the '/' size separator, always len 1 */
             int has_size = scan < run->len && run->items[scan].kind == CK_SEP;
@@ -425,14 +425,14 @@ static void css_background_run(css_buf *pool, comp_vec *run) {
 }
 
 static void css_handle_background(css_buf *pool, comp_vec *comps) {
-    comp_vec result = {NULL, 0, 0, 0};
+    comp_vec result = {NULL, 0, 0, pool->oom};
     Py_ssize_t start = 0;
     int first_run = 1;
     for (Py_ssize_t index = 0; index <= comps->len; index++) {
         int at_comma = index < comps->len && comps->items[index].kind == CK_SEP &&
                        pool->data[comps->items[index].off] == ','; /* a SEP comp is always len 1 */
         if (index == comps->len || at_comma) {
-            comp_vec run = {NULL, 0, 0, 0};
+            comp_vec run = {NULL, 0, 0, pool->oom};
             for (Py_ssize_t pos = start; pos < index; pos++) {
                 comp_vec_push(&run, comps->items[pos]);
             }
@@ -562,7 +562,7 @@ static css_comp css_font_family_comp(css_buf *pool, css_comp comp) {
     Py_ssize_t body_start = comp.off + 1;
     /* css_minify_string always re-emits the matching closing quote, so a CK_STR comp always ends with it */
     Py_ssize_t body_len = comp.len - 2;
-    css_buf lowered = {NULL, 0, 0, 0};
+    css_buf lowered = {NULL, 0, 0, pool->oom};
     for (Py_ssize_t index = 0; index < body_len; index++) {
         cbuf_putc(&lowered, css_lower(pool->data[body_start + index]));
     }
@@ -646,7 +646,7 @@ static void css_handle_font(css_buf *pool, comp_vec *comps) {
     if (non_sep <= 1) {
         return;
     }
-    comp_vec values = {NULL, 0, 0, 0};
+    comp_vec values = {NULL, 0, 0, pool->oom};
     for (Py_ssize_t index = 0; index < comps->len; index++) {
         comp_vec_push(&values, comps->items[index]);
     }
@@ -676,7 +676,7 @@ static void css_handle_font(css_buf *pool, comp_vec *comps) {
     }
     /* family was set to at most values.len-1 then decremented at least once above, so family+1 < values.len holds */
     if (pool->data[values.items[family + 1].off] == '-') {
-        css_buf quoted = {NULL, 0, 0, 0};
+        css_buf quoted = {NULL, 0, 0, pool->oom};
         cbuf_putc(&quoted, '\'');
         cbuf_put_run(&quoted, pool->data + values.items[family + 1].off, values.items[family + 1].len);
         cbuf_putc(&quoted, '\'');
@@ -838,11 +838,11 @@ static void css_minify_value(css_buf *pool, token_vec *vec, Py_ssize_t start, Py
     /* Flexbox 1 §7.1: a unitless zero not preceded by two flex factors is a flex factor, so flex keeps zero units */
     css_render_components(pool, vec, start, end, css_prop_is_color(name, name_len),
                           !is_z_index && (name_len != 4 || !css_run_ieq(name, name_len, "flex")), scratch);
+    /* the handlers and the assembler read the components' pool text, which a failed growth left unwritten */
+    if (*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (whole_calc) {
-        if (pool->failed || scratch->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            out->failed = 1;                   /* GCOVR_EXCL_LINE: allocation failure cannot be forced from a test */
-            return;                            /* GCOVR_EXCL_LINE: allocation failure cannot be forced from a test */
-        }
         if (!css_z_index_fold_is_integer(pool, &scratch->items[0])) {
             css_render_raw_value(vec, start, end, out);
             return;

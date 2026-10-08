@@ -147,7 +147,8 @@ static unsigned char *mini_ucs4_to_utf8(const Py_UCS4 *text, Py_ssize_t len, Py_
 
 /* Minify src[0..len) through the shipped CSS engine, returning its UTF-8 output in a freshly
    PyMem-allocated buffer (caller frees) with the byte length in *out_len. Input that minifies
-   to nothing yields a zero-length buffer (*out_len 0), which the callers treat as empty.
+   to nothing yields a zero-length buffer (*out_len 0), which the callers treat as empty; NULL
+   with a nonzero *out_len reports an allocation failure.
    inline_mode 1 selects the style="" declaration-list grammar over the full-stylesheet one.
    baseline (a CSSMinify year, 0 for the most portable output) bounds how new the emitted syntax
    may be. The engine is value-safe and idempotent, so the emitted CSS reparses to the same
@@ -157,7 +158,7 @@ static unsigned char *mini_css_bytes(const Py_UCS4 *src, Py_ssize_t len, int inl
     Py_ssize_t utf8_len;
     unsigned char *utf8 = mini_ucs4_to_utf8(src, len, &utf8_len);
     if (utf8 == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        *out_len = 0;   /* GCOVR_EXCL_LINE */
+        *out_len = 1;   /* GCOVR_EXCL_LINE: the CSS engine's own failure convention */
         return NULL;    /* GCOVR_EXCL_LINE */
     }
     unsigned char *result = th_minify_css_bytes(utf8, utf8_len, inline_mode, baseline, out_len);
@@ -167,19 +168,27 @@ static unsigned char *mini_css_bytes(const Py_UCS4 *src, Py_ssize_t len, int inl
 
 /* Minify a style="" declaration list, returning its value as a freshly PyMem-allocated code-point
    buffer (caller frees) with the length in *out_len, or NULL when the declarations minify to
-   nothing (the caller then renders the empty value). */
-static Py_UCS4 *mini_style_attr_css(const Py_UCS4 *value, Py_ssize_t len, int baseline, Py_ssize_t *out_len) {
+   nothing (the caller then renders the empty value). An allocation failure marks out failed and
+   also returns NULL with an empty value. */
+static Py_UCS4 *mini_style_attr_css(sbuf *out, const Py_UCS4 *value, Py_ssize_t len, int baseline,
+                                    Py_ssize_t *out_len) {
     Py_ssize_t css_len;
     unsigned char *result = mini_css_bytes(value, len, 1, baseline, &css_len);
+    *out_len = 0;
+    if (result == NULL && css_len != 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1;                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (css_len == 0) {
         PyMem_Free(result); /* the declarations minified to nothing: the caller renders an empty value */
-        *out_len = 0;
         return NULL;
     }
     sbuf decoded = {NULL, 0, 0, 0};
     sbuf_put_utf8(&decoded, (const char *)result, css_len);
     PyMem_Free(result);
-    return sbuf_finish(&decoded, out_len);
+    Py_UCS4 *minified = sbuf_finish(&decoded, out_len);
+    out->failed |= minified == NULL;
+    return minified;
 }
 
 /* Write an element's start tag, dropping redundant attribute quotes and writing a
@@ -208,7 +217,7 @@ static void mini_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_seri
         Py_UCS4 *minified = NULL;
         if (minify_css && value_len > 0 && name_len == 5 && memcmp(name, "style", 5) == 0) {
             /* NULL with value_len 0 when the declarations minified to empty, rendered as an empty value below */
-            value = minified = mini_style_attr_css(value, value_len, css_baseline, &value_len);
+            value = minified = mini_style_attr_css(out, value, value_len, css_baseline, &value_len);
         }
         if (unquote && value_len == 0) {
             continue; /* an empty value reparses identically as a bare attribute name */
@@ -594,8 +603,9 @@ static int mini_emit_script_js(sbuf *out, th_tree *tree, th_node *node, const th
    caller to emit the content verbatim -- for a non-style raw-text element or an empty <style>,
    so those cost nothing. A parsed <style> body can hold no </style close sequence (the parser
    would have ended the element there), and the CSS engine returns its input unchanged if its
-   output would spell one the input lacks, so the minified stylesheet stays inside the element. */
-static int mini_emit_style_css(sbuf *out, th_tree *tree, th_node *node, int baseline) {
+   output would spell one the input lacks, so the minified stylesheet stays inside the element. Kept out
+   of line: only a <style> under minify_css reaches it, and inlined it grows the serializer's walk. */
+static TH_NOINLINE int mini_emit_style_css(sbuf *out, th_tree *tree, th_node *node, int baseline) {
     if (node->atom != TH_TAG_STYLE) {
         return 0; /* script/textarea/title and other raw-text elements are never CSS */
     }
@@ -607,8 +617,9 @@ static int mini_emit_style_css(sbuf *out, th_tree *tree, th_node *node, int base
         return 0; /* an empty <style>: the verbatim path emits nothing either */
     }
     Py_UCS4 *src = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
-    if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return 0;      /* GCOVR_EXCL_LINE */
+    if (src == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;        /* GCOVR_EXCL_LINE: no verbatim copy stands in for the minified stylesheet */
     }
     Py_ssize_t pos = 0;
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
@@ -618,6 +629,10 @@ static int mini_emit_style_css(sbuf *out, th_tree *tree, th_node *node, int base
     Py_ssize_t css_len;
     unsigned char *result = mini_css_bytes(src, total, 0, baseline, &css_len);
     PyMem_Free(src);
+    if (result == NULL && css_len != 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1;                  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;                         /* GCOVR_EXCL_LINE */
+    }
     sbuf_put_utf8(out, (const char *)result, css_len); /* css_len 0 (a whitespace-only stylesheet) writes nothing */
     PyMem_Free(result);
     return 1;
