@@ -68,6 +68,9 @@ def md(html: str) -> str:
         pytest.param("<h3><p>x</p></h3>", "### x", id="heading-paragraph-stays-in-heading"),
         pytest.param("<h2>a<p>b</p>c</h2>", "## a b c", id="heading-block-edges-read-as-spaces"),
         pytest.param("<h2><div>a</div><div>b</div></h2>", "## a b", id="heading-sibling-blocks-join"),
+        pytest.param("<h1><pre>x\n</pre></h1>", "# `x`", id="heading-code-block-reads-as-code-span"),
+        pytest.param("<h1><table><tr><th>a</th><td>b</td></tr></table></h1>", "# a b", id="heading-table-cells-split"),
+        pytest.param("<h1><pre></pre>x</h1>", "# x", id="heading-empty-code-block"),
     ],
 )
 def test_headings(html: str, expected: str) -> None:
@@ -184,6 +187,13 @@ def test_code_elements_preserve_text(tag: str, content: str, expected: str) -> N
         pytest.param("<a href='h'> t</a>", "[t](h)", id="link-leading-space-at-line-start-dropped"),
         pytest.param("x<a href='h'></a>y", "x[](h)y", id="link-empty-text-keeps-brackets"),
         pytest.param("x<b><a href='h'> t</a></b>", "x **[t](h)**", id="link-inside-emphasis-opens-both"),
+        pytest.param('<a href="/t"><pre>x\ny</pre></a>', "[`x y`](/t)", id="code-block-in-link-text"),
+        pytest.param(
+            '<a href="/t"><h1><math><mtext>a<br>b</mtext></math></h1></a>',
+            "[a b](/t)",
+            id="heading-break-under-foreign-content-in-link-text",
+        ),
+        pytest.param('<a href="/t"><div>x<br>y</div></a>', "[x  \ny](/t)", id="break-in-block-in-link-text"),
     ],
 )
 def test_links_and_images(html: str, expected: str) -> None:
@@ -370,7 +380,7 @@ def test_inline_delimiter_html_before_empty_text() -> None:
         pytest.param(
             "<table><tr><td><div><i>a</i><i>b</i></div>x</td></tr></table>",
             Markdown(tables=Markdown.Tables(cell_blocks="text")),
-            "| *a*<em>b</em>x |\n| --- |",
+            "| *a*<em>b</em> x |\n| --- |",
             id="text-cell-keeps-html",
         ),
         pytest.param(
@@ -801,6 +811,29 @@ def test_trailing_break_at_an_inline_root_is_dropped() -> None:
         ),
         pytest.param(
             "<del><table><tr><td>a</td></tr></table></del>", "| ~~a~~ |\n| --- |", id="table-in-strikethrough"
+        ),
+        pytest.param("<table><tr><td><h1>x</h1></td></tr></table>", "| x |\n| --- |", id="table-heading-in-cell"),
+        pytest.param(
+            "<table><tr><td>a<p>b</p>c</td></tr></table>", "| a b c |\n| --- |", id="table-text-after-cell-block"
+        ),
+        pytest.param(
+            "<table><tr><td><blockquote>q</blockquote></td></tr></table>", "| q |\n| --- |", id="table-quote-in-cell"
+        ),
+        pytest.param(
+            "<table><tr><td><pre>x</pre></td></tr></table>", "| `x` |\n| --- |", id="table-code-block-in-cell"
+        ),
+        pytest.param(
+            "<table><tr><td><h1>a<br>b</h1></td></tr></table>", "| a b |\n| --- |", id="table-heading-break-in-cell"
+        ),
+        pytest.param(
+            "<table><tr><td><ul>\n<li>a</li>\n</ul></td></tr></table>",
+            "| <ul> <li>a</li> </ul> |\n| --- |",
+            id="table-list-html-in-cell-joins-lines",
+        ),
+        pytest.param(
+            '<table><tr><td><a href="/t"><ul><li>x</li></ul></a></td></tr></table>',
+            "| [x](/t) |\n| --- |",
+            id="table-list-in-link-in-cell-flattens",
         ),
     ],
 )
@@ -2629,8 +2662,14 @@ def test_images(html: str, opts: Markdown, expected: str) -> None:
         pytest.param(
             "<table><tr><td><pre>a|b</pre></td></tr></table>",
             Markdown(),
-            "| ``` a\\|b ``` |\n| --- |",
+            "| `a\\|b` |\n| --- |",
             id="cell-pipe-escaped-in-preformatted-text",
+        ),
+        pytest.param(
+            "<table><tr><td><span><p>x</p></span></td></tr></table>",
+            Markdown(converters={"span": lambda _element, content: content}),
+            "| x |\n| --- |",
+            id="cell-converter-content-with-a-block",
         ),
     ],
 )
