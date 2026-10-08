@@ -2245,7 +2245,7 @@ static void md_leave_converter(md_ctx *ctx, md_frame *frame) {
         end--;
     }
     PyObject *content = NULL;
-    if (!ctx->out.failed) { /* GCOVR_EXCL_BR_LINE: the sub-buffer fails only on an unforceable allocation */
+    if (!(ctx->out.failed | ctx->prefix.failed)) { /* GCOVR_EXCL_BR_LINE: only an unforceable allocation fails */
         content = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, data, end);
     }
     PyMem_Free(data);
@@ -2634,6 +2634,8 @@ static void md_enter_cell(md_ctx *ctx, md_table *table) {
 
 static void md_leave_cell(md_ctx *ctx, md_table *table) {
     sbuf rendered = ctx->out;
+    /* the cell's buffers and its padded grid slot fail apart from the output, so their flags join it here */
+    int failed = rendered.failed | ctx->prefix.failed;
     PyMem_Free(ctx->prefix.data);
     ctx->out = table->saved_out;
     ctx->prefix = table->saved_prefix;
@@ -2663,6 +2665,7 @@ static void md_leave_cell(md_ctx *ctx, md_table *table) {
         wrote = 1;
     }
     PyMem_Free(rendered.data);
+    ctx->out.failed |= failed | dst->failed;
     if (table->grid != NULL) {
         if (dst->len > table->widths[table->column]) {
             table->widths[table->column] = dst->len;
@@ -3417,6 +3420,8 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     if (ctx.markers != inline_markers) {
         PyMem_Free(ctx.markers);
     }
+    /* the line prefix fails apart from the output buffer */
+    ctx.out.failed |= ctx.prefix.failed;
     PyMem_Free(ctx.prefix.data);
     PyMem_Free(ctx.refs);
     if (ctx.failed) {
