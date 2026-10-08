@@ -254,12 +254,51 @@ def cssom_observation(
     rule: Final = StyleRule("p", declaration)
     rules: Final = RuleList((rule,))
     _require("Rule wrapper differs", condition=tuple(rules) == (rules[0],) and rules[0].style is declaration)
-    sheet: Final = StyleSheet("p { " + declaration.text + " }")
-    _require(
-        "Sheet declaration differs", condition=tuple(item.style.text for item in sheet.rules) == (declaration.text,)
-    )
+    if (close := _rule_close(declaration.text)) is not None:
+        sheet: Final = StyleSheet("p { " + declaration.text + close)
+        _require(
+            "Sheet declaration differs", condition=tuple(item.style.text for item in sheet.rules) == (declaration.text,)
+        )
     computed_observation(data)
     return observed
+
+
+def _rule_close(text: str) -> str | None:
+    """
+    Return what closes ``p { <text>`` so the rule body holds text as written, or None when no closer can.
+
+    A rule body reads its declarations nested, so a top-level ``}`` ends the rule where a style attribute keeps it as a
+    value (CSS Syntax 3 §5.5.7). A block, string, comment or escape still open at the end of text runs to the end of
+    input (§5.5.8, §4.3.5, §4.3.2, §4.3.7) and would swallow a written ``}``, so the rule ends at end of input as well.
+    """
+    closers: list[str] = []
+    pos = 0
+    while pos < len(text):
+        char = text[pos]
+        if char in "([{":
+            closers.append(")]}"["([{".index(char)])
+        elif closers and char == closers[-1]:
+            closers.pop()
+        elif not closers and char == "}":
+            return None
+        elif (pos := _opaque_end(text, pos)) < 0:
+            return ""
+        pos += 1
+    return "" if closers else " }"
+
+
+def _opaque_end(text: str, pos: int) -> int:
+    """Return the last offset of the escape, comment or string at pos, pos for any other code point, or -1 if open."""
+    if text[pos] == "\\":
+        return pos + 1 if pos + 1 < len(text) else -1
+    if text.startswith("/*", pos):
+        return end + 1 if (end := text.find("*/", pos + 2)) >= 0 else -1
+    if (quote := text[pos]) in "\"'":
+        pos += 1
+        while pos < len(text) and text[pos] not in {quote, "\n"}:
+            pos += 2 if text[pos] == "\\" else 1
+        return pos if pos < len(text) else -1
+    return pos
 
 
 def computed_observation(data: bytes) -> str:
