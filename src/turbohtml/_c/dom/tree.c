@@ -434,9 +434,6 @@ static th_node *current_node(th_tree *tree) {
 static int stack_push(th_tree *tree, th_node *node) {
     /* a failed node_new hands over NULL and sets tree->failed, which ends the drain after this token; until then the
        stack stays free of it */
-    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: only an allocation failure yields no node */
-        return 0;       /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
     if (tree->open_len >= TH_MAX_TREE_DEPTH) {
         /* Runaway nesting: leave the element in the DOM (it was already inserted under
            the deepest open element) but do not descend into it, so subsequent start
@@ -1337,10 +1334,6 @@ static Py_UCS4 *token_text(th_tree *tree, const th_token *token, Py_ssize_t *out
     }
     /* an allocation failure set tree->failed, which ends the drain after this token; until then every mode sees an
        empty run instead of reading through the NULL copy */
-    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: a text token's run is never empty, so NULL means allocation failure */
-        *out_len = 0;  /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
     /* a mode that consumed a leading slice of this text token and reprocessed
        the remainder set text_offset; hand back only the remainder */
     /* the consumed prefix never exceeds the run length */
