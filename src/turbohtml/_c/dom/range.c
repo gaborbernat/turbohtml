@@ -582,7 +582,8 @@ static PyObject *get_common_ancestor(PyObject *self, void *Py_UNUSED(closure)) {
 
 /* --- boundary setters --- */
 
-/* Borrow the (handle, node) a node argument wraps; sets a TypeError and returns -1 otherwise. */
+/* Borrow the (handle, node) a node argument wraps; sets a TypeError and returns -1 otherwise. A concurrent move into
+   another tree rebinds the pair under the owner's lock, so each caller runs under the guard on its node argument. */
 static int node_arg(PyObject *self, PyObject *arg, PyObject **handle, th_node **node) {
     if (!is_node(arg, state_of(self))) {
         PyErr_SetString(PyExc_TypeError, "expected a node");
@@ -612,11 +613,13 @@ static PyObject *set_boundary(PyObject *self, PyObject *args, int is_start) {
     Py_RETURN_NONE;
 }
 
-static PyObject *range_set_start(PyObject *self, PyObject *args) {
+TH_NODE_API(static, PyObject *, range_set_start, (PyObject * self, PyObject *args), (self, args),
+            (PyObject * self, PyObject *args), node_argument(state_of(self), args, NULL, 0, NULL), NULL) {
     return set_boundary(self, args, 1);
 }
 
-static PyObject *range_set_end(PyObject *self, PyObject *args) {
+TH_NODE_API(static, PyObject *, range_set_end, (PyObject * self, PyObject *args), (self, args),
+            (PyObject * self, PyObject *args), node_argument(state_of(self), args, NULL, 0, NULL), NULL) {
     return set_boundary(self, args, 0);
 }
 
@@ -636,7 +639,8 @@ static int reference_parent(PyObject *self, PyObject *arg, PyObject **handle, th
     return 0;
 }
 
-static PyObject *range_set_start_before(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_set_start_before, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *parent;
     Py_ssize_t index;
@@ -647,7 +651,8 @@ static PyObject *range_set_start_before(PyObject *self, PyObject *arg) {
     Py_RETURN_NONE;
 }
 
-static PyObject *range_set_start_after(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_set_start_after, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *parent;
     Py_ssize_t index;
@@ -658,7 +663,8 @@ static PyObject *range_set_start_after(PyObject *self, PyObject *arg) {
     Py_RETURN_NONE;
 }
 
-static PyObject *range_set_end_before(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_set_end_before, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *parent;
     Py_ssize_t index;
@@ -669,7 +675,8 @@ static PyObject *range_set_end_before(PyObject *self, PyObject *arg) {
     Py_RETURN_NONE;
 }
 
-static PyObject *range_set_end_after(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_set_end_after, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *parent;
     Py_ssize_t index;
@@ -680,7 +687,8 @@ static PyObject *range_set_end_after(PyObject *self, PyObject *arg) {
     Py_RETURN_NONE;
 }
 
-static PyObject *range_select_node(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_select_node, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *parent;
     Py_ssize_t index;
@@ -692,7 +700,8 @@ static PyObject *range_select_node(PyObject *self, PyObject *arg) {
     Py_RETURN_NONE;
 }
 
-static PyObject *range_select_node_contents(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_select_node_contents, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *node;
     if (node_arg(self, arg, &handle, &node) < 0) {
@@ -786,7 +795,8 @@ static int point_arg(PyObject *self, PyObject *args, th_node **node, Py_ssize_t 
     return 0;
 }
 
-static PyObject *range_compare_point(PyObject *self, PyObject *args) {
+TH_NODE_API(static, PyObject *, range_compare_point, (PyObject * self, PyObject *args), (self, args),
+            (PyObject * self, PyObject *args), node_argument(state_of(self), args, NULL, 0, NULL), NULL) {
     th_node *node;
     Py_ssize_t offset;
     int outside;
@@ -810,7 +820,8 @@ static PyObject *range_compare_point(PyObject *self, PyObject *args) {
     return PyLong_FromLong(0);
 }
 
-static PyObject *range_is_point_in_range(PyObject *self, PyObject *args) {
+TH_NODE_API(static, PyObject *, range_is_point_in_range, (PyObject * self, PyObject *args), (self, args),
+            (PyObject * self, PyObject *args), node_argument(state_of(self), args, NULL, 0, NULL), NULL) {
     th_node *node;
     Py_ssize_t offset;
     int outside;
@@ -831,7 +842,8 @@ static PyObject *range_is_point_in_range(PyObject *self, PyObject *args) {
     Py_RETURN_TRUE;
 }
 
-static PyObject *range_intersects_node(PyObject *self, PyObject *arg) {
+TH_NODE_API(static, PyObject *, range_intersects_node, (PyObject * self, PyObject *arg), (self, arg),
+            (PyObject * self, PyObject *arg), is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL, NULL) {
     PyObject *handle;
     th_node *node;
     if (node_arg(self, arg, &handle, &node) < 0) {
@@ -968,8 +980,12 @@ static th_node *insert_at_start(RangeObject *range, PyObject **node_ref) {
         }
         start_node = range->start_node;
         start_text_like = start_node->type == TH_NODE_TEXT || start_node->type == TH_NODE_CDATA;
+        /* the lock guards a wrapper's node only while it belongs to this tree, and a node of another tree is never the
+           start node */
         if (start_node->type == TH_NODE_COMMENT || start_node->type == TH_NODE_PI ||
-            (start_text_like && start_node->parent == NULL) || ((NodeObject *)node_obj)->node == start_node) {
+            (start_text_like && start_node->parent == NULL) ||
+            (node_owned_by((NodeObject *)node_obj, range->start_handle) &&
+             ((NodeObject *)node_obj)->node == start_node)) {
             PyErr_SetString(PyExc_ValueError, "cannot insert at this boundary point");
             return NULL;
         }
@@ -1087,7 +1103,9 @@ static int import_surround_parent(RangeObject *range, PyObject *new_parent) {
     }
 }
 
-static PyObject *range_surround_contents(PyObject *self, PyObject *new_parent) {
+TH_NODE_API(static, PyObject *, range_surround_contents, (PyObject * self, PyObject *new_parent), (self, new_parent),
+            (PyObject * self, PyObject *new_parent),
+            is_node(new_parent, state_of(self)) ? (NodeObject *)new_parent : NULL, NULL) {
     RangeObject *range = (RangeObject *)self;
     module_state *state = state_of(self);
     if (!is_node(new_parent, state)) {

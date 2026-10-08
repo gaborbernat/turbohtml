@@ -1,0 +1,1 @@
+:class:`~turbohtml.Range` methods now read a moving node argument together with its tree.
