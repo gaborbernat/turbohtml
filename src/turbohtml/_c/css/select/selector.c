@@ -15,7 +15,10 @@
 
 /* Record a parse failure with the position and reason for the error message. Set
    unconditionally: an error propagates up through early returns without another
-   failure being recorded, so the first (deepest) call keeps its position. */
+   failure being recorded, so the first (deepest) call keeps its position. A NULL
+   reason marks an allocation failure. sel_raise reports it as MemoryError, and a
+   forgiving :is()/:where() list stops on it, since dropping the arm would match the
+   document against a partial list. */
 static void sel_fail(sel_parser *parser, const char *reason) {
     parser->error = 1;
     parser->err_pos = parser->pos;
@@ -833,9 +836,9 @@ static sel_simple *sel_compound_parse(sel_parser *parser, int *out_count) {
             /* named so the branch and its coverage marker stay on one line (clang-format
                would otherwise wrap the long comparison and orphan the marker) */
             int grow_failed = sel_grow((void **)&simples, &capacity, sizeof(sel_simple)) < 0;
-            if (grow_failed) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                parser->error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-                break;             /* GCOVR_EXCL_LINE: allocation-failure path */
+            if (grow_failed) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                sel_fail(parser, NULL); /* GCOVR_EXCL_LINE: allocation-failure path */
+                break;                  /* GCOVR_EXCL_LINE: allocation-failure path */
             }
         }
         sel_one(parser, &simples[count]);
@@ -907,7 +910,7 @@ static int sel_complex_parse(sel_parser *parser, sel_complex *complex, int neste
             int grow_failed = sel_grow((void **)&compounds, &capacity, sizeof(sel_compound)) < 0;
             if (grow_failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 free_simples(simples, simple_count); /* GCOVR_EXCL_LINE: allocation-failure path */
-                parser->error = 1;                   /* GCOVR_EXCL_LINE: allocation-failure path */
+                sel_fail(parser, NULL);              /* GCOVR_EXCL_LINE: allocation-failure path */
                 break;                               /* GCOVR_EXCL_LINE: allocation-failure path */
             }
         }
@@ -999,14 +1002,17 @@ int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, i
         sel_skip_ws(parser);
         if (count == capacity) {
             int grow_failed = sel_grow((void **)&alts, &capacity, sizeof(sel_complex)) < 0;
-            if (grow_failed) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                parser->error = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-                break;             /* GCOVR_EXCL_LINE: allocation-failure path */
+            if (grow_failed) {          /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                sel_fail(parser, NULL); /* GCOVR_EXCL_LINE: allocation-failure path */
+                break;                  /* GCOVR_EXCL_LINE: allocation-failure path */
             }
         }
         if (sel_complex_parse(parser, &alts[count], nested, relative) == 0) {
             count++;
         } else if (forgiving) {
+            if (parser->err_reason == NULL) { /* GCOVR_EXCL_BR_LINE: only an allocation failure has no reason */
+                break;                        /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
             parser->error = 0; /* drop the unparsable arm and recover to the next one */
             sel_skip_bad_arm(parser);
         } else {
@@ -1057,6 +1063,10 @@ void selector_free(sel_compiled *compiled) {
    position the failing token starts at (issue #434), e.g.
    invalid CSS selector ":nth-child(foo)": expected An+B at position 11 */
 void sel_raise(PyObject *selector_error, PyObject *selector_str, const sel_parser *parser) {
+    if (parser->err_reason == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory();             /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;                       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     PyErr_Format(selector_error, "invalid CSS selector \"%U\": %s at position %zd", selector_str, parser->err_reason,
                  parser->err_pos);
 }
