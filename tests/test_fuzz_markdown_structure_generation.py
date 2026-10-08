@@ -168,6 +168,8 @@ def test_markdown_unsupported_element() -> None:
         pytest.param('<p><img src="a"></p>', id="image-without-alt"),
         pytest.param("<pre>x</pre>", id="code-without-final-newline"),
         pytest.param("<p>x<br></p>", id="break-ending-block"),
+        pytest.param("<p>x <br>y</p>", id="space-before-break"),
+        pytest.param("<p>x\n<br>y</p>", id="newline-before-break"),
         pytest.param("<p>x<strong>a<br></strong>y</p>", id="break-ending-emphasis"),
         pytest.param("<p>x<strong><br></strong>y</p>", id="emphasis-around-break"),
         pytest.param("<p>x<em> y </em>z</p>", id="emphasis-edge-spaces"),

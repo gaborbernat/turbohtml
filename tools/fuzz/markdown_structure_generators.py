@@ -177,7 +177,10 @@ def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> 
         ):
             text = text.lstrip(" \t\n\f\r")
         following: Final = records[index + 1][0] if index + 1 < len(records) else None
-        if (following is None and not inline) or (following is not None and following not in _FLOW_INLINE):
+        # a line drops the collapsible spaces at its end (CSS Text 3, 4.1.2), so a space before a break draws nothing
+        if (following is None and not inline) or (
+            following is not None and (following not in _FLOW_INLINE or following == "br")
+        ):
             text = text.rstrip(" \t\n\f\r")
         if text:
             output.append(("#text", (("value", text),), ()))
