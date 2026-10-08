@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
@@ -38,6 +39,7 @@ __all__: Final = [
     "dom_lifecycle_check",
     "dom_lifecycle_controls",
     "dom_lifecycle_generate",
+    "dom_lifecycle_race",
     "dom_lifecycle_seeds",
     "run_dom_lifecycle",
 ]
@@ -125,6 +127,23 @@ def run_dom_lifecycle(program: bytes) -> tuple[tuple[LifecycleStep, ...], tuple[
     machine: Final = _Machine(_instructions(program))
     machine.block(range(len(machine.code)))
     return tuple(machine.trace), tuple("" if node is None else node.serialize() for node in machine.nodes)
+
+
+def dom_lifecycle_race(seeds: Sequence[str]) -> list[tuple[LifecycleStep, ...]]:
+    """Run every seed in its own thread at once, so the programs contend on the module and interpreter state."""
+    machines: Final = [_Machine(_instructions(bytes.fromhex(seed))) for seed in seeds]
+    start: Final = threading.Barrier(len(machines))
+
+    def run(machine: _Machine) -> None:
+        start.wait()
+        machine.block(range(len(machine.code)))
+
+    threads: Final = [threading.Thread(target=run, args=(machine,)) for machine in machines]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return [tuple(machine.trace) for machine in machines]
 
 
 def _instructions(program: bytes) -> list[tuple[int, int, int, int]]:

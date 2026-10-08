@@ -17,7 +17,14 @@
    only into the extension, behind CSS_MINIFY_STANDALONE, so a pure-C harness can run the core under
    AddressSanitizer/LeakSanitizer and libFuzzer. */
 
+#ifdef CSS_MINIFY_STANDALONE
+/* the core needs only CPython's signed size type, so the harness build supplies it without the interpreter headers */
+#include <stddef.h>
+#include <stdio.h>
+typedef ptrdiff_t Py_ssize_t;
+#else
 #include "core/common.h"
+#endif
 #include "data/css_colors.h"
 
 #include <math.h>

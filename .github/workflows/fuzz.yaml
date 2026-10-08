@@ -32,6 +32,23 @@ jobs:
         run: uvx --with tox-uv tox run -e fuzz-smoke
         env:
           UV_PYTHON_PREFERENCE: only-managed
+  msan:
+    name: 🧠 MemorySanitizer standalone harnesses
+    runs-on: ubuntu-24.04
+    # the IDNA, phone, JS and CSS cores link no interpreter, so MemorySanitizer sees every byte they read and catches
+    # the uninitialized reads AddressSanitizer misses
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - name: ✅ Run msan
+        run: uvx --with tox-uv tox run -e msan
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
   oracle:
     name: 🧪 sanitizer wrong-output oracles
     runs-on: ubuntu-24.04

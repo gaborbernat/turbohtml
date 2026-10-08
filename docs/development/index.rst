@@ -120,9 +120,10 @@ Two mechanisms share one driver (``tools/fuzz/fuzz.py``):
 
 - **Standalone C harnesses** for the surfaces whose core decouples from CPython: the IDNA ``ToASCII`` engine
   (``idna_harness.c``, compiled with ``TH_IDNA_STANDALONE``), the phone-number recognizer (``phone_harness.c``, which
-  reads text through a callback) and the JS minifier (``js_minify_harness.c``, compiled with ``JM_STANDALONE``). The
-  three link against the system allocator with no interpreter, so a coverage-guided ``libFuzzer`` run
-  (``-fsanitize=fuzzer``) or an ``AFL++`` target drives them directly.
+  reads text through a callback), the JS minifier (``js_minify_harness.c``, compiled with ``JM_STANDALONE``) and the CSS
+  minifier (``css_harness.c``, compiled with ``CSS_MINIFY_STANDALONE``). The four link against the system allocator with
+  no interpreter, so a coverage-guided ``libFuzzer`` run (``-fsanitize=fuzzer``) or an ``AFL++`` target drives them
+  directly.
 - **An in-process driver** (``tools/fuzz/_targets.py``) for the surfaces that reach the live tree -- ``parse``,
   ``serialize`` (and the parse-serialize round trip), ``sanitize``, the URL parser, and the HTML and CSS minifiers. It
   runs against an extension built with the sanitizers and calls the public API, so a C fault aborts the interpreter with
@@ -152,6 +153,16 @@ compilation and XSLT application then count their steps and raise ``ValueError``
 input fails fast instead of timing out and hiding the next find. Release builds leave the macro undefined and compile no
 counter. ``fuzz-smoke`` runs ``tests/fuzz_build/`` to check that the limit stops those inputs, and that a public call
 raises ``MemoryError`` whichever of its allocations the ``-Dfuzzing=true`` hook fails.
+
+AddressSanitizer misses reads of uninitialized memory, so the ``msan`` environment rebuilds the four standalone
+harnesses with ``-fsanitize=memory`` and replays the same seeds on Linux. It skips the in-process driver:
+MemorySanitizer needs every byte instrumented, and a stock CPython is not. The ``tsan`` environment runs the
+free-threaded tests inside a digest-pinned ThreadSanitizer CPython image, including the ``dom-lifecycle`` seeds run in
+parallel threads and compared with their serial run.
+
+.. code-block:: console
+
+    $ tox r -e msan   # Linux: the standalone harnesses under MemorySanitizer
 
 The in-process driver runs each input under pymalloc and again under ``PYTHONMALLOC=malloc``, because AddressSanitizer
 cannot see an over-read that stays inside a pymalloc pool. The deep run splits ``--minutes`` between the two passes.
