@@ -40,9 +40,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("code-change", "batch", "prune", "coverage"), required=True)
     parser.add_argument("--sanitizer", choices=("address", "undefined", "coverage"), required=True)
     parser.add_argument("--seconds", type=int, required=True)
-    parser.add_argument("--source", type=Path, required=True, help="the checkout, with the base branch fetched")
+    parser.add_argument("--source", type=Path, required=True, help="the checkout, with its full history")
     parser.add_argument("--workspace", type=Path, required=True, help="holds storage/, logs/ and the CFLite outputs")
-    parser.add_argument("--base-ref", help="the branch a code-change run diffs against")
+    parser.add_argument("--base-commit", help="the commit a code-change run diffs against and finds its base build at")
+    parser.add_argument("--upload-build", action="store_true", help="keep this build as the next run's base build")
     arguments: Final = parser.parse_args(argv)
     return _run(
         _Job(
@@ -51,7 +52,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.seconds,
             arguments.source.resolve(),
             arguments.workspace.resolve(),
-            arguments.base_ref,
+            arguments.base_commit,
+            arguments.upload_build,
         )
     )
 
@@ -73,7 +75,8 @@ def _run(job: _Job) -> int:
         "LANGUAGE": "python",
         "SANITIZER": job.sanitizer,
         "LOW_DISK_SPACE": "True",
-        **({} if job.base_ref is None else {"GIT_BASE_REF": job.base_ref}),
+        **({} if job.base_commit is None else {"GIT_BASE_COMMIT": job.base_commit}),
+        **({"UPLOAD_BUILD": "True"} if job.upload_build else {}),
     }
     status: Final = {
         "build": _docker(
@@ -144,7 +147,8 @@ class _Job:
     seconds: int
     source: Path
     workspace: Path
-    base_ref: str | None
+    base_commit: str | None
+    upload_build: bool
 
 
 if __name__ == "__main__":

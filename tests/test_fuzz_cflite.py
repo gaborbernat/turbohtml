@@ -82,9 +82,21 @@ def test_cflite_writes_logs_not_console(docker: MagicMock, tmp_path: Path, capsy
     )
 
 
-def test_cflite_code_change_diffs_against_base(docker: MagicMock, tmp_path: Path) -> None:
-    main(_arguments(tmp_path, "--base-ref", "main"))
-    assert {_environment(call.args[0])["GIT_BASE_REF"] for call in docker.call_args_list} == {"main"}
+@pytest.mark.parametrize(
+    ("extra", "variables"),
+    [
+        pytest.param(("--base-commit", "0123abc"), {"GIT_BASE_COMMIT": "0123abc"}, id="base-commit"),
+        pytest.param(("--upload-build",), {"UPLOAD_BUILD": "True"}, id="upload-build"),
+    ],
+)
+def test_cflite_passes_base_build_settings(
+    docker: MagicMock, tmp_path: Path, extra: tuple[str, ...], variables: dict[str, str]
+) -> None:
+    main(_arguments(tmp_path, *extra))
+    assert [_environment(call.args[0]) for call in docker.call_args_list] == [
+        {**_expected(tmp_path), **variables},
+        {**_expected(tmp_path), **variables, "MODE": "batch", "FUZZ_SECONDS": "3600", "OUTPUT_SARIF": "True"},
+    ]
 
 
 def test_cflite_build_failure_skips_fuzzing(
