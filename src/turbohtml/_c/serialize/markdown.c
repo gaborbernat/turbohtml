@@ -1897,6 +1897,18 @@ enum md_lead {
     MD_LEAD_IN_BLOCK = 2, /* a paragraph's content or an ATX heading, which opens its own line */
 };
 
+/* Whether an HTML <a> carries an href. The parser and the DOM store the name as its
+   static atom, so one integer compare per attribute finds it where th_node_attr_find
+   would hash the name first. */
+static int md_has_href(const th_node *node) {
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == TH_ATTR_HREF) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* A loose item needs its first block on the marker line even when a transparent
    container wraps it; otherwise CommonMark reads that block as code. The scan descends
    into such containers, into inline elements and into paragraphs, and climbs back out of
@@ -1932,7 +1944,7 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
         }
         uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
         if (atom == TH_TAG_IMG || atom == TH_TAG_BR || atom == TH_TAG_Q ||
-            (atom == TH_TAG_A && th_node_attr_find(ctx->tree, child, "href", 4) >= 0)) {
+            (atom == TH_TAG_A && md_has_href(child))) {
             return paragraph != NULL ? MD_LEAD_IN_BLOCK : MD_LEAD_INLINE; /* it writes markup even with no text */
         }
         if (atom >= TH_TAG_H1 && atom <= TH_TAG_H6) {
@@ -1961,7 +1973,7 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
 /* What an inline element writes first: an empty one writes something only when it is a
    break, an image, a quote or a link. */
 static int md_element_lead(md_ctx *ctx, th_node *node, uint16_t atom) {
-    if (atom == TH_TAG_A && th_node_attr_find(ctx->tree, node, "href", 4) >= 0) {
+    if (atom == TH_TAG_A && md_has_href(node)) {
         return MD_LEAD_INLINE; /* the brackets are written even around nothing */
     }
     if (node->first_child == NULL) {
