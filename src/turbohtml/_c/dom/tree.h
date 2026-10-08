@@ -399,8 +399,9 @@ th_tree *th_tree_new_rooted(enum th_node_type type, int xml, int quirks);
    identity (the `==` operator's domain). */
 int th_node_equals(th_tree *left_tree, th_node *left, th_tree *right_tree, th_node *right);
 
-/* DOM normalize over a subtree: merge each run of adjacent Text children into one node and drop empty Text nodes. */
-void th_node_normalize(th_tree *tree, th_node *root);
+/* DOM normalize over a subtree: merge each run of adjacent Text children into one node and drop empty Text nodes.
+   Returns 0, or -1 on allocation failure. */
+int th_node_normalize(th_tree *tree, th_node *root);
 
 /* Parse an HTML fragment as if set as the innerHTML of the given context element
    (e.g. "td", or "svg path"). The returned tree serializes the context root's
@@ -502,10 +503,15 @@ int th_tree_scripting(const th_tree *tree);
    skip the :has() subtree memo on shallow trees where the direct walk is already cheap. */
 Py_ssize_t th_tree_max_depth(const th_tree *tree);
 
-/* Whether a text node holds only HTML ASCII whitespace (or nothing), realizing a
-   zero-copy span on demand. The :empty selector uses it to ignore the document
-   white space Selectors-4 §13.2 permits inside an otherwise empty element. */
+/* Whether a text node holds only HTML ASCII whitespace (or nothing), read in place
+   without realizing a zero-copy span. The :empty selector uses it to ignore the
+   document white space Selectors-4 §13.2 permits inside an otherwise empty element. */
 int th_node_text_is_blank(th_tree *tree, th_node *node);
+
+/* The first nonzero classify verdict over the descendant text of node in document
+   order, or 0 when every code point classifies as 0. Reads zero-copy spans in place,
+   so it never allocates. */
+int th_node_text_classify(th_tree *tree, th_node *node, int (*classify)(Py_UCS4));
 
 /* Materialize one text/comment/doctype node's own character data (realizing a
    zero-copy span on demand) into a freshly PyMem-allocated UCS4 buffer.
@@ -517,9 +523,14 @@ Py_UCS4 *th_node_data(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len);
 PyObject *th_node_text_string(th_tree *tree, th_node *node);
 
+/* A text node's own code points as a str, read in place without realizing a zero-copy span. NULL with MemoryError
+   when the str cannot be allocated. */
+PyObject *th_node_data_string(th_tree *tree, th_node *node);
+
 /* Gather node's concatenated descendant text into a caller-sized, reusable UCS4
-   buffer (no allocation, no str), for the find(text=) literal/exact C scan. */
-void th_node_collect_text(th_tree *tree, th_node *node, Py_UCS4 *buf);
+   buffer (no str), for the find(text=) literal/exact C scan. Returns -1 when a
+   zero-copy span cannot be realized. */
+int th_node_collect_text(th_tree *tree, th_node *node, Py_UCS4 *buf);
 
 /* Serialize node and its subtree as HTML (the WHATWG fragment serialization).
    For the document node this is the whole-document markup. PyMem-allocated;

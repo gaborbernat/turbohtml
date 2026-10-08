@@ -1508,6 +1508,8 @@ def test_dir_auto_on_foreign_element_reads_text(html: str, direction: str) -> No
         # dir=auto on an input resolves from the value attribute, not child text
         pytest.param('<input id=a type=search dir=auto value="עִבְרִית">', ":dir(rtl)", ["a"], id="input-auto-rtl-value"),
         pytest.param('<input id=a dir=auto value="abc">', ":dir(ltr)", ["a"], id="input-auto-ltr-value"),
+        pytest.param('<input id=a dir=auto value="12 א">', ":dir(rtl)", ["a"], id="input-auto-skips-neutral-value"),
+        pytest.param('<input id=a dir=auto value="123">', ":dir(ltr)", ["a"], id="input-auto-neutral-value-ltr"),
         pytest.param('<input id=a dir=auto value="">', ":dir(ltr)", ["a"], id="input-auto-blank-value-ltr"),
         pytest.param("<input id=a dir=auto>", ":dir(ltr)", ["a"], id="input-auto-no-value-ltr"),
     ],

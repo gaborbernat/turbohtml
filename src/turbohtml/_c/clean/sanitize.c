@@ -3012,11 +3012,7 @@ static TH_WALK_INLINE int settle_range(sanitizer *s, th_node *parent, th_node *b
         if (cursor->type != TH_NODE_ELEMENT) {
             if (foster && cursor->type == TH_NODE_TEXT) {
                 th_node *after = cursor->next_sibling; /* fostering moves cursor out of the range: capture its place */
-                int fostered = balancer_table_text_fostered(s, cursor);
-                if (fostered < 0) { /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
-                    return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-                }
-                cursor = fostered ? after : cursor->next_sibling;
+                cursor = balancer_table_text_fostered(s, cursor) ? after : cursor->next_sibling;
                 continue;
             }
             cursor = cursor->next_sibling;
@@ -4111,17 +4107,9 @@ static uint32_t balancer_child_bits(const th_node *element, uint32_t outer) {
 /* Non-whitespace text directly inside a table context is foster-parented out of the table on re-parse (HTML 13.2.6.4.10
    "in table text"): move the whole text node to just before the enclosing table, where a browser places it, so the
    output re-parses stably. A U+0000 the parser drops cannot occur in a sanitized text node. The caller has established
-   that the text's parent fosters. Returns 1 when the text moved, 0 when it stays, -1 on error. */
+   that the text's parent fosters. Returns 1 when the text moved, 0 when it stays. */
 static int balancer_foster_text(sanitizer *s, th_node *text) {
-    const Py_UCS4 *data = th_node_realize_text(s->tree, text);
-    if (data == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    int visible = 0;
-    for (Py_ssize_t index = 0; index < text->text_len && !visible; index++) {
-        visible = !is_space(data[index]);
-    }
-    if (!visible) {
+    if (th_node_text_is_blank(s->tree, text)) {
         return 0;
     }
     th_node *table = balancer_enclosing_table(text);
@@ -4252,11 +4240,7 @@ static int balance_subtree(sanitizer *s, th_node *root, int foster) {
             }
         } else if (foster && node->type == TH_NODE_TEXT) {
             th_node *after = node->next_sibling; /* fostering moves node before the table, so capture its place first */
-            int fostered = balancer_table_text_fostered(s, node);
-            if (fostered < 0) { /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
-                return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
-            }
-            if (fostered) {
+            if (balancer_table_text_fostered(s, node)) {
                 if (after != NULL) {
                     node = after;
                     continue;
@@ -4336,12 +4320,7 @@ static int balance_range(sanitizer *s, th_node *first, th_node *stop, balance_co
             }
         } else if (node->type == TH_NODE_TEXT && (context.bits & CONTEXT_FOSTERS)) {
             th_node *after = node->next_sibling; /* fostering moves the text before the table: capture its place */
-            int fostered = balancer_foster_text(s, node);
-            if (fostered < 0) {     /* GCOVR_EXCL_BR_LINE: foster only fails on allocation */
-                PyMem_Free(frames); /* GCOVR_EXCL_LINE: allocation-failure path */
-                return -1;          /* GCOVR_EXCL_LINE */
-            }
-            if (fostered) {
+            if (balancer_foster_text(s, node)) {
                 node = after;
                 continue;
             }

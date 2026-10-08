@@ -1460,8 +1460,9 @@ static int set_candidate_attrs(th_tree *tree, th_node *anchor, PyObject *url, Py
         }
         status = th_node_attr_set(tree, anchor, "href", 4, url_points, PyUnicode_GET_LENGTH(url), 1);
         PyMem_Free(url_points);
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: attribute arena allocation cannot be forced from a test */
-            return -1;    /* GCOVR_EXCL_LINE */
+        if (status < 0) {     /* GCOVR_EXCL_BR_LINE: attribute arena allocation cannot be forced from a test */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: the tree reports a failed allocation without raising */
+            return -1;        /* GCOVR_EXCL_LINE */
         }
     }
     while (PyDict_Next(attrs, &pos, &name, &value)) {
@@ -1474,8 +1475,9 @@ static int set_candidate_attrs(th_tree *tree, th_node *anchor, PyObject *url, Py
         }
         status = th_node_attr_set(tree, anchor, name_bytes, name_len, value_points, PyUnicode_GET_LENGTH(value), 1);
         PyMem_Free(value_points);
-        if (status < 0) { /* GCOVR_EXCL_BR_LINE: attribute arena allocation cannot be forced from a test */
-            return -1;    /* GCOVR_EXCL_LINE */
+        if (status < 0) {     /* GCOVR_EXCL_BR_LINE: attribute arena allocation cannot be forced from a test */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: the tree reports a failed allocation without raising */
+            return -1;        /* GCOVR_EXCL_LINE */
         }
     }
     return 0;
@@ -1493,6 +1495,7 @@ static int replace_anchor_text(th_tree *tree, th_node *anchor, PyObject *text) {
     th_node *child = text_len > 0 ? th_tree_make_data_node(tree, TH_NODE_TEXT, points, text_len) : NULL;
     PyMem_Free(points);
     if (text_len > 0 && child == NULL) { /* GCOVR_EXCL_BR_LINE: text-node arena allocation */
+        PyErr_NoMemory();                /* GCOVR_EXCL_LINE: the tree reports a failed allocation without raising */
         return -1;                       /* GCOVR_EXCL_LINE */
     }
     if (child != NULL) {
@@ -1527,13 +1530,9 @@ TH_NODE_API(static, int, snapshot_existing,
     (void)turbohtml_node_borrow(module, target, &tree, &anchor);
     Py_ssize_t text_len;
     Py_UCS4 *points = th_node_text(tree, anchor, &text_len);
-    if (text_len == 0) {
-        text = PyUnicode_FromString("");
-    } else if (points == NULL) { /* GCOVR_EXCL_BR_LINE: flattened-text allocation */
-        text = NULL;             /* GCOVR_EXCL_LINE */
-    } else {                     /* GCOVR_EXCL_LINE: llvm-cov assigns this line to the allocation-failure edge */
-        text = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, points, text_len);
-    }
+    /* GCOVR_EXCL_BR_START: th_node_text fails only on allocation failure, without raising */
+    text = points == NULL ? PyErr_NoMemory() : PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, points, text_len);
+    /* GCOVR_EXCL_BR_STOP */
     PyMem_Free(points);
     Py_ssize_t href_index = th_node_attr_find(tree, anchor, "href", 4);
     url = attr_text(href_index < 0 ? NULL : &anchor->attrs[href_index]);
@@ -1611,8 +1610,9 @@ static int append_data_slice(th_tree *tree, th_node *fragment, const Py_UCS4 *po
         return 0;
     }
     th_node *text = th_tree_make_data_node(tree, TH_NODE_TEXT, points + start, end - start);
-    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: text-node arena allocation cannot be forced from a test */
-        return -1;      /* GCOVR_EXCL_LINE */
+    if (text == NULL) {   /* GCOVR_EXCL_BR_LINE: text-node arena allocation cannot be forced from a test */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: the tree reports a failed allocation without raising */
+        return -1;        /* GCOVR_EXCL_LINE */
     }
     th_node_append_child(fragment, text);
     return 0;
@@ -1645,9 +1645,11 @@ static int append_result(th_tree *tree, th_node *fragment, const Py_UCS4 *points
     }
     static const Py_UCS4 anchor_tag[] = {'a'};
     th_node *anchor = th_tree_make_element(tree, anchor_tag, 1, TH_TAG_A, 0);
-    /* GCOVR_EXCL_BR_START: anchor arena allocation cannot be forced */
-    int status = anchor == NULL ? -1 : set_candidate_attrs(tree, anchor, result->url, result->attrs, 1);
-    /* GCOVR_EXCL_BR_STOP */
+    if (anchor == NULL) { /* GCOVR_EXCL_BR_LINE: anchor arena allocation cannot be forced from a test */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: the tree reports a failed allocation without raising */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    int status = set_candidate_attrs(tree, anchor, result->url, result->attrs, 1);
     if (status == 0) { /* GCOVR_EXCL_BR_LINE: attribute encoding/arena allocation */
         status = replace_anchor_text(tree, anchor, result->text);
     }
@@ -1666,10 +1668,7 @@ TH_NODE_API(static, PyObject *, snapshot_text, (PyObject * module, PyObject *tar
     PyObject *text;
     Py_BEGIN_CRITICAL_SECTION(handle);
     (void)turbohtml_node_borrow(module, target, &tree, &node);
-    const Py_UCS4 *points = th_node_realize_text(tree, node);
-    /* GCOVR_EXCL_BR_START: text realization and Unicode snapshot allocation cannot be forced */
-    text = points == NULL ? NULL : PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, points, node->text_len);
-    /* GCOVR_EXCL_BR_STOP */
+    text = th_node_data_string(tree, node);
     Py_END_CRITICAL_SECTION();
     return text;
 }
@@ -1694,6 +1693,7 @@ TH_NODE_API(static, int, apply_text,
     (void)turbohtml_node_borrow(module, target, &tree, &node);
     th_node *fragment = th_tree_make_fragment(tree);
     if (fragment == NULL) { /* GCOVR_EXCL_BR_LINE: fragment arena allocation cannot be forced from a test */
+        PyErr_NoMemory();   /* GCOVR_EXCL_LINE: the tree reports a failed allocation without raising */
         status = -1;        /* GCOVR_EXCL_LINE */
     } else {                /* GCOVR_EXCL_LINE: brace of the allocation-failure branch */
         Py_ssize_t cursor = 0;
@@ -1761,6 +1761,7 @@ static int process_text(PyObject *module, PyObject *target, const apply_policy *
     if (results == NULL) { /* GCOVR_EXCL_BR_LINE: candidate result array allocation cannot be forced from a test */
         Py_DECREF(spans);  /* GCOVR_EXCL_LINE */
         Py_DECREF(text);   /* GCOVR_EXCL_LINE */
+        PyErr_NoMemory();  /* GCOVR_EXCL_LINE: PyMem_Calloc does not raise */
         return -1;         /* GCOVR_EXCL_LINE */
     }
     int status = 0;
