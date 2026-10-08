@@ -6,8 +6,10 @@ import argparse
 import hashlib
 import json
 import sys
+import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 import lxml.etree
@@ -20,15 +22,10 @@ if TYPE_CHECKING:
 
 __all__ = ["Verdict", "compare", "main"]
 
-_RNG: Final = "http://relaxng.org/ns/structure/1.0"
-_XML_BASE: Final = "{http://www.w3.org/XML/1998/namespace}base"
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Distinguish findings from invalid corpora for automated runs."""
-    parser: Final = argparse.ArgumentParser(
-        description="Compare inline Jing RELAX NG labels with turbohtml and libxml2."
-    )
+    parser: Final = argparse.ArgumentParser(description="Compare Jing RELAX NG labels with turbohtml and libxml2.")
     parser.add_argument("--corpus", required=True)
     arguments: Final = parser.parse_args(argv)
     try:
@@ -56,52 +53,50 @@ def _report(corpus: str) -> Counter[str]:
 def compare(suite: lxml.etree._Element) -> Iterator[Verdict]:
     """Check both engines against labels to retain shared failures."""
     for position, case in enumerate(_cases(suite), 1):
-        case_id: Final = f"{position:03}"
-        if _requires_resources(case):
-            yield Verdict(
-                case_id,
-                hashlib.sha256(lxml.etree.tostring(case)).hexdigest(),
-                "both",
-                "unsupported-inventory",
-                None,
-                None,
-            )
-            continue
-        schema_labels: Final = [child for child in case if child.tag in {"correct", "incorrect"}]
-        if len(schema_labels) != 1:
-            message: Final = "A testCase must contain one schema label"
-            raise _CorpusError(message)
-        schema_text: Final = _payload(schema_labels[0])
-        schema_hash: Final = hashlib.sha256(schema_text).hexdigest()
-        expected: Final = schema_labels[0].tag == "correct"
-        ours: Final = _compile_turbohtml(schema_text)
-        reference: Final = _compile_lxml(schema_text)
-        yield Verdict(case_id, schema_hash, "turbohtml", "compilation", expected, ours is not None)
-        yield Verdict(case_id, schema_hash, "libxml2", "compilation", expected, reference is not None)
-        if not expected:
-            continue
-        documents: Final = [child for child in case if child.tag in {"valid", "invalid"}]
-        for document_position, document in enumerate(documents, 1):
-            document_text: Final = _payload(document)
-            document_hash: Final = hashlib.sha256(schema_text + b"\0" + document_text).hexdigest()
-            document_id: Final = f"{case_id}/{document_position}"
-            valid: Final = document.tag == "valid"
-            yield Verdict(
-                document_id,
-                document_hash,
-                "turbohtml",
-                "validation",
-                valid,
-                None if ours is None else ours.validate(parse_xml(document_text.decode())).valid,
-            )
-            yield Verdict(
-                document_id,
-                document_hash,
-                "libxml2",
-                "validation",
-                valid,
-                None if reference is None else reference.validate(lxml.etree.fromstring(document_text, _parser())),
-            )
+        with tempfile.TemporaryDirectory(prefix="rng-labels-") as directory:
+            yield from _compare_case(f"{position:03}", case, Path(directory))
+
+
+def _compare_case(case_id: str, case: lxml.etree._Element, directory: Path) -> Iterator[Verdict]:
+    schema_labels: Final = [child for child in case if child.tag in {"correct", "incorrect"}]
+    if len(schema_labels) != 1:
+        message: Final = "A testCase must contain one schema label"
+        raise _CorpusError(message)
+    expected: Final = schema_labels[0].tag == "correct"
+    schema_text: Final = _payload(schema_labels[0])
+    # the file names and layout follow Jing's own test preparation (test/prep.xsl), so hrefs resolve as Jing ran them
+    schema_path: Final = directory / ("c.rng" if expected else "i.rng")
+    schema_path.write_bytes(schema_text)
+    _write_resources(case, directory)
+    schema_hash: Final = hashlib.sha256(lxml.etree.tostring(case)).hexdigest()
+    ours: Final = _compile_turbohtml(schema_text, schema_path, directory)
+    reference: Final = _compile_lxml(schema_path)
+    yield Verdict(case_id, schema_hash, "turbohtml", "compilation", expected, ours is not None)
+    yield Verdict(case_id, schema_hash, "libxml2", "compilation", expected, reference is not None)
+    if not expected:
+        return
+    documents: Final = [child for child in case if child.tag in {"valid", "invalid"}]
+    for document_position, document in enumerate(documents, 1):
+        document_text = _payload(document)
+        document_hash = hashlib.sha256(schema_text + b"\0" + document_text).hexdigest()
+        document_id = f"{case_id}/{document_position}"
+        valid = document.tag == "valid"
+        yield Verdict(
+            document_id,
+            document_hash,
+            "turbohtml",
+            "validation",
+            valid,
+            None if ours is None else ours.validate(parse_xml(document_text.decode())).valid,
+        )
+        yield Verdict(
+            document_id,
+            document_hash,
+            "libxml2",
+            "validation",
+            valid,
+            None if reference is None else reference.validate(lxml.etree.fromstring(document_text, _parser())),
+        )
 
 
 def _cases(suite: lxml.etree._Element) -> Iterator[lxml.etree._Element]:
@@ -112,14 +107,25 @@ def _cases(suite: lxml.etree._Element) -> Iterator[lxml.etree._Element]:
             yield from _cases(child)
 
 
-def _requires_resources(case: lxml.etree._Element) -> bool:
-    return any(child.tag in {"resource", "dir"} for child in case) or any(
-        (element.tag in {f"{{{_RNG}}}externalRef", f"{{{_RNG}}}include"} and "href" in element.attrib)
-        or _XML_BASE in element.attrib
-        for label in case
-        if label.tag in {"correct", "incorrect"}
-        for element in label.iter()
-    )
+def _write_resources(container: lxml.etree._Element, directory: Path) -> None:
+    for child in container:
+        if child.tag == "dir":
+            (nested := directory / _resource_name(child)).mkdir()
+            _write_resources(child, nested)
+        elif child.tag == "resource":
+            path = directory / _resource_name(child)
+            if any(isinstance(element.tag, str) for element in child):
+                path.write_bytes(_payload(child))
+            else:
+                path.write_text(child.text or "", encoding="utf-8")
+
+
+def _resource_name(element: lxml.etree._Element) -> str:
+    name: Final = element.get("name", "")
+    if not name or Path(name).name != name or name in {".", ".."}:
+        message: Final = "A resource or dir name must be one path component"
+        raise _CorpusError(message)
+    return name
 
 
 def _payload(label: lxml.etree._Element) -> bytes:
@@ -137,16 +143,16 @@ def _parser() -> lxml.etree.XMLParser:
     return lxml.etree.XMLParser(resolve_entities="internal", no_network=True, load_dtd=False)
 
 
-def _compile_turbohtml(schema: bytes) -> RelaxNG | None:
+def _compile_turbohtml(schema: bytes, path: Path, directory: Path) -> RelaxNG | None:
     try:
-        return RelaxNG(schema.decode())
-    except ValueError:
+        return RelaxNG(schema.decode(), base_url=str(path), include_root=directory)
+    except (ValueError, OSError):
         return None
 
 
-def _compile_lxml(schema: bytes) -> lxml.etree.RelaxNG | None:
+def _compile_lxml(path: Path) -> lxml.etree.RelaxNG | None:
     try:
-        return lxml.etree.RelaxNG(lxml.etree.fromstring(schema, _parser()))
+        return lxml.etree.RelaxNG(lxml.etree.parse(str(path), _parser()))
     except lxml.etree.RelaxNGParseError:
         return None
 

@@ -57,6 +57,7 @@ py.extension_module(
     '_html',
     mode_sources + [
         'src/turbohtml/_c/core/module.c',
+        'src/turbohtml/_c/core/resource.c',
         'src/turbohtml/_c/tokenizer/charref.c',
         'src/turbohtml/_c/tokenizer/statemachine.c',
         'src/turbohtml/_c/tokenizer/token.c',

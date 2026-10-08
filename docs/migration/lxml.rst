@@ -126,6 +126,10 @@ each violation with the ``/root/child`` path that located it:
 
     False /qty
 
+``etree.RelaxNG(file=path)`` resolves ``include`` and ``externalRef`` against the file's location. turbohtml takes the
+schema text and that location as ``base_url``, plus an optional ``include_root`` that confines the files it may read:
+``RelaxNG(Path(path).read_text(), base_url=path, include_root=Path(path).parent)``.
+
 Performance
 ===========
 

@@ -342,24 +342,31 @@ static Py_ssize_t def_find(const def_vec *defines, const Py_UCS4 *name, Py_ssize
     return -1;
 }
 
+static int def_part_add(th_schema *schema, def_entry *entry, th_node *node) {
+    if (entry->first == NULL) {
+        entry->first = node;
+        return 0;
+    }
+    def_part *part = arena_alloc(&schema->mem, sizeof(*part));
+    if (part == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    part->node = node;
+    part->next = NULL;
+    if (entry->last == NULL) {
+        entry->extra = part;
+    } else {
+        entry->last->next = part;
+    }
+    entry->last = part;
+    return 0;
+}
+
 static int def_add(th_schema *schema, const th_node_attr *name, th_node *node) {
     def_vec *defines = &schema->defines;
     Py_ssize_t index = def_find(defines, name->value, name->value_len);
     if (index >= 0) {
-        def_entry *entry = &defines->items[index];
-        def_part *part = arena_alloc(&schema->mem, sizeof(*part));
-        if (part == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-            return -1;      /* GCOVR_EXCL_LINE */
-        }
-        part->node = node;
-        part->next = NULL;
-        if (entry->last == NULL) {
-            entry->extra = part;
-        } else {
-            entry->last->next = part;
-        }
-        entry->last = part;
-        return 0;
+        return def_part_add(schema, &defines->items[index], node);
     }
     if (defines->len == defines->cap) {
         Py_ssize_t cap = defines->cap ? defines->cap * 2 : TH_INITIAL_CAPACITY(8);
@@ -561,7 +568,7 @@ static int rng_datatype_id(th_schema *schema, th_node *node, int default_datatyp
 }
 
 static pattern *rng_build(th_schema *schema, th_node *node);
-static void rng_check_href(th_schema *schema, th_node *node);
+static void rng_check_href(th_node *node);
 static int rng_check_interleave_node(th_schema *schema, th_node *interleave);
 
 /* Group the pattern children of a container into a single pattern (Empty when none). */
@@ -713,24 +720,24 @@ static pattern *rng_build(th_schema *schema, th_node *node) {
         PyErr_SetString(PyExc_ValueError, "RELAX NG <ref> has no matching define");
         return schema->p_notallowed;
     }
-    rng_check_href(schema, node);
+    rng_check_href(node);
     return schema->p_notallowed;
 }
 
-static void rng_check_href(th_schema *schema, th_node *node) {
+static void rng_check_href(th_node *node) {
     if (node->type != TH_NODE_ELEMENT) {
         return;
     }
     const Py_UCS4 *local, *prefix;
     Py_ssize_t local_len = 0, prefix_len = 0;
     split_prefix(node->text, node->text_len, &local, &local_len, &prefix, &prefix_len);
-    if (!u_eq_ascii(local, local_len, "externalRef") && !u_eq_ascii(local, local_len, "include")) {
-        return;
-    }
-    if (attr_exact(schema->tree, node, "href", 4) == NULL) {
+    /* rng_resolve_resources already replaced every reference that carries an href */
+    if (u_eq_ascii(local, local_len, "externalRef") || u_eq_ascii(local, local_len, "include")) {
         PyErr_SetString(PyExc_ValueError, "RELAX NG resource reference is missing the required href attribute");
     }
 }
+
+static pattern *rng_combine(th_schema *schema, const def_entry *entry);
 
 static pattern *rng_resolve(th_schema *schema, int def_index) {
     def_entry *entry = &schema->defines.items[def_index];
@@ -738,6 +745,12 @@ static pattern *rng_resolve(th_schema *schema, int def_index) {
         return entry->built;
     }
     entry->built = schema->p_empty; /* placeholder guards direct build recursion */
+    entry->built = rng_combine(schema, entry);
+    return entry->built;
+}
+
+/* Section 4.17 merges same-named components by their combine attribute: choice unless one says interleave. */
+static pattern *rng_combine(th_schema *schema, const def_entry *entry) {
     pattern *combined = NULL;
     th_node *define = entry->first;
     def_part *part = entry->extra;
@@ -761,8 +774,7 @@ static pattern *rng_resolve(th_schema *schema, int def_index) {
         define = part->node;
         part = part->next;
     }
-    entry->built = combined;
-    return entry->built;
+    return combined;
 }
 
 /* ---- derivatives ---- */
@@ -1123,52 +1135,53 @@ static pattern *rng_child_element(valctx *ctx, pattern *p, th_node *element) {
 /* ---- compile & entry ---- */
 
 static int rng_scan(th_schema *schema, th_node *container, int depth);
+static int rng_is_reference(th_schema *schema, th_node *node);
 static int rng_check_unused_refs(th_schema *schema, th_node *container);
 static void rng_prune_annotations(th_schema *schema, th_node *container);
 
-static int rng_compile(th_schema *schema) {
+static int rng_resolve_resources(th_schema *schema, PyObject *base_url, PyObject *include_root);
+static int rng_local_is(th_node *node, const char *local);
+static int rng_grammar_components(th_schema *schema, th_node *container, def_entry *starts);
+
+static int rng_compile(th_schema *schema, PyObject *base_url, PyObject *include_root) {
     qname root_name = schema_direct_qname(schema, schema->root);
     if (!u_eq_ascii(root_name.uri, root_name.uri_len, RNG_NS)) {
         PyErr_SetString(PyExc_ValueError, "RELAX NG schema root must use the structure namespace");
         return 0;
     }
+    schema->rng_references = (u_eq_ascii(root_name.local, root_name.local_len, "include") ||
+                              u_eq_ascii(root_name.local, root_name.local_len, "externalRef")) &&
+                             attr_exact(schema->tree, schema->root, "href", 4) != NULL;
     rng_prune_annotations(schema, schema->root);
-    th_tree *tree = schema->tree;
+    if (rng_resolve_resources(schema, base_url, include_root) < 0) {
+        return 0;
+    }
     schema->p_empty = pat_new(schema, P_EMPTY);
     schema->p_notallowed = pat_new(schema, P_NOTALLOWED);
     schema->p_text = pat_new(schema, P_TEXT);
-    if (!u_eq_ascii(root_name.local, root_name.local_len, "grammar")) {
+    if (!rng_local_is(schema->root, "grammar")) {
         /* no defines, so no ref cycles; rng_build checks 4.10 and 7.4 inline instead of a second walk */
         schema->start = rng_build(schema, schema->root);
         return PyErr_Occurred() ? 0 : 1;
     }
-    for (th_node *child = schema->root->first_child; child != NULL; child = child->next_sibling) {
-        if (is_schema_el(schema, child, RNG_NS, "define")) {
-            const th_node_attr *name = attr_exact(tree, child, "name", 4);
-            if (name == NULL) {
-                continue;
-            }
-            if (def_add(schema, name, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-                PyErr_NoMemory();                   /* GCOVR_EXCL_LINE */
-                return 0;                           /* GCOVR_EXCL_LINE */
-            }
-        } else {
-            rng_check_href(schema, child);
-            if (PyErr_Occurred()) {
-                return 0;
-            }
-        }
+    def_entry starts = {0};
+    if (rng_grammar_components(schema, schema->root, &starts) < 0) {
+        return 0;
     }
-    th_node *start = first_schema_child(schema, schema->root, RNG_NS, "start");
-    if (start == NULL) {
+    if (starts.first == NULL) {
         PyErr_SetString(PyExc_ValueError, "grammar has no start element");
         return 0;
     }
     for (Py_ssize_t index = 0; index < schema->defines.len; index++) {
         schema->defines.items[index].cycle_depth = -1;
     }
-    if (rng_scan(schema, start, 0) < 0) {
+    if (rng_scan(schema, starts.first, 0) < 0) {
         return 0;
+    }
+    for (def_part *part = starts.extra; part != NULL; part = part->next) {
+        if (rng_scan(schema, part->node, 0) < 0) {
+            return 0;
+        }
     }
     for (Py_ssize_t index = 0; index < schema->defines.len; index++) {
         def_entry *entry = &schema->defines.items[index];
@@ -1184,8 +1197,57 @@ static int rng_compile(th_schema *schema) {
             }
         }
     }
-    schema->start = rng_build_children(schema, start, NULL);
+    schema->start = rng_combine(schema, &starts);
     return PyErr_Occurred() ? 0 : 1;
+}
+
+/* Gather the start and define components of a grammar, looking through div (4.11, and the divs 4.7 makes of each
+   include). Returns 0, or -1 with an exception set. */
+static int rng_grammar_components(th_schema *schema, th_node *container, def_entry *starts) {
+    for (th_node *child = container->first_child; child != NULL; child = child->next_sibling) {
+        if (rng_local_is(child, "define")) {
+            const th_node_attr *name = attr_exact(schema->tree, child, "name", 4);
+            if (name != NULL && def_add(schema, name, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+                PyErr_NoMemory();                                   /* GCOVR_EXCL_LINE */
+                return -1;                                          /* GCOVR_EXCL_LINE */
+            }
+        } else if (rng_local_is(child, "start")) {
+            if (def_part_add(schema, starts, child) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+                PyErr_NoMemory();                          /* GCOVR_EXCL_LINE */
+                return -1;                                 /* GCOVR_EXCL_LINE */
+            }
+        } else if (rng_local_is(child, "div")) {
+            if (rng_grammar_components(schema, child, starts) < 0) {
+                return -1;
+            }
+        } else {
+            rng_check_href(child);
+            if (PyErr_Occurred()) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Annotation pruning (4.1) leaves only RELAX NG elements, so the local name alone identifies a component and the
+   compiler skips a namespace lookup per child. */
+static int rng_local_is(th_node *node, const char *local) {
+    if (node->type != TH_NODE_ELEMENT) {
+        return 0;
+    }
+    const Py_UCS4 *name;
+    const Py_UCS4 *prefix;
+    Py_ssize_t name_len = 0;
+    Py_ssize_t prefix_len = 0;
+    split_prefix(node->text, node->text_len, &name, &name_len, &prefix, &prefix_len);
+    return u_eq_ascii(name, name_len, local);
+}
+
+/* An include or externalRef that names a resource; one without href stays for the 4.5 missing-href rejection. */
+static int rng_is_reference(th_schema *schema, th_node *node) {
+    return (is_schema_el(schema, node, RNG_NS, "include") || is_schema_el(schema, node, RNG_NS, "externalRef")) &&
+           attr_exact(schema->tree, node, "href", 4) != NULL;
 }
 
 /* Section 4.1 removes annotation subtrees before pattern and name-class construction. */
@@ -1198,6 +1260,9 @@ static void rng_prune_annotations(th_schema *schema, th_node *container) {
             if (!u_eq_ascii(name.uri, name.uri_len, RNG_NS)) {
                 th_node_remove(child);
             } else {
+                schema->rng_references |= (u_eq_ascii(name.local, name.local_len, "include") ||
+                                           u_eq_ascii(name.local, name.local_len, "externalRef")) &&
+                                          attr_exact(schema->tree, child, "href", 4) != NULL;
                 rng_prune_annotations(schema, child);
             }
         }
@@ -1222,7 +1287,7 @@ static int rng_check_unused_refs(th_schema *schema, th_node *container) {
                 return -1;
             }
         }
-        rng_check_href(schema, child);
+        rng_check_href(child);
         if (PyErr_Occurred() || rng_check_unused_refs(schema, child) < 0) {
             return -1;
         }

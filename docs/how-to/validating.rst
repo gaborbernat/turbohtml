@@ -66,3 +66,40 @@ document, so it drops into a pipeline that expects an exception:
 
     True
     rejected: /note
+
+***************************************
+ Compose a schema across several files
+***************************************
+
+A RELAX NG schema can pull in other files with ``include`` (a grammar whose definitions merge into this one) and
+``externalRef`` (a pattern used in place). A schema passed as text has no location, so pass its path as ``base_url``;
+each ``href`` resolves against it, after any ``xml:base`` on the way down. Set ``include_root`` to the directory the
+schema files live in so a reference cannot read anything outside it:
+
+.. testcode::
+
+    import tempfile
+    from pathlib import Path
+    from turbohtml import parse_xml
+    from turbohtml.validate import RelaxNG
+
+    with tempfile.TemporaryDirectory() as folder:
+        Path(folder, "line.rng").write_text(
+            '<element name="line" xmlns="http://relaxng.org/ns/structure/1.0"><text/></element>', encoding="utf-8"
+        )
+        main = Path(folder, "note.rng")
+        main.write_text(
+            '<element name="note" xmlns="http://relaxng.org/ns/structure/1.0">'
+            '<oneOrMore><externalRef href="line.rng"/></oneOrMore></element>',
+            encoding="utf-8",
+        )
+        schema = RelaxNG(main.read_text(encoding="utf-8"), base_url=str(main), include_root=folder)
+    print(schema.is_valid(parse_xml("<note><line>hi</line></note>")))
+
+.. testoutput::
+
+    True
+
+Compilation reads every referenced file once, so the compiled schema validates without touching the disk again. Without
+``base_url``, a schema that references another file raises :class:`ValueError` instead of reading a path relative to the
+working directory.

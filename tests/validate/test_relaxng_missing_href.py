@@ -26,6 +26,11 @@ _RNG: Final = "http://relaxng.org/ns/structure/1.0"
             id="grammar-include",
         ),
         pytest.param(
+            f'<grammar xmlns="{_RNG}"><div><include/></div><start><element name="foo"><empty/></element></start>'
+            "</grammar>",
+            id="div-include",
+        ),
+        pytest.param(
             f'<rng:grammar xmlns:rng="{_RNG}"><rng:include/><rng:start><rng:element name="foo">'
             "<rng:empty/></rng:element></rng:start></rng:grammar>",
             id="prefixed-include",

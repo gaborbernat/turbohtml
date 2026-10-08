@@ -14,11 +14,13 @@ derivative check runs in the extension.
 from __future__ import annotations
 
 from itertools import starmap
-from typing import TYPE_CHECKING, ClassVar, Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from ._html import _schema_compile, _schema_validate
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ._html import Document, Node
 
 __all__ = [
@@ -74,11 +76,8 @@ class SchemaValidationError(Exception):
 class _Schema:
     """Shared machinery for the two schema languages; not instantiated directly."""
 
-    _KIND: ClassVar[int]
-
-    def __init__(self, source: str | Node) -> None:
-        text = source if isinstance(source, str) else source.serialize()
-        self._compiled: Final = _schema_compile(self._KIND, text)
+    def __init__(self, compiled: object) -> None:
+        self._compiled: Final = compiled
 
     def validate(self, document: Document | Node) -> ValidationResult:
         """Validate a parsed document (or element), returning the full :class:`ValidationResult`."""
@@ -106,7 +105,9 @@ class XMLSchema(_Schema):
         hops, or an ``xs:unique``/``xs:key``/``xs:keyref`` identity constraint is declared.
     """
 
-    _KIND = 0
+    def __init__(self, source: str | Node) -> None:
+        """Compile the schema once; every validation reuses the result."""
+        super().__init__(_schema_compile(0, _text(source)))
 
 
 class RelaxNG(_Schema):
@@ -114,7 +115,22 @@ class RelaxNG(_Schema):
     A compiled RELAX NG schema (XML syntax).
 
     :param source: the schema as RELAX NG text, or a schema document parsed with :func:`turbohtml.parse_xml`.
-    :raises ValueError: when the schema is malformed.
+    :param base_url: the schema's path or file URL, against which each ``include`` and ``externalRef`` href resolves
+        (after any ``xml:base``); required only when the schema references other files.
+    :param include_root: when set, referenced files must resolve inside this directory, including through nested
+        references.
+    :raises ValueError: when the schema is malformed, references a file without a ``base_url``, or a reference
+        escapes ``include_root``, carries a fragment, loops, loads the wrong kind of pattern, or overrides a component
+        the included grammar lacks.
+    :raises OSError: when a referenced file cannot be read.
     """
 
-    _KIND = 1
+    def __init__(
+        self, source: str | Node, *, base_url: str | None = None, include_root: str | Path | None = None
+    ) -> None:
+        """Compile the schema, reading the files it references, once; every validation reuses the result."""
+        super().__init__(_schema_compile(1, _text(source), base_url, include_root))
+
+
+def _text(source: str | Node) -> str:
+    return source if isinstance(source, str) else source.serialize()
