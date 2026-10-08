@@ -13,6 +13,8 @@
 
 #include "js/internal.h"
 
+#include "core/fuzzing.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +53,7 @@ typedef struct {
    post-parse fold and print walks (bounded by this AST height) stay well inside the C stack -- even a
    512 KiB secondary-thread stack -- while clearing the deepest generated expressions seen in practice
    (hundreds of operands). The point is to fail cleanly on a pathological input rather than fault. */
-enum { JM_MAX_DEPTH = 1000 };
+enum { JM_MAX_DEPTH = TH_DEPTH_LIMIT(1000) };
 
 /* Report the first error: the construct that failed, the byte offset, and the offending token slice
    (or end-of-input), so a diagnostic names what and where rather than an offset alone (#434). */

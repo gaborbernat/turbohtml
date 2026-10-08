@@ -1,0 +1,12 @@
+option(
+    'fuzzing',
+    type: 'boolean',
+    value: false,
+    description: 'Define FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION for fuzz-only checks; never ship this build',
+)
+option(
+    'force_scalar',
+    type: 'boolean',
+    value: false,
+    description: 'Define TH_FORCE_SCALAR: compile the portable SWAR scan loops in place of the NEON and SSE2 ones',
+)

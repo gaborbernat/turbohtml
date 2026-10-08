@@ -1702,7 +1702,7 @@ static int xr_reserve(xr_program *program, Py_ssize_t depth) {
                      XR_MAX_TRAIL);
         return -1;
     }
-    Py_ssize_t cap = program->trail_cap == 0 ? 64 : program->trail_cap * 2;
+    Py_ssize_t cap = program->trail_cap == 0 ? TH_INITIAL_CAPACITY(64) : program->trail_cap * 2;
     if (cap > XR_MAX_TRAIL) {
         cap = XR_MAX_TRAIL;
     }

@@ -9,6 +9,7 @@
    DOM extract/clone/delete algorithms. */
 
 #include "dom/nodes.h"
+#include "core/fuzzing.h"
 
 typedef struct {
     PyObject_HEAD PyObject *start_handle; /* _TreeHandle owning start_node (keeps its tree alive) */
@@ -19,7 +20,7 @@ typedef struct {
     Py_ssize_t end_offset;
 } RangeObject;
 
-#define RANGE_MAX_RECURSIVE_DEPTH ((Py_ssize_t)400)
+#define RANGE_MAX_RECURSIVE_DEPTH ((Py_ssize_t)TH_DEPTH_LIMIT(400))
 
 /* Character data whose offset indexes code points and which the content operations split in place. */
 static int is_char_data(const th_node *node) {

@@ -470,6 +470,7 @@ commands_pre = [
     "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dbuildtype=debugoptimized",
+    "--config-settings=setup-args=-Dfuzzing=true",
   ],
 ]
 commands = [
@@ -654,9 +655,19 @@ commands_pre = [
     "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dbuildtype=debugoptimized",
+    "--config-settings=setup-args=-Dfuzzing=true",
   ],
 ]
 commands = [ [ "python", "{tox_root}{/}tools{/}fuzz{/}fuzz.py", "--mode", "smoke" ] ]
+
+[env.preprocess-identity]
+description = "check that the fuzz-only branches leave the production build's preprocessed C byte-identical"
+skip_install = true
+deps = [ "meson>=1.12.1", "ninja>=1.13.2" ]
+dependency_groups = []
+commands_pre = []  # the check configures its own production build and compiles nothing
+commands = [ [ "python", "{tox_root}{/}tools{/}preprocess_identity.py" ] ]
+commands_post = []  # drop the base env's C coverage report
 
 [env.regen]
 description = "regenerate the generated C tables (entities, tag atoms)"
@@ -698,6 +709,38 @@ dependency_groups = [ "release" ]
 pass_env = [ "GH_TOKEN" ]
 commands_pre = []
 commands = [ [ "python", "{tox_root}{/}tasks{/}release.py", "--version", "{posargs}" ] ]
+
+[env.scalar]
+description = "run the test suite against the portable SWAR scan loops that TH_FORCE_SCALAR selects over NEON and SSE2"
+base_python = [ "3.14" ]
+package = "skip"  # commands_pre installs the forced-scalar editable build
+# no gcovr: the SIMD build owns the coverage gate, this run diffs the scalar arms against the same expectations
+deps = []
+dependency_groups = [ "test" ]
+commands_pre = [
+  [
+    "uv",
+    "pip",
+    "install",
+    "--reinstall",
+    "--no-deps",
+    "--no-build-isolation",
+    "--editable",
+    "{tox_root}",
+    "--config-settings=build-dir={env_dir}{/}cbuild",
+    "--config-settings=setup-args=-Dbuildtype=release",
+    "--config-settings=setup-args=-Dforce_scalar=true",
+  ],
+]
+commands = [
+  [
+    "pytest",
+    "--no-cov",
+    "--ignore={tox_root}{/}tests{/}conformance",
+    { replace = "posargs", default = [ "tests" ], extend = true },
+  ],
+]
+commands_post = []  # drop the base env's C coverage report
 
 [env.tsan]
 description = "detect data races with ThreadSanitizer; run inside ghcr.io/nascheme/cpython-tsan:3.14t"

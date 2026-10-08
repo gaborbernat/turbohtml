@@ -41,7 +41,7 @@ static inline int css_ctz64(uint64_t value) {
    no escape or non-ASCII byte -- advances sixteen bytes per step on NEON/SSE2 (a scalar byte loop elsewhere). The
    caller resumes scalar handling at the first byte the fast run rejects (a '\' escape, a non-ASCII byte, or a stop
    character), so the result is byte-identical to a pure scalar scan; only the plain stretch is skipped faster. */
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if !defined(TH_FORCE_SCALAR) && (defined(__aarch64__) || defined(_M_ARM64))
 #include <arm_neon.h>
 #define CSS_IDENT_SIMD 1
 static inline uint64_t css_ident_stop_mask(const unsigned char *p) {
@@ -54,7 +54,7 @@ static inline uint64_t css_ident_stop_mask(const unsigned char *p) {
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(stop), 4)), 0);
 }
 #define CSS_IDENT_STOP_INDEX(mask) (css_ctz64(mask) >> 2)
-#elif defined(__SSE2__) || defined(_M_X64)
+#elif !defined(TH_FORCE_SCALAR) && (defined(__SSE2__) || defined(_M_X64))
 #include <emmintrin.h>
 #define CSS_IDENT_SIMD 1
 static inline uint64_t css_ident_stop_mask(const unsigned char *p) {
@@ -217,7 +217,7 @@ typedef struct {
 
 /* Untrusted nesting drives the parsers into C recursion. 100 sits between rust-cssparser's 75 and WebKit's 128; the
    deepest shape, nested @media, then needs about 42 KiB of stack with clang -O3, a third of a 128 KiB thread. */
-#define CSS_MAX_NESTING 100
+#define CSS_MAX_NESTING TH_DEPTH_LIMIT(100)
 
 static inline int css_nesting_enter(token_vec *vec) {
     if (vec->depth >= CSS_MAX_NESTING) {

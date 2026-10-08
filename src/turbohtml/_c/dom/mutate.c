@@ -427,7 +427,7 @@ Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree) {
    detaches; an insertion links first, so child's fresh siblings are the record's. */
 int th_tree_add_node_iterator(th_tree *tree, th_node_iterator *iterator) {
     if (tree->node_iterator_count == tree->node_iterator_cap) {
-        Py_ssize_t cap = tree->node_iterator_cap == 0 ? 4 : tree->node_iterator_cap * 2;
+        Py_ssize_t cap = tree->node_iterator_cap == 0 ? TH_INITIAL_CAPACITY(4) : tree->node_iterator_cap * 2;
         th_node_iterator **grown = PyMem_Realloc(tree->node_iterators, (size_t)cap * sizeof(th_node_iterator *));
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -951,7 +951,7 @@ static th_node *copy_node_iterative(th_tree *dest, th_tree *src, th_node *src_no
     }
 }
 
-#define TH_COPY_RECURSION_LIMIT 64
+#define TH_COPY_RECURSION_LIMIT TH_DEPTH_LIMIT(64)
 
 static th_node *copy_node_at(th_tree *dest, th_tree *src, th_node *src_node, int depth) {
     if (depth == TH_COPY_RECURSION_LIMIT) {

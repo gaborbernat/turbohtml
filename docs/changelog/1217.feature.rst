@@ -1,0 +1,1 @@
+Add a fuzz-only C build mode that poisons arena gaps and parked wrappers and checks its sanitizer at startup.

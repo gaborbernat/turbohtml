@@ -41,7 +41,7 @@ static inline Py_ssize_t escape_extra(Py_UCS4 character, int quote) {
     }
 }
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if !defined(TH_FORCE_SCALAR) && (defined(__aarch64__) || defined(_M_ARM64))
 
 #include <arm_neon.h>
 
@@ -102,7 +102,7 @@ static inline int word_has_special32(const uint32_t *block, int quote) {
     return vmaxvq_u32(hits) != 0;
 }
 
-#elif defined(__SSE2__) || defined(_M_X64)
+#elif !defined(TH_FORCE_SCALAR) && (defined(__SSE2__) || defined(_M_X64))
 
 #include <emmintrin.h>
 

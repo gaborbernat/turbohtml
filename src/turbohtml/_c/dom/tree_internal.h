@@ -10,10 +10,17 @@
 #include "core/node_map.h"
 #include "dom/tree.h"
 
+#include "core/fuzzing.h"
+
 #include <stddef.h>
 #include <string.h>
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+/* One aligned slot, so a short input opens several blocks and walks the doubling path. */
+#define ARENA_BLOCK ((Py_ssize_t)16)
+#else
 #define ARENA_BLOCK ((Py_ssize_t)64 * 1024)
+#endif
 #define ARENA_MAX_BLOCK ((Py_ssize_t)256 * 1024)
 
 /* Keep the one-time span realization out of line so need_text() stays small
@@ -184,6 +191,10 @@ struct th_tree {
 };
 
 static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    Py_ssize_t requested = size;
+    size += TH_FUZZ_ARENA_GAP;
+#endif
     size = (size + 15) & ~(Py_ssize_t)15; /* 16-byte align */
     arena_block *block = tree->arena;
     if (block == NULL || block->used + size > block->cap) {
@@ -202,11 +213,20 @@ static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {
         fresh->next = tree->arena;
         fresh->used = 0;
         fresh->cap = cap;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        /* Poison the fresh block and unpoison each allocation, as lexbor's mraw does, so a read past one reports
+           (https://github.com/lexbor/lexbor/blob/f4cbbcd91359a0ec9499e3ce7e263de629482d61/source/lexbor/core/mraw.c#L182-L217).
+         */
+        TH_FUZZ_POISON(fresh->data, (size_t)cap);
+#endif
         tree->arena = fresh;
         block = fresh;
     }
     void *result = block->data + block->used;
     block->used += size;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    TH_FUZZ_UNPOISON(result, (size_t)requested);
+#endif
     return result;
 }
 

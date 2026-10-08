@@ -163,7 +163,7 @@ static th_node *xsd_group_model(th_schema *schema, th_node *group_ref) {
 
 static int edecl_push(th_schema *schema, edecl_vec *vec, const edecl *item) {
     if (vec->count == vec->cap) {
-        Py_ssize_t next = vec->cap ? vec->cap * 2 : 8;
+        Py_ssize_t next = vec->cap ? vec->cap * 2 : TH_INITIAL_CAPACITY(8);
         edecl *grown = arena_alloc(&schema->mem, (size_t)next * sizeof(edecl));
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return -1;       /* GCOVR_EXCL_LINE */
@@ -1275,7 +1275,7 @@ static int xsd_chain_refscan(th_schema *schema, int kind, th_node *node, int *st
 /* Validation follows these refs by C recursion (xsd_collect_edecls, xsd_match_once, xsd_effective_model,
    xsd_collect_attrs). Well above any real schema (xmlschema already fails below 200 hops) and far below the smallest
    supported thread stack. */
-#define TH_XSD_MAX_REF_DEPTH 100
+#define TH_XSD_MAX_REF_DEPTH TH_DEPTH_LIMIT(100)
 
 /* state[index] is 0 unvisited, -1 on the DFS stack (a back edge is a cycle), else the resolved chain length. depth caps
    the recursion itself; the length cap also catches a chain reached through memoized nodes. */

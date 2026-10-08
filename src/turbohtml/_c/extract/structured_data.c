@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define STRUCTURED_DATA_MAX_ITEM_DEPTH ((Py_ssize_t)400)
+#define STRUCTURED_DATA_MAX_ITEM_DEPTH ((Py_ssize_t)TH_DEPTH_LIMIT(400))
 
 /* The HTML script type that flags a JSON-LD block, matched case-insensitively after trimming. */
 static const char JSON_LD_TYPE[] = "application/ld+json";

@@ -65,7 +65,7 @@ static inline uint64_t sbuf_special_mask(uint64_t word, int escape_quote, int es
    skips: when it reports a hit the SWAR pair loop below rescans the block and names the exact code
    point, so the vector arms never decide where a special is. escape.c carries the same per-arch
    split for its sizing scan. */
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if !defined(TH_FORCE_SCALAR) && (defined(__aarch64__) || defined(_M_ARM64))
 
 #include <arm_neon.h>
 
@@ -84,7 +84,7 @@ static inline int sbuf_block_has_special(const Py_UCS4 *text, int escape_quote, 
     return vmaxvq_u32(hits) != 0;
 }
 
-#elif defined(__SSE2__) || defined(_M_X64)
+#elif !defined(TH_FORCE_SCALAR) && (defined(__SSE2__) || defined(_M_X64))
 
 #include <emmintrin.h>
 

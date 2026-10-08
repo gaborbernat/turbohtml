@@ -37,7 +37,7 @@ static const char RNG_NS[] = "http://relaxng.org/ns/structure/1.0";
 
 /* Schema compilation and instance validation still have recursive grammar walks. Preflight the tree far enough below
    the smallest supported thread stack that those walks cannot exhaust it. */
-#define TH_VALIDATE_MAX_DEPTH 400
+#define TH_VALIDATE_MAX_DEPTH TH_DEPTH_LIMIT(400)
 
 /* ======================= bump arena ======================= */
 
@@ -50,11 +50,22 @@ typedef struct {
     arena_block *head;
 } arena;
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+/* One aligned slot, so a short schema opens several blocks. */
+#define SCHEMA_ARENA_BLOCK 16u
+#else
+#define SCHEMA_ARENA_BLOCK 4096u
+#endif
+
 static void *arena_alloc(arena *mem, size_t size) {
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    size_t requested = size;
+    size += TH_FUZZ_ARENA_GAP;
+#endif
     size = (size + 15u) & ~(size_t)15u;
     arena_block *block = mem->head;
     if (block == NULL || block->cap - block->used < size) {
-        size_t want = size > 4096u ? size : 4096u;
+        size_t want = size > SCHEMA_ARENA_BLOCK ? size : SCHEMA_ARENA_BLOCK;
         arena_block *fresh = PyMem_Malloc(sizeof(arena_block) + want);
         if (fresh == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE */
@@ -62,11 +73,17 @@ static void *arena_alloc(arena *mem, size_t size) {
         fresh->next = mem->head;
         fresh->used = 0;
         fresh->cap = want;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        TH_FUZZ_POISON(fresh + 1, want);
+#endif
         mem->head = fresh;
         block = fresh;
     }
     void *out = (char *)(block + 1) + block->used;
     block->used += size;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    TH_FUZZ_UNPOISON(out, requested);
+#endif
     return out;
 }
 
@@ -74,6 +91,9 @@ static void arena_free(arena *mem) {
     arena_block *block = mem->head;
     while (block != NULL) {
         arena_block *next = block->next;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        TH_FUZZ_UNPOISON(block + 1, block->cap);
+#endif
         PyMem_Free(block);
         block = next;
     }
@@ -546,7 +566,7 @@ typedef struct {
 static int ns_scope_push(th_schema *schema, ns_scope *scope, const char *prefix, Py_ssize_t prefix_len,
                          const Py_UCS4 *uri, Py_ssize_t uri_len) {
     if (scope->len == scope->cap) {
-        Py_ssize_t cap = scope->cap ? scope->cap * 2 : 8;
+        Py_ssize_t cap = scope->cap ? scope->cap * 2 : TH_INITIAL_CAPACITY(8);
         ns_binding *items = arena_alloc(&schema->mem, (size_t)cap * sizeof(ns_binding));
         if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return -1;       /* GCOVR_EXCL_LINE */
@@ -649,7 +669,7 @@ static int schema_build_qname_cache(th_schema *schema) {
 
 static int named_push(th_schema *schema, named_vec *vec, const Py_UCS4 *name, Py_ssize_t len, th_node *node) {
     if (vec->len == vec->cap) {
-        Py_ssize_t cap = vec->cap ? vec->cap * 2 : 8;
+        Py_ssize_t cap = vec->cap ? vec->cap * 2 : TH_INITIAL_CAPACITY(8);
         named_node *items = arena_alloc(&schema->mem, (size_t)cap * sizeof(named_node));
         if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
             return -1;       /* GCOVR_EXCL_LINE */
@@ -923,3 +943,14 @@ TH_NODE_API(, PyObject *, turbohtml_schema_validate, (PyObject * module, PyObjec
     int valid = ctx.error_count == 0;
     return Py_BuildValue("(ON)", valid ? Py_True : Py_False, errors);
 }
+
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+char th_fuzz_schema_arena_overread(size_t size) {
+    arena mem = {NULL};
+    const volatile char *first = arena_alloc(&mem, size);
+    (void)arena_alloc(&mem, size);
+    char value = first[size];
+    arena_free(&mem);
+    return value;
+}
+#endif

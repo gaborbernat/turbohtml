@@ -301,7 +301,7 @@ typedef struct {
 /* The deepest element nesting the rewriter tracks. Past it a start tag is still emitted
    but not pushed, so a pathologically deep or unclosed input keeps the spine (and the C
    stack the selector matcher walks) bounded rather than growing without limit. */
-#define RW_MAX_DEPTH 8192
+#define RW_MAX_DEPTH TH_DEPTH_LIMIT(8192)
 
 /* --- the handle object handed to a Python handler --- */
 

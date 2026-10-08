@@ -15,7 +15,7 @@
    so any repeat count is stack-safe and only the total NFA state count is bounded. Group nesting drives the recursive
    parser, so it takes the 250 levels PCRE2 (PARENS_NEST_LIMIT) and Rust's regex-syntax (nest_limit) allow for the
    same reason: a musl thread from uv's python-build-standalone gets a 130 KiB stack, which 1000 levels overflow. */
-#define RX_MAX_GROUP_DEPTH 250
+#define RX_MAX_GROUP_DEPTH TH_DEPTH_LIMIT(250)
 
 /* Why a pattern failed to compile; each maps to its own error in regex_cache_add. */
 enum { RX_FAIL_MEMORY = 1, RX_FAIL_NESTING, RX_FAIL_BOUND, RX_FAIL_STATES };

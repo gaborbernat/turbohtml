@@ -646,7 +646,7 @@ typedef struct {
 
 /* Plain prose holds none of the bytes that begin a link, so the scan skips one-byte text a block at a time and the
    per-character switch sees only the blocks that hold a `.`, `:`, `@` or, with phone detection on, a digit. */
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if !defined(TH_FORCE_SCALAR) && (defined(__aarch64__) || defined(_M_ARM64))
 
 #include <arm_neon.h>
 
@@ -662,7 +662,7 @@ static inline int block_has_trigger(const uint8_t *block, int digits) {
     return vmaxvq_u8(hits) != 0;
 }
 
-#elif defined(__SSE2__) || defined(_M_X64)
+#elif !defined(TH_FORCE_SCALAR) && (defined(__SSE2__) || defined(_M_X64))
 
 #include <emmintrin.h>
 

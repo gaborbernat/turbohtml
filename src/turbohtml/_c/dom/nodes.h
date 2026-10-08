@@ -470,6 +470,9 @@ static inline PyObject *node_wrap_nonnull(module_state *state, PyObject *handle,
 #ifndef Py_GIL_DISABLED
     if (state->node_freelist != NULL) {
         self = (NodeObject *)state->node_freelist;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        TH_FUZZ_UNPOISON(self, sizeof(NodeObject));
+#endif
         state->node_freelist = (PyObject *)self->node; /* the next link rode in the node field */
         state->node_freelist_len--;
         PyObject_Init((PyObject *)self, type); /* revive: refcount 1, restamp ob_type (+incref heaptype) */

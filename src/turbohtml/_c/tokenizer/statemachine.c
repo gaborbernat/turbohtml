@@ -28,10 +28,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if !defined(TH_FORCE_SCALAR) && (defined(__aarch64__) || defined(_M_ARM64))
 #include <arm_neon.h>
 #define TH_SCAN_NEON 1
-#elif defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#elif !defined(TH_FORCE_SCALAR) && (defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2))
 #include <emmintrin.h>
 #define TH_SCAN_SSE2 1
 #endif

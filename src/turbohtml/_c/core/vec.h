@@ -16,6 +16,8 @@
 #ifndef TURBOHTML_CORE_VEC_H
 #define TURBOHTML_CORE_VEC_H
 
+#include "core/fuzzing.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -26,6 +28,11 @@
    narrower casts in and clamps the result back. */
 static inline int th_grow_cap(size_t needed, size_t current, size_t initial, size_t elem_size, size_t *cap_out,
                               size_t *bytes_out) {
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    /* The fuzz build starts arrays small (core/fuzzing.h), here at two slots rather than one: the open-addressing
+       tables that share this helper grow at half load, and a one-slot table fills before its first growth. */
+    initial = 2;
+#endif
     size_t cap = current ? current : initial;
     while (cap < needed) {
         if (cap > SIZE_MAX / 2) {

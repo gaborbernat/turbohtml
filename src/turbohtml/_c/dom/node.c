@@ -45,6 +45,9 @@ void th_node_freelist_clear(module_state *state) {
        exit regardless. */
     while (state->node_freelist != NULL) {
         NodeObject *self = (NodeObject *)state->node_freelist;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        TH_FUZZ_UNPOISON(self, sizeof(NodeObject));
+#endif
         state->node_freelist = (PyObject *)self->node;
         Py_TYPE(self)->tp_free(self); /* the type ref was dropped on push; the types are still live here */
     }
@@ -71,6 +74,12 @@ static void node_dealloc(PyObject *self) {
         state->node_freelist = self;
         state->node_freelist_len++;
         Py_DECREF(type); /* release this object's type ref; PyObject_Init re-takes it on revive */
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        /* Keep the parked wrapper poisoned until reuse, as lexbor's dobject does, so a stale pointer reports
+           (https://github.com/lexbor/lexbor/blob/f4cbbcd91359a0ec9499e3ce7e263de629482d61/source/lexbor/core/dobject.c#L89-L147).
+         */
+        TH_FUZZ_POISON(self, sizeof(NodeObject));
+#endif
         return;
     }
 #endif

@@ -378,6 +378,16 @@ PyObject *turbohtml_register_css_minify(PyObject *module, PyObject *type);
 PyObject *turbohtml_schema_compile(PyObject *module, PyObject *args);
 PyObject *turbohtml_schema_validate(PyObject *module, PyObject *args, PyObject *kwargs);
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+/* Implemented in core/fuzzing.c: add the fuzz-only functions to the module and wrap the PyMem allocator. Returns 0 or
+   -1. */
+int th_fuzz_register(PyObject *module);
+
+/* Implemented in validate/schema.c: read the byte after a fresh schema arena allocation of `size` bytes, which the
+   crash self-test expects ASan to report. */
+char th_fuzz_schema_arena_overread(size_t size);
+#endif
+
 /* Implemented in validate/conformance.c, the HTML5 authoring-conformance checker behind
    turbohtml.conformance (issue #541). _conformance_check(node) walks a parsed document or
    subtree and returns (valid, findings), each finding a (code, severity, message, line,
