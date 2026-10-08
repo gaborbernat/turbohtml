@@ -9,7 +9,11 @@
    failure injection libxml2's fuzzers run
    (https://github.com/GNOME/libxml2/blob/c43dc98d27ac315a48d93dbd399c6c22cf7125b1/fuzz/fuzz.c#L83-L181). It wraps
    PYMEM_DOMAIN_MEM alone: the C core allocates through PyMem_*, while the object and raw domains also serve interpreter
-   internals whose failures are not the C core's to handle. */
+   internals whose failures are not the C core's to handle.
+
+   _fuzz_escape_iterators(node) points every NodeIterator registered on node's tree at the tree's document, outside
+   any root below it. Removals that run the pre-removing steps cannot produce that state, so the hook gives
+   _tree_verify's iterator check a violation to report. */
 
 #include "core/common.h"
 #include "dom/ownership.h"
@@ -142,8 +146,21 @@ static PyObject *fuzz_inject_failure(PyObject *module, PyObject *position) {
     return Py_BuildValue("(nO)", (Py_ssize_t)attempts, failed ? Py_True : Py_False);
 }
 
+static PyObject *fuzz_escape_iterators(PyObject *module, PyObject *owner) {
+    th_tree *tree;
+    th_node *node;
+    if (turbohtml_node_borrow(module, owner, &tree, &node) < 0) {
+        return NULL;
+    }
+    for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
+        tree->node_iterators[index]->reference = th_tree_document(tree);
+    }
+    return PyLong_FromSsize_t(tree->node_iterator_count);
+}
+
 static PyMethodDef fuzz_methods[] = {
     {"_fuzz_crash", fuzz_crash, METH_O, NULL},
+    {"_fuzz_escape_iterators", fuzz_escape_iterators, METH_O, NULL},
     {"_fuzz_inject_failure", fuzz_inject_failure, METH_O, NULL},
     {NULL, NULL, 0, NULL},
 };
