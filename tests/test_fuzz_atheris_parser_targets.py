@@ -76,6 +76,19 @@ def test_atheris_parser_token_options(data: bytes, opts: int, expected: tuple[ob
     assert token_observation(data, Header(opts, 0, 2)) == expected
 
 
+@pytest.mark.parametrize(
+    "oracle",
+    [
+        pytest.param("html", id="html-fixpoint"),
+        pytest.param("spans", id="source-spans"),
+        pytest.param("entries", id="xpath-entries"),
+    ],
+)
+def test_atheris_parser_document_reports_oracle_failure(oracle: str) -> None:
+    with pytest.raises(AssertionError, match=f"^{oracle} broke$"):
+        document_observation(b"<p>x</p>", **{oracle: lambda _text: f"{oracle} broke"})
+
+
 @pytest.mark.parametrize("target", parser_targets(), ids=lambda target: target.name)
 def test_atheris_parser_callback_rejects_invalid_utf8(target: Target) -> None:
     with pytest.raises(UnicodeDecodeError):

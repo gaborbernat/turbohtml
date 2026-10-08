@@ -23,6 +23,7 @@ from .round_trip_oracles import (
     fixpoint_check,
     idna_host_check,
     normalize_url_check,
+    url_reparse_check,
 )
 
 if TYPE_CHECKING:
@@ -432,10 +433,11 @@ def minifier_check(
 
 def url_check(data: bytes, normalize: Callable[[str], str] = extract.normalize_url) -> None:
     """Known-valid Unicode families distinguish stable wrong hosts from valid normalization."""
+    url: Final = f"https://example.com/{_text(data)}"
+    _equal(url_reparse_check(url, normalize), None)
     affix: Final = data[:4].hex()
     _equal(idna_host_check(f"acute-decomposed\n{affix}", normalize), None)
     _equal(idna_nfc_check(f"reorder:{affix}", normalize), None)
-    url: Final = f"https://example.com/{_text(data)}"
     _equal(normalize_url_check(url, normalize), None)
     _equal(clean_url_check(url), None)
 

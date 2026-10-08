@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from turbohtml import (
@@ -22,9 +23,13 @@ from turbohtml import (
 )
 
 from .atheris_header import BYTEWISE, Header, feed_chunks
+from .atheris_invariants import assert_invariant
 from .atheris_registry import Target
+from .round_trip_oracles import html_check, span_check, xpath_entry_check
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from turbohtml import SourceLocation
 
 __all__ = [
@@ -34,6 +39,10 @@ __all__ = [
     "parser_targets",
     "token_observation",
 ]
+
+
+# One node-set, one scalar and one attribute expression reach each XPath result shape on the fuzzed tree.
+_XPATH_ENTRIES: Final = ("//*", "count(//*)", "//*/@*")
 
 
 def parser_targets() -> tuple[Target, ...]:
@@ -99,10 +108,20 @@ def _token_chunks(data: bytes, header: Header) -> None:
     token_observation(data, header)
 
 
-def document_observation(data: bytes) -> str:
-    """Exercise returned document records through serialization consumers."""
-    document: Final = parse(data.decode("utf-8"))
+def document_observation(
+    data: bytes,
+    html: Callable[[str], str | None] = html_check,
+    spans: Callable[[str], str | None] = span_check,
+    entries: Callable[[str], str | None] = xpath_entry_check,
+) -> str:
+    """Exercise returned document records through serialization consumers, span and XPath entry-point oracles."""
+    source: Final = data.decode("utf-8")
+    document: Final = parse(source)
     _require("Document result type", condition=isinstance(document, (Document, Node)))
+    assert_invariant(html, source)
+    assert_invariant(spans, source)
+    for expression in _XPATH_ENTRIES:
+        assert_invariant(entries, json.dumps({"html": source, "xpath": expression}))
     return _serialization(document)
 
 

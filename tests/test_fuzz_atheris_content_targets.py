@@ -116,3 +116,7 @@ def test_content_chunks_reject_dropped_chunk(
     with pytest.raises(AssertionError, match="Content API mismatch"):
         check(data, Header(0, 0, 1))
 
+
+def test_content_url_rejects_unstable_reparse() -> None:
+    with pytest.raises(AssertionError, match="reparse changes normalized URL"):
+        url_check(b"x", lambda source: source + "/")

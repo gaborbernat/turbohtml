@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Final, cast, get_args
+from typing import TYPE_CHECKING, Final, cast, get_args
 
 import turbohtml
 from turbohtml import Canonical, HTMLParseError, Markdown, ParseError, PlainText, annotation_surface, annotation_tags
@@ -22,7 +23,12 @@ from turbohtml.cssom import ComputedStyle, RuleList, StyleDeclaration, StyleRule
 from turbohtml.transform import Transform, strparam, transform
 from turbohtml.validate import RelaxNG, SchemaValidationError, ValidationError, ValidationResult, XMLSchema
 
+from .atheris_invariants import assert_invariant
 from .atheris_registry import Target
+from .round_trip_oracles import selector_entry_check, style_check, xml_check
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = [
     "cli_observation",
@@ -35,6 +41,9 @@ __all__ = [
     "selector_observation",
     "transform_observation",
 ]
+
+
+_SELECTOR_DOCUMENT: Final = '<div id="a"><p class="x">one</p><p>two</p></div>'
 
 
 def reference_targets() -> tuple[Target, ...]:
@@ -201,9 +210,12 @@ def conformance_observation(data: bytes) -> tuple[bool, tuple[str, ...], tuple[s
     return report.valid, tuple(message.code for message in report.messages), diagnostic
 
 
-def selector_observation(data: bytes) -> tuple[str, tuple[tuple[int, int, int], ...]]:
+def selector_observation(
+    data: bytes, entries: Callable[[str], str | None] = selector_entry_check
+) -> tuple[str, tuple[tuple[int, int, int], ...]]:
     """Both translator wrappers must retain selector specificity and node selection."""
     selector: Final = data.decode("utf-8")
+    assert_invariant(entries, json.dumps({"html": _SELECTOR_DOCUMENT, "css": selector}))
     try:
         expression: Final = css_to_xpath(selector)
     except ExpressionError as error:
@@ -211,7 +223,7 @@ def selector_observation(data: bytes) -> tuple[str, tuple[tuple[int, int, int], 
         raise
     _require("Generic translator differs", condition=GenericTranslator().css_to_xpath(selector) == expression)
     _require("HTML translator differs", condition=HTMLTranslator().css_to_xpath(selector) == expression)
-    document: Final = turbohtml.parse('<div id="a"><p class="x">one</p><p>two</p></div>')
+    document: Final = turbohtml.parse(_SELECTOR_DOCUMENT)
     _require(
         "Selector translation differs",
         condition=tuple(node.serialize() for node in document.select(selector))
@@ -220,9 +232,12 @@ def selector_observation(data: bytes) -> tuple[str, tuple[tuple[int, int, int], 
     return expression, tuple(css_specificity(selector))
 
 
-def cssom_observation(data: bytes) -> tuple[tuple[str, str, bool], ...]:
-    """Preserve declaration records through rule attachment."""
+def cssom_observation(
+    data: bytes, style: Callable[[str], str | None] = style_check
+) -> tuple[tuple[str, str, bool], ...]:
+    """Preserve declaration records through rule attachment and a ``StyleDeclaration.text`` re-read."""
     source: Final = data.decode("utf-8")
+    assert_invariant(style, source)
     declaration: Final = StyleDeclaration.parse(source)
     observed: Final = tuple((name, declaration[name], declaration.important(name)) for name in declaration)
     _require("Property order differs", condition=declaration.properties() == tuple(name for name, _, _ in observed))
@@ -267,9 +282,11 @@ def computed_observation(data: bytes) -> str:
     return computed["color"]
 
 
-def schema_observation(data: bytes) -> tuple[bool, bool]:
-    """Compiled schema verdicts and assertion errors must describe the same instance."""
-    document: Final = turbohtml.parse_xml(data.decode("utf-8"))
+def schema_observation(data: bytes, xml: Callable[[str], str | None] = xml_check) -> tuple[bool, bool]:
+    """Compiled schema verdicts and assertion errors must describe the same instance, and XML output must re-read."""
+    source: Final = data.decode("utf-8")
+    assert_invariant(xml, source)
+    document: Final = turbohtml.parse_xml(source)
     schemas: Final = (
         XMLSchema(
             '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
