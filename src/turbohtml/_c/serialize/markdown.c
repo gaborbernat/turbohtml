@@ -2537,6 +2537,23 @@ static void md_list_child(md_ctx *ctx, Py_ssize_t owner, th_node *child) {
     }
 }
 
+/* Whether only line breaks and line prefixes were written since offset, as an empty
+   block leaves them, so nothing a reader sees separates what came before from what
+   follows. offset sits mid-line, right after the last character written there. */
+static int md_blank_since(md_ctx *ctx, Py_ssize_t offset) {
+    Py_ssize_t column = ctx->prefix.len;
+    for (Py_ssize_t index = offset; index < ctx->out.len; index++) {
+        if (ctx->out.data[index] == '\n') {
+            column = 0;
+        } else if (column < ctx->prefix.len && ctx->out.data[index] == ctx->prefix.data[column]) {
+            column++;
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int md_list_ordered(md_ctx *ctx, th_node *node) {
     int ordered = node->atom == TH_TAG_OL;
     if (ctx->opt->google_doc) {
@@ -2568,7 +2585,7 @@ static void md_enter_list(md_ctx *ctx, th_node *node) {
     /* CommonMark keeps items with the same bullet or ordered delimiter in one list,
        blank line or not, so a list that follows one of its own kind with nothing in
        between switches its marker to stay a separate list */
-    if (ctx->list_end_marker != 0 && ctx->list_end == ctx->out.len && ctx->list_end_prefix == ctx->prefix.len) {
+    if (ctx->list_end_marker != 0 && ctx->list_end_prefix == ctx->prefix.len && md_blank_since(ctx, ctx->list_end)) {
         if (ordered && ctx->list_end_marker == '.') {
             state.delimiter = ')';
         } else if (!ordered && ctx->list_end_marker == state.bullet) {
