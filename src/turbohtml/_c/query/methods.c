@@ -175,18 +175,19 @@ PyObject *turbohtml_register_selector_error(PyObject *module, PyObject *type) {
 
 static int append_selected(PyObject *out, module_state *state, PyObject *handle, th_node *origin,
                            sel_compiled *compiled, Py_ssize_t limit, const sel_simple *single) {
+    HandleObject *handle_obj = (HandleObject *)handle;
+    int indexed = selector_use_index(handle_obj, origin, compiled);
+    if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+        return -1;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     int error = 0;
     sel_nth_memo nth_memo = {0};
     sel_default_memo default_memo = {0};
     sel_sibling_memo memo = {0};
-    HandleObject *handle_obj = (HandleObject *)handle;
     sel_ctx ctx = {
         compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
         &default_memo,  &memo};
-    int indexed = selector_use_index(handle_obj, origin, compiled);
-    if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
-        error = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
-    } else if (indexed) {
+    if (indexed) {
         Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
         for (Py_ssize_t pos = handle_obj->index_offsets[compiled->subject_atom]; pos < end; pos++) {
             th_node *node = handle_obj->index_nodes[pos];
