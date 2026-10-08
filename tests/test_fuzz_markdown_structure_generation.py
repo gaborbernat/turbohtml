@@ -202,6 +202,25 @@ def test_markdown_unsupported_element() -> None:
         pytest.param("<h3><p>x</p></h3>", id="heading-paragraph"),
         pytest.param("<h2>a<p>b</p>c</h2>", id="heading-text-around-block"),
         pytest.param("<h2><div>a</div><div>b</div></h2>", id="heading-sibling-blocks"),
+        pytest.param("<em><p>a</p>b</em>", id="emphasis-around-paragraph"),
+        pytest.param("<strong><p></p></strong>", id="emphasis-around-empty-paragraph"),
+        pytest.param("<em><hr></em>", id="emphasis-around-rule"),
+        pytest.param("<b><ul><li>a</li></ul></b>", id="emphasis-around-list"),
+        pytest.param("<i><blockquote><p>a</p></blockquote></i>", id="emphasis-around-quote"),
+        pytest.param("<em><h1>a</h1></em>", id="emphasis-around-heading"),
+        pytest.param("<h3><em>a<p>b</p></em></h3>", id="heading-emphasis-around-paragraph"),
+        pytest.param('<a href="/t">a<p>b</p>c</a>', id="link-around-paragraph"),
+        pytest.param('<a href="/t"><hr></a>', id="link-around-rule"),
+        pytest.param('<p>x<a href="/t"> y </a>z</p>', id="link-edge-spaces"),
+        pytest.param('<p><a href="/t"><br></a></p>', id="link-holding-break"),
+        pytest.param('<h3><a href="/t">t<br>a</a></h3>', id="heading-link-break"),
+        pytest.param("<table><tr><td>a<p>b</p></td></tr></table>", id="cell-paragraph"),
+        pytest.param("<table><tr><td><p></p></td></tr></table>", id="cell-empty-paragraph"),
+        pytest.param("<h1><pre><code>x</code></pre></h1>", id="heading-code-block"),
+        pytest.param("<strong><p></p></strong> i", id="text-after-emphasis-around-block"),
+        pytest.param("<em>d <p>e</p></em>", id="space-before-block-in-emphasis"),
+        pytest.param('<i><a href="/t"><br></a></i>', id="emphasis-around-link-holding-break"),
+        pytest.param('<p>x<a href="/t"><br></a></p>', id="break-in-empty-link-ends-block"),
     ],
 )
 def test_markdown_supported_html_meaning(markup: str) -> None:
@@ -214,6 +233,7 @@ def test_markdown_supported_html_meaning(markup: str) -> None:
         pytest.param("<ul>x<li>y</li></ul>", "ul", id="text-in-list"),
         pytest.param("<ol><p>x</p></ol>", "ol", id="paragraph-in-list"),
         pytest.param("<li>x</li>", "li", id="item-outside-list"),
+        pytest.param('<a href="/x"><table><a href="/y">t</a></table></a>', "a", id="link-in-link"),
     ],
 )
 def test_markdown_content_model_violation(markup: str, container: str) -> None:
