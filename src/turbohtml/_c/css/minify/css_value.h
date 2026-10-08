@@ -30,7 +30,7 @@ typedef struct {
     css_comp *items;
     Py_ssize_t len;
     Py_ssize_t cap;
-    int failed;
+    int *oom;
 } comp_vec;
 
 static void comp_vec_push(comp_vec *vec, css_comp comp) {
@@ -38,13 +38,13 @@ static void comp_vec_push(comp_vec *vec, css_comp comp) {
         size_t cap;
         size_t bytes;
         int grew = th_grow_cap((size_t)(vec->len + 1), (size_t)vec->cap, 16, sizeof(css_comp), &cap, &bytes);
-        if (!grew) {         /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            vec->failed = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-            return;          /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        if (!grew) {       /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+            *vec->oom = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return;        /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
         }
         css_comp *grown = css_realloc(vec->items, bytes);
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            vec->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+            *vec->oom = 1;   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
             return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         }
         vec->items = grown;
@@ -53,18 +53,19 @@ static void comp_vec_push(comp_vec *vec, css_comp comp) {
     vec->items[vec->len++] = comp;
 }
 
-/* Append a run of code points to the pool and return its starting offset. */
+/* Append a run of code points to the pool and return its starting offset. A failed growth returns 0, the start of
+   what the pool already holds, rather than the unwritten end; the oom flag tells the readers to ignore it. */
 static Py_ssize_t pool_run(css_buf *pool, const css_char *text, Py_ssize_t len) {
     Py_ssize_t off = pool->len;
     cbuf_put_run(pool, text, len);
-    return off;
+    return pool->len == off + len ? off : 0; /* GCOVR_EXCL_BR_LINE: 0 only after a failed growth */
 }
 
-/* Append an ASCII C string to the pool and return its starting offset. */
+/* Append an ASCII C string to the pool and return its starting offset, 0 after a failed growth as for pool_run. */
 static Py_ssize_t pool_cstr(css_buf *pool, const char *text) {
     Py_ssize_t off = pool->len;
     cbuf_puts(pool, text);
-    return off;
+    return pool->len > off ? off : 0; /* GCOVR_EXCL_BR_LINE: 0 only after a failed growth */
 }
 
 /* Case-insensitively compare a code-point run against an ASCII literal. */
@@ -483,7 +484,7 @@ static void css_minify_url(css_buf *pool, const css_char *text, Py_ssize_t len, 
     const css_char *inner = text + inner_start;
     if (inner_len >= 2 && (inner[0] == '"' || inner[0] == '\'') && inner[inner_len - 1] == inner[0]) {
         /* a quoted body: strip continuations, then drop the quotes when the body is url-unquotable */
-        css_buf scratch = {NULL, 0, 0, 0};
+        css_buf scratch = {NULL, 0, 0, pool->oom};
         css_strip_continuations(&scratch, inner + 1, inner_len - 2);
         if (css_url_unquotable(scratch.data, scratch.len)) {
             cbuf_put_run(pool, scratch.data, scratch.len);
@@ -603,7 +604,7 @@ static void css_append_num_pct(css_buf *out, const css_char *text, Py_ssize_t le
 
 /* Append a color-function component: the minified number, with a percent sign when it is a percentage. */
 static void css_append_color_number(css_buf *out, const css_token *raw, int is_pct) {
-    css_buf scratch = {NULL, 0, 0, 0};
+    css_buf scratch = {NULL, 0, 0, out->oom};
     Py_ssize_t off;
     Py_ssize_t len;
     css_format_number(&scratch, raw->text, raw->text_len, is_pct, &off, &len);
@@ -735,7 +736,7 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
     }
     /* opaque-but-inexact or non-opaque: rebuild the function in shortest form, keeping rgb percentages as integers
        when they fall on exact 20% steps (51/102/.../255) */
-    css_buf result = {NULL, 0, 0, 0};
+    css_buf result = {NULL, 0, 0, pool->oom};
     /* rgb()/hsl() are the modern aliases of rgba()/hsla() and take an optional alpha, so always use the shorter
        three-letter name (CSS Color 4 §4): rgba(...) -> rgb(...), hsla(...) -> hsl(...) */
     cbuf_puts(&result, is_rgb ? "rgb" : "hsl");
@@ -765,7 +766,7 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
         }
     }
     if (has_alpha) {
-        css_buf alpha_text = {NULL, 0, 0, 0};
+        css_buf alpha_text = {NULL, 0, 0, pool->oom};
         css_append_color_number(&alpha_text, raws[3], types[3]);
         cbuf_puts(&result, has_slash ? "/" : ",");
         css_append_num_pct(&result, alpha_text.data, alpha_text.len);
@@ -915,7 +916,7 @@ static void css_collapse_transform_args(const css_char *name, Py_ssize_t name_le
 static void css_render_function(css_buf *pool, token_vec *vec, Py_ssize_t name_index, Py_ssize_t close_index,
                                 Py_ssize_t *out_off, Py_ssize_t *out_len) {
     css_token *name_token = &vec->items[name_index];
-    css_buf args = {NULL, 0, 0, 0};
+    css_buf args = {NULL, 0, 0, pool->oom};
     css_minify_func_args(pool, vec, name_index + 2, close_index, name_token->text, name_token->text_len, &args);
     css_collapse_transform_args(name_token->text, name_token->text_len, &args);
     *out_off = pool->len;

@@ -1,0 +1,2 @@
+Raise MemoryError when an allocation fails while minifying CSS or a style attribute, instead of returning truncated
+output or crashing.

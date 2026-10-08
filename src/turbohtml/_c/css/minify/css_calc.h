@@ -267,6 +267,7 @@ static void calc_parse_product(calc_parser *parser, csum *out) {
         int is_div = token->delim == '/';
         parser->pos++;
         if (rhs == NULL && (rhs = css_malloc(sizeof(*rhs))) == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            *parser->vec->oom = 1;                                     /* GCOVR_EXCL_LINE */
             out->ok = 0;                                               /* GCOVR_EXCL_LINE */
             break;                                                     /* GCOVR_EXCL_LINE */
         }
@@ -303,6 +304,7 @@ static void calc_parse_sum(calc_parser *parser, csum *out) {
         }
         parser->pos++;
         if (rhs == NULL && (rhs = css_malloc(sizeof(*rhs))) == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            *parser->vec->oom = 1;                                     /* GCOVR_EXCL_LINE */
             out->ok = 0;                                               /* GCOVR_EXCL_LINE */
             break;                                                     /* GCOVR_EXCL_LINE */
         }
@@ -458,7 +460,7 @@ CSS_NOINLINE static int css_try_calc(css_buf *pool, token_vec *vec, Py_ssize_t s
             nonzero[nonzero_count++] = sum.terms[index];
         }
     }
-    css_buf result = {NULL, 0, 0, 0};
+    css_buf result = {NULL, 0, 0, pool->oom};
     int formatted = 1;
     if (nonzero_count == 0) {
         if (sum.count == 1) {
@@ -499,14 +501,19 @@ CSS_NOINLINE static int css_try_calc(css_buf *pool, token_vec *vec, Py_ssize_t s
    folded the calc() (`rgb(calc(1),0,0)` became `rgb(1,0,0)`), so the fold reads the arguments as the next call would,
    the post-order esbuild applies to calc() inside a color. Out of line: only a calc() inside a color reaches it. */
 CSS_NOINLINE static void css_refold_color(css_buf *pool, Py_ssize_t *out_off, Py_ssize_t *out_len, css_compkind *kind) {
+    if (*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;       /* GCOVR_EXCL_LINE: the rendered call may not be in the pool */
+    }
     /* the fold appends to the pool, so the tokens read a copy of the rendered call */
-    css_buf call = {NULL, 0, 0, 0};
+    css_buf call = {NULL, 0, 0, pool->oom};
     cbuf_put_run(&call, pool->data + *out_off, *out_len);
-    token_vec tokens = {0};
+    token_vec tokens = {.oom = pool->oom};
     css_tokenize(call.data, call.len, &tokens);
     Py_ssize_t off;
     Py_ssize_t len;
-    if (css_try_color_func(pool, &tokens, 2, tokens.len - 1, &off, &len, kind) > 0) {
+    /* a failed copy or tokenization leaves too few tokens for the call's name, parenthesis and arguments */
+    if (!*pool->oom && /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        css_try_color_func(pool, &tokens, 2, tokens.len - 1, &off, &len, kind) > 0) {
         *out_off = off;
         *out_len = len;
     }

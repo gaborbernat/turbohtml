@@ -51,7 +51,7 @@ static void css_collect_raw_blocks(token_vec *vec, Py_ssize_t start, Py_ssize_t 
 /* Whether a declaration's tokens [start, end) that run to the end of the input leave a block open. Kept out of line:
    only the last declaration of an unterminated stylesheet reaches it. */
 CSS_NOINLINE static int css_leaves_block_open(token_vec *vec, Py_ssize_t start, Py_ssize_t end) {
-    css_buf blocks = {NULL, 0, 0, 0};
+    css_buf blocks = {NULL, 0, 0, vec->oom};
     css_collect_raw_blocks(vec, start, end, &blocks);
     int open = blocks.len > 0;
     cbuf_free(&blocks);
@@ -62,7 +62,7 @@ CSS_NOINLINE static int css_leaves_block_open(token_vec *vec, Py_ssize_t start, 
    to the end of the input reaches it. */
 CSS_NOINLINE static void css_close_bare_blocks(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end,
                                                comp_vec *comps) {
-    css_buf blocks = {NULL, 0, 0, 0};
+    css_buf blocks = {NULL, 0, 0, pool->oom};
     css_collect_open_blocks(vec, start, end, 1, &blocks);
     for (Py_ssize_t depth = blocks.len - 1; depth >= 0; depth--) {
         css_comp closer = {0};
@@ -78,7 +78,7 @@ CSS_NOINLINE static void css_close_bare_blocks(css_buf *pool, token_vec *vec, Py
 /* Write a closer for each block a raw value leaves open, functions included: the raw path prints a function's `(` as a
    plain delimiter. Kept out of line: only a value that runs to the end of the input reaches it. */
 CSS_NOINLINE static void css_close_raw_blocks(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *out) {
-    css_buf blocks = {NULL, 0, 0, 0};
+    css_buf blocks = {NULL, 0, 0, vec->oom};
     css_collect_raw_blocks(vec, start, end, &blocks);
     for (Py_ssize_t depth = blocks.len - 1; depth >= 0; depth--) {
         /* `]` and `}` sit two code points past their openers, `)` one */
@@ -527,7 +527,7 @@ static Py_ssize_t css_collapse_repeat_run(css_buf *pool, css_comp *items, Py_ssi
 typedef Py_ssize_t (*css_run_transform)(css_buf *pool, css_comp *items, Py_ssize_t count);
 
 static void css_handle_runs(css_buf *pool, comp_vec *comps, css_run_transform transform) {
-    comp_vec result = {NULL, 0, 0, 0};
+    comp_vec result = {NULL, 0, 0, pool->oom};
     Py_ssize_t run_start = 0;
     Py_ssize_t index = 0;
     while (index <= comps->len) {
@@ -592,7 +592,7 @@ static Py_ssize_t css_collapse_box_shadow_run(css_buf *pool, css_comp *items, Py
 /* Append a color-function-style filter value (progid alpha shortening), returning 1 when handled. */
 static void css_handle_filter(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end, const css_char *prop,
                               Py_ssize_t prop_len, css_buf *out) {
-    css_buf joined = {NULL, 0, 0, 0};
+    css_buf joined = {NULL, 0, 0, pool->oom};
     for (Py_ssize_t index = start; index < end; index++) {
         css_token *token = &vec->items[index];
         if (token->kind == CSS_WS || token->kind == CSS_COMMENT) {
@@ -605,20 +605,25 @@ static void css_handle_filter(css_buf *pool, token_vec *vec, Py_ssize_t start, P
             Py_ssize_t off;
             Py_ssize_t len;
             css_minify_string(pool, token->text, token->text_len, &off, &len);
+            if (*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                break;        /* GCOVR_EXCL_LINE: the string was never written to the pool */
+            }
             cbuf_put_run(&joined, pool->data + off, len);
         } else if (token->kind == CSS_URL) {
             Py_ssize_t off;
             Py_ssize_t len;
             css_minify_url(pool, token->text, token->text_len, &off, &len);
+            if (*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                break;        /* GCOVR_EXCL_LINE: the url was never written to the pool */
+            }
             cbuf_put_run(&joined, pool->data + off, len);
         } else {
             cbuf_put_run(&joined, token->text, token->text_len);
         }
     }
-    if (joined.failed || pool->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        out->failed = 1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
-        cbuf_free(&joined);              /* GCOVR_EXCL_LINE: allocation-failure path */
-        return;                          /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (*pool->oom) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        cbuf_free(&joined); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     const char *legacy = "progid:dximagetransform.microsoft.alpha(opacity=";
     Py_ssize_t legacy_len = (Py_ssize_t)strlen(legacy);
@@ -704,7 +709,8 @@ static int css_handle_unicode_range(token_vec *vec, Py_ssize_t start, Py_ssize_t
     Py_ssize_t capacity = TH_INITIAL_CAPACITY(16);
     long long (*ranges)[2] = css_malloc((size_t)capacity * sizeof(*ranges));
     if (ranges == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return 0;         /* GCOVR_EXCL_LINE */
+        *out->oom = 1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;         /* GCOVR_EXCL_LINE */
     }
     Py_ssize_t count = 0;
     for (Py_ssize_t index = start; index < end; index++) {
@@ -730,7 +736,8 @@ static int css_handle_unicode_range(token_vec *vec, Py_ssize_t start, Py_ssize_t
             long long (*grown)[2] = css_realloc(ranges, bytes);
             if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
                 css_free(ranges); /* GCOVR_EXCL_LINE */
-                return 0;         /* GCOVR_EXCL_LINE */
+                *out->oom = 1;    /* GCOVR_EXCL_LINE: allocation-failure path */
+                return 1;         /* GCOVR_EXCL_LINE */
             }
             ranges = grown;
             capacity = (Py_ssize_t)cap;

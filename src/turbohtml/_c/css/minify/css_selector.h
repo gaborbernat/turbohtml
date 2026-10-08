@@ -201,7 +201,7 @@ typedef struct {
     css_decl *items;
     Py_ssize_t len;
     Py_ssize_t cap;
-    int failed;
+    int *oom;
 } decl_vec;
 
 static void decl_vec_push(decl_vec *vec, css_decl decl) {
@@ -209,14 +209,14 @@ static void decl_vec_push(decl_vec *vec, css_decl decl) {
         size_t cap;
         size_t bytes;
         int grew = th_grow_cap((size_t)(vec->len + 1), (size_t)vec->cap, 16, sizeof(css_decl), &cap, &bytes);
-        if (!grew) {         /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            vec->failed = 1; /* GCOVR_EXCL_LINE */
-            return;          /* GCOVR_EXCL_LINE */
+        if (!grew) {       /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+            *vec->oom = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return;        /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
         }
         css_decl *grown = css_realloc(vec->items, bytes);
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            vec->failed = 1; /* GCOVR_EXCL_LINE */
-            return;          /* GCOVR_EXCL_LINE */
+            *vec->oom = 1;   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+            return;          /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         }
         vec->items = grown;
         vec->cap = (Py_ssize_t)cap;
@@ -328,7 +328,7 @@ static int css_make_declaration(css_buf *pool, token_vec *vec, Py_ssize_t start,
         return 0;
     }
 
-    css_buf value = {NULL, 0, 0, 0};
+    css_buf value = {NULL, 0, 0, pool->oom};
     css_minify_value(pool, vec, value_start, value_end, pool->data + prop_off, prop_len, is_custom, scratch, &value);
     if (!is_custom && value.len == 0) {
         cbuf_free(&value);
@@ -559,9 +559,9 @@ static void css_dedup(css_buf *pool, decl_vec *decls) {
     dedup_entry *table = stack_table;
     if (cap > CSS_DEDUP_STACK) {
         table = css_malloc((size_t)cap * sizeof(dedup_entry));
-        if (table == NULL) {                 /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            css_dedup_pairwise(pool, decls); /* GCOVR_EXCL_LINE */
-            return;                          /* GCOVR_EXCL_LINE */
+        if (table == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            *pool->oom = 1;  /* GCOVR_EXCL_LINE: allocation-failure path */
+            return;          /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
     memset(table, 0, (size_t)cap * sizeof(dedup_entry));

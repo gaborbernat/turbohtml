@@ -117,7 +117,7 @@ static void css_merge_box(css_buf *pool, decl_vec *decls, const char *shorthand,
     for (int edge = 0; edge < 4; edge++) {
         any_wide |= css_decl_is_wide_keyword(pool, &decls->items[idx[edge]]);
     }
-    css_buf value = {NULL, 0, 0, 0};
+    css_buf value = {NULL, 0, 0, pool->oom};
     if (any_wide) {
         for (int edge = 0; edge < 4; edge++) {
             if (!css_decl_is_wide_keyword(pool, &decls->items[idx[edge]]) ||
@@ -215,7 +215,7 @@ static void css_merge_pair(css_buf *pool, decl_vec *decls, const char *shorthand
             return;
         }
     }
-    css_buf value = {NULL, 0, 0, 0};
+    css_buf value = {NULL, 0, 0, pool->oom};
     cbuf_put_run(&value, pool->data + decls->items[idx0].val_off, decls->items[idx0].val_len);
     if (!css_decl_value_eq(pool, &decls->items[idx0], &decls->items[idx1])) {
         cbuf_putc(&value, ' ');
@@ -253,7 +253,7 @@ static void css_merge_triple(css_buf *pool, decl_vec *decls, const char *shortha
         }
         any_wide |= css_decl_is_wide_keyword(pool, &decls->items[idx[part]]);
     }
-    css_buf value = {NULL, 0, 0, 0};
+    css_buf value = {NULL, 0, 0, pool->oom};
     if (any_wide) {
         for (int part = 0; part < 3; part++) {
             if (!css_decl_is_wide_keyword(pool, &decls->items[idx[part]]) ||
@@ -331,8 +331,17 @@ static void css_merge_shorthands(css_buf *pool, decl_vec *decls, int baseline) {
 }
 
 static void css_render_declarations(css_buf *pool, decl_vec *decls, int baseline, css_buf *out) {
+    /* a declaration parsed after a failed growth may point at pool text that was never written */
+    if (*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     css_dedup(pool, decls);
     css_merge_shorthands(pool, decls, baseline);
+    /* a shorthand merged after a failed growth points at the pool's start, which holds at least the longhands it
+       replaced, so the merges read inside the pool; the render must not copy it */
+    if (*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     int first = 1;
     for (Py_ssize_t index = 0; index < decls->len; index++) {
         css_decl *decl = &decls->items[index];
@@ -536,7 +545,9 @@ static void css_at_prelude(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_s
     default:
         break;
     }
-    cbuf_reserve(out, 1);
+    if (!cbuf_reserve(out, 1)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;                  /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     memmove(out->data + mark + 1, out->data + mark, (size_t)(out->len - mark) * sizeof(css_char));
     out->data[mark] = ' ';
     out->len++;
@@ -554,7 +565,7 @@ CSS_NOINLINE static void css_close_prelude_blocks(const token_vec *vec, Py_ssize
     for (Py_ssize_t index = start; index < end; index++) {
         braced |= vec->items[index].delim == '{';
     }
-    css_buf blocks = {NULL, 0, 0, 0};
+    css_buf blocks = {NULL, 0, 0, vec->oom};
     for (Py_ssize_t index = start; index < end; index++) {
         css_char delim = vec->items[index].delim;
         if (delim == '(' || delim == '[' || delim == '{') {
@@ -578,7 +589,7 @@ static Py_ssize_t css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
     if (cur->index == cur->media_at) {
         /* out is the caller's fresh piece buffer, so it can take over the prelude css_media_continues rendered */
         *out = cur->media_next;
-        cur->media_next = (css_buf){NULL, 0, 0, 0};
+        cur->media_next = (css_buf){NULL, 0, 0, pool->oom};
         cur->index = cur->media_body;
         media_head = out->len;
         css_parse_rules(pool, cur, 0, 0, 1, out);
@@ -612,7 +623,7 @@ static Py_ssize_t css_parse_at(css_buf *pool, cursor *cur, css_buf *out) {
             media_head = css_run_ieq(name, name_len, "@media") ? out->len : 0;
             css_parse_rules(pool, cur, 0, is_keyframes, media_head > 0, out);
         } else {
-            decl_vec decls = {NULL, 0, 0, 0};
+            decl_vec decls = {NULL, 0, 0, pool->oom};
             css_parse_declarations(pool, cur, &decls);
             css_render_declarations(pool, &decls, cur->baseline, out);
             css_free(decls.items);
@@ -689,7 +700,7 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
         css_skip_block(cur);
         return;
     }
-    comp_vec scratch = {NULL, 0, 0, 0}; /* reused across this list's values, freed once below */
+    comp_vec scratch = {NULL, 0, 0, pool->oom}; /* reused across this list's values, freed once below */
     while (cur->index < cur->vec->len) {
         css_token *token = cursor_peek(cur);
         if (token->kind == CSS_WS || token->kind == CSS_COMMENT) {
@@ -701,7 +712,7 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
             break;
         }
         if (token->kind == CSS_AT) {
-            css_buf nested = {NULL, 0, 0, 0};
+            css_buf nested = {NULL, 0, 0, pool->oom};
             css_parse_at(pool, cur, &nested);
             css_decl decl = {0};
             decl.prop_off = pool_run(pool, nested.data, nested.len);
@@ -726,11 +737,11 @@ static void css_parse_declarations(css_buf *pool, cursor *cur, decl_vec *decls) 
             if (cur->vec->bad && css_skip_bad_nested_block(cur, segment_start, segment_end)) {
                 continue;
             }
-            decl_vec inner = {NULL, 0, 0, 0};
+            decl_vec inner = {NULL, 0, 0, pool->oom};
             css_parse_declarations(pool, cur, &inner);
-            css_buf selector = {NULL, 0, 0, 0};
+            css_buf selector = {NULL, 0, 0, pool->oom};
             css_minify_selector(cur->vec, segment_start, segment_end, 0, &selector);
-            css_buf body = {NULL, 0, 0, 0};
+            css_buf body = {NULL, 0, 0, pool->oom};
             css_render_declarations(pool, &inner, cur->baseline, &body);
             css_decl decl = {0};
             decl.prop_off = pool->len;
@@ -784,7 +795,7 @@ typedef struct {
     rule_item *items;
     Py_ssize_t len;
     Py_ssize_t cap;
-    int failed;
+    int *oom;
 } rule_vec;
 
 /* Inlined into css_parse_rules, its only caller: out of line, passing the 64-byte item by value costs more than the
@@ -794,13 +805,13 @@ static CSS_FORCEINLINE void rule_vec_push(rule_vec *vec, rule_item item) {
         size_t cap;
         size_t bytes;
         int grew = th_grow_cap((size_t)(vec->len + 1), (size_t)vec->cap, 16, sizeof(rule_item), &cap, &bytes);
-        if (!grew) {         /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            vec->failed = 1; /* GCOVR_EXCL_LINE */
-            return;          /* GCOVR_EXCL_LINE */
+        if (!grew) {       /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+            *vec->oom = 1; /* GCOVR_EXCL_LINE */
+            return;        /* GCOVR_EXCL_LINE */
         }
         rule_item *grown = css_realloc(vec->items, bytes);
         if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            vec->failed = 1; /* GCOVR_EXCL_LINE */
+            *vec->oom = 1;   /* GCOVR_EXCL_LINE */
             return;          /* GCOVR_EXCL_LINE */
         }
         vec->items = grown;
@@ -849,9 +860,9 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
             css_skip_block(cur);
             return;
         }
-        decl_vec decls = {NULL, 0, 0, 0};
+        decl_vec decls = {NULL, 0, 0, pool->oom};
         css_parse_declarations(pool, cur, &decls);
-        css_buf body = {NULL, 0, 0, 0};
+        css_buf body = {NULL, 0, 0, pool->oom};
         css_render_declarations(pool, &decls, cur->baseline, &body);
         if (body.len > 0) {
             /* render the selector straight into the pool (it reads only the source tokens, never the pool scratch),
@@ -903,7 +914,7 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
     while (end > start && cur->vec->items[end - 1].kind == CSS_WS) {
         end--;
     }
-    css_buf text = {NULL, 0, 0, 0};
+    css_buf text = {NULL, 0, 0, pool->oom};
     for (Py_ssize_t index = start; index < end; index++) {
         css_token *piece = &cur->vec->items[index];
         cbuf_put_run(&text, piece->text, piece->text_len);
@@ -948,18 +959,18 @@ static void css_rule_hash_add(uint32_t *table, size_t mask, uint32_t hash) {
 /* Re-minify "prev_body;it_body" so a same-selector merge dedups overlapping declarations the same way one rule would.
  */
 static void css_merge_rule_bodies(css_buf *pool, rule_item *prev, const rule_item *it, int baseline, int depth) {
-    css_buf combined = {NULL, 0, 0, 0};
+    css_buf combined = {NULL, 0, 0, pool->oom};
     cbuf_put_run(&combined, pool->data + prev->body_off, prev->body_len);
     cbuf_putc(&combined, ';');
     cbuf_put_run(&combined, pool->data + it->body_off, it->body_len);
     /* the merged body parses below the rule list that holds it, so it inherits that list's depth */
-    token_vec tokens = {.depth = depth};
+    token_vec tokens = {.depth = depth, .oom = pool->oom};
     css_tokenize(combined.data, combined.len, &tokens);
-    cursor inner = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, 0}};
-    decl_vec decls = {NULL, 0, 0, 0};
+    cursor inner = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, pool->oom}};
+    decl_vec decls = {NULL, 0, 0, pool->oom};
     css_parse_declarations(pool, &inner, &decls);
     cbuf_free(&inner.media_next);
-    css_buf body = {NULL, 0, 0, 0};
+    css_buf body = {NULL, 0, 0, pool->oom};
     css_render_declarations(pool, &decls, baseline, &body);
     prev->body_off = pool_run(pool, body.data, body.len);
     prev->body_len = body.len;
@@ -1184,6 +1195,7 @@ static int css_summarize_body(const css_buf *pool, Py_ssize_t offset, Py_ssize_t
                 }
                 css_property_summary *properties = css_realloc(summary->properties, bytes);
                 if (properties == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    *pool->oom = 1;       /* GCOVR_EXCL_LINE: allocation failure */
                     return 0;             /* GCOVR_EXCL_LINE: allocation failure */
                 }
                 summary->properties = properties;
@@ -1258,7 +1270,9 @@ CSS_NOINLINE static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items
         hashes = css_malloc(hash_cap * sizeof(uint32_t));
         if (hashes != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure falls back to the backward scan */
             memset(hashes, 0, hash_cap * sizeof(uint32_t));
-        }
+        } else {
+            *pool->oom = 1; /* GCOVR_EXCL_LINE: the backward scan below still merges correctly */
+        } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
     }
     for (Py_ssize_t index = 0; index < items->len; index++) {
         rule_item *it = &items->items[index];
@@ -1314,7 +1328,7 @@ CSS_NOINLINE static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items
                         end++;
                     }
                 }
-                css_buf selector = {NULL, 0, 0, 0};
+                css_buf selector = {NULL, 0, 0, pool->oom};
                 cbuf_reserve(&selector, length);
                 cbuf_put_run(&selector, pool->data + target->sel_off, target->sel_len);
                 for (Py_ssize_t next = index; next < end; next++) {
@@ -1334,7 +1348,9 @@ CSS_NOINLINE static void css_merge_adjacent_rules(css_buf *pool, rule_vec *items
                 summaries = css_malloc((size_t)items->len * sizeof(*summaries));
                 if (summaries != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure uses the direct scan */
                     memset(summaries, 0, (size_t)items->len * sizeof(*summaries));
-                }
+                } else {
+                    *pool->oom = 1; /* GCOVR_EXCL_LINE: the direct scan below still merges correctly */
+                } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
             }
             const int conflict =
                 summaries == NULL
@@ -1461,7 +1477,8 @@ typedef struct {
    per nesting level, so its frame stays as small as a list without a run needs. */
 CSS_NOINLINE static int css_join_media(const css_buf *pool, const rule_vec *items, const css_buf *piece,
                                        Py_ssize_t head, media_run **run) {
-    if (items->len == 0) {
+    /* the last item's text may sit past what a failed growth wrote */
+    if (items->len == 0 || *pool->oom) { /* GCOVR_EXCL_BR_LINE: the oom operand is an allocation failure */
         return 0;
     }
     const rule_item *last = &items->items[items->len - 1];
@@ -1473,10 +1490,11 @@ CSS_NOINLINE static int css_join_media(const css_buf *pool, const rule_vec *item
     if (*run == NULL) {
         *run = css_malloc(sizeof(media_run));
         if (*run == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            *pool->oom = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
             return 0;       /* GCOVR_EXCL_LINE: the block stays unjoined */
         }
         (*run)->item = items->len - 1;
-        (*run)->text = (css_buf){NULL, 0, 0, 0};
+        (*run)->text = (css_buf){NULL, 0, 0, pool->oom};
         cbuf_put_run(&(*run)->text, text, last->text_len - 1);
     }
     /* a block's last at-statement is rendered without its ';', which the next body must not extend */
@@ -1490,15 +1508,18 @@ CSS_NOINLINE static int css_join_media(const css_buf *pool, const rule_vec *item
 CSS_NOINLINE static void css_rejoin_media(css_buf *pool, cursor *cur, rule_vec *items, media_run *run) {
     cbuf_putc(&run->text, '}');
     /* the block parses where the first one did, so it inherits the rule list's depth */
-    token_vec tokens = {.depth = cur->vec->depth};
+    token_vec tokens = {.depth = cur->vec->depth, .oom = pool->oom};
     css_tokenize(run->text.data, run->text.len, &tokens);
-    cursor inner = {&tokens, 0, cur->baseline, -1, 0, {NULL, 0, 0, 0}};
-    css_buf merged = {NULL, 0, 0, 0};
+    cursor inner = {&tokens, 0, cur->baseline, -1, 0, {NULL, 0, 0, pool->oom}};
+    css_buf merged = {NULL, 0, 0, pool->oom};
     css_parse_at(pool, &inner, &merged);
     cbuf_free(&inner.media_next);
     rule_item *block = &items->items[run->item];
-    block->text_off = pool_run(pool, merged.data, merged.len);
-    block->text_len = merged.len;
+    Py_ssize_t text_off = pool_run(pool, merged.data, merged.len);
+    if (!*pool->oom) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        block->text_off = text_off;
+        block->text_len = merged.len;
+    }
     css_free(tokens.items);
     cbuf_free(&merged);
     cbuf_free(&run->text);
@@ -1514,7 +1535,7 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
         css_skip_block(cur);
         return;
     }
-    rule_vec items = {NULL, 0, 0, 0};
+    rule_vec items = {NULL, 0, 0, pool->oom};
     /* css_media_continues folds only blocks that whitespace and comments separate, since it cannot tell a node that
        minifies away, and the blocks it folds may each end and start with a nested same-query block. joinable_at is
        items.len after a dropped node or a folded block boundary; an @media block pushed then that repeats the last
@@ -1547,7 +1568,7 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
             break;
         }
         if (token->kind == CSS_AT) {
-            css_buf piece = {NULL, 0, 0, 0};
+            css_buf piece = {NULL, 0, 0, pool->oom};
             Py_ssize_t kind = css_parse_at(pool, cur, &piece);
             /* css_parse_at always emits at least the lowercased at-rule name, so piece is never empty */
             if (css_is_empty_conditional_atrule(piece.data, piece.len)) {
@@ -1576,6 +1597,12 @@ static void css_parse_rules(css_buf *pool, cursor *cur, int top, int keyframe, i
     }
     if (run != NULL) {
         css_rejoin_media(pool, cur, &items, run);
+    }
+    /* an item collected after a failed growth may point at pool text that was never written */
+    if (*pool->oom) {                /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        css_free(items.items);       /* GCOVR_EXCL_LINE: allocation-failure path */
+        css_nesting_leave(cur->vec); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;                      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     css_merge_adjacent_rules(pool, &items, cur->baseline, cur->vec->depth);
     int prev_at_statement = 0;
