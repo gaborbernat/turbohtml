@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fuzz.atheris_driver import fuzz
+from fuzz.atheris_header import SEED_HEADER
 from fuzz.atheris_registry import Target
 
 if TYPE_CHECKING:
@@ -28,11 +29,12 @@ def test_atheris_driver_connects_exception_boundary(mocker: MockerFixture) -> No
     runtime.instrument_func.side_effect = lambda callback: callback
     mocker.patch("fuzz.atheris_driver.import_module", autospec=True, return_value=runtime)
     mocker.patch("fuzz.atheris_driver.rejection_hook", autospec=True, return_value=partial(rejected.append, 1))
+    mocker.patch("fuzz.atheris_driver.failure_hook", autospec=True, return_value=lambda _position: (0, False))
 
     def native_loop() -> None:
         callback: Callable[[bytes], None] = runtime.Setup.call_args.args[1]
-        callback(b"invalid")
-        callback(b"valid")
+        callback(SEED_HEADER + b"invalid")
+        callback(SEED_HEADER + b"valid")
 
     runtime.Fuzz.side_effect = native_loop
     fuzz([target], ["turbohtml.__main__"], "cli", ["driver", "-runs=2"])

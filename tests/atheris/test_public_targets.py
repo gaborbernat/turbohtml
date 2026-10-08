@@ -11,6 +11,7 @@ from subprocess import run  # ruff: ignore[suspicious-subprocess-import] - libFu
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from fuzz.atheris_header import SEED_HEADER, Header
 from fuzz.atheris_runtime import build_runtime
 
 if TYPE_CHECKING:
@@ -24,9 +25,26 @@ _CONSUME: Final = """
 import sys
 from pathlib import Path
 from typing import Final
+from fuzz.atheris_header import split_header
 from fuzz.atheris_targets import public_targets
 _TARGET: Final = next(target for target in public_targets() if target.name == sys.argv[1])
-_TARGET.callback(Path(sys.argv[2]).read_bytes())
+_TARGET.callback(split_header(Path(sys.argv[2]).read_bytes())[1])
+"""
+
+# the window results go to preallocated slots, since an append would allocate inside the window and take the failure
+_FAIL: Final = """
+import sys
+from pathlib import Path
+from fuzz.atheris_runtime import failure_hook, rejecting_callback
+from fuzz.atheris_targets import public_targets
+target = next(target for target in public_targets() if target.name == sys.argv[1])
+hook = failure_hook()
+windows = [None, None]
+def inject(position):
+    windows[position == 0] = window = hook(position)
+    return window
+rejecting_callback(target.callback, target.exceptions, lambda: None, inject)(Path(sys.argv[2]).read_bytes())
+assert windows[1][1], windows
 """
 
 
@@ -108,7 +126,8 @@ def test_atheris_public_consumers_run_with_native_coverage(tmp_path: Path) -> No
         corpus.mkdir()
         seed: Final = generated_seeds.get(
             target,
-            (
+            SEED_HEADER
+            + (
                 b"p.x"
                 if target == "css-translate"
                 else b'consume("kept",external);'
@@ -164,3 +183,25 @@ def test_atheris_public_consumers_run_with_native_coverage(tmp_path: Path) -> No
             "native_counter_files": len(native_counters),
         }
     (tmp_path / "public-targets.json").write_text(json.dumps(outcomes, indent=2) + "\n", encoding="utf-8")
+
+
+@pytest.mark.oracle
+def test_atheris_failure_header_reaches_allocator_hook(tmp_path: Path) -> None:
+    if sys.platform != "linux" or importlib.util.find_spec("atheris") is None:
+        pytest.skip("Atheris's native runtime requires its optional Linux wheel")
+    runtime: Final = cast("_Runtime", importlib.import_module("atheris"))
+    library: Final = build_runtime(Path(runtime.path()) / "libclang_rt.fuzzer_no_main.a", tmp_path / "runtime")
+    # the header fails the first PyMem allocation, and the callback must answer with MemoryError
+    failing: Final = tmp_path / "failing"
+    failing.write_bytes(Header(0, 1, 256).encode() + "水😀".encode())
+    run(  # ruff: ignore[subprocess-without-shell-equals-true] - public callback and the real allocator hook.
+        [sys.executable, "-c", _FAIL, "html-document", str(failing)],
+        env={
+            **os.environ,
+            "LD_PRELOAD": str(library),
+            "PYTHONPATH": str(Path(__file__).parents[2] / "tools"),
+            "GCOV_PREFIX": str(tmp_path / "gcda"),
+        },
+        capture_output=True,
+        check=True,
+    )

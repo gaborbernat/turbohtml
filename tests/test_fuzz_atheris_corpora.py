@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 from fuzz.atheris_corpora import main, write_corpora
+from fuzz.atheris_header import SEED_HEADER
 from fuzz.html_structure_generators import html_grammar_complete
 from fuzz.structure_generators import Identifier, Production, compile_grammar, generate
 
@@ -44,10 +45,10 @@ def test_corpus_routes_exact_bytes(
         tuple((tmp_path / entry.file).read_bytes() for entry in manifest.entries),
         tuple(entry.productions for entry in manifest.entries),
         manifest.rejected,
-    ) == (targets, (source,) * len(targets), (((production, "fixture:1"),),) * len(targets), ())
+    ) == (targets, (SEED_HEADER + source,) * len(targets), (((production, "fixture:1"),),) * len(targets), ())
     assert (
         json.loads((tmp_path / "manifest.json").read_text())["entries"][0]["sha256"]
-        == hashlib.sha256(source).hexdigest()
+        == hashlib.sha256(SEED_HEADER + source).hexdigest()
     )
 
 
