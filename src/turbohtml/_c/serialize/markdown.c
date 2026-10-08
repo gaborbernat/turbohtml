@@ -1914,24 +1914,19 @@ static int md_item_is_loose(md_ctx *ctx, th_node *node) {
                     break;
                 }
             }
-            continue;
-        }
-        if (child->type != TH_NODE_ELEMENT) {
-            continue;
-        }
-        uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
-        if (is_md_skipped(child)) {
-            continue;
-        }
-        if (is_md_block(atom)) {
-            in_run = 0;
-            if (md_is_paragraph_block(atom)) {
+        } else if (child->type == TH_NODE_ELEMENT && !is_md_skipped(child)) {
+            uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
+            if (is_md_block(atom)) {
+                in_run = 0;
+                if (md_is_paragraph_block(atom)) {
+                    units++;
+                }
+            } else if (!in_run) {
                 units++;
+                in_run = 1;
             }
-        } else if (!in_run) {
-            units++;
-            in_run = 1;
         }
+        /* a text run counts as a unit too, so the check follows every child */
         if (units > 1) {
             return 1;
         }

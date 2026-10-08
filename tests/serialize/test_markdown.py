@@ -647,6 +647,8 @@ def test_selected_item_keeps_nested_list_depth() -> None:
         pytest.param("<p><br>a</p>", "\\\na", id="leading-break-kept"),
         pytest.param("<ul><li>a<br></li><li>b</li></ul>", "- a\n- b", id="item-trailing-break-stays-tight"),
         pytest.param("<ul><li>a</li><br><li>b</li></ul>", "- a\n- b", id="break-between-items-dropped"),
+        pytest.param("<ul><li><p>x</p>y</li></ul>", "- x\n\n  y", id="item-text-after-paragraph-is-loose"),
+        pytest.param("<ul><li>x<ul></ul>y</li></ul>", "- x\n\n  y", id="item-text-around-empty-list-is-loose"),
         pytest.param("<ul><li>a<br>b</li><li>c</li></ul>", "- a  \n  b\n- c", id="item-inner-break-kept"),
         pytest.param("<p>a<br></p><p>c</p>", "a\n\nc", id="paragraph-trailing-break-dropped"),
         pytest.param("<blockquote>a<br></blockquote><p>c</p>", "> a\n\nc", id="quote-trailing-break-dropped"),
