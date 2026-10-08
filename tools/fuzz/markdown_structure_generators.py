@@ -124,17 +124,16 @@ def _tree(node: Element) -> _TreeNode:
 def _flow(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     output: Final[list[_Meaning]] = []
     inline: Final[list[_Meaning]] = []
-    for record in records:
+    for record in (*records, _BOUNDARY):
         if record[0] in _FLOW_INLINE:
             inline.append(record)
-        else:
-            if inline:
-                output.append(("p", (), _block_end(tuple(inline))))
-                inline.clear()
-            if record != _BOUNDARY:
-                output.append(record)
-    if inline:
-        output.append(("p", (), _block_end(tuple(inline))))
+            continue
+        # a paragraph needs a non-blank line (CommonMark 4.8), so a run of breaks alone is none, as an empty <p> is
+        if content := _block_end(tuple(inline)):
+            output.append(("p", (), content))
+        inline.clear()
+        if record != _BOUNDARY:
+            output.append(record)
     return tuple(output)
 
 
