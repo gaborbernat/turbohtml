@@ -120,6 +120,9 @@ from ._stubs.dom import (
     _register_mutation_record as _register_mutation_record,
 )
 from ._stubs.dom import (
+    _tree_verify as _tree_verify,
+)
+from ._stubs.dom import (
     parse as parse,
 )
 from ._stubs.dom import (

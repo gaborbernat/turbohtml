@@ -215,6 +215,7 @@ static PyMethodDef html_methods[] = {
     {"_sax_dispatch", turbohtml_sax_dispatch, METH_VARARGS, NULL},
     {"_parse_into", turbohtml_parse_into, METH_VARARGS, NULL},
     {"_rewrite", turbohtml_rewrite, METH_VARARGS, NULL},
+    {"_tree_verify", turbohtml_tree_verify, METH_O, NULL},
     {"_parse_tree", turbohtml_parse_tree, METH_VARARGS, NULL},
     {"_parse_fragment", turbohtml_parse_fragment, METH_VARARGS, NULL},
     {"_parse_only", turbohtml_parse_only, METH_O, NULL},
