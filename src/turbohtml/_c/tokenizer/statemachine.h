@@ -124,16 +124,21 @@ typedef struct {
 } th_parse_error;
 
 /* A growable sink the tokenizer and tree builder append parse errors to. A
-   zeroed sink is a valid empty one; the owner frees items with PyMem_Free. */
+   zeroed sink is a valid empty one; the owner frees items with PyMem_Free.
+   failed records a dropped error, so a reader fails instead of handing back an
+   incomplete list; checking it once at the end keeps every push site as cheap
+   as a push that cannot fail. */
 typedef struct {
     th_parse_error *items;
     Py_ssize_t len;
     Py_ssize_t cap;
+    int failed;
 } th_error_sink;
 
-/* Append one error to a sink, growing it as needed; -1 on allocation failure
-   (the error is then dropped, leaving the sink usable). Shared so the tree
-   builder reports its construction errors into the same sink the tokenizer fills. */
+/* Append one error to a sink, growing it as needed; -1 and sink->failed set on
+   allocation failure (the error is then dropped, leaving the sink usable). Shared
+   so the tree builder reports its construction errors into the same sink the
+   tokenizer fills. */
 int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col);
 
 /* Release a sink's storage and reset it to empty. */
@@ -253,6 +258,10 @@ enum th_step {
 
 /* Advance until one token is produced or the machine stalls. */
 enum th_step th_tok_next(th_tokenizer *self, th_token **out);
+
+/* Whether an allocation failed, the condition th_tok_next reports as TH_STEP_ERROR; a
+   drain reads it once after its loop instead of testing every step. */
+int th_tok_failed(const th_tokenizer *self);
 
 /* Free the buffers a consumer took ownership of (the moved-out text run). */
 void th_token_clear(th_token *tok);

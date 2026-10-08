@@ -177,7 +177,9 @@ uint32_t intern_attr_dynamic(th_tree *tree, const char *bytes, Py_ssize_t len) {
         return TH_ATTR__DYNAMIC_BASE + (found - 1);
     }
     if (attr_table_reserve(tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return TH_ATTR_UNKNOWN;         /* GCOVR_EXCL_LINE: allocation-failure path */
+        /* flag the parse as arena_alloc does, so the builder drops the tree instead of keeping an atom-0 attribute */
+        tree->failed = 1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        return TH_ATTR_UNKNOWN; /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     char *stored = arena_alloc(tree, len + 1);
     if (stored == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -338,15 +340,19 @@ Py_ssize_t th_tree_max_depth(const th_tree *tree) {
 /* Fold the preprocessing errors into the tokenizer's, once. They depend only on the input the
    tree still borrows, so finding them at the first read costs a parse that never reads errors
    nothing at all. */
-void th_tree_ensure_input_errors(th_tree *tree, int kind, const void *data, Py_ssize_t length) {
+int th_tree_ensure_input_errors(th_tree *tree, int kind, const void *data, Py_ssize_t length) {
     if (tree->input_errors_merged) {
-        return;
+        return 0;
     }
-    tree->input_errors_merged = 1;
     th_error_sink preprocessing = {0};
+    /* the merge leaves the tree's errors untouched on failure, so a later read can retry */
     th_input_stream_errors(kind, data, length, &preprocessing);
-    tree->failed |= th_error_sink_merge(&tree->errors, &preprocessing) < 0;
+    /* GCOVR_EXCL_BR_START: the scan and the merge fail only when an allocation does */
+    int failed = preprocessing.failed || th_error_sink_merge(&tree->errors, &preprocessing) < 0;
+    /* GCOVR_EXCL_BR_STOP */
     th_error_sink_free(&preprocessing);
+    tree->input_errors_merged = !failed;
+    return -failed;
 }
 
 const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count) {
@@ -426,6 +432,11 @@ static th_node *current_node(th_tree *tree) {
 }
 
 static int stack_push(th_tree *tree, th_node *node) {
+    /* a failed node_new hands over NULL and sets tree->failed, which ends the drain after this token; until then the
+       stack stays free of it */
+    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: only an allocation failure yields no node */
+        return 0;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (tree->open_len >= TH_MAX_TREE_DEPTH) {
         /* Runaway nesting: leave the element in the DOM (it was already inserted under
            the deepest open element) but do not descend into it, so subsequent start
@@ -1324,6 +1335,12 @@ static Py_UCS4 *token_text(th_tree *tree, const th_token *token, Py_ssize_t *out
     } else {
         out = buf_to_ucs4(tree, &token->text, out_len);
     }
+    /* an allocation failure set tree->failed, which ends the drain after this token; until then every mode sees an
+       empty run instead of reading through the NULL copy */
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: a text token's run is never empty, so NULL means allocation failure */
+        *out_len = 0;  /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     /* a mode that consumed a leading slice of this text token and reprocessed
        the remainder set text_offset; hand back only the remainder */
     /* the consumed prefix never exceeds the run length */
@@ -1491,11 +1508,13 @@ static th_select_cache *select_cache_get(th_tree *tree, th_node *select) {
             state->caches = grown;
             state->cap = (Py_ssize_t)cap;
         }
-        slot = ++state->count;
+        /* counted only once indexed: a failed insert must leave no uninitialized cache for select_cache_free */
+        slot = state->count + 1;
         if (th_node_map_insert(&state->index, select, slot) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             tree->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
             return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         }
+        state->count = slot;
         th_select_cache *cache = &state->caches[slot - 1];
         cache->select = select;
         cache->targets = NULL;
@@ -2132,8 +2151,9 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         Py_ssize_t fs = stack_index_of(tree, fmt);
         stack_remove_at(tree, fs);
         Py_ssize_t furthest_now = stack_index_of(tree, furthest);
-        if (!stack_push(tree, NULL)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return 1;                  /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        /* grow the stack by one slot; the clone fills it because stack_push refuses NULL, a failed node_new */
+        if (!stack_push(tree, fmt_clone)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return 1;                       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         }
         memmove(&tree->open[furthest_now + 2], &tree->open[furthest_now + 1],
                 (size_t)(tree->open_len - furthest_now - 2) * sizeof(th_node *));
@@ -4366,6 +4386,9 @@ static void run_drain(th_tree *tree, th_tokenizer *sm, th_run_state *run_state) 
                                tok->col);
         }
     }
+    /* the tokenizer reports its allocation failures as TH_STEP_ERROR, which would otherwise end the drain as if the
+       input had ended and return a partial tree, and a parse error the sink dropped would leave the list incomplete */
+    tree->failed |= th_tok_failed(sm) || tree->errors.failed; /* GCOVR_EXCL_BR_LINE: only an allocation fails */
     run_state->mode = dc->mode;
     run_state->original_mode = dc->original_mode;
     run_state->foster_return = dc->foster_return;
@@ -4809,7 +4832,10 @@ th_tree *th_stream_finish(th_stream *stream) {
     /* the source locations index the uncompacted input, and to_source() reads it after the tokenizer is gone */
     retain_normalized_source(stream->tree, stream->sm, stream->tree->track_locations);
     finalize_document(stream->tree);
-    stream->tree->failed |= th_error_sink_merge(&stream->tree->errors, &stream->preprocessing) < 0;
+    /* GCOVR_EXCL_BR_START: the scan and the merge fail only when an allocation does */
+    stream->tree->failed |=
+        stream->preprocessing.failed || th_error_sink_merge(&stream->tree->errors, &stream->preprocessing) < 0;
+    /* GCOVR_EXCL_BR_STOP */
     th_error_sink_free(&stream->preprocessing);
     if (stream->tree->failed) { /* GCOVR_EXCL_BR_LINE: only an allocation failure sets failed */
         return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */
