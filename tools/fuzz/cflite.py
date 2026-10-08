@@ -120,15 +120,18 @@ def _public_build_log(log: Path) -> str:
 
 
 def _crashes(workspace: Path) -> list[dict[str, str | int]]:
-    # the hash names a crash for triage without exposing the input, as fuzz.py logs its crashers
+    # the hash names a crash for triage without exposing the input, as fuzz.py logs its crashers. CIFuzz saves each
+    # input as out/artifacts/<target>/<sanitizer>/<input> next to an <input>.summary stack trace (_target_artifact_path
+    # and _save_crash in infra/cifuzz/fuzz_target.py, google/oss-fuzz@868bfcbd1db0c8eb4dc6029598c90705d6c88e74)
+    artifacts: Final = workspace / "out" / "artifacts"
     return [
         {
-            "fuzzer": path.parent.name,
+            "fuzzer": path.relative_to(artifacts).parts[0],
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "bytes": path.stat().st_size,
         }
-        for path in sorted((workspace / "out" / "artifacts").rglob("*"))
-        if path.is_file()
+        for path in sorted(artifacts.rglob("*"))
+        if path.is_file() and path.suffix != ".summary"
     ]
 
 

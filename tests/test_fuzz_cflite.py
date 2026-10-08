@@ -141,15 +141,24 @@ def test_cflite_build_success_keeps_log_private(
 def test_cflite_reports_crashes_by_hash(
     docker: MagicMock, mocker: MockerFixture, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    crash: Final = tmp_path / "workspace" / "out" / "artifacts" / "fuzz_html_document" / "crash-input"
-    crash.parent.mkdir(parents=True)
-    crash.write_bytes(b"<secret>")
+    artifacts: Final = tmp_path / "workspace" / "out" / "artifacts"
+    for target, name, data in (
+        ("fuzz_html_document", "crash-8c1ff5bd5bfa04b3c5dd2b9b5bd52bc1a0ea0d1a", b"<secret>"),
+        ("fuzz_xml_transform", "crash-2b0f8d36f2e8f9d2e86c4b8a2e43f4e5c0a1b7d9", b"<x/>"),
+    ):
+        crash = artifacts / target / "address" / name
+        crash.parent.mkdir(parents=True)
+        crash.write_bytes(data)
+        crash.with_name(f"{crash.name}.summary").write_text("==1==ERROR: AddressSanitizer: heap-buffer-overflow\n")
     docker.side_effect = [mocker.MagicMock(returncode=0), mocker.MagicMock(returncode=1)]
     status: Final = main(_arguments(tmp_path))
     output: Final = capsys.readouterr().out
     assert (status, json.loads(output)["crashes"], "secret" in output) == (
         1,
-        [{"bytes": 8, "fuzzer": "fuzz_html_document", "sha256": hashlib.sha256(b"<secret>").hexdigest()}],
+        [
+            {"bytes": 8, "fuzzer": "fuzz_html_document", "sha256": hashlib.sha256(b"<secret>").hexdigest()},
+            {"bytes": 4, "fuzzer": "fuzz_xml_transform", "sha256": hashlib.sha256(b"<x/>").hexdigest()},
+        ],
         False,
     )
 
