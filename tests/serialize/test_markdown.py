@@ -121,6 +121,7 @@ def test_blocks_and_whitespace(html: str, expected: str) -> None:
         pytest.param("<strong>a<p></p></strong>", "**a**", id="emphasis-before-empty-block"),
         pytest.param("<span>a<p>x</p>c</span>", "a\n\nx\n\nc", id="inline-text-after-block-opens-block"),
         pytest.param("<strong>a<ul><li>i</li></ul>c</strong>", "**a**\n\n- **i**\n\n**c**", id="emphasis-around-list"),
+        pytest.param("<em>a<blockquote>b</blockquote>c</em>", "*a*\n\n> *b*\n\n*c*", id="emphasis-around-quote"),
     ],
 )
 def test_inline_emphasis(html: str, expected: str) -> None:

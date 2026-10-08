@@ -1,0 +1,1 @@
+``to_markdown`` closes emphasis before a block quote inside it and reopens it in the quote.

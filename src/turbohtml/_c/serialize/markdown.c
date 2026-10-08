@@ -3154,6 +3154,11 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
         md_enter_table(ctx, node);
         return;
     case TH_TAG_BLOCKQUOTE: {
+        /* the quote opens its lines here rather than through md_block_line, so it closes
+           the runs before it (CommonMark 6.2 pairs them within one block) and takes the
+           block start an inner block left pending */
+        md_suspend_markers(ctx);
+        ctx->block_ended = 0;
         Py_ssize_t base = ctx->prefix.len;
         int saved_levels = ctx->indent_levels;
         const char *marker = ++ctx->indent_levels <= TH_MAX_INDENT_LEVELS ? "> " : "";
