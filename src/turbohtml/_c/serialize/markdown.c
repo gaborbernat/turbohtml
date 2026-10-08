@@ -1959,9 +1959,12 @@ static int md_item_is_loose(md_ctx *ctx, th_node *node) {
         }
         int visible = 0;
         if (child->type == TH_NODE_TEXT) {
-            const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len && !visible; index++) {
-                visible = !is_space(text[index]);
+            /* inside a run more text only extends it, so only a run's first text is read */
+            if (!in_run) {
+                const Py_UCS4 *text = need_text(ctx->tree, child);
+                for (Py_ssize_t index = 0; index < child->text_len && !visible; index++) {
+                    visible = !is_space(text[index]);
+                }
             }
         } else if (child->type == TH_NODE_ELEMENT && !is_md_skipped(child)) {
             uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
