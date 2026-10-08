@@ -430,11 +430,6 @@ static th_node *current_node(th_tree *tree) {
 }
 
 static int stack_push(th_tree *tree, th_node *node) {
-    /* a failed node_new hands over NULL and sets tree->failed, which ends the drain after this token; until then the
-       stack stays free of it */
-    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: only an allocation failure yields no node */
-        return 0;       /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
     if (tree->open_len >= TH_MAX_TREE_DEPTH) {
         /* Runaway nesting: leave the element in the DOM (it was already inserted under
            the deepest open element) but do not descend into it, so subsequent start
@@ -871,8 +866,8 @@ static void record_meta_label(th_tree *tree, const th_token *token) {
 
 static th_node *insert_element(th_tree *tree, const th_token *token) {
     th_node *node = build_element(tree, token);
-    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (node == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return tree->sink;  /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     th_node *parent, *before;
     insertion_location(tree, &parent, &before);
@@ -1136,12 +1131,12 @@ static th_node *declarative_shadow_host(th_tree *tree, const th_token *token, in
    insertions populate the shadow tree. NULL on allocation failure. */
 static th_node *insert_declarative_template(th_tree *tree, const th_token *token, th_node *host, int closed) {
     th_node *tmpl = build_element(tree, token);
-    if (tmpl == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (tmpl == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return tree->sink; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     th_node *shadow = th_element_attach_shadow(tree, host, closed);
-    if (shadow == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (shadow == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return tree->sink; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     if (token_attr(token, "shadowrootdelegatesfocus", 24) != NULL) {
         shadow->tag_flags |= TH_SHADOW_DELEGATES_FOCUS;
@@ -1167,9 +1162,6 @@ static th_node *insert_template(th_tree *tree, const th_token *token) {
         return insert_declarative_template(tree, token, host, closed);
     }
     th_node *node = insert_element(tree, token);
-    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-    }
     th_node *content = node_new(tree, TH_NODE_CONTENT);
     if (content == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return node;       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
@@ -2149,9 +2141,8 @@ static int adoption_agency(th_tree *tree, uint16_t atom) {
         Py_ssize_t fs = stack_index_of(tree, fmt);
         stack_remove_at(tree, fs);
         Py_ssize_t furthest_now = stack_index_of(tree, furthest);
-        /* grow the stack by one slot; the clone fills it because stack_push refuses NULL, a failed node_new */
-        if (!stack_push(tree, fmt_clone)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return 1;                       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        if (!stack_push(tree, NULL)) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return 1;                  /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
         }
         memmove(&tree->open[furthest_now + 2], &tree->open[furthest_now + 1],
                 (size_t)(tree->open_len - furthest_now - 2) * sizeof(th_node *));
@@ -2509,8 +2500,8 @@ static th_node *insert_implicit(th_tree *tree, uint16_t atom, uint8_t flags);
 
 static th_node *insert_implicit(th_tree *tree, uint16_t atom, uint8_t flags) {
     th_node *node = node_new(tree, TH_NODE_ELEMENT);
-    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    if (node == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return tree->sink; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     node->text = (Py_UCS4 *)th_tag_wide_name(atom);
     node->text_len = th_tag_table[atom - 1].name_len;
@@ -2605,9 +2596,7 @@ static enum th_drain drain_before_html(th_tree *tree, th_token *tok, th_insert *
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HTML) {
         th_node *html = insert_element(tree, tok);
-        if (html != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, html);
-        }
+        stack_push(tree, html);
         dc->mode = M_BEFORE_HEAD;
         return TH_DRAIN_NEXT;
     }
@@ -2619,9 +2608,7 @@ static enum th_drain drain_before_html(th_tree *tree, th_token *tok, th_insert *
     }
     {
         th_node *html = insert_implicit(tree, TH_TAG_HTML, TH_TAG_SPECIAL | TH_TAG_SCOPING);
-        if (html != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, html);
-        }
+        stack_push(tree, html);
     }
     dc->mode = M_BEFORE_HEAD;
     return TH_DRAIN_REPROCESS;
@@ -2655,10 +2642,8 @@ static enum th_drain drain_before_head(th_tree *tree, th_token *tok, th_insert *
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_HEAD) {
         th_node *head = insert_element(tree, tok);
-        if (head != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, head);
-            tree->head = head;
-        }
+        stack_push(tree, head);
+        tree->head = head;
         dc->mode = M_IN_HEAD;
         return TH_DRAIN_NEXT;
     }
@@ -2717,9 +2702,7 @@ static enum th_drain drain_in_head(th_tree *tree, th_token *tok, th_insert *dc) 
         if (atom == TH_TAG_TITLE || atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT || atom == TH_TAG_NOFRAMES) {
             int model = content_model_for(atom, flags, tree->scripting);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, (enum th_initial_state)model);
             dc->original_mode = M_IN_HEAD;
             dc->mode = M_TEXT;
@@ -2732,9 +2715,7 @@ static enum th_drain drain_in_head(th_tree *tree, th_token *tok, th_insert *dc) 
         }
         if (atom == TH_TAG_NOSCRIPT) {
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             if (tree->scripting) {
                 /* with scripting on, noscript follows the generic raw-text path */
                 th_tok_switch(dc->sm, TH_INIT_RAWTEXT);
@@ -2747,10 +2728,8 @@ static enum th_drain drain_in_head(th_tree *tree, th_token *tok, th_insert *dc) 
         }
         if (atom == TH_TAG_TEMPLATE) {
             th_node *node = insert_template(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                afe_push_marker(tree);
-            }
+            stack_push(tree, node);
+            afe_push_marker(tree);
             tmpl_push(tree, M_IN_TEMPLATE);
             dc->mode = M_IN_TEMPLATE;
             return TH_DRAIN_NEXT;
@@ -2818,9 +2797,7 @@ static enum th_drain drain_in_head_noscript(th_tree *tree, th_token *tok, th_ins
         }
         if (atom == TH_TAG_STYLE || atom == TH_TAG_NOFRAMES) {
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, TH_INIT_RAWTEXT);
             dc->original_mode = M_IN_HEAD_NOSCRIPT;
             dc->mode = M_TEXT;
@@ -2858,18 +2835,14 @@ static enum th_drain drain_after_head(th_tree *tree, th_token *tok, th_insert *d
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_BODY) {
         th_node *body = insert_element(tree, tok);
-        if (body != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, body);
-        }
+        stack_push(tree, body);
         tree->frameset_ok = 0; /* an explicit body can't be replaced by a frameset */
         dc->mode = M_IN_BODY;
         return TH_DRAIN_NEXT;
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_FRAMESET) {
         th_node *fs = insert_element(tree, tok);
-        if (fs != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, fs);
-        }
+        stack_push(tree, fs);
         dc->mode = M_IN_FRAMESET;
         return TH_DRAIN_NEXT;
     }
@@ -2890,21 +2863,15 @@ static enum th_drain drain_after_head(th_tree *tree, th_token *tok, th_insert *d
                        stack; the template itself stays open */
                     tree->open[tree->open_len - 1] = node;
                     tree->stack_version++;
-                    if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                        afe_push_marker(tree);
-                        tmpl_push(tree, M_IN_TEMPLATE);
-                        dc->mode = M_IN_TEMPLATE;
-                    } else {
-                        stack_pop(tree); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-                    }
+                    afe_push_marker(tree);
+                    tmpl_push(tree, M_IN_TEMPLATE);
+                    dc->mode = M_IN_TEMPLATE;
                     return TH_DRAIN_NEXT;
                 }
                 th_node *node = is_void_atom(atom) ? insert_void_element(tree, tok) : insert_element(tree, tok);
                 stack_pop(tree); /* remove head again */
                 if (atom == TH_TAG_TITLE || atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT || atom == TH_TAG_NOFRAMES) {
-                    if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                        stack_push(tree, node);
-                    }
+                    stack_push(tree, node);
                     th_tok_switch(dc->sm, (enum th_initial_state)content_model_for(atom, flags, tree->scripting));
                     dc->original_mode = M_AFTER_HEAD;
                     dc->mode = M_TEXT;
@@ -2921,9 +2888,7 @@ static enum th_drain drain_after_head(th_tree *tree, th_token *tok, th_insert *d
     }
     {
         th_node *body = insert_implicit(tree, TH_TAG_BODY, TH_TAG_SPECIAL);
-        if (body != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, body);
-        }
+        stack_push(tree, body);
     }
     dc->mode = M_IN_BODY;
     return TH_DRAIN_REPROCESS;
@@ -2938,10 +2903,8 @@ static enum th_drain drain_in_template(th_tree *tree, th_token *tok, th_insert *
         uint16_t atom = tok->atom;
         if (atom == TH_TAG_TEMPLATE) {
             th_node *node = insert_template(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                afe_push_marker(tree);
-            }
+            stack_push(tree, node);
+            afe_push_marker(tree);
             tmpl_push(tree, M_IN_TEMPLATE);
             return TH_DRAIN_NEXT;
         }
@@ -2952,9 +2915,7 @@ static enum th_drain drain_in_template(th_tree *tree, th_token *tok, th_insert *
         }
         if (atom == TH_TAG_TITLE || atom == TH_TAG_STYLE || atom == TH_TAG_SCRIPT || atom == TH_TAG_NOFRAMES) {
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, (enum th_initial_state)content_model_for(atom, flags, tree->scripting));
             dc->original_mode = M_IN_TEMPLATE;
             dc->mode = M_TEXT;
@@ -3011,9 +2972,7 @@ static enum th_drain drain_in_frameset(th_tree *tree, th_token *tok, th_insert *
         uint16_t atom = tok_atom(tok);
         if (atom == TH_TAG_FRAMESET) {
             th_node *fs = insert_element(tree, tok);
-            if (fs != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, fs);
-            }
+            stack_push(tree, fs);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_FRAME) {
@@ -3022,9 +2981,7 @@ static enum th_drain drain_in_frameset(th_tree *tree, th_token *tok, th_insert *
         }
         if (atom == TH_TAG_NOFRAMES) {
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, TH_INIT_RAWTEXT);
             dc->original_mode = M_IN_FRAMESET;
             dc->mode = M_TEXT;
@@ -3058,9 +3015,7 @@ static enum th_drain drain_after_frameset(th_tree *tree, th_token *tok, th_inser
     }
     if (tok->kind == TH_START_TAG && tok_atom(tok) == TH_TAG_NOFRAMES) {
         th_node *node = insert_element(tree, tok);
-        if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, node);
-        }
+        stack_push(tree, node);
         th_tok_switch(dc->sm, TH_INIT_RAWTEXT);
         dc->original_mode = M_AFTER_FRAMESET;
         dc->mode = M_TEXT;
@@ -3185,9 +3140,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                     stack_pop(tree);
                 }
                 th_node *fs = insert_element(tree, tok);
-                if (fs != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                    stack_push(tree, fs);
-                }
+                stack_push(tree, fs);
                 dc->mode = M_IN_FRAMESET;
             }
             return TH_DRAIN_NEXT;
@@ -3200,18 +3153,14 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                 stack_pop(tree); /* nested headings don't stack */
             }
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (is_p_closing_block(atom) && atom != TH_TAG_PLAINTEXT && atom != TH_TAG_PRE &&
             atom != TH_TAG_LISTING) { /* pre/listing also drop a leading newline below */
             close_p_in_button_scope(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_TABLE) {
@@ -3220,9 +3169,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                 pop_until_atom(tree, TH_TAG_P);
             }
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             dc->mode = M_IN_TABLE;
             return TH_DRAIN_NEXT;
         }
@@ -3238,17 +3185,14 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             reconstruct_afe(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             tree->frameset_ok = 0;
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_SVG || atom == TH_TAG_MATH) {
             reconstruct_afe(tree);
             th_node *node = insert_foreign(tree, tok, atom == TH_TAG_SVG ? TH_NS_SVG : TH_NS_MATHML);
-            if (node != NULL && !tok->self_closing) { /* GCOVR_EXCL_BR_LINE: insert_foreign returns NULL only on
-                                                         allocation failure */
+            if (!tok->self_closing) {
                 stack_push(tree, node);
             }
             return TH_DRAIN_NEXT;
@@ -3271,9 +3215,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             close_p_before_list_item(tree, barrier);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_DD || atom == TH_TAG_DT) {
@@ -3294,9 +3236,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             close_p_before_list_item(tree, barrier);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_HR) {
@@ -3316,9 +3256,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             reconstruct_afe(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_OPTION || atom == TH_TAG_OPTGROUP) {
@@ -3332,9 +3270,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             reconstruct_afe(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_RB || atom == TH_TAG_RTC) {
@@ -3342,9 +3278,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                 generate_implied_end_tags(tree, TH_TAG_UNKNOWN);
             }
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_RP || atom == TH_TAG_RT) {
@@ -3352,9 +3286,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                 generate_implied_end_tags(tree, TH_TAG_RTC);
             }
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_BASE || atom == TH_TAG_BASEFONT || atom == TH_TAG_BGSOUND || atom == TH_TAG_LINK ||
@@ -3369,11 +3301,9 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             }
             close_p_in_button_scope(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                if (!in_template) {
-                    tree->form = node;
-                }
+            stack_push(tree, node);
+            if (!in_template) {
+                tree->form = node;
             }
             return TH_DRAIN_NEXT;
         }
@@ -3392,20 +3322,16 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             /* the famous quirk: <image> becomes <img> */
             reconstruct_afe(tree);
             th_node *node = insert_void_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                node->atom = TH_TAG_IMG;
-                node->text = (Py_UCS4 *)th_tag_wide_name(TH_TAG_IMG);
-                node->text_len = th_tag_table[TH_TAG_IMG - 1].name_len;
-            }
+            node->atom = TH_TAG_IMG;
+            node->text = (Py_UCS4 *)th_tag_wide_name(TH_TAG_IMG);
+            node->text_len = th_tag_table[TH_TAG_IMG - 1].name_len;
             return TH_DRAIN_NEXT; /* img is void */
         }
         if (atom == TH_TAG_PLAINTEXT) {
             tree->reparse_hazard = 1; /* the serialized </plaintext> re-parses as text, as does everything after it */
             close_p_in_button_scope(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, TH_INIT_PLAINTEXT);
             return TH_DRAIN_NEXT; /* PLAINTEXT runs to EOF; no end tag returns from it */
         }
@@ -3417,9 +3343,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                 tree->frameset_ok = 0;
             }
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             if (atom == TH_TAG_TEXTAREA) {
                 tree->drop_newline = 1; /* a leading LF in a textarea is ignored */
             }
@@ -3434,9 +3358,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
         if (atom == TH_TAG_PRE || atom == TH_TAG_LISTING) {
             close_p_in_button_scope(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             tree->drop_newline = 1; /* a leading LF in pre/listing is ignored */
             tree->frameset_ok = 0;
             return TH_DRAIN_NEXT;
@@ -3464,36 +3386,28 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
                 reconstruct_afe(tree);
             }
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                afe_push_if_open(tree, node);
-            }
+            stack_push(tree, node);
+            afe_push_if_open(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (flags & TH_TAG_FORMATTING) {
             reconstruct_afe(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                afe_push_if_open(tree, node);
-            }
+            stack_push(tree, node);
+            afe_push_if_open(tree, node);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_APPLET || atom == TH_TAG_MARQUEE || atom == TH_TAG_OBJECT) {
             reconstruct_afe(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             afe_push_marker(tree);
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_TEMPLATE) {
             th_node *node = insert_template(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                afe_push_marker(tree);
-            }
+            stack_push(tree, node);
+            afe_push_marker(tree);
             tmpl_push(tree, M_IN_TEMPLATE);
             dc->mode = M_IN_TEMPLATE;
             return TH_DRAIN_NEXT;
@@ -3504,9 +3418,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             return TH_DRAIN_NEXT; /* void: inserted, not pushed (a stray "/" on any
                       other element is ignored in HTML content) */
         }
-        if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-            stack_push(tree, node);
-        }
+        stack_push(tree, node);
         /* every HTML selectedcontent the parser creates lands here, so a select cached before
            it arrived learns of it without a test on every other element's insert or push */
         if (atom == TH_TAG_SELECTEDCONTENT && tree->select_state != NULL) {
@@ -3728,18 +3640,14 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
             clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
             afe_push_marker(tree);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             dc->mode = M_IN_CAPTION;
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_COLGROUP) {
             clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             dc->mode = M_IN_COLUMN_GROUP;
             return TH_DRAIN_NEXT;
         }
@@ -3747,9 +3655,7 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
             clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
             {
                 th_node *cg = insert_implicit(tree, TH_TAG_COLGROUP, TH_TAG_SPECIAL);
-                if (cg != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                    stack_push(tree, cg);
-                }
+                stack_push(tree, cg);
             }
             dc->mode = M_IN_COLUMN_GROUP;
             return TH_DRAIN_REPROCESS;
@@ -3757,9 +3663,7 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
         if (atom == TH_TAG_TBODY || atom == TH_TAG_THEAD || atom == TH_TAG_TFOOT) {
             clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             dc->mode = M_IN_TABLE_BODY;
             return TH_DRAIN_NEXT;
         }
@@ -3767,9 +3671,7 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
             clear_to(tree, TH_TAG_TABLE, TH_TAG_TABLE, TH_TAG_TABLE);
             {
                 th_node *tb = insert_implicit(tree, TH_TAG_TBODY, TH_TAG_SPECIAL);
-                if (tb != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                    stack_push(tree, tb);
-                }
+                stack_push(tree, tb);
             }
             dc->mode = M_IN_TABLE_BODY;
             return TH_DRAIN_REPROCESS;
@@ -3789,9 +3691,7 @@ static enum th_drain drain_in_table(th_tree *tree, th_token *tok, th_insert *dc)
             uint16_t a2 = tok->atom;
             int model = content_model_for(a2, f2, tree->scripting);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, (enum th_initial_state)model);
             dc->original_mode = dc->table_origin;
             dc->mode = M_TEXT;
@@ -3944,9 +3844,7 @@ static enum th_drain drain_in_table_body(th_tree *tree, th_token *tok, th_insert
         if (atom == TH_TAG_TR) {
             clear_to(tree, TH_TAG_TBODY, TH_TAG_TFOOT, TH_TAG_THEAD);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             dc->mode = M_IN_ROW;
             return TH_DRAIN_NEXT;
         }
@@ -3954,9 +3852,7 @@ static enum th_drain drain_in_table_body(th_tree *tree, th_token *tok, th_insert
             clear_to(tree, TH_TAG_TBODY, TH_TAG_TFOOT, TH_TAG_THEAD);
             {
                 th_node *row = insert_implicit(tree, TH_TAG_TR, TH_TAG_SPECIAL);
-                if (row != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                    stack_push(tree, row);
-                }
+                stack_push(tree, row);
             }
             dc->mode = M_IN_ROW;
             return TH_DRAIN_REPROCESS;
@@ -4009,9 +3905,7 @@ static enum th_drain drain_in_row(th_tree *tree, th_token *tok, th_insert *dc) {
         if (atom == TH_TAG_TD || atom == TH_TAG_TH) {
             clear_to(tree, TH_TAG_TR, TH_TAG_TR, TH_TAG_TR);
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             afe_push_marker(tree);
             dc->mode = M_IN_CELL;
             return TH_DRAIN_NEXT;
@@ -4189,9 +4083,7 @@ static enum th_drain drain_after_after_frameset(th_tree *tree, th_token *tok, th
         }
         if (atom == TH_TAG_NOFRAMES) {
             th_node *node = insert_element(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-            }
+            stack_push(tree, node);
             th_tok_switch(dc->sm, TH_INIT_RAWTEXT);
             dc->original_mode = M_AFTER_AFTER_FRAMESET;
             dc->mode = M_TEXT;
@@ -4281,10 +4173,8 @@ static void run_drain(th_tree *tree, th_tokenizer *sm, th_run_state *run_state) 
              dc->mode == M_IN_COLUMN_GROUP || dc->mode == M_IN_CAPTION) &&
             tok_atom(tok) == TH_TAG_TEMPLATE) {
             th_node *node = insert_template(tree, tok);
-            if (node != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-                stack_push(tree, node);
-                afe_push_marker(tree);
-            }
+            stack_push(tree, node);
+            afe_push_marker(tree);
             tmpl_push(tree, M_IN_TEMPLATE);
             dc->mode = M_IN_TEMPLATE;
             goto token_done;
@@ -4524,9 +4414,12 @@ static th_tree *tree_new_document(int positions, int locations) {
     tree->track_positions = positions || locations; /* set before any element node_new */
     tree->track_locations = locations;
     tree->document = node_new(tree, TH_NODE_DOCUMENT);
-    if (tree->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        th_tree_free(tree);       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    tree->sink = node_new(tree, TH_NODE_ELEMENT);
+    /* GCOVR_EXCL_BR_START: allocation failure cannot be forced from a test */
+    if (tree->document == NULL || tree->sink == NULL) {
+        /* GCOVR_EXCL_BR_STOP */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     tree->frameset_ok = 1;
     return tree;
@@ -4615,9 +4508,12 @@ th_tree *th_tree_parse_fragment(int kind, const void *data, Py_ssize_t length, c
     tree->track_positions = positions || locations; /* set before any element node_new */
     tree->track_locations = locations;
     tree->document = node_new(tree, TH_NODE_DOCUMENT);
-    if (tree->document == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        th_tree_free(tree);       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        return NULL;              /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+    tree->sink = node_new(tree, TH_NODE_ELEMENT);
+    /* GCOVR_EXCL_BR_START: allocation failure cannot be forced from a test */
+    if (tree->document == NULL || tree->sink == NULL) {
+        /* GCOVR_EXCL_BR_STOP */
+        th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
     tree->frameset_ok = 1;
 
