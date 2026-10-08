@@ -94,6 +94,7 @@ struct th_tree {
     Py_ssize_t open_len;
     uint64_t stack_version, scope_version;
     uint16_t scope_atom;
+    uint16_t ctx_atom; /* the fragment context element's atom (reset uses it) */
     int scope_result;
     Py_ssize_t open_cap;
     Py_ssize_t max_depth; /* peak open-element nesting seen while parsing; a cheap O(1)
@@ -111,7 +112,6 @@ struct th_tree {
     Py_ssize_t afe_cap;
     th_node *head;          /* the <head> element once inserted */
     th_node *fragment_root; /* the html root in fragment parsing; NULL otherwise */
-    uint16_t ctx_atom;      /* the fragment context element's atom (reset uses it) */
     th_node *form;          /* the form element pointer: nested forms are ignored */
     int *tmpl;              /* stack of template insertion modes (enum mode as int) */
     Py_ssize_t tmpl_len;
@@ -188,6 +188,10 @@ struct th_tree {
        parsing closes. One pointer keeps th_tree at 512 bytes, inside pymalloc's
        small-object limit, so every parse still allocates its tree from pymalloc. */
     th_select_state *select_state;
+    /* What a failed element construction hands the insertion modes in place of NULL: never linked into the
+       document, it absorbs the rest of the failing token's pushes and edits until tree->failed ends the drain, so
+       stack_push and the modes need no NULL checks. ctx_atom sits beside scope_atom to keep th_tree at 512 bytes. */
+    th_node *sink;
 };
 
 static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {

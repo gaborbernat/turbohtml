@@ -617,12 +617,12 @@ static th_node_attr *rw_attr_grow(th_node *node) {
     return &grown[node->attr_count];
 }
 
-/* Copy a str's code points into a fresh UCS4 buffer; *out_len set. NULL only on OOM. */
+/* Copy a str's code points into a fresh UCS4 buffer; *out_len set. NULL with MemoryError set on OOM. */
 static Py_UCS4 *rw_copy_ucs4(PyObject *str, Py_ssize_t *out_len) {
     Py_ssize_t len = PyUnicode_GET_LENGTH(str);
     Py_UCS4 *buf = PyMem_Malloc((size_t)(len ? len : 1) * sizeof(Py_UCS4));
-    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (buf == NULL) {                   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return (void *)PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int kind = PyUnicode_KIND(str);
     const void *data = PyUnicode_DATA(str);
@@ -658,6 +658,10 @@ static PyObject *rw_set_attribute(rw_handle *self, PyObject *args) {
     if (atom == TH_ATTR_UNKNOWN) {
         uint32_t count = self->ctx->tree->attr_rec_count;
         atom = intern_attr_dynamic(self->ctx->tree, buf, len);
+        if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+            PyMem_Free(copy);          /* GCOVR_EXCL_LINE: allocation-failure path */
+            return PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
         if (self->ctx->tree->attr_rec_count != count) {
             goto append;
         }
@@ -1050,6 +1054,8 @@ static int rw_validate_simple(sel_simple *simple, th_tree *tree, const char **re
         char buf[256];
         Py_ssize_t len = rw_encode_utf8(PyUnicode_4BYTE_KIND, simple->name, simple->name_len, buf, sizeof(buf));
         simple->attr_atom = intern_attr_dynamic(tree, buf, len);
+        /* a failed interning leaves no reason, which the caller reports as MemoryError */
+        return simple->attr_atom != TH_ATTR_UNKNOWN; /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
     }
     return 1;
 }
@@ -1117,7 +1123,13 @@ static th_node *rw_make_node(rw_ctx *ctx, const th_token *token, uint16_t atom, 
             const th_attr *attr = &token->attrs[index];
             char buf[256];
             Py_ssize_t at = rw_encode_utf8(attr->name.kind, attr->name.data, attr->name.len, buf, sizeof(buf));
-            node->attrs[index].name_atom = rw_attr_atom(ctx->tree, buf, at);
+            uint32_t name_atom = rw_attr_atom(ctx->tree, buf, at);
+            if (name_atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+                node->attr_count = index;       /* GCOVR_EXCL_LINE: allocation-failure path */
+                rw_free_node(node);             /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;                    /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            node->attrs[index].name_atom = name_atom;
             if (attr->has_value) {
                 node->attrs[index].value_len = attr->value.len;
                 node->attrs[index].value =
@@ -1490,6 +1502,11 @@ static int rw_compile_rules(rw_ctx *ctx, module_state *state, PyObject *handlers
         const char *reason = NULL;
         if (!rw_validate_alts(compiled->alts, compiled->count, ctx->tree, &reason)) {
             selector_free(compiled);
+            if (reason == NULL) { /* GCOVR_EXCL_BR_LINE: only a failed interning returns no reason */
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+                Py_DECREF(pair);  /* GCOVR_EXCL_LINE: allocation-failure path */
+                return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
             PyErr_Format(state->selector_error, "selector %R is not streamable: %s", selector, reason);
             Py_DECREF(pair);
             return -1;
@@ -1540,7 +1557,7 @@ PyObject *turbohtml_rewrite(PyObject *module, PyObject *args) {
     th_tok_close(ctx.sm);
 
     th_token *token;
-    enum th_step step;
+    enum th_step step = TH_STEP_DONE;
     Py_BEGIN_CRITICAL_SECTION(module);
     while (!ctx.error) {
         step = th_tok_next(ctx.sm, &token);
@@ -1570,6 +1587,11 @@ PyObject *turbohtml_rewrite(PyObject *module, PyObject *args) {
         }
     }
     Py_END_CRITICAL_SECTION();
+    /* checked once after the loop: a per-token check cost rewrite 26,000 instructions a call */
+    if (step == TH_STEP_ERROR) { /* GCOVR_EXCL_BR_LINE: the only step error is an out-of-memory condition */
+        PyErr_NoMemory();        /* GCOVR_EXCL_LINE: allocation-failure path */
+        ctx.error = 1;           /* GCOVR_EXCL_LINE: allocation-failure path */
+    } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
 
     /* an unclosed element at EOF: flush its trailing edits and free the spine */
     while (ctx.depth > 0 && !ctx.error) {

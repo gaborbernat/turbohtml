@@ -40,6 +40,14 @@
 
 #define REPLACEMENT 0xFFFD
 
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
 static void buf_init(th_buf *buf) {
     buf->data = NULL;
     buf->len = 0;
@@ -354,23 +362,8 @@ static void push(th_tokenizer *self, th_buf *buf, Py_UCS4 ch) {
         self->oom = 1;         /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
 }
 
-int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col) {
-    if (sink->len == sink->cap) {
-        size_t cap;
-        size_t bytes;
-        int grew = th_grow_cap((size_t)(sink->cap + 1), (size_t)sink->cap, 8, sizeof(th_parse_error), &cap, &bytes);
-        if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            return -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-        }
-        th_parse_error *grown = PyMem_Realloc(sink->items, bytes);
-        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        }
-        sink->items = grown;
-        sink->cap = (Py_ssize_t)cap;
-    }
-    sink->items[sink->len++] = (th_parse_error){code, line, col};
-    return 0;
+TH_NOINLINE int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col) {
+    return th_error_sink_append(sink, code, line, col);
 }
 
 void th_error_sink_free(th_error_sink *sink) {
@@ -386,7 +379,7 @@ void th_tok_set_error_sink(th_tokenizer *self, th_error_sink *sink) {
 
 /* Record a parse error at the current input position. The sink check keeps the
    sink-free path (the standalone tokenizer) free of any per-error work; a sink's
-   own allocation failure silently drops the error rather than failing the parse. */
+   own allocation failure marks the sink failed, which the drain turns into a failed parse. */
 static void tok_error(th_tokenizer *self, const char *code) {
     if (self->err_sink != NULL) {
         th_error_sink_push(self->err_sink, code, self->line, self->col);
@@ -580,6 +573,10 @@ void th_tok_borrow_input(th_tokenizer *self, int kind, const void *data, Py_ssiz
     self->input_borrowed = 1;
 }
 
+int th_tok_failed(const th_tokenizer *self) {
+    return self->oom;
+}
+
 const void *th_tok_input_data(const th_tokenizer *self, int *kind) {
     *kind = self->input.kind;
     return self->input.data;
@@ -727,6 +724,18 @@ static void start_tag(th_tokenizer *self, int end_tag, Py_UCS4 first) {
 /* Begin a new attribute and point self->attr at it. On allocation failure the
    oom_attr sink keeps subsequent appends writing into valid storage until the
    sticky flag is reported. */
+/* Route the attribute that found no slot to the discard sink and fail the token. Dropping
+   attribute capture keeps finish_attr_name off the slot that does not exist; the sticky
+   oom flag ends tokenization, so the option never matters again. */
+/* GCOVR_EXCL_START: runs only when an attribute slot fails to allocate */
+static TH_NOINLINE void attr_alloc_failed(th_tokenizer *self) {
+    self->oom = 1;
+    self->capture_attributes = 0;
+    self->attr = &self->oom_attr;
+    self->attr_loc = &self->oom_attr_loc;
+}
+/* GCOVR_EXCL_STOP */
+
 static void new_attr(th_tokenizer *self) {
     if (!self->capture_attributes) {
         self->attr = &self->oom_attr;
@@ -738,18 +747,14 @@ static void new_attr(th_tokenizer *self) {
         size_t cap;
         size_t bytes;
         int grew = th_grow_cap((size_t)(tok->attr_cap + 1), (size_t)tok->attr_cap, 4, sizeof(th_attr), &cap, &bytes);
-        if (!grew) {       /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-            self->oom = 1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-            self->attr = &self->oom_attr;         /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-            self->attr_loc = &self->oom_attr_loc; /* GCOVR_EXCL_LINE: size-overflow path */
-            return;                               /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        if (!grew) {                 /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+            attr_alloc_failed(self); /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return;                  /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
         }
         th_attr *grown = PyMem_Realloc(tok->attrs, bytes);
-        if (grown == NULL) {              /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            self->oom = 1;                /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
-            self->attr = &self->oom_attr; /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
-            self->attr_loc = &self->oom_attr_loc; /* GCOVR_EXCL_LINE: out-of-memory path */
-            return; /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        if (grown == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            attr_alloc_failed(self); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return;                  /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         for (Py_ssize_t index = tok->attr_cap; index < (Py_ssize_t)cap; index++) {
             buf_init(&grown[index].name);
@@ -759,11 +764,9 @@ static void new_attr(th_tokenizer *self) {
         tok->attrs = grown;
         if (self->capture_locations) {
             th_attr_loc *grown_locs = PyMem_Realloc(tok->attr_locs, cap * sizeof(th_attr_loc));
-            if (grown_locs == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-                self->oom = 1;                /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
-                self->attr = &self->oom_attr; /* GCOVR_EXCL_LINE: out-of-memory path */
-                self->attr_loc = &self->oom_attr_loc; /* GCOVR_EXCL_LINE: out-of-memory path */
-                return;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+            if (grown_locs == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                attr_alloc_failed(self); /* GCOVR_EXCL_LINE: allocation-failure path */
+                return;                  /* GCOVR_EXCL_LINE: allocation-failure path */
             }
             tok->attr_locs = grown_locs;
         }
@@ -1260,6 +1263,9 @@ void th_input_stream_errors(int kind, const void *data, Py_ssize_t len, th_error
    preprocessing error precedes a tokenizer error at the same position, because the spec
    reports it before the tokenizer consumes the character. */
 int th_error_sink_merge(th_error_sink *dst, const th_error_sink *src) {
+    if (th_error_sink_failed(dst) || th_error_sink_failed(src)) { /* GCOVR_EXCL_BR_LINE: only an allocation fails */
+        return -1;                                                /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (src->len == 0) {
         return 0;
     }
@@ -1286,14 +1292,6 @@ int th_error_sink_merge(th_error_sink *dst, const th_error_sink *src) {
     dst->cap = total;
     return 0;
 }
-
-#if defined(_MSC_VER)
-#define TH_NOINLINE __declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-#define TH_NOINLINE __attribute__((noinline))
-#else
-#define TH_NOINLINE
-#endif
 
 /* Find the first of up to four stop bytes (duplicates allowed) in the 1-byte
    input from position index on. A vector loop skips 16-byte blocks containing

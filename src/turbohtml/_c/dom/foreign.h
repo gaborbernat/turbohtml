@@ -268,9 +268,6 @@ static int is_foreign_breakout(uint16_t atom) {
 static th_node *insert_foreign(th_tree *tree, th_token *token, uint8_t ns) {
     token->self_closing_acknowledged = 1;
     th_node *node = insert_element(tree, token);
-    if (node == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-    }
     node->ns = ns;
     /* HTML category flags do not transfer (an svg <tr> is not special); only
        the integration-point elements are in the spec's special category */
@@ -410,8 +407,7 @@ static int foreign_step(th_tree *tree, th_token *token) {
         }
         uint8_t ns = current_node(tree)->ns;
         th_node *node = insert_foreign(tree, token, ns);
-        /* the inserted foreign node is NULL only on allocation failure */
-        if (node != NULL && !token->self_closing) { /* GCOVR_EXCL_BR_LINE */
+        if (!token->self_closing) {
             stack_push(tree, node);
         }
         return 1;
