@@ -1223,12 +1223,24 @@ static void md_emit_code_span(md_ctx *ctx, th_node *node) {
     PyMem_Free(content.data);
 }
 
+static void md_emit_url_without_breaks(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ssize_t len);
+
+/* What a destination character means to md_emit_url, so one table load per character
+   answers every test the layout pass makes. */
+enum { MD_URL_SPACE = 1, MD_URL_LT = 2, MD_URL_OPEN = 4, MD_URL_CLOSE = 8, MD_URL_BREAK = 16 };
+static const uint8_t MD_URL[128] = {
+    ['\t'] = MD_URL_BREAK, ['\n'] = MD_URL_BREAK, ['\r'] = MD_URL_BREAK, [' '] = MD_URL_SPACE,
+    ['<'] = MD_URL_LT,     ['('] = MD_URL_OPEN,   [')'] = MD_URL_CLOSE,
+};
+
 /* Write a link destination (CommonMark 6.3) after an optional base prefix. A bare
    destination cannot hold a space or start with `<`, and takes parentheses only
    in balanced pairs; anything else goes in the `<...>` form, which takes any
    parenthesis but no unescaped angle bracket. Parentheses stay bare while they
    balance, so a `wiki/Foo_(bar)` URL reads as written. A backslash, and a `&` that
-   would decode as a character reference, are escaped in either form. */
+   would decode as a character reference, are escaped in either form. A tab or line
+   break is left out: no destination form holds a line ending (CommonMark 6.3), and the
+   URL parser removes every tab and newline anyway (URL Standard 4.4). */
 static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ssize_t len) {
     /* an empty destination is spelled "<>": bare, a following title or a reference
        definition's line end would be read in its place (CommonMark 4.7, 6.3) */
@@ -1236,11 +1248,19 @@ static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ss
     int depth = 0;
     int unbalanced = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
-        if (url[index] == ' ' || (index == 0 && *base == '\0' && url[index] == '<')) {
+        uint8_t kind = url[index] < 128 ? MD_URL[url[index]] : 0;
+        if (kind == 0) {
+            continue;
+        }
+        if (kind & MD_URL_BREAK) {
+            md_emit_url_without_breaks(ctx, base, url, len);
+            return;
+        }
+        if ((kind & MD_URL_SPACE) || ((kind & MD_URL_LT) && index == 0 && *base == '\0')) {
             angle = 1;
-        } else if (url[index] == '(') {
+        } else if (kind & MD_URL_OPEN) {
             depth++;
-        } else if (url[index] == ')') {
+        } else if (kind & MD_URL_CLOSE) {
             unbalanced |= depth == 0;
             depth -= depth > 0;
         }
@@ -1261,6 +1281,24 @@ static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ss
     if (angle) {
         sbuf_putc(&ctx->out, '>');
     }
+}
+
+/* Write a destination that holds a tab or line break without them. Only such a rare
+   destination pays for the copy, made so that a reference split by a break is seen. */
+static void md_emit_url_without_breaks(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ssize_t len) {
+    Py_UCS4 *kept = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
+    if (kept == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        ctx->out.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;              /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_ssize_t count = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (url[index] >= 128 || !(MD_URL[url[index]] & MD_URL_BREAK)) {
+            kept[count++] = url[index];
+        }
+    }
+    md_emit_url(ctx, base, kept, count);
+    PyMem_Free(kept);
 }
 
 /* Write a link/image title inside its `"..."` delimiters: a `"` would close the

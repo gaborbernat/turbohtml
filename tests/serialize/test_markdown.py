@@ -930,6 +930,11 @@ def test_escaping_none(html: str, options: Markdown, expected: str) -> None:
             '<a href="http://x/\x7f">http://x/\x7f</a>', "[http://x/\x7f](http://x/\x7f)", id="no-autolink-del"
         ),
         pytest.param('<a href="http://x/y">http://x/y</a>', "<http://x/y>", id="autolink"),
+        pytest.param('<a href="a\nb">x</a>', "[x](ab)", id="newline-dropped"),
+        pytest.param('<a href="a\tb">x</a>', "[x](ab)", id="tab-dropped"),
+        pytest.param('<img src="i&#13;e">', "![](ie)", id="carriage-return-dropped"),
+        pytest.param('<a href="é\nx">t</a>', "[t](éx)", id="newline-dropped-after-non-ascii"),
+        pytest.param('<a href="\n&lt;">x</a>', "[x](<\\<>)", id="leading-angle-after-dropped-newline"),
     ],
 )
 def test_link_destination(html: str, expected: str) -> None:
