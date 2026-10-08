@@ -1134,6 +1134,14 @@ static void md_settle_run(md_ctx *ctx, Py_ssize_t index, th_node *node) {
     /* md_put_close moves a close that would follow a hard break in front of it */
     int moved = ctx->out.len == ctx->break_end && data == ctx->break_data;
     Py_ssize_t close_at = moved ? ctx->break_start : ctx->out.len;
+    /* the usual shape settles at a glance: a star run after a space or a line start,
+       around content that starts and ends with an ordinary character, opens (it cannot
+       close) and its close closes, and with equal runs on both sides the rule of 3 never
+       applies */
+    if (delimiter == '*' && md_edge(data[marker->open_at + open_len]) == 0 && md_edge(data[close_at - 1]) == 0 &&
+        (marker->open_at == 0 || md_edge(data[marker->open_at - 1]) == MD_EDGE_SPACE)) {
+        return;
+    }
     Py_ssize_t run_start = marker->open_at;
     while (run_start > 0 && md_live_delimiter(data, run_start - 1, delimiter)) {
         run_start--;
