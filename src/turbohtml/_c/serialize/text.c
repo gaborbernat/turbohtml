@@ -480,7 +480,9 @@ static void text_enter_link(text_ctx *ctx, th_node *node, Py_ssize_t opened) {
 
 static void text_render_inline(text_ctx *ctx, th_node *node) {
     if (node->type == TH_NODE_TEXT) {
-        text_emit_text(ctx, need_text(ctx->tree, node), node->text_len);
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(&ctx->out, ctx->tree, node, &len);
+        text_emit_text(ctx, text, len);
         return;
     }
     if (node->type != TH_NODE_ELEMENT && node->type != TH_NODE_CONTENT) {
@@ -530,11 +532,8 @@ static Py_ssize_t text_indent(text_ctx *ctx, Py_ssize_t count, int levels) {
 static int text_leads_with_inline(text_ctx *ctx, th_node *node) {
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         if (child->type == TH_NODE_TEXT) {
-            const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len; index++) {
-                if (!is_space(text[index])) {
-                    return 1;
-                }
+            if (!text_view_is_blank(text_view(ctx->tree, child))) {
+                return 1;
             }
             continue;
         }
@@ -573,17 +572,7 @@ static inline void text_block_child(text_ctx *ctx, text_frame *frame, th_node *c
         return;
     }
     if (!frame->in_run) {
-        int only_ws = child->type == TH_NODE_TEXT;
-        if (only_ws) {
-            const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len; index++) {
-                if (!is_space(text[index])) {
-                    only_ws = 0;
-                    break;
-                }
-            }
-        }
-        if (only_ws) {
+        if (child->type == TH_NODE_TEXT && text_view_is_blank(text_view(ctx->tree, child))) {
             return;
         }
         text_block_line(ctx, ctx->tight ? 0 : 1);
@@ -805,6 +794,8 @@ static void text_leave_cell(text_ctx *ctx, text_table *table) {
     for (Py_ssize_t index = 0; index < rendered.len; index++) {
         sbuf_putc(dst, rendered.data[index] == '\n' ? ' ' : rendered.data[index]);
     }
+    /* the cell's buffers would otherwise drop their failures */
+    ctx->out.failed |= rendered.failed | dst->failed;
     PyMem_Free(rendered.data);
     table->cells[slot] = table->cell;
     if (dst->len > table->widths[table->column]) {
@@ -976,7 +967,9 @@ static void text_run(text_ctx *ctx) {
             /* text lays out without pushing a frame, so a run of it renders in place */
             if (frame->walk == TEXT_WALK_INLINE) {
                 for (; child != NULL && child->type == TH_NODE_TEXT; child = child->next_sibling) {
-                    text_emit_text(ctx, need_text(ctx->tree, child), child->text_len);
+                    Py_ssize_t len;
+                    const Py_UCS4 *text = ser_text(&ctx->out, ctx->tree, child, &len);
+                    text_emit_text(ctx, text, len);
                 }
             } else if (frame->walk == TEXT_WALK_BLOCK) {
                 for (; child != NULL && child->type == TH_NODE_TEXT; child = child->next_sibling) {
@@ -1028,7 +1021,9 @@ static void text_render_root(text_ctx *ctx, th_node *node) {
     if (node->type == TH_NODE_TEXT) {
         ctx->started = 1;
         ctx->line_has_content = 1;
-        text_emit_text(ctx, need_text(ctx->tree, node), node->text_len);
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(&ctx->out, ctx->tree, node, &len);
+        text_emit_text(ctx, text, len);
     } else if (is_md_block(node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN)) {
         text_render_block(ctx, node);
     } else {

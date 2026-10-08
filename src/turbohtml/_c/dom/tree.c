@@ -355,13 +355,31 @@ const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count)
 }
 
 int th_node_text_is_blank(th_tree *tree, th_node *node) {
-    const Py_UCS4 *text = need_text(tree, node); /* realize a zero-copy span before scanning */
-    for (Py_ssize_t index = 0; index < node->text_len; index++) {
-        if (!is_space(text[index])) {
-            return 0;
+    return text_view_is_blank(text_view(tree, node));
+}
+
+int th_node_text_classify(th_tree *tree, th_node *root, int (*classify)(Py_UCS4)) {
+    th_node *node = root->first_child;
+    while (node != NULL) {
+        if (node->type == TH_NODE_TEXT) {
+            th_text_view text = text_view(tree, node);
+            for (Py_ssize_t index = 0; index < text.len; index++) {
+                int verdict = classify(text_view_at(text, index));
+                if (verdict != 0) {
+                    return verdict;
+                }
+            }
         }
+        if (node->first_child != NULL) {
+            node = node->first_child;
+            continue;
+        }
+        while (node != root && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        node = node == root ? NULL : node->next_sibling;
     }
-    return 1;
+    return 0;
 }
 
 /* Resolve a lowercased tag name (UTF-8 bytes) to its atom, or TH_TAG_UNKNOWN for
@@ -1552,8 +1570,8 @@ static th_node *copy_node_in_tree(th_tree *tree, th_node *source) {
         return copy;
     }
     th_node *copy = node_new(tree, source->type);
-    if (copy != NULL) { /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
-        copy->text = need_text(tree, source);
+    if (copy != NULL) {            /* GCOVR_EXCL_BR_LINE: NULL only on alloc failure */
+        copy->text = source->text; /* a span stays valid for a copy in the same tree, so it needs no realizing */
         copy->text_len = source->text_len;
         if (source->type != TH_NODE_TEXT) { /* compact text nodes omit attr_count */
             copy->attr_count = source->attr_count;
