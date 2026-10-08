@@ -546,8 +546,8 @@ static Py_ssize_t index_root_group(th_node_map *groups, th_node *root, Py_ssize_
     return 0;
 }
 
-/* Only a document root reads the element index, so only those are prebuilt. Out of line:
-   inlined, the per-root scan lowered GCC's estimate of the selection loop that follows. */
+/* Only a document root reads the element index, so only those are prebuilt. Out of line,
+   so the loop does not change GCC's estimates for the selection loop that follows. */
 static TH_NOINLINE int select_many_prebuild(PyObject *roots, module_state *state, PyObject *selector) {
     for (Py_ssize_t index = 0; index < PyList_GET_SIZE(roots); index++) {
         PyObject *root = PyList_GET_ITEM(roots, index);
@@ -562,9 +562,6 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     PyObject *roots_obj;
     PyObject *selector;
     if (!PyArg_ParseTuple(args, "O!U:_select_many", &PyList_Type, &roots_obj, &selector)) {
-        return NULL;
-    }
-    if (select_many_prebuild(roots_obj, PyModule_GetState(module), selector) < 0) {
         return NULL;
     }
     Py_ssize_t count = PyList_GET_SIZE(roots_obj);
@@ -585,10 +582,19 @@ PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
         Py_DECREF(out);                                      /* GCOVR_EXCL_LINE */
         return PyErr_NoMemory();                             /* GCOVR_EXCL_LINE */
     }
+    module_state *state = PyModule_GetState(module);
+    int has_document = 0;
     for (Py_ssize_t index = 0; index < count; index++) {
         roots[index].node = (NodeObject *)PyList_GET_ITEM(roots_obj, index);
+        has_document |= Py_IS_TYPE(roots[index].node, (PyTypeObject *)state->document_type);
     }
-    module_state *state = PyModule_GetState(module);
+    if (has_document && select_many_prebuild(roots_obj, state, selector) < 0) {
+        PyMem_Free(batches);
+        PyMem_Free(group);
+        PyMem_Free(roots);
+        Py_DECREF(out);
+        return NULL;
+    }
     int error = 0;
     PyObject *handles = NULL;
 #ifndef Py_GIL_DISABLED
