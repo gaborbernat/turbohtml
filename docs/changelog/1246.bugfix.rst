@@ -1,0 +1,2 @@
+:class:`~turbohtml.cssom.StyleSheet` and :class:`~turbohtml.cssom.StyleDeclaration` keep ``{}`` blocks in custom
+property values.

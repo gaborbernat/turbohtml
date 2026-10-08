@@ -16,6 +16,8 @@ from turbohtml.cssom import ComputedStyle, RuleList, StyleDeclaration, StyleRule
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from _pytest.mark.structures import ParameterSet
+
     from turbohtml import Document
 
 
@@ -489,6 +491,63 @@ def test_computed_style_with_no_stylesheet_is_all_initial() -> None:
     div = document.select_one("div")
     assert isinstance(div, Element)
     assert computed_style(div)["visibility"] == "visible"
+
+
+_CUSTOM_PROPERTY_BLOCKS: Final[list[ParameterSet]] = [
+    pytest.param("--x: {a;b}", (("--x", "{a;b}"),), id="block-value"),
+    pytest.param("--x: a{b;c}d; color: red", (("--x", "a{b;c}d"), ("color", "red")), id="block-between-tokens"),
+    pytest.param("--x: {{a;b}}; color: red", (("--x", "{{a;b}}"), ("color", "red")), id="nested-blocks"),
+    pytest.param("--x: {é;ü}; color: red", (("--x", "{é;ü}"), ("color", "red")), id="non-ascii-in-block"),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _CUSTOM_PROPERTY_BLOCKS)
+def test_parse_declarations_keeps_custom_property_block(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    assert _pairs(StyleDeclaration.parse(text)) == expected
+
+
+@pytest.mark.parametrize(("text", "expected"), _CUSTOM_PROPERTY_BLOCKS)
+def test_stylesheet_keeps_custom_property_block(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    assert _pairs(StyleSheet(f"p {{ {text} }}").rules[0].style) == expected
+
+
+def test_stylesheet_block_ends_only_at_its_own_closer() -> None:
+    assert [rule.selector_text for rule in StyleSheet("p { --x: {a)} } q { color: red }").rules] == ["p", "q"]
+
+
+def test_parse_declarations_keeps_deeply_nested_custom_property_block() -> None:
+    value = f"{'{' * 70}a;b{'}' * 70}"
+    assert _pairs(StyleDeclaration.parse(f"--x: {value}; color: red")) == (("--x", value), ("color", "red"))
+
+
+_ESCAPED_DELIMITERS: Final[list[ParameterSet]] = [
+    pytest.param(r"--x: \{; color: red", (("--x", r"\{"), ("color", "red")), id="escaped-opener"),
+    pytest.param(r"--x: {a\};b}; color: red", (("--x", r"{a\};b}"), ("color", "red")), id="escaped-closer-in-block"),
+    pytest.param(r"--x: a\;b; color: red", (("--x", r"a\;b"), ("color", "red")), id="escaped-semicolon"),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_DELIMITERS)
+def test_parse_declarations_reads_escaped_delimiter_as_name(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    assert _pairs(StyleDeclaration.parse(text)) == expected
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_DELIMITERS)
+def test_stylesheet_reads_escaped_delimiter_as_name(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    assert _pairs(StyleSheet(f"p {{ {text} }}").rules[0].style) == expected
+
+
+def test_stylesheet_at_rule_block_reads_escaped_closer_as_name() -> None:
+    css = r"@media x { a\} { color: red } } q { color: blue }"
+    assert [rule.selector_text for rule in StyleSheet(css).rules] == ["q"]
+
+
+def _pairs(declaration: StyleDeclaration) -> tuple[tuple[str, str], ...]:
+    return tuple((name, declaration[name]) for name in declaration)
+
+
+def test_computed_style_reads_declaration_after_custom_property_block() -> None:
+    assert _style("<div></div>", css="div { --x: {a}; color: red }")["color"] == "red"
 
 
 def test_stylesheet_attribute_selector_and_stray_bracket() -> None:
