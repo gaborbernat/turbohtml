@@ -245,15 +245,17 @@ shapes built from literals in the C sources.
 the ``project.yaml``, ``Dockerfile`` and ``build.sh``. An OSS-Fuzz project reuses ``project.yaml`` and ``build.sh``; its
 ``Dockerfile`` clones the repository where this one copies the checkout. ``build.sh`` builds the fuzz-only mode and
 packages each Atheris target in the registry (``tools/fuzz/atheris_targets.py``) as its own fuzzer, plus the native
-IDNA, phone and JS minifier harnesses. The ``🧬 ClusterFuzzLite`` workflow fuzzes pull requests that touch C or fuzz
-sources for 600 s per sanitizer. A daily run fuzzes for 3,600 s, prunes the corpus and measures coverage, then fails
-when a target's callback or a Python-implemented export it owns executes no line (``tox r -e fuzz-reachability``).
+IDNA, phone and JS minifier harnesses. The ``🧬 ClusterFuzzLite`` workflow fuzzes each push to ``main`` that touches C
+or fuzz sources for 600 s per sanitizer and reports only crashes that the previous push's build does not reproduce. This
+workflow skips pull requests because their jobs have no stored base build, and CIFuzz would report each of ``main``'s
+crashes there as new. A daily run fuzzes for 3,600 s, prunes the corpus and measures coverage, then fails when a
+target's callback or a Python-implemented export it owns executes no line (``tox r -e fuzz-reachability``).
 
 ``tools/fuzz/cflite.py`` drives the ClusterFuzzLite images and writes their logs, crashes and corpus to files under its
-workspace instead of the console, because a crash report prints short inputs and this repository's logs are public. The
-daily jobs keep these files in the private repository named by the ``CFLITE_STORAGE_REPO`` variable, written with the
-``CFLITE_STORAGE_TOKEN`` secret, and skip while the variable is unset. Pull request findings leave the runner encrypted
-to ``FUZZ_AGE_RECIPIENT``.
+workspace instead of the console, because a crash report prints short inputs and this repository's logs are public.
+Every job keeps these files in the private repository named by the ``CFLITE_STORAGE_REPO`` variable, written with the
+``CFLITE_STORAGE_TOKEN`` secret, and skips while the variable is unset. A push run caches its build for the next push
+and sends its findings encrypted to ``FUZZ_AGE_RECIPIENT`` as well.
 
 Add a target by registering a ``bytes``-taking callable in ``_TARGETS`` (in-process) and dropping a representative
 benign seed under ``tools/fuzz/corpus/<target>/``; add a standalone harness by mirroring ``idna_harness.c`` for any C
