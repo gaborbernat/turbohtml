@@ -86,6 +86,8 @@ commands = [
     # env (the "🔬 conformance" CI job). Deselect them here so the normal matrix never runs an oracle suite
     # without its oracle -- a missing oracle must error there, not skip silently in the matrix.
     "--ignore={tox_root}{/}tests{/}conformance",
+    # tests/fuzz_build checks the operation limit only the sanitizer fuzz build compiles in; fuzz-smoke runs it
+    "--ignore={tox_root}{/}tests{/}fuzz_build",
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],
   # enforce 100% C LINE coverage everywhere gcov runs, and 100% BRANCH coverage on
@@ -281,6 +283,7 @@ commands = [
     "10",
     "--no-cov",
     "--ignore={tox_root}{/}tests{/}conformance",
+    "--ignore={tox_root}{/}tests{/}fuzz_build",
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],
 ]
@@ -467,7 +470,7 @@ commands_pre = [
     "--editable",
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
-    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
+    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined -DTH_OPERATION_LIMIT=100000",
     "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dbuildtype=debugoptimized",
     "--config-settings=setup-args=-Dfuzzing=true",
@@ -549,7 +552,7 @@ commands_pre = [
     "--editable",
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
-    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
+    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined -DTH_OPERATION_LIMIT=100000",
     "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dbuildtype=debugoptimized",
   ],
@@ -617,7 +620,7 @@ commands_pre = [
     "--editable",
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
-    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
+    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined -DTH_OPERATION_LIMIT=100000",
     "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dbuildtype=debugoptimized",
   ],
@@ -641,7 +644,8 @@ set_env = { CC = "clang", PYTHONHASHSEED = "0" }
 commands_pre = [
   # build the extension with the sanitizers so the in-process harness faults on a C memory error. b_sanitize trips
   # meson's linker capability check for an extension module on macOS, so pass the flag through c_args/c_link_args, which
-  # the driver's ASan-runtime preload then arms; buildtype matches the tsan env's instrumented build.
+  # the driver's ASan-runtime preload then arms; buildtype matches the tsan env's instrumented build. The operation
+  # limit is the XPath opLimit libxslt's own fuzzer sets (libxslt tests/fuzz/fuzz.c), applied to each counter.
   [
     "uv",
     "pip",
@@ -652,7 +656,7 @@ commands_pre = [
     "--editable",
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
-    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined",
+    "--config-settings=setup-args=-Dc_args=-fsanitize=address,undefined -DTH_OPERATION_LIMIT=100000",
     "--config-settings=setup-args=-Dc_link_args=-fsanitize=address,undefined",
     "--config-settings=setup-args=-Dbuildtype=debugoptimized",
     "--config-settings=setup-args=-Dfuzzing=true",
@@ -737,6 +741,7 @@ commands = [
     "pytest",
     "--no-cov",
     "--ignore={tox_root}{/}tests{/}conformance",
+    "--ignore={tox_root}{/}tests{/}fuzz_build",
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],
 ]

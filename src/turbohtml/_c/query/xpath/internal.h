@@ -189,6 +189,9 @@ typedef struct {
     xp_name_test_fn name_test;
     void *name_test_ctx;
     int strict_no_ns;
+#ifdef TH_OPERATION_LIMIT
+    size_t *operations; /* shared by the predicate contexts of one top-level evaluation */
+#endif
 } xp_ctx;
 
 struct xp_live_frame {
@@ -226,6 +229,20 @@ static inline void xp_live_changed(xp_ctx *ctx) {
 static inline int xp_before_python(xp_ctx *ctx) {
     return ctx->before_python == NULL ? 0 : ctx->before_python(ctx->extension_ctx, ctx->live->current);
 }
+
+#ifdef TH_OPERATION_LIMIT
+/* Fuzz builds pass -DTH_OPERATION_LIMIT so a super-linear expression stops with a ValueError instead of a timeout that
+   hides other findings. libxml2 charges each evaluated operation and each node a step yields the same way
+   (xpath.c xmlXPathCheckOpLimit); release builds compile none of this. */
+static inline int xp_charge(xp_ctx *ctx, size_t count) {
+    *ctx->operations += count;
+    if (*ctx->operations <= TH_OPERATION_LIMIT) {
+        return 0;
+    }
+    *ctx->feature = "evaluation exceeded the operation limit";
+    return -3;
+}
+#endif
 
 /* Pre-order successor, shared by the evaluator and id(). ns_push is declared in the
    public xpath.h because the marshaling boundary also builds node-sets through it. */

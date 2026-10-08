@@ -1044,23 +1044,28 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
         Py_ssize_t size = set->len;
         Py_ssize_t write_pos = 0;
         for (Py_ssize_t index = 0; index < set->len; index++) {
-            xp_ctx pctx = {ctx->tree,
-                           set->items[index].node,
-                           set->items[index].attr,
-                           index + 1,
-                           size,
-                           ctx->feature,
-                           ctx->vars,
-                           ctx->namespaces,
-                           ctx->extension,
-                           ctx->extension_ctx,
-                           ctx->depth,
-                           ctx->regex_cache,
-                           ctx->live,
-                           ctx->before_python,
-                           ctx->name_test,
-                           ctx->name_test_ctx,
-                           ctx->strict_no_ns};
+            xp_ctx pctx = {
+                ctx->tree,
+                set->items[index].node,
+                set->items[index].attr,
+                index + 1,
+                size,
+                ctx->feature,
+                ctx->vars,
+                ctx->namespaces,
+                ctx->extension,
+                ctx->extension_ctx,
+                ctx->depth,
+                ctx->regex_cache,
+                ctx->live,
+                ctx->before_python,
+                ctx->name_test,
+                ctx->name_test_ctx,
+                ctx->strict_no_ns,
+#ifdef TH_OPERATION_LIMIT
+                ctx->operations,
+#endif
+            };
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
             if (rc < 0) {
@@ -1286,6 +1291,11 @@ static int eval_path_step_inner(const xp_program *prog, const xn *step, const st
         if (stepped < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             return -1;     /* GCOVR_EXCL_LINE */
         }
+#ifdef TH_OPERATION_LIMIT
+        if (xp_charge(ctx, 1 + (size_t)(following->len - before)) < 0) {
+            return -3;
+        }
+#endif
         if (step->first >= 0) {
             xp_nodeset slice = {following->items + before, following->len - before, 0, following->snapshots};
             int rc;
@@ -1810,6 +1820,11 @@ int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) 
         *ctx->feature = "an expression nested too deeply";
         return -3;
     }
+#ifdef TH_OPERATION_LIMIT
+    if (xp_charge(ctx, 1) < 0) {
+        return -3;
+    }
+#endif
     ctx->depth++;
     int rc;
     if (ctx->live == NULL) {
@@ -1828,8 +1843,16 @@ int xp_eval_at(const xp_program *prog, struct th_tree *tree, struct th_node *con
                const xp_bindings *vars, const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx,
                xp_result *out, const char **feature) {
     xr_cache *regex_cache = NULL;
-    xp_ctx ctx = {tree,          context, -1,           pos,  size, feature, vars, namespaces, extension,
-                  extension_ctx, 0,       &regex_cache, NULL, NULL, NULL,    NULL, 0};
+#ifdef TH_OPERATION_LIMIT
+    size_t operations = 0;
+#endif
+    xp_ctx ctx = {
+        tree,          context, -1,           pos,  size, feature, vars, namespaces, extension,
+        extension_ctx, 0,       &regex_cache, NULL, NULL, NULL,    NULL, 0,
+#ifdef TH_OPERATION_LIMIT
+        &operations,
+#endif
+    };
     int rc = eval_expr(prog, prog->root, &ctx, out);
     if (regex_cache != NULL) {
         xr_cache_free(regex_cache);
@@ -1841,23 +1864,31 @@ int xp_eval_pattern_at(const xp_program *prog, struct th_tree *tree, struct th_n
                        void *extension_ctx, xp_name_test_fn name_test, void *name_test_ctx, xp_result *out,
                        const char **feature) {
     xr_cache *regex_cache = NULL;
-    xp_ctx ctx = {tree,
-                  context,
-                  -1,
-                  1,
-                  1,
-                  feature,
-                  NULL,
-                  NULL,
-                  extension,
-                  extension_ctx,
-                  0,
-                  &regex_cache,
-                  NULL,
-                  NULL,
-                  name_test,
-                  name_test_ctx,
-                  name_test == NULL && th_tree_is_xml(tree)}; /* GCOVR_EXCL_BR_LINE: XML only */
+#ifdef TH_OPERATION_LIMIT
+    size_t operations = 0;
+#endif
+    xp_ctx ctx = {
+        tree,
+        context,
+        -1,
+        1,
+        1,
+        feature,
+        NULL,
+        NULL,
+        extension,
+        extension_ctx,
+        0,
+        &regex_cache,
+        NULL,
+        NULL,
+        name_test,
+        name_test_ctx,
+        name_test == NULL && th_tree_is_xml(tree), /* GCOVR_EXCL_BR_LINE: XML only */
+#ifdef TH_OPERATION_LIMIT
+        &operations,
+#endif
+    };
     int rc = eval_expr(prog, prog->root, &ctx, out);
     if (regex_cache != NULL) {
         xr_cache_free(regex_cache);
@@ -1876,9 +1907,16 @@ int xp_eval_snapshot(const xp_program *prog, struct th_tree *tree, struct th_nod
                      xp_before_python_fn before_python, xp_result *out, const char **feature) {
     xr_cache *regex_cache = NULL;
     xp_live_registry live = {0};
+#ifdef TH_OPERATION_LIMIT
+    size_t operations = 0;
+#endif
     xp_ctx ctx = {
-        tree,  context,       -1,   1,    1, feature, vars, namespaces, extension, extension_ctx, 0, &regex_cache,
-        &live, before_python, NULL, NULL, 0};
+        tree,        context,       -1,   1,    1, feature, vars, namespaces, extension, extension_ctx, 0, &regex_cache,
+        &live,       before_python, NULL, NULL, 0,
+#ifdef TH_OPERATION_LIMIT
+        &operations,
+#endif
+    };
     xp_live_frame frame = {.node = context, .vars = vars};
     xp_live_enter(&ctx, &frame);
     int rc = eval_expr(prog, prog->root, &ctx, out);
