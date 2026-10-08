@@ -120,10 +120,10 @@ static int is_partially_contained(th_node *node, th_node *start_node, th_node *e
 }
 
 /* Move every child of a throwaway fragment onto parent, in order. */
-static void adopt_fragment_children(th_node *parent, th_node *fragment) {
+static void adopt_fragment_children(th_tree *tree, th_node *parent, th_node *fragment) {
     while (fragment->first_child != NULL) {
         th_node *child = fragment->first_child;
-        th_node_remove(child);
+        th_node_remove_silent(tree, child);
         th_node_append_child(parent, child);
     }
 }
@@ -294,10 +294,10 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        adopt_fragment_children(clone, sub);
+        adopt_fragment_children(tree, clone, sub);
     }
     for (Py_ssize_t index = 0; index < contained_count; index++) {
-        th_node_remove(contained[index]);
+        th_node_remove_silent(tree, contained[index]);
         th_node_append_child(fragment, contained[index]);
     }
     PyMem_Free(contained);
@@ -321,7 +321,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
         if (sub == NULL) { /* GCOVR_EXCL_BR_LINE: only the OOM paths of the recursion reach here */
             return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        adopt_fragment_children(clone, sub);
+        adopt_fragment_children(tree, clone, sub);
     }
     return fragment;
 }
@@ -378,7 +378,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        adopt_fragment_children(clone, sub);
+        adopt_fragment_children(tree, clone, sub);
     }
     for (Py_ssize_t index = 0; index < contained_count; index++) {
         th_node *copy = th_tree_copy_node(tree, tree, contained[index]);
@@ -406,7 +406,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         if (sub == NULL) { /* GCOVR_EXCL_BR_LINE: only the OOM paths of the recursion reach here */
             return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        adopt_fragment_children(clone, sub);
+        adopt_fragment_children(tree, clone, sub);
     }
     return fragment;
 }
@@ -918,7 +918,7 @@ static th_node *adopt(RangeObject *range, PyObject *child_obj) {
         return NULL;
     }
     if (child->node->type != TH_NODE_CONTENT) { /* a fragment stays where it is; only its children move */
-        th_node_remove(child->node);
+        th_node_remove_silent(((HandleObject *)range->start_handle)->tree, child->node);
     }
     return child->node;
 }
@@ -1014,7 +1014,7 @@ static th_node *insert_at_start(RangeObject *range, PyObject **node_ref) {
         /* a DocumentFragment inserts its children and is left empty */
         while (linked->first_child != NULL) {
             th_node *child = linked->first_child;
-            th_node_remove(child);
+            th_node_remove_silent(((HandleObject *)range->start_handle)->tree, child);
             th_node_insert_before(parent, child, reference);
         }
     } else {
@@ -1117,11 +1117,11 @@ static PyObject *range_surround_contents(PyObject *self, PyObject *new_parent) {
                 store_end(range, range->start_handle, new_node, new_offset);
             }
             while (parent_node->first_child != NULL) {
-                th_node_remove(parent_node->first_child);
+                th_node_remove_silent(tree, parent_node->first_child);
             }
             th_node *linked = insert_core(range, new_parent);
             if (linked != NULL) {
-                adopt_fragment_children(linked, fragment);
+                adopt_fragment_children(tree, linked, fragment);
                 store_start(range, range->start_handle, linked->parent, node_index(linked));
                 store_end(range, range->start_handle, linked->parent, node_index(linked) + 1);
                 result = Py_NewRef(new_parent);

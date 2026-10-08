@@ -602,7 +602,7 @@ TH_NODE_API(static, PyObject *, shadow_root_set_inner_html, (PyObject * self, Py
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
     handle_drop_index(((NodeObject *)self)->handle);
     while (root->first_child != NULL) {
-        th_node_remove(root->first_child);
+        th_node_remove_silent(dest, root->first_child);
     }
     for (th_node *child = th_tree_document(fragment)->first_child; child != NULL; child = child->next_sibling) {
         th_node *copy = th_tree_copy_node(dest, fragment, child);

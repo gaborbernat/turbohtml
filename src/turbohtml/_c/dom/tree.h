@@ -328,8 +328,13 @@ int th_node_set_data(th_tree *tree, th_node *node, const Py_UCS4 *data, Py_ssize
 /* Structural-edit primitives. remove detaches a node from its parent; append and
    insert_before link it (ref==NULL appends); contains reports whether ancestor is
    node or one of its ancestors; copy_node deep-copies a subtree into another tree
-   (NULL on allocation failure). */
+   (NULL on allocation failure). remove skips the DOM NodeIterator pre-removing steps,
+   so it is for nodes no caller holds an iterator on (a parse, sanitize, schema or
+   XSLT result tree, or a fragment built in the same call) and for XSLT's whitespace
+   strip, which puts the nodes back before it returns; remove_silent runs the steps
+   without queuing a mutation record. */
 void th_node_remove(th_node *child);
+void th_node_remove_silent(th_tree *tree, th_node *child);
 void th_node_append_child(th_node *parent, th_node *child);
 void th_node_insert_before(th_node *parent, th_node *child, th_node *ref);
 
@@ -343,9 +348,11 @@ void th_node_insert_before_observed(th_tree *tree, th_node *parent, th_node *chi
 /* The MutationObserver registry (dom/observe.c) lives in the tree's fields, but that
    engine cannot include the tree-internal header (its Node bindings clash with the
    tree-builder's link inlines), so it reaches the registry through these accessors.
-   th_tree_has_observers gates the record-capture work on the mutation hot path. */
+   th_tree_has_observers gates the record-capture work on the mutation hot path, and
+   th_tree_has_iterators lets a removal loop skip the NodeIterator steps. */
 struct th_observer;
 int th_tree_has_observers(const th_tree *tree);
+int th_tree_has_iterators(const th_tree *tree);
 struct th_observer ***th_tree_observers_ptr(th_tree *tree);
 Py_ssize_t *th_tree_observer_count_ptr(th_tree *tree);
 Py_ssize_t *th_tree_observer_cap_ptr(th_tree *tree);
