@@ -707,10 +707,7 @@ retry:;
         sel_ctx ctx = {
             compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
             &default_memo,  &memo};
-        int indexed = selector_use_index(handle_obj, origin, compiled);
-        if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
-            error = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
-        } else if (indexed) {
+        if (selector_use_index(handle_obj, origin, compiled)) {
             Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
             for (Py_ssize_t pos = handle_obj->index_offsets[compiled->subject_atom]; pos < end; pos++) {
                 th_node *node = handle_obj->index_nodes[pos];
