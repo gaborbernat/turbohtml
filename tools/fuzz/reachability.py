@@ -83,11 +83,12 @@ def _functions(item: object) -> Iterator[_Function]:
 
 def _methods(cls: type) -> Iterator[FunctionType]:
     # only methods compiled from the class's own module count: dataclass and NamedTuple generate theirs from "<string>",
-    # and a C type's vars hold method descriptors
+    # a C type's vars hold method descriptors, and PyPy's interpreter-level functions carry a code object without
+    # co_filename
     source: Final = getattr(sys.modules[cls.__module__], "__file__", None)
     for member in vars(cls).values():
         function = member.__func__ if isinstance(member, (staticmethod, classmethod)) else member
-        if inspect.isfunction(function) and function.__code__.co_filename == source:
+        if inspect.isfunction(function) and getattr(function.__code__, "co_filename", None) == source:
             yield function
 
 
