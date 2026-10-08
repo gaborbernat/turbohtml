@@ -525,6 +525,35 @@ _LOOSE_NAV_HTML: Final[str] = (
             "1. \n   1. x",
             id="nested-list-in-a-non-item-wrapper-stays-nested",
         ),
+        pytest.param(
+            "<ul><li><div>y<p>z</p></div></li></ul>", "- y\n\n  z", id="paragraphs-in-a-wrapper-loosen-the-item"
+        ),
+        pytest.param(
+            "<ul><li><a>y<p>z</p></a></li></ul>", "- y\n\n  z", id="paragraphs-in-a-placeholder-loosen-the-item"
+        ),
+        pytest.param(
+            "<ul><li>w<ul><li>a</li></ul>x</li></ul>", "- w\n\n  - a\n\n  x", id="text-after-a-sublist-loosens"
+        ),
+        pytest.param(
+            "<ul><li>w<blockquote>a</blockquote>x</li></ul>", "- w\n\n  > a\n\n  x", id="text-after-a-quote-loosens"
+        ),
+        pytest.param(
+            "<ul><li>w<table><tr><td>a</td></tr></table>x</li></ul>",
+            "- w\n\n  | a |\n  | --- |\n\n  x",
+            id="text-after-a-table-loosens",
+        ),
+        pytest.param("<ul><li>x<p></p></li></ul>", "- x", id="empty-paragraph-keeps-the-item-tight"),
+        pytest.param(
+            '<ul><li>x<p><a href="/t"></a></p></li></ul>', "- x\n\n  [](/t)", id="empty-link-counts-as-a-paragraph"
+        ),
+        pytest.param(
+            "<ul><li><h1>t</h1><ul><li>a</li></ul>x</li></ul>",
+            "- # t\n\n  - a\n\n  x",
+            id="first-text-after-a-sublist-loosens",
+        ),
+        pytest.param(
+            "<ul><li><svg><text>a</text></svg><p>b</p></li></ul>", "- a\n\n  b", id="foreign-text-counts-as-a-run"
+        ),
     ],
 )
 def test_lists(html: str, expected: str) -> None:
