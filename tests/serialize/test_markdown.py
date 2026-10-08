@@ -107,6 +107,12 @@ def test_blocks_and_whitespace(html: str, expected: str) -> None:
         pytest.param("<p><em>x <strong>y</strong></em></p>", "*x **y***", id="nested-emphasis"),
         pytest.param("<p><span>plain</span></p>", "plain", id="span-transparent"),
         pytest.param("<p><mark>m</mark></p>", "m", id="passthrough-inline"),
+        pytest.param("<strong>a<p>x</p>c</strong>", "**a**\n\n**x**\n\n**c**", id="emphasis-reopens-per-block"),
+        pytest.param("<em><p>a</p><p>b</p></em>", "*a*\n\n*b*", id="emphasis-over-paragraphs"),
+        pytest.param("<em>x <strong>y<p>z</p></strong></em>", "*x **y***\n\n***z***", id="nested-emphasis-reopens"),
+        pytest.param("<strong>a<p></p></strong>", "**a**", id="emphasis-before-empty-block"),
+        pytest.param("<span>a<p>x</p>c</span>", "a\n\nx\n\nc", id="inline-text-after-block-opens-block"),
+        pytest.param("<strong>a<ul><li>i</li></ul>c</strong>", "**a**\n\n- **i**\n\n**c**", id="emphasis-around-list"),
     ],
 )
 def test_inline_emphasis(html: str, expected: str) -> None:

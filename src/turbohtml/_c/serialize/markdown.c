@@ -162,6 +162,7 @@ enum md_leave {
     MD_LEAVE_CELL,    /* collapse the cell onto its row */
     MD_LEAVE_TABLE,
     MD_LEAVE_BLOCKQUOTE, /* mark a quote that opened no block of its own */
+    MD_LEAVE_BLOCK_END,  /* the block inside an inline element is done */
 };
 
 enum md_table_phase {
@@ -300,6 +301,7 @@ typedef struct {
     int drop_space;             /* swallow the next pending space (block/inline start) without emitting */
     int pending_loose;          /* the previous block wants a blank line after it */
     int suppress_break;         /* the next block attaches to the current (list marker) line */
+    int block_ended;            /* a block in an inline element closed: next content opens a block */
     int tight;                  /* inside a list item: inline runs do not add blank lines */
     int list_depth;             /* nesting depth of the current list, for bullet cycling */
     int indent_levels;          /* list and quote nesting that indents the prefix, capped by TH_MAX_INDENT_LEVELS */
@@ -355,7 +357,11 @@ static void md_write_blank_prefix(md_ctx *ctx) {
 /* Position the cursor at the start of a fresh, prefixed line for the next block,
    collapsing the margin with the previous block (a blank line when either side
    is loose). loose marks whether this block wants blank lines around it. */
+static void md_suspend_markers(md_ctx *ctx);
+
 static void md_block_line(md_ctx *ctx, int loose) {
+    md_suspend_markers(ctx);
+    ctx->block_ended = 0;
     if (!ctx->started) {
         ctx->started = 1;
         md_write_prefix(ctx);
@@ -549,6 +555,9 @@ static TH_NOINLINE void md_emit_pending(md_ctx *ctx) {
    stays outside an emphasis run), then open any markers that were waiting for
    real content. */
 static void md_before_visible(md_ctx *ctx) {
+    if (ctx->block_ended) {
+        md_block_line(ctx, 1);
+    }
     md_flush_space(ctx);
     if (ctx->pending != NULL && !ctx->pending->emitted) {
         md_emit_pending(ctx);
@@ -954,6 +963,19 @@ static Py_ssize_t md_push_marker(md_ctx *ctx, const char *text) {
 
 /* Close the marker a frame opened, returning its closing run when the open run was
    written (so the close run must be too), NULL otherwise. */
+/* A delimiter run pairs only within one block's inline content (CommonMark 6.2), so
+   a block that starts inside an emphasis element closes every run written so far;
+   md_before_visible reopens them at the next visible character, in the new block. */
+static void md_suspend_markers(md_ctx *ctx) {
+    for (Py_ssize_t index = ctx->marker_count; index > ctx->marker_base; index--) {
+        md_marker *marker = &ctx->markers[index - 1];
+        if (marker->emitted) {
+            md_put_close(ctx, marker->close);
+            marker->emitted = 0;
+        }
+    }
+}
+
 static const char *md_pop_marker(md_ctx *ctx, Py_ssize_t marker) {
     if (marker < 0) {
         return NULL;
@@ -1730,6 +1752,11 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
     }
     if (is_md_block(atom)) {
         if (!ctx->inline_only) {
+            if (!ctx->in_cell) {
+                /* the content after the block belongs to a new block, so note where it ends;
+                   a cell flattens its blocks onto its one line instead */
+                md_push(ctx, node, MD_WALK_NONE, MD_LEAVE_BLOCK_END);
+            }
             md_render_block(ctx, node);
             return;
         }
@@ -3192,6 +3219,9 @@ static void md_leave(md_ctx *ctx) {
         break;
     case MD_LEAVE_TABLE:
         md_leave_table(ctx, frame->table);
+        break;
+    case MD_LEAVE_BLOCK_END:
+        ctx->block_ended = 1;
         break;
     case MD_LEAVE_BLOCKQUOTE:
         /* a leading quote writes its marker only with its first block; CommonMark
