@@ -4,8 +4,8 @@ Run ClusterFuzzLite with its output kept off the public CI log.
 The stock GitHub actions print each crash report, which carries the crashing input for short inputs, and upload the
 input as a workflow artifact anyone signed in can download. This driver runs the same pinned images on the standalone
 platform with a filesystem filestore instead: the build and run logs, crashes, corpus and coverage land in files under
-``--workspace``, and the console gets only exit codes and crash hashes. The workflow then commits the files to the
-private storage repository or encrypts them.
+``--workspace``, and the console gets only exit codes, crash hashes and, when the build fails, the build log. The
+workflow then commits the files to the private storage repository or encrypts them.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -28,6 +29,9 @@ __all__ = ["BUILD_IMAGE", "RUN_IMAGE", "main"]
 _IMAGES: Final = "gcr.io/oss-fuzz-base/clusterfuzzlite-"
 BUILD_IMAGE: Final = _IMAGES + "build-fuzzers@sha256:831044bb06844a77e6b435d6476da4917386119c83a76aa9c0c0b02b3d1a2bb5"
 RUN_IMAGE: Final = _IMAGES + "run-fuzzers@sha256:35b5e685193f1f920f6627dd8f0bd9009fbb338eab795254d48bd073b45235cf"
+_BUILD_CHECK: Final = "Build check: stdout:"
+_BUILD_CHECK_VERDICT: Final = re.compile(r"BAD BUILD: |\d{4}-\d\d-\d\d [\d:,]+ - \S+ - [A-Z]+ - ")
+_BUILD_LOG_LINES: Final = 200
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -72,9 +76,13 @@ def _run(job: _Job) -> int:
         **({} if job.base_ref is None else {"GIT_BASE_REF": job.base_ref}),
     }
     status: Final = {
-        "build": _docker(BUILD_IMAGE, environment, (workspace, job.source), logs / f"build-{job.sanitizer}.log")
+        "build": _docker(
+            BUILD_IMAGE, environment, (workspace, job.source), build_log := logs / f"build-{job.sanitizer}.log"
+        )
     }
-    if status["build"] == 0:
+    if status["build"] != 0:
+        print(_public_build_log(build_log), file=sys.stderr)
+    else:
         status[job.mode] = _docker(
             RUN_IMAGE,
             {**environment, "MODE": job.mode, "FUZZ_SECONDS": str(job.seconds), "OUTPUT_SARIF": "True"},
@@ -100,6 +108,15 @@ def _docker(image: str, environment: dict[str, str], mounts: Sequence[Path], log
     ]
     with log.open("ab") as output:
         return subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=False).returncode
+
+
+def _public_build_log(log: Path) -> str:
+    # docker build, pip, meson and compiler output name files and flags, never a fuzz input, so a failed build can show
+    # its log on the public console; the bad build check then runs each fuzzer on its first inputs and prints the run
+    # of one that dies, so from there on only the verdict lines and CIFuzz's own log lines stay
+    build, _, check = log.read_text(encoding="utf-8", errors="replace").partition(_BUILD_CHECK)
+    lines: Final = build.splitlines() + [line for line in check.splitlines() if _BUILD_CHECK_VERDICT.match(line)]
+    return "\n".join(lines[-_BUILD_LOG_LINES:])
 
 
 def _crashes(workspace: Path) -> list[dict[str, str | int]]:

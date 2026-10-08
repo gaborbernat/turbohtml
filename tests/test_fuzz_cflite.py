@@ -8,7 +8,9 @@ import pytest
 from fuzz.cflite import BUILD_IMAGE, RUN_IMAGE, main
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+    from typing import IO
     from unittest.mock import MagicMock
 
     from pytest_mock import MockerFixture
@@ -17,6 +19,18 @@ if TYPE_CHECKING:
 @pytest.fixture
 def docker(mocker: MockerFixture) -> MagicMock:
     return mocker.patch("fuzz.cflite.subprocess.run", autospec=True, return_value=mocker.MagicMock(returncode=0))
+
+
+@pytest.fixture
+def build_log(docker: MagicMock, mocker: MockerFixture) -> Callable[[str, int], None]:
+    def write(log: str, returncode: int) -> None:
+        def run(*_: object, stdout: IO[bytes], **__: object) -> MagicMock:
+            stdout.write(log.encode())
+            return mocker.MagicMock(returncode=returncode)
+
+        docker.side_effect = run
+
+    return write
 
 
 def _arguments(tmp_path: Path, *extra: str) -> list[str]:
@@ -82,6 +96,46 @@ def test_cflite_build_failure_skips_fuzzing(
         1,
         {"build": 2},
     )
+
+
+@pytest.mark.parametrize(
+    ("log", "shown"),
+    [
+        pytest.param(
+            "Step 1/4 : FROM base-builder-python\nERROR: meson setup failed\n",
+            "Step 1/4 : FROM base-builder-python\nERROR: meson setup failed\n",
+            id="build-step",
+        ),
+        pytest.param(
+            "compile done\nBuild check: stdout: INFO: performing bad build checks for /out/fuzz_html_document\n"
+            "BAD BUILD: /out/fuzz_html_document seems to have either startup crash or exit:\n"
+            "==12==ERROR: AddressSanitizer: heap-buffer-overflow\nBase64: PHNlY3JldD4=\n"
+            "2026-10-08 04:20:29,440 - root - ERROR - Build check failed.\n",
+            "compile done\nBAD BUILD: /out/fuzz_html_document seems to have either startup crash or exit:\n"
+            "2026-10-08 04:20:29,440 - root - ERROR - Build check failed.\n",
+            id="bad-build-check-drops-fuzzer-output",
+        ),
+        pytest.param(
+            "".join(f"line {index}\n" for index in range(250)),
+            "".join(f"line {index}\n" for index in range(50, 250)),
+            id="tail",
+        ),
+    ],
+)
+def test_cflite_build_failure_shows_public_build_log(
+    build_log: Callable[[str, int], None], tmp_path: Path, capsys: pytest.CaptureFixture[str], log: str, shown: str
+) -> None:
+    build_log(log, 1)
+    main(_arguments(tmp_path))
+    assert capsys.readouterr().err == shown
+
+
+def test_cflite_build_success_keeps_log_private(
+    build_log: Callable[[str, int], None], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    build_log("compile done\n", 0)
+    main(_arguments(tmp_path))
+    assert not capsys.readouterr().err
 
 
 def test_cflite_reports_crashes_by_hash(
