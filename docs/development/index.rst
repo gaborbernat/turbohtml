@@ -230,11 +230,12 @@ shapes built from literals in the C sources.
     $ tox r -e fuzz-amplify -- search --minutes 5  # shapes drawn from the C literals
 
 `ClusterFuzzLite <https://google.github.io/clusterfuzzlite/>`_ keeps a corpus across runs. ``.clusterfuzzlite/`` holds
-the ``project.yaml``, ``Dockerfile`` and ``build.sh`` that OSS-Fuzz reads as well. ``build.sh`` builds the fuzz-only
-mode and packages each Atheris target in the registry (``tools/fuzz/atheris_targets.py``) as its own fuzzer, plus the
-native IDNA, phone and JS minifier harnesses. The ``🧬 ClusterFuzzLite`` workflow fuzzes pull requests that touch C or
-fuzz sources for 600 s per sanitizer. A daily run fuzzes for 3,600 s, prunes the corpus and measures coverage, then
-fails when a target's callback or a Python-implemented export it owns executes no line (``tox r -e fuzz-reachability``).
+the ``project.yaml``, ``Dockerfile`` and ``build.sh``. An OSS-Fuzz project reuses ``project.yaml`` and ``build.sh``; its
+``Dockerfile`` clones the repository where this one copies the checkout. ``build.sh`` builds the fuzz-only mode and
+packages each Atheris target in the registry (``tools/fuzz/atheris_targets.py``) as its own fuzzer, plus the native
+IDNA, phone and JS minifier harnesses. The ``🧬 ClusterFuzzLite`` workflow fuzzes pull requests that touch C or fuzz
+sources for 600 s per sanitizer. A daily run fuzzes for 3,600 s, prunes the corpus and measures coverage, then fails
+when a target's callback or a Python-implemented export it owns executes no line (``tox r -e fuzz-reachability``).
 
 ``tools/fuzz/cflite.py`` drives the ClusterFuzzLite images and writes their logs, crashes and corpus to files under its
 workspace instead of the console, because a crash report prints short inputs and this repository's logs are public. The
