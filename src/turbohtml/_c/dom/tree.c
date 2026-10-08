@@ -347,9 +347,7 @@ int th_tree_ensure_input_errors(th_tree *tree, int kind, const void *data, Py_ss
     th_error_sink preprocessing = {0};
     /* the merge leaves the tree's errors untouched on failure, so a later read can retry */
     th_input_stream_errors(kind, data, length, &preprocessing);
-    /* GCOVR_EXCL_BR_START: the scan and the merge fail only when an allocation does */
-    int failed = preprocessing.failed || th_error_sink_merge(&tree->errors, &preprocessing) < 0;
-    /* GCOVR_EXCL_BR_STOP */
+    int failed = th_error_sink_merge(&tree->errors, &preprocessing) < 0;
     th_error_sink_free(&preprocessing);
     tree->input_errors_merged = !failed;
     return -failed;
@@ -4388,7 +4386,7 @@ static void run_drain(th_tree *tree, th_tokenizer *sm, th_run_state *run_state) 
     }
     /* the tokenizer reports its allocation failures as TH_STEP_ERROR, which would otherwise end the drain as if the
        input had ended and return a partial tree, and a parse error the sink dropped would leave the list incomplete */
-    tree->failed |= th_tok_failed(sm) || tree->errors.failed; /* GCOVR_EXCL_BR_LINE: only an allocation fails */
+    tree->failed |= th_tok_failed(sm) || th_error_sink_failed(&tree->errors); /* GCOVR_EXCL_BR_LINE: allocation */
     run_state->mode = dc->mode;
     run_state->original_mode = dc->original_mode;
     run_state->foster_return = dc->foster_return;
@@ -4832,10 +4830,7 @@ th_tree *th_stream_finish(th_stream *stream) {
     /* the source locations index the uncompacted input, and to_source() reads it after the tokenizer is gone */
     retain_normalized_source(stream->tree, stream->sm, stream->tree->track_locations);
     finalize_document(stream->tree);
-    /* GCOVR_EXCL_BR_START: the scan and the merge fail only when an allocation does */
-    stream->tree->failed |=
-        stream->preprocessing.failed || th_error_sink_merge(&stream->tree->errors, &stream->preprocessing) < 0;
-    /* GCOVR_EXCL_BR_STOP */
+    stream->tree->failed |= th_error_sink_merge(&stream->tree->errors, &stream->preprocessing) < 0;
     th_error_sink_free(&stream->preprocessing);
     if (stream->tree->failed) { /* GCOVR_EXCL_BR_LINE: only an allocation failure sets failed */
         return NULL;            /* GCOVR_EXCL_LINE: allocation-failure path */

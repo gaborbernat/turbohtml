@@ -749,16 +749,14 @@ PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args)
         Py_DECREF(tuple);
     }
     th_tok_free(sm);
-    if (step == TH_STEP_ERROR || errors.failed) { /* GCOVR_EXCL_BR_LINE: both mean an allocation failed */
+    if (step == TH_STEP_ERROR || th_error_sink_failed(&errors)) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
         Py_DECREF(out);              /* GCOVR_EXCL_LINE: allocation-failure path */
         th_error_sink_free(&errors); /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory();     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_error_sink preprocessing = {0};
     th_input_stream_errors(PyUnicode_KIND(text), PyUnicode_DATA(text), PyUnicode_GET_LENGTH(text), &preprocessing);
-    /* GCOVR_EXCL_BR_START: the scan and the merge fail only when an allocation does */
-    int merge_failed = preprocessing.failed || th_error_sink_merge(&errors, &preprocessing) < 0;
-    /* GCOVR_EXCL_BR_STOP */
+    int merge_failed = th_error_sink_merge(&errors, &preprocessing) < 0;
     th_error_sink_free(&preprocessing);
     if (merge_failed) {              /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         Py_DECREF(out);              /* GCOVR_EXCL_LINE: allocation-failure path */

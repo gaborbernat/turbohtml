@@ -1601,9 +1601,9 @@ th_tree *th_tree_parse_xml(int kind, const void *data, Py_ssize_t length) {
     PyMem_Free(parser.u8);
     PyMem_Free(parser.dup);
     /* a well-formedness error the sink dropped fails the parse as any other allocation does */
-    if (tree->failed || tree->errors.failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        th_tree_free(tree);                    /* GCOVR_EXCL_LINE: allocation-failure path */
-        return NULL;                           /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (tree->failed || th_error_sink_failed(&tree->errors)) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
+        th_tree_free(tree);                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     return tree;
 }

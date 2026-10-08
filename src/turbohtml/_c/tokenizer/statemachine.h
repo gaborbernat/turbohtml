@@ -125,21 +125,25 @@ typedef struct {
 
 /* A growable sink the tokenizer and tree builder append parse errors to. A
    zeroed sink is a valid empty one; the owner frees items with PyMem_Free.
-   failed records a dropped error, so a reader fails instead of handing back an
-   incomplete list; checking it once at the end keeps every push site as cheap
-   as a push that cannot fail. */
+   A negative cap records a dropped error, so a reader fails instead of handing
+   back an incomplete list, and checking it once at the end keeps every push site
+   as cheap as a push that cannot fail. The flag reuses cap because a separate
+   field would grow th_tree past pymalloc's 512-byte small-object limit. */
 typedef struct {
     th_parse_error *items;
     Py_ssize_t len;
     Py_ssize_t cap;
-    int failed;
 } th_error_sink;
 
-/* Append one error to a sink, growing it as needed; -1 and sink->failed set on
-   allocation failure (the error is then dropped, leaving the sink usable). Shared
-   so the tree builder reports its construction errors into the same sink the
-   tokenizer fills. */
+/* Append one error to a sink, growing it as needed; -1 on allocation failure,
+   after which the sink refuses every append and th_error_sink_failed reports it.
+   Shared so the tree builder reports its construction errors into the same sink
+   the tokenizer fills. */
 int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col);
+
+static inline int th_error_sink_failed(const th_error_sink *sink) {
+    return sink->cap < 0;
+}
 
 /* Release a sink's storage and reset it to empty. */
 void th_error_sink_free(th_error_sink *sink);
