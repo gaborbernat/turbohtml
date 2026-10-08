@@ -1006,7 +1006,9 @@ TH_NODE_API(, PyObject *, node_find_all, (PyObject * self, PyObject *args, PyObj
         query.limit >= 0 && query.limit <= 8
             ? handle_obj->index_built && handle_index_usable(handle_obj, origin) && query_is_indexed_tag(&query)
             : handle_use_index(handle_obj, origin, query_is_indexed_tag(&query));
-    if (use_index && query_is_simple_tag(&query)) {
+    if (use_index < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+        error = 1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    } else if (use_index && query_is_simple_tag(&query)) {
         Py_SETREF(out, node_wrap_indexed(state, handle, query.tag_atom, query.limit));
         error = out == NULL;
     } else if (use_index && query.nattr == 1 && query.class_ucs4 == NULL && query.class_filter == NULL &&

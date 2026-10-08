@@ -770,8 +770,10 @@ static inline int handle_index_usable(HandleObject *handle, th_node *origin) {
 
 /* Whether an eligible query (a known subject tag, rooted at the document) can read
    the whole-tree atom index, building it on the first such query and reusing it
-   after. Returns 0 when the query is ineligible, the origin is a subtree, or a
-   build fails (out of memory); the caller then falls back to a pre-order walk. */
+   after. Returns 1 to read the index, 0 when the query is ineligible or the origin
+   is a subtree (the caller then walks in pre-order), or -1 with MemoryError set when
+   the build fails, so the caller reports the allocation failure instead of hiding it
+   behind the walk. */
 static inline int handle_use_index(HandleObject *handle, th_node *origin, int eligible) {
     if (!eligible || !handle_index_usable(handle, origin)) {
         return 0;
@@ -779,8 +781,11 @@ static inline int handle_use_index(HandleObject *handle, th_node *origin, int el
     if (handle->index_built) {
         return 1;
     }
-    return handle_build_index(handle) ==
-           0; /* GCOVR_EXCL_BR_LINE: an index build only fails on unforceable allocation */
+    if (handle_build_index(handle) < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+        PyErr_NoMemory();                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 1;
 }
 
 static inline PyObject *node_wrap_indexed(module_state *state, PyObject *handle, uint16_t tag, Py_ssize_t limit) {
