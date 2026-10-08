@@ -6,14 +6,17 @@
 #ifndef TURBOHTML_SERIALIZE_CSS_H
 #define TURBOHTML_SERIALIZE_CSS_H
 
+#ifndef CSS_MINIFY_STANDALONE
 #include "core/common.h"
+#endif
 
 /* Minify the UTF-8 CSS view[0..length) into a freshly allocated UTF-8 buffer (free with
-   PyMem_Free); *out_len receives its byte length. inline_mode 1 parses a bare declaration
-   list (a style="" value), 0 a full stylesheet (a <style> body). baseline bounds how new
-   the output syntax may be (0 targets every browser). Empty output returns NULL with
-   *out_len 0. The engine is value-safe: the output reparses to the same cascade as the
-   input, and re-minifying is a fixpoint. The view type is css_char (unsigned char). */
+   PyMem_Free, or free under CSS_MINIFY_STANDALONE); *out_len receives its byte length.
+   inline_mode 1 parses a bare declaration list (a style="" value), 0 a full stylesheet (a
+   <style> body). baseline bounds how new the output syntax may be (0 targets every
+   browser). Empty output returns NULL with *out_len 0. The engine is value-safe: the
+   output reparses to the same cascade as the input, and re-minifying is a fixpoint. The
+   view type is css_char (unsigned char). */
 unsigned char *th_minify_css_bytes(const unsigned char *view, Py_ssize_t length, int inline_mode, int baseline,
                                    Py_ssize_t *out_len);
 

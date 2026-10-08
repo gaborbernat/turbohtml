@@ -4,9 +4,10 @@ Build and drive the turbohtml fuzz harnesses under AddressSanitizer + UndefinedB
 Two mechanisms cover the untrusted-input entry points the security spike prioritizes (tox-dev/turbohtml#478):
 
 * standalone, malloc-backed C harnesses for the surfaces whose core decouples from CPython -- the IDNA ToASCII engine
-  (``idna_harness.c``, the highest memory-safety risk), the phone-number recognizer (``phone_harness.c``) and the JS
-  minifier (``../js_minify_harness.c``). These compile with no interpreter, exactly the ``JM_STANDALONE`` pattern the
-  JS minifier already ships.
+  (``idna_harness.c``, the highest memory-safety risk), the phone-number recognizer (``phone_harness.c``), the JS
+  minifier (``../js_minify_harness.c``) and the CSS minifier (``css_harness.c``). These compile with no interpreter,
+  exactly the ``JM_STANDALONE`` pattern the JS minifier already ships. ``--sanitizer memory`` builds them under
+  MemorySanitizer instead and skips the in-process driver, whose interpreter carries no MemorySanitizer instrumentation.
 * an in-process driver (``_targets.py``) for the surfaces that reach the live PyObject tree -- parse, serialize,
   sanitize, the URL parser, and the HTML/CSS minifiers -- run against an extension compiled with the sanitizers so a C
   fault aborts the interpreter with a stack trace. It calls the public API, so it survives the in-flight C refactors.
@@ -65,6 +66,13 @@ _CRASHES: Final[dict[str, str]] = {
     "schema-arena-gap-overflow": "use-after-poison",
     "parked-wrapper": "use-after-poison",
 }
+# MemorySanitizer flags a read only when every instruction that wrote the bytes was instrumented, so it runs on the
+# harnesses that link no interpreter; origin tracking 2 names the allocation behind each report (LLVM MemorySanitizer
+# documentation, "Origin Tracking")
+_SANITIZERS: Final[dict[str, tuple[str, ...]]] = {
+    "address": ("-fsanitize=address,undefined",),
+    "memory": ("-fsanitize=memory", "-fsanitize-memory-track-origins=2"),
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -86,6 +94,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--build", action="store_true", help="build the ASan extension here (tox builds it otherwise)")
     parser.add_argument("--extra-corpus", type=Path, default=None, help="a second seed directory (vendored test data)")
     parser.add_argument("--skip-inprocess", action="store_true", help="only run the standalone C harnesses")
+    parser.add_argument(
+        "--sanitizer",
+        choices=sorted(_SANITIZERS),
+        default="address",
+        help="instrumentation for the standalone harnesses; memory runs only them, since CPython is not instrumented",
+    )
     args, passthrough = parser.parse_known_args(argv)
     if passthrough and args.mode not in {"round-trip", "release-diff", "triage"}:
         parser.error(f"unrecognized arguments: {' '.join(passthrough)}")
@@ -100,10 +114,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_oracles(args.minutes, args.rng_seed, args.crash_dir)
     if args.mode in {"round-trip", "release-diff"}:
         return _run_round_trip(args.mode, args.minutes, args.rng_seed, args.crash_dir, passthrough)
-    if not args.skip_inprocess and (code := _self_test()) != 0:
+    # MemorySanitizer builds only the standalone harnesses, so it has no extension to self-test or drive in-process
+    inprocess = not args.skip_inprocess and args.sanitizer != "memory"
+    if (inprocess and (code := _self_test()) != 0) or (
+        code := _run_standalone(args.mode, args.extra_corpus, args.crash_dir, args.sanitizer)
+    ) != 0:
         return code
-    if (code := _run_standalone(args.mode, args.extra_corpus, args.crash_dir)) != 0 or args.skip_inprocess:
-        return code
+    if not inprocess:
+        return 0
     return _run_inprocess(args.mode, args.minutes, args.rng_seed, args.crash_dir) or (
         _run_fuzz_build_tests() if args.mode == "smoke" else 0
     )
@@ -269,40 +287,56 @@ def _self_test() -> int:
     return 0
 
 
-def _run_standalone(mode: str, extra: Path | None, crash_dir: Path) -> int:
+def _run_standalone(mode: str, extra: Path | None, crash_dir: Path, sanitizer: str) -> int:
     work = Path(tempfile.mkdtemp(prefix="th-fuzz-"))
     idna = work / "idna_harness"
     js = work / "js_harness"
     phone = work / "phone_harness"
-    _compile(_FUZZ / "idna_harness.c", [], "-DTH_IDNA_STANDALONE", idna)
-    _compile(_FUZZ / "phone_harness.c", [], "-DTH_PHONE_STANDALONE", phone)
+    css = work / "css_harness"
+    flags = _SANITIZERS[sanitizer]
+    _compile(_FUZZ / "idna_harness.c", [], "-DTH_IDNA_STANDALONE", idna, flags)
+    _compile(_FUZZ / "phone_harness.c", [], "-DTH_PHONE_STANDALONE", phone, flags)
     _compile(
         _ROOT / "tools" / "js_minify_harness.c",
         [_ROOT / "src" / "turbohtml" / "_c" / "js" / f"{name}.c" for name in _JS_ENGINE],
         "-DJM_STANDALONE",
         js,
+        flags,
+    )
+    _compile(
+        _FUZZ / "css_harness.c",
+        [_ROOT / "src" / "turbohtml" / "_c" / "css" / "minify" / "css.c"],
+        "-DCSS_MINIFY_STANDALONE",
+        css,
+        flags,
     )
     js_seeds = _files(_REGRESSIONS) + (_js_corpus(work) if mode == "deep" else [])
     env = {
         **os.environ,
         "ASAN_OPTIONS": f"detect_leaks={1 if platform.system() == 'Linux' else 0}:halt_on_error=1",
         "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
+        "MSAN_OPTIONS": "halt_on_error=1",
     }
     if mode == "deep":
         env = _private_reports(env, crash_dir)
-    for binary, seeds in ((idna, _seed_files("idna", extra)), (phone, _seed_files("phone", extra)), (js, js_seeds)):
+    for binary, seeds in (
+        (idna, _seed_files("idna", extra)),
+        (phone, _seed_files("phone", extra)),
+        (js, js_seeds),
+        (css, _seed_files("minify_css", extra)),
+    ):
         if (result := subprocess.run([str(binary), *seeds], env=env, check=False)).returncode != 0:
             print(f"SANITIZER ABORT in {binary.name} (exit {result.returncode})", file=sys.stderr)
             return result.returncode
     return 0
 
 
-def _compile(harness: Path, sources: list[Path], macro: str, binary: Path) -> None:
+def _compile(harness: Path, sources: list[Path], macro: str, binary: Path, flags: tuple[str, ...]) -> None:
     cmd = [
         _CC,
         macro,
+        *flags,
         "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION",
-        "-fsanitize=address,undefined",
         "-fno-omit-frame-pointer",
         "-g",
         "-O1",
@@ -313,6 +347,7 @@ def _compile(harness: Path, sources: list[Path], macro: str, binary: Path) -> No
         str(_ROOT / "src" / "turbohtml" / "_c"),
         str(harness),
         *[str(path) for path in sources],
+        "-lm",
         "-o",
         str(binary),
     ]
@@ -412,7 +447,7 @@ def _private_reports(env: dict[str, str], crash_dir: Path) -> dict[str, str]:
     # a sanitizer report names the faulting function and line, which discloses an unfixed bug in a public CI log, so a
     # deep run writes reports beside the crashers, where the workflow encrypts them
     log = f":log_path={crash_dir / 'crash-sanitizer'}"
-    return {**env, "ASAN_OPTIONS": env["ASAN_OPTIONS"] + log, "UBSAN_OPTIONS": env["UBSAN_OPTIONS"] + log}
+    return {**env, **{key: env[key] + log for key in ("ASAN_OPTIONS", "UBSAN_OPTIONS", "MSAN_OPTIONS") if key in env}}
 
 
 if __name__ == "__main__":
