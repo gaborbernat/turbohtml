@@ -505,7 +505,11 @@ static void set_end_bp(RangeObject *self, PyObject *handle, th_node *node, Py_ss
 
 /* --- construction --- */
 
-static PyObject *range_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+/* A concurrent move into another tree rebinds the container's handle and node under its owner's lock, so the guard
+   holds that lock while the boundary is read and validated. */
+TH_NODE_API(static, PyObject *, range_new, (PyTypeObject * type, PyObject *args, PyObject *kwds), (type, args, kwds),
+            (PyTypeObject * type, PyObject *args, PyObject *kwds),
+            node_argument(PyType_GetModuleState(type), args, kwds, 0, "container"), NULL) {
     static char *keywords[] = {"container", "offset", NULL};
     PyObject *container;
     Py_ssize_t offset = 0;
@@ -1167,7 +1171,10 @@ static PyObject *range_repr(PyObject *self) {
 
 /* --- StaticRange --- */
 
-static PyObject *static_range_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+TH_NODE_API(static, PyObject *, static_range_new, (PyTypeObject * type, PyObject *args, PyObject *kwds),
+            (type, args, kwds), (PyTypeObject * type, PyObject *args, PyObject *kwds),
+            node_argument(PyType_GetModuleState(type), args, kwds, 0, "start_container"),
+            node_argument(PyType_GetModuleState(type), args, kwds, 2, "end_container")) {
     static char *keywords[] = {"start_container", "start_offset", "end_container", "end_offset", NULL};
     PyObject *start_container;
     Py_ssize_t start_offset;

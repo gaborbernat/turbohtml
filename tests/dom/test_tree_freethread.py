@@ -674,6 +674,28 @@ def test_concurrent_adoption_and_reads(read: Callable[[turbohtml.Element], objec
     assert destinations[1].text == "text"
 
 
+def test_concurrent_range_construction_while_the_container_moves_is_memory_safe() -> None:
+    node: Final = turbohtml.Element("b")
+    source: Final = turbohtml.Element("section", children=[node])
+    destinations: Final = [turbohtml.Element("main"), turbohtml.Element("aside")]
+    start: Final = threading.Barrier(2)
+
+    def builder() -> None:
+        start.wait()
+        for _ in range(2_000):
+            # each reads the container's tree handle and node, which a move rebinds together
+            turbohtml.Range(node, 0)
+            turbohtml.StaticRange(node, 0, node, 0)
+
+    def mover() -> None:
+        start.wait()
+        for index in range(2_000):
+            destinations[index % 2].append(source)
+
+    _run(builder, mover)
+    assert destinations[1].children == (source,)
+
+
 def test_concurrent_wraps_and_inserts_of_foreign_nodes_keep_the_tree_intact() -> None:
     markup = "<div>" + "<p><b>x</b></p>" * 200 + "</div>"
     root = turbohtml.parse(markup).find("div")

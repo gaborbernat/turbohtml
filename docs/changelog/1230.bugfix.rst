@@ -1,0 +1,1 @@
+:class:`~turbohtml.Range` and :class:`~turbohtml.StaticRange` now read a moving container together with its tree.
