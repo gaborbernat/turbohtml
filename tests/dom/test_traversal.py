@@ -20,6 +20,7 @@ from turbohtml import (
     TreeWalker,
     parse,
 )
+from turbohtml.clean import linkify_node
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -770,15 +771,74 @@ def test_iterator_adjusts_the_candidate_when_the_filter_removes_nodes() -> None:
     assert _ids(visited) == ["r", "p0", "p1", "p2"]
 
 
-def test_iterator_reference_moved_out_of_root_unobserved_falls_back() -> None:
+@pytest.mark.parametrize(
+    "remove",
+    [
+        pytest.param(lambda document: _select_p0(document).extract_contents(), id="range-extract"),
+        pytest.param(lambda document: _select_p0(document).delete_contents(), id="range-delete"),
+        pytest.param(
+            lambda document: turbohtml.Range(_el(document.select_one("#r")), 3).insert_node(
+                _el(document.select_one("#p0"))
+            ),
+            id="range-insert",
+        ),
+        pytest.param(lambda document: _select_p0(document).surround_contents(Element("section")), id="range-surround"),
+        pytest.param(lambda document: _el(document.select_one("#r")).remove("#p0"), id="query-remove"),
+        pytest.param(lambda document: _el(document.select_one("#r")).prune("#p1, #p2"), id="query-prune"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("before", "expected"),
+    [pytest.param(False, ("r", False), id="after"), pytest.param(True, ("p1", True), id="before")],
+)
+def test_iterator_follows_removals_outside_the_node_api(
+    remove: Callable[[Document], object], *, before: bool, expected: tuple[str, bool]
+) -> None:
+    removal_doc = _removal_doc()
+    iterator = NodeIterator(_el(removal_doc.select_one("#r")))
+    _walk_to(iterator, 4 if before else 3, back=2 if before else 0)  # reference: b, pointer before or after
+    remove(removal_doc)
+    assert (_ids([iterator.reference_node])[0], iterator.pointer_before_reference_node) == expected
+
+
+def _select_p0(document: Document) -> turbohtml.Range:
+    selection = turbohtml.Range(_el(document.select_one("#r")))
+    selection.select_node(_el(document.select_one("#p0")))
+    return selection
+
+
+def test_iterator_follows_strip_tags_unwrapping_the_reference_parent() -> None:
     removal_doc = _removal_doc()
     iterator = NodeIterator(_el(removal_doc.select_one("#r")))
     _walk_to(iterator, 4, back=2)  # reference: b, pointer before
-    moved = turbohtml.Range(_el(removal_doc.select_one("#r")))
-    moved.select_node(_el(removal_doc.select_one("#p0")))
-    fragment = moved.extract_contents()  # a Range edit does not adjust iterators
-    _el(fragment.children[0].children[0]).decompose()
-    assert (_ids([iterator.reference_node]), iterator.pointer_before_reference_node) == (["p0"], False)
+    _el(removal_doc.select_one("#r")).strip_tags("#p0")
+    # b leaves p0 first, moving the pointer on to p1, and p0 then leaves holding no pointer
+    assert (_ids([iterator.reference_node]), iterator.pointer_before_reference_node) == (["p1"], True)
+
+
+def test_iterator_follows_normalize_merging_the_reference_text() -> None:
+    root = Element("div", children=[Text("a"), Text("b")])
+    iterator = NodeIterator(root)
+    _walk_to(iterator, 3)  # reference: the second text node
+    root.normalize()
+    assert (iterator.reference_node, iterator.pointer_before_reference_node) == (root.children[0], False)
+
+
+def test_iterator_follows_linkify_replacing_the_reference_text() -> None:
+    root = Element("p", children=[Text("see https://example.com")])
+    iterator = NodeIterator(root)
+    _walk_to(iterator, 2)  # reference: the text node
+    linkify_node(root)
+    assert (iterator.reference_node, iterator.pointer_before_reference_node) == (root.children[1].children[0], False)
+
+
+def test_iterator_follows_shadow_root_inner_html_replacement() -> None:
+    shadow = Element("div").attach_shadow()
+    shadow.set_inner_html("<p><b></b></p>")
+    iterator = NodeIterator(shadow)
+    _walk_to(iterator, 3)  # reference: b
+    shadow.set_inner_html("<i></i>")
+    assert (iterator.reference_node, iterator.pointer_before_reference_node) == (shadow, False)
 
 
 def test_many_iterators_on_one_tree_all_follow_removals() -> None:

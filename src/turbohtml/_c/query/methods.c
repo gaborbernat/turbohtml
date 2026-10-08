@@ -2318,6 +2318,35 @@ static th_node *subtree_after(th_node *node, th_node *root) {
     return NULL;
 }
 
+/* The query edits unlink under the tree lock with no Python call in between, so the iterator count holds for a whole
+   pass; the callers pass it as a literal, so the compiler clones each pass and a tree with no live iterator unlinks
+   without testing for one. */
+static inline void query_unlink(th_tree *tree, th_node *node, int iterators) {
+    if (iterators) {
+        th_node_remove_silent(tree, node);
+    } else {
+        th_node_remove(node);
+    }
+}
+
+/* Remove every node under origin that keep does not hold. Removing one node rewires only links outside the nodes
+   still to visit, and subtree_after reads them before the remove, so no snapshot pointer goes stale. */
+static void prune_unkept(th_tree *tree, th_node *origin, const prune_keep *keep, Py_ssize_t unique, int iterators) {
+    th_node *node = origin->first_child;
+    while (node != NULL) {
+        int full = 0;
+        if (!prune_kept(keep, unique, node, &full)) {
+            th_node *after = subtree_after(node, origin);
+            query_unlink(tree, node, iterators);
+            node = after;
+        } else if (full) {
+            node = subtree_after(node, origin); /* a match: keep its whole subtree, skip it */
+        } else {
+            node = node->first_child; /* an ancestor of a match always has a child to descend into */
+        }
+    }
+}
+
 TH_NODE_API(, PyObject *, node_prune, (PyObject * self, PyObject *arg), (self, arg), (PyObject * self, PyObject *arg),
             (NodeObject *)self, arg != NULL && is_node(arg, state_of(self)) ? (NodeObject *)arg : NULL) {
     if (check_selector_arg(arg) < 0) {
@@ -2378,22 +2407,12 @@ retry:;
                     keep[unique++] = keep[read];
                 }
             }
-            /* Pass 2: pure-C edit. Removing one node rewires only links outside the
-               nodes still to visit, and subtree_after reads them before the remove,
-               so no snapshot pointer is dereferenced after it goes stale. */
+            /* Pass 2: pure-C edit (see prune_unkept). */
             handle_drop_index(handle);
-            th_node *node = origin->first_child;
-            while (node != NULL) {
-                int full = 0;
-                if (!prune_kept(keep, unique, node, &full)) {
-                    th_node *after = subtree_after(node, origin);
-                    th_node_remove(node);
-                    node = after;
-                } else if (full) {
-                    node = subtree_after(node, origin); /* a match: keep its whole subtree, skip it */
-                } else {
-                    node = node->first_child; /* an ancestor of a match always has a child to descend into */
-                }
+            if (th_tree_has_iterators(tree_of(self))) {
+                prune_unkept(tree_of(self), origin, keep, unique, 1);
+            } else {
+                prune_unkept(tree_of(self), origin, keep, unique, 0);
             }
         }
     }
@@ -2438,6 +2457,30 @@ static int snapshot_push(node_snapshot *snapshot, th_node *node) {
     }
     snapshot->items[snapshot->count++] = node;
     return 0;
+}
+
+/* Detach each matched node (see query_unlink). A node never frees on remove, only unlinks, and re-detaching an
+   already-detached node is a no-op, so a nested match whose ancestor already left the tree drops harmlessly. */
+static void remove_matches(th_tree *tree, const node_snapshot *snapshot, int iterators) {
+    for (Py_ssize_t at = 0; at < snapshot->count; at++) {
+        query_unlink(tree, snapshot->items[at], iterators);
+    }
+}
+
+/* Unwrap each matched node, splicing its children into its parent in its place, then detach it. Unwrapping only
+   relinks, so a nested match stays live, reparented to the surviving ancestor, until its own turn; its parent is
+   re-read here and is always set (a match is a strict descendant of the origin). */
+static void unwrap_matches(th_tree *tree, const node_snapshot *snapshot, int iterators) {
+    for (Py_ssize_t at = 0; at < snapshot->count; at++) {
+        th_node *node = snapshot->items[at];
+        th_node *parent = node->parent;
+        while (node->first_child != NULL) {
+            th_node *child = node->first_child;
+            query_unlink(tree, child, iterators);
+            th_node_insert_before(parent, child, node);
+        }
+        query_unlink(tree, node, iterators);
+    }
 }
 
 /* Record every element descendant of origin matching compiled, in document
@@ -2491,12 +2534,11 @@ retry:;
         if (snapshot_matches(compiled, origin, &snapshot) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             error = 1;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
         } else if (snapshot.count > 0) {
-            /* Pure-C edit: detach each match. A node never frees on remove, only
-               unlinks, and re-detaching an already-detached node is a no-op, so a
-               nested match whose ancestor already left the tree drops harmlessly. */
             handle_drop_index(handle);
-            for (Py_ssize_t at = 0; at < snapshot.count; at++) {
-                th_node_remove(snapshot.items[at]);
+            if (th_tree_has_iterators(tree_of(self))) {
+                remove_matches(tree_of(self), &snapshot, 1);
+            } else {
+                remove_matches(tree_of(self), &snapshot, 0);
             }
         }
     }
@@ -2534,21 +2576,11 @@ retry:;
         if (snapshot_matches(compiled, origin, &snapshot) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             error = 1;                                           /* GCOVR_EXCL_LINE: allocation-failure path */
         } else if (snapshot.count > 0) {
-            /* Pure-C edit: unwrap each match, splicing its children into its parent
-               in its place, then detach it. Unwrapping only relinks, so a nested
-               match stays live, reparented to the surviving ancestor, until its own
-               turn; its parent is re-read here and is always set (a match is a
-               strict descendant of origin). */
             handle_drop_index(handle);
-            for (Py_ssize_t at = 0; at < snapshot.count; at++) {
-                th_node *node = snapshot.items[at];
-                th_node *parent = node->parent;
-                while (node->first_child != NULL) {
-                    th_node *child = node->first_child;
-                    th_node_remove(child);
-                    th_node_insert_before(parent, child, node);
-                }
-                th_node_remove(node);
+            if (th_tree_has_iterators(tree_of(self))) {
+                unwrap_matches(tree_of(self), &snapshot, 1);
+            } else {
+                unwrap_matches(tree_of(self), &snapshot, 0);
             }
         }
     }

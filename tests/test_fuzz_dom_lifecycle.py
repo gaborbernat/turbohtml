@@ -142,33 +142,28 @@ def test_dom_lifecycle_operation_outcome(instructions: list[tuple[int, int, int,
     assert _steps(*instructions)[-1].outcome == outcome
 
 
-def test_tree_verify_counts_an_iterator_reference_outside_its_root() -> None:
-    root: Final = Element("div")
-    root.append(Text("x"))
-    root.append(Text("y"))
+def test_tree_verify_keeps_an_iterator_reference_inside_its_root_across_normalize() -> None:
+    root: Final = Element("div", children=[Text("x"), Text("y")])
     iterator: Final = NodeIterator(root)
     for _ in range(3):
         iterator.next_node()
-    # normalize merges the text nodes without the DOM NodeIterator pre-removing steps, so the reference leaves root
-    root.normalize()
-    assert _tree_verify(root) == (0, 0, 1, 0)
+    root.normalize()  # merging removes the reference, so the removal steps move it back to the merged text
+    assert (_tree_verify(root), iterator.reference_node) == ((0, 0, 0, 0), root.children[0])
 
 
-def test_tree_verify_counts_a_filter_candidate_outside_its_root() -> None:
-    root: Final = Element("div")
-    root.append(Text("x"))
+def test_tree_verify_keeps_a_filter_candidate_inside_its_root_across_normalize() -> None:
     merged: Final = Text("y")
-    root.append(merged)
+    root: Final = Element("div", children=[Text("x"), merged])
     reports: Final[list[tuple[int, int, int, int]]] = []
 
     def record(node: Node) -> int:
         if node == merged:
-            # normalize skips the DOM NodeIterator pre-removing steps, so the merged candidate leaves root
+            # merging removes the candidate, so the removal steps move it back to the merged text
             root.normalize()
             reports.append(_tree_verify(root))
         return NodeFilter.FILTER_SKIP
 
-    assert (list(NodeIterator(root, filter=record)), reports) == ([], [(0, 0, 1, 0)])
+    assert (list(NodeIterator(root, filter=record)), reports) == ([], [(0, 0, 0, 0)])
 
 
 def test_tree_verify_accepts_a_current_css_path_id_map() -> None:

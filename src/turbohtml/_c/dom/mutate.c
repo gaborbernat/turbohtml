@@ -18,6 +18,14 @@
 
 #include <string.h>
 
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+
 /* An empty tree for programmatically constructed nodes: the arena grows on the
    first allocation and can_span stays 0, so a node's text is always owned rather
    than a borrowed span. */
@@ -410,6 +418,10 @@ int th_tree_has_observers(const th_tree *tree) {
     return tree->observer_count > 0;
 }
 
+int th_tree_has_iterators(const th_tree *tree) {
+    return tree->node_iterator_count > 0;
+}
+
 struct th_observer ***th_tree_observers_ptr(th_tree *tree) {
     return &tree->observers;
 }
@@ -472,8 +484,9 @@ static void adjust_node_pointer(const th_node_iterator *iterator, th_node *remov
         return;
     }
     if (*before) {
-        /* a node pointer can leave root through an unobserved edit (a Range extract), so the walk may miss root */
-        for (th_node *walk = removed; walk != NULL && walk != iterator->root; walk = walk->parent) {
+        /* every unlink from a tree a caller can reach runs these steps (XSLT's whitespace strip unlinks raw, but puts
+           the nodes back under the same lock, with no Python call in between), so the walk meets root */
+        for (th_node *walk = removed; walk != iterator->root; walk = walk->parent) {
             if (walk->next_sibling != NULL) {
                 *node = walk->next_sibling;
                 return;
@@ -492,19 +505,30 @@ static void adjust_node_pointer(const th_node_iterator *iterator, th_node *remov
     *before = 0;
 }
 
-void th_node_remove_observed(th_tree *tree, th_node *child) {
-    th_node *parent = child->parent;
-    if (parent != NULL) {
-        th_mo_child_removed(tree, parent, child, child->prev_sibling, child->next_sibling);
-        for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
-            th_node_iterator *iterator = tree->node_iterators[index];
-            adjust_node_pointer(iterator, child, &iterator->reference, &iterator->reference_before);
-            if (iterator->candidate != NULL) {
-                adjust_node_pointer(iterator, child, &iterator->candidate, &iterator->candidate_before);
-            }
+/* Out of line: most trees hold no live iterator, so the removal loops of normalize, the sanitizer and the query edits
+   keep a single count test on their hot path. */
+static TH_NOINLINE void run_pre_removing_steps(th_tree *tree, th_node *child) {
+    for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
+        th_node_iterator *iterator = tree->node_iterators[index];
+        adjust_node_pointer(iterator, child, &iterator->reference, &iterator->reference_before);
+        if (iterator->candidate != NULL) {
+            adjust_node_pointer(iterator, child, &iterator->candidate, &iterator->candidate_before);
         }
     }
+}
+
+void th_node_remove_silent(th_tree *tree, th_node *child) {
+    if (tree->node_iterator_count > 0) {
+        run_pre_removing_steps(tree, child);
+    }
     node_remove(child);
+}
+
+void th_node_remove_observed(th_tree *tree, th_node *child) {
+    if (child->parent != NULL) {
+        th_mo_child_removed(tree, child->parent, child, child->prev_sibling, child->next_sibling);
+    }
+    th_node_remove_silent(tree, child);
 }
 
 void th_node_append_child_observed(th_tree *tree, th_node *parent, th_node *child) {
@@ -540,7 +564,7 @@ void th_tree_verify(th_tree *tree, th_node *start, Py_ssize_t (*visit)(void *con
         }
         node = node->next_sibling;
     }
-    /* the DOM NodeIterator pre-removing steps keep both pointers inside root across every observed removal */
+    /* the DOM NodeIterator pre-removing steps keep both pointers inside root across removals from a reachable tree */
     found->iterators = 0;
     for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
         const th_node_iterator *iterator = tree->node_iterators[index];
@@ -1119,12 +1143,20 @@ th_tree *th_tree_copy_document(th_tree *src) {
     return dest;
 }
 
-static void normalize_children(th_tree *tree, th_node *root) {
+static inline void normalize_unlink(th_tree *tree, th_node *child, int iterators) {
+    if (iterators) {
+        th_node_remove_silent(tree, child);
+    } else {
+        node_remove(child);
+    }
+}
+
+static void normalize_children(th_tree *tree, th_node *root, int iterators) {
     for (th_node *child = root->first_child; child != NULL;) {
         th_node *next = child->next_sibling;
         if (child->type == TH_NODE_TEXT) {
             if (child->text_len == 0) {
-                th_node_remove(child);
+                normalize_unlink(tree, child, iterators);
                 child = next;
                 continue;
             }
@@ -1133,7 +1165,7 @@ static void normalize_children(th_tree *tree, th_node *root) {
             while (end != NULL && end->type == TH_NODE_TEXT) {
                 th_node *after = end->next_sibling;
                 if (end->text_len == 0) {
-                    th_node_remove(end);
+                    normalize_unlink(tree, end, iterators);
                 } else {
                     merged_len += end->text_len;
                 }
@@ -1159,7 +1191,7 @@ static void normalize_children(th_tree *tree, th_node *root) {
             }
             while (next != end) {
                 th_node *after = next->next_sibling;
-                th_node_remove(next);
+                normalize_unlink(tree, next, iterators);
                 next = after;
             }
         }
@@ -1167,11 +1199,23 @@ static void normalize_children(th_tree *tree, th_node *root) {
     }
 }
 
+static void normalize_subtree(th_tree *tree, th_node *root, int iterators);
+
+/* No Python code runs while normalize walks, so the iterator count cannot change mid-call: each literal below lets the
+   compiler clone the walk, and a tree with no live iterator unlinks without testing for one. */
 void th_node_normalize(th_tree *tree, th_node *root) {
+    if (th_tree_has_iterators(tree)) {
+        normalize_subtree(tree, root, 1);
+    } else {
+        normalize_subtree(tree, root, 0);
+    }
+}
+
+static void normalize_subtree(th_tree *tree, th_node *root, int iterators) {
     th_node *node = root;
     for (;;) {
         if (node == root || node->type == TH_NODE_ELEMENT) {
-            normalize_children(tree, node);
+            normalize_children(tree, node, iterators);
         }
         if (node->first_child != NULL) {
             node = node->first_child;
