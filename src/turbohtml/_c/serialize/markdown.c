@@ -1933,43 +1933,80 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
 }
 
 /* Whether a list item lays out as more than one paragraph, so it renders as a
-   CommonMark loose item (a blank line between its blocks): a leading text/inline
-   run plus a paragraph block, or two paragraph blocks. A nested list, blockquote
-   or other self-framing block is not a paragraph and does not force looseness (a
-   tight item can still carry a sublist). */
+   CommonMark loose item (a blank line between its blocks): two runs of visible inline
+   content split by a paragraph block, also when a div, a link or an emphasis wraps
+   them, since a tight item writes its paragraphs on consecutive lines that read as one.
+   Content after a nested list, quote or table needs the blank line too, or it
+   continues that block lazily (CommonMark 5.1, 5.2) or as a row (GFM 4.10). A
+   heading, rule or code block ends on its own line and does not force looseness, so a
+   tight item can still carry one, and the scan never enters a self-framing block. */
 static int md_item_is_loose(md_ctx *ctx, th_node *node) {
     int units = 0;
     int in_run = 0;
-    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+    int absorbs = 0; /* the last block reads a following line as its own */
+    th_node *parent = node;
+    th_node *child = node->first_child;
+    for (;;) {
+        while (child == NULL) {
+            if (parent == node) {
+                return 0;
+            }
+            if (is_md_block(parent->ns == TH_NS_HTML ? parent->atom : TH_TAG_UNKNOWN)) {
+                in_run = 0;
+            }
+            child = parent->next_sibling;
+            parent = parent->parent;
+        }
+        int visible = 0;
         if (child->type == TH_NODE_TEXT) {
             const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len; index++) {
-                if (!is_space(text[index])) {
-                    if (!in_run) {
-                        units++;
-                        in_run = 1;
-                    }
-                    break;
-                }
+            for (Py_ssize_t index = 0; index < child->text_len && !visible; index++) {
+                visible = !is_space(text[index]);
             }
         } else if (child->type == TH_NODE_ELEMENT && !is_md_skipped(child)) {
             uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
             if (is_md_block(atom)) {
                 in_run = 0;
-                if (md_is_paragraph_block(atom)) {
-                    units++;
+                switch (atom) {
+                case TH_TAG_UL:
+                case TH_TAG_OL:
+                case TH_TAG_MENU:
+                case TH_TAG_BLOCKQUOTE:
+                case TH_TAG_TABLE:
+                    absorbs = 1;
+                    child = child->next_sibling;
+                    continue;
+                case TH_TAG_PRE:
+                case TH_TAG_HR:
+                case TH_TAG_H1:
+                case TH_TAG_H2:
+                case TH_TAG_H3:
+                case TH_TAG_H4:
+                case TH_TAG_H5:
+                case TH_TAG_H6:
+                    absorbs = 0;
+                    child = child->next_sibling;
+                    continue;
+                default:
+                    break;
                 }
-            } else if (!in_run) {
-                units++;
-                in_run = 1;
+            }
+            /* an image, and a link even with no text, write markup of their own */
+            visible = atom == TH_TAG_IMG || (atom == TH_TAG_A && th_node_attr_find(ctx->tree, child, "href", 4) >= 0);
+            if (!visible && child->first_child != NULL) {
+                parent = child;
+                child = child->first_child;
+                continue;
             }
         }
-        /* a text run counts as a unit too, so the check follows every child */
-        if (units > 1) {
-            return 1;
+        if (visible && !in_run) {
+            if (++units > 1 || absorbs) {
+                return 1;
+            }
+            in_run = 1;
         }
+        child = child->next_sibling;
     }
-    return 0;
 }
 
 /* Lay out one child of a block container: a block child opens its own block, and an
