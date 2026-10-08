@@ -62,13 +62,21 @@ def md(html: str) -> str:
         pytest.param("<h3>a<br></h3>", "### a", id="heading-trailing-break-dropped"),
         pytest.param(
             "<h1><div><h2>x<br>y</h2>z<br>w</div></h1>",
-            "# \n\n## x y\n\nz w",
+            "# x y z w",
             id="nested-heading-keeps-break-as-space",
         ),
+        pytest.param("<h3><p>x</p></h3>", "### x", id="heading-paragraph-stays-in-heading"),
+        pytest.param("<h2>a<p>b</p>c</h2>", "## a b c", id="heading-block-edges-read-as-spaces"),
+        pytest.param("<h2><div>a</div><div>b</div></h2>", "## a b", id="heading-sibling-blocks-join"),
     ],
 )
 def test_headings(html: str, expected: str) -> None:
     assert md(html) == expected
+
+
+def test_setext_heading_keeps_block_content() -> None:
+    config: Final = Markdown(headings=Markdown.Headings(style="setext"))
+    assert parse_fragment("<h1>a<p>b</p></h1>").to_markdown(config) == "a b\n==="
 
 
 @pytest.mark.parametrize(
@@ -272,7 +280,7 @@ def test_code(html: str, expected: str) -> None:
             id="emphasis-adjacent-in-mtext-html",
         ),
         pytest.param(
-            "<a href='h'><div><i>a</i><i>b</i></div>x</a>", "[*a*<em>b</em>x](h)", id="emphasis-adjacent-in-link-html"
+            "<a href='h'><div><i>a</i><i>b</i></div>x</a>", "[*a*<em>b</em> x](h)", id="emphasis-adjacent-in-link-html"
         ),
         pytest.param("<p><i>;</i>i</p>", "<em>;</em>i", id="emphasis-close-punct-before-letter"),
         pytest.param("<p>i<i>;</i></p>", "i<em>;</em>", id="emphasis-open-letter-before-punct"),

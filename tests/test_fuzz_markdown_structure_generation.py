@@ -184,6 +184,9 @@ def test_markdown_unsupported_element() -> None:
         pytest.param("<pre>a<p></p>b</pre>", id="empty-block-breaks-code-line"),
         pytest.param("<table><b>x</b></table>", id="foster-parented-emphasis"),
         pytest.param("<table><em>a</em><tr><td>b</td></tr></table>", id="foster-parented-before-rows"),
+        pytest.param("<h3><p>x</p></h3>", id="heading-paragraph"),
+        pytest.param("<h2>a<p>b</p>c</h2>", id="heading-text-around-block"),
+        pytest.param("<h2><div>a</div><div>b</div></h2>", id="heading-sibling-blocks"),
     ],
 )
 def test_markdown_supported_html_meaning(markup: str) -> None:

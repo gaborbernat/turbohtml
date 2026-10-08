@@ -1,0 +1,2 @@
+``to_markdown`` keeps block content inside a heading on the heading line and reads a block edge in link text or a
+heading as a space.

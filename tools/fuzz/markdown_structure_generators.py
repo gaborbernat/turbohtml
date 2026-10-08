@@ -227,7 +227,28 @@ def _record(tag: str, element: _TreeNode, children: tuple[_Meaning, ...]) -> tup
         # quote and item content is a flow of blocks; a tight item's single paragraph renders bare (CommonMark 5.1-5.3),
         # so items compare with every inline run wrapped
         return ((tag, (), _flow(children)),)
+    if tag in _HEADINGS:
+        # a heading is one line of inline content (CommonMark 4.2), so its blocks and breaks flatten onto it as spaces
+        return ((tag, (), _line(children)),)
     return ((tag, _attributes(tag, element.attrib), children),)
+
+
+def _line(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    flat: Final[list[_Meaning]] = []
+    for record in records:
+        if record[0] in _FLOW_INLINE and record[0] != "br":
+            flat.append(record)
+        elif record[0] == "br" or record == _BOUNDARY:
+            flat.append(("#text", (("value", " "),), ()))
+        else:
+            flat.extend((("#text", (("value", " "),), ()), *_line(record[2]), ("#text", (("value", " "),), ())))
+    merged: Final[list[_Meaning]] = []
+    for record in flat:
+        if record[0] == "#text" and merged and merged[-1][0] == "#text":
+            merged[-1] = ("#text", (("value", merged[-1][1][0][1] + record[1][0][1]),), ())
+        else:
+            merged.append(record)
+    return _spacing(tuple(merged), preserve=False, inline=False)
 
 
 def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
@@ -581,6 +602,7 @@ _CONTENT_REQUIRED: Final = frozenset({"p", "strong", "em", "s", "code", "ul", "o
 _EMPHASIS: Final = frozenset({"strong", "em", "s"})
 _BLOCKS: Final = frozenset({"p", "ul", "ol", "table"})
 _BOUNDARY: Final[_Meaning] = ("#block", (), ())
+_HEADINGS: Final = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # the WHATWG content models of the containers whose Markdown syntax can hold nothing else (4.4.5-4.4.8, 4.9)
 _CONTENT_MODEL: Final[dict[str, frozenset[str]]] = {
     "ul": frozenset({"li", "script"}),

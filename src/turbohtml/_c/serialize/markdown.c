@@ -163,6 +163,7 @@ enum md_leave {
     MD_LEAVE_TABLE,
     MD_LEAVE_BLOCKQUOTE, /* mark a quote that opened no block of its own */
     MD_LEAVE_BLOCK_END,  /* the block inside an inline element is done */
+    MD_LEAVE_SPACE,      /* a flattened block's end reads as a space */
 };
 
 enum md_table_phase {
@@ -1751,7 +1752,7 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
         return;
     }
     if (is_md_block(atom)) {
-        if (!ctx->inline_only) {
+        if (!ctx->inline_only && !ctx->in_heading) {
             if (!ctx->in_cell) {
                 /* the content after the block belongs to a new block, so note where it ends;
                    a cell flattens its blocks onto its one line instead */
@@ -1765,10 +1766,13 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
             md_enter_cell_flat(ctx, node, -1);
             return;
         }
-        /* inside link text a block cannot open its own line (a blank line would
-           split the CommonMark link), so it flattens to inline; its boundary still
-           reads as a space so adjacent words never fuse */
+        /* inside link text or a heading a block cannot open its own line (a blank
+           line would split the CommonMark link, and a heading is one line), so it
+           flattens to inline; its boundary still reads as a space so adjacent words
+           never fuse */
         ctx->space_pending = 1;
+        md_push(ctx, node, MD_WALK_INLINE, MD_LEAVE_SPACE);
+        return;
     }
     md_push(ctx, node, MD_WALK_INLINE, MD_LEAVE_NONE);
 }
@@ -3222,6 +3226,9 @@ static void md_leave(md_ctx *ctx) {
         break;
     case MD_LEAVE_BLOCK_END:
         ctx->block_ended = 1;
+        break;
+    case MD_LEAVE_SPACE:
+        ctx->space_pending = 1;
         break;
     case MD_LEAVE_BLOCKQUOTE:
         /* a leading quote writes its marker only with its first block; CommonMark
