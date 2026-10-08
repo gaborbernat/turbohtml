@@ -520,6 +520,28 @@ def test_parse_declarations_keeps_deeply_nested_custom_property_block() -> None:
     assert _pairs(StyleDeclaration.parse(f"--x: {value}; color: red")) == (("--x", value), ("color", "red"))
 
 
+_ESCAPED_DELIMITERS: Final[list[ParameterSet]] = [
+    pytest.param(r"--x: \{; color: red", (("--x", r"\{"), ("color", "red")), id="escaped-opener"),
+    pytest.param(r"--x: {a\};b}; color: red", (("--x", r"{a\};b}"), ("color", "red")), id="escaped-closer-in-block"),
+    pytest.param(r"--x: a\;b; color: red", (("--x", r"a\;b"), ("color", "red")), id="escaped-semicolon"),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_DELIMITERS)
+def test_parse_declarations_reads_escaped_delimiter_as_name(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    assert _pairs(StyleDeclaration.parse(text)) == expected
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_DELIMITERS)
+def test_stylesheet_reads_escaped_delimiter_as_name(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    assert _pairs(StyleSheet(f"p {{ {text} }}").rules[0].style) == expected
+
+
+def test_stylesheet_at_rule_block_reads_escaped_closer_as_name() -> None:
+    css = r"@media x { a\} { color: red } } q { color: blue }"
+    assert [rule.selector_text for rule in StyleSheet(css).rules] == ["q"]
+
+
 def _pairs(declaration: StyleDeclaration) -> tuple[tuple[str, str], ...]:
     return tuple((name, declaration[name]) for name in declaration)
 

@@ -76,8 +76,15 @@ def test_atheris_reference_css_records_left_open_at_end(
     assert cssom_observation(data) == expected
 
 
-def test_atheris_reference_custom_property_block_records() -> None:
-    assert cssom_observation(b"--x: {a}") == (("--x", "{a}", False),)
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(b"--x: {a}", (("--x", "{a}", False),), id="custom-property-block"),
+        pytest.param(rb"--x: a\}", (("--x", r"a\}", False),), id="escaped-closer"),
+    ],
+)
+def test_atheris_reference_css_block_records(data: bytes, expected: tuple[tuple[str, str, bool], ...]) -> None:
+    assert cssom_observation(data) == expected
 
 
 def test_atheris_reference_selector_specificity() -> None:

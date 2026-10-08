@@ -412,9 +412,11 @@ static int css_take_important(const Py_UCS4 **value, Py_ssize_t *len) {
 }
 
 /* What css_scan_to does at each ASCII code point: 1, 2 and 3 open a (), [] or {} block and name its kind, 4 marks a
-   closer, a quote, `:` or `;`, and 0 lets the run of names and numbers between them skip the comparisons. */
+   closer, a quote, a backslash, `:` or `;`, and 0 lets the run of names and numbers between them skip the
+   comparisons. */
 static const unsigned char CSS_SCAN_CLASS[128] = {
-    ['('] = 1, ['['] = 2, ['{'] = 3, [')'] = 4, [']'] = 4, ['}'] = 4, ['"'] = 4, ['\''] = 4, [':'] = 4, [';'] = 4,
+    ['('] = 1, ['['] = 2,  ['{'] = 3, [')'] = 4, [']'] = 4,  ['}'] = 4,
+    ['"'] = 4, ['\''] = 4, [':'] = 4, [';'] = 4, ['\\'] = 4,
 };
 
 /* The closer of each block kind; kind 0 stands for no open block and matches nothing. */
@@ -477,6 +479,9 @@ static Py_ssize_t css_scan_to(const Py_UCS4 *data, Py_ssize_t pos, Py_ssize_t en
                 }
                 pos++;
             }
+        } else if (cur == '\\') {
+            /* an escaped code point is part of a name (CSS Syntax 3 §4.3.7), so `\}` stays in the name */
+            pos++;
         }
         pos++;
     }
@@ -484,39 +489,6 @@ static Py_ssize_t css_scan_to(const Py_UCS4 *data, Py_ssize_t pos, Py_ssize_t en
         PyMem_Free(spilled);
     }
     return found;
-}
-
-/* The offset just past the '}' matching the '{' at pos, tracking nested braces (so
-   an @media block's inner rule blocks are skipped whole) and skipping strings, or
-   end when the block is unterminated. */
-static Py_ssize_t css_match_brace(const Py_UCS4 *data, Py_ssize_t pos, Py_ssize_t end) {
-    int depth = 0;
-    while (pos < end) {
-        Py_UCS4 cur = data[pos];
-        if (cur == '"' || cur == '\'') {
-            Py_UCS4 quote = cur;
-            pos++;
-            while (pos < end) {
-                if (data[pos] == '\\' && pos + 1 < end) {
-                    pos += 2;
-                    continue;
-                }
-                if (data[pos] == quote) {
-                    break;
-                }
-                pos++;
-            }
-        } else if (cur == '{') {
-            depth++;
-        } else if (cur == '}') {
-            depth--;
-            if (depth == 0) {
-                return pos + 1;
-            }
-        }
-        pos++;
-    }
-    return end;
 }
 
 /* Parse the declarations in the cleaned block [start, end) into decls, growing the
@@ -770,7 +742,11 @@ static css_rule *css_parse_sheet(const Py_UCS4 *data, Py_ssize_t len, Py_ssize_t
                 pos = semi < len ? semi + 1 : len;
                 continue;
             }
-            pos = css_match_brace(data, brace, len);
+            Py_ssize_t block_end = css_scan_to(data, brace + 1, len, '}', '}');
+            if (block_end < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                goto fail;       /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            pos = block_end < len ? block_end + 1 : len;
             continue;
         }
         if (brace >= len) {
