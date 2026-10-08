@@ -61,6 +61,21 @@ def test_atheris_reference_empty_css_records() -> None:
     assert cssom_observation(b"") == ()
 
 
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(b"color: (", (("color", "(", False),), id="open-block"),
+        pytest.param(b'content: "x', (("content", '"x', False),), id="open-string"),
+        pytest.param(b'content: "a\n/* x', (("content", '"a\n/* x', False),), id="open-comment-after-string"),
+        pytest.param(b"a: b}", (("a", "b}", False),), id="top-level-closer"),
+    ],
+)
+def test_atheris_reference_css_records_left_open_at_end(
+    data: bytes, expected: tuple[tuple[str, str, bool], ...]
+) -> None:
+    assert cssom_observation(data) == expected
+
+
 def test_atheris_reference_selector_specificity() -> None:
     expression, specificity = selector_observation(b"div#a > p.x")
     assert (bool(expression), specificity) == (True, ((1, 1, 2),))
