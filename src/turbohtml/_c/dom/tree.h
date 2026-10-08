@@ -468,8 +468,8 @@ uint64_t th_tree_id_version(const th_tree *tree);
 /* Fold in the parse errors the input's own code points raise, which th_tree_parse leaves for
    the first reader. The source is passed in rather than read off the tree: th_tree_parse hands
    tree->data to the tokenizer's own buffer, which does not outlive the parse. Idempotent; call
-   before th_tree_errors. */
-void th_tree_ensure_input_errors(th_tree *tree, int kind, const void *data, Py_ssize_t length);
+   before th_tree_errors. Returns -1 on allocation failure, leaving the errors as they were. */
+int th_tree_ensure_input_errors(th_tree *tree, int kind, const void *data, Py_ssize_t length);
 
 const th_parse_error *th_tree_errors(const th_tree *tree, Py_ssize_t *out_count);
 
