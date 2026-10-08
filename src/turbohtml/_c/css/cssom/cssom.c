@@ -28,9 +28,15 @@
    longhands appear here; shorthands are expanded into these before the cascade. */
 typedef struct {
     const char *name;
-    int inherited;
     const char *initial;
+    uint8_t name_len;
+    uint8_t initial_len;
+    uint8_t inherited;
 } css_prop_meta;
+
+/* The lengths come from the literals at compile time, so building a computed style runs no strlen. Byte-wide fields
+   after the pointers keep each row the size it had before the lengths. */
+#define CSS_PROP(name, inherited, initial) {name, initial, sizeof(name) - 1, sizeof(initial) - 1, inherited}
 
 /* clang-format off */
 enum css_prop_id {
@@ -54,69 +60,69 @@ enum css_prop_id {
 };
 
 static const css_prop_meta CSS_PROPS[NUM_PROPS] = {
-    {"color", 1, "canvastext"},
-    {"font-size", 1, "medium"},
-    {"font-style", 1, "normal"},
-    {"font-weight", 1, "normal"},
-    {"font-variant", 1, "normal"},
-    {"line-height", 1, "normal"},
-    {"text-align", 1, "start"},
-    {"text-indent", 1, "0"},
-    {"text-transform", 1, "none"},
-    {"letter-spacing", 1, "normal"},
-    {"word-spacing", 1, "normal"},
-    {"white-space", 1, "normal"},
-    {"visibility", 1, "visible"},
-    {"list-style-type", 1, "disc"},
-    {"list-style-position", 1, "outside"},
-    {"cursor", 1, "auto"},
-    {"direction", 1, "ltr"},
-    {"caption-side", 1, "top"},
-    {"display", 0, "inline"},
-    {"position", 0, "static"},
-    {"top", 0, "auto"},
-    {"right", 0, "auto"},
-    {"bottom", 0, "auto"},
-    {"left", 0, "auto"},
-    {"float", 0, "none"},
-    {"clear", 0, "none"},
-    {"width", 0, "auto"},
-    {"height", 0, "auto"},
-    {"min-width", 0, "auto"},
-    {"min-height", 0, "auto"},
-    {"max-width", 0, "none"},
-    {"max-height", 0, "none"},
-    {"margin-top", 0, "0"},
-    {"margin-right", 0, "0"},
-    {"margin-bottom", 0, "0"},
-    {"margin-left", 0, "0"},
-    {"padding-top", 0, "0"},
-    {"padding-right", 0, "0"},
-    {"padding-bottom", 0, "0"},
-    {"padding-left", 0, "0"},
-    {"border-top-width", 0, "medium"},
-    {"border-right-width", 0, "medium"},
-    {"border-bottom-width", 0, "medium"},
-    {"border-left-width", 0, "medium"},
-    {"border-top-style", 0, "none"},
-    {"border-right-style", 0, "none"},
-    {"border-bottom-style", 0, "none"},
-    {"border-left-style", 0, "none"},
-    {"border-top-color", 0, "currentcolor"},
-    {"border-right-color", 0, "currentcolor"},
-    {"border-bottom-color", 0, "currentcolor"},
-    {"border-left-color", 0, "currentcolor"},
-    {"background-color", 0, "transparent"},
-    {"background-image", 0, "none"},
-    {"opacity", 0, "1"},
-    {"z-index", 0, "auto"},
-    {"overflow-x", 0, "visible"},
-    {"overflow-y", 0, "visible"},
-    {"vertical-align", 0, "baseline"},
-    {"box-sizing", 0, "content-box"},
-    {"outline-width", 0, "medium"},
-    {"outline-style", 0, "none"},
-    {"outline-color", 0, "currentcolor"},
+    CSS_PROP("color", 1, "canvastext"),
+    CSS_PROP("font-size", 1, "medium"),
+    CSS_PROP("font-style", 1, "normal"),
+    CSS_PROP("font-weight", 1, "normal"),
+    CSS_PROP("font-variant", 1, "normal"),
+    CSS_PROP("line-height", 1, "normal"),
+    CSS_PROP("text-align", 1, "start"),
+    CSS_PROP("text-indent", 1, "0"),
+    CSS_PROP("text-transform", 1, "none"),
+    CSS_PROP("letter-spacing", 1, "normal"),
+    CSS_PROP("word-spacing", 1, "normal"),
+    CSS_PROP("white-space", 1, "normal"),
+    CSS_PROP("visibility", 1, "visible"),
+    CSS_PROP("list-style-type", 1, "disc"),
+    CSS_PROP("list-style-position", 1, "outside"),
+    CSS_PROP("cursor", 1, "auto"),
+    CSS_PROP("direction", 1, "ltr"),
+    CSS_PROP("caption-side", 1, "top"),
+    CSS_PROP("display", 0, "inline"),
+    CSS_PROP("position", 0, "static"),
+    CSS_PROP("top", 0, "auto"),
+    CSS_PROP("right", 0, "auto"),
+    CSS_PROP("bottom", 0, "auto"),
+    CSS_PROP("left", 0, "auto"),
+    CSS_PROP("float", 0, "none"),
+    CSS_PROP("clear", 0, "none"),
+    CSS_PROP("width", 0, "auto"),
+    CSS_PROP("height", 0, "auto"),
+    CSS_PROP("min-width", 0, "auto"),
+    CSS_PROP("min-height", 0, "auto"),
+    CSS_PROP("max-width", 0, "none"),
+    CSS_PROP("max-height", 0, "none"),
+    CSS_PROP("margin-top", 0, "0"),
+    CSS_PROP("margin-right", 0, "0"),
+    CSS_PROP("margin-bottom", 0, "0"),
+    CSS_PROP("margin-left", 0, "0"),
+    CSS_PROP("padding-top", 0, "0"),
+    CSS_PROP("padding-right", 0, "0"),
+    CSS_PROP("padding-bottom", 0, "0"),
+    CSS_PROP("padding-left", 0, "0"),
+    CSS_PROP("border-top-width", 0, "medium"),
+    CSS_PROP("border-right-width", 0, "medium"),
+    CSS_PROP("border-bottom-width", 0, "medium"),
+    CSS_PROP("border-left-width", 0, "medium"),
+    CSS_PROP("border-top-style", 0, "none"),
+    CSS_PROP("border-right-style", 0, "none"),
+    CSS_PROP("border-bottom-style", 0, "none"),
+    CSS_PROP("border-left-style", 0, "none"),
+    CSS_PROP("border-top-color", 0, "currentcolor"),
+    CSS_PROP("border-right-color", 0, "currentcolor"),
+    CSS_PROP("border-bottom-color", 0, "currentcolor"),
+    CSS_PROP("border-left-color", 0, "currentcolor"),
+    CSS_PROP("background-color", 0, "transparent"),
+    CSS_PROP("background-image", 0, "none"),
+    CSS_PROP("opacity", 0, "1"),
+    CSS_PROP("z-index", 0, "auto"),
+    CSS_PROP("overflow-x", 0, "visible"),
+    CSS_PROP("overflow-y", 0, "visible"),
+    CSS_PROP("vertical-align", 0, "baseline"),
+    CSS_PROP("box-sizing", 0, "content-box"),
+    CSS_PROP("outline-width", 0, "medium"),
+    CSS_PROP("outline-style", 0, "none"),
+    CSS_PROP("outline-color", 0, "currentcolor"),
 };
 
 /* CSS_PROPS ids ordered by their name, so css_prop_id can binary-search a declaration
@@ -1012,8 +1018,7 @@ static int css_value_set_slice(css_value *value, const Py_UCS4 *data, Py_ssize_t
     return 0;
 }
 
-static int css_value_set_ascii(css_value *value, const char *text) {
-    Py_ssize_t len = (Py_ssize_t)strlen(text);
+static int css_value_set_ascii(css_value *value, const char *text, Py_ssize_t len) {
     Py_UCS4 buffer[32];
     for (Py_ssize_t index = 0; index < len; index++) {
         buffer[index] = (Py_UCS4)text[index];
@@ -1037,24 +1042,24 @@ static int css_resolve(css_value *out, const css_slot *slot, const css_value *pa
         Py_ssize_t len = slot->value_len;
         if (css_slice_ci_eq(value, len, "inherit")) {
             return inherited != NULL ? css_value_set_slice(out, inherited->data, inherited->len)
-                                     : css_value_set_ascii(out, meta->initial);
+                                     : css_value_set_ascii(out, meta->initial, meta->initial_len);
         }
         if (css_slice_ci_eq(value, len, "initial")) {
-            return css_value_set_ascii(out, meta->initial);
+            return css_value_set_ascii(out, meta->initial, meta->initial_len);
         }
         if (css_slice_ci_eq(value, len, "unset") || css_slice_ci_eq(value, len, "revert")) {
             /* revert has no user/UA origin to fall back to here, so it collapses to unset */
             if (meta->inherited && inherited != NULL) {
                 return css_value_set_slice(out, inherited->data, inherited->len);
             }
-            return css_value_set_ascii(out, meta->initial);
+            return css_value_set_ascii(out, meta->initial, meta->initial_len);
         }
         return css_value_set_slice(out, value, len);
     }
     if (meta->inherited && inherited != NULL) {
         return css_value_set_slice(out, inherited->data, inherited->len);
     }
-    return css_value_set_ascii(out, meta->initial);
+    return css_value_set_ascii(out, meta->initial, meta->initial_len);
 }
 
 typedef struct {
@@ -1470,7 +1475,7 @@ PyObject *turbohtml_css_computed_style(PyObject *module, PyObject *arg) {
         return NULL;             /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (int index = 0; index < NUM_PROPS; index++) {
-        PyObject *name = PyUnicode_FromString(CSS_PROPS[index].name);
+        PyObject *name = PyUnicode_FromStringAndSize(CSS_PROPS[index].name, CSS_PROPS[index].name_len);
         PyObject *value = css_slice_str(final_map[index].data, final_map[index].len);
         if (name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             Py_XDECREF(name);                /* GCOVR_EXCL_LINE: allocation-failure path */
