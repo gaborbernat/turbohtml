@@ -1197,7 +1197,9 @@ static void md_emit_code_span(md_ctx *ctx, th_node *node) {
    balance, so a `wiki/Foo_(bar)` URL reads as written. A backslash, and a `&` that
    would decode as a character reference, are escaped in either form. */
 static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ssize_t len) {
-    int angle = 0;
+    /* an empty destination is spelled "<>": bare, a following title or a reference
+       definition's line end would be read in its place (CommonMark 4.7, 6.3) */
+    int angle = len == 0 && *base == '\0';
     int depth = 0;
     int unbalanced = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
@@ -1306,6 +1308,12 @@ static void md_enter_link(md_ctx *ctx, th_node *node) {
     }
     Py_ssize_t href_len;
     const Py_UCS4 *href = md_attr(ctx->tree, node, "href", &href_len);
+    if (href == NULL && th_node_attr_find(ctx->tree, node, "href", 4) >= 0) {
+        /* an empty href links to the document itself (WHATWG 4.6.2); only a missing one
+           leaves a placeholder */
+        static const Py_UCS4 empty_href[1] = {0};
+        href = empty_href;
+    }
     if (href == NULL || opt->ignore_links || (opt->skip_internal_links && md_href_internal(href))) {
         md_push(ctx, node, MD_WALK_INLINE, opt->wrap_links ? MD_LEAVE_NONE : MD_LEAVE_NO_WRAP);
         return;
@@ -1585,6 +1593,8 @@ static void md_emit_image(md_ctx *ctx, th_node *node) {
     if (src != NULL) {
         int relative = *opt->base_url != '\0' && !md_href_absolute(src, src_len) && !md_href_internal(src);
         md_emit_url(ctx, relative ? opt->base_url : "", src, src_len);
+    } else {
+        sbuf_puts(&ctx->out, "<>"); /* a missing src is an empty destination */
     }
     Py_ssize_t title_len;
     const Py_UCS4 *title = md_attr(ctx->tree, node, "title", &title_len);
