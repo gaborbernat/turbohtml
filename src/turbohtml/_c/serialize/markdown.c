@@ -1106,6 +1106,15 @@ static void md_enter_emphasis(md_ctx *ctx, th_node *node, const char *delim, uin
     md_wrap_flank(ctx, node, marker);
 }
 
+static int md_all_spaces(const Py_UCS4 *text, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (text[index] != ' ') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* The longest run of backticks anywhere in s, so an inline code span can fence
    with one more backtick than that and never be split by its own content. */
 static Py_ssize_t md_max_backtick_run(const Py_UCS4 *text, Py_ssize_t len) {
@@ -1205,7 +1214,11 @@ static void md_emit_code_span(md_ctx *ctx, th_node *node) {
         return;
     }
     Py_ssize_t fence = md_max_backtick_run(content.data, len) + 1;
-    int pad = content.data[0] == '`' || content.data[len - 1] == '`';
+    /* a reader strips one space from each end of content that both starts and ends with
+       one (CommonMark 6.1), so such content, like content edged with a backtick, gets
+       one more on each side */
+    int pad = content.data[0] == '`' || content.data[len - 1] == '`' ||
+              (content.data[0] == ' ' && content.data[len - 1] == ' ' && !md_all_spaces(content.data, len));
     for (Py_ssize_t index = 0; index < fence; index++) {
         sbuf_putc(&ctx->out, '`');
     }
