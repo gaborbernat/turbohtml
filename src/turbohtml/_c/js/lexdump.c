@@ -37,7 +37,7 @@ static PyObject *minify_js_impl(PyObject *arg, int fold, int mangle, int passthr
         if (err[0] != '\0') { /* GCOVR_EXCL_BR_LINE: the empty-message case is an allocation failure */
             if (passthrough) {
                 /* lenient mode: an unparsable script passes through unchanged, the leniency the
-                   inline-<script> path already has via th_js_minify's errlen==0 opt-out */
+                   inline-<script> path already has */
                 return Py_NewRef(arg);
             }
             PyErr_SetString(PyExc_ValueError, err);

@@ -19,16 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef TH_NOINLINE
-#if defined(_MSC_VER)
-#define TH_NOINLINE __declspec(noinline)
-#elif defined(__GNUC__)
-#define TH_NOINLINE __attribute__((noinline))
-#else
-#define TH_NOINLINE
-#endif
-#endif
-
 typedef struct {
     const Py_UCS4 *str;
     Py_ssize_t len;
@@ -62,9 +52,6 @@ static void fail(P *parser, const char *message) {
         return;
     }
     parser->err = 1;
-    if (parser->errlen == 0) { /* errlen==0 is the no-message opt-out the HTML inline-<script> path uses */
-        return;
-    }
     Py_ssize_t start = parser->lx.start;
     if (parser->lx.kind == JT_EOF) {
         snprintf(parser->errbuf, parser->errlen, "%s at offset %zd: reached end of input", message, (Py_ssize_t)start);
@@ -277,9 +264,6 @@ static void set_ident(P *parser, int32_t node) {
 /* A node with one borrowed-text span (identifier/literal/template chunk). */
 static int32_t leaf(P *parser, jm_kind kind) {
     int32_t index = jm_node_new(parser->prog, kind);
-    if (index < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return -1;   /* GCOVR_EXCL_LINE */
-    }
     if (kind == JN_IDENT) {
         set_ident(parser, index);
     } else {
@@ -308,18 +292,12 @@ static void semicolon(P *parser) {
 
 static int32_t parse_var(P *parser, int no_in) {
     int32_t node = jm_node_new(parser->prog, JN_VAR);
-    if (node < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return -1;  /* GCOVR_EXCL_LINE */
-    }
     uint8_t decl = kw(parser, "const") ? 2 : kw(parser, "let") ? 1 : 0;
     parser->prog->nodes[node].decl = decl;
     advance(parser); /* var / let / const */
     int32_t tail = -1;
     for (;;) {
         int32_t declr = jm_node_new(parser->prog, JN_DECLR);
-        if (declr < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            return -1;   /* GCOVR_EXCL_LINE */
-        }
         Py_ssize_t target_start = parser->lx.start;
         int32_t target = parse_primary(parser); /* an identifier or a destructuring pattern */
         if (parser->err) {
@@ -2042,20 +2020,17 @@ static void parse_static_block(P *parser, int32_t member) {
 }
 
 jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, int module, char *errbuf, size_t errlen) {
-    jm_program *prog = jm_calloc(1, sizeof(jm_program));
-    if (prog == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        if (errlen > 0) {     /* GCOVR_EXCL_LINE */
-            errbuf[0] = '\0'; /* GCOVR_EXCL_LINE */
-        } /* GCOVR_EXCL_LINE */
-        return NULL; /* GCOVR_EXCL_LINE */
+    jm_program *prog = jm_program_new();
+    if (prog == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        errbuf[0] = '\0'; /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
     }
     prog->src = src;
     prog->src_len = len;
 
     P parser = {.prog = prog, .err = 0, .errbuf = errbuf, .errlen = errlen, .await_keyword = module, .strict = module};
-    if (errlen > 0) { /* errlen==0 is the no-message opt-out the HTML inline-<script> path uses */
-        errbuf[0] = '\0';
-    }
+    errbuf[0] = '\0';
+    prog->parse_err = &parser.err;
     jm_lex_init(&parser.lx, src, len);
     parser.lx.html_comments = !module;
     parser.lx.sink = prog; /* accrue kept license/banner comments before the first token is read */
@@ -2066,14 +2041,15 @@ jm_program *jm_parse(const Py_UCS4 *src, Py_ssize_t len, int module, char *errbu
         parse_statements(&parser, root, JT_EOF, 1);
     }
     prog->root = root;
+    prog->parse_err = NULL; /* parser.err dies with this frame; the later passes check prog->failed */
     prog->comment_count = parser.lx.comment_count; /* commit the run scanned on the real parse path */
     if (parser.names != NULL) {                    /* still NULL when no parameter list needed a check */
         jm_free(parser.names);
     }
 
-    if (parser.err || prog->failed) {     /* GCOVR_EXCL_BR_LINE: prog->failed is only set on allocation failure */
-        if (prog->failed && errlen > 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            errbuf[0] = '\0';             /* GCOVR_EXCL_LINE */
+    if (parser.err || prog->failed) { /* GCOVR_EXCL_BR_LINE: prog->failed is only set on allocation failure */
+        if (prog->failed) {           /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            errbuf[0] = '\0';         /* GCOVR_EXCL_LINE */
         } /* GCOVR_EXCL_LINE */
         jm_program_free(prog);
         return NULL;

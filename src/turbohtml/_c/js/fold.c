@@ -266,8 +266,8 @@ static void fold_boolean(F *folder, int32_t idx, int truth) {
     static const Py_UCS4 zero = '0';
     static const Py_UCS4 one = '1';
     int32_t num = jm_node_new(folder->prog, JN_NUM);
-    if (num < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path leaves the literal as-is */
-        return;    /* GCOVR_EXCL_LINE */
+    if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path leaves the literal as-is */
+        return;                 /* GCOVR_EXCL_LINE */
     }
     folder->prog->nodes[num].str = truth ? &zero : &one;
     folder->prog->nodes[num].str_len = 1;
@@ -284,8 +284,8 @@ static void fold_void(F *folder, int32_t idx) {
     static const Py_UCS4 zero = '0';
     static const Py_UCS4 voidkw[] = {'v', 'o', 'i', 'd'};
     int32_t num = jm_node_new(folder->prog, JN_NUM);
-    if (num < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return;    /* GCOVR_EXCL_LINE */
+    if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;                 /* GCOVR_EXCL_LINE */
     }
     folder->prog->nodes[num].str = &zero;
     folder->prog->nodes[num].str_len = 1;
@@ -608,8 +608,8 @@ static int negate_test(F *folder, int32_t *test) {
         int32_t pool[16];
         for (int slot = 0; slot < wraps; slot++) {
             pool[slot] = jm_node_new(folder->prog, JN_UNARY);
-            if (pool[slot] < 0) {    /* GCOVR_EXCL_BR_LINE: allocation-failure bails before any mutation */
-                return applications; /* GCOVR_EXCL_LINE */
+            if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure bails before any mutation */
+                return applications;    /* GCOVR_EXCL_LINE */
             }
         }
         int consumed = 0;
@@ -637,8 +637,8 @@ static int32_t negate_for_test(F *folder, int32_t idx) {
         return idx;
     }
     int32_t neg = jm_node_new(folder->prog, JN_UNARY);
-    if (neg < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return -1; /* GCOVR_EXCL_LINE */
+    if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1;              /* GCOVR_EXCL_LINE */
     }
     folder->prog->nodes[neg].op = JT_NOT;
     folder->prog->nodes[neg].a = idx;
@@ -655,8 +655,8 @@ static int32_t make_cond(F *folder, int32_t test, int32_t then, int32_t els) {
         els = swap;
     }
     int32_t cond = jm_node_new(prog, JN_COND);
-    if (cond < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return -1;  /* GCOVR_EXCL_LINE */
+    if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1;      /* GCOVR_EXCL_LINE */
     }
     prog->nodes[cond].a = test;
     prog->nodes[cond].b = then;
@@ -671,8 +671,8 @@ static int32_t make_logical(F *folder, int32_t test, int32_t expr) {
     jm_program *prog = folder->prog;
     uint16_t op = negate_test(folder, &test) % 2 ? JT_OR : JT_AND;
     int32_t logic = jm_node_new(prog, JN_LOGICAL);
-    if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return -1;   /* GCOVR_EXCL_LINE */
+    if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1;      /* GCOVR_EXCL_LINE */
     }
     prog->nodes[logic].op = op;
     prog->nodes[logic].a = test;
@@ -711,8 +711,8 @@ static int same_expr(jm_program *prog, int32_t left, int32_t right) {
 /* Overwrite the node at idx with a two-operand logical `left op right`. */
 static void fold_to_logical(F *folder, int32_t idx, uint16_t op, int32_t left, int32_t right) {
     int32_t logic = jm_node_new(folder->prog, JN_LOGICAL);
-    if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return;      /* GCOVR_EXCL_LINE */
+    if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return;                 /* GCOVR_EXCL_LINE */
     }
     folder->prog->nodes[logic].op = op;
     folder->prog->nodes[logic].a = left;
@@ -772,8 +772,8 @@ static void convert_if(F *folder, int32_t idx) {
             return;
         }
         int32_t neg = jm_node_new(prog, JN_UNARY);
-        if (neg < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            return;    /* GCOVR_EXCL_LINE */
+        if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;         /* GCOVR_EXCL_LINE */
         }
         prog->nodes[neg].op = JT_NOT;
         prog->nodes[neg].a = prog->nodes[idx].a;
@@ -840,8 +840,8 @@ static int32_t as_sequence(jm_program *prog, int32_t expr) {
         return expr;
     }
     int32_t seq = jm_node_new(prog, JN_SEQ);
-    if (seq < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return -1; /* GCOVR_EXCL_LINE */
+    if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return -1;      /* GCOVR_EXCL_LINE */
     }
     prog->nodes[seq].a = expr;
     return seq;
@@ -953,6 +953,7 @@ static void fold_if_return_chain(F *folder, int32_t first) {
     int32_t local[16];
     int32_t *guards = count <= 16 ? local : jm_malloc((size_t)count * sizeof(int32_t));
     if (guards == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        prog->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
         return;           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int32_t written = 0;
@@ -1017,12 +1018,12 @@ static void fold_guard_jump(F *folder, int32_t first, int jump_kind) {
             continue;
         }
         int32_t neg = jm_node_new(prog, JN_UNARY);
-        if (neg < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            return;    /* GCOVR_EXCL_LINE */
+        if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;         /* GCOVR_EXCL_LINE */
         }
         int32_t block = jm_node_new(prog, JN_BLOCK);
-        if (block < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            return;      /* GCOVR_EXCL_LINE */
+        if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            return;         /* GCOVR_EXCL_LINE */
         }
         prog->nodes[neg].op = JT_NOT;
         prog->nodes[neg].a = prog->nodes[idx].a;
@@ -1206,8 +1207,8 @@ static void splice_lone_else(F *folder, int32_t idx) {
         return;
     }
     int32_t inner = jm_node_new(prog, JN_IF);
-    if (inner < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the else */
-        return;      /* GCOVR_EXCL_LINE */
+    if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the else */
+        return;         /* GCOVR_EXCL_LINE */
     }
     prog->nodes[inner] = prog->nodes[idx];
     prog->nodes[inner].c = -1;
@@ -1327,15 +1328,17 @@ static void fold_concat(F *folder, int32_t idx) {
     Py_UCS4 quote = left->str[0];
     Py_ssize_t value_cap = left->str_len + right->str_len; /* neither decoded value outgrows its lexeme */
     Py_UCS4 *value = jm_malloc((size_t)value_cap * sizeof(Py_UCS4));
-    if (value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        return;          /* GCOVR_EXCL_LINE */
+    if (value == NULL) {          /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        folder->prog->failed = 1; /* GCOVR_EXCL_LINE */
+        return;                   /* GCOVR_EXCL_LINE */
     }
     Py_ssize_t value_len = jm_str_decode(left->str, left->str_len, value);
     value_len += jm_str_decode(right->str, right->str_len, value + value_len);
     Py_UCS4 *lexeme = jm_malloc((size_t)(value_len * 6 + 2) * sizeof(Py_UCS4)); /* the widest escape is 6 wide */
-    if (lexeme == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        jm_free(value);   /* GCOVR_EXCL_LINE */
-        return;           /* GCOVR_EXCL_LINE */
+    if (lexeme == NULL) {         /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        jm_free(value);           /* GCOVR_EXCL_LINE */
+        folder->prog->failed = 1; /* GCOVR_EXCL_LINE */
+        return;                   /* GCOVR_EXCL_LINE */
     }
     lexeme[0] = quote;
     Py_ssize_t inner = jm_str_encode(value, value_len, quote, lexeme + 1);
@@ -1569,8 +1572,8 @@ static void walk(F *folder, int32_t idx) {
                             node->b = negated;
                         } else {
                             int32_t logic = jm_node_new(folder->prog, JN_LOGICAL);
-                            if (logic < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-                                return;      /* GCOVR_EXCL_LINE */
+                            if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                                return;                 /* GCOVR_EXCL_LINE */
                             }
                             node = &folder->prog->nodes[idx];
                             folder->prog->nodes[logic].op = JT_AND;
@@ -1720,8 +1723,8 @@ static void walk(F *folder, int32_t idx) {
                    so it shortens to the strict `void 0===X` / `void 0!==X`; X's evaluation (and any
                    throw from it) is identical on both forms since X is not a bare name. */
                 int32_t undef = jm_node_new(folder->prog, JN_UNARY);
-                if (undef < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the typeof */
-                    return;      /* GCOVR_EXCL_LINE */
+                if (folder->prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the typeof */
+                    return;                 /* GCOVR_EXCL_LINE */
                 }
                 fold_void(folder, undef);
                 node = &folder->prog->nodes[idx];             /* the two allocations may have moved the arena */

@@ -8,31 +8,52 @@
 
 #include <string.h>
 
-static int jm_grow_nodes(jm_program *prog) {
-    if (prog->node_count < prog->node_cap) {
-        return 0;
-    }
+/* Grow the node arena, keeping the slot at node_count spare, and return 1. On failure it returns 0 and jm_node_new
+   hands that slot out as a sink that absorbs the caller's writes, the way the tokenizer's oom_attr absorbs attribute
+   data. A failed program never grows again, so the sink stays one fixed slot. Out of line: only a doubling of the
+   arena reaches it, and inlined it would grow every jm_node_new call site. */
+static TH_NOINLINE int jm_grow_nodes(jm_program *prog) {
     size_t cap;
     size_t bytes;
-    int grew = th_grow_cap((size_t)prog->node_cap + 1, (size_t)prog->node_cap, 64, sizeof(jm_node), &cap, &bytes);
-    if (!grew) {   /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-        return -1; /* GCOVR_EXCL_LINE */
+    jm_node *grown;
+    /* GCOVR_EXCL_BR_START: a failed program never grows again, and a size overflow or a failed realloc is an
+       allocation failure */
+    if (!prog->failed &&
+        th_grow_cap((size_t)prog->node_cap + 1, (size_t)prog->node_cap, 64, sizeof(jm_node), &cap, &bytes) &&
+        (grown = jm_realloc(prog->nodes, bytes)) != NULL) {
+        /* GCOVR_EXCL_BR_STOP */
+        prog->nodes = grown;
+        prog->node_cap = (int32_t)cap;
+        return 1;
     }
-    jm_node *grown = jm_realloc(prog->nodes, bytes);
-    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;       /* GCOVR_EXCL_LINE */
+    /* GCOVR_EXCL_START: allocation failure cannot be forced from a test */
+    prog->failed = 1;
+    if (prog->parse_err != NULL) {
+        *prog->parse_err = 1;
     }
-    prog->nodes = grown;
-    prog->node_cap = (int32_t)cap;
     return 0;
+    /* GCOVR_EXCL_STOP */
 }
 
-int32_t jm_node_new(jm_program *prog, jm_kind kind) {
-    if (jm_grow_nodes(prog) < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        prog->failed = 1;          /* GCOVR_EXCL_LINE */
-        return -1;                 /* GCOVR_EXCL_LINE */
+jm_program *jm_program_new(void) {
+    jm_program *prog = jm_calloc(1, sizeof(jm_program));
+    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        return NULL;    /* GCOVR_EXCL_LINE */
     }
-    int32_t index = prog->node_count++;
+    if (!jm_grow_nodes(prog)) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        jm_free(prog);          /* GCOVR_EXCL_LINE */
+        return NULL;            /* GCOVR_EXCL_LINE */
+    }
+    return prog;
+}
+
+/* Out of line: inlined at the parser's call sites, the arena check measured more instructions under callgrind than the
+   call it saves. */
+TH_NOINLINE int32_t jm_node_new(jm_program *prog, jm_kind kind) {
+    int32_t index = prog->node_count;
+    if (index + 1 < prog->node_cap || jm_grow_nodes(prog)) { /* GCOVR_EXCL_BR_LINE: false only on allocation failure */
+        prog->node_count = index + 1;
+    }
     jm_node *node = &prog->nodes[index];
     node->kind = (uint8_t)kind;
     node->decl = 0;
@@ -166,9 +187,10 @@ const Py_UCS4 *jm_ident_value(jm_program *prog, const Py_UCS4 *src, Py_ssize_t l
         return src;
     }
     Py_UCS4 *buf = jm_malloc((size_t)len * sizeof(Py_UCS4)); /* decoding only ever shortens */
-    if (buf == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        *out_len = len; /* GCOVR_EXCL_LINE */
-        return src;     /* GCOVR_EXCL_LINE */
+    if (buf == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        prog->failed = 1; /* GCOVR_EXCL_LINE: the escaped spelling would resolve as another name */
+        *out_len = len;   /* GCOVR_EXCL_LINE */
+        return src;       /* GCOVR_EXCL_LINE */
     }
     Py_ssize_t write = 0;
     for (Py_ssize_t read = 0; read < len;) {

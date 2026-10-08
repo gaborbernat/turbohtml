@@ -575,21 +575,23 @@ static int mini_emit_script_js(sbuf *out, th_tree *tree, th_node *node, const th
         return 0; /* an empty <script>: the verbatim path emits nothing either */
     }
     Py_UCS4 *src = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
-    if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return 0;      /* GCOVR_EXCL_LINE */
+    if (src == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;        /* GCOVR_EXCL_LINE: no verbatim copy stands in for the minified script */
     }
     Py_ssize_t pos = 0;
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         memcpy(src + pos, need_text(tree, child), (size_t)child->text_len * sizeof(Py_UCS4));
         pos += child->text_len;
     }
-    /* errlen 0: the HTML path discards the message and falls back to verbatim instead */
     Py_ssize_t out_len;
+    char err[160]; /* empty after a NULL result only on allocation failure */
     Py_UCS4 *result =
-        th_js_minify(src, total, opts->minify_js_fold, opts->minify_js_mangle, kind == 2, &out_len, NULL, 0);
+        th_js_minify(src, total, opts->minify_js_fold, opts->minify_js_mangle, kind == 2, &out_len, err, sizeof(err));
     PyMem_Free(src);
     if (result == NULL) {
-        return 0; /* a parse error (or allocation failure): emit the script verbatim */
+        out->failed |= err[0] == '\0'; /* GCOVR_EXCL_BR_LINE: an empty message is an allocation failure */
+        return out->failed;            /* a parse error emits the script verbatim */
     }
     int embeds = js_embeds_in_script(result, out_len);
     if (embeds) {

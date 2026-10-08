@@ -26,7 +26,7 @@ Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, 
         for (int pass = 0; pass < 12; pass++) {
             /* GCOVR_EXCL_BR_STOP */
             if (jm_compress(prog) <= 0) {
-                settled = 1; /* nothing left to do (or poisoned/failed: the tree is as folded as before) */
+                settled = 1; /* nothing left to do, or a with/eval poisoned resolution, or an allocation failed */
                 break;
             }
             settled = fold && !jm_fold(prog); /* clean up empties and fold what the compress exposed */
@@ -38,10 +38,11 @@ Py_UCS4 *th_js_minify(const Py_UCS4 *src, Py_ssize_t len, int fold, int mangle, 
             jm_fold(prog);
         }
     }
-    Py_UCS4 *out = jm_print(prog, out_len);
+    /* a pass that ran out of memory left its rewrite unfinished, so printing would return partial output */
+    Py_UCS4 *out = prog->failed ? NULL : jm_print(prog, out_len); /* GCOVR_EXCL_BR_LINE: allocation failure */
     jm_program_free(prog);
-    if (out == NULL && errlen > 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-        errbuf[0] = '\0';            /* GCOVR_EXCL_LINE */
+    if (out == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        errbuf[0] = '\0'; /* GCOVR_EXCL_LINE */
     } /* GCOVR_EXCL_LINE */
     return out;
 }
