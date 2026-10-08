@@ -184,6 +184,12 @@ def test_code_elements_preserve_text(tag: str, content: str, expected: str) -> N
         pytest.param("<a href='h'> t</a>", "[t](h)", id="link-leading-space-at-line-start-dropped"),
         pytest.param("x<a href='h'></a>y", "x[](h)y", id="link-empty-text-keeps-brackets"),
         pytest.param("x<b><a href='h'> t</a></b>", "x **[t](h)**", id="link-inside-emphasis-opens-both"),
+        pytest.param('<p><a href="t" title="\n&gt;">x</a></p>', '[x](t "&#10;>")', id="link-title-line-break"),
+        pytest.param('<p><img src="i" title="a&#13;b"></p>', '![](i "a&#13;b")', id="image-title-carriage-return"),
+        pytest.param(
+            '<p><a href="t" title="a&amp;amp;">x</a></p>', '[x](t "a\\&amp;")', id="link-title-escapes-reference"
+        ),
+        pytest.param('<p><a href="t" title="a &amp; b">x</a></p>', '[x](t "a & b")', id="link-title-keeps-bare-amp"),
     ],
 )
 def test_links_and_images(html: str, expected: str) -> None:
