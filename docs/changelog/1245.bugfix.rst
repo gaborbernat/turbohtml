@@ -1,0 +1,1 @@
+``to_markdown`` keeps a ``<br>`` and a block edge inside ``<pre>`` as line breaks of the code block.

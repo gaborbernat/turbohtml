@@ -223,17 +223,25 @@ def test_links_and_images(html: str, expected: str) -> None:
             "<pre><code>before\n<p>after</p></code></pre>", "```\nbefore\nafter\n```", id="pre-existing-newline"
         ),
         pytest.param(
-            "<pre><code>before<p>\nafter</p></code></pre>", "```\nbefore\nafter\n```", id="pre-newline-in-block"
+            "<pre><code>before<p>\nafter</p></code></pre>", "```\nbefore\n\nafter\n```", id="pre-newline-in-block"
         ),
         pytest.param(
-            "<pre><code>before <p>after</p></code></pre>", "```\nbefore after\n```", id="pre-space-before-block"
+            "<pre><code>before <p>after</p></code></pre>", "```\nbefore \nafter\n```", id="pre-space-before-block"
         ),
-        pytest.param("<pre><code>a<br>b</code></pre>", "```\nab\n```", id="pre-code-break"),
+        pytest.param("<pre><code>a<br>b</code></pre>", "```\na\nb\n```", id="pre-code-break"),
         pytest.param("<pre><code>a<span>b</span>c</code></pre>", "```\nabc\n```", id="pre-code-inline-adjacent"),
         pytest.param("<p>x<code> a </code>y</p>", "x`  a  `y", id="code-span-edge-spaces"),
         pytest.param("<p><code> `a` </code></p>", "``  `a`  ``", id="code-span-edge-spaces-and-backticks"),
         pytest.param("<p>x<code>  </code>y</p>", "x`  `y", id="code-span-only-spaces"),
         pytest.param("<p>x<code> a</code>y</p>", "x` a`y", id="code-span-one-edge-space"),
+        pytest.param("<pre>x<br><br>y</pre>", "```\nx\n\ny\n```", id="pre-repeated-break"),
+        pytest.param("<pre><br>y</pre>", "```\n\ny\n```", id="pre-leading-break"),
+        pytest.param("<pre>x<p><br></p></pre>", "```\nx\n\n```", id="pre-break-opening-block"),
+        pytest.param(
+            "<pre><table><tr><th>a</th><td>b</td></tr></table></pre>", "```\na\nb\n```", id="pre-table-cells-on-lines"
+        ),
+        pytest.param("<pre>a<script>s</script>b</pre>", "```\nab\n```", id="pre-skips-script"),
+        pytest.param("<pre><svg><td>a</td><td>b</td></svg></pre>", "```\nab\n```", id="pre-foreign-cells-stay-inline"),
         pytest.param(
             "First <code>blah blah<br />blah blah</code> second",
             "First `blah blah blah blah` second",

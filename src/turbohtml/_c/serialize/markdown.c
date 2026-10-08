@@ -1133,8 +1133,44 @@ static Py_ssize_t md_max_backtick_run(const Py_UCS4 *text, Py_ssize_t len) {
     return best;
 }
 
+enum { MD_CODE_INLINE, MD_CODE_LINE, MD_CODE_BREAK, MD_CODE_SKIPPED };
+
+/* How code text treats an element: a block, or a table row or cell that the table
+   model sets apart from its neighbors, lays out on lines of its own; a script or style
+   holds no text (is_md_skipped; a <head> cannot sit in code); anything else runs inline.
+   One switch answers all three. */
+static int md_code_kind(const th_node *node) {
+    if (node->ns != TH_NS_HTML) {
+        return MD_CODE_INLINE;
+    }
+    switch (node->atom) {
+    case TH_TAG_BR:
+        return MD_CODE_BREAK;
+    case TH_TAG_SCRIPT:
+    case TH_TAG_STYLE:
+        return MD_CODE_SKIPPED;
+    case TH_TAG_TR:
+    case TH_TAG_TD:
+    case TH_TAG_TH:
+        return MD_CODE_LINE;
+    default:
+        return is_md_block(node->atom) ? MD_CODE_LINE : MD_CODE_INLINE;
+    }
+}
+
+/* Write the separator a block edge owes before a run that starts with first. */
+static inline void md_code_boundary(sbuf *out, Py_UCS4 separator, Py_UCS4 first) {
+    if (out->len > 0 && (separator == '\n' ? out->data[out->len - 1] != '\n'
+                                           : !is_space(out->data[out->len - 1]) && !is_space(first))) {
+        sbuf_putc(out, separator);
+    }
+}
+
 /* Block descendants need a separator when flattened into code text, but inline
-   descendants and explicit whitespace must keep their original adjacency. */
+   descendants and explicit whitespace must keep their original adjacency. In a code
+   block (separator '\n') a block edge and a <br> each end the line, as CSS lays them
+   out, so a block's edge adds a newline unless the line already ended; in a span
+   (separator ' ') both read as one space. */
 static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS4 separator) {
     int boundary = 0;
     th_node *parent = root;
@@ -1144,7 +1180,7 @@ static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS
             if (parent == root) {
                 return;
             }
-            if (parent->type == TH_NODE_ELEMENT && parent->ns == TH_NS_HTML && is_md_block(parent->atom)) {
+            if (parent->type == TH_NODE_ELEMENT && md_code_kind(parent) == MD_CODE_LINE) {
                 boundary = 1;
             }
             child = parent->next_sibling;
@@ -1152,21 +1188,22 @@ static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS
         }
         if (child->type == TH_NODE_TEXT && child->text_len > 0) {
             const Py_UCS4 *text = need_text(tree, child);
-            if (boundary && out->len > 0 && !is_space(out->data[out->len - 1]) && !is_space(text[0])) {
-                sbuf_putc(out, separator);
+            if (boundary) {
+                md_code_boundary(out, separator, text[0]);
             }
             sbuf_put_run(out, text, child->text_len);
             boundary = 0;
         } else if (child->type == TH_NODE_ELEMENT || child->type == TH_NODE_CONTENT) {
-            if (child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML && child->atom == TH_TAG_BR) {
-                if (separator == ' ') {
-                    sbuf_putc(out, ' ');
-                    boundary = 0;
+            int kind = child->type == TH_NODE_ELEMENT ? md_code_kind(child) : MD_CODE_INLINE;
+            if (kind == MD_CODE_BREAK) {
+                /* a break ends the line as a newline does */
+                if (boundary) {
+                    md_code_boundary(out, separator, separator);
                 }
-            } else {
-                if (child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML && is_md_block(child->atom)) {
-                    boundary = 1;
-                }
+                sbuf_putc(out, separator);
+                boundary = 0;
+            } else if (kind != MD_CODE_SKIPPED) {
+                boundary |= kind == MD_CODE_LINE;
                 parent = child;
                 child = child->first_child;
                 continue;
