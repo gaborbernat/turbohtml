@@ -62,15 +62,28 @@ static inline int is_md_block(uint16_t atom) {
     }
 }
 
-/* Elements whose entire subtree contributes nothing to a text/markdown rendering:
-   document metadata and scripts. <script>/<style> hold code, not prose, in every
-   namespace (an inline-SVG stylesheet is CSS just like an HTML one), so they are
-   dropped regardless of ns; <head> is an HTML-only concept. */
+/* Elements whose entire subtree contributes nothing to a text/markdown rendering.
+   <script>/<style> hold code, not prose, in every namespace (an inline-SVG
+   stylesheet is CSS just like an HTML one), so they are dropped regardless of ns.
+   The rest are the HTML elements of WHATWG Rendering 15.3.1 "area, base, basefont,
+   datalist, head, link, meta, noembed, noframes, param, rp, script, style, template,
+   title { display: none; }" that hold children (the void ones have none, and a
+   template's content is a separate fragment walked on its own). */
 static inline int is_md_skipped(const th_node *node) {
-    if (node->atom == TH_TAG_SCRIPT || node->atom == TH_TAG_STYLE) {
+    switch (node->atom) {
+    case TH_TAG_SCRIPT:
+    case TH_TAG_STYLE:
         return 1;
+    case TH_TAG_DATALIST:
+    case TH_TAG_HEAD:
+    case TH_TAG_NOEMBED:
+    case TH_TAG_NOFRAMES:
+    case TH_TAG_RP:
+    case TH_TAG_TITLE:
+        return node->ns == TH_NS_HTML;
+    default:
+        return 0;
     }
-    return node->ns == TH_NS_HTML && node->atom == TH_TAG_HEAD;
 }
 
 static inline Py_ssize_t md_put_decimal(sbuf *out, Py_ssize_t number) {
