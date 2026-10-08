@@ -487,22 +487,26 @@ static PyObject *mo_observe(PyObject *self, PyObject *args, PyObject *kwds) {
         PyErr_SetString(PyExc_TypeError, "at least one of child_list, attributes, or character_data must be set");
         return NULL;
     }
-    MutationObserverObject *observer = (MutationObserverObject *)self;
-    PyObject *handle = ((NodeObject *)target_obj)->handle;
-    if (observer->handle != NULL && observer->handle != handle) {
-        PyErr_SetString(PyExc_ValueError, "target belongs to a different tree than an earlier one");
-        return NULL;
-    }
     int has_filter;
     th_mo_filter *filter;
     Py_ssize_t filter_count;
     if (build_filter(attribute_filter, &has_filter, &filter, &filter_count) < 0) {
         return NULL;
     }
+    /* iterating attribute_filter runs Python code that can move target into another tree, so read its handle after */
+    MutationObserverObject *observer = (MutationObserverObject *)self;
+    th_node *target;
+    PyObject *handle = node_owner_pair((NodeObject *)target_obj, &target);
+    if (observer->handle != NULL && observer->handle != handle) {
+        Py_DECREF(handle);
+        free_names(filter, filter_count);
+        PyErr_SetString(PyExc_ValueError, "target belongs to a different tree than an earlier one");
+        return NULL;
+    }
     if (observer->handle == NULL) {
         observer->handle = Py_NewRef(handle);
     }
-    th_node *target = ((NodeObject *)target_obj)->node;
+    Py_DECREF(handle); /* observer->handle now keeps the tree alive */
     th_tree *tree = ((HandleObject *)handle)->tree;
     const uint8_t opts[6] = {(uint8_t)child_list, (uint8_t)attributes,          (uint8_t)character_data,
                              (uint8_t)subtree,    (uint8_t)attribute_old_value, (uint8_t)character_data_old_value};

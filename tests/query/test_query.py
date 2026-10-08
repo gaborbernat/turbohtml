@@ -683,6 +683,13 @@ def test_css_path_after_duplicate_id_removal() -> None:
     assert (before, nodes[0].css_path()) == ("html > body > p:nth-of-type(1)", "#same")
 
 
+def test_css_path_of_detached_element_with_id_absent_from_document() -> None:
+    element: Final = parse("<p>one</p>").select("p")[0]
+    element.extract()
+    element.attrs["id"] = "gone"
+    assert element.css_path() == "p"
+
+
 def _path(node: Element, kind: str) -> str:
     return node.css_path() if kind == "css" else node.xpath_path()
 
