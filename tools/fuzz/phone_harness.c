@@ -131,6 +131,12 @@ static void run_bytes(const unsigned char *bytes, size_t len) {
     free(wide);
 }
 
+#ifdef TH_PHONE_FUZZ
+int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
+    run_bytes(data, size);
+    return 0;
+}
+#else
 static void run_builtins(void) {
     static const char *const texts[] = {
         "",
@@ -226,12 +232,6 @@ static int run_dump(int argc, char **argv) {
     return 0;
 }
 
-#ifdef TH_PHONE_FUZZ
-int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
-    run_bytes(data, size);
-    return 0;
-}
-#else
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--dump") == 0) {
         return run_dump(argc, argv);

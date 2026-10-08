@@ -175,6 +175,12 @@ static void run_bytes(const unsigned char *bytes, size_t len) {
     free(wide);
 }
 
+#ifdef TH_IDNA_FUZZ
+int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
+    run_bytes(data, size);
+    return 0;
+}
+#else
 /* Inputs that stress the punycode encode path, the xn-- decode path (the OpenSSL/Libidn2 CVE surface), the
    no-non-ASCII equivalence label, long labels, empty labels, and the mapping/drop rows -- independent of any corpus. */
 static void run_builtins(void) {
@@ -235,12 +241,6 @@ static void run_file(const char *path) {
     free(buf);
 }
 
-#ifdef TH_IDNA_FUZZ
-int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
-    run_bytes(data, size);
-    return 0;
-}
-#else
 int main(int argc, char **argv) {
     run_builtins();
     for (int index = 1; index < argc; index++) {
