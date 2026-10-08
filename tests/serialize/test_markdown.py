@@ -122,6 +122,9 @@ def test_blocks_and_whitespace(html: str, expected: str) -> None:
         pytest.param("<span>a<p>x</p>c</span>", "a\n\nx\n\nc", id="inline-text-after-block-opens-block"),
         pytest.param("<strong>a<ul><li>i</li></ul>c</strong>", "**a**\n\n- **i**\n\n**c**", id="emphasis-around-list"),
         pytest.param("<em>a<blockquote>b</blockquote>c</em>", "*a*\n\n> *b*\n\n*c*", id="emphasis-around-quote"),
+        pytest.param("<hr><code><hr>a</code>", "---\n\n`a`", id="code-span-holding-a-block-opens-its-line"),
+        pytest.param("<hr><kbd><hr>a</kbd>", "---\n\n`a`", id="keyboard-input-holding-a-block-opens-its-line"),
+        pytest.param("<hr><samp><hr>a</samp>", "---\n\n`a`", id="sample-output-holding-a-block-opens-its-line"),
     ],
 )
 def test_inline_emphasis(html: str, expected: str) -> None:
@@ -524,6 +527,44 @@ _LOOSE_NAV_HTML: Final[str] = (
             "<ol><li><ol><span><ol><li>x</li></ol></span></ol></li></ol>",
             "1. \n   1. x",
             id="nested-list-in-a-non-item-wrapper-stays-nested",
+        ),
+        pytest.param("<ul><li>x<ul><li></li></ul></li></ul>", "- x\n\n  -", id="empty-nested-item-after-text"),
+        pytest.param(
+            '<ul><li>x<ol start="2"><li>y</li></ol></li></ul>', "- x\n\n  2. y", id="ordered-from-two-after-text"
+        ),
+        pytest.param(
+            "<ul><li>x<ul><li><i></i></li></ul></li></ul>", "- x\n\n  -", id="item-of-empty-inline-after-text"
+        ),
+        pytest.param(
+            "<ul><li><blockquote>q</blockquote><p>y</p><p>z</p></li></ul>",
+            "- \n  > q\n\n  y\n\n  z",
+            id="loose-item-opening-with-a-quote",
+        ),
+        pytest.param(
+            "<ul><li><hr><p>y</p><p>z</p></li></ul>", "- \n  ---\n\n  y\n\n  z", id="loose-item-opening-with-a-rule"
+        ),
+        pytest.param(
+            "<ul><li><i></i></li><li>y<p>z</p></li></ul>", "- \n\n- y\n\n  z", id="item-of-empty-inline-in-loose-list"
+        ),
+        pytest.param("<ul><li><em><p>x</p></em></li></ul>", "- *x*", id="item-wrapper-opening-with-a-paragraph"),
+        pytest.param(
+            "<ul><li>x<ul><li><q>y</q></li></ul></li></ul>", '- x\n  - "y"', id="nested-item-opening-with-a-quote"
+        ),
+        pytest.param(
+            '<ul><li>x<ul><li><img src="i"></li></ul></li></ul>',
+            "- x\n  - ![](i)",
+            id="nested-item-opening-with-an-image",
+        ),
+        pytest.param(
+            "<ul><li>x<ul><li><br>y</li></ul></li></ul>", "- x\n  - \\\n    y", id="nested-item-opening-with-a-break"
+        ),
+        pytest.param(
+            "<ul><li><a><ul><li>x</li></ul></a></li></ul>", "- \n  - x", id="placeholder-link-opening-with-a-list"
+        ),
+        pytest.param(
+            "<ul><li>x<ul><svg></svg><li>y</li></ul></li></ul>",
+            "- x\n  - y",
+            id="nested-list-opening-with-foreign-content",
         ),
     ],
 )
