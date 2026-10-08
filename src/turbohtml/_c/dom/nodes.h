@@ -781,7 +781,7 @@ static inline int handle_use_index(HandleObject *handle, th_node *origin, int el
     if (handle->index_built) {
         return 1;
     }
-    if (handle_build_index(handle) < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+    if (TH_UNLIKELY(handle_build_index(handle) < 0)) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
         PyErr_NoMemory();                 /* GCOVR_EXCL_LINE: allocation-failure path */
         return -1;                        /* GCOVR_EXCL_LINE: allocation-failure path */
     }

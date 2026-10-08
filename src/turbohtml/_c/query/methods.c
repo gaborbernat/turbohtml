@@ -184,7 +184,7 @@ static int append_selected(PyObject *out, module_state *state, PyObject *handle,
         compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
         &default_memo,  &memo};
     int indexed = selector_use_index(handle_obj, origin, compiled);
-    if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+    if (TH_UNLIKELY(indexed < 0)) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
         error = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
     } else if (indexed) {
         Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);
@@ -250,7 +250,7 @@ retry:;
                               !th_tree_is_xml(compiled->tree)
                           ? handle_use_index(handle_obj, origin, 1)
                           : 0;
-        if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+        if (TH_UNLIKELY(indexed < 0)) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
             error = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
         } else if (indexed) {
             Py_SETREF(out, node_wrap_indexed(state, handle, single->tag_atom, limit > 0 ? limit : -1));
@@ -708,7 +708,7 @@ retry:;
             compiled->tree, origin, compiled->quirks, selector_uses_has_memo(compiled) ? &memo.table : NULL, &nth_memo,
             &default_memo,  &memo};
         int indexed = selector_use_index(handle_obj, origin, compiled);
-        if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
+        if (TH_UNLIKELY(indexed < 0)) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
             error = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
         } else if (indexed) {
             Py_ssize_t end = indexed_candidates_end(handle_obj, compiled);

@@ -24,6 +24,15 @@
 #define TH_FALLTHROUGH ((void)0)
 #endif
 
+/* Mark an error branch as cold. GCC weighs inlining by estimated block frequency, so
+   an unmarked error branch next to a hot loop lowers the loop's estimate and can cost
+   the loop the inlining of its matcher. */
+#if defined(__GNUC__) || defined(__clang__)
+#define TH_UNLIKELY(condition) __builtin_expect(!!(condition), 0)
+#else
+#define TH_UNLIKELY(condition) (condition)
+#endif
+
 /* Implemented in escape.c. Signature matches METH_VARARGS | METH_KEYWORDS. */
 PyObject *turbohtml_escape(PyObject *module, PyObject *args, PyObject *kwds);
 
