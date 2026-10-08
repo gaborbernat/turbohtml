@@ -196,7 +196,6 @@ def _element(element: _TreeNode, parent: str, *, preserve: bool) -> tuple[_Meani
         return (_BOUNDARY, *children, _BOUNDARY)  # a block ends the paragraph around it even when it holds no text
     if (
         element.tag in {"span", "thead", "tbody"}
-        or (element.tag, parent) == ("code", "pre")
         # an <a> without href is a placeholder (WHATWG 4.5.1) and Markdown has no link without a destination
         or (element.tag == "a" and "href" not in element.attrib)
     ):
@@ -220,12 +219,14 @@ def _check_profile(element: _TreeNode, parent: str) -> None:
 
 
 def _record(tag: str, element: _TreeNode, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    if tag in {"pre", "code"}:
+        # code holds literal text only (CommonMark 4.5, 6.1), so markup inside it means nothing and its text is read
+        # off the tree
+        return ((tag, (), text),) if (text := _code_text(element, block=tag == "pre")) or tag == "pre" else ()
     if tag in _CONTENT_REQUIRED and not children:
         return (_BOUNDARY,) if tag in _BLOCKS else ()
     if tag in _EMPHASIS:
         return _emphasis(tag, children)
-    if tag in {"pre", "code"}:
-        return ((tag, (), _code_text(children, block=tag == "pre")),)
     if tag in {"blockquote", "li"}:
         # quote and item content is a flow of blocks; a tight item's single paragraph renders bare (CommonMark 5.1-5.3),
         # so items compare with every inline run wrapped
@@ -273,27 +274,39 @@ def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     return (*before, *(((tag, (), tuple(inner)),) if inner else ()), *after)
 
 
-def _code_text(children: tuple[_Meaning, ...], *, block: bool) -> tuple[_Meaning, ...]:
-    # code holds literal text only (CommonMark 4.5, 6.1): a block keeps its line breaks, a span turns them to spaces,
-    # and fenced content always ends in a newline that a browser does not draw
-    text: Final = _plain_text(children).removesuffix("\n") if block else _plain_text(children).replace("\n", " ")
+def _code_text(element: _TreeNode, *, block: bool) -> tuple[_Meaning, ...]:
+    # a block keeps its line breaks and drops the newline fenced content always ends in, which a browser does not
+    # draw; a span reads its line breaks as spaces (CommonMark 6.1) and collapses spaces as the normal flow does
+    # (CSS Text 3, 4.1.1)
+    text: Final = _literal(element).removesuffix("\n") if block else re.sub(r"[ \t\n\f\r]+", " ", _literal(element))
     return (("#text", (("value", text),), ()),) if text else ()
 
 
-def _plain_text(records: tuple[_Meaning, ...]) -> str:
+def _literal(element: _TreeNode) -> str:
+    # a block starts and ends a line even when it holds no text, so its edge breaks a line that already holds text
     text = ""
-    for record in records:
-        if record[0] == "#text":
-            text += record[1][0][1]
-        elif record[0] == "br":
-            text += "\n"
-        elif record[0] in _FLOW_INLINE:
-            text += _plain_text(record[2])
-        else:
-            # a block starts and ends a line even when it holds no text
-            inner = _plain_text(record[2]).removesuffix("\n")
-            text += ("" if not text or text.endswith("\n") else "\n") + (f"{inner}\n" if inner else "")
+    boundary = False
+    for part in _literal_parts(element):
+        if part is None:
+            boundary = True
+        elif part:
+            text += "\n" if boundary and text and not text.endswith("\n") else ""
+            text += part
+            boundary = False
     return text
+
+
+def _literal_parts(element: _TreeNode) -> Iterator[str | None]:
+    yield element.text
+    for child in element:
+        if child.tag == "br":
+            yield "\n"
+        elif child.tag not in _HIDDEN:
+            edge: tuple[None, ...] = () if child.tag in _LITERAL_INLINE else (None,)
+            yield from edge
+            yield from _literal_parts(child)
+            yield from edge
+        yield child.tail
 
 
 def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], ...]:
@@ -578,6 +591,7 @@ _INLINE_HOSTS: Final = frozenset({
     "h6",
 })
 _INLINE_TEXT: Final = frozenset({"a", "em", "strong", "b", "i", "s", "del", "span"})
+_LITERAL_INLINE: Final = _INLINE_TEXT | {"code", "img"}
 _ALLOWED: Final = _INLINE_HOSTS | {
     "div",
     "hr",
