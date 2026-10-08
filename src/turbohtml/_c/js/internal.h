@@ -427,8 +427,9 @@ int32_t jm_sym_new(jm_program *prog, const Py_UCS4 *name, Py_ssize_t name_len, i
 jm_program *jm_program_new(void);
 
 /* Append a node of the given kind and return its index. All fields but kind are zeroed except
-   a/b/c/d/next/sym which are set to -1. On allocation failure it sets prog->failed and returns the
-   sink, a spare slot past the live nodes that callers write as if it were new, so no call site checks. */
+   a/b/c/d/next/sym which are set to -1. On allocation failure it sets prog->failed. During a parse it then returns
+   the sink, a spare slot past the live nodes that the parser writes as if it were new, so no parser site checks;
+   outside a parse it returns -1. */
 int32_t jm_node_new(jm_program *prog, jm_kind kind);
 
 /* Render the AST as a canonical S-expression (code points; *out_len receives the
