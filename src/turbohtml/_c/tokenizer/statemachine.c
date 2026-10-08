@@ -362,35 +362,8 @@ static void push(th_tokenizer *self, th_buf *buf, Py_UCS4 ch) {
         self->oom = 1;         /* GCOVR_EXCL_LINE: out-of-memory path, unreachable from a test */
 }
 
-static int sink_grow(th_error_sink *sink) {
-    if (th_error_sink_failed(sink)) { /* GCOVR_EXCL_BR_LINE: a sink fails only on allocation failure */
-        return -1;                    /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    size_t cap;
-    size_t bytes;
-    int grew = th_grow_cap((size_t)(sink->cap + 1), (size_t)sink->cap, 8, sizeof(th_parse_error), &cap, &bytes);
-    if (!grew) {          /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
-        sink->cap = -1;   /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-        return -1;        /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
-    }
-    th_parse_error *grown = PyMem_Realloc(sink->items, bytes);
-    if (grown == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        sink->cap = -1;   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
-    }
-    sink->items = grown;
-    sink->cap = (Py_ssize_t)cap;
-    return 0;
-}
-
-/* Out of line: parse errors are rare, and inlined into the tokenizer states and the
-   preprocessing scan, the push shifted register allocation in their hot loops. */
 TH_NOINLINE int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col) {
-    if (sink->len >= sink->cap && sink_grow(sink) < 0) {
-        return -1;
-    }
-    sink->items[sink->len++] = (th_parse_error){code, line, col};
-    return 0;
+    return th_error_sink_append(sink, code, line, col);
 }
 
 void th_error_sink_free(th_error_sink *sink) {

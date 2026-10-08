@@ -18,6 +18,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "core/vec.h"
+
 /* Emitted token kinds. Character tokens are coalesced into TEXT runs, except
    when resolve_references is off and a reference becomes its own TH_CHARREF. */
 enum th_kind {
@@ -135,15 +137,43 @@ typedef struct {
     Py_ssize_t cap;
 } th_error_sink;
 
-/* Append one error to a sink, growing it as needed; -1 on allocation failure,
-   after which the sink refuses every append and th_error_sink_failed reports it.
-   Shared so the tree builder reports its construction errors into the same sink
-   the tokenizer fills. */
-int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col);
-
 static inline int th_error_sink_failed(const th_error_sink *sink) {
     return sink->cap < 0;
 }
+
+/* Append one error to a sink, growing it as needed; -1 on allocation failure,
+   after which the sink refuses every append and th_error_sink_failed reports it.
+   Inline for the XML parser, whose error path sits in its hot name reader. */
+static inline int th_error_sink_append(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col) {
+    /* a failed sink's negative cap sends every append here, where the first check refuses it */
+    if (sink->len >= sink->cap) {
+        if (th_error_sink_failed(sink)) { /* GCOVR_EXCL_BR_LINE: a sink fails only on allocation failure */
+            return -1;                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        size_t cap;
+        size_t bytes;
+        int grew = th_grow_cap((size_t)(sink->cap + 1), (size_t)sink->cap, 8, sizeof(th_parse_error), &cap, &bytes);
+        if (!grew) {        /* GCOVR_EXCL_BR_LINE: size overflow needs a length no allocation could hold */
+            sink->cap = -1; /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+            return -1;      /* GCOVR_EXCL_LINE: size-overflow path, unreachable from a test */
+        }
+        th_parse_error *grown = PyMem_Realloc(sink->items, bytes);
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            sink->cap = -1;  /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
+        }
+        sink->items = grown;
+        sink->cap = (Py_ssize_t)cap;
+    }
+    sink->items[sink->len++] = (th_parse_error){code, line, col};
+    return 0;
+}
+
+/* th_error_sink_append out of line, for the tokenizer states and the preprocessing scan:
+   inlined there, its failure handling shifted register allocation in their hot loops.
+   Shared so the tree builder reports its construction errors into the same sink the
+   tokenizer fills. */
+int th_error_sink_push(th_error_sink *sink, const char *code, Py_ssize_t line, Py_ssize_t col);
 
 /* Release a sink's storage and reset it to empty. */
 void th_error_sink_free(th_error_sink *sink);
