@@ -1375,8 +1375,8 @@ static int expand_shorthand_ref(jm_program *prog, int32_t sym) {
         return 1;
     }
     int32_t key = jm_node_new(prog, JN_IDENT);
-    if (key < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the shorthand */
-        return 0;  /* GCOVR_EXCL_LINE */
+    if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the shorthand */
+        return 0;       /* GCOVR_EXCL_LINE */
     }
     prog->nodes[key].str = prog->syms[sym].name;
     prog->nodes[key].str_len = prog->syms[sym].name_len;
@@ -1516,8 +1516,8 @@ static void replace_reads(jm_program *prog, int32_t idx, jm_propagation *plans) 
             int32_t sym = prog->nodes[read].sym;
             if (sym >= 0 && plans[sym].target >= 0) {
                 int32_t key = jm_node_new(prog, JN_IDENT);
-                if (key < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the binding */
-                    return;    /* GCOVR_EXCL_LINE */
+                if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the binding */
+                    return;         /* GCOVR_EXCL_LINE */
                 }
                 prog->nodes[key].str = prog->syms[sym].name;
                 prog->nodes[key].str_len = prog->syms[sym].name_len;
@@ -1573,8 +1573,9 @@ static int propagate_value_literals(jm_program *prog, int32_t global) {
         }
         if (plans == NULL) {
             plans = jm_malloc((size_t)prog->sym_count * sizeof(jm_propagation));
-            if (plans == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-                return 0;        /* GCOVR_EXCL_LINE */
+            if (plans == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+                prog->failed = 1; /* GCOVR_EXCL_LINE */
+                return 0;         /* GCOVR_EXCL_LINE */
             }
             for (int32_t slot = 0; slot < prog->sym_count; slot++) {
                 plans[slot].target = -1;
@@ -1672,11 +1673,12 @@ int jm_compress(jm_program *prog) {
     int32_t global = analyze(&mangler, prog);
     prog->resolved = 0;
     int result = -1;
+    /* GCOVR_EXCL_BR_START: each operand is an allocation failure */
+    prog->failed |= global < 0 || mangler.failed || mangler.visible.failed || mangler.frees.failed;
+    /* GCOVR_EXCL_BR_STOP */
     /* top-level bindings are observable and never touched; a with/eval poisons the whole program */
     if (!mangler.poisoned) {
-        /* GCOVR_EXCL_BR_START: the remaining guards are allocation-failure paths */
-        if (global >= 0 && !mangler.failed && !mangler.visible.failed && !mangler.frees.failed) {
-            /* GCOVR_EXCL_BR_STOP */
+        if (!prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             prog->resolved = 1;
             int changed = 0;
             collapse_chain(prog, prog->nodes[prog->root].a, &changed);
@@ -1696,10 +1698,11 @@ void jm_mangle(jm_program *prog) {
     M mangler = {0};
     int32_t global = analyze(&mangler, prog);
     prog->resolved = 0;
+    /* GCOVR_EXCL_BR_START: each operand is an allocation failure */
+    prog->failed |= global < 0 || mangler.failed || mangler.visible.failed || mangler.frees.failed;
+    /* GCOVR_EXCL_BR_STOP */
     if (!mangler.poisoned) {
-        /* GCOVR_EXCL_BR_START: the remaining guards are allocation-failure paths */
-        if (global >= 0 && !mangler.failed && !mangler.visible.failed && !mangler.frees.failed) {
-            /* GCOVR_EXCL_BR_STOP */
+        if (!prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             prog->resolved = 1;
             /* Reserve every kept (top-level or pinned) binding name. Slots keep only renamed bindings apart, so a
                new name equal to a kept one would capture its references inside the renamed scope, or be captured
@@ -1717,6 +1720,8 @@ void jm_mangle(jm_program *prog) {
                 assign_slots(&mangler, child, 0);
             }
             assign_names_by_frequency(&mangler);
+            /* a kept name whose reservation failed could be handed out again, capturing its references */
+            prog->failed |= mangler.failed || mangler.frees.failed; /* GCOVR_EXCL_BR_LINE: allocation failure */
         }
     }
     mangler_free(&mangler);

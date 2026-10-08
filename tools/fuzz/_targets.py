@@ -107,8 +107,8 @@ def _run_one(func: Callable[[bytes], None], data: bytes, repro: Path) -> str | N
     return None
 
 
-# the default leaves <style> and style="" verbatim; the minifier's CSS path runs only when enabled
-_MINIFY: Final = turbohtml.Minify(minify_css=clean.CSSMinify())
+# the default leaves <script>, <style> and style="" verbatim; the minifier's JS and CSS paths run only when enabled
+_MINIFY: Final = turbohtml.Minify(minify_js=clean.JSMinify(), minify_css=clean.CSSMinify())
 _PHONES: Final = clean.PhoneNumbers(regions=("US", "GB", "DE", "IN"))
 _PHONE_DETECTOR: Final = clean.LinkDetector(phones=_PHONES)
 _PHONE_LINKER: Final = clean.Linker(clean.Linkify(phones=_PHONES, parse_email=True))

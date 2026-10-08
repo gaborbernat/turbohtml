@@ -13,6 +13,16 @@
 
 #include "js/jstypes.h"
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
 /* ECMAScript token kinds. The lexer never decides whether a `/` is division or a
    regular-expression literal (that needs grammar position): it always reports
    JT_DIV / JT_DIV_ASSIGN, and the parser calls jm_lex_rescan_regex when a value is
@@ -338,7 +348,9 @@ typedef struct jm_program {
     int shadows_undefined; /* some binding is named `undefined`, so the fold pass must check each read */
     int resolved;          /* every identifier carries its symbol from a with/eval-free resolution */
 
-    int failed; /* allocation failure */
+    int failed;     /* sticky allocation failure: the minifier raises MemoryError instead of printing the tree */
+    int *parse_err; /* the parser's error flag while jm_parse runs, else NULL: a failed node allocation stops the
+                       parse the way a syntax error does, so no early-error walk follows a link into the sink */
 } jm_program;
 
 /* Overwrite node dst in place with a copy of src, keeping dst's sibling link and its JN_F_VALUE mark:
@@ -394,9 +406,9 @@ void jm_program_free(jm_program *prog);
    in place (sets jm_sym.mangled, which the printer emits). Safe by construction: a
    binding is only renamed when its whole subtree is statically resolvable and the new
    name cannot capture a free name or shadow an enclosing binding that is referenced.
-   A no-op (leaves names unchanged) on allocation failure. */
+   An allocation failure sets prog->failed. */
 /* Peephole-fold the AST into shorter equivalent forms (e.g. true -> !0) in place,
-   before mangling. Value-exact; a no-op on allocation failure. */
+   before mangling. Value-exact; an allocation failure sets prog->failed. */
 int jm_fold(jm_program *prog); /* 1 when any transform fired: the tree needs another look */
 
 /* Run one compression pass: resolve every binding, then drop dead ones, inline single-use values, and
@@ -411,8 +423,12 @@ void jm_mangle(jm_program *prog);
 int32_t jm_scope_new(jm_program *prog, int32_t parent, uint8_t kind);
 int32_t jm_sym_new(jm_program *prog, const Py_UCS4 *name, Py_ssize_t name_len, int32_t scope, uint8_t decl);
 
-/* Append a node of the given kind, returning its index or -1 on OOM. All fields but
-   kind are zeroed except a/b/c/d/next/sym which are set to -1. */
+/* A program with an empty node arena that already holds the spare sink slot, or NULL on allocation failure. */
+jm_program *jm_program_new(void);
+
+/* Append a node of the given kind and return its index. All fields but kind are zeroed except
+   a/b/c/d/next/sym which are set to -1. On allocation failure it sets prog->failed and returns the
+   sink, a spare slot past the live nodes that callers write as if it were new, so no call site checks. */
 int32_t jm_node_new(jm_program *prog, jm_kind kind);
 
 /* Render the AST as a canonical S-expression (code points; *out_len receives the

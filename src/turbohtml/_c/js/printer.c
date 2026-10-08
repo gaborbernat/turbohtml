@@ -671,9 +671,9 @@ static void print_number(St *st, const jm_node *node) {
     }
     if (overflow) { /* an unusually long literal (a huge exponent): one run, separators removed */
         Py_UCS4 *big = jm_malloc((size_t)node->str_len * sizeof(Py_UCS4));
-        if (big == NULL) {                         /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            put_run(st, node->str, node->str_len); /* GCOVR_EXCL_LINE */
-            return;                                /* GCOVR_EXCL_LINE */
+        if (big == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            st->failed = 1; /* GCOVR_EXCL_LINE */
+            return;         /* GCOVR_EXCL_LINE */
         }
         Py_ssize_t pos = 0;
         for (Py_ssize_t index = 0; index < node->str_len; index++) {
@@ -763,9 +763,9 @@ static void print_bigint(St *st, const jm_node *node) {
         return;
     }
     Py_UCS4 *buf = jm_malloc((size_t)node->str_len * sizeof(Py_UCS4));
-    if (buf == NULL) {        /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the literal verbatim */
-        print_text(st, node); /* GCOVR_EXCL_LINE */
-        return;               /* GCOVR_EXCL_LINE */
+    if (buf == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+        st->failed = 1; /* GCOVR_EXCL_LINE */
+        return;         /* GCOVR_EXCL_LINE */
     }
     Py_ssize_t len = 0;
     for (Py_ssize_t scan = 0; scan < node->str_len; scan++) {
