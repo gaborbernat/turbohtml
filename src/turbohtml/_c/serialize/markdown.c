@@ -312,6 +312,7 @@ typedef struct {
     int g_bold;                 /* google_doc: a CSS font-weight bold is in force from an ancestor */
     int g_italic;               /* google_doc: a CSS font-style italic is in force from an ancestor */
     int failed;                 /* a reference buffer allocation failed */
+    int hidden_attrs;           /* the tree's th_tree.hidden_attrs, read once */
     int escape_prose;           /* escape what a reader would parse in prose; off under Escaping(mode="none") */
     uint8_t escape_mask;        /* the MD_ASCII classes the options escape */
     uint8_t run_stop;           /* the MD_ASCII classes that end a bulk-copied run */
@@ -1750,7 +1751,7 @@ static int md_br_trailing(md_ctx *ctx, th_node *node) {
                         return 0;
                     }
                 }
-            } else if (sibling->type == TH_NODE_ELEMENT && !is_md_skipped(sibling)) {
+            } else if (sibling->type == TH_NODE_ELEMENT && !is_md_skipped(sibling, ctx->hidden_attrs)) {
                 uint16_t atom = sibling->ns == TH_NS_HTML ? sibling->atom : TH_TAG_UNKNOWN;
                 if (atom == TH_TAG_BR) {
                     continue; /* another break is not visible content; keep looking past it */
@@ -1842,7 +1843,7 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
     default:
         break;
     }
-    if (is_md_skipped(node)) {
+    if (is_md_skipped(node, ctx->hidden_attrs)) {
         return;
     }
     if (is_md_block(atom)) {
@@ -1952,7 +1953,7 @@ static void md_render_inline(md_ctx *ctx, th_node *node) {
         return;
     }
     uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
-    if (md_tag_filtered(ctx->opt, atom) && !is_md_skipped(node)) {
+    if (md_tag_filtered(ctx->opt, atom) && !is_md_skipped(node, ctx->hidden_attrs)) {
         /* drop this tag's markup but keep its inline content (a skipped tag, e.g.
            <script>, still vanishes whole, so it falls through to the no-op below) */
         md_push(ctx, node, MD_WALK_INLINE, MD_LEAVE_NONE);
@@ -1999,7 +2000,7 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
             child = child->next_sibling; /* whitespace-only: keep looking past it */
             continue;
         }
-        if (child->type != TH_NODE_ELEMENT || is_md_skipped(child)) {
+        if (child->type != TH_NODE_ELEMENT || is_md_skipped(child, ctx->hidden_attrs)) {
             child = child->next_sibling;
             continue;
         }
@@ -2046,7 +2047,7 @@ static int md_item_is_loose(md_ctx *ctx, th_node *node) {
                     break;
                 }
             }
-        } else if (child->type == TH_NODE_ELEMENT && !is_md_skipped(child)) {
+        } else if (child->type == TH_NODE_ELEMENT && !is_md_skipped(child, ctx->hidden_attrs)) {
             uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
             if (is_md_block(atom)) {
                 in_run = 0;
@@ -2075,7 +2076,7 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
     int block = 0;
     if (child->type == TH_NODE_ELEMENT) {
         atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
-        if (is_md_skipped(child)) {
+        if (is_md_skipped(child, ctx->hidden_attrs)) {
             return;
         }
         block = is_md_block(atom);
@@ -2213,7 +2214,7 @@ static int md_edge_space(md_ctx *ctx, th_node *root, int from_start) {
             const Py_UCS4 *text = need_text(ctx->tree, node);
             return is_space(text[from_start ? 0 : node->text_len - 1]);
         }
-        if (node->type == TH_NODE_ELEMENT && !is_md_skipped(node)) {
+        if (node->type == TH_NODE_ELEMENT && !is_md_skipped(node, ctx->hidden_attrs)) {
             uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
             if (atom == TH_TAG_BR) {
                 return 1;
@@ -3449,6 +3450,7 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     md_marker inline_markers[MD_INLINE_MARKERS];
     md_ctx ctx = {0};
     ctx.tree = tree;
+    ctx.hidden_attrs = tree->hidden_attrs;
     ctx.opt = opt;
     ctx.frames = ctx.inline_frames = inline_frames;
     ctx.frame_cap = MD_INLINE_FRAMES;

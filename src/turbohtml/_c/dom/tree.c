@@ -245,6 +245,7 @@ static uint32_t intern_attr(th_tree *tree, const th_buf *name) {
         const char *bytes = (const char *)name->data;
         uint32_t atom = th_attr_atom(bytes, (size_t)name->len);
         if (atom != TH_ATTR_UNKNOWN) {
+            tree->hidden_attrs |= atom == TH_ATTR_HIDDEN; /* the parser's write site, merged attributes included */
             return atom;
         }
         if (buf_ascii(bytes, name->len)) {

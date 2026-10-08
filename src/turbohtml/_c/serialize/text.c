@@ -138,6 +138,7 @@ typedef struct {
     int tight;
     int list_depth;
     int indent_levels; /* list and quote nesting that indents the prefix, capped by TH_MAX_INDENT_LEVELS */
+    int hidden_attrs;  /* the tree's th_tree.hidden_attrs, read once */
     int failed;
 } text_ctx;
 
@@ -505,7 +506,7 @@ static void text_render_inline(text_ctx *ctx, th_node *node) {
     case TH_TAG_WBR:
         break;
     default:
-        if (!is_md_skipped(node)) {
+        if (!is_md_skipped(node, ctx->hidden_attrs)) {
             text_push(ctx, node, TEXT_WALK_INLINE, TEXT_LEAVE_NONE, opened);
             return;
         }
@@ -542,7 +543,7 @@ static int text_leads_with_inline(text_ctx *ctx, th_node *node) {
             continue;
         }
         uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
-        if (is_md_skipped(child)) {
+        if (is_md_skipped(child, ctx->hidden_attrs)) {
             continue;
         }
         return !is_md_block(atom);
@@ -557,7 +558,7 @@ static inline void text_block_child(text_ctx *ctx, text_frame *frame, th_node *c
     int block = 0;
     if (child->type == TH_NODE_ELEMENT) {
         uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
-        if (is_md_skipped(child)) {
+        if (is_md_skipped(child, ctx->hidden_attrs)) {
             return;
         }
         block = is_md_block(atom);
@@ -1045,6 +1046,7 @@ static void text_render_root(text_ctx *ctx, th_node *node) {
 Py_UCS4 *th_node_layout_text(th_tree *tree, th_node *node, const text_opts *opt, Py_ssize_t *out_len) {
     text_ctx ctx = {0};
     ctx.tree = tree;
+    ctx.hidden_attrs = tree->hidden_attrs;
     ctx.opt = opt;
     text_render_root(&ctx, node);
     PyMem_Free(ctx.prefix.data);
@@ -1058,6 +1060,7 @@ Py_UCS4 *th_node_annotated_text(th_tree *tree, th_node *node, const text_opts *o
                                 Py_ssize_t *out_len) {
     text_ctx ctx = {0};
     ctx.tree = tree;
+    ctx.hidden_attrs = tree->hidden_attrs;
     ctx.opt = opt;
     ctx.rules = rules;
     ctx.n_rules = n_rules;

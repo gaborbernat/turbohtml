@@ -62,14 +62,41 @@ static inline int is_md_block(uint16_t atom) {
     }
 }
 
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
+
+/* The `hidden` attribute hides an HTML element through WHATWG Rendering 15.3.1
+   "[hidden]:not([hidden=until-found i]):not(embed) { display: none; }": an
+   until-found section stays drawn, and an embed holds no text to keep, so its
+   exception changes nothing here. Kept out of line so is_md_skipped stays small
+   enough to inline at its many call sites. */
+static TH_NOINLINE int md_hidden_attr(const th_node *node) {
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        const th_node_attr *attr = &node->attrs[index];
+        if (attr->name_atom == TH_ATTR_HIDDEN) {
+            return attr->value_len != 11 || !starts_with_ascii_ci(attr->value, 11, "until-found");
+        }
+    }
+    return 0;
+}
+
 /* Elements whose entire subtree contributes nothing to a text/markdown rendering.
    <script>/<style> hold code, not prose, in every namespace (an inline-SVG
    stylesheet is CSS just like an HTML one), so they are dropped regardless of ns.
    The rest are the HTML elements of WHATWG Rendering 15.3.1 "area, base, basefont,
    datalist, head, link, meta, noembed, noframes, param, rp, script, style, template,
    title { display: none; }" that hold children (the void ones have none, and a
-   template's content is a separate fragment walked on its own). */
-static inline int is_md_skipped(const th_node *node) {
+   template's content is a separate fragment walked on its own), and any other HTML
+   element its `hidden` attribute hides, looked for only in a tree that has had one
+   (th_tree.hidden_attrs), since the scan would run on every element. */
+static inline int is_md_skipped(const th_node *node, int hidden_attrs) {
     switch (node->atom) {
     case TH_TAG_SCRIPT:
     case TH_TAG_STYLE:
@@ -82,7 +109,7 @@ static inline int is_md_skipped(const th_node *node) {
     case TH_TAG_TITLE:
         return node->ns == TH_NS_HTML;
     default:
-        return 0;
+        return hidden_attrs && node->ns == TH_NS_HTML && md_hidden_attr(node);
     }
 }
 

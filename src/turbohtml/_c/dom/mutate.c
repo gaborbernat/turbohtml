@@ -163,6 +163,8 @@ th_node *th_tree_make_pi(th_tree *tree, const Py_UCS4 *target, Py_ssize_t target
 static uint32_t th_attr_intern_utf8(th_tree *tree, const char *bytes, Py_ssize_t len) {
     uint32_t atom = th_attr_atom(bytes, (size_t)len);
     if (atom != TH_ATTR_UNKNOWN) {
+        /* every API write goes through here: set_attribute, a built element, the XML parser and a folded name */
+        tree->hidden_attrs |= atom == TH_ATTR_HIDDEN;
         return atom;
     }
     return intern_attr_dynamic(tree, bytes, len);
@@ -966,6 +968,7 @@ th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_nod
                 const char *name = th_attr_name(src, atom, &name_len);
                 atom = th_attr_intern_utf8(dest, name, name_len);
             }
+            dest->hidden_attrs |= atom == TH_ATTR_HIDDEN; /* a static atom crosses trees without interning */
             node->attrs[index].name_atom = atom;
             if (from->value != NULL) {
                 Py_UCS4 *value =

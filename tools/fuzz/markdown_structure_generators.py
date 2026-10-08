@@ -188,7 +188,12 @@ def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> 
 
 
 def _element(element: _TreeNode, parent: str, *, preserve: bool) -> tuple[_Meaning, ...]:
-    if element.tag in _HIDDEN or element.tag.endswith(("}script", "}style")):
+    if (
+        element.tag in _HIDDEN
+        or element.tag.endswith(("}script", "}style"))
+        # an HTML element's hidden attribute hides it unless it reads until-found (WHATWG Rendering 15.3.1)
+        or ("{" not in element.tag and element.attrib.get("hidden", "until-found").lower() != "until-found")
+    ):
         return ()
     _check_profile(element, parent)
     children: Final = _children(element, preserve=preserve or element.tag == "pre")
