@@ -525,6 +525,21 @@ _LOOSE_NAV_HTML: Final[str] = (
             "1. \n   1. x",
             id="nested-list-in-a-non-item-wrapper-stays-nested",
         ),
+        pytest.param(
+            "<ul><li>a</li></ul><p><span><br></span></p><ul><li>b</li></ul>",
+            "- a\n\n\n\n* b",
+            id="list-after-an-empty-paragraph-switches-marker",
+        ),
+        pytest.param(
+            "<blockquote><ul><li>a</li></ul><p><span><br></span></p><ul><li>b</li></ul></blockquote>",
+            "> - a\n>\n>\n>\n> * b",
+            id="quoted-list-after-an-empty-paragraph-switches-marker",
+        ),
+        pytest.param(
+            "<ul><li>a</li></ul><p>x&gt;</p><ul><li>b</li></ul>",
+            "- a\n\nx>\n\n- b",
+            id="list-after-text-ending-in-gt-keeps-marker",
+        ),
     ],
 )
 def test_lists(html: str, expected: str) -> None:
