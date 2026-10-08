@@ -237,10 +237,13 @@ th_node *th_tree_make_element(th_tree *tree, const Py_UCS4 *tag, Py_ssize_t tag_
 int th_tree_set_attr(th_tree *tree, th_node *node, Py_ssize_t index, const char *name, Py_ssize_t name_len,
                      const Py_UCS4 *value, Py_ssize_t value_len, int has_value) {
     th_node_attr *attr = &node->attrs[index];
-    attr->name_atom = th_attr_intern_utf8(tree, name, name_len);
-    /* a failed interning leaves no atom, the way fold_attr_atom reports it below */
-    if (attr->name_atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
-        return -1;                            /* GCOVR_EXCL_LINE: allocation-failure path */
+    attr->name_atom = th_attr_atom(name, (size_t)name_len);
+    /* only a dynamic name can fail to intern; testing there keeps the common names' path as short as a store */
+    if (attr->name_atom == TH_ATTR_UNKNOWN) {
+        attr->name_atom = intern_attr_dynamic(tree, name, name_len);
+        if (attr->name_atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+            return -1;                            /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
     }
     if (!has_value) {
         return 0;
@@ -273,9 +276,13 @@ static int node_attr_store(th_tree *tree, th_node *node, const char *name, Py_ss
                            Py_ssize_t value_len, int has_value, int append) {
     tree->attr_version++;
     mark_start_dirty(tree, node);
-    uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
-    if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
-        return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+    uint32_t atom = th_attr_atom(name, (size_t)name_len);
+    /* only a dynamic name can fail to intern; testing there keeps the common names' path as short as a store */
+    if (atom == TH_ATTR_UNKNOWN) {
+        atom = intern_attr_dynamic(tree, name, name_len);
+        if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+            return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
     }
     tree->id_version += atom == TH_ATTR_ID;
     Py_UCS4 *owned = NULL;
