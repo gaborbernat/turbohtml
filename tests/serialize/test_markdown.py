@@ -948,7 +948,7 @@ def test_escaping_none(html: str, options: Markdown, expected: str) -> None:
         pytest.param('<a href="http://x/&lt;">http://x/&lt;</a>', "[http://x/\\<](http://x/<)", id="no-autolink-lt"),
         pytest.param('<a href="http://x/&gt;">http://x/&gt;</a>', "[http://x/>](http://x/>)", id="no-autolink-gt"),
         pytest.param(
-            '<a href="http://x/\x7f">http://x/\x7f</a>', "[http://x/\x7f](http://x/\x7f)", id="no-autolink-del"
+            '<a href="http://x/\x7f">http://x/\x7f</a>', "[http://x/\x7f](<http://x/\x7f>)", id="no-autolink-del"
         ),
         pytest.param('<a href="http://x/y">http://x/y</a>', "<http://x/y>", id="autolink"),
         pytest.param('<a href="a\nb">x</a>', "[x](ab)", id="newline-dropped"),
@@ -956,6 +956,8 @@ def test_escaping_none(html: str, options: Markdown, expected: str) -> None:
         pytest.param('<img src="i&#13;e">', "![](ie)", id="carriage-return-dropped"),
         pytest.param('<a href="é\nx">t</a>', "[t](éx)", id="newline-dropped-after-non-ascii"),
         pytest.param('<a href="\n&lt;">x</a>', "[x](<\\<>)", id="leading-angle-after-dropped-newline"),
+        pytest.param('<a href="a\x01b">x</a>', "[x](<a\x01b>)", id="control-takes-angle-form"),
+        pytest.param('<img src="a\x0cb">', "![](<a\x0cb>)", id="form-feed-takes-angle-form"),
     ],
 )
 def test_link_destination(html: str, expected: str) -> None:

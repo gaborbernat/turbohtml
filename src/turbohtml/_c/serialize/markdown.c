@@ -1277,20 +1277,26 @@ static void md_emit_url_without_breaks(md_ctx *ctx, const char *base, const Py_U
 
 /* What a destination character means to md_emit_url, so one table load per character
    answers every test the layout pass makes. */
-enum { MD_URL_SPACE = 1, MD_URL_LT = 2, MD_URL_OPEN = 4, MD_URL_CLOSE = 8, MD_URL_BREAK = 16 };
+enum { MD_URL_ANGLE = 1, MD_URL_LT = 2, MD_URL_OPEN = 4, MD_URL_CLOSE = 8, MD_URL_BREAK = 16 };
 static const uint8_t MD_URL[128] = {
-    ['\t'] = MD_URL_BREAK, ['\n'] = MD_URL_BREAK, ['\r'] = MD_URL_BREAK, [' '] = MD_URL_SPACE,
-    ['<'] = MD_URL_LT,     ['('] = MD_URL_OPEN,   [')'] = MD_URL_CLOSE,
+    ['\t'] = MD_URL_BREAK, ['\n'] = MD_URL_BREAK, ['\r'] = MD_URL_BREAK, [' '] = MD_URL_ANGLE,  ['<'] = MD_URL_LT,
+    ['('] = MD_URL_OPEN,   [')'] = MD_URL_CLOSE,  [0x00] = MD_URL_ANGLE, [0x01] = MD_URL_ANGLE, [0x02] = MD_URL_ANGLE,
+    [0x03] = MD_URL_ANGLE, [0x04] = MD_URL_ANGLE, [0x05] = MD_URL_ANGLE, [0x06] = MD_URL_ANGLE, [0x07] = MD_URL_ANGLE,
+    [0x08] = MD_URL_ANGLE, [0x0b] = MD_URL_ANGLE, [0x0c] = MD_URL_ANGLE, [0x0e] = MD_URL_ANGLE, [0x0f] = MD_URL_ANGLE,
+    [0x10] = MD_URL_ANGLE, [0x11] = MD_URL_ANGLE, [0x12] = MD_URL_ANGLE, [0x13] = MD_URL_ANGLE, [0x14] = MD_URL_ANGLE,
+    [0x15] = MD_URL_ANGLE, [0x16] = MD_URL_ANGLE, [0x17] = MD_URL_ANGLE, [0x18] = MD_URL_ANGLE, [0x19] = MD_URL_ANGLE,
+    [0x1a] = MD_URL_ANGLE, [0x1b] = MD_URL_ANGLE, [0x1c] = MD_URL_ANGLE, [0x1d] = MD_URL_ANGLE, [0x1e] = MD_URL_ANGLE,
+    [0x1f] = MD_URL_ANGLE, [0x7f] = MD_URL_ANGLE,
 };
 
 /* Write a link destination (CommonMark 6.3) after an optional base prefix. A bare
-   destination cannot hold a space or start with `<`, and takes parentheses only
-   in balanced pairs; anything else goes in the `<...>` form, which takes any
-   parenthesis but no unescaped angle bracket. Parentheses stay bare while they
-   balance, so a `wiki/Foo_(bar)` URL reads as written. A backslash, and a `&` that
-   would decode as a character reference, are escaped in either form. A tab or line
-   break is left out: no destination form holds a line ending (CommonMark 6.3), and the
-   URL parser removes every tab and newline anyway (URL Standard 4.4). */
+   destination cannot hold a space or an ASCII control character or start with `<`,
+   and takes parentheses only in balanced pairs; anything else goes in the `<...>`
+   form, which takes any parenthesis but no unescaped angle bracket. Parentheses stay
+   bare while they balance, so a `wiki/Foo_(bar)` URL reads as written. A backslash,
+   and a `&` that would decode as a character reference, are escaped in either form. A
+   tab or line break is left out: no destination form holds a line ending (CommonMark
+   6.3), and the URL parser removes every tab and newline anyway (URL Standard 4.4). */
 static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ssize_t len) {
     /* an empty destination is spelled "<>": bare, a following title or a reference
        definition's line end would be read in its place (CommonMark 4.7, 6.3) */
@@ -1306,7 +1312,7 @@ static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ss
             md_emit_url_without_breaks(ctx, base, url, len);
             return;
         }
-        if ((kind & MD_URL_SPACE) || ((kind & MD_URL_LT) && index == 0 && *base == '\0')) {
+        if ((kind & MD_URL_ANGLE) || ((kind & MD_URL_LT) && index == 0 && *base == '\0')) {
             angle = 1;
         } else if (kind & MD_URL_OPEN) {
             depth++;
