@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
+    from .atheris_header import Header
+
 __all__ = ["Target", "validate_owners"]
 
 
@@ -47,3 +49,11 @@ class Target:
     callback: Callable[[bytes], None]
     exports: tuple[str, ...]
     exceptions: tuple[type[Exception], ...] = ()
+    chunked: Callable[[bytes, Header], None] | None = None
+
+    def run(self, payload: bytes, header: Header) -> None:
+        """Feed a target with an incremental API in the header's chunks instead of one piece."""
+        if self.chunked is None:
+            self.callback(payload)
+        else:
+            self.chunked(payload, header)

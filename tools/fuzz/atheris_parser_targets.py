@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Final, NamedTuple
+import json
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from turbohtml import (
     Document,
@@ -21,7 +22,15 @@ from turbohtml import (
     tokenize,
 )
 
+from .atheris_header import BYTEWISE, Header, feed_chunks
+from .atheris_invariants import assert_invariant
 from .atheris_registry import Target
+from .round_trip_oracles import html_check, span_check, xpath_entry_check
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from turbohtml import SourceLocation
 
 __all__ = [
     "document_observation",
@@ -30,6 +39,10 @@ __all__ = [
     "parser_targets",
     "token_observation",
 ]
+
+
+# One node-set, one scalar and one attribute expression reach each XPath result shape on the fuzzed tree.
+_XPATH_ENTRIES: Final = ("//*", "count(//*)", "//*/@*")
 
 
 def parser_targets() -> tuple[Target, ...]:
@@ -54,12 +67,19 @@ def parser_targets() -> tuple[Target, ...]:
             ),
             (UnicodeDecodeError,),
         ),
-        Target("html-incremental", _incremental, ("turbohtml.IncrementalParser",), (UnicodeDecodeError,)),
+        Target(
+            "html-incremental",
+            _incremental,
+            ("turbohtml.IncrementalParser",),
+            (UnicodeDecodeError,),
+            _incremental_chunks,
+        ),
         Target(
             "html-tokenizer",
             _tokens,
             ("turbohtml.tokenize", "turbohtml.Tokenizer", "turbohtml.Token", "turbohtml.TokenType"),
             (UnicodeDecodeError,),
+            _token_chunks,
         ),
     )
 
@@ -76,14 +96,32 @@ def _incremental(data: bytes) -> None:
     incremental_observation(data)
 
 
+def _incremental_chunks(data: bytes, header: Header) -> None:
+    incremental_observation(data, header)
+
+
 def _tokens(data: bytes) -> None:
     token_observation(data)
 
 
-def document_observation(data: bytes) -> str:
-    """Exercise returned document records through serialization consumers."""
-    document: Final = parse(data.decode("utf-8"))
+def _token_chunks(data: bytes, header: Header) -> None:
+    token_observation(data, header)
+
+
+def document_observation(
+    data: bytes,
+    html: Callable[[str], str | None] = html_check,
+    spans: Callable[[str], str | None] = span_check,
+    entries: Callable[[str], str | None] = xpath_entry_check,
+) -> str:
+    """Exercise returned document records through serialization consumers, span and XPath entry-point oracles."""
+    source: Final = data.decode("utf-8")
+    document: Final = parse(source)
     _require("Document result type", condition=isinstance(document, (Document, Node)))
+    assert_invariant(html, source)
+    assert_invariant(spans, source)
+    for expression in _XPATH_ENTRIES:
+        assert_invariant(entries, json.dumps({"html": source, "xpath": expression}))
     return _serialization(document)
 
 
@@ -94,32 +132,49 @@ def fragment_observation(data: bytes) -> str:
     return _serialization(fragment)
 
 
-def incremental_observation(data: bytes) -> str:
-    """Empty feeds and multibyte boundaries must preserve the complete parse."""
-    data.decode("utf-8")
-    parser: Final = IncrementalParser()
-    parser.feed(b"")
-    for value in data:
-        parser.feed(bytes((value,)))
-        parser.feed(b"")
-    document: Final = parser.close()
-    observed: Final = _serialization(document)
-    _require("Incremental document differs", condition=observed == parse(data).serialize())
-    return observed
+def incremental_observation(data: bytes, header: Header = BYTEWISE) -> tuple[str, _Positions]:
+    """
+    Empty feeds and splits inside UTF-8 sequences must preserve the one-shot parse and its positions.
 
-
-def token_observation(data: bytes) -> tuple[_TokenSnapshot, ...]:
-    """Streaming and reset must preserve token fields and source positions."""
+    The opts bits flip the defaults: 1 feeds decoded text, 2 drops positions, 4 records source locations.
+    """
     source: Final = data.decode("utf-8")
-    tokenizer: Final = Tokenizer()
-    streamed: Final = list(tokenizer.feed(""))
-    for char in source:
-        streamed.extend(tokenizer.feed(char))
-        streamed.extend(tokenizer.feed(""))
+    positions: Final = not header.opts & 2
+    locations: Final = bool(header.opts & 4)
+    parser: Final = IncrementalParser(positions=positions, source_locations=locations)
+    if header.opts & 1:
+        feed_chunks(parser.feed, source, header.max_chunk)
+    else:
+        feed_chunks(parser.feed, data, header.max_chunk)
+    document: Final = parser.close()
+    expected: Final = parse(data, positions=positions, source_locations=locations)
+    observed: Final = _serialization(document)
+    _require("Incremental document differs", condition=observed == expected.serialize())
+    placed: Final = _positions(document)
+    _require("Incremental positions differ", condition=placed == _positions(expected))
+    return observed, placed
+
+
+def token_observation(data: bytes, header: Header = BYTEWISE) -> tuple[_TokenSnapshot, ...]:
+    """
+    Streaming and reset must preserve token fields and source positions.
+
+    The opts bits flip the defaults: 1 keeps character references apart, 2 captures source, 4 drops attributes.
+    """
+    source: Final = data.decode("utf-8")
+    options: Final = {
+        "resolve_references": not header.opts & 1,
+        "capture_source": bool(header.opts & 2),
+        "capture_attributes": not header.opts & 4,
+    }
+    tokenizer: Final = Tokenizer(**options)
+    streamed: Final[list[Token]] = []
+    feed_chunks(lambda chunk: streamed.extend(tokenizer.feed(chunk)), source, header.max_chunk)
     streamed.extend(tokenizer.close())
     observed: Final = tuple(_token_snapshot(token) for token in streamed)
     _require(
-        "Incremental tokens differ", condition=observed == tuple(_token_snapshot(token) for token in tokenize(source))
+        "Incremental tokens differ",
+        condition=observed == tuple(_token_snapshot(token) for token in tokenize(source, **options)),
     )
     tokenizer.reset()
     _require(
@@ -129,6 +184,12 @@ def token_observation(data: bytes) -> tuple[_TokenSnapshot, ...]:
         == observed,
     )
     return observed
+
+
+def _positions(document: Document) -> _Positions:
+    return tuple(
+        (element.source_line, element.source_col, element.source_location) for element in document.iter_elements()
+    )
 
 
 def _serialization(node: Node) -> str:
@@ -175,3 +236,6 @@ class _TokenSnapshot(NamedTuple):
     self_closing: bool
     line: int
     col: int
+
+
+_Positions = tuple[tuple[int | None, int | None, "SourceLocation | None"], ...]

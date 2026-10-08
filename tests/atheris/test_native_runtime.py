@@ -10,6 +10,7 @@ from subprocess import run  # ruff: ignore[suspicious-subprocess-import] - libFu
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from fuzz.atheris_header import HEADER_SIZE, SEED_HEADER
 from fuzz.atheris_runtime import build_runtime
 
 if TYPE_CHECKING:
@@ -68,7 +69,15 @@ fuzz(
     [Target("benign", consume, ("capability_target.consume",), (UnicodeError,))],
     ["capability_target"],
     "benign",
-    [sys.argv[0], sys.argv[1], "-atheris_runs=64", "-seed=1", "-max_len=16", "-artifact_prefix=" + sys.argv[1] + "/"],
+    [
+        sys.argv[0],
+        sys.argv[1],
+        sys.argv[3],
+        "-atheris_runs=64",
+        "-seed=1",
+        "-max_len=32",
+        "-artifact_prefix=" + sys.argv[1] + "/",
+    ],
     custom_mutator=None if sys.argv[2] == "default" else mutate,
 )
 """
@@ -89,12 +98,16 @@ def test_atheris_native_corpus_rejection(tmp_path: Path) -> None:
         "LD_PRELOAD": str(library),
         "PYTHONPATH": os.pathsep.join((str(tmp_path), str(Path(__file__).parents[2] / "tools"))),
     }
+    # libFuzzer reads the seed directory but writes only new units, to the first directory
+    seeds = tmp_path / "seeds"
+    seeds.mkdir()
+    (seeds / "seed").write_bytes(SEED_HEADER + b"SEED")
     corpora: dict[str, list[str]] = {}
     for mode in ("accept", "reject", "mixed", "reset", "default", "unexpected"):
         corpus = tmp_path / f"{mode}-corpus"
         corpus.mkdir()
         result = run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed interpreter and local control.
-            [sys.executable, str(child), str(corpus), mode],
+            [sys.executable, str(child), str(corpus), mode, str(seeds)],
             env={**environment, "ATHERIS_CONTROL_MODE": mode},
             capture_output=True,
             check=False,
@@ -110,6 +123,6 @@ def test_atheris_native_corpus_rejection(tmp_path: Path) -> None:
             assert b"Done 64" in result.stderr
             if mode != "default":
                 assert b"ATHERIS_CUSTOM_MUTATOR_BRIDGE=1" in result.stderr
-                corpora[mode] = sorted(path.read_bytes().decode("ascii") for path in corpus.iterdir())
+                corpora[mode] = sorted({path.read_bytes()[HEADER_SIZE:].decode("ascii") for path in corpus.iterdir()})
     (tmp_path / "corpora.json").write_text(json.dumps(corpora), encoding="utf-8")
     assert corpora == {"accept": ["BENIGN_A", "BENIGN_B"], "reject": [], "mixed": ["BENIGN_B"], "reset": ["BENIGN_B"]}

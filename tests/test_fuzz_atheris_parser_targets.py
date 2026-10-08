@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
+from fuzz.atheris_header import BYTEWISE, Header
 from fuzz.atheris_parser_targets import (
     document_observation,
     fragment_observation,
@@ -11,21 +12,37 @@ from fuzz.atheris_parser_targets import (
     token_observation,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from turbohtml import SourceLocation, SourceSpan
 
+if TYPE_CHECKING:
     from fuzz.atheris_registry import Target
 
 
+_UNPLACED: Final = ((None, None, None),) * 3
+
+
+def test_atheris_parser_document_output() -> None:
+    assert document_observation("<p>水😀</p>".encode()) == "<html><head></head><body><p>水😀</p></body></html>"
+
+
 @pytest.mark.parametrize(
-    "observe",
+    ("header", "positions"),
     [
-        pytest.param(document_observation, id="document"),
-        pytest.param(incremental_observation, id="incremental"),
+        pytest.param(BYTEWISE, (*_UNPLACED, (1, 0, None)), id="bytes-one-unit"),
+        pytest.param(Header(1, 0, 2), (*_UNPLACED, (1, 0, None)), id="text-two-units"),
+        pytest.param(Header(2, 0, 3), (*_UNPLACED, (None, None, None)), id="no-positions"),
+        pytest.param(
+            Header(4, 0, 5),
+            (*_UNPLACED, (1, 0, SourceLocation(SourceSpan(1, 0, 0, 1, 3, 3), SourceSpan(1, 5, 5, 1, 9, 9), {}))),
+            id="source-locations",
+        ),
     ],
 )
-def test_atheris_parser_document_output(observe: Callable[[bytes], str]) -> None:
-    assert observe("<p>水😀</p>".encode()) == "<html><head></head><body><p>水😀</p></body></html>"
+def test_atheris_parser_incremental_output(header: Header, positions: tuple[object, ...]) -> None:
+    assert incremental_observation("<p>水😀</p>".encode(), header) == (
+        "<html><head></head><body><p>水😀</p></body></html>",
+        positions,
+    )
 
 
 def test_atheris_parser_fragment_output() -> None:
@@ -38,6 +55,38 @@ def test_atheris_parser_token_fields() -> None:
         ("TEXT", None, "x", None, False, 1, 10),
         ("END_TAG", "p", None, (), False, 1, 11),
     )
+
+
+@pytest.mark.parametrize(
+    ("data", "opts", "expected"),
+    [
+        pytest.param(
+            b"x&amp;",
+            1,
+            (
+                ("TEXT", None, "x", None, False, 1, 0),
+                ("CHARACTER_REFERENCE", None, "&", None, False, 1, 1),
+            ),
+            id="references-apart",
+        ),
+        pytest.param(b'<p id="a">', 4, (("START_TAG", "p", None, (), False, 1, 0),), id="no-attributes"),
+    ],
+)
+def test_atheris_parser_token_options(data: bytes, opts: int, expected: tuple[object, ...]) -> None:
+    assert token_observation(data, Header(opts, 0, 2)) == expected
+
+
+@pytest.mark.parametrize(
+    "oracle",
+    [
+        pytest.param("html", id="html-fixpoint"),
+        pytest.param("spans", id="source-spans"),
+        pytest.param("entries", id="xpath-entries"),
+    ],
+)
+def test_atheris_parser_document_reports_oracle_failure(oracle: str) -> None:
+    with pytest.raises(AssertionError, match=f"^{oracle} broke$"):
+        document_observation(b"<p>x</p>", **{oracle: lambda _text: f"{oracle} broke"})
 
 
 @pytest.mark.parametrize("target", parser_targets(), ids=lambda target: target.name)

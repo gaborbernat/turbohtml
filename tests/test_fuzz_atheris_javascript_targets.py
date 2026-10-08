@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 from fuzz.atheris_corpora import write_corpora
+from fuzz.atheris_header import SEED_HEADER
 from fuzz.atheris_javascript_targets import javascript_observation, javascript_targets
 from fuzz.atheris_targets import main, owner_inventory
 from fuzz.round_trip_oracles import OutOfScopeError
@@ -126,7 +127,7 @@ def test_javascript_corpus_admission(tmp_path: Path, source: bytes, error: str |
             tuple((tmp_path / entry.file).read_bytes() for entry in manifest.entries),
             tuple(entry.productions for entry in manifest.entries),
             manifest.rejected,
-        ) == (("javascript",), (source,), ((("script", "fixture:1"),),), ())
+        ) == (("javascript",), (SEED_HEADER + source,), ((("script", "fixture:1"),),), ())
 
 
 @pytest.mark.oracle

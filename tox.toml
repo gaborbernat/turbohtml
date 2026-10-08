@@ -327,6 +327,8 @@ commands_pre = [
     "{tox_root}",
     "--config-settings=build-dir={env_dir}{/}cbuild",
     "--config-settings=setup-args=-Dbuildtype=debug",
+    # the input header's failure_pos drives the PyMem failure hook only this build defines
+    "--config-settings=setup-args=-Dfuzzing=true",
     "--config-settings=compile-args=-j2"
   ],
 ]

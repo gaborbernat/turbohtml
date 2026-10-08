@@ -10,6 +10,7 @@ import pytest
 from fuzz.atheris_corpora import CorpusProfile, write_corpora
 from fuzz.atheris_corpora import main as corpus_main
 from fuzz.atheris_generation_targets import encoding_observation, generation_targets
+from fuzz.atheris_header import SEED_HEADER
 from fuzz.atheris_targets import main, owner_inventory, public_targets
 from fuzz.encoding_structure_generators import encoding_grammar
 from fuzz.markdown_structure_generators import MarkdownProfileError, markdown_grammar
@@ -102,7 +103,7 @@ def test_generation_corpus_preserves_context(
         len(tuple(tmp_path.glob("**/" + entry.sha256))),
         manifest.entries[0] == manifest.entries[1],
         manifest.rejected,
-    ) == (case.data, *context, hashlib.sha256(case.data).hexdigest(), 1, True, ())
+    ) == (SEED_HEADER + case.data, *context, hashlib.sha256(SEED_HEADER + case.data).hexdigest(), 1, True, ())
 
 
 def test_generation_corpus_rejects_changed_encoding_literal(tmp_path: Path) -> None:

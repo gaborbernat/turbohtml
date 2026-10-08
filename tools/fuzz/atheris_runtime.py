@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import importlib
 import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
+
+from .atheris_header import split_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-__all__ = ["build_runtime", "main", "rejecting_callback", "rejection_hook"]
+    from .atheris_header import Header
+
+__all__ = ["build_runtime", "failure_hook", "main", "rejecting_callback", "rejection_hook"]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -93,15 +98,41 @@ def _shared_sanitizer(sanitizer: Path, output: Path) -> Path:
 
 
 def rejecting_callback(
-    target: Callable[[bytes], None], exceptions: tuple[type[Exception], ...], reject: Callable[[], None]
+    target: Callable[[bytes, Header], None],
+    exceptions: tuple[type[Exception], ...],
+    reject: Callable[[], None],
+    inject: Callable[[int], tuple[int, bool]],
 ) -> Callable[[bytes], None]:
-    """Reject only exceptions the selected public API documents."""
+    """
+    Fail the header's allocation, then reject only exceptions the selected public API documents.
+
+    An injected failure must surface as ``MemoryError`` and nothing else, and a ``MemoryError`` without one is a
+    finding. The ``finally`` block closes the window before any handler here allocates. libxml2 checks that each API
+    reports the failure it injected
+    (https://github.com/GNOME/libxml2/blob/c43dc98d27ac315a48d93dbd399c6c22cf7125b1/fuzz/xml.c#L72-L83).
+    """
 
     def run(data: bytes) -> None:
+        header, payload = split_header(data)
+        inject(header.failure_pos)
         try:
-            target(data)
-        except exceptions:
+            try:
+                target(payload, header)
+            finally:
+                failed = inject(0)[1]
+        except MemoryError:
+            if not failed:
+                raise
+            return
+        except exceptions as error:
+            if failed:
+                message = f"{type(error).__name__} for an injected allocation failure"
+                raise AssertionError(message) from error
             reject()
+            return
+        if failed:
+            message = "a result for an injected allocation failure"
+            raise AssertionError(message)
 
     return run
 
@@ -109,6 +140,13 @@ def rejecting_callback(
 def rejection_hook() -> Callable[[], None]:
     """Resolve the preloaded bridge before starting the callback loop."""
     return ctypes.CFUNCTYPE(None)(("turbohtml_fuzz_reject_input", ctypes.CDLL(None)))
+
+
+def failure_hook() -> Callable[[int], tuple[int, bool]]:
+    """Resolve the PyMem failure hook, which only the fuzz-only build (``meson -Dfuzzing=true``) defines."""
+    return cast(
+        "Callable[[int], tuple[int, bool]]", vars(importlib.import_module("turbohtml._html"))["_fuzz_inject_failure"]
+    )
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Final, Protocol, cast
 
 from .atheris_registry import Target, validate_owners
-from .atheris_runtime import rejecting_callback, rejection_hook
+from .atheris_runtime import failure_hook, rejecting_callback, rejection_hook
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -27,7 +27,7 @@ def fuzz(
     target: Final = {target.name: target for target in targets}[target_name]
     atheris: Final = import_module("atheris")
     instrument: Final = cast("Callable[[Callable[[bytes], None]], Callable[[bytes], None]]", atheris.instrument_func)
-    callback: Final = instrument(rejecting_callback(target.callback, target.exceptions, rejection_hook()))
+    callback: Final = instrument(rejecting_callback(target.run, target.exceptions, rejection_hook(), failure_hook()))
     cast("Callable[[], None]", atheris.instrument_all)()
     cast("_Setup", atheris.Setup)(list(argv), callback, custom_mutator=custom_mutator)
     cast("Callable[[], None]", atheris.Fuzz)()
