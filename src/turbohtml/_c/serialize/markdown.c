@@ -116,10 +116,11 @@ enum {
 typedef struct {
     const char *open;
     const char *close;
-    th_node *node;   /* the wrapped element when it has an HTML fallback, else NULL */
-    uint8_t html;    /* enum md_html */
-    uint8_t flags;   /* MD_MARK_* */
-    uint8_t emitted; /* the open run was written, so the close run must be too */
+    th_node *node;      /* the wrapped element when it has an HTML fallback, else NULL */
+    Py_ssize_t open_at; /* where the open run was written in out */
+    uint8_t html;       /* enum md_html */
+    uint8_t flags;      /* MD_MARK_* */
+    uint8_t emitted;    /* the open run was written, so the close run must be too */
 } md_marker;
 
 /* The layout state one list threads through its items, including the items it
@@ -502,20 +503,24 @@ static const char *md_alternate_run(md_ctx *ctx, const md_marker *marker);
 
 /* Whether marker[index] must fall back to raw inline HTML because its Markdown
    delimiter would not survive a round-trip. Three ways it fails: it touches an
-   identical delimiter, so the two runs merge into one, unless the other emphasis
-   character can take its place; a ~~ run nests directly in another, which opens a code
-   fence (and commonmark.js has no strikethrough); or its flanking context (CommonMark
-   6.2) leaves neither side able to pair. The flanking test runs only for a
-   single-text-node element, where the surrounding characters are known without a
-   subtree scan, so the walk stays linear. */
+   identical delimiter, the run of an enclosing marker opened in the same batch included,
+   so the two runs merge into one, unless the other emphasis character can take its
+   place; a ~~ run nests directly in another, which opens a code fence (and commonmark.js
+   has no strikethrough); or its flanking context (CommonMark 6.2) leaves neither side
+   able to pair. The flanking test runs only for a single-text-node element, where the
+   surrounding characters are known without a subtree scan, so the walk stays linear;
+   md_settle_run checks the rest once the content is written. */
 static int md_marker_html(md_ctx *ctx, Py_ssize_t index, Py_ssize_t first) {
     md_marker *marker = &ctx->markers[index];
     if (marker->node == NULL) {
         return 0;
     }
     Py_ssize_t len = ctx->out.len;
-    if (index == first && len > 0 && ctx->out.data[len - 1] == (unsigned char)marker->open[0] &&
-        !(len >= 2 && ctx->out.data[len - 2] == '\\')) {
+    /* an enclosing `*` opened together with this `**` reads as `***`, which nests the
+       same way (CommonMark 6.2 rule 14), so only that pairing keeps its delimiters */
+    if (len > 0 && ctx->out.data[len - 1] == (unsigned char)marker->open[0] &&
+        !(len >= 2 && ctx->out.data[len - 2] == '\\') &&
+        !(index > first && strlen(ctx->markers[index - 1].open) < strlen(marker->open))) {
         const char *alternate = md_alternate_run(ctx, marker);
         if (alternate == NULL) {
             return 1;
@@ -546,6 +551,7 @@ static TH_NOINLINE void md_emit_pending(md_ctx *ctx) {
             marker->open = MD_HTML_TAGS[marker->html - 1][0];
             marker->close = MD_HTML_TAGS[marker->html - 1][1];
         }
+        marker->open_at = ctx->out.len;
         md_puts8(&ctx->out, marker->open);
         marker->emitted = 1;
         ctx->line_has_content = 1;
@@ -962,6 +968,225 @@ static Py_ssize_t md_push_marker(md_ctx *ctx, const char *text) {
     return ctx->marker_count++;
 }
 
+static int md_is_emphasis(uint16_t atom) {
+    switch (atom) {
+    case TH_TAG_STRONG:
+    case TH_TAG_B:
+    case TH_TAG_EM:
+    case TH_TAG_I:
+    case TH_TAG_DEL:
+    case TH_TAG_S:
+    case TH_TAG_STRIKE:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Whether a delimiter run between before and after is left- or right-flanking
+   (CommonMark 6.2), classifying whitespace and punctuation as md_edge does. */
+static int md_left_flanking(Py_UCS4 before, Py_UCS4 after) {
+    uint8_t next = md_edge(after);
+    return next != MD_EDGE_SPACE && (next != MD_EDGE_PUNCT || md_edge(before) != 0);
+}
+
+static int md_right_flanking(Py_UCS4 before, Py_UCS4 after) {
+    uint8_t prev = md_edge(before);
+    return prev != MD_EDGE_SPACE && (prev != MD_EDGE_PUNCT || md_edge(after) != 0);
+}
+
+/* Whether a run of `*` or `~` (star) or of `_` can open, or close, emphasis
+   (CommonMark 6.2 rules 1-8; GFM strikethrough flanks as `*` does). */
+static int md_run_opens(Py_UCS4 before, Py_UCS4 after, int star) {
+    return md_left_flanking(before, after) &&
+           (star || !md_right_flanking(before, after) || md_edge(before) == MD_EDGE_PUNCT);
+}
+
+static int md_run_closes(Py_UCS4 before, Py_UCS4 after, int star) {
+    return md_right_flanking(before, after) &&
+           (star || !md_left_flanking(before, after) || md_edge(after) == MD_EDGE_PUNCT);
+}
+
+/* The character the output holds right after an inline element, read off the tree for
+   the flanking test of its closing run: the next text's first character, a line end at
+   a block or cell boundary or a break, the punctuation an enclosing run or a link closes
+   with, or the punctuation that a following link, run or code span opens with. An image,
+   or anything a converter writes, reads as ordinary: an ordinary character is where a run
+   after punctuation cannot close, so an uncertain answer only ever trades a delimiter for
+   the raw-HTML tag. A parsed tree wraps every inline node in a block, so the climb ends. */
+static Py_UCS4 md_char_after(md_ctx *ctx, th_node *node) {
+    const md_opts *opt = ctx->opt;
+    if (opt->converters != NULL) {
+        return 'a';
+    }
+    th_node *cursor = node;
+    th_node *next = node->next_sibling;
+    int depth = 0;       /* how far the scan has descended into the elements after node */
+    int punct_depth = 0; /* the outermost entered element that writes punctuation before its text, 0 for none */
+    for (;;) {
+        while (next == NULL) {
+            cursor = cursor->parent;
+            if (depth > 0) {
+                /* an entered element ran out without text, so it wrote nothing */
+                punct_depth = punct_depth == depth ? 0 : punct_depth;
+                depth--;
+                next = cursor->next_sibling;
+                continue;
+            }
+            uint16_t atom = cursor->ns == TH_NS_HTML ? cursor->atom : TH_TAG_UNKNOWN;
+            if (is_md_block(atom) || atom == TH_TAG_TD || atom == TH_TAG_TH) {
+                return '\n';
+            }
+            if (md_is_emphasis(atom)) {
+                return '*';
+            }
+            if (atom == TH_TAG_A && th_node_attr_find(ctx->tree, cursor, "href", 4) >= 0) {
+                return ']';
+            }
+            next = cursor->next_sibling;
+        }
+        cursor = next;
+        next = cursor->next_sibling;
+        if (cursor->type == TH_NODE_TEXT) {
+            if (cursor->text_len > 0) {
+                return punct_depth > 0 ? '*' : need_text(ctx->tree, cursor)[0];
+            }
+            continue;
+        }
+        if (cursor->type != TH_NODE_ELEMENT || is_md_skipped(cursor)) {
+            continue;
+        }
+        uint16_t atom = cursor->ns == TH_NS_HTML ? cursor->atom : TH_TAG_UNKNOWN;
+        if (is_md_block(atom) || atom == TH_TAG_BR) {
+            return '\n';
+        }
+        if (atom == TH_TAG_IMG) {
+            return punct_depth > 0 ? '*' : 'a';
+        }
+        if (atom == TH_TAG_A && !opt->ignore_links && th_node_attr_find(ctx->tree, cursor, "href", 4) >= 0) {
+            return '['; /* link text opens with its bracket, empty or not */
+        }
+        if ((atom == TH_TAG_DEL || atom == TH_TAG_S || atom == TH_TAG_STRIKE) && !opt->keep_strikethrough) {
+            continue; /* struck-through content is not written */
+        }
+        if (cursor->first_child != NULL) {
+            depth++;
+            if (punct_depth == 0 &&
+                (md_is_emphasis(atom) || atom == TH_TAG_CODE || atom == TH_TAG_KBD || atom == TH_TAG_SAMP)) {
+                punct_depth = depth;
+            }
+            next = cursor->first_child;
+        }
+    }
+}
+
+/* Rewrite a written open run as the element's raw-HTML tag, moving the content after
+   it and every recorded output offset past it along. */
+static void md_rewrite_open(md_ctx *ctx, md_marker *marker, Py_ssize_t open_len) {
+    const char *open = MD_HTML_TAGS[marker->html - 1][0];
+    Py_ssize_t shift = (Py_ssize_t)strlen(open) - open_len;
+    const Py_UCS4 *old_data = ctx->out.data;
+    sbuf_reserve(&ctx->out, shift);
+    if (ctx->out.failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    Py_UCS4 *at = &ctx->out.data[marker->open_at];
+    memmove(at + open_len + shift, at + open_len,
+            (size_t)(ctx->out.len - marker->open_at - open_len) * sizeof(Py_UCS4));
+    for (Py_ssize_t index = 0; open[index] != '\0'; index++) {
+        at[index] = (Py_UCS4)(unsigned char)open[index];
+    }
+    ctx->out.len += shift;
+    /* a break recorded past the run moves with it; one before it no longer ends the output */
+    if (ctx->break_data == old_data && ctx->break_start > marker->open_at) {
+        ctx->break_data = ctx->out.data;
+        ctx->break_start += shift;
+        ctx->break_end += shift;
+    }
+    /* the wrap column rescans the line from the last newline */
+    ctx->line_start = 0;
+    ctx->line_checked = 0;
+    marker->open = open;
+    marker->close = MD_HTML_TAGS[marker->html - 1][1];
+}
+
+/* Whether data[at] is the delimiter character with no backslash escaping it. */
+static int md_live_delimiter(const Py_UCS4 *data, Py_ssize_t at, Py_UCS4 delimiter) {
+    return data[at] == delimiter && !(at > 0 && data[at - 1] == '\\');
+}
+
+/* Once a run's content is written the characters around both of its delimiters are
+   known, so a run that cannot open or close where it sits (CommonMark 6.2), or whose
+   opener could close an enclosing open run of the same character instead, falls back to
+   its raw-HTML tag. Flanking is judged for the whole delimiter run, which takes in the
+   same character written right next to this one by a neighboring element. md_marker_html
+   decided before any content existed and sees only an element holding one text node, so
+   this settles the rest. node is the element, whose closing run md_char_after looks
+   past, or NULL when a line end follows the close. */
+static void md_settle_run(md_ctx *ctx, Py_ssize_t index, th_node *node) {
+    md_marker *marker = &ctx->markers[index];
+    if (!marker->emitted || marker->node == NULL || marker->open[0] == '<') {
+        return;
+    }
+    const Py_UCS4 *data = ctx->out.data;
+    Py_UCS4 delimiter = (unsigned char)marker->open[0];
+    Py_ssize_t open_len = (Py_ssize_t)strlen(marker->open);
+    /* md_put_close moves a close that would follow a hard break in front of it */
+    int moved = ctx->out.len == ctx->break_end && data == ctx->break_data;
+    Py_ssize_t close_at = moved ? ctx->break_start : ctx->out.len;
+    /* the usual shape settles at a glance: a star run after a space or a line start,
+       around content that starts and ends with an ordinary character, opens (it cannot
+       close) and its close closes, and with equal runs on both sides the rule of 3 never
+       applies */
+    if (delimiter == '*' && md_edge(data[marker->open_at + open_len]) == 0 && md_edge(data[close_at - 1]) == 0 &&
+        (marker->open_at == 0 || md_edge(data[marker->open_at - 1]) == MD_EDGE_SPACE)) {
+        return;
+    }
+    Py_ssize_t run_start = marker->open_at;
+    while (run_start > 0 && md_live_delimiter(data, run_start - 1, delimiter)) {
+        run_start--;
+    }
+    Py_ssize_t run_end = marker->open_at + open_len;
+    while (run_end < close_at && data[run_end] == delimiter) {
+        run_end++;
+    }
+    Py_UCS4 before = run_start > 0 ? data[run_start - 1] : '\n';
+    Py_UCS4 after = run_end < close_at ? data[run_end] : '\n';
+    int star = delimiter != '_';
+    int settled = md_run_opens(before, after, star);
+    for (Py_ssize_t outer = ctx->marker_base; settled && outer < index; outer++) {
+        /* an enclosing run written into this same delimiter run opens with it instead */
+        settled = !(ctx->markers[outer].open[0] == marker->open[0] && ctx->markers[outer].open_at < run_start &&
+                    md_run_closes(before, after, star));
+    }
+    if (settled) {
+        Py_ssize_t last = close_at - 1;
+        while (last > run_end && md_live_delimiter(data, last, delimiter)) {
+            last--;
+        }
+        Py_UCS4 follow = '\n';
+        if (moved) {
+            follow = ctx->opt->line_break == TH_MD_BREAK_BACKSLASH ? '\\' : ' ';
+        } else if (node != NULL && (!star || md_edge(data[last]) != 0)) {
+            /* after an ordinary character a star run closes whatever follows */
+            follow = md_char_after(ctx, node);
+        }
+        settled = md_run_closes(data[last], follow, star);
+        /* when either run can both open and close, the two pair only if their lengths do
+           not sum to a multiple of 3, unless both lengths are (CommonMark 6.2 rule 9); with
+           the sum a multiple of 3, the opener's length decides both */
+        Py_ssize_t open_run = run_end - run_start;
+        Py_ssize_t close_run = close_at - 1 - last + (Py_ssize_t)strlen(marker->close);
+        if (settled && (md_run_closes(before, after, star) || md_run_opens(data[last], follow, star)) &&
+            (open_run + close_run) % 3 == 0 && open_run % 3 != 0) {
+            settled = 0;
+        }
+    }
+    if (!settled) {
+        md_rewrite_open(ctx, marker, open_len);
+    }
+}
+
 /* Close the marker a frame opened, returning its closing run when the open run was
    written (so the close run must be too), NULL otherwise. */
 /* A delimiter run pairs only within one block's inline content (CommonMark 6.2), so
@@ -971,6 +1196,7 @@ static void md_suspend_markers(md_ctx *ctx) {
     for (Py_ssize_t index = ctx->marker_count; index > ctx->marker_base; index--) {
         md_marker *marker = &ctx->markers[index - 1];
         if (marker->emitted) {
+            md_settle_run(ctx, index - 1, NULL);
             md_put_close(ctx, marker->close);
             marker->emitted = 0;
         }
@@ -1003,6 +1229,9 @@ static int md_followed_by_break(md_ctx *ctx, th_node *node) {
     if (sibling == NULL) {
         /* a node that is not an element carries TH_TAG_UNKNOWN, never a block atom */
         th_node *parent = node->parent;
+        if (parent->ns == TH_NS_HTML && md_is_emphasis(parent->atom)) {
+            return ctx->opt->converters == NULL; /* the enclosing run's closing delimiter or tag is punctuation */
+        }
         return parent->ns == TH_NS_HTML && is_md_block(parent->atom) && ctx->inline_only == 0 && !ctx->in_cell &&
                ctx->opt->converters == NULL;
     }
@@ -3303,6 +3532,9 @@ static void md_leave(md_ctx *ctx) {
     }
     switch (frame->leave) {
     case MD_LEAVE_WRAP: {
+        if (frame->marker >= 0) { /* GCOVR_EXCL_BR_LINE: -1 only on an allocation failure */
+            md_settle_run(ctx, frame->marker, frame->node);
+        }
         const char *close = md_pop_marker(ctx, frame->marker);
         if (close != NULL) {
             md_put_close(ctx, close);
