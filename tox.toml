@@ -568,6 +568,28 @@ commands = [
 ]
 allowlist_externals = [ "git" ]
 
+[env.fuzz-reachability]
+description = "fail when a ClusterFuzzLite coverage run leaves a harness's target functions unexecuted"
+package = "skip"  # commands_pre installs a plain release build; the coverage data comes from the CFLite run
+deps = []  # override the base env's gcovr; the coverage data is Python coverage.py output
+dependency_groups = [ "test" ]  # carries coverage and the libraries the registry's targets import
+set_env = { PYTHONPATH = "{tox_root}{/}tools" }
+commands_pre = [
+  [
+    "uv",
+    "pip",
+    "install",
+    "--reinstall",
+    "--no-deps",
+    "--no-build-isolation",
+    "--editable",
+    "{tox_root}",
+    "--config-settings=build-dir={env_dir}{/}cbuild",
+    "--config-settings=setup-args=-Dbuildtype=release",
+  ],
+]
+commands = [ [ "python", "-m", "fuzz.reachability", { replace = "posargs", extend = true } ] ]
+
 [env.fuzz-release-diff]
 description = "compare HEAD with the latest PyPI release on generated inputs (a local triage aid, not a CI gate)"
 package = "skip"  # commands_pre installs a plain release build to compare with the release wheel

@@ -229,6 +229,19 @@ shapes built from literals in the C sources.
     $ tox r -e fuzz-amplify                        # the per-PR gate: the regression list
     $ tox r -e fuzz-amplify -- search --minutes 5  # shapes drawn from the C literals
 
+`ClusterFuzzLite <https://google.github.io/clusterfuzzlite/>`_ keeps a corpus across runs. ``.clusterfuzzlite/`` holds
+the ``project.yaml``, ``Dockerfile`` and ``build.sh`` that OSS-Fuzz reads as well. ``build.sh`` builds the fuzz-only
+mode and packages each Atheris target in the registry (``tools/fuzz/atheris_targets.py``) as its own fuzzer, plus the
+native IDNA, phone and JS minifier harnesses. The ``🧬 ClusterFuzzLite`` workflow fuzzes pull requests that touch C or
+fuzz sources for 600 s per sanitizer. A daily run fuzzes for 3,600 s, prunes the corpus and measures coverage, then
+fails when a target's callback or a Python-implemented export it owns executes no line (``tox r -e fuzz-reachability``).
+
+``tools/fuzz/cflite.py`` drives the ClusterFuzzLite images and writes their logs, crashes and corpus to files under its
+workspace instead of the console, because a crash report prints short inputs and this repository's logs are public. The
+daily jobs keep these files in the private repository named by the ``CFLITE_STORAGE_REPO`` variable, written with the
+``CFLITE_STORAGE_TOKEN`` secret, and skip while the variable is unset. Pull request findings leave the runner encrypted
+to ``FUZZ_AGE_RECIPIENT``.
+
 Add a target by registering a ``bytes``-taking callable in ``_TARGETS`` (in-process) and dropping a representative
 benign seed under ``tools/fuzz/corpus/<target>/``; add a standalone harness by mirroring ``idna_harness.c`` for any C
 unit that compiles free of the CPython boundary. macOS ships no ``libFuzzer`` runtime with Apple Clang, so the
