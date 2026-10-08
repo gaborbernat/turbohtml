@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 from fuzz.atheris_registry import validate_owners
-from fuzz.atheris_targets import MODULES, main, owner_inventory, public_targets
+from fuzz.atheris_targets import MODULES, main, owner_inventory, public_modules, public_targets
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,6 +27,24 @@ def test_atheris_targets_complete_qualified_inventory() -> None:
             "turbohtml.parse_xml": "xml-schema",
             "turbohtml.__main__.main": "html-cli",
         },
+    )
+
+
+def test_atheris_targets_discover_public_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    package: Final = tmp_path / "discovered"
+    (package / "nested").mkdir(parents=True)
+    (package / "_private").mkdir()
+    for name in ("__init__", "__main__", "public", "nested/__init__", "nested/leaf", "_private/__init__", "_hidden"):
+        (package / f"{name}.py").write_text("__all__ = []\n", encoding="utf-8")
+    (package / "undeclared.py").write_text("", encoding="utf-8")
+    (package / "_private" / "inner.py").write_text("__all__ = []\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(tmp_path)
+    assert public_modules("discovered") == (
+        "discovered",
+        "discovered.__main__",
+        "discovered.nested",
+        "discovered.nested.leaf",
+        "discovered.public",
     )
 
 

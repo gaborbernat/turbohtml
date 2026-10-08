@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
+import pkgutil
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -23,30 +25,27 @@ if TYPE_CHECKING:
 
     from .atheris_registry import Target
 
-__all__ = ["MODULES", "main", "owner_inventory", "public_targets"]
+__all__ = ["MODULES", "main", "owner_inventory", "public_modules", "public_targets"]
 
-MODULES: Final = (
-    "turbohtml",
-    "turbohtml.__main__",
-    "turbohtml.build",
-    "turbohtml.clean",
-    "turbohtml.conformance",
-    "turbohtml.convert",
-    "turbohtml.cssom",
-    "turbohtml.detect",
-    "turbohtml.extract",
-    "turbohtml.migration.bleach",
-    "turbohtml.migration.markupsafe",
-    "turbohtml.migration.stdlib",
-    "turbohtml.mutations",
-    "turbohtml.query",
-    "turbohtml.rewrite",
-    "turbohtml.saxparse",
-    "turbohtml.transform",
-    "turbohtml.traverse",
-    "turbohtml.treebuild",
-    "turbohtml.validate",
-)
+
+def public_modules(package: str) -> tuple[str, ...]:
+    """
+    List the modules with no underscore in their path that declare ``__all__``, so a new one joins the gap check.
+
+    ``__main__`` stays in, since ``python -m turbohtml`` runs it.
+    """
+    walked: Final = pkgutil.walk_packages(importlib.import_module(package).__path__, f"{package}.")
+    return tuple(
+        sorted(
+            name
+            for name in (package, *(module.name for module in walked))
+            if not any(part.startswith("_") and part != "__main__" for part in name.split("."))
+            and hasattr(importlib.import_module(name), "__all__")
+        )
+    )
+
+
+MODULES: Final = public_modules("turbohtml")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
