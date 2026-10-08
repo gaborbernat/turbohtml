@@ -536,20 +536,68 @@ void th_node_append_child_observed(th_tree *tree, th_node *parent, th_node *chil
     th_mo_child_inserted(tree, parent, child);
 }
 
+/* Whether node lies in one of tree's arena blocks. A node of another tree linked in here points into an arena that can
+   be freed under this one, so the walk counts it rather than follow it. Only a corrupt tree reaches the not-found and
+   over-budget paths below; tests/fuzz_build/test_tree_verify_breakage.py builds such trees in the fuzz build. */
+static int arena_owns(const th_tree *tree, const th_node *node) {
+    /* the loop runs out of blocks for a corrupt tree alone */
+    for (const arena_block *block = tree->arena; block != NULL; block = block->next) { /* GCOVR_EXCL_BR_LINE */
+        /* one unsigned compare: an address below data wraps to an offset past used */
+        if ((uintptr_t)node - (uintptr_t)block->data < (uintptr_t)block->used) {
+            return 1;
+        }
+    } /* GCOVR_EXCL_LINE: corrupt tree only */
+    return 0; /* GCOVR_EXCL_LINE: corrupt tree only */
+}
+
+/* Whether the walk may step onto next. A node from another arena counts as an identity violation, and a step past
+   the budget as a link violation: the tree stamped at most node_seq nodes, so a longer walk is going round a cycle. */
+static int verify_step(const th_tree *tree, const th_node *next, Py_ssize_t *budget, th_tree_violations *found) {
+    /* GCOVR_EXCL_START: corrupt tree only */
+    if (!arena_owns(tree, next)) {
+        found->identities++;
+        return 0;
+    }
+    if (--*budget < 0) {
+        found->links++;
+        return 0;
+    }
+    /* GCOVR_EXCL_STOP */
+    return 1;
+}
+
 void th_tree_verify(th_tree *tree, th_node *start, Py_ssize_t (*visit)(void *context, th_node *node), void *context,
                     th_tree_violations *found) {
+    found->links = 0;
+    found->identities = 0;
+    found->iterators = 0;
+    found->versions = 0;
+    Py_ssize_t budget = (Py_ssize_t)tree->node_seq;
+    if (!verify_step(tree, start, &budget, found)) { /* GCOVR_EXCL_BR_LINE: corrupt tree only */
+        return;                                      /* GCOVR_EXCL_LINE: corrupt tree only */
+    }
     th_node *top = start;
-    while (top->parent != NULL) {
+    while (top->parent != NULL && verify_step(tree, top->parent, &budget, found)) { /* GCOVR_EXCL_BR_LINE */
         top = top->parent;
     }
-    found->links = (top->prev_sibling != NULL) + (top->next_sibling != NULL);
-    found->identities = 0;
+    found->links += (top->prev_sibling != NULL) + (top->next_sibling != NULL);
+    budget = (Py_ssize_t)tree->node_seq - 1; /* the walk below visits each node under top once */
     for (th_node *node = top;;) {
         th_node *previous = NULL;
-        for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            found->links += (child->parent != node) + (child->prev_sibling != previous);
+        th_node *child = node->first_child;
+        /* the walk climbs back through parent links, so it stops at a child whose link points elsewhere */
+        while (child != NULL && verify_step(tree, child, &budget, found) && /* GCOVR_EXCL_BR_LINE */
+               child->parent == node) {                                     /* GCOVR_EXCL_BR_LINE */
+            found->links += child->prev_sibling != previous;
             previous = child;
+            child = child->next_sibling;
         }
+        /* GCOVR_EXCL_START: corrupt tree only */
+        if (child != NULL) {
+            found->links += budget >= 0 && arena_owns(tree, child);
+            return;
+        }
+        /* GCOVR_EXCL_STOP */
         found->links += node->last_child != previous;
         found->identities += (node->seq >= tree->node_seq) + visit(context, node);
         if (node->first_child != NULL) {
@@ -565,7 +613,6 @@ void th_tree_verify(th_tree *tree, th_node *start, Py_ssize_t (*visit)(void *con
         node = node->next_sibling;
     }
     /* the DOM NodeIterator pre-removing steps keep both pointers inside root across removals from a reachable tree */
-    found->iterators = 0;
     for (Py_ssize_t index = 0; index < tree->node_iterator_count; index++) {
         const th_node_iterator *iterator = tree->node_iterators[index];
         found->iterators += !is_inclusive_ancestor_of(iterator->root, iterator->reference);

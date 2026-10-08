@@ -190,6 +190,11 @@ def test_tree_verify_keeps_a_filter_candidate_inside_its_root_across_normalize()
     assert (list(NodeIterator(root, filter=record)), reports) == ([], [(0, 0, 0, 0)])
 
 
+def test_tree_verify_finds_nodes_in_every_arena_block() -> None:
+    document: Final = parse("<p>" * 3_000)  # enough nodes to fill several arena blocks
+    assert _tree_verify(document) == (0, 0, 0, 0)
+
+
 def test_tree_verify_accepts_a_current_css_path_id_map() -> None:
     document: Final = parse('<p id="a"><b></b></p>')
     document.select("b")[0].css_path()

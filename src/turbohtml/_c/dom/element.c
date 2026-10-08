@@ -2981,10 +2981,9 @@ static int import_all(PyObject *handle, PyObject *list) {
 
 /* Append one node that is not a DocumentFragment as parent's last child: the same imports and checks as gathering it
    into a list (see gather_insert), without the list or the scratch array. A foreign node is imported first, which
-   suspends the caller's critical section, so another thread can move it again before the section resumes; the import
-   repeats until the node belongs to this tree, and every check below then reads the tree afresh. The imported copy is
-   fresh and nothing links to it, so it needs no ancestor walk. Returns 0, or -1 with an exception.
- */
+   suspends the caller's critical section, so another thread can move it again, or link the imported copy, before the
+   section resumes; the import repeats until the node belongs to this tree. A copy no other edit could have reached
+   skips the ancestor walk and the unlink; any other node gets both, read afresh. Returns 0, or -1 with an exception. */
 static int append_one(PyObject *self, th_node *parent, PyObject *item) {
     if (!PyObject_TypeCheck(item, (PyTypeObject *)state_of(self)->node_type)) {
         PyErr_SetString(PyExc_TypeError, "child must be a node");
@@ -2999,16 +2998,19 @@ static int append_one(PyObject *self, th_node *parent, PyObject *item) {
        that lock, so the import and the checks stay on the handle the caller locked */
     PyObject *handle = ((NodeObject *)self)->handle;
     th_tree *tree = ((HandleObject *)handle)->tree;
-    int foreign = 0;
+    int fresh = 0;
     while (!node_owned_by(child, handle)) {
-        foreign = 1;
+        uint64_t version = ((HandleObject *)handle)->mutation_version;
         if (import_node(handle, child) == NULL) { /* GCOVR_EXCL_BR_LINE: OOM only */
             return -1;                            /* GCOVR_EXCL_LINE: OOM path */
         }
+        /* the import bumps the version once; a further bump means another thread edited this tree while the import
+           gave its lock up, and that edit can have linked the copy */
+        fresh = ((HandleObject *)handle)->mutation_version == version + 1;
     }
     th_node *node = child->node;
     const char *message = NULL;
-    if (!foreign && th_node_contains(tree, node, parent)) {
+    if (!fresh && th_node_contains(tree, node, parent)) {
         message = "cannot insert a node into its own subtree";
     } else if (node->type == TH_NODE_DOCTYPE) { /* no Document appends: a doctype is the only rule that can fail */
         message = th_pre_insert_error(parent, &node, 1, NULL, NULL, NULL);
@@ -3018,7 +3020,7 @@ static int append_one(PyObject *self, th_node *parent, PyObject *item) {
         return -1;
     }
     handle_drop_index(handle);
-    if (!foreign) {
+    if (!fresh) {
         th_node_remove_observed(tree, node);
     }
     th_node_append_child_observed(tree, parent, node);
