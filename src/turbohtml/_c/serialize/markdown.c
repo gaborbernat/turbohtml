@@ -408,6 +408,9 @@ static void md_newline(md_ctx *ctx) {
    spaces is blank (CommonMark 4.9) and ends the paragraph, so a break with nothing
    before it on its line takes the backslash spelling whatever the style. */
 static void md_write_break(md_ctx *ctx) {
+    if (ctx->block_ended) {
+        md_block_line(ctx, 1); /* the break opens the block after an inner one, so it leads that block's line */
+    }
     ctx->break_start = ctx->out.len;
     sbuf_puts(&ctx->out, ctx->opt->line_break == TH_MD_BREAK_BACKSLASH || !ctx->line_has_content ? "\\" : "  ");
     md_newline(ctx);
@@ -1734,33 +1737,86 @@ static void md_emit_image(md_ctx *ctx, th_node *node) {
     ctx->line_has_content = 1;
 }
 
+static int md_is_code_span(uint16_t atom) {
+    return atom == TH_TAG_CODE || atom == TH_TAG_KBD || atom == TH_TAG_SAMP;
+}
+
+/* Whether a code span writes anything for an element: the text md_emit_code_span would
+   collect, even spaces alone. */
+static int md_code_writes_text(md_ctx *ctx, th_node *node) {
+    sbuf content = {0};
+    md_collect_code_text(ctx->tree, node, &content, ' ');
+    int writes = content.len > 0;
+    PyMem_Free(content.data);
+    return writes;
+}
+
+/* Whether an element renders as a Markdown link, whose text cannot hold a block: the
+   cases md_enter_link leaves as a placeholder are not. Only elements reach here: the
+   link a break sits in, its element ancestors, and elements after the break. */
+static int md_is_link(md_ctx *ctx, th_node *node) {
+    if (node->ns != TH_NS_HTML || node->atom != TH_TAG_A || ctx->opt->ignore_links ||
+        th_node_attr_find(ctx->tree, node, "href", 4) < 0) {
+        return 0;
+    }
+    Py_ssize_t href_len;
+    const Py_UCS4 *href = md_attr(ctx->tree, node, "href", &href_len);
+    return !(ctx->opt->skip_internal_links && href != NULL && md_href_internal(href));
+}
+
 /* Whether a <br> sits at the end of its block, where a hard break does nothing
-   (CommonMark 6.7): no visible content follows it before a block boundary. Scanning
-   forward, a following non-space text run or inline element is visible content and a
-   following block ends the run; climbing out of an inline wrapper reaches the block
-   that encloses the break. A parsed tree always wraps a break in a block (the body at
-   least), so the climb meets that block and never a parentless node. */
+   (CommonMark 6.7): no visible content follows it before a block boundary. The scan
+   walks forward in document order: non-space text, an image, a quote or a code span
+   with text is visible content, and a block ends the run; another break, or an inline
+   element holding none of these (an empty link draws nothing either), is looked
+   through, as is nothing when a converter could write anything. Climbing out of an
+   inline wrapper reaches the block that encloses the break. A parsed tree always wraps
+   a break in a block (the body at least), so the climb meets that block and never a
+   parentless node. */
 static int md_br_trailing(md_ctx *ctx, th_node *node) {
-    for (th_node *cursor = node;; cursor = cursor->parent) {
-        for (th_node *sibling = cursor->next_sibling; sibling != NULL; sibling = sibling->next_sibling) {
-            if (sibling->type == TH_NODE_TEXT) {
-                const Py_UCS4 *text = need_text(ctx->tree, sibling);
-                for (Py_ssize_t index = 0; index < sibling->text_len; index++) {
-                    if (!is_space(text[index])) {
-                        return 0;
-                    }
-                }
-            } else if (sibling->type == TH_NODE_ELEMENT && !is_md_skipped(sibling)) {
-                uint16_t atom = sibling->ns == TH_NS_HTML ? sibling->atom : TH_TAG_UNKNOWN;
-                if (atom == TH_TAG_BR) {
-                    continue; /* another break is not visible content; keep looking past it */
-                }
-                return is_md_block(atom); /* a block ends the run (trailing); any other element is content */
+    /* link text flattens its blocks onto its line (md_render_inline_tag), so inside a
+       link a block ends nothing; link holds the link the scan is in */
+    th_node *link = NULL;
+    for (th_node *ancestor = node->parent; ctx->inline_only > 0 && link == NULL; ancestor = ancestor->parent) {
+        link = md_is_link(ctx, ancestor) ? ancestor : NULL;
+    }
+    th_node *cursor = node;
+    th_node *next = node->next_sibling;
+    for (;;) {
+        while (next == NULL) {
+            cursor = cursor->parent;
+            if (cursor == link) {
+                link = NULL;
+            } else if (link == NULL && is_md_block(cursor->ns == TH_NS_HTML ? cursor->atom : TH_TAG_UNKNOWN)) {
+                return 1;
             }
+            next = cursor->next_sibling;
         }
-        th_node *parent = cursor->parent;
-        if (is_md_block(parent->ns == TH_NS_HTML ? parent->atom : TH_TAG_UNKNOWN)) {
-            return 1;
+        cursor = next;
+        next = cursor->next_sibling;
+        if (cursor->type == TH_NODE_TEXT) {
+            const Py_UCS4 *text = need_text(ctx->tree, cursor);
+            for (Py_ssize_t index = 0; index < cursor->text_len; index++) {
+                if (!is_space(text[index])) {
+                    return 0;
+                }
+            }
+        } else if (cursor->type == TH_NODE_ELEMENT && !is_md_skipped(cursor)) {
+            uint16_t atom = cursor->ns == TH_NS_HTML ? cursor->atom : TH_TAG_UNKNOWN;
+            if (link == NULL && is_md_block(atom)) {
+                return 1;
+            }
+            if (ctx->opt->converters != NULL || atom == TH_TAG_IMG || atom == TH_TAG_Q) {
+                return 0;
+            }
+            if (md_is_code_span(atom)) {
+                if (md_code_writes_text(ctx, cursor)) {
+                    return 0; /* a code span writes its text, blocks and all */
+                }
+            } else if (cursor->first_child != NULL) {
+                link = link == NULL && md_is_link(ctx, cursor) ? cursor : link;
+                next = cursor->first_child;
+            }
         }
     }
 }
