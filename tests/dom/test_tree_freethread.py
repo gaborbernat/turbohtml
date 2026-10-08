@@ -696,6 +696,51 @@ def test_concurrent_wraps_and_inserts_of_foreign_nodes_keep_the_tree_intact() ->
     assert root.serialize() == markup
 
 
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param(lambda node, item: node.insert_before(item, turbohtml.Text("t")), id="insert-before"),
+        pytest.param(lambda node, item: node.insert_after(item, turbohtml.Text("t")), id="insert-after"),
+        pytest.param(lambda node, item: node.replace_with(node, item), id="replace-with-self"),
+        pytest.param(lambda node, item: node.insert(0, item), id="insert"),
+        pytest.param(lambda node, item: node.extend([item, turbohtml.Text("t")]), id="extend"),
+        pytest.param(lambda node, item: node.wrap(item), id="wrap"),
+        pytest.param(lambda node, item: node.wrap_children(item), id="wrap-children"),
+        pytest.param(lambda node, item: node.wrap_siblings(item), id="wrap-siblings"),
+    ],
+)
+def test_concurrent_edit_with_foreign_arguments_while_the_node_moves(
+    edit: Callable[[turbohtml.Element, turbohtml.Element], object],
+) -> None:
+    node: Final = turbohtml.Element("b")
+    source: Final = turbohtml.Element("section", children=[node])
+    destinations: Final = [turbohtml.Element("main"), turbohtml.Element("aside")]
+    items: Final = [turbohtml.Element("i") for _ in range(300)]
+    holder: Final = turbohtml.Element("div", children=items)
+    pools: Final = [turbohtml.Element("ul"), turbohtml.Element("ol")]
+    start: Final = threading.Barrier(3)
+
+    def editor() -> None:
+        start.wait()
+        for item in items:
+            # importing item waits for its contended tree, which suspends the lock on node's tree; the mover can then
+            # take node into another tree before the edit resumes
+            edit(node, item)
+
+    def mover() -> None:
+        start.wait()
+        for index in range(len(items)):
+            destinations[index % 2].append(source)
+
+    def shuffler() -> None:
+        start.wait()
+        for index in range(len(items)):
+            pools[index % 2].append(holder)  # rebinds every item still in holder to the other tree
+
+    _run(editor, mover, shuffler)
+    assert (destinations[1].children, holder.children) == ((source,), ())
+
+
 @pytest.mark.parametrize("move_parent", [pytest.param(False, id="first"), pytest.param(True, id="parent")])
 def test_concurrent_sibling_memo_and_adoption(*, move_parent: bool) -> None:
     children: Final = [turbohtml.Element("b") for _ in range(128)]

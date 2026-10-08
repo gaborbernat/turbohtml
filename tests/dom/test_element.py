@@ -1900,12 +1900,18 @@ def test_wrap_siblings_needs_a_parent() -> None:
         Element("div").wrap_siblings(Element("section"))
 
 
-def test_wrap_siblings_rejects_an_until_in_another_parent() -> None:
+@pytest.mark.parametrize(
+    "outsider",
+    [
+        pytest.param(lambda doc: next(iter(_found(doc, "ol").children)), id="another-parent"),
+        pytest.param(lambda _doc: Element("li"), id="another-tree"),
+    ],
+)
+def test_wrap_siblings_rejects_an_until_outside_the_siblings(outsider: Callable[[Document], Node]) -> None:
     doc = parse("<ul><li>a</li></ul><ol><li>b</li></ol>")
     first = next(iter(_found(doc, "ul").children))
-    outsider = next(iter(_found(doc, "ol").children))
     with pytest.raises(ValueError, match="following siblings"):
-        first.wrap_siblings(Element("div"), until=outsider)
+        first.wrap_siblings(Element("div"), until=outsider(doc))
 
 
 def test_wrap_siblings_rejects_an_until_before_the_node() -> None:
