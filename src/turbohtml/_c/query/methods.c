@@ -246,13 +246,8 @@ retry:;
     } else {
         th_node *origin = ((NodeObject *)self)->node;
         const sel_simple *single = sel_single_simple(compiled);
-        int indexed = single != NULL && single->kind == 'e' && single->tag_atom != TH_TAG_UNKNOWN &&
-                              !th_tree_is_xml(compiled->tree)
-                          ? handle_use_index(handle_obj, origin, 1)
-                          : 0;
-        if (indexed < 0) { /* GCOVR_EXCL_BR_LINE: an index build only fails on allocation failure */
-            error = 1;     /* GCOVR_EXCL_LINE: allocation-failure path */
-        } else if (indexed) {
+        if (single != NULL && single->kind == 'e' && single->tag_atom != TH_TAG_UNKNOWN &&
+            !th_tree_is_xml(compiled->tree) && handle_use_index(handle_obj, origin, 1)) {
             Py_SETREF(out, node_wrap_indexed(state, handle, single->tag_atom, limit > 0 ? limit : -1));
             error = out == NULL;
         } else {
