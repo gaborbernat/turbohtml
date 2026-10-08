@@ -190,7 +190,11 @@ TH_NODE_API(static, int, node_set_data, (PyObject * self, PyObject *value, void 
     handle_clear_css_cache((HandleObject *)((NodeObject *)self)->handle);
     Py_END_CRITICAL_SECTION();
     PyMem_Free(points);
-    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on OOM */
+    if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on OOM */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
 }
 
 static PyGetSetDef data_getset[] = {

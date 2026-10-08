@@ -1789,14 +1789,8 @@ static int sel_auto_dir(th_tree *tree, th_node *node) {
         }
         return sel_first_strong_dir(value->value, value->value_len);
     }
-    Py_ssize_t len = 0;
-    Py_UCS4 *text = th_node_text(tree, node, &len);
-    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return 1;       /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    int dir = sel_first_strong_dir(text, len);
-    PyMem_Free(text);
-    return dir;
+    int dir = th_node_text_classify(tree, node, sel_strong_dir);
+    return dir != 0 ? dir : 1;
 }
 
 /* The element's resolved direction: 1 ltr, 2 rtl. The nearest dir attribute wins

@@ -1009,7 +1009,7 @@ static int md_followed_by_break(md_ctx *ctx, th_node *node) {
     if (sibling->type != TH_NODE_TEXT || sibling->text_len == 0) {
         return 0;
     }
-    return md_edge(need_text(ctx->tree, sibling)[0]) != 0;
+    return md_edge(text_view_at(text_view(ctx->tree, sibling), 0)) != 0;
 }
 
 static const char *const MD_ALTERNATES[][2] = {{"*", "_"}, {"_", "*"}, {"**", "__"}, {"__", "**"}};
@@ -1044,30 +1044,30 @@ static void md_wrap_flank(md_ctx *ctx, th_node *node, md_marker *marker) {
     if (only == NULL || only->next_sibling != NULL || only->type != TH_NODE_TEXT || only->text_len == 0) {
         return;
     }
-    const Py_UCS4 *text = need_text(ctx->tree, only);
+    th_text_view text = text_view(ctx->tree, only);
     Py_ssize_t start = 0;
-    Py_ssize_t end = only->text_len;
-    Py_UCS4 first = text[start];
-    Py_UCS4 last = text[end - 1];
+    Py_ssize_t end = text.len;
+    Py_UCS4 first = text_view_at(text, start);
+    Py_UCS4 last = text_view_at(text, end - 1);
     if ((first | last) < 128 && (MD_EDGE[first] | MD_EDGE[last]) == 0) {
         return; /* ordinary characters at both ends: the run flanks wherever it sits */
     }
-    while (start < end && is_space(text[start])) {
+    while (start < end && is_space(text_view_at(text, start))) {
         start++;
     }
-    while (end > start && is_space(text[end - 1])) {
+    while (end > start && is_space(text_view_at(text, end - 1))) {
         end--;
     }
     if (start == end) {
         return;
     }
-    if (md_is_ascii_punct(text[start])) {
+    if (md_is_ascii_punct(text_view_at(text, start))) {
         marker->flags |= MD_MARK_OPEN_PUNCT;
     }
-    if (md_is_ascii_punct(text[end - 1])) {
+    if (md_is_ascii_punct(text_view_at(text, end - 1))) {
         th_node *sibling = node->next_sibling;
         Py_UCS4 next = sibling != NULL && sibling->type == TH_NODE_TEXT && sibling->text_len > 0
-                           ? need_text(ctx->tree, sibling)[0]
+                           ? text_view_at(text_view(ctx->tree, sibling), 0)
                            : ' ';
         if (md_edge(next) == 0) {
             marker->flags |= MD_MARK_CLOSE_FAILS;
@@ -1187,11 +1187,15 @@ static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS
             parent = parent->parent;
         }
         if (child->type == TH_NODE_TEXT && child->text_len > 0) {
-            const Py_UCS4 *text = need_text(tree, child);
+            Py_ssize_t len;
+            const Py_UCS4 *text = ser_text(out, tree, child, &len);
+            if (len == 0) { /* GCOVR_EXCL_BR_LINE: the run is non-empty, so 0 means an allocation failure */
+                return;     /* GCOVR_EXCL_LINE: out carries the failure to the caller */
+            }
             if (boundary) {
                 md_code_boundary(out, separator, text[0]);
             }
-            sbuf_put_run(out, text, child->text_len);
+            sbuf_put_run(out, text, len);
             boundary = 0;
         } else if (child->type == TH_NODE_ELEMENT || child->type == TH_NODE_CONTENT) {
             int kind = child->type == TH_NODE_ELEMENT ? md_code_kind(child) : MD_CODE_INLINE;
@@ -1744,11 +1748,8 @@ static int md_br_trailing(md_ctx *ctx, th_node *node) {
     for (th_node *cursor = node;; cursor = cursor->parent) {
         for (th_node *sibling = cursor->next_sibling; sibling != NULL; sibling = sibling->next_sibling) {
             if (sibling->type == TH_NODE_TEXT) {
-                const Py_UCS4 *text = need_text(ctx->tree, sibling);
-                for (Py_ssize_t index = 0; index < sibling->text_len; index++) {
-                    if (!is_space(text[index])) {
-                        return 0;
-                    }
+                if (!text_view_is_blank(text_view(ctx->tree, sibling))) {
+                    return 0;
                 }
             } else if (sibling->type == TH_NODE_ELEMENT && !is_md_skipped(sibling)) {
                 uint16_t atom = sibling->ns == TH_NS_HTML ? sibling->atom : TH_TAG_UNKNOWN;
@@ -1942,7 +1943,9 @@ static void md_leave_google(md_ctx *ctx, md_frame *frame) {
    flow (rare, e.g. a <div> inside a <span>) is laid out as its own block. */
 static void md_render_inline(md_ctx *ctx, th_node *node) {
     if (node->type == TH_NODE_TEXT) {
-        md_emit_text(ctx, need_text(ctx->tree, node), node->text_len);
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(&ctx->out, ctx->tree, node, &len);
+        md_emit_text(ctx, text, len);
         return;
     }
     if (node->type != TH_NODE_ELEMENT && node->type != TH_NODE_CONTENT) {
@@ -1990,11 +1993,8 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
             parent = parent->parent;
         }
         if (child->type == TH_NODE_TEXT) {
-            const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len; index++) {
-                if (!is_space(text[index])) {
-                    return 1; /* leading visible text rides on the bullet line */
-                }
+            if (!text_view_is_blank(text_view(ctx->tree, child))) {
+                return 1; /* leading visible text rides on the bullet line */
             }
             child = child->next_sibling; /* whitespace-only: keep looking past it */
             continue;
@@ -2036,15 +2036,9 @@ static int md_item_is_loose(md_ctx *ctx, th_node *node) {
     int in_run = 0;
     for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
         if (child->type == TH_NODE_TEXT) {
-            const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len; index++) {
-                if (!is_space(text[index])) {
-                    if (!in_run) {
-                        units++;
-                        in_run = 1;
-                    }
-                    break;
-                }
+            if (!in_run && !text_view_is_blank(text_view(ctx->tree, child))) {
+                units++;
+                in_run = 1;
             }
         } else if (child->type == TH_NODE_ELEMENT && !is_md_skipped(child)) {
             uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
@@ -2094,17 +2088,7 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
         if (atom == TH_TAG_BR && md_br_trailing(ctx, child)) {
             return; /* nothing visible follows, so the break does nothing (CommonMark 6.7) */
         }
-        int only_ws = child->type == TH_NODE_TEXT;
-        if (only_ws) {
-            const Py_UCS4 *text = need_text(ctx->tree, child);
-            for (Py_ssize_t index = 0; index < child->text_len; index++) {
-                if (!is_space(text[index])) {
-                    only_ws = 0;
-                    break;
-                }
-            }
-        }
-        if (only_ws) {
+        if (child->type == TH_NODE_TEXT && text_view_is_blank(text_view(ctx->tree, child))) {
             return;
         }
         if (child->type == TH_NODE_ELEMENT && atom != TH_TAG_A && child->first_child != NULL &&
@@ -2210,8 +2194,7 @@ static int md_edge_space(md_ctx *ctx, th_node *root, int from_start) {
     th_node *node = from_start ? root->first_child : root->last_child;
     while (node != NULL) {
         if (node->type == TH_NODE_TEXT && node->text_len > 0) {
-            const Py_UCS4 *text = need_text(ctx->tree, node);
-            return is_space(text[from_start ? 0 : node->text_len - 1]);
+            return is_space(text_view_at(text_view(ctx->tree, node), from_start ? 0 : node->text_len - 1));
         }
         if (node->type == TH_NODE_ELEMENT && !is_md_skipped(node)) {
             uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
@@ -3012,7 +2995,9 @@ static int md_table_step(md_ctx *ctx, md_frame *frame) {
         }
         /* a cell of text alone renders in place, with no frame of its own */
         for (th_node *child = cell->first_child; child != NULL; child = child->next_sibling) {
-            md_emit_text(ctx, need_text(ctx->tree, child), child->text_len);
+            Py_ssize_t len;
+            const Py_UCS4 *text = ser_text(&ctx->out, ctx->tree, child, &len);
+            md_emit_text(ctx, text, len);
         }
         if (table->phase != MD_TABLE_STRIP) {
             md_leave_cell(ctx, table);
@@ -3388,7 +3373,9 @@ static void md_run(md_ctx *ctx) {
             /* text lays out without running Python or pushing a frame, so a run of it renders in place */
             if (frame->walk == MD_WALK_INLINE) {
                 for (; child != NULL && child->type == TH_NODE_TEXT; child = child->next_sibling) {
-                    md_emit_text(ctx, need_text(ctx->tree, child), child->text_len);
+                    Py_ssize_t len;
+                    const Py_UCS4 *text = ser_text(&ctx->out, ctx->tree, child, &len);
+                    md_emit_text(ctx, text, len);
                 }
             } else if (frame->walk == MD_WALK_BLOCK) {
                 for (; child != NULL && child->type == TH_NODE_TEXT; child = child->next_sibling) {
@@ -3466,7 +3453,9 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
     if (node->type == TH_NODE_TEXT) {
         ctx.started = 1;
         ctx.line_has_content = 1;
-        md_emit_text(&ctx, need_text(tree, node), node->text_len);
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(&ctx.out, tree, node, &len);
+        md_emit_text(&ctx, text, len);
     } else if (md_apply_converter(&ctx, node)) {
         /* a converter registered for the root element renders it whole */
     } else if (node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML && node->atom == TH_TAG_LI) {

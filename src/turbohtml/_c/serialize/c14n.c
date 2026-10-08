@@ -359,9 +359,12 @@ static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node
         }
         break;
     case TH_NODE_TEXT:
-    case TH_NODE_CDATA: /* a CDATA section canonicalizes as its escaped character data */
-        c14n_put_text(out, need_text(tree, node), node->text_len);
+    case TH_NODE_CDATA: { /* a CDATA section canonicalizes as its escaped character data */
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(out, tree, node, &len);
+        c14n_put_text(out, text, len);
         break;
+    }
     case TH_NODE_COMMENT:
         if (opts->with_comments) {
             sbuf_puts(out, "<!--");
