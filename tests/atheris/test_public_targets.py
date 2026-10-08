@@ -28,7 +28,8 @@ from typing import Final
 from fuzz.atheris_header import split_header
 from fuzz.atheris_targets import public_targets
 _TARGET: Final = next(target for target in public_targets() if target.name == sys.argv[1])
-_TARGET.callback(split_header(Path(sys.argv[2]).read_bytes())[1])
+header, payload = split_header(Path(sys.argv[2]).read_bytes())
+_TARGET.run(payload, header)
 """
 
 # the window results go to preallocated slots, since an append would allocate inside the window and take the failure
@@ -43,7 +44,7 @@ windows = [None, None]
 def inject(position):
     windows[position == 0] = window = hook(position)
     return window
-rejecting_callback(target.callback, target.exceptions, lambda: None, inject)(Path(sys.argv[2]).read_bytes())
+rejecting_callback(target.run, target.exceptions, lambda: None, inject)(Path(sys.argv[2]).read_bytes())
 assert windows[1][1], windows
 """
 

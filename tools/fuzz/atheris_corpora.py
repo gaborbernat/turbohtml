@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, cast
 
-from .atheris_header import SEED_HEADER
+from .atheris_header import SEED_HEADER, split_header
 from .atheris_targets import public_targets
 from .css_structure_generators import css_grammar
 from .encoding_structure_generators import encoding_check, encoding_grammar, encoding_profile
@@ -99,7 +99,7 @@ def write_corpora(
             if context and (error := encoding_check(case)):
                 raise AssertionError(error)
             try:
-                target.callback(case.data)
+                target.run(case.data, split_header(seed)[0])
             except target.exceptions as error:
                 rejected.append(RejectedEntry(name, digest, type(error).__name__))
                 continue

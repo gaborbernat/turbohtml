@@ -71,7 +71,7 @@ def test_atheris_callback_rejects_documented_error() -> None:
     accepted: list[bytes] = []
     rejected: list[int] = []
 
-    def consume(data: bytes) -> None:
+    def consume(data: bytes, _header: Header) -> None:
         if data == b"invalid":
             message = "documented error"
             raise UnicodeError(message)
@@ -86,7 +86,7 @@ def test_atheris_callback_rejects_documented_error() -> None:
 def test_atheris_callback_preserves_unexpected_error() -> None:
     rejected: list[int] = []
 
-    def consume(data: bytes) -> None:
+    def consume(data: bytes, _header: Header) -> None:
         raise ValueError(data.decode())
 
     callback = rejecting_callback(consume, (UnicodeError,), partial(rejected.append, 1), lambda _position: (0, False))
@@ -97,12 +97,16 @@ def test_atheris_callback_preserves_unexpected_error() -> None:
 
 def test_atheris_callback_opens_and_closes_failure_window(mocker: MockerFixture) -> None:
     inject = mocker.MagicMock(return_value=(3, False))
-    rejecting_callback(print, (), mocker.MagicMock(), inject)(Header(0, 7, 1).encode() + b"x")
-    assert inject.call_args_list == [mocker.call(7), mocker.call(0)]
+    target = mocker.MagicMock()
+    rejecting_callback(target, (), mocker.MagicMock(), inject)(Header(2, 7, 1).encode() + b"x")
+    assert (inject.call_args_list, target.call_args_list) == (
+        [mocker.call(7), mocker.call(0)],
+        [mocker.call(b"x", Header(2, 7, 1))],
+    )
 
 
 def test_atheris_callback_keeps_injected_memory_error(mocker: MockerFixture) -> None:
-    def consume(_data: bytes) -> None:
+    def consume(_data: bytes, _header: Header) -> None:
         raise MemoryError
 
     reject = mocker.MagicMock()
@@ -121,7 +125,7 @@ def test_atheris_callback_keeps_injected_memory_error(mocker: MockerFixture) -> 
 def test_atheris_callback_reports_failure_mismatch(
     mocker: MockerFixture, raised: type[Exception] | None, error: type[Exception], match: str, *, failed: bool
 ) -> None:
-    def consume(_data: bytes) -> None:
+    def consume(_data: bytes, _header: Header) -> None:
         if raised is not None:
             raise raised
 

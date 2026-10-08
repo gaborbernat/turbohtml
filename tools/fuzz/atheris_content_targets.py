@@ -12,6 +12,7 @@ import turbohtml
 from turbohtml import clean, detect, extract, parse_fragment
 from turbohtml.migration import bleach, markupsafe, stdlib
 
+from .atheris_header import BYTEWISE, Header, feed_chunks
 from .atheris_registry import Target
 from .idna_nfc_oracles import idna_nfc_check
 from .round_trip_oracles import (
@@ -29,10 +30,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "content_targets",
+    "detector_check",
     "minifier_check",
     "minifier_observation",
     "sanitizer_check",
     "sanitizer_observation",
+    "stdlib_check",
     "stdlib_observation",
     "url_check",
 ]
@@ -125,6 +128,7 @@ def content_targets() -> tuple[Target, ...]:
                     "normalize",
                 )
             ),
+            chunked=_detect_chunks,
         ),
         Target(
             "content-extract",
@@ -186,7 +190,13 @@ def content_targets() -> tuple[Target, ...]:
                 ),
             ),
         ),
-        Target("content-stdlib", _stdlib, ("turbohtml.migration.stdlib.HTMLParser",)),
+        Target(
+            "content-stdlib",
+            _stdlib,
+            ("turbohtml.migration.stdlib.HTMLParser",),
+            (UnicodeDecodeError,),
+            _stdlib_chunks,
+        ),
     )
 
 
@@ -283,6 +293,11 @@ def _detect(data: bytes) -> None:
         _equal(detect.is_normalized(form, normalized), expected=True)
 
 
+def _detect_chunks(data: bytes, header: Header) -> None:
+    _detect(data)
+    detector_check(data, header)
+
+
 def _extract(data: bytes) -> None:
     url_check(data)
     text: Final = _text(data)
@@ -368,6 +383,31 @@ def _stdlib(data: bytes) -> None:
     _equal(stdlib_observation(data), f"{text}&")
     parser.reset()
     _equal(parser.getpos(), (1, 0))
+
+
+def _stdlib_chunks(data: bytes, header: Header) -> None:
+    _stdlib(data)
+    stdlib_check(data, header)
+
+
+def detector_check(data: bytes, header: Header = BYTEWISE) -> None:
+    """Require the fuzz bytes fed in chunks, empty ones included, to reach the answer one ``detect`` call gives."""
+    options: Final = detect.Detection()
+    stream: Final = detect.EncodingDetector(options)
+    feed_chunks(stream.feed, data, header.max_chunk)
+    _equal(stream.close(), detect.detect(data, options))
+
+
+def stdlib_check(data: bytes, header: Header = BYTEWISE) -> None:
+    """Require the decoded fuzz text fed in chunks to reach the handlers as one ``feed`` call does."""
+    source: Final = data.decode("utf-8")
+    chunked: Final = _TextParser()
+    feed_chunks(chunked.feed, source, header.max_chunk)
+    chunked.close()
+    whole: Final = _TextParser()
+    whole.feed(source)
+    whole.close()
+    _equal("".join(chunked.text), "".join(whole.text))
 
 
 def minifier_check(

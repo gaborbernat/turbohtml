@@ -16,6 +16,8 @@ from .atheris_header import split_header
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from .atheris_header import Header
+
 __all__ = ["build_runtime", "failure_hook", "main", "rejecting_callback", "rejection_hook"]
 
 
@@ -82,7 +84,7 @@ def build_runtime(archive: Path, output: Path, *, coverage: bool = False) -> Pat
 
 
 def rejecting_callback(
-    target: Callable[[bytes], None],
+    target: Callable[[bytes, Header], None],
     exceptions: tuple[type[Exception], ...],
     reject: Callable[[], None],
     inject: Callable[[int], tuple[int, bool]],
@@ -101,7 +103,7 @@ def rejecting_callback(
         inject(header.failure_pos)
         try:
             try:
-                target(payload)
+                target(payload, header)
             finally:
                 failed = inject(0)[1]
         except MemoryError:

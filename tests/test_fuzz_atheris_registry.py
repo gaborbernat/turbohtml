@@ -5,6 +5,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from fuzz.atheris_header import Header
 from fuzz.atheris_registry import Target, validate_owners
 
 from turbohtml.__main__ import main
@@ -52,3 +53,17 @@ def test_atheris_registry_rejects_duplicate_target_name() -> None:
     targets = [Target("same", print, ("first.export",)), Target("same", print, ("second.export",))]
     with pytest.raises(ValueError, match="Duplicate target names"):
         validate_owners(targets, [])
+
+
+def test_atheris_registry_runs_whole_payload_without_chunked_consumer() -> None:
+    seen: list[bytes] = []
+    Target("whole", seen.append, ()).run(b"payload", Header(1, 2, 3))
+    assert seen == [b"payload"]
+
+
+def test_atheris_registry_runs_chunked_consumer_with_header() -> None:
+    seen: list[tuple[bytes, Header]] = []
+    Target("chunked", print, (), (), lambda payload, header: seen.append((payload, header))).run(
+        b"payload", Header(1, 2, 3)
+    )
+    assert seen == [(b"payload", Header(1, 2, 3))]

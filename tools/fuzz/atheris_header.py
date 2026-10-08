@@ -8,7 +8,10 @@ custom mutator keeps them aligned (``atheris_bridge.c``).
 
 from __future__ import annotations
 
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, AnyStr, Final, NamedTuple
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 _FIELD_SIZE: Final = 4
 HEADER_SIZE: Final = 3 * _FIELD_SIZE
@@ -26,6 +29,27 @@ def split_header(data: bytes) -> tuple[Header, bytes]:
     return Header(opts, failure_pos % (size + 100), max(max_chunk % (size + size // 8 + 1), 1)), data[HEADER_SIZE:]
 
 
+def feed_chunks(feed: Callable[[AnyStr], object], data: AnyStr, max_chunk: int) -> None:
+    """Feed ``data`` in ``max_chunk`` pieces with an empty feed before and after each, which must change nothing."""
+    feed(data[:0])
+    for chunk in _chunks(data, max_chunk):
+        feed(chunk)
+        feed(chunk[:0])
+
+
+def _chunks(data: AnyStr, max_chunk: int) -> Iterator[AnyStr]:
+    # libxml2's push loop takes max_chunk units per piece until 50 + len/100 pieces, then the rest, which bounds the
+    # feed count of a large input with a small chunk
+    # (https://github.com/GNOME/libxml2/blob/c43dc98d27ac315a48d93dbd399c6c22cf7125b1/fuzz/xml.c#L137-L157)
+    start = 0
+    for _ in range(50 + len(data) // 100 - 1):
+        if len(data) - start <= max_chunk:
+            break
+        yield data[start : start + max_chunk]
+        start += max_chunk
+    yield data[start:]
+
+
 class Header(NamedTuple):
     """A ``failure_pos`` of 0 injects no allocation failure."""
 
@@ -41,5 +65,7 @@ class Header(NamedTuple):
 # libxml2's seed generator writes options 0, no failure and a 256-byte push chunk
 # (https://github.com/GNOME/libxml2/blob/c43dc98d27ac315a48d93dbd399c6c22cf7125b1/fuzz/genSeed.c#L133-L141).
 SEED_HEADER: Final = Header(0, 0, 256).encode()
+# One unit per feed cuts inside every multibyte sequence.
+BYTEWISE: Final = Header(0, 0, 1)
 
-__all__ = ["HEADER_SIZE", "SEED_HEADER", "Header", "split_header"]
+__all__ = ["BYTEWISE", "HEADER_SIZE", "SEED_HEADER", "Header", "feed_chunks", "split_header"]
