@@ -1,0 +1,1 @@
+Skip ``<template>`` content in ``to_markdown`` and ``to_text``, which browsers do not render.

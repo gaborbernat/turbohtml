@@ -1137,8 +1137,8 @@ enum { MD_CODE_INLINE, MD_CODE_LINE, MD_CODE_BREAK, MD_CODE_SKIPPED };
 
 /* How code text treats an element: a block, or a table row or cell that the table
    model sets apart from its neighbors, lays out on lines of its own; a script or style
-   holds no text (is_md_skipped; a <head> cannot sit in code); anything else runs inline.
-   One switch answers all three. */
+   holds no text, and a template's content is never drawn (is_md_skipped; a <head>
+   cannot sit in code); anything else runs inline. One switch answers all three. */
 static int md_code_kind(const th_node *node) {
     if (node->ns != TH_NS_HTML) {
         return MD_CODE_INLINE;
@@ -1148,6 +1148,7 @@ static int md_code_kind(const th_node *node) {
         return MD_CODE_BREAK;
     case TH_TAG_SCRIPT:
     case TH_TAG_STYLE:
+    case TH_TAG_TEMPLATE:
         return MD_CODE_SKIPPED;
     case TH_TAG_TR:
     case TH_TAG_TD:
@@ -1180,7 +1181,7 @@ static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS
             if (parent == root) {
                 return;
             }
-            if (parent->type == TH_NODE_ELEMENT && md_code_kind(parent) == MD_CODE_LINE) {
+            if (md_code_kind(parent) == MD_CODE_LINE) {
                 boundary = 1;
             }
             child = parent->next_sibling;
@@ -1193,8 +1194,8 @@ static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS
             }
             sbuf_put_run(out, text, child->text_len);
             boundary = 0;
-        } else if (child->type == TH_NODE_ELEMENT || child->type == TH_NODE_CONTENT) {
-            int kind = child->type == TH_NODE_ELEMENT ? md_code_kind(child) : MD_CODE_INLINE;
+        } else if (child->type == TH_NODE_ELEMENT) {
+            int kind = md_code_kind(child);
             if (kind == MD_CODE_BREAK) {
                 /* a break ends the line as a newline does */
                 if (boundary) {
@@ -1945,7 +1946,7 @@ static void md_render_inline(md_ctx *ctx, th_node *node) {
         md_emit_text(ctx, need_text(ctx->tree, node), node->text_len);
         return;
     }
-    if (node->type != TH_NODE_ELEMENT && node->type != TH_NODE_CONTENT) {
+    if (node->type != TH_NODE_ELEMENT) {
         return;
     }
     if (md_apply_converter(ctx, node)) {

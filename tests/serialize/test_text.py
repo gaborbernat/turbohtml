@@ -185,7 +185,11 @@ def test_links_and_images(html: str, opts: PlainText, expected: str) -> None:
         pytest.param("<p>a<span>x<!--c-->y</span>b</p>", PlainText(), "axyb", id="comment-in-inline"),
         pytest.param("<p>a<span><script>s</script>y</span></p>", PlainText(), "ay", id="script-in-inline"),
         pytest.param("<div><span>a<h2>H</h2>b</span></div>", PlainText(), "a\n\nHb", id="block-in-inline"),
-        pytest.param("<p>a<template>t</template>b</p>", PlainText(), "atb", id="template-in-inline"),
+        pytest.param("<p>a<template>t</template>b</p>", PlainText(), "ab", id="template-in-inline-skipped"),
+        pytest.param("<pre>a<template>t</template>b</pre>", PlainText(), "ab", id="template-in-pre-skipped"),
+        pytest.param(
+            "<pre>a<svg><template>t</template></svg>b</pre>", PlainText(), "atb", id="foreign-template-in-pre-kept"
+        ),
         pytest.param("<ul><li><!--c-->x</li></ul>", PlainText(), "* x", id="li-leading-comment"),
         pytest.param("<ul><li><script>s</script>x</li></ul>", PlainText(), "* x", id="li-leading-script"),
         pytest.param("<div><p>a</p><!--c--><p>b</p></div>", PlainText(), "a\n\nb", id="comment-between-blocks"),

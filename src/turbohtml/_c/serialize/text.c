@@ -483,7 +483,7 @@ static void text_render_inline(text_ctx *ctx, th_node *node) {
         text_emit_text(ctx, need_text(ctx->tree, node), node->text_len);
         return;
     }
-    if (node->type != TH_NODE_ELEMENT && node->type != TH_NODE_CONTENT) {
+    if (node->type != TH_NODE_ELEMENT) {
         return;
     }
     uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
@@ -849,14 +849,34 @@ static void text_leave_table(text_ctx *ctx, text_table *table) {
     PyMem_Free(table);
 }
 
-static void text_render_pre(text_ctx *ctx, th_node *node) {
-    Py_ssize_t text_len;
-    Py_UCS4 *text = th_node_text(ctx->tree, node, &text_len);
-    if (text == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        ctx->out.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
-        return;              /* GCOVR_EXCL_LINE: allocation-failure path */
+/* The text under a pre, leaving out each template's content, which is never drawn
+   (WHATWG Rendering 15.3.1). */
+static void text_collect_pre(text_ctx *ctx, th_node *root, sbuf *out) {
+    th_node *node = root->first_child;
+    while (node != NULL) {
+        if (node->type == TH_NODE_TEXT) {
+            sbuf_put_ucs4(out, need_text(ctx->tree, node), node->text_len);
+        } else if (node->first_child != NULL && (node->atom != TH_TAG_TEMPLATE || node->ns != TH_NS_HTML)) {
+            node = node->first_child;
+            continue;
+        }
+        while (node != root && node->next_sibling == NULL) {
+            node = node->parent;
+        }
+        node = node == root ? NULL : node->next_sibling;
     }
-    Py_ssize_t end = text_len;
+}
+
+static void text_render_pre(text_ctx *ctx, th_node *node) {
+    sbuf collected = {NULL, 0, 0, 0};
+    text_collect_pre(ctx, node, &collected);
+    if (collected.failed) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        ctx->out.failed = 1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyMem_Free(collected.data); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return;                     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    const Py_UCS4 *text = collected.data;
+    Py_ssize_t end = collected.len;
     if (end > 0 && text[end - 1] == '\n') {
         end--;
     }
@@ -869,7 +889,7 @@ static void text_render_pre(text_ctx *ctx, th_node *node) {
             ctx->line_has_content = 1;
         }
     }
-    PyMem_Free(text);
+    PyMem_Free(collected.data);
 }
 
 static void text_render_block(text_ctx *ctx, th_node *node) {

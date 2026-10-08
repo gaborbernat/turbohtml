@@ -67,8 +67,7 @@ static inline int is_md_block(uint16_t atom) {
    stylesheet is CSS just like an HTML one), so they are dropped regardless of ns.
    The rest are the HTML elements of WHATWG Rendering 15.3.1 "area, base, basefont,
    datalist, head, link, meta, noembed, noframes, param, rp, script, style, template,
-   title { display: none; }" that hold children (the void ones have none, and a
-   template's content is a separate fragment walked on its own). */
+   title { display: none; }" that hold children; the void ones have none. */
 static inline int is_md_skipped(const th_node *node) {
     switch (node->atom) {
     case TH_TAG_SCRIPT:
@@ -79,6 +78,7 @@ static inline int is_md_skipped(const th_node *node) {
     case TH_TAG_NOEMBED:
     case TH_TAG_NOFRAMES:
     case TH_TAG_RP:
+    case TH_TAG_TEMPLATE:
     case TH_TAG_TITLE:
         return node->ns == TH_NS_HTML;
     default:
