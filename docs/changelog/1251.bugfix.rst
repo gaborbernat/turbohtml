@@ -1,0 +1,2 @@
+Skip ``<title>``, ``<datalist>``, ``<noembed>``, ``<noframes>`` and ``<rp>`` in ``to_markdown`` and ``to_text``, which
+browsers do not render.

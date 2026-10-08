@@ -188,7 +188,7 @@ def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> 
 
 
 def _element(element: _TreeNode, parent: str, *, preserve: bool) -> tuple[_Meaning, ...]:
-    if element.tag in {"script", "style", "head", "meta", "title"}:
+    if element.tag in _HIDDEN or element.tag.endswith(("}script", "}style")):
         return ()
     _check_profile(element, parent)
     children: Final = _children(element, preserve=preserve or element.tag == "pre")
@@ -606,6 +606,24 @@ _EMPHASIS: Final = frozenset({"strong", "em", "s"})
 _BLOCKS: Final = frozenset({"p", "ul", "ol", "table"})
 _BOUNDARY: Final[_Meaning] = ("#block", (), ())
 _HEADINGS: Final = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+# WHATWG Rendering 15.3.1 draws none of these (a template's content is a separate fragment); script and style hold code
+# in every namespace
+_HIDDEN: Final = frozenset({
+    "area",
+    "base",
+    "basefont",
+    "datalist",
+    "head",
+    "link",
+    "meta",
+    "noembed",
+    "noframes",
+    "param",
+    "rp",
+    "script",
+    "style",
+    "title",
+})
 # the WHATWG content models of the containers whose Markdown syntax can hold nothing else (4.4.5-4.4.8, 4.9)
 _CONTENT_MODEL: Final[dict[str, frozenset[str]]] = {
     "ul": frozenset({"li", "script"}),

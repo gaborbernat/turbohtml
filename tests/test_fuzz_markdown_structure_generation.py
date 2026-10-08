@@ -149,6 +149,10 @@ def test_markdown_unsupported_element() -> None:
     "markup",
     [
         pytest.param("<!-- hidden --><script>x</script><style>x</style><p>y</p>", id="hidden-elements"),
+        pytest.param(
+            "<p>a<title>t</title><datalist>d</datalist><noembed>e</noembed><noframes>f</noframes><rp>(</rp>b</p>",
+            id="rendering-hidden-elements",
+        ),
         pytest.param("<div> <p><span>a</span><span>b</span></p> </div>", id="adjacent-transparent-text"),
         pytest.param("<p>x</p>y", id="trailing-inline-flow"),
         pytest.param("x<p>y</p>", id="leading-inline-flow"),
