@@ -854,6 +854,24 @@ _COMMONMARK_TEXT_CASES: Final = [
     pytest.param("<p>&amp;#</p>", "&#", id="amp-hash-at-end"),
     pytest.param("<p>AT&amp;T</p>", "AT&T", id="amp-name-at-end"),
     pytest.param("<p>&amp;x y;</p>", "&x y;", id="amp-name-without-semicolon"),
+    pytest.param("<p>&amp;<a>mp;</a></p>", "\\&mp;", id="amp-reference-split-across-nodes"),
+    pytest.param("<p>&amp;am<span>p;</span></p>", "\\&amp;", id="amp-name-split-across-nodes"),
+    pytest.param("<p>\\&amp;<span>amp;</span></p>", "\\\\\\&amp;", id="amp-after-escaped-backslash-split"),
+    pytest.param("<p>&amp;<span>amp</span></p>", "&amp", id="amp-split-without-semicolon"),
+    pytest.param("<p>&amp;#<span>65;</span></p>", "\\&#65;", id="amp-number-split-across-nodes"),
+    pytest.param("<p>&amp;#1<span>2;</span></p>", "\\&#12;", id="amp-digits-split-across-nodes"),
+    pytest.param("<p>&amp;am<code>x</code>p;</p>", "&am`x`p;", id="amp-split-by-code-span"),
+    pytest.param(
+        "<p>&amp;" + "a" * 40 + "<span>b;</span></p>", "&" + "a" * 40 + "b;", id="amp-name-past-longest-entity"
+    ),
+    pytest.param(
+        "<p>&amp;" + "a" * 20 + "<span>" + "b" * 30 + ";</span></p>",
+        "&" + "a" * 20 + "b" * 30 + ";",
+        id="amp-split-shape-capped",
+    ),
+    pytest.param("<p>&amp;am<b>p;</b></p>", "&am**p;**", id="amp-split-by-emphasis"),
+    pytest.param("<p><b>&amp;am<span>p;</span></b></p>", "**\\&amp;**", id="amp-split-inside-emphasis"),
+    pytest.param("<p>" + "a" * 40 + "<span>b;</span></p>", "a" * 40 + "b;", id="long-word-before-node"),
     pytest.param("<h1>a # b #</h1>", "# a # b \\#", id="heading-trailing-hash"),
     pytest.param("<h2>x ##</h2>", "## x \\##", id="heading-trailing-hash-run"),
     pytest.param("<h1>#</h1>", "# \\#", id="heading-only-hash"),
@@ -1496,6 +1514,13 @@ def test_converter_receives_element_and_content(mocker: MockerFixture) -> None:
 def test_unregistered_tag_renders_normally() -> None:
     out = parse("<p><b>x</b><i>y</i></p>").to_markdown(Markdown(converters={"b": wrap("@")}))
     assert out == "@x@*y*"
+
+
+def test_split_reference_after_converter_output() -> None:
+    converted = parse("<p><span>&amp;am</span>p;</p>").to_markdown(
+        Markdown(converters={"span": lambda _element, _content: "X"})
+    )
+    assert converted == "Xp;"
 
 
 def test_content_node_passes_through_with_converters() -> None:
@@ -2714,6 +2739,12 @@ def test_markdown_table_link_block_fallback(html: str, config: Markdown, expecte
     [
         pytest.param(
             "<p>a&lt;b&gt;c</p>", Markdown(escaping=Markdown.Escaping(mode="all")), "a\\<b\\>c", id="escape-all"
+        ),
+        pytest.param(
+            "<p>&amp;am<span>p;</span></p>",
+            Markdown(escaping=Markdown.Escaping(mode="all")),
+            "\\&amp;",
+            id="escaped-amp-split-across-nodes",
         ),
         pytest.param(
             "<p>a*b_c</p>", Markdown(escaping=Markdown.Escaping(asterisks=False)), "a*b\\_c", id="escape-no-asterisks"

@@ -313,6 +313,7 @@ typedef struct {
     int g_italic;               /* google_doc: a CSS font-style italic is in force from an ancestor */
     int failed;                 /* a reference buffer allocation failed */
     int escape_prose;           /* escape what a reader would parse in prose; off under Escaping(mode="none") */
+    int amp_open;               /* the last text node ended in an `&` and name, which the next can finish */
     uint8_t escape_mask;        /* the MD_ASCII classes the options escape */
     uint8_t run_stop;           /* the MD_ASCII classes that end a bulk-copied run */
     Py_ssize_t break_start;     /* where the last hard break was written in out... */
@@ -745,11 +746,79 @@ static Py_ssize_t md_escape_line_number(md_ctx *ctx, const Py_UCS4 *text, Py_ssi
     return scan + 1 - index;
 }
 
+/* md_escape_by_context for running text, which also notes an `&` whose name runs to
+   the node's end, so the next node can tell whether it finishes a reference. */
+static int md_escape_in_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t index, Py_ssize_t len) {
+    if (md_escape_by_context(text, index, len)) {
+        return 1;
+    }
+    if (text[index] == '&') {
+        Py_ssize_t scan = index + 1;
+        while (scan < len && (is_ascii_alpha(text[scan]) || is_ascii_digit(text[scan]) || text[scan] == '#')) {
+            scan++;
+        }
+        ctx->amp_open = scan == len;
+    }
+    return 0;
+}
+
+/* md_starts_reference sees one text node at a time, so a node that continues the
+   output right after an unescaped `&` and the start of a name or number (`&` then
+   `amp;`) can finish a reference across the two. The shape is checked over both,
+   capped where no reference CommonMark decodes reaches (2.5: a WHATWG entity name is
+   at most 31 letters, a number at most 7 digits), and the `&` escaped in place. The
+   node's first character follows with no space, so no wrap check has measured the line
+   past the `&`. */
+static void md_escape_split_reference(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
+    const Py_UCS4 *data = ctx->out.data;
+    Py_ssize_t amp = ctx->out.len;
+    while (amp > 0 && ctx->out.len - amp < 34 &&
+           (is_ascii_alpha(data[amp - 1]) || is_ascii_digit(data[amp - 1]) || data[amp - 1] == '#')) {
+        amp--;
+    }
+    Py_ssize_t slashes = 0;
+    while (amp - 1 - slashes > 0 && data[amp - 2 - slashes] == '\\') {
+        slashes++;
+    }
+    if (amp == 0 || data[amp - 1] != '&' || slashes % 2 == 1) {
+        return;
+    }
+    Py_UCS4 shape[40];
+    Py_ssize_t tail = ctx->out.len - amp + 1; /* the `&` and the name or number after it */
+    memcpy(shape, &data[amp - 1], (size_t)tail * sizeof(Py_UCS4));
+    Py_ssize_t count = tail;
+    for (Py_ssize_t index = 0; index < len && count < 40; index++) {
+        shape[count++] = text[index];
+        if (text[index] == ';') {
+            break;
+        }
+    }
+    if (!md_starts_reference(shape, 0, count)) {
+        return;
+    }
+    sbuf_reserve(&ctx->out, 1);
+    if (ctx->out.failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return;            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    memmove(&ctx->out.data[amp], &ctx->out.data[amp - 1], (size_t)tail * sizeof(Py_UCS4));
+    ctx->out.data[amp - 1] = '\\';
+    ctx->out.len++;
+}
+
 /* Emit inline text with normal-flow whitespace collapsing and markdown escaping.
    Prose is mostly plain runs, so after the first character of a word is placed
    (which resolves the deferred space, markers and escapes) the rest of the run --
    no whitespace, nothing to escape -- is bulk-copied in one memcpy. */
 static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
+    /* a reference continues only when nothing comes between the last node's `&` and name
+       and this node's first character; what is already written md_escape_split_reference
+       reads back, and an opening run still pending would come between */
+    if (ctx->amp_open) {
+        ctx->amp_open = 0;
+        if (ctx->pending == NULL || ctx->pending->emitted) {
+            md_escape_split_reference(ctx, text, len);
+        }
+    }
     int translit = ctx->opt->transliterate;
     Py_ssize_t index = 0;
     while (index < len) {
@@ -776,7 +845,7 @@ static void md_emit_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
             }
         }
         int by_context = ((kind & MD_CH_CONTEXT) || (translit && ch == 0x2190)) && ctx->escape_prose &&
-                         md_escape_by_context(text, index, len);
+                         md_escape_in_text(ctx, text, index, len);
         md_put_char(ctx, ch, (kind & ctx->escape_mask) || by_context);
         index++;
         /* past the word's first character nothing is at a line start, so an escaped
