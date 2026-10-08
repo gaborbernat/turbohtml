@@ -16,6 +16,8 @@ from turbohtml.cssom import ComputedStyle, RuleList, StyleDeclaration, StyleRule
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from _pytest.mark.structures import ParameterSet
+
     from turbohtml import Document
 
 
@@ -531,6 +533,25 @@ def test_computed_style_on_detached_element_uses_inline_and_initials() -> None:
     style = computed_style(element)
     assert style["color"] == "red"
     assert style["display"] == "inline"
+
+
+_ESCAPED_COMMENT_STARTS: Final[list[ParameterSet]] = [
+    pytest.param(r"--x: a\/*b; color: red", (("--x", r"a\/*b"), ("color", "red")), id="unclosed"),
+    pytest.param(r"--x: a\/*b*/c; color: red", (("--x", r"a\/*b*/c"), ("color", "red")), id="closed"),
+    pytest.param("--x: a\\", (("--x", "a\\"),), id="backslash-at-end"),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_COMMENT_STARTS)
+def test_parse_declarations_keeps_escaped_comment_start(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    declaration = StyleDeclaration.parse(text)
+    assert tuple((name, declaration[name]) for name in declaration) == expected
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_COMMENT_STARTS)
+def test_stylesheet_keeps_escaped_comment_start(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    declaration = StyleSheet(f"p {{ {text}").rules[0].style
+    assert tuple((name, declaration[name]) for name in declaration) == expected
 
 
 def test_comment_and_escape_edge_cases() -> None:

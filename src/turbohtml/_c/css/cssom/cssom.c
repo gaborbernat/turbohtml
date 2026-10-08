@@ -318,10 +318,14 @@ static int css_classify_component(const Py_UCS4 *data, Py_ssize_t len) {
     return COMPONENT_COLOR;
 }
 
-/* Copy src stripping CSS block comments, honoring '' and "" strings (a comment
-   marker inside a string is literal, and a backslash escapes the next character).
-   Each comment becomes one space so it stays a token boundary. Returns an owned
-   buffer of *out_len code points, or NULL on allocation failure. */
+/* The code points css_strip_comments acts on, as bits offset from the double quote, the lowest of them. */
+#define CSS_STRIP_STOPS                                                                                                \
+    ((UINT64_C(1) << ('"' - '"')) | (UINT64_C(1) << ('\'' - '"')) | (UINT64_C(1) << ('/' - '"')) |                     \
+     (UINT64_C(1) << ('\\' - '"')))
+
+/* Copy src stripping CSS block comments. A comment marker inside a '' or "" string or right after a backslash is
+   literal. Each comment becomes one space so it stays a token boundary. Returns an owned buffer of *out_len code
+   points, or NULL on allocation failure. */
 static Py_UCS4 *css_strip_comments(const Py_UCS4 *src, Py_ssize_t len, Py_ssize_t *out_len) {
     Py_UCS4 *out = PyMem_Malloc((size_t)(len + 1) * sizeof(Py_UCS4));
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -331,6 +335,14 @@ static Py_UCS4 *css_strip_comments(const Py_UCS4 *src, Py_ssize_t len, Py_ssize_
     Py_ssize_t pos = 0;
     while (pos < len) {
         Py_UCS4 ch = src[pos];
+        /* one bit test passes every code point but a quote, the backslash and the slash, which keeps the per-character
+           cost of the escape check off names, numbers and punctuation */
+        Py_UCS4 offset = ch - '"';
+        if (offset > '\\' - '"' || !((CSS_STRIP_STOPS >> offset) & 1)) {
+            out[write++] = ch;
+            pos++;
+            continue;
+        }
         if (ch == '"' || ch == '\'') {
             Py_UCS4 quote = ch;
             out[write++] = ch;
@@ -348,6 +360,13 @@ static Py_UCS4 *css_strip_comments(const Py_UCS4 *src, Py_ssize_t len, Py_ssize_
                 }
                 pos++;
             }
+            continue;
+        }
+        if (ch == '\\' && pos + 1 < len) {
+            /* the escaped code point joins a name (CSS Syntax 3 §4.3.7), so an escaped slash opens no comment */
+            out[write++] = ch;
+            out[write++] = src[pos + 1];
+            pos += 2;
             continue;
         }
         if (ch == '/' && pos + 1 < len && src[pos + 1] == '*') {
