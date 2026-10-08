@@ -972,9 +972,6 @@ th_node *th_tree_copy_node_shallow(th_tree *dest, th_tree *src, th_node *src_nod
                 Py_ssize_t name_len;
                 const char *name = th_attr_name(src, atom, &name_len);
                 atom = th_attr_intern_utf8(dest, name, name_len);
-                if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
-                    return NULL;               /* GCOVR_EXCL_LINE: allocation-failure path */
-                }
             }
             node->attrs[index].name_atom = atom;
             if (from->value != NULL) {
