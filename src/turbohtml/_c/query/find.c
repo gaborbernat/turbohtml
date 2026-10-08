@@ -977,6 +977,9 @@ TH_NODE_API(, PyObject *, node_find, (PyObject * self, PyObject *args, PyObject 
 /* Build the element index an unbounded document-rooted tag query reads before the query
    runs, and raise MemoryError when the build fails, where node_find_all would fall back to
    a walk. The same check inside node_find_all cost find 430 instructions a call. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((flatten))
+#endif
 static int find_index_prebuild(PyObject *self, const query_t *query) {
     if (query->limit >= 0 && query->limit <= 8) {
         return 0;
