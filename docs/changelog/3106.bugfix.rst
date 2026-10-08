@@ -1,0 +1,2 @@
+Raise MemoryError when an allocation fails while compiling or evaluating XPath or compiling or applying an XSLT
+stylesheet, instead of a ValueError or a wrong result.

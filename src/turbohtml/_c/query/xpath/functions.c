@@ -31,9 +31,10 @@ static double context_node_number(xp_ctx *ctx) {
     Py_ssize_t length;
     Py_UCS4 *text = item_string(ctx->tree, item, &length);
     if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        ctx->call->oom = 1; /* GCOVR_EXCL_LINE */
         return (double)NAN; /* GCOVR_EXCL_LINE */
     }
-    double value = parse_number(text, length);
+    double value = parse_number(text, length, &ctx->call->oom);
     PyMem_Free(text);
     return value;
 }
@@ -293,14 +294,14 @@ static size_t translate_slot(const translate_entry *entries, size_t mask, Py_UCS
     return slot;
 }
 
-static int substring(struct th_tree *tree, xp_result *args, int argc, xp_result *out) {
+static int substring(struct th_tree *tree, int *oom, xp_result *args, int argc, xp_result *out) {
     Py_ssize_t slen;
     Py_UCS4 *text = to_string(tree, &args[0], &slen);
     if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;      /* GCOVR_EXCL_LINE */
     }
-    double start = xp_round(to_number(tree, &args[1]));
-    double last = argc >= 3 ? start + xp_round(to_number(tree, &args[2])) : (double)slen + 1;
+    double start = xp_round(to_number(tree, &args[1], oom));
+    double last = argc >= 3 ? start + xp_round(to_number(tree, &args[2], oom)) : (double)slen + 1;
     Py_ssize_t lo = start < 1 ? 0 : (start > (double)slen + 1 ? slen : (Py_ssize_t)start - 1);
     Py_ssize_t hi = last < 1 ? 0 : (last > (double)slen + 1 ? slen : (Py_ssize_t)last - 1);
     if (hi < lo) {
@@ -676,7 +677,7 @@ static int regex_test(xp_ctx *ctx, xp_result *args, int argc, xp_result *out) {
     }
     /* GCOVR_EXCL_BR_STOP */
     xr_error error;
-    int found = xr_test(ctx->regex_cache, pattern, pattern_len, flags, input, input_len, &error);
+    int found = xr_test(&ctx->call->regex_cache, pattern, pattern_len, flags, input, input_len, &error);
     PyMem_Free(pattern);
     PyMem_Free(input);
     if (found < 0) {
@@ -708,8 +709,8 @@ static int regex_replace(xp_ctx *ctx, xp_result *args, int argc, int exslt, xp_r
     xr_error error;
     Py_UCS4 *result;
     Py_ssize_t result_len;
-    int rc = xr_replace(ctx->regex_cache, pattern, pattern_len, flags, input, input_len, replacement, replacement_len,
-                        !exslt, exslt && !global, &result, &result_len, &error);
+    int rc = xr_replace(&ctx->call->regex_cache, pattern, pattern_len, flags, input, input_len, replacement,
+                        replacement_len, !exslt, exslt && !global, &result, &result_len, &error);
     PyMem_Free(pattern);
     PyMem_Free(input);
     PyMem_Free(replacement);
@@ -1144,8 +1145,8 @@ static int str_replace(struct th_tree *tree, const xp_result *args, xp_result *o
 
 /* str:padding(length, pattern?): a string of `length` characters built by cycling
    `pattern` (a single space by default). An empty pattern pads with spaces. */
-static int str_padding(struct th_tree *tree, const xp_result *args, int argc, xp_result *out) {
-    double requested = round(to_number(tree, &args[0]));
+static int str_padding(struct th_tree *tree, int *oom, const xp_result *args, int argc, xp_result *out) {
+    double requested = round(to_number(tree, &args[0], oom));
     /* source data can supply the length, so a tiny document could size a huge allocation; the ceiling is libexslt's
        (strings.c, df878571), raised as an error since truncating would contradict the EXSLT definition */
     const Py_ssize_t ceiling = 100000;
@@ -1245,7 +1246,7 @@ static int str_align(struct th_tree *tree, const xp_result *args, int argc, xp_r
 
 /* math:min / math:max over a node-set's numeric string-values. An empty node-set or
    any non-numeric member yields NaN, matching EXSLT. */
-static int math_extreme(struct th_tree *tree, const xp_result *arg, int want_max, xp_result *out) {
+static int math_extreme(struct th_tree *tree, int *oom, const xp_result *arg, int want_max, xp_result *out) {
     const xp_nodeset *nodes = &arg->nodes;
     if (nodes->len == 0) {
         result_number(out, (double)NAN);
@@ -1258,7 +1259,7 @@ static int math_extreme(struct th_tree *tree, const xp_result *arg, int want_max
         if (text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
             return -1;      /* GCOVR_EXCL_LINE */
         }
-        double value = parse_number(text, length);
+        double value = parse_number(text, length, oom);
         PyMem_Free(text);
         if (isnan(value)) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
             extreme = (double)NAN;
@@ -1275,7 +1276,7 @@ static int math_extreme(struct th_tree *tree, const xp_result *arg, int want_max
 /* math:highest / math:lowest: the members whose numeric value is the maximum
    (`want_max`) or minimum. Any non-numeric member, or an empty node-set, yields an
    empty node-set. */
-static int math_select(struct th_tree *tree, const xp_result *arg, int want_max, xp_result *out) {
+static int math_select(struct th_tree *tree, int *oom, const xp_result *arg, int want_max, xp_result *out) {
     memset(out, 0, sizeof(*out));
     out->kind = XP_NODESET;
     const xp_nodeset *nodes = &arg->nodes;
@@ -1295,7 +1296,7 @@ static int math_select(struct th_tree *tree, const xp_result *arg, int want_max,
             PyMem_Free(values); /* GCOVR_EXCL_LINE */
             return -1;          /* GCOVR_EXCL_LINE */
         }
-        values[index] = parse_number(text, length);
+        values[index] = parse_number(text, length, oom);
         PyMem_Free(text);
         if (isnan(values[index])) { /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
             numeric = 0;
@@ -1582,9 +1583,9 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
     } else if (func_is(fn, "boolean")) {
         result_bool(out, to_boolean(ctx->tree, &args[0]));
     } else if (func_is(fn, "number")) {
-        result_number(out, argc >= 1 ? to_number(ctx->tree, &args[0]) : context_node_number(ctx));
+        result_number(out, argc >= 1 ? to_number(ctx->tree, &args[0], &ctx->call->oom) : context_node_number(ctx));
     } else if (func_is(fn, "floor") || func_is(fn, "ceiling") || func_is(fn, "round")) {
-        double value = to_number(ctx->tree, &args[0]);
+        double value = to_number(ctx->tree, &args[0], &ctx->call->oom);
         result_number(out, func_is(fn, "floor")     ? floor(value)
                            : func_is(fn, "ceiling") ? ceil(value)
                                                     : xp_round(value));
@@ -1608,7 +1609,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
                     rc = -1;        /* GCOVR_EXCL_LINE */
                     break;          /* GCOVR_EXCL_LINE */
                 }
-                total += parse_number(text, length);
+                total += parse_number(text, length, &ctx->call->oom);
                 PyMem_Free(text);
             }
             if (rc == 0) { /* GCOVR_EXCL_BR_LINE: alloc */
@@ -1692,7 +1693,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
     } else if (func_is(fn, "str:replace")) {
         rc = str_replace(ctx->tree, args, out);
     } else if (func_is(fn, "str:padding")) {
-        rc = str_padding(ctx->tree, args, argc, out);
+        rc = str_padding(ctx->tree, &ctx->call->oom, args, argc, out);
     } else if (func_is(fn, "str:align")) {
         rc = str_align(ctx->tree, args, argc, out);
     } else if (func_is(fn, "math:min") || func_is(fn, "math:max") || func_is(fn, "math:highest") ||
@@ -1701,14 +1702,15 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
             *ctx->feature = "a math: function on a non-node-set";
             rc = -4;
         } else if (func_is(fn, "math:min") || func_is(fn, "math:max")) {
-            rc = math_extreme(ctx->tree, &args[0], func_is(fn, "math:max"), out);
+            rc = math_extreme(ctx->tree, &ctx->call->oom, &args[0], func_is(fn, "math:max"), out);
         } else {
-            rc = math_select(ctx->tree, &args[0], func_is(fn, "math:highest"), out);
+            rc = math_select(ctx->tree, &ctx->call->oom, &args[0], func_is(fn, "math:highest"), out);
         }
     } else if (func_is(fn, "math:abs")) {
-        result_number(out, fabs(to_number(ctx->tree, &args[0])));
+        result_number(out, fabs(to_number(ctx->tree, &args[0], &ctx->call->oom)));
     } else if (func_is(fn, "math:power")) {
-        result_number(out, pow(to_number(ctx->tree, &args[0]), to_number(ctx->tree, &args[1])));
+        result_number(
+            out, pow(to_number(ctx->tree, &args[0], &ctx->call->oom), to_number(ctx->tree, &args[1], &ctx->call->oom)));
     } else if (func_is(fn, "date:year")) {
         rc = date_number(ctx->tree, &args[0], 0, out);
     } else if (func_is(fn, "date:month-in-year")) {
@@ -1755,7 +1757,7 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
         PyMem_Free(hay);
         PyMem_Free(needle);
     } else if (func_is(fn, "substring")) {
-        rc = substring(ctx->tree, args, argc, out);
+        rc = substring(ctx->tree, &ctx->call->oom, args, argc, out);
     } else if (func_is(fn, "translate")) {
         Py_ssize_t sl;
         Py_ssize_t fl;
@@ -1827,11 +1829,9 @@ PyObject *turbohtml_xpath_parse(PyObject *Py_UNUSED(module), PyObject *arg) {
     if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE */
     }
-    char err[128];
-    xp_program *prog = xp_compile(src, len, err, sizeof(err));
+    xp_program *prog = xp_compile(src, len, "");
     PyMem_Free(src);
     if (prog == NULL) {
-        PyErr_SetString(PyExc_ValueError, err);
         return NULL;
     }
     Py_ssize_t dlen;

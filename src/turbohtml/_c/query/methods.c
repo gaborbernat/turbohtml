@@ -992,11 +992,9 @@ static xp_program *cached_xpath_compile(HandleObject *handle, PyObject *arg) {
     if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE */
     }
-    char err[128];
-    xp_program *prog = xp_compile(src, len, err, sizeof(err));
+    xp_program *prog = xp_compile(src, len, "");
     PyMem_Free(src);
     if (prog == NULL) {
-        PyErr_SetString(PyExc_ValueError, err);
         return NULL;
     }
     if (handle->xpath_cache == NULL) {
@@ -1074,21 +1072,12 @@ static PyObject *xpath_item_to_py(module_state *state, PyObject *handle, th_tree
 
 /* Translate an xp_eval status into a Python error: -4 a TypeError (a value where a
    node-set is required), -3 a ValueError (an unbound variable, an unbound prefix, or an
-   over-deep expression), -1 an allocation failure or an already-set exception (an unknown
-   function, a wrong-arity call, a malformed regex, or an extension failure). */
+   over-deep expression); -1 already carries its exception. */
 static void *xpath_raise_status(int status, const char *feature) {
-    if (PyErr_Occurred()) { /* a borrowed Python call already set the exception (regex, unknown function, ...) */
-        return NULL;
+    if (!PyErr_Occurred()) {
+        PyErr_Format(status == -4 ? PyExc_TypeError : PyExc_ValueError, "xpath: %s", feature);
     }
-    if (status == -4) {
-        PyErr_Format(PyExc_TypeError, "xpath: %s", feature);
-        return NULL;
-    }
-    if (status == -3) { /* GCOVR_EXCL_BR_LINE: the remaining status -1 is an allocation failure */
-        PyErr_Format(PyExc_ValueError, "xpath: %s", feature);
-        return NULL;
-    }
-    return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: status == -1 is an allocation failure that cannot be forced */
+    return NULL;
 }
 
 static PyObject *xpath_scalar_to_py(const xp_result *result) {
@@ -2060,11 +2049,9 @@ static PyObject *xpath_compiled_new(PyTypeObject *type, PyObject *args, PyObject
     if (src == NULL) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    char err[128];
-    xp_program *prog = xp_compile(src, len, err, sizeof(err));
+    xp_program *prog = xp_compile(src, len, "");
     PyMem_Free(src);
     if (prog == NULL) {
-        PyErr_SetString(PyExc_ValueError, err);
         return NULL;
     }
     XPathObject *self = (XPathObject *)type->tp_alloc(type, 0);

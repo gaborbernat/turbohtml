@@ -11,6 +11,7 @@ typedef struct {
     lexer lx;
     xp_program *prog;
     int failed;
+    int oom;   /* an allocation failed; it outranks any syntax error found while the parse unwound */
     int depth; /* current parse recursion depth, capped at XP_MAX_DEPTH */
     const char *msg;
     Py_ssize_t err_pos;     /* offset of the offending token when failed */
@@ -50,16 +51,32 @@ static void expect(parser *ps, tok_kind kind, const char *msg) {
     }
 }
 
+/* A failed allocation stops the parse like a syntax error; xp_compile reads ps->oom to raise MemoryError instead. */
+/* GCOVR_EXCL_START: allocation failure */
+static void fail_oom(parser *ps) {
+    ps->oom = 1;
+    ps->failed = 1;
+}
+/* GCOVR_EXCL_STOP */
+
+static int32_t node_new(parser *ps, enum xn_kind kind) {
+    int32_t index = xn_new(ps->prog, kind);
+    if (index < 0) {  /* GCOVR_EXCL_BR_LINE: alloc */
+        fail_oom(ps); /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return index;
+}
+
 /* Copy the lexer's current NAME/LITERAL text into the node's owned string. */
-static int copy_text(xp_program *prog, int32_t idx, const Py_UCS4 *src, Py_ssize_t len) {
+static void copy_text(parser *ps, int32_t idx, const Py_UCS4 *src, Py_ssize_t len) {
     Py_UCS4 *buf = PyMem_Malloc((size_t)len * sizeof(Py_UCS4));
-    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return -1;     /* GCOVR_EXCL_LINE */
+    if (buf == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+        fail_oom(ps);  /* GCOVR_EXCL_LINE */
+        return;        /* GCOVR_EXCL_LINE */
     }
     memcpy(buf, src, (size_t)len * sizeof(Py_UCS4));
-    prog->nodes[idx].str = buf;
-    prog->nodes[idx].str_len = len;
-    return 0;
+    ps->prog->nodes[idx].str = buf;
+    ps->prog->nodes[idx].str_len = len;
 }
 
 /* A NodeTest after an axis has been chosen; fills test/str on the step node. */
@@ -89,19 +106,15 @@ static void parse_node_test(parser *ps, int32_t step) {
         lex_next(lx); /* the name */
         expect(ps, TK_LPAREN, "expected '('");
         if (is_pi && lx->kind == TK_LITERAL) {
-            if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
-            } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+            copy_text(ps, step, lx->tstart, lx->tlen);
             lex_next(lx);
         }
         expect(ps, TK_RPAREN, "expected ')'");
         return;
     }
     ps->prog->nodes[step].test = NT_NAME;
-    ps->prog->nodes[step].prefix_len = lx->tprefix;            /* the resolved URI binds at eval time */
-    if (copy_text(ps->prog, step, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory");                             /* GCOVR_EXCL_LINE */
-    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    ps->prog->nodes[step].prefix_len = lx->tprefix; /* the resolved URI binds at eval time */
+    copy_text(ps, step, lx->tstart, lx->tlen);
     lex_next(lx);
 }
 
@@ -111,10 +124,9 @@ static int32_t parse_predicates(parser *ps) {
     int32_t tail = -1;
     while (ps->lx.kind == TK_LBRACK) {
         lex_next(&ps->lx);
-        int32_t pred = xn_new(ps->prog, XN_PRED);
-        if (pred < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-            return head;               /* GCOVR_EXCL_LINE */
+        int32_t pred = node_new(ps, XN_PRED);
+        if (pred < 0) {  /* GCOVR_EXCL_BR_LINE: alloc */
+            return head; /* GCOVR_EXCL_LINE */
         }
         int32_t expr = parse_expr(ps);
         ps->prog->nodes[pred].first = expr;
@@ -162,7 +174,7 @@ static int32_t parse_step(parser *ps) {
     lexer *lx = &ps->lx;
     if (lx->kind == TK_DOT) {
         lex_next(lx);
-        int32_t step = xn_new(ps->prog, XN_STEP);
+        int32_t step = node_new(ps, XN_STEP);
         if (step < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -172,7 +184,7 @@ static int32_t parse_step(parser *ps) {
     }
     if (lx->kind == TK_DOTDOT) {
         lex_next(lx);
-        int32_t step = xn_new(ps->prog, XN_STEP);
+        int32_t step = node_new(ps, XN_STEP);
         if (step < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -180,10 +192,9 @@ static int32_t parse_step(parser *ps) {
         ps->prog->nodes[step].test = NT_NODE;
         return step;
     }
-    int32_t step = xn_new(ps->prog, XN_STEP);
-    if (step < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-        return -1;                 /* GCOVR_EXCL_LINE */
+    int32_t step = node_new(ps, XN_STEP);
+    if (step < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;  /* GCOVR_EXCL_LINE */
     }
     enum xp_axis axis = AX_CHILD;
     if (lx->kind == TK_AT) {
@@ -220,7 +231,7 @@ static int starts_step(tok_kind kind) {
    Appends to *tail; inserts a synthetic descendant-or-self::node() for //. */
 static void parse_relative_tail(parser *ps, int32_t *head, int32_t *tail, int dslash) {
     if (dslash) {
-        int32_t ds = xn_new(ps->prog, XN_STEP);
+        int32_t ds = node_new(ps, XN_STEP);
         if (ds < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return;   /* GCOVR_EXCL_LINE */
         }
@@ -247,10 +258,9 @@ static void parse_relative_tail(parser *ps, int32_t *head, int32_t *tail, int ds
 
 /* LocationPath / PathExpr without a leading FilterExpr. */
 static int32_t parse_location_path(parser *ps) {
-    int32_t path = xn_new(ps->prog, XN_PATH);
-    if (path < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-        return -1;                 /* GCOVR_EXCL_LINE */
+    int32_t path = node_new(ps, XN_PATH);
+    if (path < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;  /* GCOVR_EXCL_LINE */
     }
     int32_t head = -1;
     int32_t tail = -1;
@@ -287,18 +297,16 @@ static int32_t parse_primary(parser *ps) {
         return inner;
     }
     if (lx->kind == TK_LITERAL) {
-        int32_t lit = xn_new(ps->prog, XN_LIT);
+        int32_t lit = node_new(ps, XN_LIT);
         if (lit < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
         }
-        if (copy_text(ps->prog, lit, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory");                            /* GCOVR_EXCL_LINE */
-        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        copy_text(ps, lit, lx->tstart, lx->tlen);
         lex_next(lx);
         return lit;
     }
     if (lx->kind == TK_NUM) {
-        int32_t num = xn_new(ps->prog, XN_NUM);
+        int32_t num = node_new(ps, XN_NUM);
         if (num < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
         }
@@ -313,26 +321,21 @@ static int32_t parse_primary(parser *ps) {
             return -1;
         }
         ps->prog->has_variables = 1;
-        int32_t var = xn_new(ps->prog, XN_VAR);
+        int32_t var = node_new(ps, XN_VAR);
         if (var < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1; /* GCOVR_EXCL_LINE */
         }
-        if (copy_text(ps->prog, var, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory");                            /* GCOVR_EXCL_LINE */
-        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+        copy_text(ps, var, lx->tstart, lx->tlen);
         lex_next(lx);
         return var;
     }
     /* The only remaining primary is a FunctionCall: starts_filter() guarantees a
        NAME here once '(', a literal, and a number have been ruled out above. */
-    int32_t fn = xn_new(ps->prog, XN_FUNC);
-    if (fn < 0) {                  /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-        return -1;                 /* GCOVR_EXCL_LINE */
+    int32_t fn = node_new(ps, XN_FUNC);
+    if (fn < 0) {  /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1; /* GCOVR_EXCL_LINE */
     }
-    if (copy_text(ps->prog, fn, lx->tstart, lx->tlen) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory");                           /* GCOVR_EXCL_LINE */
-    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    copy_text(ps, fn, lx->tstart, lx->tlen);
     lex_next(lx);
     expect(ps, TK_LPAREN, "expected '(' after function name");
     int32_t arg_head = -1;
@@ -390,10 +393,9 @@ static int32_t parse_filter_or_path(parser *ps) {
     int32_t preds = parse_predicates(ps);
     int32_t base = primary;
     if (preds >= 0) {
-        int32_t filter = xn_new(ps->prog, XN_FILTER);
-        if (filter < 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
-            fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-            return -1;                 /* GCOVR_EXCL_LINE */
+        int32_t filter = node_new(ps, XN_FILTER);
+        if (filter < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;    /* GCOVR_EXCL_LINE */
         }
         ps->prog->nodes[filter].first = primary;
         ps->prog->nodes[filter].second = preds;
@@ -402,10 +404,9 @@ static int32_t parse_filter_or_path(parser *ps) {
     if (ps->lx.kind != TK_SLASH && ps->lx.kind != TK_DSLASH) {
         return base;
     }
-    int32_t path = xn_new(ps->prog, XN_PATH);
-    if (path < 0) {                /* GCOVR_EXCL_BR_LINE: alloc */
-        fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-        return -1;                 /* GCOVR_EXCL_LINE */
+    int32_t path = node_new(ps, XN_PATH);
+    if (path < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;  /* GCOVR_EXCL_LINE */
     }
     ps->prog->nodes[path].second = base;
     int32_t head = -1;
@@ -424,7 +425,7 @@ static int32_t parse_union(parser *ps) {
     while (ps->lx.kind == TK_PIPE) {
         lex_next(&ps->lx);
         int32_t right = parse_filter_or_path(ps);
-        int32_t union_node = xn_new(ps->prog, XN_UNION);
+        int32_t union_node = node_new(ps, XN_UNION);
         if (union_node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;        /* GCOVR_EXCL_LINE */
         }
@@ -448,7 +449,7 @@ static int32_t parse_unary(parser *ps) {
     if (ps->lx.kind == TK_MINUS) {
         lex_next(&ps->lx);
         int32_t operand = parse_unary(ps);
-        int32_t neg = xn_new(ps->prog, XN_NEG);
+        int32_t neg = node_new(ps, XN_NEG);
         if (neg < 0) {   /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             ps->depth--; /* GCOVR_EXCL_LINE */
             return -1;   /* GCOVR_EXCL_LINE */
@@ -477,7 +478,7 @@ static int32_t parse_multiplicative(parser *ps) {
         }
         lex_next(&ps->lx);
         int32_t right = parse_unary(ps);
-        int32_t node = xn_new(ps->prog, op);
+        int32_t node = node_new(ps, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -501,7 +502,7 @@ static int32_t parse_additive(parser *ps) {
         }
         lex_next(&ps->lx);
         int32_t right = parse_multiplicative(ps);
-        int32_t node = xn_new(ps->prog, op);
+        int32_t node = node_new(ps, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -529,7 +530,7 @@ static int32_t parse_relational(parser *ps) {
         }
         lex_next(&ps->lx);
         int32_t right = parse_additive(ps);
-        int32_t node = xn_new(ps->prog, op);
+        int32_t node = node_new(ps, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -553,7 +554,7 @@ static int32_t parse_equality(parser *ps) {
         }
         lex_next(&ps->lx);
         int32_t right = parse_relational(ps);
-        int32_t node = xn_new(ps->prog, op);
+        int32_t node = node_new(ps, op);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -569,7 +570,7 @@ static int32_t parse_and(parser *ps) {
     while (ps->lx.kind == TK_AND) {
         lex_next(&ps->lx);
         int32_t right = parse_equality(ps);
-        int32_t node = xn_new(ps->prog, XN_AND);
+        int32_t node = node_new(ps, XN_AND);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -585,7 +586,7 @@ static int32_t parse_expr(parser *ps) {
     while (ps->lx.kind == TK_OR) {
         lex_next(&ps->lx);
         int32_t right = parse_and(ps);
-        int32_t node = xn_new(ps->prog, XN_OR);
+        int32_t node = node_new(ps, XN_OR);
         if (node < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure cannot be forced */
             return -1;  /* GCOVR_EXCL_LINE */
         }
@@ -697,9 +698,6 @@ static void optimize_descendant_steps(xp_program *prog) {
    slice of the offending token (non-ASCII code points shown as '?'), or a note that the
    expression ended early when the failure is at end of input. */
 static void format_error(char *errbuf, size_t errlen, const parser *ps) {
-    /* ps->msg is NULL only when an arena OOM failed the parse without a message, which
-       cannot be forced from a test */
-    const char *reason = ps->msg != NULL ? ps->msg : "invalid XPath expression"; /* GCOVR_EXCL_BR_LINE */
     char token[32];
     Py_ssize_t span = ps->err_tok_len > 0 ? ps->err_tok_len : (ps->err_pos < ps->lx.len ? 1 : 0);
     Py_ssize_t count = span < (Py_ssize_t)sizeof(token) - 1 ? span : (Py_ssize_t)sizeof(token) - 1;
@@ -709,17 +707,17 @@ static void format_error(char *errbuf, size_t errlen, const parser *ps) {
     }
     token[count] = '\0';
     if (count > 0) {
-        snprintf(errbuf, errlen, "%s at offset %zd near '%s'", reason, ps->err_pos, token);
+        snprintf(errbuf, errlen, "%s at offset %zd near '%s'", ps->msg, ps->err_pos, token);
     } else {
-        snprintf(errbuf, errlen, "%s at the end of the expression", reason);
+        snprintf(errbuf, errlen, "%s at the end of the expression", ps->msg);
     }
 }
 
-xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen) {
+xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, const char *error_prefix) {
     xp_program *prog = PyMem_Malloc(sizeof(*prog));
-    if (prog == NULL) {                            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
-        snprintf(errbuf, errlen, "out of memory"); /* GCOVR_EXCL_LINE */
-        return NULL;                               /* GCOVR_EXCL_LINE */
+    if (prog == NULL) {   /* GCOVR_EXCL_BR_LINE: alloc */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
     }
     prog->references = 1;
     prog->has_python_calls = 0;
@@ -733,6 +731,7 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
     ps.lx.src = src;
     ps.lx.len = len;
     ps.lx.op_context = 0;
+    ps.lx.oom = &ps.oom;
     lex_next(&ps.lx);
     if (ps.lx.error) {
         fail(&ps, "invalid character in expression");
@@ -746,11 +745,16 @@ xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t 
     if (!ps.failed && ps.lx.kind != TK_EOF) {
         fail(&ps, "unexpected trailing tokens");
     }
-    /* root < 0 and a NULL message only arise from an arena allocation failure that
-       did not record a message, so those branches cannot be forced from a test */
-    if (ps.failed || prog->root < 0) { /* GCOVR_EXCL_BR_LINE: root < 0 is an unforced arena OOM */
-        format_error(errbuf, errlen, &ps);
+    if (ps.oom) {         /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_free(prog);    /* GCOVR_EXCL_LINE */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    if (ps.failed) {
         xp_free(prog);
+        char message[128];
+        format_error(message, sizeof(message), &ps);
+        PyErr_Format(PyExc_ValueError, "%s%s", error_prefix, message);
         return NULL;
     }
     optimize_descendant_steps(prog);

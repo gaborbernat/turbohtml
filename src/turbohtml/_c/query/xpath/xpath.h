@@ -23,10 +23,10 @@
 
 typedef struct xp_program xp_program;
 
-/* Compile an XPath expression given as code points. Returns the program, or NULL
-   on a syntax error with a NUL-terminated message written into errbuf (errlen is
-   its capacity). The source is not retained; names and literals are copied. */
-xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, char *errbuf, size_t errlen);
+/* Compile an XPath expression given as code points. Returns the program, or NULL with
+   ValueError (error_prefix followed by the syntax error) or MemoryError set. The source
+   is not retained; names and literals are copied. */
+xp_program *xp_compile(const Py_UCS4 *src, Py_ssize_t len, const char *error_prefix);
 
 int xp_calls_python(const xp_program *prog);
 void xp_retain(xp_program *prog);
@@ -131,9 +131,9 @@ typedef int (*xp_extension_fn)(void *ctx, struct th_node *context_node, const Py
    -3 for an evaluation error that maps to ValueError (a reference to an unbound variable,
    a name test whose prefix is not bound, or an expression nested past XP_MAX_DEPTH), or
    -4 for a type error that maps to TypeError (a value used where a node-set is required),
-   with *feature set to a short name for the message. Returns -1 on allocation failure or
-   when a Python error is already set (a malformed regex, an extension failure, or an
-   unknown-function/wrong-arity call reported with the function name). */
+   with *feature set to a short name for the message. Returns -1 with a Python exception
+   set: MemoryError on allocation failure, or the error a malformed regex, an extension
+   failure, or an unknown-function/wrong-arity call raised. */
 struct th_tree;
 int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
             const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx, xp_result *out,

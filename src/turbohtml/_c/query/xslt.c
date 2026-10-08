@@ -746,6 +746,7 @@ typedef struct engine {
 
     const char *error;
     int py_error;
+    int oom; /* a numeric conversion failed to allocate and went on with NaN; the entry point raises MemoryError */
     int owns_model;
 #ifdef TH_OPERATION_LIMIT
     size_t operations; /* stylesheet elements compiled, then instructions applied in one run */
@@ -921,6 +922,13 @@ static int fail_py(engine *eng) {
     return -1;
 }
 
+/* GCOVR_EXCL_START: allocation failure */
+static int fail_oom(engine *eng) {
+    PyErr_NoMemory();
+    return fail_py(eng);
+}
+/* GCOVR_EXCL_STOP */
+
 #ifdef TH_OPERATION_LIMIT
 /* Fuzz builds pass -DTH_OPERATION_LIMIT so a super-linear stylesheet stops with a ValueError instead of a timeout that
    hides other findings. libxslt charges each parsed instruction (xslt.c xsltParseSequenceConstructor) and each
@@ -1054,19 +1062,17 @@ static xp_program *compile_pattern_new(engine *eng, const Py_UCS4 *src, Py_ssize
     }
     if (!anchored && xb_add_ascii(&expr, "//") < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         xb_free(&expr);                               /* GCOVR_EXCL_LINE */
-        fail(eng, "out of memory");                   /* GCOVR_EXCL_LINE */
+        fail_oom(eng);                                /* GCOVR_EXCL_LINE */
         return NULL;                                  /* GCOVR_EXCL_LINE */
     }
     if (xb_add(&expr, pattern, trimmed) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         xb_free(&expr);                        /* GCOVR_EXCL_LINE */
-        fail(eng, "out of memory");            /* GCOVR_EXCL_LINE */
+        fail_oom(eng);                         /* GCOVR_EXCL_LINE */
         return NULL;                           /* GCOVR_EXCL_LINE */
     }
-    char errbuf[256];
-    xp_program *prog = xp_compile(expr.data, expr.len, errbuf, sizeof(errbuf));
+    xp_program *prog = xp_compile(expr.data, expr.len, "xslt: bad match pattern: ");
     xb_free(&expr);
     if (prog == NULL) {
-        PyErr_Format(PyExc_ValueError, "xslt: bad match pattern: %s", errbuf);
         fail_py(eng);
         return NULL;
     }
@@ -1368,7 +1374,7 @@ static int xslt_extension(void *vctx, th_node *context_node, const Py_UCS4 *name
             PyErr_SetString(PyExc_ValueError, "xslt: format-number() takes at least two arguments");
             return -1;
         }
-        double value = to_number(eng->src_tree, &args[0]);
+        double value = to_number(eng->src_tree, &args[0], &eng->oom);
         Py_ssize_t picture_len = 0;
         Py_UCS4 *picture = to_string(eng->src_tree, &args[1], &picture_len);
         if (picture == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
@@ -1460,11 +1466,6 @@ static int eval_program(engine *eng, const xp_program *prog, th_node *context, P
         PyMem_Free(bindings); /* GCOVR_EXCL_LINE: only the >64-binding path allocates */
     }
     if (status < 0 && !PyErr_Occurred()) {
-        /* A -3/-4 error always names a feature; only an unforced allocation failure
-           returns <0 with none, so the fallback string is exercised nowhere. */
-        if (feature == NULL) {      /* GCOVR_EXCL_BR_LINE */
-            feature = "evaluation"; /* GCOVR_EXCL_LINE */
-        } /* GCOVR_EXCL_LINE */
         PyErr_Format(PyExc_ValueError, "xslt: expression error (%s)", feature);
     }
     return status;
@@ -1492,10 +1493,14 @@ static int build_key(engine *eng, xslt_key *key) {
                      : xp_eval_at(key->match_prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, NULL, NULL, &matched,
                                   &feature);
     }
-    if (status < 0) { /* GCOVR_EXCL_BR_LINE: the key match compiled, so it evaluates */
-        PyErr_Format(PyExc_ValueError, "xslt: key match failed"); /* GCOVR_EXCL_LINE */
-        return fail_py(eng);                                      /* GCOVR_EXCL_LINE */
+    /* GCOVR_EXCL_START: the key match compiled, so it fails only to allocate or past the fuzz build's operation limit */
+    if (status < 0) {
+        if (!PyErr_ExceptionMatches(PyExc_MemoryError)) {
+            PyErr_Format(PyExc_ValueError, "xslt: key match failed");
+        }
+        return fail_py(eng);
     }
+    /* GCOVR_EXCL_STOP */
     uint32_t use_atom;
     int direct_attribute = xp_single_attribute_atom(key->use_prog, eng->src_tree, &use_atom);
     for (Py_ssize_t index = 0; index < matched.nodes.len; index++) {
@@ -1593,7 +1598,7 @@ static int scan_static_name_pattern(engine *eng, const xp_program *prog, xp_resu
             memcmp(node->text, step->str, (size_t)step->str_len * sizeof(Py_UCS4)) == 0) {
             if (ns_push(&matched->nodes, node, -1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                 xp_result_free(matched);                  /* GCOVR_EXCL_LINE */
-                return -1;                                /* GCOVR_EXCL_LINE */
+                return fail_oom(eng);                     /* GCOVR_EXCL_LINE */
             }
         }
         if (node->first_child != NULL) {
@@ -1616,7 +1621,8 @@ static int build_rule(engine *eng, xslt_rule *rule) {
     rule->built = 1;
     const xn *pattern = &rule->prog->nodes[rule->prog->root];
     if (pattern->kind == XN_PATH && pattern->first < 0) {
-        return match_set_add(&rule->matched, eng->src_root, -1);
+        /* best_rule reads a NULL rule as no match unless the engine recorded an error */
+        return match_set_add(&rule->matched, eng->src_root, -1) < 0 ? fail_oom(eng) : 0; /* GCOVR_EXCL_BR_LINE: alloc */
     }
     xp_result matched;
     const char *feature = NULL;
@@ -1628,10 +1634,7 @@ static int build_rule(engine *eng, xslt_rule *rule) {
                      : xp_eval_at(rule->prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, xslt_extension, eng,
                                   &matched, &feature);
     if (status < 0) {
-        if (!PyErr_Occurred()) {   /* GCOVR_EXCL_BR_LINE: pattern evaluation sets an exception only on allocation */
-            if (feature == NULL) { /* GCOVR_EXCL_BR_LINE: a -3/-4 error always names a feature */
-                feature = "evaluation"; /* GCOVR_EXCL_LINE */
-            } /* GCOVR_EXCL_LINE */
+        if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: pattern evaluation sets an exception only on allocation */
             PyErr_Format(PyExc_ValueError, "xslt: match pattern error (%s)", feature);
         }
         return fail_py(eng);
@@ -1640,7 +1643,7 @@ static int build_rule(engine *eng, xslt_rule *rule) {
         int added = match_set_add(&rule->matched, matched.nodes.items[index].node, matched.nodes.items[index].attr);
         if (added < 0) {              /* GCOVR_EXCL_BR_LINE: alloc */
             xp_result_free(&matched); /* GCOVR_EXCL_LINE */
-            return -1;                /* GCOVR_EXCL_LINE */
+            return fail_oom(eng);     /* GCOVR_EXCL_LINE */
         }
     }
     xp_result_free(&matched);
@@ -1790,17 +1793,17 @@ static int expression_grow(engine *eng) {
     return 0;
 }
 
-static xp_program *compile_expression(engine *eng, const Py_UCS4 *source, Py_ssize_t length, char *error,
-                                      size_t error_size) {
+/* Returns the program, or NULL with the exception set; error_prefix starts the message of a syntax error. */
+static xp_program *compile_expression(engine *eng, const Py_UCS4 *source, Py_ssize_t length, const char *error_prefix) {
     xp_program *program = expression_lookup(eng, source, length);
     if (program != NULL) {
         return program;
     }
     if (!eng->owns_model) { /* GCOVR_EXCL_BR_LINE: compilation covers every immutable stylesheet expression */
-        snprintf(error, error_size, "stylesheet expression was not compiled"); /* GCOVR_EXCL_LINE */
-        return NULL;                                                           /* GCOVR_EXCL_LINE */
+        PyErr_SetString(PyExc_RuntimeError, "xslt: stylesheet expression was not compiled"); /* GCOVR_EXCL_LINE */
+        return NULL;                                                                         /* GCOVR_EXCL_LINE */
     }
-    program = xp_compile(source, length, error, error_size);
+    program = xp_compile(source, length, error_prefix);
     if (program == NULL) {
         return NULL;
     }
@@ -1931,13 +1934,12 @@ static int eval_avt(engine *eng, const Py_UCS4 *src, Py_ssize_t len, Py_UCS4 **o
                 }
                 end++;
             }
-            char errbuf[256];
-            xp_program *prog = compile_expression(eng, src + start, end - start, errbuf, sizeof(errbuf));
+            xp_program *prog =
+                compile_expression(eng, src + start, end - start, "xslt: bad expression in attribute value template: ");
             /* A run only receives AVTs that precompile_stylesheet validated. */
             /* GCOVR_EXCL_START */
             if (prog == NULL) {
                 xb_free(&buffer);
-                PyErr_Format(PyExc_ValueError, "xslt: bad expression in attribute value template: %s", errbuf);
                 fail_py(eng);
                 return -1;
             }
@@ -1971,7 +1973,7 @@ static int eval_avt(engine *eng, const Py_UCS4 *src, Py_ssize_t len, Py_UCS4 **o
     return 0;
 oom: /* GCOVR_EXCL_START: allocation-failure path */
     xb_free(&buffer);
-    fail(eng, "out of memory");
+    fail_oom(eng);
     return -1;
     /* GCOVR_EXCL_STOP */
 }
@@ -1982,8 +1984,8 @@ static int emit_text(engine *eng, th_node *out_parent, const Py_UCS4 *data, Py_s
         return 0;
     }
     th_node *node = th_tree_make_data_node(eng->out_tree, TH_NODE_TEXT, data, len);
-    if (node == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (node == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node_append_child(out_parent, node);
     return 0;
@@ -2014,18 +2016,16 @@ static int do_value_of(engine *eng, th_node *instruction, th_node *out_parent) {
     if (xp_is_attribute(eng->cur_attr) && is_self_dot(select, select_len)) {
         Py_ssize_t text_len = 0;
         Py_UCS4 *text = current_string(eng, &text_len);
-        if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (text == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         int rc = emit_text(eng, out_parent, text, text_len);
         PyMem_Free(text);
         return rc;
     }
-    char errbuf[256];
-    xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
-        PyErr_Format(PyExc_ValueError, "xslt: bad value-of select: %s", errbuf); /* GCOVR_EXCL_LINE */
-        return fail_py(eng);                                                     /* GCOVR_EXCL_LINE */
+    xp_program *prog = compile_expression(eng, select, select_len, "xslt: bad value-of select: ");
+    if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+        return fail_py(eng); /* GCOVR_EXCL_LINE */
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
@@ -2035,8 +2035,8 @@ static int do_value_of(engine *eng, th_node *instruction, th_node *out_parent) {
     Py_ssize_t text_len = 0;
     Py_UCS4 *text = to_string(eng->src_tree, &value, &text_len);
     xp_result_free(&value);
-    if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (text == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     int rc = emit_text(eng, out_parent, text, text_len);
     PyMem_Free(text);
@@ -2051,15 +2051,15 @@ static int copy_of_node(engine *eng, th_node *out_parent, xp_item item) {
         const char *attr_name = th_attr_name(eng->src_tree, attr->name_atom, &name_len);
         if (out_parent->type == TH_NODE_ELEMENT) {
             int rc = th_node_attr_set(eng->out_tree, out_parent, attr_name, name_len, attr->value, attr->value_len, 1);
-            if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-                return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+            if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+                return fail_oom(eng); /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
     }
     th_node *copy = th_tree_copy_node(eng->out_tree, eng->src_tree, item.node);
-    if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (copy == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node_append_child(out_parent, copy);
     return 0;
@@ -2071,11 +2071,9 @@ static int do_copy_of(engine *eng, th_node *instruction, th_node *out_parent) {
     if (select == NULL) {
         return fail(eng, "xsl:copy-of requires a select attribute");
     }
-    char errbuf[256];
-    xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
-        PyErr_Format(PyExc_ValueError, "xslt: bad copy-of select: %s", errbuf); /* GCOVR_EXCL_LINE */
-        return fail_py(eng);                                                    /* GCOVR_EXCL_LINE */
+    xp_program *prog = compile_expression(eng, select, select_len, "xslt: bad copy-of select: ");
+    if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+        return fail_py(eng); /* GCOVR_EXCL_LINE */
     }
     /* A lone $var that is a result tree fragment copies the fragment's children. */
     if (prog->nodes[prog->root].kind == XN_VAR) {
@@ -2085,8 +2083,8 @@ static int do_copy_of(engine *eng, th_node *instruction, th_node *out_parent) {
                 eng->scope[index].rtf != NULL) {
                 for (th_node *child = eng->scope[index].rtf->first_child; child != NULL; child = child->next_sibling) {
                     th_node *copy = th_tree_copy_node(eng->out_tree, eng->out_tree, child);
-                    if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-                        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+                    if (copy == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+                        return fail_oom(eng); /* GCOVR_EXCL_LINE */
                     }
                     th_node_append_child(out_parent, copy);
                 }
@@ -2112,8 +2110,8 @@ static int do_copy_of(engine *eng, th_node *instruction, th_node *out_parent) {
     Py_ssize_t text_len = 0;
     Py_UCS4 *text = to_string(eng->src_tree, &value, &text_len);
     xp_result_free(&value);
-    if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (text == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     int rc = emit_text(eng, out_parent, text, text_len);
     PyMem_Free(text);
@@ -2124,8 +2122,8 @@ static int do_copy_of(engine *eng, th_node *instruction, th_node *out_parent) {
    xsl:attribute/comment/processing-instruction collect their text. */
 static int instantiate_string(engine *eng, th_node *body, Py_UCS4 **out_data, Py_ssize_t *out_len) {
     th_node *fragment = th_tree_make_fragment(eng->out_tree);
-    if (fragment == NULL) {                /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (fragment == NULL) {   /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     if (instantiate_body(eng, body, fragment) < 0) {
         return -1;
@@ -2134,15 +2132,15 @@ static int instantiate_string(engine *eng, th_node *body, Py_UCS4 **out_data, Py
     for (th_node *child = fragment->first_child; child != NULL; child = child->next_sibling) {
         Py_ssize_t child_len = 0;
         Py_UCS4 *child_text = th_node_text(eng->out_tree, child, &child_len);
-        if (child_text == NULL) {              /* GCOVR_EXCL_BR_LINE: alloc */
-            xb_free(&buffer);                  /* GCOVR_EXCL_LINE */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (child_text == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
+            xb_free(&buffer);     /* GCOVR_EXCL_LINE */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         int rc = xb_add(&buffer, child_text, child_len);
         PyMem_Free(child_text);
-        if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-            xb_free(&buffer);                  /* GCOVR_EXCL_LINE */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+            xb_free(&buffer);     /* GCOVR_EXCL_LINE */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
     }
     *out_data = buffer.data;
@@ -2224,7 +2222,7 @@ static int order_attrset(engine *eng, Py_ssize_t slot, unsigned char *seen, xslt
         return raise_attrset_depth(eng, set);
     }
     seen[slot] = 1;
-    int rc = slots_push(order, slot) < 0 ? fail(eng, "out of memory") : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+    int rc = slots_push(order, slot) < 0 ? fail_oom(eng) : 0; /* GCOVR_EXCL_BR_LINE: alloc */
     for (Py_ssize_t index = set->uses_end - 1; rc == 0 && index >= set->uses_start; index--) {
         rc = order_attrset(eng, eng->attrset_uses.items[index], seen, order);
     }
@@ -2237,11 +2235,11 @@ static int order_attrset(engine *eng, Py_ssize_t slot, unsigned char *seen, xslt
 static int apply_attribute_sets(engine *eng, const Py_UCS4 *names, Py_ssize_t names_len, th_node *out_element) {
     xslt_slots roots = {0};
     if (attrsets_named(eng, names, names_len, &roots) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory");                   /* GCOVR_EXCL_LINE */
+        return fail_oom(eng);                                /* GCOVR_EXCL_LINE */
     }
     xslt_slots order = {0};
     unsigned char *seen = PyMem_Calloc((size_t)eng->nattrsets, 1);
-    int rc = seen == NULL ? fail(eng, "out of memory") : 0; /* GCOVR_EXCL_BR_LINE: alloc */
+    int rc = seen == NULL ? fail_oom(eng) : 0; /* GCOVR_EXCL_BR_LINE: alloc */
     for (Py_ssize_t index = roots.len - 1; rc == 0 && index >= 0; index--) {
         rc = order_attrset(eng, roots.items[index], seen, &order);
     }
@@ -2294,8 +2292,8 @@ static int computed_name_valid(enum computed_name kind, const Py_UCS4 *name, Py_
    built in a fragment first, where xsl:attribute finds no element and drops the attributes the element would carry. */
 static int instantiate_without_element(engine *eng, th_node *instruction, th_node *out_parent) {
     th_node *holder = th_tree_make_fragment(eng->out_tree);
-    if (holder == NULL) {                  /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (holder == NULL) {     /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     if (instantiate_body(eng, instruction, holder) < 0) {
         return -1;
@@ -2327,8 +2325,8 @@ static int do_element(engine *eng, th_node *instruction, th_node *out_parent) {
     uint16_t atom = atom_for_name(name, resolved_len);
     th_node *element = th_tree_make_element(eng->out_tree, name, resolved_len, atom, 0);
     PyMem_Free(name);
-    if (element == NULL) {                 /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (element == NULL) {    /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node_append_child(out_parent, element);
     Py_ssize_t use_len = 0;
@@ -2388,8 +2386,8 @@ static int do_attribute_ns(engine *eng, th_node *out_parent, const Py_UCS4 *name
         char decl[40];
         int decl_len = snprintf(decl, sizeof(decl), "xmlns:%s", generated);
         int rc = th_node_attr_set(eng->out_tree, out_parent, decl, decl_len, nsuri, nsuri_len, 1);
-        if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         prefix = generated;
         prefix_len = made;
@@ -2398,25 +2396,25 @@ static int do_attribute_ns(engine *eng, th_node *out_parent, const Py_UCS4 *name
     for (Py_ssize_t index = 0; index < prefix_len; index++) {
         if (xb_add_char(&qname, (Py_UCS4)(unsigned char)prefix[index]) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
             xb_free(&qname);                                                  /* GCOVR_EXCL_LINE */
-            return fail(eng, "out of memory");                                /* GCOVR_EXCL_LINE */
+            return fail_oom(eng);                                             /* GCOVR_EXCL_LINE */
         }
     }
     int colon = xb_add_char(&qname, ':');
     int local = xb_add(&qname, name + local_start, name_len - local_start);
-    if (colon < 0 || local < 0) {          /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-        xb_free(&qname);                   /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (colon < 0 || local < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        xb_free(&qname);          /* GCOVR_EXCL_LINE */
+        return fail_oom(eng);     /* GCOVR_EXCL_LINE */
     }
     Py_ssize_t utf8_len = 0;
     char *utf8 = ucs4_to_utf8(qname.data, qname.len, &utf8_len);
     xb_free(&qname);
-    if (utf8 == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (utf8 == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     int rc = th_node_attr_set(eng->out_tree, out_parent, utf8, utf8_len, value, value_len, 1);
     PyMem_Free(utf8);
-    if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     return 0;
 }
@@ -2467,15 +2465,15 @@ static int do_attribute(engine *eng, th_node *instruction, th_node *out_parent) 
     Py_ssize_t utf8_len = 0;
     char *utf8 = ucs4_to_utf8(name, resolved_len, &utf8_len);
     PyMem_Free(name);
-    if (utf8 == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        PyMem_Free(value);                 /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (utf8 == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(value);    /* GCOVR_EXCL_LINE */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     int rc = th_node_attr_set(eng->out_tree, out_parent, utf8, utf8_len, value, value_len, 1);
     PyMem_Free(utf8);
     PyMem_Free(value);
-    if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     return 0;
 }
@@ -2488,8 +2486,8 @@ static int do_copy(engine *eng, th_node *instruction, th_node *out_parent) {
         const char *name = th_attr_name(eng->src_tree, attr->name_atom, &name_len);
         if (out_parent->type == TH_NODE_ELEMENT) {
             int rc = th_node_attr_set(eng->out_tree, out_parent, name, name_len, attr->value, attr->value_len, 1);
-            if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-                return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+            if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+                return fail_oom(eng); /* GCOVR_EXCL_LINE */
             }
         }
         return 0;
@@ -2498,8 +2496,8 @@ static int do_copy(engine *eng, th_node *instruction, th_node *out_parent) {
     if (node->type == TH_NODE_ELEMENT) {
         uint16_t atom = atom_for_name(node->text, node->text_len);
         th_node *element = th_tree_make_element(eng->out_tree, node->text, node->text_len, atom, 0);
-        if (element == NULL) {                 /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (element == NULL) {    /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         th_node_append_child(out_parent, element);
         Py_ssize_t use_len = 0;
@@ -2511,8 +2509,8 @@ static int do_copy(engine *eng, th_node *instruction, th_node *out_parent) {
     }
     if (node->type == TH_NODE_TEXT || node->type == TH_NODE_COMMENT || node->type == TH_NODE_PI) {
         th_node *copy = th_tree_copy_node(eng->out_tree, eng->src_tree, node);
-        if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (copy == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         th_node_append_child(out_parent, copy);
         return 0;
@@ -2550,13 +2548,13 @@ static int do_comment(engine *eng, th_node *instruction, th_node *out_parent) {
     Py_ssize_t data_len = 0;
     Py_UCS4 *data = space_after(raw, raw_len, '-', '-', 1, &data_len);
     PyMem_Free(raw);
-    if (data == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (data == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node *node = th_tree_make_data_node(eng->out_tree, TH_NODE_COMMENT, data, data_len);
     PyMem_Free(data);
-    if (node == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (node == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node_append_child(out_parent, node);
     return 0;
@@ -2586,15 +2584,15 @@ static int do_pi(engine *eng, th_node *instruction, th_node *out_parent) {
     Py_ssize_t data_len = 0;
     Py_UCS4 *data = space_after(raw, raw_len, '?', '>', 0, &data_len);
     PyMem_Free(raw);
-    if (data == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        PyMem_Free(target);                /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (data == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        PyMem_Free(target);   /* GCOVR_EXCL_LINE */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node *node = th_tree_make_pi(eng->out_tree, target, target_len, data, data_len);
     PyMem_Free(target);
     PyMem_Free(data);
-    if (node == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (node == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     th_node_append_child(out_parent, node);
     return 0;
@@ -2607,11 +2605,9 @@ static int eval_test(engine *eng, th_node *instruction, int *out_bool) {
     if (test == NULL) {
         return fail(eng, "xsl:if/xsl:when requires a test attribute");
     }
-    char errbuf[256];
-    xp_program *prog = compile_expression(eng, test, test_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed tests before a run */
-        PyErr_Format(PyExc_ValueError, "xslt: bad test: %s", errbuf); /* GCOVR_EXCL_LINE */
-        return fail_py(eng);                                          /* GCOVR_EXCL_LINE */
+    xp_program *prog = compile_expression(eng, test, test_len, "xslt: bad test: ");
+    if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed tests before a run */
+        return fail_py(eng); /* GCOVR_EXCL_LINE */
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
@@ -2732,12 +2728,10 @@ static int compile_sorts(engine *eng, th_node *instruction, sort_spec *specs, in
             select = &XPATH_DOT;
             select_len = 1;
         }
-        char errbuf[256];
-        xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
+        xp_program *prog = compile_expression(eng, select, select_len, "xslt: bad sort select: ");
         if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed sort selects before a run */
-            PyErr_Format(PyExc_ValueError, "xslt: bad sort select: %s", errbuf); /* GCOVR_EXCL_LINE */
-            fail_py(eng);                                                        /* GCOVR_EXCL_LINE */
-            return -1;                                                           /* GCOVR_EXCL_LINE */
+            fail_py(eng);   /* GCOVR_EXCL_LINE */
+            return -1;      /* GCOVR_EXCL_LINE */
         }
         Py_ssize_t type_len = 0;
         const Py_UCS4 *type = attr_lookup(eng->sheet_tree, child, "data-type", 9, &type_len);
@@ -2758,8 +2752,8 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
         return 0;
     }
     sort_item *items = PyMem_Malloc((size_t)set->len * (size_t)nspecs * sizeof(sort_item));
-    if (items == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (items == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < set->len; index++) {
         for (int spec = 0; spec < nspecs; spec++) {
@@ -2781,11 +2775,11 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
                     for (Py_ssize_t done = 0; done < index * nspecs + spec; done++) { /* GCOVR_EXCL_LINE */
                         PyMem_Free(items[done].key);                                  /* GCOVR_EXCL_LINE */
                     } /* GCOVR_EXCL_LINE */
-                    PyMem_Free(items);                 /* GCOVR_EXCL_LINE */
-                    return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+                    PyMem_Free(items);    /* GCOVR_EXCL_LINE */
+                    return fail_oom(eng); /* GCOVR_EXCL_LINE */
                 }
                 slot->key_len = text_len;
-                slot->number = parse_number(slot->key, slot->key_len);
+                slot->number = parse_number(slot->key, slot->key_len, &eng->oom);
                 if (nspecs == 1 && specs[spec].numeric) {
                     slot->index = index;
                 }
@@ -2805,7 +2799,7 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
             }
             if (specs[spec].numeric && value.kind == XP_STRING) {
                 slot->key = NULL;
-                slot->number = parse_number(value.string, value.string_len);
+                slot->number = parse_number(value.string, value.string_len, &eng->oom);
                 if (nspecs == 1) {
                     slot->index = index;
                 }
@@ -2829,10 +2823,10 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
                 for (Py_ssize_t done = 0; done < index * nspecs + spec; done++) { /* GCOVR_EXCL_LINE */
                     PyMem_Free(items[done].key);                                  /* GCOVR_EXCL_LINE */
                 } /* GCOVR_EXCL_LINE */
-                PyMem_Free(items);                 /* GCOVR_EXCL_LINE */
-                return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+                PyMem_Free(items);    /* GCOVR_EXCL_LINE */
+                return fail_oom(eng); /* GCOVR_EXCL_LINE */
             }
-            slot->number = parse_number(slot->key, slot->key_len);
+            slot->number = parse_number(slot->key, slot->key_len, &eng->oom);
             if (nspecs == 1 && specs[spec].numeric) {
                 slot->index = index;
             }
@@ -2846,8 +2840,8 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
             for (Py_ssize_t index = 0; index < set->len; index++) { /* GCOVR_EXCL_LINE */
                 PyMem_Free(items[index].key);                       /* GCOVR_EXCL_LINE */
             } /* GCOVR_EXCL_LINE */
-            PyMem_Free(items);                 /* GCOVR_EXCL_LINE */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+            PyMem_Free(items);    /* GCOVR_EXCL_LINE */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         for (Py_ssize_t index = 0; index < set->len; index++) {
             sorted[index] = set->items[items[index].index];
@@ -2865,8 +2859,8 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
         for (Py_ssize_t index = 0; index < set->len * nspecs; index++) { /* GCOVR_EXCL_LINE */
             PyMem_Free(items[index].key);                                /* GCOVR_EXCL_LINE */
         } /* GCOVR_EXCL_LINE */
-        PyMem_Free(items);                 /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        PyMem_Free(items);    /* GCOVR_EXCL_LINE */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < set->len; index++) {
         order[index] = (sort_row){index, items, specs, nspecs};
@@ -2878,8 +2872,8 @@ static int sort_nodeset(engine *eng, xp_nodeset *set, sort_spec *specs, int nspe
         for (Py_ssize_t index = 0; index < set->len * nspecs; index++) { /* GCOVR_EXCL_LINE */
             PyMem_Free(items[index].key);                                /* GCOVR_EXCL_LINE */
         } /* GCOVR_EXCL_LINE */
-        PyMem_Free(items);                 /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        PyMem_Free(items);    /* GCOVR_EXCL_LINE */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < set->len; index++) {
         sorted[index] = set->items[order[index].index];
@@ -3095,7 +3089,9 @@ static int build_matcher(engine *eng, th_node *instruction, const Py_UCS4 *patte
                          : xp_eval_at(prog, eng->src_tree, eng->src_root, 1, 1, NULL, NULL, xslt_extension, eng,
                                       &matched, &feature);
         if (status < 0) {
-            PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error");
+            if (!PyErr_ExceptionMatches(PyExc_MemoryError)) { /* GCOVR_EXCL_BR_LINE: alloc */
+                PyErr_Format(PyExc_ValueError, "xslt: xsl:number pattern error");
+            }
             return fail_py(eng);
         }
         for (Py_ssize_t slot = 0; slot < matched.nodes.len; slot++) {
@@ -3103,7 +3099,7 @@ static int build_matcher(engine *eng, th_node *instruction, const Py_UCS4 *patte
             int added = match_set_add(set, item.node, item.attr);
             if (added < 0) {              /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
                 xp_result_free(&matched); /* GCOVR_EXCL_LINE */
-                return -1;                /* GCOVR_EXCL_LINE */
+                return fail_oom(eng);     /* GCOVR_EXCL_LINE */
             }
         }
         xp_result_free(&matched);
@@ -3679,19 +3675,21 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     int have_count = 0;
     int have_from = 0;
     if (value_expr != NULL) {
-        char errbuf[256];
-        xp_program *prog = compile_expression(eng, value_expr, value_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed values before a run */
-            PyErr_Format(PyExc_ValueError, "xslt: bad number value: %s", errbuf); /* GCOVR_EXCL_LINE */
-            return fail_py(eng);                                                  /* GCOVR_EXCL_LINE */
+        xp_program *prog = compile_expression(eng, value_expr, value_len, "xslt: bad number value: ");
+        if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed values before a run */
+            return fail_py(eng); /* GCOVR_EXCL_LINE */
         }
         xp_result result;
         int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &result);
         if (status < 0) {
             return fail_py(eng);
         }
-        values[nvalues++] = (long)floor(to_number(eng->src_tree, &result) + 0.5);
+        double number = to_number(eng->src_tree, &result, &eng->oom);
         xp_result_free(&result);
+        if (eng->oom) {           /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE: the NaN a failed conversion yields has no long value */
+        }
+        values[nvalues++] = (long)floor(number + 0.5);
     } else if (xp_is_attribute(eng->cur_attr)) {
         values[nvalues++] = 1;
     } else {
@@ -3802,9 +3800,9 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     long gsize = gsize_text != NULL ? parse_grouping_size(gsize_text, gsize_len) : 0;
     xb buffer = {0};
     int formatted = format_multi(&buffer, format, format_len, values, nvalues, gsep, gsep_len, gsize);
-    if (formatted < 0) {                   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-        xb_free(&buffer);                  /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (formatted < 0) {      /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        xb_free(&buffer);     /* GCOVR_EXCL_LINE */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     int rc = emit_text(eng, out_parent, buffer.data, buffer.len);
     xb_free(&buffer);
@@ -3820,11 +3818,9 @@ static int compute_binding(engine *eng, th_node *declaration, xp_result *out_val
     Py_ssize_t select_len = 0;
     const Py_UCS4 *select = attr_lookup(eng->sheet_tree, declaration, "select", 6, &select_len);
     if (select != NULL) {
-        char errbuf[256];
-        xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed bindings before a run */
-            PyErr_Format(PyExc_ValueError, "xslt: bad variable select: %s", errbuf); /* GCOVR_EXCL_LINE */
-            return fail_py(eng);                                                     /* GCOVR_EXCL_LINE */
+        xp_program *prog = compile_expression(eng, select, select_len, "xslt: bad variable select: ");
+        if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed bindings before a run */
+            return fail_py(eng); /* GCOVR_EXCL_LINE */
         }
         int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, out_value);
         if (status < 0) {
@@ -3837,16 +3833,16 @@ static int compute_binding(engine *eng, th_node *declaration, xp_result *out_val
         return 0;
     }
     th_node *fragment = th_tree_make_fragment(eng->out_tree);
-    if (fragment == NULL) {                /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (fragment == NULL) {   /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     if (instantiate_body(eng, declaration, fragment) < 0) {
         return -1;
     }
     Py_ssize_t text_len = 0;
     Py_UCS4 *text = th_node_text(eng->out_tree, fragment, &text_len);
-    if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (text == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     result_string(out_value, text, text_len);
     *out_rtf = fragment;
@@ -3927,10 +3923,10 @@ static int bind_params(engine *eng, th_node *template_body, param_pass *passes, 
             if (str_eq(passes[index].name, passes[index].name_len, name, name_len)) {
                 xp_result copy;
                 if (copy_result_value(&passes[index].value, &copy) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    return fail(eng, "out of memory");                    /* GCOVR_EXCL_LINE */
+                    return fail_oom(eng);                                 /* GCOVR_EXCL_LINE */
                 }
                 if (scope_push(eng, name, name_len, copy, passes[index].rtf) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    return fail(eng, "out of memory");                              /* GCOVR_EXCL_LINE */
+                    return fail_oom(eng);                                           /* GCOVR_EXCL_LINE */
                 }
                 matched = 1;
                 break;
@@ -3943,7 +3939,7 @@ static int bind_params(engine *eng, th_node *template_body, param_pass *passes, 
                 return -1;
             }
             if (scope_push(eng, name, name_len, value, rtf) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return fail(eng, "out of memory");                 /* GCOVR_EXCL_LINE */
+                return fail_oom(eng);                              /* GCOVR_EXCL_LINE */
             }
         }
     }
@@ -4004,8 +4000,8 @@ static int do_call_template(engine *eng, th_node *instruction, th_node *out_pare
        deep-recursion path of a self-calling named template, and keeping this array off
        the frame lets the recursion run much deeper before the depth guard trips. */
     param_pass *passes = PyMem_Malloc((size_t)XSLT_MAX_PARAMS * sizeof(param_pass));
-    if (passes == NULL) {                  /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (passes == NULL) {     /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     int npasses = collect_params(eng, instruction, passes, XSLT_MAX_PARAMS);
     if (npasses < 0) {
@@ -4033,11 +4029,9 @@ static int do_for_each(engine *eng, th_node *instruction, th_node *out_parent) {
     if (select == NULL) {
         return fail(eng, "xsl:for-each requires a select attribute");
     }
-    char errbuf[256];
-    xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
-    if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
-        PyErr_Format(PyExc_ValueError, "xslt: bad for-each select: %s", errbuf); /* GCOVR_EXCL_LINE */
-        return fail_py(eng);                                                     /* GCOVR_EXCL_LINE */
+    xp_program *prog = compile_expression(eng, select, select_len, "xslt: bad for-each select: ");
+    if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+        return fail_py(eng); /* GCOVR_EXCL_LINE */
     }
     xp_result value;
     int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
@@ -4126,8 +4120,8 @@ static int apply_builtin(engine *eng, th_node *node, Py_ssize_t attr, const Py_U
     if (node->type == TH_NODE_TEXT) {
         Py_ssize_t text_len = node->text_len;
         const Py_UCS4 *text = th_node_realize_text(eng->src_tree, node);
-        if (text == NULL && text_len != 0) {   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (text == NULL && text_len != 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng);            /* GCOVR_EXCL_LINE */
         }
         return emit_text(eng, out_parent, text, text_len);
     }
@@ -4170,11 +4164,9 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
     const Py_UCS4 *select = attr_lookup(eng->sheet_tree, instruction, "select", 6, &select_len);
     xp_result value;
     if (select != NULL) {
-        char errbuf[256];
-        xp_program *prog = compile_expression(eng, select, select_len, errbuf, sizeof(errbuf));
-        if (prog == NULL) { /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
-            PyErr_Format(PyExc_ValueError, "xslt: bad apply-templates select: %s", errbuf); /* GCOVR_EXCL_LINE */
-            return fail_py(eng);                                                            /* GCOVR_EXCL_LINE */
+        xp_program *prog = compile_expression(eng, select, select_len, "xslt: bad apply-templates select: ");
+        if (prog == NULL) {      /* GCOVR_EXCL_BR_LINE: compilation rejects malformed selects before a run */
+            return fail_py(eng); /* GCOVR_EXCL_LINE */
         }
         int status = eval_program(eng, prog, eng->cur_node, eng->ctx_pos, eng->ctx_size, &value);
         if (status < 0) {
@@ -4192,7 +4184,7 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
             for (th_node *child = eng->cur_node->first_child; child != NULL; child = child->next_sibling) {
                 if (ns_push(&value.nodes, child, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     xp_result_free(&value);                 /* GCOVR_EXCL_LINE */
-                    return fail(eng, "out of memory");      /* GCOVR_EXCL_LINE */
+                    return fail_oom(eng);                   /* GCOVR_EXCL_LINE */
                 }
             }
         }
@@ -4211,9 +4203,9 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
        applies templates that recurse), so keeping this array off the frame lets the
        recursion run much deeper before the depth guard trips. */
     param_pass *passes = PyMem_Malloc((size_t)XSLT_MAX_PARAMS * sizeof(param_pass));
-    if (passes == NULL) {                  /* GCOVR_EXCL_BR_LINE: alloc */
-        xp_result_free(&value);            /* GCOVR_EXCL_LINE */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (passes == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        xp_result_free(&value); /* GCOVR_EXCL_LINE */
+        return fail_oom(eng);   /* GCOVR_EXCL_LINE */
     }
     int npasses = collect_params(eng, instruction, passes, XSLT_MAX_PARAMS);
     if (npasses < 0) {
@@ -4350,12 +4342,12 @@ static int cache_ns_decl(engine *eng, th_node *lre, th_node *anc, const th_node_
         size_t bytes;
         /* GCOVR_EXCL_BR_START: allocation size overflow */
         if (!th_grow_cap(eng->ns_decls_len + 1, eng->ns_decls_cap, 4, sizeof(xslt_ns_decl), &capacity, &bytes)) {
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE: allocation size overflow */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE: allocation size overflow */
         }
         /* GCOVR_EXCL_BR_STOP */
         xslt_ns_decl *grown = PyMem_Realloc(eng->ns_decls, bytes);
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->ns_decls = grown;
         eng->ns_decls_cap = capacity;
@@ -4411,7 +4403,7 @@ static int copy_namespace_decls(engine *eng, th_node *lre, th_node *copy, th_nod
         }
         /* GCOVR_EXCL_BR_START: alloc */
         if (th_node_attr_set(eng->out_tree, copy, decl->name, decl->name_len, decl->value, decl->value_len, 1) < 0) {
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE: alloc */
         }
         /* GCOVR_EXCL_BR_STOP */
     }
@@ -4494,8 +4486,8 @@ static const Py_UCS4 *xsl_prefixed_attr(const engine *eng, const th_node *node, 
 static int instantiate_literal(engine *eng, th_node *element, th_node *out_parent) {
     uint16_t atom = atom_for_name(element->text, element->text_len);
     th_node *copy = th_tree_make_element(eng->out_tree, element->text, element->text_len, atom, 0);
-    if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (copy == NULL) {       /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     if (copy_namespace_decls(eng, element, copy, out_parent) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;                                                  /* GCOVR_EXCL_LINE */
@@ -4528,8 +4520,8 @@ static int instantiate_literal(engine *eng, th_node *element, th_node *out_paren
         }
         int rc = th_node_attr_set(eng->out_tree, copy, name, name_len, resolved, resolved_len, 1);
         PyMem_Free(resolved);
-        if (rc < 0) {                          /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (rc < 0) {             /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
     }
     th_node_append_child(out_parent, copy);
@@ -4652,8 +4644,8 @@ static int emit_literal_text(engine *eng, th_node *out_parent, const th_node *li
         return 0;
     }
     th_node *node = th_tree_make_data_node(eng->out_tree, TH_NODE_TEXT, NULL, 0);
-    if (node == NULL) {                    /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (node == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     /* The compiled snapshot outlives serialization and result-tree cleanup. */
     node->text = literal->text;
@@ -4666,8 +4658,8 @@ static int instantiate_non_element(engine *eng, th_node *node, th_node *out_pare
     if (node->type == TH_NODE_TEXT) {
         Py_ssize_t text_len = node->text_len;
         const Py_UCS4 *text = th_node_realize_text(eng->sheet_tree, node);
-        if (text == NULL && text_len != 0) {   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (text == NULL && text_len != 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng);            /* GCOVR_EXCL_LINE */
         }
         return ucs4_blank(text, text_len) ? 0 : emit_literal_text(eng, out_parent, node);
     }
@@ -4676,8 +4668,8 @@ static int instantiate_non_element(engine *eng, th_node *node, th_node *out_pare
            whitespace); it emits as text, which cdata-section-elements may later re-wrap. */
         Py_ssize_t text_len = node->text_len;
         const Py_UCS4 *text = th_node_realize_text(eng->sheet_tree, node);
-        if (text == NULL && text_len != 0) {   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (text == NULL && text_len != 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng);            /* GCOVR_EXCL_LINE */
         }
         return emit_literal_text(eng, out_parent, node);
     }
@@ -4721,8 +4713,8 @@ static int instantiate_classified(engine *eng, th_node *node, th_node *out_paren
             if (child->type == TH_NODE_TEXT) {
                 Py_ssize_t text_len = child->text_len;
                 const Py_UCS4 *text = th_node_realize_text(eng->sheet_tree, child);
-                if (text == NULL && text_len != 0) {   /* GCOVR_EXCL_BR_LINE: alloc */
-                    return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+                if (text == NULL && text_len != 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    return fail_oom(eng);            /* GCOVR_EXCL_LINE */
                 }
                 int rc = emit_literal_text(eng, out_parent, child);
                 if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: alloc */
@@ -4752,7 +4744,7 @@ static int instantiate_classified(engine *eng, th_node *node, th_node *out_paren
             return -1;
         }
         if (scope_push(eng, name, name_len, value, rtf) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory");                 /* GCOVR_EXCL_LINE */
+            return fail_oom(eng);                              /* GCOVR_EXCL_LINE */
         }
         return 0;
     }
@@ -4871,8 +4863,8 @@ static int push_rule(engine *eng, xslt_rule rule) {
     if (eng->nrules == eng->rules_cap) {
         Py_ssize_t cap = eng->rules_cap == 0 ? TH_INITIAL_CAPACITY(16) : eng->rules_cap * 2;
         xslt_rule *grown = PyMem_Realloc(eng->rules, (size_t)cap * sizeof(xslt_rule));
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->rules = grown;
         eng->rules_cap = cap;
@@ -4888,8 +4880,8 @@ static int parse_template(engine *eng, th_node *element, int *position) {
         if (eng->nnamed == eng->named_cap) {
             Py_ssize_t cap = eng->named_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->named_cap * 2;
             xslt_named *grown = PyMem_Realloc(eng->named, (size_t)cap * sizeof(xslt_named));
-            if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-                return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+            if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+                return fail_oom(eng); /* GCOVR_EXCL_LINE */
             }
             eng->named = grown;
             eng->named_cap = cap;
@@ -4909,7 +4901,11 @@ static int parse_template(engine *eng, th_node *element, int *position) {
     Py_ssize_t priority_len = 0;
     const Py_UCS4 *priority = attr_lookup(eng->sheet_tree, element, "priority", 8, &priority_len);
     int has_priority = priority != NULL;
-    double explicit_priority = has_priority ? parse_number(priority, priority_len) : 0;
+    int oom = 0;
+    double explicit_priority = has_priority ? parse_number(priority, priority_len, &oom) : 0;
+    if (oom) {                /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
+    }
     Py_ssize_t starts[64];
     Py_ssize_t lens[64];
     int alternatives = split_union(match, match_len, starts, lens, 64);
@@ -4952,19 +4948,15 @@ static int parse_key(engine *eng, th_node *element) {
     if (match_prog == NULL) {
         return -1;
     }
-    char errbuf[256];
-    xp_program *use_prog = compile_expression(eng, use, use_len, errbuf, sizeof(errbuf));
+    xp_program *use_prog = compile_expression(eng, use, use_len, "xslt: bad key use expression: ");
     if (use_prog == NULL) {
-        if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only allocation sets an exception during compilation */
-            PyErr_Format(PyExc_ValueError, "xslt: bad key use expression: %s", errbuf);
-        }
         return fail_py(eng);
     }
     if (eng->nkeys == eng->keys_cap) {
         Py_ssize_t cap = eng->keys_cap == 0 ? TH_INITIAL_CAPACITY(4) : eng->keys_cap * 2;
         xslt_key *grown = PyMem_Realloc(eng->keys, (size_t)cap * sizeof(xslt_key));
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->keys = grown;
         eng->keys_cap = cap;
@@ -4988,8 +4980,8 @@ static int parse_attrset(engine *eng, th_node *element) {
     if (eng->nattrsets == eng->attrsets_cap) {
         Py_ssize_t cap = eng->attrsets_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->attrsets_cap * 2;
         xslt_attrset *grown = PyMem_Realloc(eng->attrsets, (size_t)cap * sizeof(xslt_attrset));
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->attrsets = grown;
         eng->attrsets_cap = cap;
@@ -5129,8 +5121,8 @@ static int parse_namespace_alias(engine *eng, th_node *root, th_node *element) {
     if (eng->naliases == eng->aliases_cap) {
         Py_ssize_t cap = eng->aliases_cap == 0 ? TH_INITIAL_CAPACITY(4) : eng->aliases_cap * 2;
         xslt_nsalias *grown = PyMem_Realloc(eng->aliases, (size_t)cap * sizeof(xslt_nsalias));
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->aliases = grown;
         eng->aliases_cap = cap;
@@ -5171,8 +5163,8 @@ static int push_global(engine *eng, const Py_UCS4 *name, Py_ssize_t name_len, th
     if (eng->nglobals == eng->globals_cap) {
         Py_ssize_t cap = eng->globals_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->globals_cap * 2;
         xslt_global *grown = PyMem_Realloc(eng->globals, (size_t)cap * sizeof(xslt_global));
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->globals = grown;
         eng->globals_cap = cap;
@@ -5221,8 +5213,8 @@ static int parse_space(engine *eng, th_node *element, int strip) {
         if (eng->nspaces == eng->spaces_cap) {
             Py_ssize_t cap = eng->spaces_cap == 0 ? TH_INITIAL_CAPACITY(8) : eng->spaces_cap * 2;
             xslt_space *grown = PyMem_Realloc(eng->spaces, (size_t)cap * sizeof(xslt_space));
-            if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-                return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+            if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+                return fail_oom(eng); /* GCOVR_EXCL_LINE */
             }
             eng->spaces = grown;
             eng->spaces_cap = cap;
@@ -5306,8 +5298,8 @@ static int resolve_xsl_prefix(engine *eng, th_node *root) {
         }
     }
     Py_UCS4 *owned = ucs4_from_ascii(prefix, prefix_len, &eng->xsl_prefix_len);
-    if (owned == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    if (owned == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail_oom(eng); /* GCOVR_EXCL_LINE */
     }
     eng->xsl_prefix = owned;
     return 0;
@@ -5725,11 +5717,9 @@ static int bind_globals(engine *eng, PyObject *params) {
                     return -1;      /* GCOVR_EXCL_LINE */
                 }
                 expr_len = PyUnicode_GET_LENGTH(supplied);
-                char errbuf[256];
-                xp_program *prog = xp_compile(expr, expr_len, errbuf, sizeof(errbuf));
+                xp_program *prog = xp_compile(expr, expr_len, "xslt: bad parameter expression: ");
                 PyMem_Free(expr);
                 if (prog == NULL) {
-                    PyErr_Format(PyExc_ValueError, "xslt: bad parameter expression: %s", errbuf);
                     return fail_py(eng);
                 }
                 xp_result value;
@@ -5739,7 +5729,7 @@ static int bind_globals(engine *eng, PyObject *params) {
                     return fail_py(eng);
                 }
                 if (scope_push(eng, global->name, global->name_len, value, NULL) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    return fail(eng, "out of memory");                                  /* GCOVR_EXCL_LINE */
+                    return fail_oom(eng);                                               /* GCOVR_EXCL_LINE */
                 }
                 continue;
             }
@@ -5754,7 +5744,7 @@ static int bind_globals(engine *eng, PyObject *params) {
             return -1;
         }
         if (scope_push(eng, global->name, global->name_len, value, rtf) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory");                                 /* GCOVR_EXCL_LINE */
+            return fail_oom(eng);                                              /* GCOVR_EXCL_LINE */
         }
     }
     return 0;
@@ -5893,8 +5883,8 @@ static int strip_record(engine *eng, th_node *node, th_node *parent, th_node *ne
     if (eng->nstripped == eng->stripped_cap) {
         Py_ssize_t cap = eng->stripped_cap == 0 ? TH_INITIAL_CAPACITY(16) : eng->stripped_cap * 2;
         struct strip_entry *grown = PyMem_Realloc(eng->stripped, (size_t)cap * sizeof(struct strip_entry));
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         eng->stripped = grown;
         eng->stripped_cap = cap;
@@ -5921,12 +5911,12 @@ static int strip_push(engine *eng, strip_frame **frames, size_t *length, size_t 
         /* Source depth cannot exhaust size_t. */
         /* GCOVR_EXCL_BR_START */
         if (!th_grow_cap(*length + 1, *capacity, 16, sizeof(strip_frame), &grown_capacity, &bytes)) {
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         /* GCOVR_EXCL_BR_STOP */
         strip_frame *grown = PyMem_Realloc(*frames, bytes);
-        if (grown == NULL) {                   /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        if (grown == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+            return fail_oom(eng); /* GCOVR_EXCL_LINE */
         }
         *frames = grown;
         *capacity = grown_capacity;
@@ -5978,15 +5968,8 @@ static int strip_walk(engine *eng, th_node *element, int inherited_preserve) {
     return 0;
 }
 
-static int precompile_expression(engine *eng, const Py_UCS4 *source, Py_ssize_t length, const char *context) {
-    char error[256];
-    if (compile_expression(eng, source, length, error, sizeof(error)) != NULL) {
-        return 0;
-    }
-    if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only allocation adds an exception during compilation */
-        PyErr_Format(PyExc_ValueError, "xslt: bad %s: %s", context, error);
-    }
-    return fail_py(eng);
+static int precompile_expression(engine *eng, const Py_UCS4 *source, Py_ssize_t length, const char *error_prefix) {
+    return compile_expression(eng, source, length, error_prefix) != NULL ? 0 : fail_py(eng);
 }
 
 static int precompile_avt(engine *eng, const Py_UCS4 *source, Py_ssize_t length) {
@@ -6009,17 +5992,18 @@ static int precompile_avt(engine *eng, const Py_UCS4 *source, Py_ssize_t length)
             }
             index++;
         }
-        if (precompile_expression(eng, source + start, index - start, "expression in attribute value template") < 0) {
+        if (precompile_expression(eng, source + start, index - start,
+                                  "xslt: bad expression in attribute value template: ") < 0) {
             return -1;
         }
     }
     return 0;
 }
 
-static int precompile_attribute(engine *eng, th_node *element, const char *name, const char *context) {
+static int precompile_attribute(engine *eng, th_node *element, const char *name, const char *error_prefix) {
     Py_ssize_t length = 0;
     const Py_UCS4 *source = attr_lookup(eng->sheet_tree, element, name, (Py_ssize_t)strlen(name), &length);
-    return source == NULL ? 0 : precompile_expression(eng, source, length, context);
+    return source == NULL ? 0 : precompile_expression(eng, source, length, error_prefix);
 }
 
 static int precompile_pattern_attribute(engine *eng, th_node *element, const char *name) {
@@ -6044,28 +6028,30 @@ static int precompile_pattern_attribute(engine *eng, th_node *element, const cha
 }
 
 static int precompile_instruction(engine *eng, th_node *element) {
-    const char *select_context = NULL;
-    const char *select_instructions[] = {"apply-templates", "for-each", "value-of",   "copy-of",
-                                         "variable",        "param",    "with-param", "sort"};
+    static const char *const select_instructions[][2] = {
+        {"apply-templates", "xslt: bad apply-templates select: "},
+        {"for-each", "xslt: bad for-each select: "},
+        {"value-of", "xslt: bad value-of select: "},
+        {"copy-of", "xslt: bad copy-of select: "},
+        {"variable", "xslt: bad variable select: "},
+        {"param", "xslt: bad param select: "},
+        {"with-param", "xslt: bad with-param select: "},
+        {"sort", "xslt: bad sort select: "},
+    };
     for (size_t index = 0; index < sizeof(select_instructions) / sizeof(select_instructions[0]); index++) {
-        if (is_xsl(eng, element, select_instructions[index])) {
-            select_context = select_instructions[index];
+        if (is_xsl(eng, element, select_instructions[index][0])) {
+            if (precompile_attribute(eng, element, "select", select_instructions[index][1]) < 0) {
+                return -1;
+            }
             break;
         }
     }
-    if (select_context != NULL) {
-        char context[64];
-        snprintf(context, sizeof(context), "%s select", select_context);
-        if (precompile_attribute(eng, element, "select", context) < 0) {
-            return -1;
-        }
-    }
     if ((is_xsl(eng, element, "if") || is_xsl(eng, element, "when")) &&
-        precompile_attribute(eng, element, "test", "test") < 0) {
+        precompile_attribute(eng, element, "test", "xslt: bad test: ") < 0) {
         return -1;
     }
     if (is_xsl(eng, element, "number")) {
-        if (precompile_attribute(eng, element, "value", "number value") < 0 ||
+        if (precompile_attribute(eng, element, "value", "xslt: bad number value: ") < 0 ||
             precompile_pattern_attribute(eng, element, "count") < 0 ||
             precompile_pattern_attribute(eng, element, "from") < 0) {
             return -1;
@@ -6130,7 +6116,7 @@ static int precompile_stylesheet(engine *eng, th_node *root) {
             return -1;
         }
     }
-    return precompile_expression(eng, &XPATH_DOT, 1, "sort select");
+    return precompile_expression(eng, &XPATH_DOT, 1, "xslt: bad sort select: ");
 }
 
 /* Re-attach the stripped text nodes in reverse order, so each node's saved successor is
@@ -6696,6 +6682,13 @@ TH_NODE_API(, PyObject *, turbohtml_xslt_transform, (PyObject * module, PyObject
     if (result == NULL && eng.error != NULL) {
         PyErr_Format(PyExc_ValueError, "%s", eng.error);
     }
+    /* A conversion that failed to allocate went on with NaN, so its result, or the error that NaN led to, is wrong. */
+    /* GCOVR_EXCL_START: allocation failure */
+    if (eng.oom) {
+        Py_CLEAR(result);
+        PyErr_NoMemory();
+    }
+    /* GCOVR_EXCL_STOP */
     engine_clear(&eng);
     Py_DECREF(source_handle);
     return result;

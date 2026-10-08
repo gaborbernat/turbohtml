@@ -136,6 +136,7 @@ typedef struct {
     double num;         /* NUM value */
     int op_context;     /* an operator may appear here (disambiguation state) */
     int error;          /* a lexical error was hit */
+    int *oom;           /* the parser's allocation-failure flag, which a long number literal can set */
 } lexer;
 
 static inline int xp_is_space(Py_UCS4 ch) {
@@ -171,6 +172,15 @@ typedef struct {
     uint64_t next_id;
 } xp_live_registry;
 
+/* What one top-level evaluation shares with every predicate context it spawns. */
+typedef struct {
+    struct xr_cache *regex_cache;
+    int oom; /* a conversion failed to allocate and went on with NaN; the entry point raises MemoryError */
+#ifdef TH_OPERATION_LIMIT
+    size_t operations;
+#endif
+} xp_call;
+
 typedef struct {
     struct th_tree *tree;
     struct th_node *node;
@@ -183,15 +193,12 @@ typedef struct {
     xp_extension_fn extension;
     void *extension_ctx;
     int depth; /* current eval_expr recursion depth, capped at XP_MAX_DEPTH */
-    struct xr_cache **regex_cache;
+    xp_call *call;
     xp_live_registry *live;
     xp_before_python_fn before_python;
     xp_name_test_fn name_test;
     void *name_test_ctx;
     int strict_no_ns;
-#ifdef TH_OPERATION_LIMIT
-    size_t *operations; /* shared by the predicate contexts of one top-level evaluation */
-#endif
 } xp_ctx;
 
 struct xp_live_frame {
@@ -235,8 +242,8 @@ static inline int xp_before_python(xp_ctx *ctx) {
    hides other findings. libxml2 charges each evaluated operation and each node a step yields the same way
    (xpath.c xmlXPathCheckOpLimit); release builds compile none of this. */
 static inline int xp_charge(xp_ctx *ctx, size_t count) {
-    *ctx->operations += count;
-    if (*ctx->operations <= TH_OPERATION_LIMIT) {
+    ctx->call->operations += count;
+    if (ctx->call->operations <= TH_OPERATION_LIMIT) {
         return 0;
     }
     *ctx->feature = "evaluation exceeded the operation limit";
@@ -257,11 +264,13 @@ struct th_node *tree_root(struct th_tree *tree, struct th_node *node);
 Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len);
 Py_UCS4 *ucs4_dup(const Py_UCS4 *src, Py_ssize_t len);
 Py_UCS4 *ucs4_from_ascii(const char *src, Py_ssize_t length, Py_ssize_t *len);
-double parse_number(const Py_UCS4 *text, Py_ssize_t len);
+/* The numeric conversions yield NaN and set *oom when an allocation fails; *oom is the caller's per-call flag, and the
+   compile or evaluation entry point raises MemoryError from it. */
+double parse_number(const Py_UCS4 *text, Py_ssize_t len, int *oom);
 /* The correctly rounded value of a decimal run of ASCII digits with at most one '.' and
    at least one digit (XPath's Number production, which the lexer and parse_number
    validate first). */
-double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len);
+double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len, int *oom);
 
 /* Result constructors and the XPath type conversions shared by eval.c and functions.c. */
 void result_bool(xp_result *result, int value);
@@ -269,7 +278,7 @@ void result_number(xp_result *result, double value);
 void result_string(xp_result *result, Py_UCS4 *owned, Py_ssize_t len);
 int to_boolean(struct th_tree *tree, const xp_result *value);
 Py_UCS4 *to_string(struct th_tree *tree, const xp_result *value, Py_ssize_t *len);
-double to_number(struct th_tree *tree, const xp_result *value);
+double to_number(struct th_tree *tree, const xp_result *value, int *oom);
 
 /* The mutual recursion between the evaluator and the function library. */
 int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out);

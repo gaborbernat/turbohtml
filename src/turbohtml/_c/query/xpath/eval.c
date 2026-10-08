@@ -776,10 +776,12 @@ static const double XP_POWERS_OF_TEN[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e
 
 /* A decimal run too long for the exact fast path, converted by CPython's correctly
    rounded strtod. The run is ASCII digits and at most one '.', which Python's float
-   grammar accepts, so only an allocation failure can make the conversion fail. */
-static double decimal_value_slow(const Py_UCS4 *digits, Py_ssize_t len) {
+   grammar accepts, so only an allocation failure can make the conversion fail; that
+   sets *oom and yields NaN. */
+static double decimal_value_slow(const Py_UCS4 *digits, Py_ssize_t len, int *oom) {
     char *ascii = PyMem_Malloc((size_t)len + 1);
     if (ascii == NULL) {    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+        *oom = 1;           /* GCOVR_EXCL_LINE */
         return (double)NAN; /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < len; index++) {
@@ -790,12 +792,13 @@ static double decimal_value_slow(const Py_UCS4 *digits, Py_ssize_t len) {
     PyMem_Free(ascii);
     if (value == -1.0 && PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only an allocation failure */
         PyErr_Clear();                       /* GCOVR_EXCL_LINE */
+        *oom = 1;                            /* GCOVR_EXCL_LINE */
         return (double)NAN;                  /* GCOVR_EXCL_LINE */
     }
     return value;
 }
 
-double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len) {
+double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len, int *oom) {
     uint64_t mantissa = 0;
     Py_ssize_t fraction_digits = 0;
     int after_dot = 0;
@@ -807,7 +810,7 @@ double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len) {
         mantissa = mantissa * 10 + (digits[index] - '0');
         fraction_digits += after_dot;
         if (mantissa > XP_EXACT_MANTISSA || fraction_digits > XP_EXACT_FRACTION_DIGITS) {
-            return decimal_value_slow(digits, len);
+            return decimal_value_slow(digits, len, oom);
         }
     }
     return (double)mantissa / XP_POWERS_OF_TEN[fraction_digits];
@@ -815,7 +818,7 @@ double xp_decimal_value(const Py_UCS4 *digits, Py_ssize_t len) {
 
 /* XPath number parse: optional leading/trailing whitespace around an optional sign,
    digits, and attr_record fractional part; anything else is NaN. */
-double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
+double parse_number(const Py_UCS4 *text, Py_ssize_t len, int *oom) {
     Py_ssize_t index = 0;
     while (index < len && xp_is_space(text[index])) {
         index++;
@@ -856,7 +859,7 @@ double parse_number(const Py_UCS4 *text, Py_ssize_t len) {
         return (double)NAN;
     }
     if (!exact) {
-        return sign * decimal_value_slow(text + index, end - index);
+        return sign * decimal_value_slow(text + index, end - index, oom);
     }
     return sign * (fraction_digits == 0 ? (double)mantissa : (double)mantissa / XP_POWERS_OF_TEN[fraction_digits]);
 }
@@ -997,19 +1000,24 @@ Py_UCS4 *to_string(struct th_tree *tree, const xp_result *value, Py_ssize_t *len
     }
 }
 
-double to_number(struct th_tree *tree, const xp_result *value) {
+/* A string parses in place; only a node-set's string-value allocates, and its failure sets *oom and yields NaN. */
+double to_number(struct th_tree *tree, const xp_result *value, int *oom) {
     if (value->kind == XP_NUMBER) {
         return value->number;
     }
     if (value->kind == XP_BOOLEAN) {
         return value->boolean ? 1.0 : 0.0;
     }
+    if (value->kind == XP_STRING) {
+        return parse_number(value->string, value->string_len, oom);
+    }
     Py_ssize_t len;
     Py_UCS4 *text = to_string(tree, value, &len);
     if (text == NULL) {     /* GCOVR_EXCL_BR_LINE: alloc */
+        *oom = 1;           /* GCOVR_EXCL_LINE */
         return (double)NAN; /* GCOVR_EXCL_LINE */
     }
-    double number = parse_number(text, len);
+    double number = parse_number(text, len, oom);
     PyMem_Free(text);
     return number;
 }
@@ -1056,15 +1064,12 @@ static int apply_predicates(const xp_program *prog, int32_t pred_head, xp_ctx *c
                 ctx->extension,
                 ctx->extension_ctx,
                 ctx->depth,
-                ctx->regex_cache,
+                ctx->call,
                 ctx->live,
                 ctx->before_python,
                 ctx->name_test,
                 ctx->name_test_ctx,
                 ctx->strict_no_ns,
-#ifdef TH_OPERATION_LIMIT
-                ctx->operations,
-#endif
             };
             xp_result value;
             int rc = eval_expr(prog, expr, &pctx, &value);
@@ -1325,13 +1330,13 @@ static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_n
 }
 
 /* Existential comparison of two scalar values (neither a node-set). */
-static int cmp_scalar(struct th_tree *tree, int op, const xp_result *left, const xp_result *right) {
+static int cmp_scalar(const xp_ctx *ctx, int op, const xp_result *left, const xp_result *right) {
     if (op == XN_EQ || op == XN_NE) {
         int eq;
         if (left->kind == XP_BOOLEAN || right->kind == XP_BOOLEAN) {
-            eq = to_boolean(tree, left) == to_boolean(tree, right);
+            eq = to_boolean(ctx->tree, left) == to_boolean(ctx->tree, right);
         } else if (left->kind == XP_NUMBER || right->kind == XP_NUMBER) {
-            eq = to_number(tree, left) == to_number(tree, right);
+            eq = to_number(ctx->tree, left, &ctx->call->oom) == to_number(ctx->tree, right, &ctx->call->oom);
         } else {
             eq = left->string_len == right->string_len &&
                  (left->string_len == 0 ||
@@ -1339,8 +1344,8 @@ static int cmp_scalar(struct th_tree *tree, int op, const xp_result *left, const
         }
         return op == XN_EQ ? eq : !eq;
     }
-    double left_num = to_number(tree, left);
-    double right_num = to_number(tree, right);
+    double left_num = to_number(ctx->tree, left, &ctx->call->oom);
+    double right_num = to_number(ctx->tree, right, &ctx->call->oom);
     switch (op) {
     case XN_LT:
         return left_num < right_num;
@@ -1365,20 +1370,20 @@ static int item_as_string(struct th_tree *tree, xp_item item, xp_result *out) {
 }
 
 static int compare_equal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result);
-static int compare_unequal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result);
-static int compare_ordered_sets(struct th_tree *tree, int op, const xp_nodeset *left, const xp_nodeset *right,
+static int compare_unequal_sets(const xp_ctx *ctx, const xp_nodeset *left, const xp_nodeset *right, int *result);
+static int compare_ordered_sets(const xp_ctx *ctx, int op, const xp_nodeset *left, const xp_nodeset *right,
                                 int *result);
 
-static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *second, int *result) {
+static int compare(const xp_ctx *ctx, int op, xp_result *first, xp_result *second, int *result) {
     int a_ns = first->kind == XP_NODESET;
     int b_ns = second->kind == XP_NODESET;
     if (!a_ns && !b_ns) {
-        *result = cmp_scalar(tree, op, first, second);
+        *result = cmp_scalar(ctx, op, first, second);
         return 0;
     }
     /* first node-set compared with first boolean uses the node-set's own boolean value */
     if ((a_ns && second->kind == XP_BOOLEAN) || (b_ns && first->kind == XP_BOOLEAN)) {
-        *result = cmp_scalar(tree, op, first, second);
+        *result = cmp_scalar(ctx, op, first, second);
         return 0;
     }
     xp_nodeset *left = a_ns ? &first->nodes : NULL;
@@ -1386,26 +1391,26 @@ static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *se
     *result = 0;
     if (a_ns && b_ns) {
         if (op == XN_EQ && left->len >= 16 && right->len >= 16) {
-            return compare_equal_sets(tree, left, right, result);
+            return compare_equal_sets(ctx->tree, left, right, result);
         }
         if (op == XN_NE && left->len > 0 && right->len > 0) {
-            return compare_unequal_sets(tree, left, right, result);
+            return compare_unequal_sets(ctx, left, right, result);
         }
         if (op != XN_EQ && op != XN_NE && left->len >= 16 && right->len >= 16) {
-            return compare_ordered_sets(tree, op, left, right, result);
+            return compare_ordered_sets(ctx, op, left, right, result);
         }
         for (Py_ssize_t index = 0; index < left->len && !*result; index++) {
             xp_result si;
-            if (item_as_string(tree, left->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                return -1;                                           /* GCOVR_EXCL_LINE */
+            if (item_as_string(ctx->tree, left->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                return -1;                                                /* GCOVR_EXCL_LINE */
             }
             for (Py_ssize_t inner_index = 0; inner_index < right->len && !*result; inner_index++) {
                 xp_result sj;
-                if (item_as_string(tree, right->items[inner_index], &sj) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    xp_result_free(&si);                                        /* GCOVR_EXCL_LINE */
-                    return -1;                                                  /* GCOVR_EXCL_LINE */
+                if (item_as_string(ctx->tree, right->items[inner_index], &sj) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    xp_result_free(&si);                                             /* GCOVR_EXCL_LINE */
+                    return -1;                                                       /* GCOVR_EXCL_LINE */
                 }
-                *result = cmp_scalar(tree, op, &si, &sj);
+                *result = cmp_scalar(ctx, op, &si, &sj);
                 xp_result_free(&sj);
             }
             xp_result_free(&si);
@@ -1416,10 +1421,10 @@ static int compare(struct th_tree *tree, int op, xp_result *first, xp_result *se
     xp_result *other = a_ns ? second : first;
     for (Py_ssize_t index = 0; index < ns->len && !*result; index++) {
         xp_result si;
-        if (item_as_string(tree, ns->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-            return -1;                                         /* GCOVR_EXCL_LINE */
+        if (item_as_string(ctx->tree, ns->items[index], &si) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+            return -1;                                              /* GCOVR_EXCL_LINE */
         }
-        *result = a_ns ? cmp_scalar(tree, op, &si, other) : cmp_scalar(tree, op, other, &si);
+        *result = a_ns ? cmp_scalar(ctx, op, &si, other) : cmp_scalar(ctx, op, other, &si);
         xp_result_free(&si);
     }
     return 0;
@@ -1487,22 +1492,22 @@ static PyObject *comparison_string(struct th_tree *tree, xp_item item) {
 }
 
 /* Inequality is existential too: it is false only when both nonempty sets contain one shared value. */
-static int compare_unequal_sets(struct th_tree *tree, const xp_nodeset *left, const xp_nodeset *right, int *result) {
+static int compare_unequal_sets(const xp_ctx *ctx, const xp_nodeset *left, const xp_nodeset *right, int *result) {
     xp_result first;
-    if (item_as_string(tree, left->items[0], &first) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        return -1;                                          /* GCOVR_EXCL_LINE: allocation failure */
+    if (item_as_string(ctx->tree, left->items[0], &first) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                               /* GCOVR_EXCL_LINE: allocation failure */
     }
     const xp_nodeset *sets[] = {right, left};
     int rc = 0;
     for (size_t side = 0; side < 2 && !*result; side++) {
         for (Py_ssize_t index = (Py_ssize_t)side; index < sets[side]->len && !*result; index++) {
             xp_result next;
-            const int converted = item_as_string(tree, sets[side]->items[index], &next);
+            const int converted = item_as_string(ctx->tree, sets[side]->items[index], &next);
             if (converted < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
                 rc = -1;         /* GCOVR_EXCL_LINE: allocation failure */
                 break;           /* GCOVR_EXCL_LINE: allocation failure */
             }
-            *result = cmp_scalar(tree, XN_NE, &first, &next);
+            *result = cmp_scalar(ctx, XN_NE, &first, &next);
             xp_result_free(&next);
         }
         if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -1513,48 +1518,48 @@ static int compare_unequal_sets(struct th_tree *tree, const xp_nodeset *left, co
     return rc;
 }
 
-static int comparison_number(struct th_tree *tree, xp_item item, double *number);
-static int comparison_extreme(struct th_tree *tree, const xp_nodeset *nodes, int minimum, double *value);
+static int comparison_number(const xp_ctx *ctx, xp_item item, double *number);
+static int comparison_extreme(const xp_ctx *ctx, const xp_nodeset *nodes, int minimum, double *value);
 
-static int compare_ordered_sets(struct th_tree *tree, int op, const xp_nodeset *left, const xp_nodeset *right,
+static int compare_ordered_sets(const xp_ctx *ctx, int op, const xp_nodeset *left, const xp_nodeset *right,
                                 int *result) {
     xp_result first = {.kind = XP_NUMBER};
     xp_result second = {.kind = XP_NUMBER};
-    const int first_rc = comparison_number(tree, left->items[0], &first.number);
-    const int second_rc = comparison_number(tree, right->items[0], &second.number);
+    const int first_rc = comparison_number(ctx, left->items[0], &first.number);
+    const int second_rc = comparison_number(ctx, right->items[0], &second.number);
     if (first_rc < 0 || second_rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         return -1;                       /* GCOVR_EXCL_LINE: allocation failure */
     }
-    *result = cmp_scalar(tree, op, &first, &second);
+    *result = cmp_scalar(ctx, op, &first, &second);
     if (*result) {
         return 0;
     }
     const int less = op == XN_LT || op == XN_LE;
-    const int left_rc = comparison_extreme(tree, left, less, &first.number);
-    const int right_rc = comparison_extreme(tree, right, !less, &second.number);
+    const int left_rc = comparison_extreme(ctx, left, less, &first.number);
+    const int right_rc = comparison_extreme(ctx, right, !less, &second.number);
     if (left_rc < 0 || right_rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
         return -1;                     /* GCOVR_EXCL_LINE: allocation failure */
     }
-    *result = cmp_scalar(tree, op, &first, &second);
+    *result = cmp_scalar(ctx, op, &first, &second);
     return 0;
 }
 
-static int comparison_number(struct th_tree *tree, xp_item item, double *number) {
+static int comparison_number(const xp_ctx *ctx, xp_item item, double *number) {
     xp_result text;
-    if (item_as_string(tree, item, &text) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        return -1;                               /* GCOVR_EXCL_LINE: allocation failure */
+    if (item_as_string(ctx->tree, item, &text) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                                    /* GCOVR_EXCL_LINE: allocation failure */
     }
-    *number = to_number(tree, &text);
+    *number = to_number(ctx->tree, &text, &ctx->call->oom);
     xp_result_free(&text);
     return 0;
 }
 
 /* A matching pair exists iff the corresponding extrema compare true; NaNs cannot supply a match. */
-static int comparison_extreme(struct th_tree *tree, const xp_nodeset *nodes, int minimum, double *value) {
+static int comparison_extreme(const xp_ctx *ctx, const xp_nodeset *nodes, int minimum, double *value) {
     for (Py_ssize_t index = 1; index < nodes->len; index++) {
         double number;
-        if (comparison_number(tree, nodes->items[index], &number) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-            return -1;                                                   /* GCOVR_EXCL_LINE: allocation failure */
+        if (comparison_number(ctx, nodes->items[index], &number) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                                  /* GCOVR_EXCL_LINE: allocation failure */
         }
         const int missing = isnan(*value); /* GCOVR_EXCL_BR_LINE: dead type-dispatch arm of the isnan macro */
         if (missing || (minimum ? number < *value : number > *value)) {
@@ -1759,7 +1764,7 @@ static int eval_expr_inner(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_
         if (rc < 0) {
             return rc;
         }
-        result_number(out, -to_number(ctx->tree, &left));
+        result_number(out, -to_number(ctx->tree, &left, &ctx->call->oom));
         xp_result_free(&left);
         return 0;
     }
@@ -1790,15 +1795,15 @@ static int eval_expr_inner(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_
             xp_live_enter(ctx, &comparison);
             rc = xp_before_python(ctx);
             if (rc == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                rc = compare(ctx->tree, expr->kind, &left, &right, &cmp);
+                rc = compare(ctx, expr->kind, &left, &right, &cmp);
             }
             xp_live_leave(ctx, &comparison);
             if (rc == 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                 result_bool(out, cmp);
             }
         } else {
-            double left_value = to_number(ctx->tree, &left);
-            double right_value = to_number(ctx->tree, &right);
+            double left_value = to_number(ctx->tree, &left, &ctx->call->oom);
+            double right_value = to_number(ctx->tree, &right, &ctx->call->oom);
             double value = expr->kind == XN_ADD   ? left_value + right_value
                            : expr->kind == XN_SUB ? left_value - right_value
                            : expr->kind == XN_MUL ? left_value * right_value
@@ -1839,34 +1844,48 @@ int eval_expr(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *out) 
     return rc;
 }
 
+/* Evaluation unwinds an allocation failure as a bare -1, or records it in call->oom where a conversion has no error
+   return and evaluation went on; raising MemoryError here gives every caller one exception contract. Out of line, the
+   entry points stay small enough to inline into the XSLT template matcher. */
+TH_NOINLINE static int eval_failed(int rc, const xp_call *call, xp_result *out) {
+    /* GCOVR_EXCL_START: allocation failure */
+    if (call->oom) {
+        if (rc == 0) {
+            xp_result_free(out);
+        }
+        PyErr_NoMemory();
+        return -1;
+    }
+    /* GCOVR_EXCL_STOP */
+    if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: alloc */
+        PyErr_NoMemory();    /* GCOVR_EXCL_LINE */
+    } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
+    return rc;
+}
+
+static int finish_eval(int rc, const xp_call *call, xp_result *out) {
+    if (call->regex_cache != NULL) {
+        xr_cache_free(call->regex_cache);
+    }
+    return (rc == -1) | call->oom ? eval_failed(rc, call, out) : rc;
+}
+
 int xp_eval_at(const xp_program *prog, struct th_tree *tree, struct th_node *context, Py_ssize_t pos, Py_ssize_t size,
                const xp_bindings *vars, const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx,
                xp_result *out, const char **feature) {
-    xr_cache *regex_cache = NULL;
-#ifdef TH_OPERATION_LIMIT
-    size_t operations = 0;
-#endif
+    xp_call call = {0};
     xp_ctx ctx = {
-        tree,          context, -1,           pos,  size, feature, vars, namespaces, extension,
-        extension_ctx, 0,       &regex_cache, NULL, NULL, NULL,    NULL, 0,
-#ifdef TH_OPERATION_LIMIT
-        &operations,
-#endif
+        tree,          context, -1,    pos,  size, feature, vars, namespaces, extension,
+        extension_ctx, 0,       &call, NULL, NULL, NULL,    NULL, 0,
     };
     int rc = eval_expr(prog, prog->root, &ctx, out);
-    if (regex_cache != NULL) {
-        xr_cache_free(regex_cache);
-    }
-    return rc;
+    return finish_eval(rc, &call, out);
 }
 
 int xp_eval_pattern_at(const xp_program *prog, struct th_tree *tree, struct th_node *context, xp_extension_fn extension,
                        void *extension_ctx, xp_name_test_fn name_test, void *name_test_ctx, xp_result *out,
                        const char **feature) {
-    xr_cache *regex_cache = NULL;
-#ifdef TH_OPERATION_LIMIT
-    size_t operations = 0;
-#endif
+    xp_call call = {0};
     xp_ctx ctx = {
         tree,
         context,
@@ -1879,21 +1898,15 @@ int xp_eval_pattern_at(const xp_program *prog, struct th_tree *tree, struct th_n
         extension,
         extension_ctx,
         0,
-        &regex_cache,
+        &call,
         NULL,
         NULL,
         name_test,
         name_test_ctx,
         name_test == NULL && th_tree_is_xml(tree), /* GCOVR_EXCL_BR_LINE: XML only */
-#ifdef TH_OPERATION_LIMIT
-        &operations,
-#endif
     };
     int rc = eval_expr(prog, prog->root, &ctx, out);
-    if (regex_cache != NULL) {
-        xr_cache_free(regex_cache);
-    }
-    return rc;
+    return finish_eval(rc, &call, out);
 }
 
 int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
@@ -1905,23 +1918,14 @@ int xp_eval(const xp_program *prog, struct th_tree *tree, struct th_node *contex
 int xp_eval_snapshot(const xp_program *prog, struct th_tree *tree, struct th_node *context, const xp_bindings *vars,
                      const xp_namespaces *namespaces, xp_extension_fn extension, void *extension_ctx,
                      xp_before_python_fn before_python, xp_result *out, const char **feature) {
-    xr_cache *regex_cache = NULL;
+    xp_call call = {0};
     xp_live_registry live = {0};
-#ifdef TH_OPERATION_LIMIT
-    size_t operations = 0;
-#endif
     xp_ctx ctx = {
-        tree,        context,       -1,   1,    1, feature, vars, namespaces, extension, extension_ctx, 0, &regex_cache,
-        &live,       before_python, NULL, NULL, 0,
-#ifdef TH_OPERATION_LIMIT
-        &operations,
-#endif
+        tree,  context,       -1,   1,    1, feature, vars, namespaces, extension, extension_ctx, 0, &call,
+        &live, before_python, NULL, NULL, 0,
     };
     xp_live_frame frame = {.node = context, .vars = vars};
     xp_live_enter(&ctx, &frame);
     int rc = eval_expr(prog, prog->root, &ctx, out);
-    if (regex_cache != NULL) {
-        xr_cache_free(regex_cache);
-    }
-    return rc;
+    return finish_eval(rc, &call, out);
 }

@@ -224,7 +224,7 @@ void lex_next(lexer *lx) {
                     lx->pos++;
                 }
             }
-            lx->num = xp_decimal_value(lx->src + start, lx->pos - start);
+            lx->num = xp_decimal_value(lx->src + start, lx->pos - start, lx->oom);
             lx->kind = TK_NUM;
             break;
         }
