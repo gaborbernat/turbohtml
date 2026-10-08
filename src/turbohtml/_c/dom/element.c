@@ -3363,9 +3363,13 @@ TH_NODE_API(static, PyObject *, element_clear, (PyObject * self, PyObject *ignor
 
 TH_NODE_API(static, PyObject *, element_normalize, (PyObject * self, PyObject *ignored), (self, ignored),
             (PyObject * self, PyObject *Py_UNUSED(ignored)), (NodeObject *)self, NULL) {
+    int failed;
     Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    th_node_normalize(tree_of(self), ((NodeObject *)self)->node);
+    failed = th_node_normalize(tree_of(self), ((NodeObject *)self)->node);
     Py_END_CRITICAL_SECTION();
+    if (failed < 0) {            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     Py_RETURN_NONE;
 }
 

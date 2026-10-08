@@ -775,7 +775,9 @@ static int text_scan_matches(th_tree *tree, th_node *node, const query_t *query,
     if (scratch_ensure(scratch, cap, text_len) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
         return -1;                                    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    th_node_collect_text(tree, node, *scratch);
+    if (th_node_collect_text(tree, node, *scratch) < 0) { /* GCOVR_EXCL_BR_LINE: allocation cannot be forced */
+        return -1;                                        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     return ucs4_contains(*scratch, text_len, query->text_needle, query->text_needle_len);
 }
 

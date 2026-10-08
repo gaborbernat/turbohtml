@@ -462,6 +462,29 @@ static inline Py_ssize_t doctype_name_len(const th_node *node) {
     return index;
 }
 
+/* A text node's code points for a writer into out. A failed span realization marks out failed, which sbuf_finish
+   reports as MemoryError, and reads as an empty run so no writer touches the NULL; th_node_text_string handles the
+   same NULL by raising directly. */
+static inline const Py_UCS4 *ser_text(sbuf *out, th_tree *tree, th_node *node, Py_ssize_t *len) {
+    *len = node->text_len;
+    if (!text_is_span(node)) {
+        return node->text;
+    }
+    const Py_UCS4 *text = realize_span(tree, node);
+    if (text == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        *len = 0;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
+    return text;
+}
+
+/* Copy a text node's code points into out unescaped, as raw text and the text content are written. */
+static inline void ser_put_node_text(sbuf *out, th_tree *tree, th_node *node) {
+    Py_ssize_t len;
+    const Py_UCS4 *text = ser_text(out, tree, node, &len);
+    sbuf_put_ucs4(out, text, len);
+}
+
 /* A pre/textarea/listing element whose first child is a text node beginning with
    a newline needs an extra leading newline on output: the parser drops one such
    newline when reading, so re-emitting it keeps the round trip faithful. */
@@ -473,7 +496,8 @@ static inline int ser_needs_leading_newline(th_tree *tree, th_node *node) {
         return 0;
     }
     th_node *first = node->first_child;
-    return first != NULL && first->type == TH_NODE_TEXT && first->text_len > 0 && need_text(tree, first)[0] == '\n';
+    return first != NULL && first->type == TH_NODE_TEXT && first->text_len > 0 &&
+           text_view_at(text_view(tree, first), 0) == '\n';
 }
 
 /* ASCII case-insensitive compare of a UCS-4 attribute value against a lowercase

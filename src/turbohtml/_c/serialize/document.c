@@ -33,9 +33,8 @@ static void render_attr_name(th_tree *tree, const th_node *node, const th_node_a
 /* Emit one node's #document line (and, for an element, its sorted attribute
    lines). The children are walked by serialize_node, so this never recurses. */
 static void serialize_node_line(sbuf *out, th_tree *tree, th_node *node, int depth) {
-    if (node->type == TH_NODE_TEXT) {
-        need_text(tree, node); /* realize a zero-copy span before output */
-    }
+    Py_ssize_t text_len = 0;
+    const Py_UCS4 *text = node->type == TH_NODE_TEXT ? ser_text(out, tree, node, &text_len) : NULL;
     /* html5lib format: "| " then two spaces per depth level, then the node */
     sbuf_puts(out, "| ");
     for (int index = 0; index < depth; index++) {
@@ -54,7 +53,7 @@ static void serialize_node_line(sbuf *out, th_tree *tree, th_node *node, int dep
         break;
     case TH_NODE_TEXT:
         sbuf_putc(out, '"');
-        sbuf_put_ucs4(out, node->text, node->text_len);
+        sbuf_put_ucs4(out, text, text_len);
         sbuf_putc(out, '"');
         break;
     case TH_NODE_ELEMENT:
@@ -203,7 +202,7 @@ SER_NOINLINE static void ser_put_rawtext(sbuf *out, th_tree *tree, th_node *elem
             ser_put_rawtext_markup(out, tree, element, child, opts, 0);
             return;
         }
-        sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
+        ser_put_node_text(out, tree, child);
     }
 }
 
@@ -327,13 +326,16 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         }
         /* a CDATA section is a Text node, so its escaped text is the one HTML form that holds a ">" */
         TH_FALLTHROUGH;
-    case TH_NODE_TEXT:
+    case TH_NODE_TEXT: {
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(out, tree, node, &len);
         if (opts->xml) {
-            sbuf_put_xml_text(out, need_text(tree, node), node->text_len, 0);
+            sbuf_put_xml_text(out, text, len, 0);
         } else {
-            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
+            sbuf_put_text(out, text, len, 0, opts->formatter);
         }
         break;
+    }
     case TH_NODE_COMMENT:
         sbuf_puts(out, "<!--");
         if (opts->xml) {
@@ -418,7 +420,7 @@ SER_NOINLINE void ser_put_rawtext_markup(sbuf *out, th_tree *tree, th_node *elem
     while (node != NULL) {
         if ((node->type == TH_NODE_TEXT || node->type == TH_NODE_CDATA) &&
             is_rawtext_element(node->parent, tree->scripting)) {
-            sbuf_put_ucs4(out, need_text(tree, node), node->text_len);
+            ser_put_node_text(out, tree, node);
             node = ser_markup_next(out, node, element);
         } else if (node->type == TH_NODE_COMMENT && strip_comments) {
             node = ser_markup_next(out, node, element);
@@ -584,16 +586,7 @@ static int pretty_is_block(th_tree *tree, const th_node *parent, const th_node *
 }
 
 static int pretty_is_blank(th_tree *tree, th_node *node) {
-    if (node->type != TH_NODE_TEXT) {
-        return 0;
-    }
-    const Py_UCS4 *text = need_text(tree, node);
-    for (Py_ssize_t index = 0; index < node->text_len; index++) {
-        if (!is_space(text[index])) {
-            return 0;
-        }
-    }
-    return 1;
+    return node->type == TH_NODE_TEXT && text_view_is_blank(text_view(tree, node));
 }
 
 /* The first node from start on that begins a line inside parent: a block child, or
@@ -631,9 +624,12 @@ static th_node *pretty_emit_run(sbuf *out, th_tree *tree, th_node *start, const 
     }
     for (th_node *node = start;; node = node->next_sibling) {
         if (node->type == TH_NODE_TEXT) {
-            const Py_UCS4 *text = need_text(tree, node);
+            Py_ssize_t end;
+            const Py_UCS4 *text = ser_text(out, tree, node, &end);
+            if (out->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return last;   /* GCOVR_EXCL_LINE: the trims below would read the empty run */
+            }
             Py_ssize_t begin = 0;
-            Py_ssize_t end = node->text_len;
             while (node == start && is_space(text[begin])) {
                 begin++;
             }
@@ -767,7 +763,12 @@ Py_UCS4 *th_node_data(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (len) {
-        memcpy(out, need_text(tree, node), (size_t)len * sizeof(Py_UCS4));
+        const Py_UCS4 *text = need_text(tree, node);
+        if (text == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyMem_Free(out); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        memcpy(out, text, (size_t)len * sizeof(Py_UCS4));
     }
     return out;
 }
@@ -811,7 +812,7 @@ static th_node *text_preorder_next(th_node *node, th_node *root) {
 static void collect_text(sbuf *out, th_tree *tree, th_node *root) {
     for (th_node *node = root->first_child; node != NULL; node = text_preorder_next(node, root)) {
         if (node->type == TH_NODE_TEXT) {
-            sbuf_put_ucs4(out, need_text(tree, node), node->text_len);
+            ser_put_node_text(out, tree, node);
         }
     }
 }
@@ -819,11 +820,16 @@ static void collect_text(sbuf *out, th_tree *tree, th_node *root) {
 Py_UCS4 *th_node_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     if (node->type == TH_NODE_TEXT) {
-        sbuf_put_ucs4(&out, need_text(tree, node), node->text_len);
+        ser_put_node_text(&out, tree, node);
     } else {
         collect_text(&out, tree, node);
     }
     return sbuf_finish(&out, out_len);
+}
+
+PyObject *th_node_data_string(th_tree *tree, th_node *node) {
+    th_text_view text = text_view(tree, node);
+    return th_str_from_kind(text.kind, text.data, text.len);
 }
 
 PyObject *th_node_text_string(th_tree *tree, th_node *root) {
@@ -880,21 +886,24 @@ PyObject *th_node_text_string(th_tree *tree, th_node *root) {
 }
 
 /* Copy every descendant Text node's code points of node into buf at pos, realizing
-   zero-copy spans on the way; the caller sizes buf to the subtree's text length.
-   The find(text=) C scan reuses one buffer across candidates so no per-node str is
-   built; a Text or Content child of a content fragment is descended like an element. */
-static void collect_text_into(th_tree *tree, th_node *root, Py_UCS4 *buf) {
+   zero-copy spans on the way so a repeated scan copies them in bulk; the caller sizes
+   buf to the subtree's text length. Returns -1 when a span cannot be realized. */
+static int collect_text_into(th_tree *tree, th_node *root, Py_UCS4 *buf) {
     Py_ssize_t pos = 0;
     for (th_node *node = root->first_child; node != NULL; node = text_preorder_next(node, root)) {
         if (node->type == TH_NODE_TEXT) {
-            memcpy(buf + pos, need_text(tree, node), (size_t)node->text_len * sizeof(Py_UCS4));
+            if (realize_text(tree, node) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+                return -1;                      /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            memcpy(buf + pos, node->text, (size_t)node->text_len * sizeof(Py_UCS4));
             pos += node->text_len;
         }
     }
+    return 0;
 }
 
-void th_node_collect_text(th_tree *tree, th_node *node, Py_UCS4 *buf) {
-    collect_text_into(tree, node, buf);
+int th_node_collect_text(th_tree *tree, th_node *node, Py_UCS4 *buf) {
+    return collect_text_into(tree, node, buf);
 }
 
 /* The WHATWG-conformant defaults the html/inner_html accessors serialize under:
