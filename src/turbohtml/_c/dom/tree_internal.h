@@ -7,6 +7,7 @@
 #ifndef TURBOHTML_DOM_TREE_INTERNAL_H
 #define TURBOHTML_DOM_TREE_INTERNAL_H
 
+#include "core/ascii.h"
 #include "core/node_map.h"
 #include "dom/tree.h"
 
@@ -230,6 +231,22 @@ static inline void *arena_alloc(th_tree *tree, Py_ssize_t size) {
     return result;
 }
 
+static inline void widen_code_points(Py_UCS4 *out, const void *data, int kind, Py_ssize_t length) {
+    if (kind == PyUnicode_4BYTE_KIND) {
+        memcpy(out, data, (size_t)length * sizeof(Py_UCS4));
+    } else if (kind == PyUnicode_1BYTE_KIND) {
+        const uint8_t *bytes = data;
+        for (Py_ssize_t index = 0; index < length; index++) {
+            out[index] = bytes[index];
+        }
+    } else {
+        const uint16_t *units = data;
+        for (Py_ssize_t index = 0; index < length; index++) {
+            out[index] = units[index];
+        }
+    }
+}
+
 /* Copy the input span [off, off+length) into a freshly arena-allocated UCS4
    array, widening the borrowed input to code points. Shared by slice
    materialization and the lazy realization of zero-copy text spans. */
@@ -238,19 +255,7 @@ static TH_NOINLINE TH_MAYBE_UNUSED Py_UCS4 *copy_input_span(th_tree *tree, Py_ss
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path, unreachable from a test */
     }
-    if (tree->kind == PyUnicode_4BYTE_KIND) {
-        memcpy(out, (const Py_UCS4 *)tree->data + off, (size_t)length * sizeof(Py_UCS4));
-    } else if (tree->kind == PyUnicode_1BYTE_KIND) {
-        const uint8_t *bytes = (const uint8_t *)tree->data + off;
-        for (Py_ssize_t index = 0; index < length; index++) {
-            out[index] = bytes[index];
-        }
-    } else {
-        const uint16_t *units = (const uint16_t *)tree->data + off;
-        for (Py_ssize_t index = 0; index < length; index++) {
-            out[index] = units[index];
-        }
-    }
+    widen_code_points(out, (const char *)tree->data + off * tree->kind, tree->kind, length);
     return out;
 }
 
@@ -270,11 +275,117 @@ static inline void text_set_span(th_node *node, Py_ssize_t offset) {
     memcpy(&node->text, &encoded, sizeof(encoded));
 }
 
-static inline Py_UCS4 *need_text(th_tree *tree, th_node *node) {
-    if (text_is_span(node)) {
-        node->text = copy_input_span(tree, text_span_offset(node), node->text_len);
+/* Realize a zero-copy span on first read, returning NULL when the copy could not be allocated. The node then keeps its
+   span, so a later read retries instead of finding the text gone. Inline, so the caller's own NULL test also guards
+   the store. */
+static inline TH_MAYBE_UNUSED Py_UCS4 *realize_span(th_tree *tree, th_node *node) {
+    Py_UCS4 *text = copy_input_span(tree, text_span_offset(node), node->text_len);
+    if (text != NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        node->text = text;
     }
-    return node->text;
+    return text;
+}
+
+static inline int realize_text(th_tree *tree, th_node *node) {
+    return text_is_span(node) && realize_span(tree, node) == NULL ? -1 : 0;
+}
+
+/* The node's code points after realize_text, or NULL when realizing failed. */
+static inline Py_UCS4 *need_text(th_tree *tree, th_node *node) {
+    return realize_text(tree, node) < 0 ? NULL : node->text; /* GCOVR_EXCL_BR_LINE: allocation failure only */
+}
+
+/* A text node's code points where they already are: the realized UCS4 copy, or a parsed node's span of the borrowed
+   input at the input's width. Readers that only scan text read through a view, so they never allocate and cannot
+   fail; readers that keep the text realize it with need_text and report a failed copy. */
+typedef struct {
+    const void *data;
+    Py_ssize_t len;
+    int kind;
+} th_text_view;
+
+static inline th_text_view text_view(const th_tree *tree, const th_node *node) {
+    if (text_is_span(node)) {
+        return (th_text_view){(const char *)tree->data + text_span_offset(node) * tree->kind, node->text_len,
+                              tree->kind};
+    }
+    return (th_text_view){node->text, node->text_len, PyUnicode_4BYTE_KIND};
+}
+
+static inline Py_UCS4 text_view_at(th_text_view view, Py_ssize_t index) {
+    return PyUnicode_READ(view.kind, view.data, index);
+}
+
+/* Widen a view into out, which holds view.len code points. */
+static inline TH_MAYBE_UNUSED void text_view_copy(Py_UCS4 *out, th_text_view view) {
+    widen_code_points(out, view.data, view.kind, view.len);
+}
+
+/* Whether a view holds only HTML ASCII whitespace (or nothing). One loop per width keeps the width test out of the
+   scan. */
+static inline TH_MAYBE_UNUSED int text_view_is_blank(th_text_view view) {
+    if (view.kind == PyUnicode_1BYTE_KIND) {
+        const Py_UCS1 *units = view.data;
+        for (Py_ssize_t index = 0; index < view.len; index++) {
+            if (!is_space(units[index])) {
+                return 0;
+            }
+        }
+    } else if (view.kind == PyUnicode_2BYTE_KIND) {
+        const Py_UCS2 *units = view.data;
+        for (Py_ssize_t index = 0; index < view.len; index++) {
+            if (!is_space(units[index])) {
+                return 0;
+            }
+        }
+    } else {
+        const Py_UCS4 *units = view.data;
+        for (Py_ssize_t index = 0; index < view.len; index++) {
+            if (!is_space(units[index])) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+/* How many times character occurs in a view, one loop per width. */
+static inline TH_MAYBE_UNUSED Py_ssize_t text_view_count(th_text_view view, Py_UCS4 character) {
+    Py_ssize_t count = 0;
+    if (view.kind == PyUnicode_1BYTE_KIND) {
+        const Py_UCS1 *units = view.data;
+        for (Py_ssize_t index = 0; index < view.len; index++) {
+            count += units[index] == character;
+        }
+    } else if (view.kind == PyUnicode_2BYTE_KIND) {
+        const Py_UCS2 *units = view.data;
+        for (Py_ssize_t index = 0; index < view.len; index++) {
+            count += units[index] == character;
+        }
+    } else {
+        const Py_UCS4 *units = view.data;
+        for (Py_ssize_t index = 0; index < view.len; index++) {
+            count += units[index] == character;
+        }
+    }
+    return count;
+}
+
+/* Whether two views hold the same code points. Views of one width compare as bytes; mixed widths compare per code
+   point. */
+static inline TH_MAYBE_UNUSED int text_view_equal(th_text_view left, th_text_view right) {
+    if (left.len != right.len) {
+        return 0;
+    }
+    if (left.kind == right.kind) {
+        return left.len == 0 || memcmp(left.data, right.data, (size_t)left.len * (size_t)left.kind) == 0;
+    }
+    for (Py_ssize_t index = 0; index < left.len; index++) {
+        if (text_view_at(left, index) != text_view_at(right, index)) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static inline int is_void_atom(uint16_t atom) {

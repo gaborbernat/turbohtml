@@ -85,6 +85,10 @@ static int replace_data_delete(th_tree *tree, th_node *node, Py_ssize_t from, Py
     Py_ssize_t remaining = node->text_len - to;
     Py_ssize_t new_len = from + remaining;
     const Py_UCS4 *text = th_node_realize_text(tree, node);
+    if (text == NULL && node->text_len > 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        PyErr_NoMemory();                     /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;                            /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     Py_UCS4 *buffer = PyMem_Malloc((size_t)(new_len > 0 ? new_len : 1) * sizeof(Py_UCS4));
     if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -96,14 +100,27 @@ static int replace_data_delete(th_tree *tree, th_node *node, Py_ssize_t from, Py
     }
     int rc = th_node_set_data(tree, node, buffer, new_len);
     PyMem_Free(buffer);
-    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on OOM */
+    if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: th_node_set_data only fails on OOM */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
+}
+
+/* A new node of node's type holding its code points [from, to). NULL on allocation failure, including a failed
+   realization of node's own text. */
+static th_node *data_slice(th_tree *tree, th_node *node, Py_ssize_t from, Py_ssize_t to) {
+    const Py_UCS4 *text = th_node_realize_text(tree, node);
+    if (text == NULL && node->text_len > 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;                          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return th_tree_make_data_node(tree, node->type, text + from, to - from);
 }
 
 /* Split a character-data node at offset: the tail becomes a new sibling right after it, which is
    returned. NULL on allocation failure. */
 static th_node *split_data_node(th_tree *tree, th_node *node, Py_ssize_t offset) {
-    const Py_UCS4 *text = th_node_realize_text(tree, node);
-    th_node *tail = th_tree_make_data_node(tree, node->type, text + offset, node->text_len - offset);
+    th_node *tail = data_slice(tree, node, offset, node->text_len);
     if (tail == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
     }
@@ -247,8 +264,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
         return fragment;
     }
     if (start_node == end_node && is_char_data(start_node)) {
-        const Py_UCS4 *text = th_node_realize_text(tree, start_node);
-        th_node *piece = th_tree_make_data_node(tree, start_node->type, text + start_offset, end_offset - start_offset);
+        th_node *piece = data_slice(tree, start_node, start_offset, end_offset);
         if (piece == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -269,9 +285,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
         return NULL;
     }
     if (first != NULL && is_char_data(first)) {
-        const Py_UCS4 *text = th_node_realize_text(tree, start_node);
-        th_node *piece =
-            th_tree_make_data_node(tree, start_node->type, text + start_offset, start_node->text_len - start_offset);
+        th_node *piece = data_slice(tree, start_node, start_offset, start_node->text_len);
         if (piece == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -302,8 +316,7 @@ static th_node *do_extract(th_tree *tree, th_node *start_node, Py_ssize_t start_
     }
     PyMem_Free(contained);
     if (last != NULL && is_char_data(last)) {
-        const Py_UCS4 *text = th_node_realize_text(tree, end_node);
-        th_node *piece = th_tree_make_data_node(tree, end_node->type, text, end_offset);
+        th_node *piece = data_slice(tree, end_node, 0, end_offset);
         if (piece == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -339,8 +352,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         return fragment;
     }
     if (start_node == end_node && is_char_data(start_node)) {
-        const Py_UCS4 *text = th_node_realize_text(tree, start_node);
-        th_node *piece = th_tree_make_data_node(tree, start_node->type, text + start_offset, end_offset - start_offset);
+        th_node *piece = data_slice(tree, start_node, start_offset, end_offset);
         if (piece == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -358,9 +370,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
         return NULL;
     }
     if (first != NULL && is_char_data(first)) {
-        const Py_UCS4 *text = th_node_realize_text(tree, start_node);
-        th_node *piece =
-            th_tree_make_data_node(tree, start_node->type, text + start_offset, start_node->text_len - start_offset);
+        th_node *piece = data_slice(tree, start_node, start_offset, start_node->text_len);
         if (piece == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             PyMem_Free(contained); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;           /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -390,8 +400,7 @@ static th_node *do_clone(th_tree *tree, th_node *start_node, Py_ssize_t start_of
     }
     PyMem_Free(contained);
     if (last != NULL && is_char_data(last)) {
-        const Py_UCS4 *text = th_node_realize_text(tree, end_node);
-        th_node *piece = th_tree_make_data_node(tree, end_node->type, text, end_offset);
+        th_node *piece = data_slice(tree, end_node, 0, end_offset);
         if (piece == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
         }
@@ -891,7 +900,9 @@ static PyObject *extract_or_delete(PyObject *self, int discard) {
                 store_end(range, range->start_handle, new_node, new_offset);
             }
             result = discard ? Py_NewRef(Py_None) : node_wrap(state, range->start_handle, fragment);
-        }
+        } else if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only a node allocation fails without raising */
+            PyErr_NoMemory();           /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
     }
     Py_END_CRITICAL_SECTION();
     return result;
@@ -915,7 +926,9 @@ static PyObject *range_clone_contents(PyObject *self, PyObject *Py_UNUSED(ignore
         th_node *fragment = do_clone(tree, range->start_node, range->start_offset, range->end_node, range->end_offset);
         if (fragment != NULL) {
             result = node_wrap(state, range->start_handle, fragment);
-        }
+        } else if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: only a node allocation fails without raising */
+            PyErr_NoMemory();           /* GCOVR_EXCL_LINE: allocation-failure path */
+        } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
     }
     Py_END_CRITICAL_SECTION();
     return result;

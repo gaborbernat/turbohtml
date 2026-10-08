@@ -73,6 +73,23 @@ def test_main_content_selects_article(html: str, expected: str) -> None:
     assert main_tag(html) == expected
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        pytest.param(", ", "; ", "a", id="first-has-commas"),
+        pytest.param("; ", ", ", "b", id="second-has-commas"),
+    ],
+)
+def test_main_content_counts_commas_in_wide_text(first: str, second: str, expected: str) -> None:
+    clause = "the comet warms near the Sun and releases gas \u20ac"
+    document = parse(
+        f"<div id=a><p>{first.join([clause] * 4)}</p></div><div id=b><p>{second.join([clause] * 4)}</p></div>"
+    )
+    found = document.main_content()
+    assert found is not None
+    assert found.attrs["id"] == expected
+
+
 def test_main_content_returns_element() -> None:
     found = parse(f"<article class=post><p>{PROSE}</p></article>").main_content()
     assert isinstance(found, Element)
