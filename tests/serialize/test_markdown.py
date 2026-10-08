@@ -230,6 +230,10 @@ def test_links_and_images(html: str, expected: str) -> None:
         ),
         pytest.param("<pre><code>a<br>b</code></pre>", "```\nab\n```", id="pre-code-break"),
         pytest.param("<pre><code>a<span>b</span>c</code></pre>", "```\nabc\n```", id="pre-code-inline-adjacent"),
+        pytest.param("<p>x<code> a </code>y</p>", "x`  a  `y", id="code-span-edge-spaces"),
+        pytest.param("<p><code> `a` </code></p>", "``  `a`  ``", id="code-span-edge-spaces-and-backticks"),
+        pytest.param("<p>x<code>  </code>y</p>", "x`  `y", id="code-span-only-spaces"),
+        pytest.param("<p>x<code> a</code>y</p>", "x` a`y", id="code-span-one-edge-space"),
         pytest.param(
             "First <code>blah blah<br />blah blah</code> second",
             "First `blah blah blah blah` second",
