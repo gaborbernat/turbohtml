@@ -1282,7 +1282,9 @@ static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS
     }
 }
 
-static void md_emit_code_span(md_ctx *ctx, th_node *node) {
+/* Write an element's text as a code span. block marks a code block written inline,
+   whose final newline ends its last line and draws nothing, as md_render_pre drops it. */
+static void md_emit_code_span(md_ctx *ctx, th_node *node, int block) {
     sbuf content = {0};
     md_collect_code_text(ctx->tree, node, &content, ' ');
     if (content.failed) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -1291,6 +1293,9 @@ static void md_emit_code_span(md_ctx *ctx, th_node *node) {
         return;                   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t len = content.len;
+    if (block && len > 0 && content.data[len - 1] == '\n') {
+        len--;
+    }
     if (len == 0) {
         PyMem_Free(content.data);
         return;
@@ -1842,6 +1847,15 @@ static int md_br_trailing(md_ctx *ctx, th_node *node) {
     }
 }
 
+/* Whether the nearest block around a node is a heading. */
+static int md_in_heading_element(th_node *node) {
+    th_node *block = node->parent;
+    while (!is_md_block(block->ns == TH_NS_HTML ? block->atom : TH_TAG_UNKNOWN)) {
+        block = block->parent;
+    }
+    return block->atom >= TH_TAG_H1 && block->atom <= TH_TAG_H6;
+}
+
 /* Render an element (or content node) by its tag, the common path shared by the
    plain walk and the google_doc CSS wrapper. Text is handled by the caller. */
 static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
@@ -1880,7 +1894,7 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
     case TH_TAG_CODE:
     case TH_TAG_KBD:
     case TH_TAG_SAMP:
-        md_emit_code_span(ctx, node);
+        md_emit_code_span(ctx, node, 0);
         return;
     case TH_TAG_A:
         md_enter_link(ctx, node);
@@ -1889,6 +1903,13 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
         md_emit_image(ctx, node);
         return;
     case TH_TAG_BR:
+        if (ctx->in_heading || ((ctx->inline_only || ctx->in_cell) && md_in_heading_element(node))) {
+            /* a hard break ends the line, but an ATX heading is one line and a
+               setext heading joins its lines, so the break reads as a space; a heading
+               flattened into link text or a cell keeps that reading */
+            ctx->space_pending = 1;
+            return;
+        }
         if (ctx->in_cell) {
             /* a row is one line, so the markdown spellings of a break cannot be used
                here: their marker would survive the collapse to a row and the break
@@ -1899,12 +1920,6 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
             } else {
                 ctx->space_pending = 1;
             }
-            return;
-        }
-        if (ctx->in_heading) {
-            /* a hard break ends the line, but an ATX heading is one line and a
-               setext heading joins its lines, so the break reads as a space */
-            ctx->space_pending = 1;
             return;
         }
         if (md_br_trailing(ctx, node)) {
@@ -1923,13 +1938,14 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
         return;
     }
     if (is_md_block(atom)) {
-        if (!ctx->inline_only && !ctx->in_heading) {
-            if (!ctx->in_cell) {
-                /* the content after the block belongs to a new block, so note where it ends;
-                   a cell flattens its blocks onto its one line instead */
-                md_push(ctx, node, MD_WALK_NONE, MD_LEAVE_BLOCK_END);
-            }
+        if (!ctx->inline_only && !ctx->in_heading && !ctx->in_cell) {
+            /* the content after the block belongs to a new block, so note where it ends */
+            md_push(ctx, node, MD_WALK_NONE, MD_LEAVE_BLOCK_END);
             md_render_block(ctx, node);
+            return;
+        }
+        if (ctx->in_cell && !ctx->inline_only && md_is_cell_block(atom)) {
+            md_render_block(ctx, node); /* a nested table or list keeps its HTML or flattens item by item */
             return;
         }
         if (ctx->in_cell && opt->cell_blocks == TH_MD_CELL_TEXT && md_is_cell_block(atom)) {
@@ -1937,10 +1953,21 @@ static void md_render_inline_tag(md_ctx *ctx, th_node *node) {
             md_enter_cell_flat(ctx, node, -1);
             return;
         }
-        /* inside link text or a heading a block cannot open its own line (a blank
-           line would split the CommonMark link, and a heading is one line), so it
-           flattens to inline; its boundary still reads as a space so adjacent words
-           never fuse */
+        /* inside link text, a heading or a table cell a block cannot open its own line (a
+           blank line would split the CommonMark link, a heading is one line, and a GFM
+           cell holds inline content, 4.10), so it flattens to inline; its boundary still
+           reads as a space so adjacent words never fuse */
+        ctx->space_pending = 1;
+        if (atom == TH_TAG_PRE) {
+            md_emit_code_span(ctx, node, 1); /* a code span is the inline form of a code block (CommonMark 6.1) */
+            ctx->space_pending = 1;
+            return;
+        }
+        md_push(ctx, node, MD_WALK_INLINE, MD_LEAVE_SPACE);
+        return;
+    }
+    if (atom == TH_TAG_TR || atom == TH_TAG_TD || atom == TH_TAG_TH) {
+        /* only a table flattened into a line reaches its rows here, and its cells must not fuse */
         ctx->space_pending = 1;
         md_push(ctx, node, MD_WALK_INLINE, MD_LEAVE_SPACE);
         return;
@@ -1996,7 +2023,7 @@ static void md_render_google(md_ctx *ctx, th_node *node) {
     if (fixed) {
         /* a fixed-width run renders as an inline code span; its subtree is consumed
            as text, so a nested fixed span is never reached and needs no dedup */
-        md_emit_code_span(ctx, node);
+        md_emit_code_span(ctx, node, 0);
     } else {
         md_render_inline_tag(ctx, node);
     }
