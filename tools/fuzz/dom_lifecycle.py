@@ -130,9 +130,15 @@ def run_dom_lifecycle(program: bytes) -> tuple[tuple[LifecycleStep, ...], tuple[
     return tuple(machine.trace), tuple("" if node is None else node.serialize() for node in machine.nodes)
 
 
-def dom_lifecycle_race(seeds: Sequence[str]) -> list[tuple[LifecycleStep, ...]]:
-    """Run every seed in its own thread at once, so the programs contend on the module and interpreter state."""
-    machines: Final = [_Machine(_instructions(bytes.fromhex(seed))) for seed in seeds]
+def dom_lifecycle_race(seeds: Sequence[str], *, shared: bool = False) -> list[tuple[LifecycleStep, ...]]:
+    """
+    Run every seed in its own thread at once, so the programs contend on the module and interpreter state.
+
+    With ``shared`` set, every program reads and writes one set of node registers, so the threads also edit, move and
+    walk the same trees.
+    """
+    nodes: Final[list[Node | None] | None] = [None] * _SLOTS if shared else None
+    machines: Final = [_Machine(_instructions(bytes.fromhex(seed)), nodes) for seed in seeds]
     start: Final = threading.Barrier(len(machines))
 
     def run(machine: _Machine) -> None:
@@ -162,9 +168,9 @@ class _UnwindError(Exception):
 class _Machine:
     """Typed register rings over one program; operands pick slots, so overwriting a slot drops its reference."""
 
-    def __init__(self, code: list[tuple[int, int, int, int]]) -> None:
+    def __init__(self, code: list[tuple[int, int, int, int]], nodes: list[Node | None] | None = None) -> None:
         self.code: Final = code
-        self.nodes: Final[list[Node | None]] = [None] * _SLOTS
+        self.nodes: Final[list[Node | None]] = [None] * _SLOTS if nodes is None else nodes
         self.walkers: Final[list[TreeWalker | NodeIterator | Iterator[object] | None]] = [None] * _SLOTS
         self.parsers: Final[list[Tokenizer | IncrementalParser | None]] = [None] * _SLOTS
         self.observers: Final[list[MutationObserver | None]] = [None] * _SLOTS
