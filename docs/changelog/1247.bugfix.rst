@@ -1,0 +1,2 @@
+Raise ``MemoryError`` when ``to_markdown`` fails to allocate memory inside a table cell, a nested list or quote, or a
+converter.
