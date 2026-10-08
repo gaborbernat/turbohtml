@@ -132,6 +132,13 @@ static void run_builtins(long *cases) {
     *cases += 2;
 }
 
+#ifdef JM_FUZZ
+/* libFuzzer entry point: build with -DJM_FUZZ -fsanitize=fuzzer,address,undefined. */
+int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
+    run_bytes(data, size);
+    return 0;
+}
+#else
 int main(int argc, char **argv) {
     long files = 0;
     long minified = 0;
@@ -142,13 +149,6 @@ int main(int argc, char **argv) {
     }
     printf("harness: %ld builtins + %ld files (%ld minified, %ld parse-failed) — no sanitizer abort\n",
            builtins, files, minified, files - minified);
-    return 0;
-}
-
-#ifdef JM_FUZZ
-/* libFuzzer entry point: build with -DJM_FUZZ -fsanitize=fuzzer,address,undefined. */
-int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
-    run_bytes(data, size);
     return 0;
 }
 #endif
