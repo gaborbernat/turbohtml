@@ -606,8 +606,7 @@ _EMPHASIS: Final = frozenset({"strong", "em", "s"})
 _BLOCKS: Final = frozenset({"p", "ul", "ol", "table"})
 _BOUNDARY: Final[_Meaning] = ("#block", (), ())
 _HEADINGS: Final = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
-# WHATWG Rendering 15.3.1 draws none of these (a template's content is a separate fragment); script and style hold code
-# in every namespace
+# WHATWG Rendering 15.3.1 draws none of these; script and style hold code in every namespace
 _HIDDEN: Final = frozenset({
     "area",
     "base",
@@ -622,6 +621,7 @@ _HIDDEN: Final = frozenset({
     "rp",
     "script",
     "style",
+    "template",
     "title",
 })
 # the WHATWG content models of the containers whose Markdown syntax can hold nothing else (4.4.5-4.4.8, 4.9)
