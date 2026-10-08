@@ -118,8 +118,10 @@ static Py_UCS4 cp(const xml_parser *parser, Py_ssize_t index) {
 }
 
 /* Record the first well-formedness error: resolve its 1-based line / 0-based
-   column by scanning to `at`, push it, and latch so the parse unwinds. */
-static void record(xml_parser *parser, const char *code, Py_ssize_t at) {
+   column by scanning to `at`, push it, and latch so the parse unwinds. Out of line: it
+   runs at most once a parse, and inlined at every error site it cost parse-xml 82,000
+   instructions a call by pushing consume_text out of the parse loop. */
+static TH_NOINLINE void record(xml_parser *parser, const char *code, Py_ssize_t at) {
     Py_ssize_t line = 1;
     Py_ssize_t column = 0;
     for (Py_ssize_t index = 0; index < at; index++) {

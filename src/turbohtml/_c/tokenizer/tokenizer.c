@@ -749,9 +749,7 @@ PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args)
         Py_DECREF(tuple);
     }
     th_tok_free(sm);
-    /* GCOVR_EXCL_BR_START: the only step error and the only dropped parse error are out-of-memory conditions */
-    if (step == TH_STEP_ERROR || errors.failed) {
-        /* GCOVR_EXCL_BR_STOP */
+    if (step == TH_STEP_ERROR || errors.failed) { /* GCOVR_EXCL_BR_LINE: both mean an allocation failed */
         Py_DECREF(out);              /* GCOVR_EXCL_LINE: allocation-failure path */
         th_error_sink_free(&errors); /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory();     /* GCOVR_EXCL_LINE: allocation-failure path */
