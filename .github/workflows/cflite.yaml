@@ -1,0 +1,166 @@
+name: 🧬 ClusterFuzzLite
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/cflite.yaml"
+      - "meson.build"
+      - "meson.options"
+      - "src/turbohtml/_c/**"
+      - "tools/fuzz/**"
+      - "tools/js_minify_harness.c"
+  schedule:
+    - cron: "0 1 * * *" # daily batch, then prune and coverage
+concurrency:
+  group: cflite-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+# tools/fuzz/cflite.py runs the ClusterFuzzLite images and writes their logs, crashes and corpus to files under the
+# workspace, because a crash report carries short inputs in the clear and this repository's console logs and workflow
+# artifacts are public. Corpus, crashes and logs go to the private repository named by vars.CFLITE_STORAGE_REPO,
+# written with secrets.CFLITE_STORAGE_TOKEN; without that variable the storage jobs skip. Pull request findings leave
+# the runner only encrypted to vars.FUZZ_AGE_RECIPIENT, as in fuzz.yaml.
+jobs:
+  code-change:
+    name: 🧬 PR fuzzing (${{ matrix.sanitizer }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: ["address", "undefined"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # CFLite diffs against the base branch to pick the affected fuzzers
+          persist-credentials: false
+      - name: 🧬 Fuzz the change for 600 s
+        run: |
+          python3 tools/fuzz/cflite.py --mode code-change --sanitizer "${SANITIZER}" --seconds 600 \
+            --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite" --base-ref "${BASE_REF}"
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+          BASE_REF: ${{ github.base_ref }}
+      - name: 🔐 Encrypt findings
+        if: failure() && vars.FUZZ_AGE_RECIPIENT != ''
+        run: |
+          curl -sSfL -o "${RUNNER_TEMP}/age.tar.gz" \
+            "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-amd64.tar.gz"
+          echo "${AGE_SHA256}  ${RUNNER_TEMP}/age.tar.gz" | sha256sum --check --strict
+          tar -xzf "${RUNNER_TEMP}/age.tar.gz" -C "${RUNNER_TEMP}" age/age
+          mkdir -p "${RUNNER_TEMP}/cflite-findings"
+          tar -czf - -C "${RUNNER_TEMP}/cflite" --ignore-failed-read logs out/artifacts cifuzz-sarif \
+            | "${RUNNER_TEMP}/age/age" --recipient "${RECIPIENT}" \
+              --output "${RUNNER_TEMP}/cflite-findings/cflite-${SANITIZER}.tar.gz.age"
+        env:
+          AGE_VERSION: v1.3.2
+          AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+          RECIPIENT: ${{ vars.FUZZ_AGE_RECIPIENT }}
+          SANITIZER: ${{ matrix.sanitizer }}
+      - name: 📤 Upload encrypted findings
+        if: failure() && vars.FUZZ_AGE_RECIPIENT != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cflite-findings-${{ matrix.sanitizer }}
+          path: ${{ runner.temp }}/cflite-findings/*.age
+          if-no-files-found: ignore
+          retention-days: 14
+  batch:
+    name: 🧬 batch fuzzing (${{ matrix.sanitizer }})
+    if: github.event_name != 'pull_request' && vars.CFLITE_STORAGE_REPO != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write # SARIF goes to code scanning, whose alert list needs write access to read
+    strategy:
+      fail-fast: false
+      max-parallel: 1 # both sanitizers grow one corpus in the storage repository
+      matrix:
+        sanitizer: ["address", "undefined"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 📥 Check out the storage repository
+        run: bash tools/fuzz/cflite_storage.sh clone
+        env:
+          STORAGE_REPO: ${{ vars.CFLITE_STORAGE_REPO }}
+          STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
+      - name: 🧬 Fuzz for 3600 s
+        run: |
+          python3 tools/fuzz/cflite.py --mode batch --sanitizer "${SANITIZER}" --seconds 3600 \
+            --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite"
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+      - name: 📤 Store corpus, crashes and logs
+        if: success() || failure()
+        run: bash tools/fuzz/cflite_storage.sh push "batch ${SANITIZER}"
+        env:
+          STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
+          SANITIZER: ${{ matrix.sanitizer }}
+      - name: 🛡️ Upload SARIF
+        if: (success() || failure()) && hashFiles(format('{0}/cflite/cifuzz-sarif/*.sarif', runner.temp)) != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ runner.temp }}/cflite/cifuzz-sarif
+          category: cflite-${{ matrix.sanitizer }}
+  prune:
+    name: ✂️ corpus pruning
+    needs: batch
+    if: (success() || failure()) && github.event_name != 'pull_request' && vars.CFLITE_STORAGE_REPO != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 📥 Check out the storage repository
+        run: bash tools/fuzz/cflite_storage.sh clone
+        env:
+          STORAGE_REPO: ${{ vars.CFLITE_STORAGE_REPO }}
+          STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
+      - name: ✂️ Prune the corpus
+        run: |
+          python3 tools/fuzz/cflite.py --mode prune --sanitizer address --seconds 600 \
+            --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite"
+      - name: 📤 Store the pruned corpus and logs
+        if: success() || failure()
+        run: bash tools/fuzz/cflite_storage.sh push "prune"
+        env:
+          STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
+  coverage:
+    name: 📊 coverage and reachability floors
+    needs: prune
+    if: (success() || failure()) && github.event_name != 'pull_request' && vars.CFLITE_STORAGE_REPO != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 📥 Check out the storage repository
+        run: bash tools/fuzz/cflite_storage.sh clone
+        env:
+          STORAGE_REPO: ${{ vars.CFLITE_STORAGE_REPO }}
+          STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
+      - name: 📊 Measure coverage over the stored corpus
+        run: |
+          python3 tools/fuzz/cflite.py --mode coverage --sanitizer coverage --seconds 600 \
+            --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite"
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - name: 🚧 Check reachability floors
+        # each Atheris target's callback and Python-implemented exports must execute at least one line
+        run: uvx --with tox-uv tox run -e fuzz-reachability -- --coverage-dir "${RUNNER_TEMP}/cflite/build-out"
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+      - name: 📤 Store the coverage logs
+        if: success() || failure()
+        run: bash tools/fuzz/cflite_storage.sh push "coverage"
+        env:
+          STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}

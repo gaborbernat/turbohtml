@@ -56,6 +56,34 @@ def test_atheris_runtime_build_keeps_archive(
     )
 
 
+@pytest.mark.parametrize(
+    ("members", "deleted"),
+    [
+        pytest.param("asan_rtl.cpp.o\nasan_preinit.cpp.o\n", ["asan_preinit.cpp.o"], id="preinit"),
+        pytest.param("ubsan_handlers.cpp.o\n", None, id="no-preinit"),
+    ],
+)
+def test_atheris_runtime_merges_sanitizer_without_preinit(
+    mocker: MockerFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, members: str, deleted: list[str] | None
+) -> None:
+    archive = tmp_path / "wheel-runtime.a"
+    archive.write_bytes(b"original archive")
+    sanitizer = tmp_path / "libclang_rt.asan.a"
+    sanitizer.write_bytes(b"sanitizer archive")
+    monkeypatch.delenv("AR", raising=False)
+    output = tmp_path / "built"
+    run = mocker.patch("subprocess.run", autospec=True, return_value=mocker.MagicMock(stdout=members))
+    assert main(["--archive", str(archive), "--output", str(output), "--sanitizer", str(sanitizer)]) == 0
+    commands = [call.args[0] for call in run.call_args_list]
+    merged = str(output / "sanitizer.a")
+    assert (sanitizer.read_bytes(), (output / "sanitizer.a").read_bytes(), commands[2:-1], commands[-1][6:9]) == (
+        b"sanitizer archive",
+        b"sanitizer archive",
+        [["ar", "t", merged], *([] if deleted is None else [["ar", "d", merged, *deleted]])],
+        [str(output / "runtime.a"), merged, "-Wl,--no-whole-archive"],
+    )
+
+
 def test_atheris_runtime_build_propagates_compiler_failure(mocker: MockerFixture, tmp_path: Path) -> None:
     archive = tmp_path / "wheel-runtime.a"
     archive.write_bytes(b"original archive")
