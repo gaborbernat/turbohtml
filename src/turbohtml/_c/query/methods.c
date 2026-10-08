@@ -546,18 +546,28 @@ static Py_ssize_t index_root_group(th_node_map *groups, th_node *root, Py_ssize_
     return 0;
 }
 
+/* Only a document root reads the element index, so only those are prebuilt. Out of line:
+   inlined, the per-root scan lowered GCC's estimate of the selection loop that follows. */
+static TH_NOINLINE int select_many_prebuild(PyObject *roots, module_state *state, PyObject *selector) {
+    for (Py_ssize_t index = 0; index < PyList_GET_SIZE(roots); index++) {
+        PyObject *root = PyList_GET_ITEM(roots, index);
+        if (Py_IS_TYPE(root, (PyTypeObject *)state->document_type) && index_prebuild(root, selector) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 PyObject *turbohtml_select_many(PyObject *module, PyObject *args) {
     PyObject *roots_obj;
     PyObject *selector;
     if (!PyArg_ParseTuple(args, "O!U:_select_many", &PyList_Type, &roots_obj, &selector)) {
         return NULL;
     }
-    Py_ssize_t count = PyList_GET_SIZE(roots_obj);
-    for (Py_ssize_t index = 0; index < count; index++) {
-        if (index_prebuild(PyList_GET_ITEM(roots_obj, index), selector) < 0) {
-            return NULL;
-        }
+    if (select_many_prebuild(roots_obj, PyModule_GetState(module), selector) < 0) {
+        return NULL;
     }
+    Py_ssize_t count = PyList_GET_SIZE(roots_obj);
     PyObject *out = PyList_New(0);
     if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;   /* GCOVR_EXCL_LINE */
