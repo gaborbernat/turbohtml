@@ -1,0 +1,2 @@
+:class:`~turbohtml.cssom.StyleSheet` and :class:`~turbohtml.cssom.StyleDeclaration` no longer read an escaped slash as
+the start of a comment.

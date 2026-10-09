@@ -592,6 +592,25 @@ def test_computed_style_on_detached_element_uses_inline_and_initials() -> None:
     assert style["display"] == "inline"
 
 
+_ESCAPED_COMMENT_STARTS: Final[list[ParameterSet]] = [
+    pytest.param(r"--x: a\/*b; color: red", (("--x", r"a\/*b"), ("color", "red")), id="unclosed"),
+    pytest.param(r"--x: a\/*b*/c; color: red", (("--x", r"a\/*b*/c"), ("color", "red")), id="closed"),
+    pytest.param("--x: a\\", (("--x", "a\\"),), id="backslash-at-end"),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_COMMENT_STARTS)
+def test_parse_declarations_keeps_escaped_comment_start(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    declaration = StyleDeclaration.parse(text)
+    assert tuple((name, declaration[name]) for name in declaration) == expected
+
+
+@pytest.mark.parametrize(("text", "expected"), _ESCAPED_COMMENT_STARTS)
+def test_stylesheet_keeps_escaped_comment_start(text: str, expected: tuple[tuple[str, str], ...]) -> None:
+    declaration = StyleSheet(f"p {{ {text}").rules[0].style
+    assert tuple((name, declaration[name]) for name in declaration) == expected
+
+
 def test_comment_and_escape_edge_cases() -> None:
     assert StyleDeclaration.parse('content: "a\\"b"').get("content") == '"a\\"b"'
     assert StyleDeclaration.parse('content: "a\\').get("content") == '"a\\'
