@@ -2064,6 +2064,22 @@ static int md_element_lead(md_ctx *ctx, th_node *node, uint16_t atom) {
     return md_leads_with_inline(ctx, node);
 }
 
+/* Whether an inline child at a run start renders without opening a run line: an inline
+   element that writes nothing (an empty emphasis, a link placeholder) opens no run, and
+   an inline wrapper whose first content sits in a block (a paragraph, a nested list,
+   quote or table) has no inline run of its own; opening one would leave an empty line
+   that reads as a blank line and splits the surrounding item, so the inner block opens
+   its own line instead. A link always leads inline, and a code span flattens its blocks
+   into the run. Kept out of line so md_block_child keeps its shape on the common path. */
+static TH_NOINLINE int md_opens_no_run(md_ctx *ctx, th_node *child, uint16_t atom) {
+    if (ctx->opt->converters != NULL) {
+        return 0;
+    }
+    int lead = md_element_lead(ctx, child, atom);
+    return lead == MD_LEAD_NOTHING ||
+           (lead != MD_LEAD_INLINE && atom != TH_TAG_CODE && atom != TH_TAG_KBD && atom != TH_TAG_SAMP);
+}
+
 /* Whether a list item lays out as more than one paragraph, so it renders as a
    CommonMark loose item (a blank line between its blocks): a leading text/inline
    run plus a paragraph block, or two paragraph blocks. A nested list, blockquote
@@ -2145,21 +2161,12 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
         if (only_ws) {
             return;
         }
-        if (child->type == TH_NODE_ELEMENT && ctx->opt->converters == NULL &&
-            (child->first_child == NULL || child->first_child->type == TH_NODE_ELEMENT)) {
-            /* an inline element that writes nothing (an empty emphasis, a link
-               placeholder) opens no run, and an inline wrapper whose first content sits in
-               a block (a paragraph, a nested list, quote or table) has no inline run of its
-               own: opening one would leave an empty line that reads as a blank line and
-               splits the surrounding item, so the inner block opens its own line instead.
-               The element test keeps the scan off the common run that starts with text; a
-               link always leads inline, and a code span flattens its blocks into the run. */
-            int lead = md_element_lead(ctx, child, atom);
-            if (lead == MD_LEAD_NOTHING ||
-                (lead != MD_LEAD_INLINE && atom != TH_TAG_CODE && atom != TH_TAG_KBD && atom != TH_TAG_SAMP)) {
-                md_render_inline(ctx, child);
-                return;
-            }
+        /* the element test keeps the scan off the common run that starts with text */
+        if (child->type == TH_NODE_ELEMENT &&
+            (child->first_child == NULL || child->first_child->type == TH_NODE_ELEMENT) &&
+            md_opens_no_run(ctx, child, atom)) {
+            md_render_inline(ctx, child);
+            return;
         }
         md_block_line(ctx, ctx->tight ? 0 : 1);
         *in_run = 1;
@@ -2602,7 +2609,7 @@ static int md_list_ordered(md_ctx *ctx, th_node *node) {
    (CommonMark 5.2). The marker would then read as paragraph text, or a lone `-` as a
    setext underline (4.3). Only an item that is the list's first element child is
    looked at; anything before it renders as a block of its own. */
-static int md_list_cannot_interrupt(md_ctx *ctx, th_node *list, int ordered, Py_ssize_t number) {
+static TH_NOINLINE int md_list_cannot_interrupt(md_ctx *ctx, th_node *list, int ordered, Py_ssize_t number) {
     th_node *item = list->first_child;
     while (item != NULL && item->type != TH_NODE_ELEMENT) {
         item = item->next_sibling;
