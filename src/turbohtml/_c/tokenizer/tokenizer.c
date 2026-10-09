@@ -156,20 +156,22 @@ static PyObject *tokenizer_new(PyTypeObject *type, PyObject *args, PyObject *kwd
                                      &capture_attributes)) {
         return NULL;
     }
+    /* the state machine comes first: tokenizer_dealloc frees it, so the object never exists without one */
+    th_tokenizer *sm = th_tok_new();
+    if (sm == NULL) {            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     TokenizerObject *self = (TokenizerObject *)type->tp_alloc(type, 0);
-    if (self == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (self == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        th_tok_free(sm); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     self->source = NULL;
     self->closed = 0;
     self->line = 1;
     self->col = 0;
-    self->sm = th_tok_new();
-    if (self->sm == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        Py_DECREF(self);         /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
-    }
-    th_tok_set_options(self->sm, resolve_references, capture_source, capture_attributes);
+    self->sm = sm;
+    th_tok_set_options(sm, resolve_references, capture_source, capture_attributes);
     return (PyObject *)self;
 }
 
@@ -747,10 +749,10 @@ PyObject *turbohtml_tokenize_states(PyObject *Py_UNUSED(module), PyObject *args)
         Py_DECREF(tuple);
     }
     th_tok_free(sm);
-    if (step == TH_STEP_ERROR) {     /* GCOVR_EXCL_BR_LINE: the only step error is an out-of-memory condition */
-        Py_DECREF(out);              /* GCOVR_EXCL_LINE: allocation-failure path */
-        th_error_sink_free(&errors); /* GCOVR_EXCL_LINE: allocation-failure path */
-        return PyErr_NoMemory();     /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (step == TH_STEP_ERROR || th_error_sink_failed(&errors)) { /* GCOVR_EXCL_BR_LINE: an allocation failed */
+        Py_DECREF(out);                                           /* GCOVR_EXCL_LINE: allocation-failure path */
+        th_error_sink_free(&errors);                              /* GCOVR_EXCL_LINE: allocation-failure path */
+        return PyErr_NoMemory();                                  /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     th_error_sink preprocessing = {0};
     th_input_stream_errors(PyUnicode_KIND(text), PyUnicode_DATA(text), PyUnicode_GET_LENGTH(text), &preprocessing);

@@ -532,12 +532,16 @@ TH_NODE_API(static, PyObject *, document_get_errors, (PyObject * self, void *clo
     /* the first read folds the preprocessing errors into the tree, so two threads reading
        Document.errors at once must not both do it; a streamed or hand-built tree kept no
        source, and its input raises no error to find */
+    int failed = 0;
     Py_BEGIN_CRITICAL_SECTION(handle);
     if (PyUnicode_Check(handle->source)) {
-        th_tree_ensure_input_errors(tree, PyUnicode_KIND(handle->source), PyUnicode_DATA(handle->source),
-                                    PyUnicode_GET_LENGTH(handle->source));
+        failed = th_tree_ensure_input_errors(tree, PyUnicode_KIND(handle->source), PyUnicode_DATA(handle->source),
+                                             PyUnicode_GET_LENGTH(handle->source));
     }
     Py_END_CRITICAL_SECTION();
+    if (failed < 0) {            /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     Py_ssize_t count;
     const th_parse_error *errors = th_tree_errors(tree, &count);
     PyObject *list = PyList_New(count);
@@ -659,7 +663,13 @@ static int strict_raise(module_state *state, th_tree *tree, int strict, PyObject
         return 0;
     }
     if (source != NULL) {
-        th_tree_ensure_input_errors(tree, PyUnicode_KIND(source), PyUnicode_DATA(source), PyUnicode_GET_LENGTH(source));
+        int failed = th_tree_ensure_input_errors(tree, PyUnicode_KIND(source), PyUnicode_DATA(source),
+                                                 PyUnicode_GET_LENGTH(source));
+        if (failed < 0) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            th_tree_free(tree); /* GCOVR_EXCL_LINE: allocation-failure path */
+            PyErr_NoMemory();   /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
     }
     Py_ssize_t count;
     const th_parse_error *errors = th_tree_errors(tree, &count);
