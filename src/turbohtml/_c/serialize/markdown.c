@@ -1171,7 +1171,7 @@ static inline void md_code_boundary(sbuf *out, Py_UCS4 separator, Py_UCS4 first)
    block (separator '\n') a block edge and a <br> each end the line, as CSS lays them
    out, so a block's edge adds a newline unless the line already ended; in a span
    (separator ' ') both read as one space. */
-static void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS4 separator) {
+static TH_NOINLINE void md_collect_code_text(th_tree *tree, th_node *root, sbuf *out, Py_UCS4 separator) {
     int boundary = 0;
     th_node *parent = root;
     th_node *child = root->first_child;
