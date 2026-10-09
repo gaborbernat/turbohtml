@@ -26,9 +26,31 @@
 #include "query/xpath/internal.h"
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
+
+/* Inline every number_attr call: do_number's size otherwise tips the inliner into outlining the format lookups on the
+   numbering hot path. The coverage build compiles at -O0, where a forced copy in each caller would split its branch
+   counts, so it keeps one copy. */
+#if defined(_MSC_VER)
+#define XSLT_FORCEINLINE __forceinline
+#elif defined(__OPTIMIZE__)
+#define XSLT_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define XSLT_FORCEINLINE inline
+#endif
+
+#ifndef TH_NOINLINE
+#if defined(_MSC_VER)
+#define TH_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define TH_NOINLINE __attribute__((noinline))
+#else
+#define TH_NOINLINE
+#endif
+#endif
 
 static PyObject *make_str(const Py_UCS4 *data, Py_ssize_t len) {
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, data, len);
@@ -894,8 +916,8 @@ static const Py_UCS4 *attr_lookup(th_tree *tree, const th_node *node, const char
     return index < 0 ? NULL : attribute_value(&node->attrs[index], out_len);
 }
 
-static const Py_UCS4 *number_attr(const engine *eng, const th_node *node, uint32_t atom, const char *name,
-                                  Py_ssize_t *out_len) {
+XSLT_FORCEINLINE static const Py_UCS4 *number_attr(const engine *eng, const th_node *node, uint32_t atom,
+                                                   const char *name, Py_ssize_t *out_len) {
     if (node->ns != TH_NS_HTML) {
         return attr_lookup(eng->sheet_tree, node, name, (Py_ssize_t)strlen(name), out_len);
     }
@@ -2945,12 +2967,10 @@ static int format_number_token(xb *out, long value, Py_UCS4 style) {
     return xb_add_ascii(out, buffer);
 }
 
-/* Emit value as decimal digits, left-padded to min_width and, when a grouping separator and a
+/* Emit a run of decimal digits left-padded to min_width and, when a grouping separator and a
    positive grouping size are given (section 7.7.1), split into groups from the right. */
-static int emit_decimal(xb *out, long value, Py_ssize_t min_width, const Py_UCS4 *gsep, Py_ssize_t gsep_len,
-                        long gsize) {
-    char raw[32];
-    int raw_len = snprintf(raw, sizeof(raw), "%ld", value);
+static int emit_digits(xb *out, const char *raw, Py_ssize_t raw_len, Py_ssize_t min_width, const Py_UCS4 *gsep,
+                       Py_ssize_t gsep_len, long gsize) {
     Py_ssize_t pad = min_width > raw_len ? min_width - raw_len : 0;
     Py_ssize_t total = raw_len + pad;
     int grouped = gsize >= 1 && gsep_len > 0;
@@ -2966,6 +2986,13 @@ static int emit_decimal(xb *out, long value, Py_ssize_t min_width, const Py_UCS4
         }
     }
     return 0;
+}
+
+static int emit_decimal(xb *out, long value, Py_ssize_t min_width, const Py_UCS4 *gsep, Py_ssize_t gsep_len,
+                        long gsize) {
+    char raw[32];
+    int raw_len = snprintf(raw, sizeof(raw), "%ld", value);
+    return emit_digits(out, raw, raw_len, min_width, gsep, gsep_len, gsize);
 }
 
 /* Format one number with a format token: a token beginning with a digit is decimal (its leading
@@ -3667,6 +3694,66 @@ static int explicit_any_number(engine *eng, const Py_UCS4 *count_pattern, const 
     }
 }
 
+/* XSLT 1.0 erratum E24 makes a value that is NaN, infinite or below 0.5 a recoverable error, recovered by inserting
+   its string value. A finite value too large for a long still formats, as the exact integer the double holds; past
+   their range, the alphabetic and roman tokens format with the token "1" (XSLT 2.0 section 12.3). Kept out of line so
+   the in-range path of do_number compiles as before. */
+TH_NOINLINE static int emit_out_of_range_value(engine *eng, th_node *instruction, th_node *out_parent, double value,
+                                               double rounded) {
+    if (!(value >= 0.5) || value > DBL_MAX) {
+        const xp_result number = {.kind = XP_NUMBER, .number = value};
+        Py_ssize_t text_len = 0;
+        Py_UCS4 *text = to_string(eng->src_tree, &number, &text_len);
+        if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
+            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+        }
+        int rc = emit_text(eng, out_parent, text, text_len);
+        PyMem_Free(text);
+        return rc;
+    }
+    char digits[DBL_MAX_10_EXP + 2];
+    int digits_len = snprintf(digits, sizeof(digits), "%.0f", rounded);
+    Py_ssize_t format_len = 0;
+    const Py_UCS4 *format = number_attr(eng, instruction, eng->number_attrs.format, "format", &format_len);
+    Py_ssize_t gsep_len = 0;
+    const Py_UCS4 *gsep =
+        number_attr(eng, instruction, eng->number_attrs.grouping_separator, "grouping-separator", &gsep_len);
+    Py_ssize_t gsize_len = 0;
+    const Py_UCS4 *gsize_text =
+        number_attr(eng, instruction, eng->number_attrs.grouping_size, "grouping-size", &gsize_len);
+    long gsize = gsize_text != NULL ? parse_grouping_size(gsize_text, gsize_len) : 0;
+    /* A single value takes the format's prefix, its first token and its suffix (section 7.7.1). */
+    Py_ssize_t token_start = 0;
+    while (token_start < format_len && !alnum_cp(format[token_start])) {
+        token_start++;
+    }
+    Py_ssize_t width = 0;
+    while (token_start + width < format_len && format[token_start + width] >= '0' &&
+           format[token_start + width] <= '9') {
+        width++;
+    }
+    Py_ssize_t token_end = token_start;
+    while (token_end < format_len && alnum_cp(format[token_end])) {
+        token_end++;
+    }
+    Py_ssize_t suffix_start = format_len;
+    while (suffix_start > token_end && !alnum_cp(format[suffix_start - 1])) {
+        suffix_start--;
+    }
+    xb buffer = {0};
+    /* GCOVR_EXCL_BR_START: allocation failure */
+    if (xb_add(&buffer, format, token_start) < 0 ||
+        emit_digits(&buffer, digits, digits_len, width, gsep, gsep_len, gsize) < 0 ||
+        xb_add(&buffer, format + suffix_start, format_len - suffix_start) < 0) {
+        xb_free(&buffer);                  /* GCOVR_EXCL_LINE */
+        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    int rc = emit_text(eng, out_parent, buffer.data, buffer.len);
+    xb_free(&buffer);
+    return rc;
+}
+
 static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
     long values[64];
     Py_ssize_t nvalues = 0;
@@ -3690,8 +3777,14 @@ static int do_number(engine *eng, th_node *instruction, th_node *out_parent) {
         if (status < 0) {
             return fail_py(eng);
         }
-        values[nvalues++] = (long)floor(to_number(eng->src_tree, &result) + 0.5);
+        double value = to_number(eng->src_tree, &result);
         xp_result_free(&result);
+        double rounded = floor(value + 0.5);
+        /* -(double)LONG_MIN is the first double past LONG_MAX, so the cast is defined below it; NaN fails both tests */
+        if (!(value >= 0.5 && rounded < -(double)LONG_MIN)) {
+            return emit_out_of_range_value(eng, instruction, out_parent, value, rounded);
+        }
+        values[nvalues++] = (long)rounded;
     } else if (xp_is_attribute(eng->cur_attr)) {
         values[nvalues++] = 1;
     } else {
