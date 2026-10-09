@@ -2541,6 +2541,13 @@ static void md_list_child(md_ctx *ctx, Py_ssize_t owner, th_node *child) {
    block leaves them, so nothing a reader sees separates what came before from what
    follows. offset sits mid-line, right after the last character written there. */
 static int md_blank_since(md_ctx *ctx, Py_ssize_t offset) {
+    /* text last on the output answers at once: a line prefix holds only spaces and `>` */
+    if (ctx->out.len > offset) {
+        Py_UCS4 last = ctx->out.data[ctx->out.len - 1];
+        if (last != '\n' && last != ' ' && last != '>') {
+            return 0;
+        }
+    }
     Py_ssize_t column = ctx->prefix.len;
     for (Py_ssize_t index = offset; index < ctx->out.len; index++) {
         if (ctx->out.data[index] == '\n') {
