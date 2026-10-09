@@ -30,7 +30,7 @@ from typing_extensions import override
 from turbohtml import Element, Namespace, Node, Text, parse_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 MarkdownRecord = tuple[str, str, str, tuple[tuple[str, str], ...], int]
 _Meaning = tuple[str, tuple[tuple[str, str], ...], tuple["_Meaning", ...]]
@@ -124,12 +124,12 @@ def _tree(node: Element) -> _TreeNode:
 def _flow(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     output: Final[list[_Meaning]] = []
     inline: Final[list[_Meaning]] = []
-    for record in (*records, _BOUNDARY):
+    for record in (*_spread(records), _BOUNDARY):
         if record[0] in _FLOW_INLINE:
             inline.append(record)
             continue
         # a paragraph needs a non-blank line (CommonMark 4.8), so a run of breaks alone is none, as an empty <p> is
-        if content := _block_end(tuple(inline)):
+        if content := _paragraph(inline):
             output.append(("p", (), content))
         inline.clear()
         if record != _BOUNDARY:
@@ -137,15 +137,58 @@ def _flow(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     return tuple(output)
 
 
+def _paragraph(records: list[_Meaning]) -> tuple[_Meaning, ...]:
+    # spreading emphasis can leave a run that starts or ends at a block, where its edge spaces collapse away
+    return _block_end(_spacing(_merge(records), preserve=False, inline=False))
+
+
+def _spread(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    # a delimiter run pairs only within one block's inline content (CommonMark 6.2), so in a flow of blocks emphasis
+    # around a block reaches each block's own inline runs
+    output: Final[list[_Meaning]] = []
+    for record in records:
+        if record[0] not in _EMPHASIS or not _holds_block(record):
+            output.append(record)
+            continue
+        run: list[_Meaning] = []
+        for child in _spread(record[2]):
+            if child[0] in _FLOW_INLINE:
+                run.append(child)
+                continue
+            output.extend(_emphasis(record[0], tuple(run)))
+            run = []
+            output.append(_emphasize_block(record[0], child))
+        output.extend(_emphasis(record[0], tuple(run)))
+    return tuple(output)
+
+
+def _holds_block(record: _Meaning) -> bool:
+    return any(child[0] not in _FLOW_INLINE or _holds_block(child) for child in record[2])
+
+
+def _emphasize_block(tag: str, record: _Meaning) -> _Meaning:
+    if record[0] in {"p", "td", *_HEADINGS}:
+        return (record[0], record[1], _emphasis(tag, record[2]))
+    if record[0] in {"blockquote", "li", "ul", "ol", "table", "tr"}:
+        return (record[0], record[1], tuple(_emphasize_block(tag, child) for child in record[2]))
+    return record  # code holds literal text (CommonMark 4.5), and a rule or a boundary holds none
+
+
 def _block_end(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
-    # a hard break that ends a block draws no line in a browser and does nothing in CommonMark (6.7)
-    end = len(records)
-    while end and records[end - 1][0] == "br":
-        end -= 1
-    if end == len(records) or not end or records[end - 1][0] != "#text":
-        return records[:end]
-    text: Final = records[end - 1][1][0][1].rstrip(" \t\n\f\r")
-    return (*records[: end - 1], *((("#text", (("value", text),), ()),) if text else ()))
+    # a hard break that ends a block draws no line in a browser and does nothing in CommonMark (6.7), and a link with
+    # no content draws nothing, so a break before one ends the block too
+    tail = len(records)
+    while tail and (records[tail - 1][0] == "br" or _draws_nothing(records[tail - 1])):
+        tail -= 1
+    kept: Final = tuple(record for record in records[tail:] if record[0] != "br")
+    if len(kept) == len(records) - tail or not tail or records[tail - 1][0] != "#text":
+        return (*records[:tail], *kept)
+    text: Final = records[tail - 1][1][0][1].rstrip(" \t\n\f\r")
+    return (*records[: tail - 1], *((("#text", (("value", text),), ()),) if text else ()), *kept)
+
+
+def _draws_nothing(record: _Meaning) -> bool:
+    return record[0] in {"a", *_EMPHASIS} and all(map(_draws_nothing, record[2]))
 
 
 def _children(element: _TreeNode, *, preserve: bool) -> tuple[_Meaning, ...]:
@@ -153,14 +196,18 @@ def _children(element: _TreeNode, *, preserve: bool) -> tuple[_Meaning, ...]:
     for child in element:
         records.extend(_element(child, element.tag, preserve=preserve))
         records.extend(_text(child.tail, preserve=preserve, keep=element.tag in _INLINE_HOSTS))
+    spaced: Final = _spacing(_merge(records), preserve=preserve, inline=element.tag in _INLINE_TEXT)
+    return spaced if preserve or element.tag in _INLINE_TEXT else _block_end(spaced)
+
+
+def _merge(records: Iterable[_Meaning]) -> tuple[_Meaning, ...]:
     merged: Final[list[_Meaning]] = []
     for record in records:
         if record[0] == "#text" and merged and merged[-1][0] == "#text":
             merged[-1] = ("#text", (("value", merged[-1][1][0][1] + record[1][0][1]),), ())
         else:
             merged.append(record)
-    spaced: Final = _spacing(tuple(merged), preserve=preserve, inline=element.tag in _INLINE_TEXT)
-    return spaced if preserve or element.tag in _INLINE_TEXT else _block_end(spaced)
+    return tuple(merged)
 
 
 def _spacing(records: tuple[_Meaning, ...], *, preserve: bool, inline: bool) -> tuple[_Meaning, ...]:
@@ -206,15 +253,27 @@ def _check_profile(element: _TreeNode, parent: str) -> None:
     if element.tag not in _ALLOWED:
         msg = f"HTML element has no declared Markdown meaning: {element.tag}"
         raise MarkdownProfileError(msg)
-    if (element.tag == "li" and parent not in {"ul", "ol"}) or (
-        (allowed := _CONTENT_MODEL.get(element.tag)) is not None
-        and (
-            any(child.tag not in allowed for child in element)
-            or any(text.strip(" \t\n\f\r") for text in (element.text, *(child.tail for child in element)))
-        )
-    ):
+    if _breaks_content_model(element, parent):
         msg = f"HTML content model violated at {element.tag}"
         raise MarkdownProfileError(msg)
+
+
+def _breaks_content_model(element: _TreeNode, parent: str) -> bool:
+    if element.tag == "li":
+        return parent not in {"ul", "ol"}
+    if element.tag == "a":
+        # an a holds no a descendant (WHATWG 4.5.1), and link text holds no link (CommonMark 6.3)
+        return any(descendant.tag == "a" for descendant in _descendants(element))
+    return (allowed := _CONTENT_MODEL.get(element.tag)) is not None and (
+        any(child.tag not in allowed for child in element)
+        or any(text.strip(" \t\n\f\r") for text in (element.text, *(child.tail for child in element)))
+    )
+
+
+def _descendants(element: _TreeNode) -> Iterator[_TreeNode]:
+    for child in element:
+        yield child
+        yield from _descendants(child)
 
 
 def _record(tag: str, element: _TreeNode, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
@@ -230,47 +289,78 @@ def _record(tag: str, element: _TreeNode, children: tuple[_Meaning, ...]) -> tup
         # quote and item content is a flow of blocks; a tight item's single paragraph renders bare (CommonMark 5.1-5.3),
         # so items compare with every inline run wrapped
         return ((tag, (), _flow(children)),)
-    if tag in _HEADINGS:
-        # a heading is one line of inline content (CommonMark 4.2), so its blocks and breaks flatten onto it as spaces
-        return ((tag, (), _line(children)),)
+    if tag == "a":
+        # link text holds inline content only (CommonMark 6.3), so its blocks flatten onto its line
+        return _link(_attributes(tag, element.attrib), _line(children, inline=True, breaks=True))
+    if tag in _HEADINGS or (
+        tag == "td" and any(child[0] not in _FLOW_INLINE or _holds_block(child) for child in children)
+    ):
+        # a heading is one line of inline content (CommonMark 4.2), so its blocks and breaks flatten onto it as spaces;
+        # a table cell holds inline content too (GFM 4.10), but a raw <br> keeps its break there
+        children = _line(children, inline=False, breaks=tag == "td")
     return ((tag, _attributes(tag, element.attrib), children),)
 
 
-def _line(records: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+def _line(records: tuple[_Meaning, ...], *, inline: bool, breaks: bool) -> tuple[_Meaning, ...]:
+    # blocks flatten onto one line as spaces, and so do hard breaks where the line cannot hold one; emphasis and links
+    # keep their place on the line with their own content flattened
+    space: Final[_Meaning] = ("#text", (("value", " "),), ())
     flat: Final[list[_Meaning]] = []
     for record in records:
-        if record[0] in _FLOW_INLINE and record[0] != "br":
+        if record == _BOUNDARY or (record[0] == "br" and not breaks):
+            flat.append(space)
+        elif record[0] in _EMPHASIS:
+            flat.extend(_emphasis(record[0], _line(record[2], inline=True, breaks=breaks)))
+        elif record[0] == "a":
+            flat.extend(_link(record[1], _line(record[2], inline=True, breaks=breaks)))
+        elif record[0] in _FLOW_INLINE:
             flat.append(record)
-        elif record[0] == "br" or record == _BOUNDARY:
-            flat.append(("#text", (("value", " "),), ()))
+        elif record[0] == "pre":
+            # the inline form of a code block is a code span (CommonMark 6.1), which reads its line endings as spaces
+            text = re.sub(r"[ \t\n\f\r]+", " ", record[2][0][1][0][1]) if record[2] else ""
+            flat.extend((space, *((("code", (), (("#text", (("value", text),), ()),)),) if text else ()), space))
         else:
-            flat.extend((("#text", (("value", " "),), ()), *_line(record[2]), ("#text", (("value", " "),), ())))
-    merged: Final[list[_Meaning]] = []
-    for record in flat:
-        if record[0] == "#text" and merged and merged[-1][0] == "#text":
-            merged[-1] = ("#text", (("value", merged[-1][1][0][1] + record[1][0][1]),), ())
-        else:
-            merged.append(record)
-    return _spacing(tuple(merged), preserve=False, inline=False)
+            flat.extend((space, *_line(record[2], inline=False, breaks=breaks), space))
+    return _spacing(_merge(flat), preserve=False, inline=inline)
 
 
 def _emphasis(tag: str, children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
     if all(record[0] == "#text" and not record[1][0][1].strip(" \t\n\f\r") for record in children):
         return children  # a delimiter run cannot wrap whitespace alone (CommonMark 6.2)
-    # emphasis does not style a hard break, so a break at its edge renders the same outside it
-    start: Final = next((index for index, record in enumerate(children) if record[0] != "br"), len(children))
-    end: Final = next((index for index in range(len(children), start, -1) if children[index - 1][0] != "br"), start)
-    inner: list[_Meaning] = list(children[start:end])
-    before: Final[list[_Meaning]] = list(children[:start])
-    after: Final[list[_Meaning]] = list(children[end:])
-    # a delimiter run touching whitespace cannot open or close (CommonMark 6.2), so edge spaces sit outside it
-    if inner and inner[0][0] == "#text" and (text := inner[0][1][0][1]) != (stripped := text.lstrip(" \t\n\f\r")):
-        before.append(("#text", (("value", text[: len(text) - len(stripped)]),), ()))
-        inner[0] = ("#text", (("value", stripped),), ())
-    if inner and inner[-1][0] == "#text" and (text := inner[-1][1][0][1]) != (stripped := text.rstrip(" \t\n\f\r")):
-        after.insert(0, ("#text", (("value", text[len(stripped) :]),), ()))
-        inner[-1] = ("#text", (("value", stripped),), ())
-    return (*before, *(((tag, (), tuple(inner)),) if inner else ()), *after)
+    before, inner, after = _edges(children)
+    return (*before, *(((tag, (), inner),) if inner else ()), *after)
+
+
+def _link(attributes: tuple[tuple[str, str], ...], children: tuple[_Meaning, ...]) -> tuple[_Meaning, ...]:
+    before, inner, after = _edges(children)
+    return (*before, ("a", attributes, inner), *after)
+
+
+def _edges(children: tuple[_Meaning, ...]) -> tuple[list[_Meaning], tuple[_Meaning, ...], list[_Meaning]]:
+    # emphasis and link text do not style a hard break, and spaces at their edge collapse with the ones outside (CSS
+    # Text 3, 4.1.1), so both render the same outside; a delimiter run touching whitespace cannot open or close
+    # (CommonMark 6.2), so they sit outside
+    inner: Final[list[_Meaning]] = list(children)
+    before: Final[list[_Meaning]] = []
+    after: Final[list[_Meaning]] = []
+    _peel(inner, before, 0, breaks=True)
+    _peel(inner, after, -1, breaks=True)
+    return before, tuple(inner), after
+
+
+def _peel(inner: list[_Meaning], outside: list[_Meaning], edge: int, *, breaks: bool) -> None:
+    while inner and (
+        (breaks and inner[edge][0] == "br")
+        or (inner[edge][0] == "#text" and inner[edge][1][0][1][edge:][:1] in _SPACES)
+    ):
+        text: str = inner[edge][1][0][1] if inner[edge][0] == "#text" else ""
+        kept: str = text.lstrip(" \t\n\f\r") if edge == 0 else text.rstrip(" \t\n\f\r")
+        if not kept:
+            outside.insert(0 if edge else len(outside), inner.pop(edge))
+            continue
+        space: _Meaning = ("#text", (("value", text[: len(text) - len(kept)] if edge == 0 else text[len(kept) :]),), ())
+        outside.insert(0 if edge else len(outside), space)
+        inner[edge] = ("#text", (("value", kept),), ())
 
 
 def _code_text(element: _TreeNode, *, block: bool) -> tuple[_Meaning, ...]:
@@ -618,6 +708,7 @@ _CONTENT_REQUIRED: Final = frozenset({"p", "strong", "em", "s", "code", "ul", "o
 _EMPHASIS: Final = frozenset({"strong", "em", "s"})
 _BLOCKS: Final = frozenset({"p", "ul", "ol", "table"})
 _BOUNDARY: Final[_Meaning] = ("#block", (), ())
+_SPACES: Final = frozenset(" \t\n\f\r")
 _HEADINGS: Final = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # WHATWG Rendering 15.3.1 draws none of these; script and style hold code in every namespace
 _HIDDEN: Final = frozenset({
