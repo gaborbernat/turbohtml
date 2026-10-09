@@ -295,7 +295,7 @@ static inline int xml_text_stop(Py_UCS4 character, int in_attr) {
    left verbatim (XML predefines no &nbsp;) and `>` escapes in every context. A code
    point XML cannot hold (a C0 control, a surrogate, a noncharacter) is dropped rather
    than emitted, so the serialization always reparses. */
-static inline void sbuf_put_xml_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr) {
+__attribute__((always_inline)) static inline void sbuf_put_xml_text(sbuf *out, const Py_UCS4 *text, Py_ssize_t len, int in_attr) {
     Py_ssize_t index = 0;
     while (index < len) {
         Py_ssize_t start = index;
