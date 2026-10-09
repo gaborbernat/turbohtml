@@ -2832,21 +2832,25 @@ static int md_row_is_header(th_node *row) {
 
 /* Collect the table's rows in document order across nested thead/tbody/tfoot wrappers
    and return the widest row's column count. With rows NULL it only counts, so the
-   array is sized by the same walk that fills it. */
+   array is sized by the same walk that fills it. A row with no cell draws nothing,
+   while every pipe row holds at least one cell (GFM 4.10), so it is left out. */
 static Py_ssize_t md_collect_rows(th_node *table, th_node **rows, Py_ssize_t *count) {
     Py_ssize_t columns = 0;
     th_node *node = table->first_child;
     while (node != NULL) {
         if (node->type == TH_NODE_ELEMENT) {
             if (node->atom == TH_TAG_TR) {
-                if (rows != NULL) {
-                    rows[*count] = node;
+                if (rows == NULL) {
+                    (*count)++;
+                } else {
                     Py_ssize_t cells = md_row_cells(node);
+                    if (cells > 0) {
+                        rows[(*count)++] = node;
+                    }
                     if (cells > columns) {
                         columns = cells;
                     }
                 }
-                (*count)++;
             } else if ((node->atom == TH_TAG_THEAD || node->atom == TH_TAG_TBODY || node->atom == TH_TAG_TFOOT) &&
                        node->first_child != NULL) {
                 node = node->first_child;
@@ -2929,7 +2933,7 @@ static void md_enter_table(md_ctx *ctx, th_node *node) {
     Py_ssize_t count = 0;
     Py_ssize_t columns = md_collect_rows(node, rows, &count);
     if (ctx->opt->table_mode == TH_MD_TABLE_HTML) {
-        if (count > 0 && columns > 0) {
+        if (count > 0) { /* a collected row holds a cell, so there are columns too */
             md_block_line(ctx, 1);
             md_emit_raw_html(ctx, node);
         }
@@ -2959,7 +2963,7 @@ static void md_enter_table(md_ctx *ctx, th_node *node) {
 /* Once the captions are out, pick how the rows render. Returns 0 when the table has
    no grid to draw. */
 static int md_table_layout(md_ctx *ctx, md_table *table) {
-    if (table->count == 0 || table->columns == 0) {
+    if (table->count == 0) {
         return 0;
     }
     const md_opts *opt = ctx->opt;
