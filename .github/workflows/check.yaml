@@ -268,7 +268,6 @@ jobs:
           enable-cache: false
           activate-environment: true
           python-version: "3.15"
-          python-arch: aarch64
       - name: 🧰 Activate native arm64 MSVC (so meson picks cl over MinGW gcc)
         if: matrix.arm
         uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4.1.0
@@ -282,7 +281,7 @@ jobs:
       - name: ✅ Build with -Werror
         run: uvx --with tox-uv tox run -e warnings
         env:
-          UV_PYTHON_PREFERENCE: ${{ matrix.arm && 'only-system' || 'only-managed' }}
+          UV_PYTHON_PREFERENCE: only-managed
   clang-tidy:
     name: 🧹 clang-tidy (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
