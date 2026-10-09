@@ -276,14 +276,7 @@ static int node_attr_store(th_tree *tree, th_node *node, const char *name, Py_ss
                            Py_ssize_t value_len, int has_value, int append) {
     tree->attr_version++;
     mark_start_dirty(tree, node);
-    uint32_t atom = th_attr_atom(name, (size_t)name_len);
-    /* only a dynamic name can fail to intern; testing there keeps the common names' path as short as a store */
-    if (atom == TH_ATTR_UNKNOWN) {
-        atom = intern_attr_dynamic(tree, name, name_len);
-        if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
-            return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-    }
+    uint32_t atom = th_attr_intern_utf8(tree, name, name_len);
     tree->id_version += atom == TH_ATTR_ID;
     Py_UCS4 *owned = NULL;
     if (has_value) {
@@ -296,6 +289,9 @@ static int node_attr_store(th_tree *tree, th_node *node, const char *name, Py_ss
         }
     }
     Py_ssize_t existing = append ? -1 : th_node_attr_find(tree, node, name, name_len);
+    if (atom == TH_ATTR_UNKNOWN) { /* GCOVR_EXCL_BR_LINE: interning fails only to allocate */
+        return -1;                 /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
     if (existing >= 0) {
         th_mo_attr_changed(tree, node, atom, node->attrs[existing].value, node->attrs[existing].value_len, 1);
     } else {
