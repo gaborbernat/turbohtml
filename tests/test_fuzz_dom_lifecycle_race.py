@@ -10,7 +10,13 @@ from typing import Final
 
 from fuzz.dom_lifecycle import dom_lifecycle_race, dom_lifecycle_seeds, run_dom_lifecycle
 
+_SEEDS: Final = dom_lifecycle_seeds()[::8]  # the seeds run each opcode over 8 slots
+
 
 def test_dom_lifecycle_race_matches_the_serial_run() -> None:
-    seeds: Final = dom_lifecycle_seeds()[::8]  # the seeds run each opcode over 8 slots
-    assert dom_lifecycle_race(seeds) == [run_dom_lifecycle(bytes.fromhex(seed))[0] for seed in seeds]
+    assert dom_lifecycle_race(_SEEDS) == [run_dom_lifecycle(bytes.fromhex(seed))[0] for seed in _SEEDS]
+
+
+def test_dom_lifecycle_race_on_shared_trees_keeps_every_tree_intact() -> None:
+    traces: Final = dom_lifecycle_race(_SEEDS, shared=True)
+    assert {step.violations for trace in traces for step in trace} == {(0, 0, 0, 0)}
