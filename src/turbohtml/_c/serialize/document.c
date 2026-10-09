@@ -326,15 +326,16 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         }
         /* a CDATA section is a Text node, so its escaped text is the one HTML form that holds a ">" */
         TH_FALLTHROUGH;
-    case TH_NODE_TEXT:
-        if (text_is_span(node) && realize_span(tree, node) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-            out->failed = 1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
-        } else if (opts->xml) {
-            sbuf_put_xml_text(out, node->text, node->text_len, 0);
+    case TH_NODE_TEXT: {
+        Py_ssize_t len;
+        const Py_UCS4 *text = ser_text(out, tree, node, &len);
+        if (opts->xml) {
+            sbuf_put_xml_text(out, text, len, 0);
         } else {
-            sbuf_put_text(out, node->text, node->text_len, 0, opts->formatter);
+            sbuf_put_text(out, text, len, 0, opts->formatter);
         }
         break;
+    }
     case TH_NODE_COMMENT:
         sbuf_puts(out, "<!--");
         if (opts->xml) {
