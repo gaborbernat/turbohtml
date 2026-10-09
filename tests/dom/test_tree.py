@@ -1535,14 +1535,14 @@ def test_renderers_complete_a_deep_tree(method: str, args: tuple[object, ...], e
 @pytest.mark.parametrize(
     "build",
     [
-        pytest.param(lambda: parse("<body>" + "<template>" * 511 + "x"), id="parse"),
-        pytest.param(lambda: parse_fragment("<template>" * 600 + "x"), id="parse_fragment"),
+        pytest.param(lambda: parse("<body>" + "<div>" * 511 + "x"), id="parse"),
+        pytest.param(lambda: parse_fragment("<div>" * 600 + "x"), id="parse_fragment"),
         pytest.param(lambda: parse_xml("<a>" * _DEEP + "x" + "</a>" * _DEEP), id="parse_xml"),
     ],
 )
 def test_renderers_complete_every_parsed_depth(build: Callable[[], Document | Element]) -> None:
     document = build()
-    assert (document.to_markdown(), document.to_text(), document.to_annotated_text({"template": ["t"]})[0]) == (
+    assert (document.to_markdown(), document.to_text(), document.to_annotated_text({"div": ["t"]})[0]) == (
         "x",
         "x",
         "x",
@@ -1553,9 +1553,9 @@ def test_markdown_closes_every_nested_emphasis() -> None:
     assert _nested("i", 40).to_markdown() == "*" * 40 + "X" + "*" * 40
 
 
-def test_annotated_text_labels_every_nested_template() -> None:
-    document = parse("<body>" + "<template>" * 511 + "x")
-    assert document.to_annotated_text({"template": ["t"]}) == ("x", [(0, 1, "t")] * 510)
+def test_annotated_text_labels_every_nested_div() -> None:
+    document = parse("<body>" + "<div>" * 511 + "x")
+    assert document.to_annotated_text({"div": ["t"]}) == ("x", [(0, 1, "t")] * 510)
 
 
 @pytest.mark.parametrize("duplicate", [pytest.param(copy.copy, id="copy"), pytest.param(copy.deepcopy, id="deepcopy")])

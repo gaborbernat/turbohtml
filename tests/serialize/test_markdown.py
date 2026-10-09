@@ -256,7 +256,7 @@ def test_links_and_images(html: str, expected: str) -> None:
         ),
         pytest.param(
             "<p>x <code>a<span>b</span><svg>s</svg><template>t</template><!--c-->d</code> y</p>",
-            "x `abstd` y",
+            "x `absd` y",
             id="code-span-flattens-nested-content",
         ),
     ],
@@ -290,9 +290,7 @@ def test_code(html: str, expected: str) -> None:
         pytest.param("<p><b>a</b><b>b</b></p>", "**a**__b__", id="strong-adjacent-alternates"),
         pytest.param("<p><b>a</b><i>b</i></p>", "**a**_b_", id="strong-then-emphasis-alternates"),
         pytest.param("<p><span><i>a</i><i>b</i></span>x</p>", "*a*<em>b</em>x", id="emphasis-adjacent-in-span-html"),
-        pytest.param(
-            "<p><template><i>a</i><i>b</i></template>x</p>", "*a*<em>b</em>x", id="emphasis-adjacent-in-template-html"
-        ),
+        pytest.param("<p><template><i>a</i><i>b</i></template>x</p>", "x", id="emphasis-in-template-skipped"),
         pytest.param(
             "<p><math><mtext><i>a</i><i>b</i></mtext></math>x</p>",
             "*a*<em>b</em>x",
@@ -1148,7 +1146,12 @@ def test_table_edge_cases(html: str, expected: str) -> None:
         pytest.param("<p><a href>x</a></p>", "[x](<>)", id="link-valueless-href"),
         pytest.param("<p><code></code></p>", "", id="code-span-empty"),
         pytest.param("<p><code>a`</code></p>", "`` a` ``", id="code-span-ends-with-backtick"),
-        pytest.param("<p>before<template>t</template>after</p>", "beforetafter", id="template-inline-content"),
+        pytest.param("<p>before<template>t</template>after</p>", "beforeafter", id="template-inline-content-skipped"),
+        pytest.param(
+            "<p>a<span><template><b>x</b></template></span>b</p>", "ab", id="template-in-inline-element-skipped"
+        ),
+        pytest.param("<pre>a<template>t</template>b</pre>", "```\nab\n```", id="template-in-pre-skipped"),
+        pytest.param("<p><code>a<template>t</template>b</code></p>", "`ab`", id="template-in-code-skipped"),
         pytest.param("<pre></pre>", "```\n```", id="pre-empty"),
         pytest.param("<pre><code></code></pre>", "```\n```", id="pre-empty-code"),
         pytest.param("<pre>\n\n</pre>", "```\n\n```", id="pre-blank-line"),
@@ -1548,9 +1551,9 @@ def test_split_reference_after_converter_output() -> None:
     assert converted == "Xp;"
 
 
-def test_content_node_passes_through_with_converters() -> None:
+def test_content_node_skipped_with_converters() -> None:
     out = parse("<p>a<template>b</template>c</p>").to_markdown(Markdown(converters={"unused": wrap("@")}))
-    assert out == "abc"
+    assert out == "ac"
 
 
 @pytest.mark.parametrize(

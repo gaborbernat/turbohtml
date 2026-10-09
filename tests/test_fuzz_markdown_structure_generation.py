@@ -149,6 +149,7 @@ def test_markdown_unsupported_element() -> None:
     "markup",
     [
         pytest.param("<!-- hidden --><script>x</script><style>x</style><p>y</p>", id="hidden-elements"),
+        pytest.param("<p>a<template>t</template>b</p>", id="template-content"),
         pytest.param(
             "<p>a<title>t</title><datalist>d</datalist><noembed>e</noembed><noframes>f</noframes><rp>(</rp>b</p>",
             id="rendering-hidden-elements",
