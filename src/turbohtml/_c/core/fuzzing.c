@@ -13,11 +13,15 @@
 
    _fuzz_escape_iterators(node) points every NodeIterator registered on node's tree at the tree's document, outside
    any root below it. Removals that run the pre-removing steps cannot produce that state, so the hook gives
-   _tree_verify's iterator check a violation to report. */
+   _tree_verify's iterator check a violation to report.
+
+   _fuzz_verify_broken(kind) builds a small tree, breaks one link the way a racing edit can, and returns what
+   th_tree_verify counts. No public call builds such a tree, so this is the only way to exercise those checks. */
 
 #include "core/common.h"
 #include "dom/ownership.h"
 #include "dom/tree_internal.h"
+#include "dom/verify.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -158,10 +162,63 @@ static PyObject *fuzz_escape_iterators(PyObject *module, PyObject *owner) {
     return PyLong_FromSsize_t(tree->node_iterator_count);
 }
 
+static Py_ssize_t fuzz_visit_nothing(void *context, th_node *node) {
+    (void)context;
+    (void)node;
+    return 0;
+}
+
+static PyObject *fuzz_verify_broken(PyObject *module, PyObject *kind) {
+    (void)module;
+    const char *name = PyUnicode_AsUTF8(kind);
+    if (name == NULL) {
+        return NULL;
+    }
+    th_tree *tree = th_tree_new();
+    th_tree *other = th_tree_new();
+    if (tree == NULL || other == NULL) {
+        th_tree_free(tree);
+        th_tree_free(other);
+        return PyErr_NoMemory();
+    }
+    th_node *root = node_new(tree, TH_NODE_ELEMENT);
+    th_node *first = node_new(tree, TH_NODE_ELEMENT);
+    th_node *second = node_new(tree, TH_NODE_ELEMENT);
+    th_node *stranger = node_new(other, TH_NODE_ELEMENT);
+    PyObject *result = NULL;
+    if (root == NULL || first == NULL || second == NULL || stranger == NULL) {
+        PyErr_NoMemory();
+    } else {
+        node_append(root, first);
+        node_append(root, second);
+        int foreign_start = strcmp(name, "foreign-start") == 0;
+        if (strcmp(name, "sibling-cycle") == 0) {
+            second->next_sibling = first;
+        } else if (strcmp(name, "parent-mismatch") == 0) {
+            second->parent = first;
+        } else if (strcmp(name, "foreign-child") == 0) {
+            second->first_child = stranger;
+            second->last_child = stranger;
+            stranger->parent = second;
+        } else if (!foreign_start && strcmp(name, "intact") != 0) {
+            PyErr_Format(PyExc_ValueError, "unknown breakage %R", kind);
+        }
+        if (!PyErr_Occurred()) {
+            th_tree_violations found;
+            th_tree_verify(tree, foreign_start ? stranger : first, fuzz_visit_nothing, NULL, &found);
+            result = Py_BuildValue("(nnnn)", found.links, found.identities, found.iterators, found.versions);
+        }
+    }
+    th_tree_free(tree);
+    th_tree_free(other);
+    return result;
+}
+
 static PyMethodDef fuzz_methods[] = {
     {"_fuzz_crash", fuzz_crash, METH_O, NULL},
     {"_fuzz_escape_iterators", fuzz_escape_iterators, METH_O, NULL},
     {"_fuzz_inject_failure", fuzz_inject_failure, METH_O, NULL},
+    {"_fuzz_verify_broken", fuzz_verify_broken, METH_O, NULL},
     {NULL, NULL, 0, NULL},
 };
 
