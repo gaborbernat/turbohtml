@@ -1,0 +1,1 @@
+``to_markdown`` flattens a block inside a table cell and writes a ``<pre>`` on a single line as a code span.
