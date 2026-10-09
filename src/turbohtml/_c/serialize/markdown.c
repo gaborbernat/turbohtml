@@ -1676,16 +1676,29 @@ static void md_cell_flat_child(md_ctx *ctx, Py_ssize_t owner, th_node *child) {
    `![...]` description a bracket, backslash or backtick is escaped the same way
    link text escapes them: an unescaped `]` would close the description early, and
    a backtick pairs with a later one into a code span, which CommonMark 6.3 reads
-   before the image brackets. The plain alt-only image mode passes escape=0 since
-   it emits no brackets to protect. */
+   before the image brackets. The description is inline content whose plain text
+   becomes the alt (CommonMark 6.4), so an emphasis delimiter, or a `<` or `&` that
+   would open raw HTML or a character reference, is escaped as prose escapes it, and
+   a line break, which could open a block on the next line, is written as its numeric
+   reference (6.5). The plain alt-only image mode passes escape=0 since it emits no
+   brackets to protect. */
 static void md_emit_alt(md_ctx *ctx, const Py_UCS4 *alt, Py_ssize_t alt_len, int escape) {
     if (alt != NULL) {
         if (escape) {
             for (Py_ssize_t index = 0; index < alt_len; index++) {
-                if (alt[index] == '[' || alt[index] == ']' || alt[index] == '\\' || alt[index] == '`') {
-                    sbuf_putc(&ctx->out, '\\');
+                Py_UCS4 ch = alt[index];
+                uint8_t kind = ch < 0x80 ? MD_ASCII[ch] : 0;
+                if (kind != 0) { /* a character in no class needs no escape */
+                    if (ch == '\n' || ch == '\r') {
+                        sbuf_puts(&ctx->out, ch == '\n' ? "&#10;" : "&#13;");
+                        continue;
+                    }
+                    if (ch == '[' || ch == ']' || ch == '\\' || ch == '`' || (kind & ctx->escape_mask) ||
+                        ((kind & MD_CH_CONTEXT) && ctx->escape_prose && md_escape_by_context(alt, index, alt_len))) {
+                        sbuf_putc(&ctx->out, '\\');
+                    }
                 }
-                md_put_literal(ctx, alt[index]);
+                md_put_literal(ctx, ch);
             }
         } else {
             md_put_run(ctx, alt, alt_len);
