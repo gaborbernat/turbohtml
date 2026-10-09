@@ -303,6 +303,8 @@ typedef struct {
     int pending_loose;          /* the previous block wants a blank line after it */
     int suppress_break;         /* the next block attaches to the current (list marker) line */
     int block_ended;            /* a block in an inline element closed: next content opens a block */
+    int interrupt_blank;        /* the next block cannot interrupt the paragraph before it, so a blank line ends it */
+    int item_marker;            /* the line holds a list marker alone, so the item's first block takes no blank line */
     int tight;                  /* inside a list item: inline runs do not add blank lines */
     int list_depth;             /* nesting depth of the current list, for bullet cycling */
     int indent_levels;          /* list and quote nesting that indents the prefix, capped by TH_MAX_INDENT_LEVELS */
@@ -381,13 +383,18 @@ static void md_block_line(md_ctx *ctx, int loose) {
             }
         }
         sbuf_putc(&ctx->out, '\n');
-        if ((ctx->pending_loose || loose) && !ctx->tight && !ctx->opt->block_spacing_single) {
+        /* a list item starts with at most one blank line (CommonMark 5.2), and a marker
+           line with nothing after it already is one */
+        if (((ctx->pending_loose || loose) && !ctx->tight && !ctx->opt->block_spacing_single && !ctx->item_marker) ||
+            ctx->interrupt_blank) {
             md_write_blank_prefix(ctx);
             sbuf_putc(&ctx->out, '\n');
         }
         md_write_prefix(ctx);
         ctx->line_has_content = 0;
     }
+    ctx->interrupt_blank = 0;
+    ctx->item_marker = 0;
     ctx->pending_loose = loose;
     ctx->space_pending = 0;
     ctx->drop_space = 1;
@@ -1974,18 +1981,43 @@ static int md_is_paragraph_block(uint16_t atom) {
     return atom == TH_TAG_P || atom == TH_TAG_DIV;
 }
 
+/* What an element's content writes first, which decides whether it can ride a list
+   marker's line, whether a list it starts can interrupt a paragraph, and whether an
+   inline wrapper needs a run line of its own. */
+enum md_lead {
+    MD_LEAD_NOTHING = -1,
+    MD_LEAD_BLOCK = 0,    /* a self-framing block */
+    MD_LEAD_INLINE = 1,   /* inline content */
+    MD_LEAD_IN_BLOCK = 2, /* a paragraph's content or an ATX heading, which opens its own line */
+};
+
+/* Whether an HTML <a> carries an href. The parser and the DOM store the name as its
+   static atom, so one integer compare per attribute finds it where th_node_attr_find
+   would hash the name first. */
+static int md_has_href(const th_node *node) {
+    for (Py_ssize_t index = 0; index < node->attr_count; index++) {
+        if (node->attrs[index].name_atom == TH_ATTR_HREF) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* A loose item needs its first block on the marker line even when a transparent
-   container wraps it; otherwise CommonMark reads that block as code. The scan
-   descends into such containers and climbs back out of one that leads with
-   nothing, so 1 means inline, 0 a self-framing block, -1 nothing at all. */
+   container wraps it; otherwise CommonMark reads that block as code. The scan descends
+   into such containers, into inline elements and into paragraphs, and climbs back out of
+   one that leads with nothing: an inline element that writes nothing (an empty <em>, a
+   link placeholder) does not count as content. */
 static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
     th_node *parent = root;
     th_node *child = root->first_child;
+    th_node *paragraph = NULL; /* the outermost paragraph block the scan is inside */
     for (;;) {
         while (child == NULL) {
             if (parent == root) {
-                return -1;
+                return MD_LEAD_NOTHING;
             }
+            paragraph = parent == paragraph ? NULL : paragraph;
             child = parent->next_sibling;
             parent = parent->parent;
         }
@@ -1993,7 +2025,8 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
             const Py_UCS4 *text = need_text(ctx->tree, child);
             for (Py_ssize_t index = 0; index < child->text_len; index++) {
                 if (!is_space(text[index])) {
-                    return 1; /* leading visible text rides on the bullet line */
+                    /* leading visible text rides on the bullet line */
+                    return paragraph != NULL ? MD_LEAD_IN_BLOCK : MD_LEAD_INLINE;
                 }
             }
             child = child->next_sibling; /* whitespace-only: keep looking past it */
@@ -2004,11 +2037,13 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
             continue;
         }
         uint16_t atom = child->ns == TH_NS_HTML ? child->atom : TH_TAG_UNKNOWN;
-        if (!is_md_block(atom) || md_is_paragraph_block(atom)) {
-            return 1;
+        if (atom == TH_TAG_IMG || atom == TH_TAG_BR || atom == TH_TAG_Q ||
+            (atom == TH_TAG_A && md_has_href(child))) {
+            return paragraph != NULL ? MD_LEAD_IN_BLOCK : MD_LEAD_INLINE; /* it writes markup even with no text */
         }
         if (atom >= TH_TAG_H1 && atom <= TH_TAG_H6) {
-            return ctx->opt->heading_style != TH_MD_HEADING_SETEXT || atom > TH_TAG_H2;
+            return ctx->opt->heading_style != TH_MD_HEADING_SETEXT || atom > TH_TAG_H2 ? MD_LEAD_IN_BLOCK
+                                                                                       : MD_LEAD_BLOCK;
         }
         switch (atom) {
         case TH_TAG_BLOCKQUOTE:
@@ -2018,12 +2053,27 @@ static int md_leads_with_inline(md_ctx *ctx, th_node *root) {
         case TH_TAG_OL:
         case TH_TAG_MENU:
         case TH_TAG_TABLE:
-            return 0;
+            return MD_LEAD_BLOCK;
         default:
+            if (paragraph == NULL && md_is_paragraph_block(atom)) {
+                paragraph = child;
+            }
             parent = child;
             child = child->first_child;
         }
     }
+}
+
+/* What an inline element writes first: an empty one writes something only when it is a
+   break, an image, a quote or a link. */
+static int md_element_lead(md_ctx *ctx, th_node *node, uint16_t atom) {
+    if (atom == TH_TAG_A && md_has_href(node)) {
+        return MD_LEAD_INLINE; /* the brackets are written even around nothing */
+    }
+    if (node->first_child == NULL) {
+        return atom == TH_TAG_BR || atom == TH_TAG_IMG || atom == TH_TAG_Q ? MD_LEAD_INLINE : MD_LEAD_NOTHING;
+    }
+    return md_leads_with_inline(ctx, node);
 }
 
 /* Whether a list item lays out as more than one paragraph, so it renders as a
@@ -2107,16 +2157,21 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
         if (only_ws) {
             return;
         }
-        if (child->type == TH_NODE_ELEMENT && atom != TH_TAG_A && child->first_child != NULL &&
-            child->first_child->type == TH_NODE_ELEMENT && md_leads_with_inline(ctx, child) == 0) {
-            /* an inline wrapper whose first child is a self-framing block (a nested
-               list, quote or table) has no inline run of its own; opening one would
-               leave an empty line that reads as a blank line and splits the surrounding
-               item, so let the inner block open its own line instead. The element
-               first-child test keeps the scan off the common inline run, and a link is
-               excluded because it flattens its block content into the run it needs. */
-            md_render_inline(ctx, child);
-            return;
+        if (child->type == TH_NODE_ELEMENT && ctx->opt->converters == NULL &&
+            (child->first_child == NULL || child->first_child->type == TH_NODE_ELEMENT)) {
+            /* an inline element that writes nothing (an empty emphasis, a link
+               placeholder) opens no run, and an inline wrapper whose first content sits in
+               a block (a paragraph, a nested list, quote or table) has no inline run of its
+               own: opening one would leave an empty line that reads as a blank line and
+               splits the surrounding item, so the inner block opens its own line instead.
+               The element test keeps the scan off the common run that starts with text; a
+               link always leads inline, and a code span flattens its blocks into the run. */
+            int lead = md_element_lead(ctx, child, atom);
+            if (lead == MD_LEAD_NOTHING ||
+                (lead != MD_LEAD_INLINE && atom != TH_TAG_CODE && atom != TH_TAG_KBD && atom != TH_TAG_SAMP)) {
+                md_render_inline(ctx, child);
+                return;
+            }
         }
         md_block_line(ctx, ctx->tight ? 0 : 1);
         *in_run = 1;
@@ -2456,6 +2511,7 @@ static void md_render_item(md_ctx *ctx, th_node *child, md_list_state *state) {
     }
     /* the item's content starts its own line: `- 1. x` would nest an ordered list */
     ctx->line_has_content = 0;
+    ctx->item_marker = 1;
     state->sub_indent = width;
     state->item_seen = 1;
     state->in_run = 0;
@@ -2553,9 +2609,28 @@ static int md_list_ordered(md_ctx *ctx, th_node *node) {
     return ordered;
 }
 
+/* Whether a list cannot interrupt the paragraph on the line before it: its first item
+   starts with a blank marker line, or it is ordered and starts at a number other than 1
+   (CommonMark 5.2). The marker would then read as paragraph text, or a lone `-` as a
+   setext underline (4.3). Only an item that is the list's first element child is
+   looked at; anything before it renders as a block of its own. */
+static int md_list_cannot_interrupt(md_ctx *ctx, th_node *list, int ordered, Py_ssize_t number) {
+    th_node *item = list->first_child;
+    while (item != NULL && item->type != TH_NODE_ELEMENT) {
+        item = item->next_sibling;
+    }
+    if (item == NULL || item->ns != TH_NS_HTML || item->atom != TH_TAG_LI) {
+        return 0;
+    }
+    return md_leads_with_inline(ctx, item) <= 0 || (ordered && md_list_number_attr(ctx, item, "value", number) != 1);
+}
+
 static void md_enter_list(md_ctx *ctx, th_node *node) {
     int ordered = md_list_ordered(ctx, node);
     Py_ssize_t number = ordered ? md_list_number_attr(ctx, node, "start", 1) : 1;
+    if (ctx->line_has_content && md_list_cannot_interrupt(ctx, node, ordered, number)) {
+        ctx->interrupt_blank = 1;
+    }
     Py_ssize_t bullets_len = (Py_ssize_t)strlen(ctx->opt->bullets);
     md_list_state state = {
         .number = number,
@@ -3229,10 +3304,11 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
                prefix, so the blank line is not itself quoted, before adding the
                "> " that every line inside the quote carries */
             sbuf_putc(&ctx->out, '\n');
-            if (!ctx->tight) {
+            if (!ctx->tight && !ctx->item_marker) {
                 md_write_blank_prefix(ctx);
                 sbuf_putc(&ctx->out, '\n');
             }
+            ctx->item_marker = 0;
             sbuf_puts(&ctx->prefix, marker);
             md_write_prefix(ctx);
             ctx->line_has_content = 0;
@@ -3368,6 +3444,7 @@ static void md_leave(md_ctx *ctx) {
            block to ride; an empty one emits no such block, so the pending break has
            to be released here or the next block attaches to the marker */
         ctx->suppress_break = 0;
+        ctx->item_marker = 0;
     }
 }
 
