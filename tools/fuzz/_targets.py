@@ -253,8 +253,9 @@ _TARGETS: Final[dict[str, Callable[[bytes], None]]] = {
     "minify_css": _minify_css,
     "minify_html": _minify_html,
 }
-# the targets whose every allocation failure raises MemoryError; sanitize, url, idna and the minifiers wait on #1275
-_ALLOC_TARGETS: Final[tuple[str, ...]] = ("phone", "parse", "serialize", "roundtrip")
+# minify_html stays out because a failed text copy in its script and style minifiers crashes, and sanitize because
+# sweeping its deep-nesting seed grows past 7 GiB
+_ALLOC_TARGETS: Final[tuple[str, ...]] = ("phone", "parse", "serialize", "roundtrip", "url", "idna", "minify_css")
 
 
 def _decode(data: bytes) -> str:

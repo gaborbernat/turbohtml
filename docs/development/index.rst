@@ -164,12 +164,12 @@ parallel threads and compared with their serial run.
 
     $ tox r -e msan   # Linux: the standalone harnesses under MemorySanitizer
 
-``fuzz-alloc`` (``fuzz.py --mode alloc``) replays the phone, parse, serialize and roundtrip seeds once per PyMem
-allocation. Each input starts with a big-endian 32-bit ``failure_pos`` header, the field libxml2's fuzzers read with
-``xmlFuzzReadInt(4)``, and the hook fails that allocation. Position 0 counts a seed's N allocations, and positions 1 to
-N then fail one each. The run requires ``MemoryError`` exactly when the injected failure fires, so a ``SystemError``, a
-returned result or a sanitizer report counts as a finding. The scheduled ``🔒 fuzz`` workflow runs it and encrypts what
-it finds.
+``fuzz-alloc`` (``fuzz.py --mode alloc``) replays the phone, parse, serialize, roundtrip, url, idna and minify_css seeds
+once per PyMem allocation. Each input starts with a big-endian 32-bit ``failure_pos`` header, the field libxml2's
+fuzzers read with ``xmlFuzzReadInt(4)``, and the hook fails that allocation. Position 0 counts a seed's N allocations,
+and positions 1 to N then fail one each. The run requires ``MemoryError`` exactly when the injected failure fires, so a
+``SystemError``, a returned result or a sanitizer report counts as a finding. The scheduled ``🔒 fuzz`` workflow runs it
+and encrypts what it finds.
 
 .. code-block:: console
 
