@@ -228,6 +228,7 @@ commands = [
 
 [env.type]
 description = "run the type checker on the code base"
+base_python = [ "3.14" ]  # lightningcss in the bench group has no 3.15 build yet (PyO3 0.27 caps at 3.14)
 dependency_groups = [ "type" ]
 commands = [ [ "ty", "check", "--output-format", "concise", "--error-on-warning", "src", "tests", "tools" ] ]
 
