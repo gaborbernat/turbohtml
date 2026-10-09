@@ -1375,8 +1375,8 @@ static int expand_shorthand_ref(jm_program *prog, int32_t sym) {
         return 1;
     }
     int32_t key = jm_node_new(prog, JN_IDENT);
-    if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the shorthand */
-        return 0;       /* GCOVR_EXCL_LINE */
+    if (key < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the shorthand */
+        return 0;  /* GCOVR_EXCL_LINE */
     }
     prog->nodes[key].str = prog->syms[sym].name;
     prog->nodes[key].str_len = prog->syms[sym].name_len;
@@ -1516,8 +1516,8 @@ static void replace_reads(jm_program *prog, int32_t idx, jm_propagation *plans) 
             int32_t sym = prog->nodes[read].sym;
             if (sym >= 0 && plans[sym].target >= 0) {
                 int32_t key = jm_node_new(prog, JN_IDENT);
-                if (prog->failed) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the binding */
-                    return;         /* GCOVR_EXCL_LINE */
+                if (key < 0) { /* GCOVR_EXCL_BR_LINE: allocation-failure path keeps the binding */
+                    return;    /* GCOVR_EXCL_LINE */
                 }
                 prog->nodes[key].str = prog->syms[sym].name;
                 prog->nodes[key].str_len = prog->syms[sym].name_len;

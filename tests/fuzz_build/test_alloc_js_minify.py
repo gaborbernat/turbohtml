@@ -37,6 +37,9 @@ _MINIFY_JS: Final[Html] = Html(layout=Minify(minify_js=JSMinify()))
         pytest.param(lambda: minify_js("var [a, b, c, d, e, f, g, h] = i"), id="binding-pattern"),
         pytest.param(lambda: minify_js(_SCRIPT), id="script"),
         pytest.param(lambda: minify_js(_SCRIPT, JSMinify(fold=False, mangle=False)), id="parse-only"),
+        # the empty statements fill the fuzz build's node arena to a doubling, so the sequence node the fold pass
+        # allocates for the merged calls takes the failed growth
+        pytest.param(lambda: minify_js(";;;;;a(); b(); c();"), id="fold-allocation"),
     ],
 )
 def test_js_minify_allocation_failure_raises_memory_error(

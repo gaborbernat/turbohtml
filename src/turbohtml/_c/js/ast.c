@@ -53,6 +53,10 @@ TH_NOINLINE int32_t jm_node_new(jm_program *prog, jm_kind kind) {
     int32_t index = prog->node_count;
     if (index + 1 < prog->node_cap || jm_grow_nodes(prog)) { /* GCOVR_EXCL_BR_LINE: false only on allocation failure */
         prog->node_count = index + 1;
+    } else if (prog->parse_err == NULL) { /* GCOVR_EXCL_LINE: allocation-failure path */
+        /* Only the parser writes through an unchecked index. The passes test each result, and a register test on -1
+           costs fewer instructions than reloading prog->failed after the call. */
+        return -1; /* GCOVR_EXCL_LINE */
     }
     jm_node *node = &prog->nodes[index];
     node->kind = (uint8_t)kind;
