@@ -1832,6 +1832,10 @@ PyObject *turbohtml_linkify_apply(PyObject *module, PyObject *args) {
     Py_XDECREF(policy.schemes);
     Py_DECREF(targets);
     if (status < 0) {
+        /* the walk's buffer and arena allocations fail with a bare -1; a callback or encoder sets its own exception */
+        if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: alloc */
+            PyErr_NoMemory();    /* GCOVR_EXCL_LINE */
+        } /* GCOVR_EXCL_LINE: brace of the never-taken alloc-failure branch */
         return NULL;
     }
     Py_RETURN_NONE;

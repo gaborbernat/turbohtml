@@ -1,0 +1,2 @@
+``Linker.linkify`` and ``Linker.linkify_node`` raise ``MemoryError`` when an allocation fails, instead of
+``SystemError``.
