@@ -801,6 +801,9 @@ def test_trailing_break_at_an_inline_root_is_dropped() -> None:
         ),
         pytest.param(
             "<del><table><tr><td>a</td></tr></table></del>", "| ~~a~~ |\n| --- |", id="table-in-strikethrough"
+        pytest.param("<table><tr><td>a</td></tr><tr></tr></table>", "| a |\n| --- |", id="table-empty-row-dropped"),
+        pytest.param(
+            "<table><tr></tr><tr><td>a</td></tr></table>", "| a |\n| --- |", id="table-empty-first-row-dropped"
         ),
     ],
 )
