@@ -359,12 +359,13 @@ static th_node *c14n_step(sbuf *out, th_tree *tree, th_node *node, const th_node
         }
         break;
     case TH_NODE_TEXT:
-    case TH_NODE_CDATA: { /* a CDATA section canonicalizes as its escaped character data */
-        Py_ssize_t len;
-        const Py_UCS4 *text = ser_text(out, tree, node, &len);
-        c14n_put_text(out, text, len);
+    case TH_NODE_CDATA: /* a CDATA section canonicalizes as its escaped character data */
+        if (text_is_span(node) && realize_span(tree, node) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            out->failed = 1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
+        } else {
+            c14n_put_text(out, node->text, node->text_len);
+        }
         break;
-    }
     case TH_NODE_COMMENT:
         if (opts->with_comments) {
             sbuf_puts(out, "<!--");
