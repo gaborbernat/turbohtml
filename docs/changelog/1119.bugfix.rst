@@ -1,1 +1,0 @@
-``<selectedcontent>`` mirrors the selected option when written after it or past a ``<datalist>`` option.

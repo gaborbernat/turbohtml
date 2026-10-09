@@ -1,1 +1,0 @@
-Normalize literal file URL path backslashes and empty root paths.

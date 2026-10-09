@@ -1,1 +1,0 @@
-:func:`~turbohtml.clean.minify_js` rejects more invalid declarations, catch parameters and binding names.

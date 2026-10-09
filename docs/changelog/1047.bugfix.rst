@@ -1,1 +1,0 @@
-:meth:`~turbohtml.Node.to_markdown` and the other text renderers keep rows under nested row groups.

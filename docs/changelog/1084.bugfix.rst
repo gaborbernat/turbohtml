@@ -1,1 +1,0 @@
-:func:`~turbohtml.clean.minify_js` reads a leading ``let`` with no binding after it as an identifier.

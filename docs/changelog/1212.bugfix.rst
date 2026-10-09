@@ -1,1 +1,0 @@
-``to_markdown`` keeps a link with an empty ``href`` and writes an empty link or image destination as ``<>``.

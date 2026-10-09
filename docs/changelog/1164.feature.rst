@@ -1,1 +1,0 @@
-Add bounded iterator edit-sequence invariant checks.

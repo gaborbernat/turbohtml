@@ -1,1 +1,0 @@
-Generate finite nested lists with independent expectations for each item's parent.

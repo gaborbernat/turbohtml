@@ -1,1 +1,0 @@
-:meth:`~turbohtml.Node.to_markdown` drops a ``<br>`` at the end of a block instead of leaving a blank line.

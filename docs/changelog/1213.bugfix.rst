@@ -1,1 +1,0 @@
-``to_markdown`` writes a line break inside inline code as a space so the next line cannot open a block.

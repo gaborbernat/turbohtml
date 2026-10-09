@@ -1,2 +1,0 @@
-:class:`~turbohtml.cssom.StyleSheet` and :class:`~turbohtml.cssom.StyleDeclaration` read a backslash-escaped delimiter
-as part of a name.

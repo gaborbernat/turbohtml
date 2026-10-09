@@ -1,1 +1,0 @@
-Generate SVG integration trees with independent namespace and parent expectations.

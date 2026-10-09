@@ -1,1 +1,0 @@
-The JavaScript minifier no longer folds a variable that a block-level function reassigns.

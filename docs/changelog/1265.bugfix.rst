@@ -1,2 +1,0 @@
-``xsl:number`` now inserts the string value of a ``value`` that is NaN, infinite or below 0.5, and formats a ``value``
-of 2^63 or more as its exact integer.

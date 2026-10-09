@@ -1,1 +1,0 @@
-Preserve invalid whitespace around operators in CSS math functions.

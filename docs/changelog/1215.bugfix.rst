@@ -1,2 +1,0 @@
-``to_markdown`` closes and reopens emphasis around a block inside it and starts a new paragraph for inline content after
-that block.

@@ -1,1 +1,0 @@
-The CSS minifier no longer merges rules past an override hidden behind ``\(`` or ``url()``.

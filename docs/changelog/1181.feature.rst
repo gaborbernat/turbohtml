@@ -1,1 +1,0 @@
-Extend encoding fuzz fixtures with both content-type declaration attribute orders.

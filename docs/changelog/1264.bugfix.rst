@@ -1,1 +1,0 @@
-``to_markdown`` writes emphasis as an HTML tag where its delimiters would merge or could not open or close.

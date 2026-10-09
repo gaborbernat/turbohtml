@@ -1,2 +1,0 @@
-Run the IDNA, phone, JavaScript and CSS standalone fuzz harnesses under MemorySanitizer, and the DOM lifecycle programs
-in parallel threads under ThreadSanitizer.

@@ -1,1 +1,0 @@
-``to_markdown`` leaves out a table row that has no cells.

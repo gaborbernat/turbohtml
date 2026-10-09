@@ -1,1 +1,0 @@
-The CSS minifier no longer splits a dimension whose unit has digits, escapes or non-ASCII.

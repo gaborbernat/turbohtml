@@ -1,2 +1,0 @@
-Raise MemoryError when an allocation fails while minifying JavaScript, instead of crashing or returning unmangled
-output.

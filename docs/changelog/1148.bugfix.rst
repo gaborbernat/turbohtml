@@ -1,1 +1,0 @@
-Preserve trailing decimal points in CSS numeric declarations.

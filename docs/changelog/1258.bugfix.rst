@@ -1,1 +1,0 @@
-``to_markdown`` escapes emphasis, tag, reference and line-break characters in image alt text.

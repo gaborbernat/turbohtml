@@ -1,1 +1,0 @@
-Add a bounded public URL-host oracle for Unicode mappings, NFC and canonical Punycode.

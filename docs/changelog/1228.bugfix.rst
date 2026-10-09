@@ -1,1 +1,0 @@
-A :class:`~turbohtml.NodeIterator` now follows removals made by ``normalize()``, ``Range`` methods and query edits.

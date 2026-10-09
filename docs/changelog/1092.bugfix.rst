@@ -1,1 +1,0 @@
-The parser ignores ``</body>`` and ``</html>`` when the body element is out of scope.

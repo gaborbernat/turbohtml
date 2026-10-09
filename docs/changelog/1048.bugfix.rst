@@ -1,1 +1,0 @@
-The CSS minifier no longer closes the input inside an unterminated string or ``url(``.

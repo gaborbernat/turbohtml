@@ -1,1 +1,0 @@
-Preserve quoted attribute names and misplaced universal selectors during CSS minification.

@@ -1,1 +1,0 @@
-:meth:`~turbohtml.Node.to_markdown` renders a ``<br>`` inside a heading as a space.

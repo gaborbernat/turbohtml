@@ -7,6 +7,325 @@
 .. towncrier release notes start
 
 **********************
+ v1.14.0 (2026-10-09)
+**********************
+
+Features - 1.14.0
+=================
+
+- The standalone IDNA fuzz target checks URL and Unicode normalization invariants. (:issue:`1010`)
+- Add bounded HTML grammar generation and export materialized production sweeps for corpus seeding. (:issue:`1018`)
+- Reduce saved HTML, CSS and JavaScript findings with language-aware deletion. (:issue:`1019`)
+- :func:`~turbohtml.clean.minify_js` shortens empty static blocks, ``new X()``, ``async ()=>`` and nested
+  ``if``/``else``. (:issue:`1111`)
+- CSS minification shortens escaped names and preserves their token boundaries. (:issue:`1112`)
+- :func:`~turbohtml.clean.minify_js` drops non-directive constant statements and prints an empty loop body as ``;``.
+  (:issue:`1113`)
+- :func:`~turbohtml.clean.minify_css` drops the space next to a string in an at-rule prelude. (:issue:`1134`)
+- Detect URL output changes and rejection during invariant fuzzing. (:issue:`1145`)
+- Add encoding stream and decoded-text invariants to the fuzz oracles. (:issue:`1152`)
+- Add a bounded public URL-host oracle for Unicode mappings, NFC and canonical Punycode. (:issue:`1155`)
+- Add fixed-target and repeated link-resolution checks to the fuzz oracles. (:issue:`1159`)
+- Add fixed text and encoding checks for streaming byte parsing. (:issue:`1160`)
+- Add bounded DOM sequence and observer callback invariant checks. (:issue:`1162`)
+- Add bounded iterator edit-sequence invariant checks. (:issue:`1164`)
+- Add bounded custom-property grammar generation with independent payload checks. (:issue:`1167`)
+- Add bounded HTML grammar generation with literal sibling-tree checks. (:issue:`1168`)
+- Add bounded XML generation with literal names and decoded whitespace expectations. (:issue:`1170`)
+- Add bounded XML generation with literal comment and CDATA expectations. (:issue:`1172`)
+- Fuzz canonical-equivalent IDNA hosts against independent normalized URL targets. (:issue:`1176`)
+- Generate SVG integration trees with independent namespace and parent expectations. (:issue:`1177`)
+- Share IDNA conversion between URL normalization and the standalone harness. (:issue:`1179`)
+- Extend encoding fuzz fixtures with BOM and conflicting declarations. (:issue:`1180`)
+- Extend encoding fuzz fixtures with both content-type declaration attribute orders. (:issue:`1181`)
+- Add encoding fuzz fixtures for UTF-16 declarations that HTML maps to UTF-8. (:issue:`1183`)
+- Generate finite nested lists with independent expectations for each item's parent. (:issue:`1184`)
+- Generate finite tables with independent row group and cell parent expectations. (:issue:`1185`)
+- Add encoding fuzz fixtures for labels that decode as windows-1252. (:issue:`1186`)
+- Expand HTML corpus generation with pinned Domato tag, attribute and value alternatives, document-only tag profiles,
+  and formatting and SVG integration shapes. (:issue:`1192`)
+- Check URL split/recomposition and reparse invariants through public normalization. (:issue:`1193`)
+- Add bounded XML structure generation with materialized corpus bytes and separate node and expansion budgets.
+  (:issue:`1196`)
+- Compare inline XSLT and schema outcomes with libxml2 and libxslt, including repaired seed-tree mutations.
+  (:issue:`1198`)
+- Add bounded CSS structure generation from pinned Domato and Blink tables, with distinct variable/keyframe bindings and
+  independent AST budget checks. (:issue:`1201`)
+- Add bounded DOM byte programs with independent state and register-order checks. (:issue:`1203`)
+- Add bounded Markdown source and HTML grammars with independent first-conversion checks and materialized corpus bytes.
+  (:issue:`1204`)
+- Add bounded encoded corpus generation with explicit codec expectations. (:issue:`1205`)
+- Admit generated XML, CSS, Markdown and encoding bytes through public fuzz consumers, and seed coverage-guided CI from
+  their generation contexts. (:issue:`1207`)
+- Add a fuzz-only C build mode that poisons arena gaps and parked wrappers and checks its sanitizer at startup.
+  (:issue:`1217`)
+- :class:`~turbohtml.validate.RelaxNG` reads ``include`` and ``externalRef`` files resolved against the new ``base_url``
+  argument, confined to ``include_root`` when set. (:issue:`1218`)
+- Fuzz retained wrappers, nested callbacks, parser reentry, hostile argument conversions and garbage collection with
+  byte programs that a native tree verifier checks after every step. (:issue:`1223`)
+- Run the IDNA, phone, JavaScript and CSS standalone fuzz harnesses under MemorySanitizer, and the DOM lifecycle
+  programs in parallel threads under ThreadSanitizer. (:issue:`1244`)
+- Add an allocation-failure sweep that fails each PyMem allocation of the fuzz seeds in turn and expects MemoryError.
+  (:issue:`1277`)
+
+Bug fixes - 1.14.0
+==================
+
+- The JavaScript minifier no longer reads past the inline-``<script>`` buffer when a member access ends with an empty
+  name, such as ``t.0.``. (:issue:`949`)
+- Keep :meth:`~turbohtml.Node.iter_elements` safe when ``set_text``, the ``text`` setter, ``field_value``, or
+  :meth:`~turbohtml.ShadowRoot.set_inner_html` replaces the iterated children, instead of crashing. Return ``None`` from
+  :meth:`~turbohtml.TreeWalker.first_child` and :meth:`~turbohtml.TreeWalker.last_child` when a ``NodeFilter`` detaches
+  the walked node, instead of crashing. (:issue:`950`)
+- Reject a :class:`RELAX NG <turbohtml.validate.RelaxNG>` ``<ref>`` with no name, a reference cycle that never crosses
+  an ``element``, and an ``interleave`` whose branches share an element name or both match text when the schema
+  compiles, and validate an ambiguous ``choice`` in bounded memory, instead of crashing, hanging, or exhausting memory.
+  (:issue:`951`)
+- Minifying CSS that contains a selector-less rule such as ``{--x:}`` no longer crashes the process. Minifying CSS with
+  many same-selector rules no longer costs time and memory quadratic in the rule count; a repeat merges only with a rule
+  at most 256 back. (:issue:`952`)
+- Count the XSLT built-in template rules against the 400-level nesting limit, raising ``RecursionError`` on a deeper
+  source document. (:issue:`953`)
+- Parsing HTML with formatting elements nested past the 512 open-element limit no longer builds a quadratic number of
+  DOM nodes. (:issue:`954`)
+- Detect duplicate attributes while parsing XML in time linear in the attribute count; an element with many attributes
+  in one namespace, or a repeated attribute name, no longer stalls :func:`turbohtml.parse_xml`. (:issue:`955`)
+- Reject an XSD :class:`~turbohtml.validate.XMLSchema` that references an undeclared component, forms a group,
+  attribute-group, or type-derivation cycle or a reference chain over 100 hops, or declares an ``xs:unique``,
+  ``xs:key``, or ``xs:keyref`` identity constraint, instead of crashing or validating the document against an incomplete
+  schema. (:issue:`956`)
+- Raise ``ValueError`` for an EXSLT ``str:padding`` length above 100,000 characters. (:issue:`957`)
+- Drop a disallowed CSS declaration written before ``{`` in a scrubbed ``<style>`` body, such as
+  ``color:expression(...)`` or ``-moz-binding:url(...)``. (:issue:`958`)
+- Attribute URL hosts the way a browser resolves them in ``normalize_url``, ``clean_url``, ``extract_links``,
+  ``resolve_links``, and the sanitizer's ``media_hosts`` allowlist: a special-scheme authority ends at a backslash, an
+  IPv4 address is read in all four notations and emitted dotted-decimal, the host is percent-decoded, and an IPv6
+  literal is zero-compressed. (:issue:`960`)
+- Decode byte-order-mark input through :attr:`EncodingMatch.codec <turbohtml.detect.EncodingMatch>` with U+FFFD
+  replacement instead of raising :exc:`UnicodeDecodeError` on malformed bytes. (:issue:`961`)
+- Skip a JSON-LD block that nests arrays or objects more than 400 levels deep instead of raising ``RecursionError`` from
+  ``Document.json_ld`` and ``Document.structured_data``. (:issue:`962`)
+- Make ``serialize(Html(xml=True))`` emit well-formed XML, dropping the characters, attribute names, and comment
+  spellings XML 1.0 forbids. (:issue:`963`)
+- :func:`turbohtml.detect.detect` reports ``UTF-16LE`` for the ``FF FE 00 00`` byte-order mark, matching
+  :func:`turbohtml.parse`, instead of the ``UTF-32LE`` label the parser does not produce. (:issue:`964`)
+- Reject ``xsl:import`` hrefs that resolve to a UNC path (``\\host\share`` or ``file:////host/share``). (:issue:`965`)
+- The URL extraction helpers :func:`~turbohtml.extract.normalize_url`, :func:`~turbohtml.extract.clean_url`, and
+  :func:`~turbohtml.extract.extract_links` no longer take time quadratic in the length of a non-ASCII host, leave a host
+  longer than 16384 code points unencoded, and keep a host carrying a code point UTS #46 disallows as Unicode rather
+  than converting it to punycode. (:issue:`966`)
+- The CSS minifier no longer crashes, or merges a rule past another that sets the same property, on a declaration such
+  as ``c:d[;e]`` whose ``;`` does not end it. (:issue:`972`)
+- ``sanitize`` drops a URL such as ``ftp\u00a0://host`` when ``allow_relative_urls`` is off, as the URL is relative.
+  (:issue:`974`)
+- Fix undefined behavior that sanitizer builds report on empty attribute values, text nodes, and namespace names.
+  (:issue:`977`)
+- An XML document with many namespace prefix declarations in scope no longer stalls :func:`turbohtml.parse_xml`.
+  (:issue:`979`)
+- :func:`~turbohtml.clean.minify_js` rejects two statements on one line with no separator. (:issue:`984`)
+- The JavaScript minifier no longer crashes on a function declaration that shares a parameter's name. (:issue:`986`)
+- Reject a prefixed namespace declaration with an empty value, such as ``xmlns:p=""``, in :func:`turbohtml.parse_xml`.
+  (:issue:`989`)
+- The JavaScript minifier now raises ``ValueError`` for a function or class declaration without a name and for a string
+  or template that ends in a backslash. (:issue:`990`)
+- The JavaScript minifier no longer revisits code it already removed. (:issue:`992`)
+- Serialize element and comment children of ``<script>``, ``<style>`` and the other raw-text elements as markup.
+  (:issue:`994`)
+- ``inner_html`` of a ``frame`` with children added through the DOM now returns an empty string. (:issue:`996`)
+- Write the text and CDATA children of ``<script>``, ``<style>`` and the other raw-text elements unescaped in
+  ``inner_html`` and ``serialize(inner=True)``. (:issue:`999`)
+- :func:`~turbohtml.clean.minify_js` keeps an async function expression's name and ``*``. (:issue:`1000`)
+- The JavaScript minifier no longer folds a variable that a block-level function reassigns. (:issue:`1001`)
+- Make :func:`turbohtml.clean.sanitize` HTML output re-parse to the tree the policy judged. (:issue:`1002`)
+- :func:`~turbohtml.clean.minify_js` keeps the parentheses V8 needs around a destructuring argument. (:issue:`1003`)
+- Folding in :func:`~turbohtml.clean.minify_js` no longer changes what a script does. (:issue:`1004`)
+- The CSS minifier no longer merges rules past an override hidden behind ``\(`` or ``url()``. (:issue:`1006`)
+- The JavaScript minifier no longer shadows a used outer binding or drops a ``var`` over a catch parameter.
+  (:issue:`1007`)
+- Run independent JavaScript invariants on exact public fuzz inputs. (:issue:`1014`)
+- A trailing backslash no longer escapes the closer the CSS minifier adds at end of input. (:issue:`1022`)
+- The CSS minifier no longer merges rules past an override with an escaped property name. (:issue:`1023`)
+- :func:`~turbohtml.clean.minify_js` accepts more valid scripts, such as ``await`` identifiers and class static blocks.
+  (:issue:`1029`)
+- :func:`~turbohtml.clean.minify_js` rejects ``let`` as a lexical binding name and duplicate unique parameters.
+  (:issue:`1030`)
+- :meth:`~turbohtml.Node.to_markdown` keeps emphasis, strikethrough and code intact when read back. (:issue:`1032`)
+- :func:`~turbohtml.clean.minify_css` no longer turns an invalid ``rgb()`` shape into a valid color. (:issue:`1033`)
+- :func:`~turbohtml.clean.minify_css` keeps spaces that a selector or value needs. (:issue:`1034`)
+- :func:`~turbohtml.clean.minify_js` no longer drops a declaration whose binding is still read. (:issue:`1035`)
+- A ``selectedcontent`` nested in an ``option`` or another ``selectedcontent`` stays empty instead of exhausting memory.
+  (:issue:`1044`)
+- :meth:`~turbohtml.Node.to_markdown` and the other text renderers handle any tree depth without :exc:`RecursionError`.
+  (:issue:`1046`)
+- :meth:`~turbohtml.Node.to_markdown` and the other text renderers keep rows under nested row groups. (:issue:`1047`)
+- The CSS minifier no longer closes the input inside an unterminated string or ``url(``. (:issue:`1048`)
+- The CSS minifier keeps the space that ends a hex escape in a property name. (:issue:`1049`)
+- The CSS minifier no longer splits a dimension whose unit has digits, escapes or non-ASCII. (:issue:`1050`)
+- :func:`~turbohtml.clean.minify_css` drops a declaration or rule holding a string a newline cuts short. (:issue:`1051`)
+- :func:`~turbohtml.clean.minify_css` no longer joins two idents in a property name. (:issue:`1052`)
+- Parsing many selected ``option`` elements is no longer quadratic, and nested options stay out of ``selectedcontent``.
+  (:issue:`1057`)
+- XSLT transform cost no longer depends on where nodes sit in memory. (:issue:`1058`)
+- :func:`~turbohtml.clean.minify_css` drops a rule whose selector holds a stray ``;`` or ``}``. (:issue:`1059`)
+- :func:`~turbohtml.clean.minify_css` closes a ``(`` or ``[`` left open at the end of input. (:issue:`1060`)
+- :func:`~turbohtml.clean.minify_css` no longer trims the space of a backslash-space escape. (:issue:`1061`)
+- :func:`~turbohtml.clean.minify_css` drops a rule with an empty selector. (:issue:`1062`)
+- :func:`~turbohtml.clean.minify_css` no longer merges a number into the next token in at-rules and ``calc()``.
+  (:issue:`1063`)
+- :func:`~turbohtml.clean.minify_css` no longer leaves some value and selector rewrites for a second call.
+  (:issue:`1064`)
+- :func:`~turbohtml.clean.minify_css` merges rules from combined same-query ``@media`` blocks in one call.
+  (:issue:`1065`)
+- :meth:`~turbohtml.Node.to_markdown` drops a ``<br>`` at the end of a block instead of leaving a blank line.
+  (:issue:`1068`)
+- :meth:`~turbohtml.Node.to_markdown` renders a ``<br>`` inside a heading as a space. (:issue:`1069`)
+- :meth:`~turbohtml.Node.to_markdown` escapes a backtick in an image's alt text. (:issue:`1072`)
+- :meth:`~turbohtml.Node.to_markdown` keeps the block after an empty list item or block quote outside the container.
+  (:issue:`1073`)
+- :meth:`~turbohtml.Node.to_markdown` keeps a list nested when a non-``li`` element wraps it inside a list item.
+  (:issue:`1074`)
+- :func:`~turbohtml.clean.minify_css` no longer turns a unit starting with ``e`` into an exponent. (:issue:`1077`)
+- :meth:`~turbohtml.Node.to_markdown` and :meth:`~turbohtml.Node.to_text` cap list and quote indentation at 20 levels.
+  (:issue:`1079`)
+- Selectors with ``~``, ``:has(~ ...)``, ``:has(+ ...)`` or chained descendant combinators match in linear time.
+  (:issue:`1081`)
+- The CSS minifier keeps ``url()`` with a modifier in ``@import`` and ``@namespace``. (:issue:`1082`)
+- :func:`~turbohtml.clean.minify_css` keeps the case of an escaped custom property name. (:issue:`1083`)
+- :func:`~turbohtml.clean.minify_js` reads a leading ``let`` with no binding after it as an identifier. (:issue:`1084`)
+- :meth:`~turbohtml.Node.xpath` accepts ``or``, ``and``, ``div`` and ``mod`` after a ``*`` name test. (:issue:`1085`)
+- :func:`~turbohtml.convert.css_to_xpath` makes ``[att="" i]`` match only elements carrying the attribute.
+  (:issue:`1086`)
+- :func:`~turbohtml.parse_xml` accepts an empty comment before the root element. (:issue:`1087`)
+- XML output from ``serialize(Html(xml=True))`` now reads back unchanged with ``parse_xml``. (:issue:`1088`)
+- ``source_locations=True`` no longer reports an end tag the source never wrote. (:issue:`1089`)
+- The parser no longer builds ``head`` and ``body`` inside SVG or MathML content. (:issue:`1090`)
+- A ``pre`` in a template table row no longer gains a line feed per round trip. (:issue:`1091`)
+- The parser ignores ``</body>`` and ``</html>`` when the body element is out of scope. (:issue:`1092`)
+- ``<selectedcontent>`` mirrors the option the spec selects. (:issue:`1093`)
+- :func:`~turbohtml.clean.minify_js` flattens all nested blocks in one call. (:issue:`1094`)
+- The sanitizer keeps escaped table sections and rows in source order. (:issue:`1095`)
+- :func:`~turbohtml.clean.minify_js` rejects declarations in single-statement bodies and invalid binding patterns.
+  (:issue:`1108`)
+- :func:`~turbohtml.convert.css_to_xpath` makes ``[att|="" i]`` match only elements carrying the attribute.
+  (:issue:`1109`)
+- :func:`~turbohtml.clean.minify_css` ends a stylesheet's final statement at-rule with ``;``. (:issue:`1110`)
+- :func:`~turbohtml.clean.minify_css` keeps ``{}`` blocks in custom property values. (:issue:`1114`)
+- :class:`~turbohtml.Element` rejects children for ``frame``, like the other elements serialized without them.
+  (:issue:`1118`)
+- ``<selectedcontent>`` mirrors the selected option when written after it or past a ``<datalist>`` option.
+  (:issue:`1119`)
+- Deeply nested :meth:`~turbohtml.Node.to_markdown` output reads back in full with markdown-it's CommonMark preset.
+  (:issue:`1121`)
+- :func:`~turbohtml.clean.minify_js` no longer crashes on a long statement list. (:issue:`1126`)
+- :func:`~turbohtml.clean.minify_js` rejects more invalid declarations, catch parameters and binding names.
+  (:issue:`1127`)
+- :func:`~turbohtml.clean.minify_css` merges same-query ``@media`` blocks separated by a rule it drops. (:issue:`1128`)
+- Selectors using ``~`` run faster on long runs of sibling elements. (:issue:`1141`)
+- Preserve valid CSS declarations beside empty values and invalid box edges. (:issue:`1143`)
+- Preserve quoted attribute names and misplaced universal selectors during CSS minification. (:issue:`1144`)
+- Preserve invalid top-level delimiters in background-position values during CSS minification. (:issue:`1146`)
+- Preserve invalid whitespace around operators in CSS math functions. (:issue:`1147`)
+- Preserve trailing decimal points in CSS numeric declarations. (:issue:`1148`)
+- Reject cleaned URLs whose canonical authority loses its web-host shape. (:issue:`1149`)
+- Preserve numeric token types and fractional math wrappers in z-index values. (:issue:`1151`)
+- Preserve quoted position components in malformed background-position declarations. (:issue:`1154`)
+- RELAX NG rejects schemas whose root uses a foreign namespace. (:issue:`1156`)
+- Treat RELAX NG values without an explicit type as tokens. (:issue:`1161`)
+- Preserve separators between stray CSS text and following nested rules. (:issue:`1163`)
+- Enforce RELAX NG data-pattern exclusions. (:issue:`1165`)
+- Keep invalid background size and repeat pairs invalid. (:issue:`1166`)
+- Keep trailing auto after unresolved background size functions. (:issue:`1169`)
+- Accept empty element content for RELAX NG empty string patterns. (:issue:`1171`)
+- Keep repeated box shorthand components when functions remain unresolved. (:issue:`1173`)
+- Enforce numeric range bounds in RELAX NG datatype validation. (:issue:`1174`)
+- Normalize literal file URL path backslashes and empty root paths. (:issue:`1175`)
+- Preserve namespace constraints when minifying universal selectors inside functions. (:issue:`1178`)
+- Preserve background-position values that contain unresolved functions. (:issue:`1182`)
+- Preserve font shorthand components around unresolved functions during CSS minification. (:issue:`1187`)
+- Reject documented API errors from Atheris-generated corpora. (:issue:`1190`)
+- Reject unresolved XSD built-in type names and global elements without names. (:issue:`1191`)
+- Reject forbidden characters after URL host decoding and IDNA mapping. (:issue:`1193`)
+- Exercise qualified public APIs through checked Atheris consumers. (:issue:`1197`)
+- Reject undefined RELAX NG references and ignore foreign annotation subtrees during compilation. (:issue:`1198`)
+- Reject RELAX NG include and externalRef patterns without href attributes, including unused definitions.
+  (:issue:`1199`)
+- Keep generated corpus bytes in separate executable target directories with their production metadata. (:issue:`1200`)
+- The Markdown conversion check accepts HTML shapes CommonMark cannot write and rejects list and table content outside
+  its HTML content model. (:issue:`1208`)
+- ``to_markdown`` writes an empty ``<blockquote>`` as ``>`` and an empty ``<pre>`` as a fence without a blank line.
+  (:issue:`1209`)
+- ``to_markdown`` writes a leading ``<br>`` and each ``<br>`` of a consecutive run as a hard line break. (:issue:`1210`)
+- The Markdown conversion check treats every HTML block as a paragraph boundary and wraps quote and list item text in
+  paragraphs. (:issue:`1211`)
+- ``to_markdown`` keeps a link with an empty ``href`` and writes an empty link or image destination as ``<>``.
+  (:issue:`1212`)
+- ``to_markdown`` writes a line break inside inline code as a space so the next line cannot open a block.
+  (:issue:`1213`)
+- ``to_markdown`` keeps block content inside a heading on the heading line and reads a block edge in link text or a
+  heading as a space. (:issue:`1214`)
+- ``to_markdown`` closes and reopens emphasis around a block inside it and starts a new paragraph for inline content
+  after that block. (:issue:`1215`)
+- ``to_markdown`` separates a list item's text from a paragraph or block before it with a blank line. (:issue:`1216`)
+- The Markdown conversion check reads the parse tree that ``to_markdown`` converts. (:issue:`1221`)
+- ``Element.css_path`` no longer hangs on a detached element whose id the document lacks, a node filter that steps its
+  own traverser raises instead of corrupting the outer step, and ``MutationObserver.observe``, ``TreeWalker``,
+  ``NodeIterator``, ``append`` and ``extend`` keep a node and its tree together when a callback or another thread moves
+  it. (:issue:`1222`)
+- :meth:`~turbohtml.Element.css_path` no longer anchors a detached element on an attached element's id. (:issue:`1227`)
+- A :class:`~turbohtml.NodeIterator` now follows removals made by ``normalize()``, ``Range`` methods and query edits.
+  (:issue:`1228`)
+- Inserting or wrapping with nodes from another tree no longer races a concurrent move of the target. (:issue:`1229`)
+- :class:`~turbohtml.Range` and :class:`~turbohtml.StaticRange` now read a moving container together with its tree.
+  (:issue:`1230`)
+- :class:`~turbohtml.Range` methods now read a moving node argument together with its tree. (:issue:`1231`)
+- Raise ``MemoryError`` when a CSS selector query fails to allocate memory. (:issue:`1233`)
+- ``to_markdown`` drops tabs and line breaks from link and image destinations. (:issue:`1237`)
+- ``to_markdown`` keeps the spaces at both ends of inline code. (:issue:`1238`)
+- ``to_markdown`` applies emphasis around a table to every cell. (:issue:`1241`)
+- Raise MemoryError when an allocation fails while minifying CSS or a style attribute, instead of returning truncated
+  output or crashing. (:issue:`1242`)
+- ``to_markdown`` keeps a ``<br>`` and a block edge inside ``<pre>`` as line breaks of the code block. (:issue:`1245`)
+- :class:`~turbohtml.cssom.StyleSheet` and :class:`~turbohtml.cssom.StyleDeclaration` keep ``{}`` blocks in custom
+  property values. (:issue:`1246`)
+- :class:`~turbohtml.cssom.StyleSheet` and :class:`~turbohtml.cssom.StyleDeclaration` read a backslash-escaped delimiter
+  as part of a name. (:issue:`1246`)
+- Raise ``MemoryError`` when ``to_markdown`` fails to allocate memory inside a table cell, a nested list or quote, or a
+  converter. (:issue:`1247`)
+- Write a link destination that holds an ASCII control character in the ``<...>`` form, the only form CommonMark reads
+  it in. (:issue:`1248`)
+- ``to_markdown`` closes emphasis before a block quote inside it and reopens it in the quote. (:issue:`1249`)
+- Skip ``<title>``, ``<datalist>``, ``<noembed>``, ``<noframes>`` and ``<rp>`` in ``to_markdown`` and ``to_text``, which
+  browsers do not render. (:issue:`1251`)
+- Raise ``MemoryError`` when parsing or rewriting HTML fails to allocate memory. (:issue:`1252`)
+- Raise MemoryError when an allocation fails while minifying JavaScript, instead of crashing or returning unmangled
+  output. (:issue:`1253`)
+- :meth:`~turbohtml.Element.extend` no longer links a node twice when another thread links its imported copy first.
+  (:issue:`1254`)
+- :class:`~turbohtml.cssom.StyleSheet` and :class:`~turbohtml.cssom.StyleDeclaration` no longer read an escaped slash as
+  the start of a comment. (:issue:`1255`)
+- ``to_markdown`` escapes a ``&`` that starts a character reference finished by the next text node. (:issue:`1256`)
+- ``to_markdown`` escapes emphasis, tag, reference and line-break characters in image alt text. (:issue:`1258`)
+- ``to_markdown`` writes line breaks in link and image titles as character references and escapes a ``&`` that starts
+  one. (:issue:`1259`)
+- Skip ``<template>`` content in ``to_markdown`` and ``to_text``, which browsers do not render. (:issue:`1260`)
+- ``to_markdown`` leaves out a table row that has no cells. (:issue:`1261`)
+- Raise ``MemoryError`` when building, copying or sanitizing elements fails to allocate memory. (:issue:`1262`)
+- ``to_markdown`` keeps a list separate from one before it when only an empty block stands between them. (:issue:`1263`)
+- ``to_markdown`` writes emphasis as an HTML tag where its delimiters would merge or could not open or close.
+  (:issue:`1264`)
+- ``xsl:number`` now inserts the string value of a ``value`` that is NaN, infinite or below 0.5, and formats a ``value``
+  of 2^63 or more as its exact integer. (:issue:`1265`)
+- ``to_markdown`` places a nested list or an item's first block on its own line where CommonMark reads it back.
+  (:issue:`1266`)
+- ``to_markdown`` drops a ``<br>`` that nothing visible follows and keeps one after an inner block in the next block.
+  (:issue:`1267`)
+- ``to_markdown`` flattens a block inside a table cell and writes a ``<pre>`` on a single line as a code span.
+  (:issue:`1268`)
+- ``to_markdown`` makes a list item loose when it holds two paragraphs or text after a nested block. (:issue:`1269`)
+- ``Linker.linkify`` and ``Linker.linkify_node`` raise ``MemoryError`` when an allocation fails, instead of
+  ``SystemError``. (:issue:`1273`)
+
+**********************
  v1.13.1 (2026-10-01)
 **********************
 

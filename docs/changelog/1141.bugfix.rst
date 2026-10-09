@@ -1,1 +1,0 @@
-Selectors using ``~`` run faster on long runs of sibling elements.

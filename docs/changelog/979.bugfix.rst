@@ -1,1 +1,0 @@
-An XML document with many namespace prefix declarations in scope no longer stalls :func:`turbohtml.parse_xml`.

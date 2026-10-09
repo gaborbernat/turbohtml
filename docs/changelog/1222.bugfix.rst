@@ -1,4 +1,0 @@
-``Element.css_path`` no longer hangs on a detached element whose id the document lacks, a node filter that steps its own
-traverser raises instead of corrupting the outer step, and ``MutationObserver.observe``, ``TreeWalker``,
-``NodeIterator``, ``append`` and ``extend`` keep a node and its tree together when a callback or another thread moves
-it.

@@ -1,1 +1,0 @@
-A ``pre`` in a template table row no longer gains a line feed per round trip.

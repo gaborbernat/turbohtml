@@ -1,1 +1,0 @@
-Add encoding fuzz fixtures for labels that decode as windows-1252.

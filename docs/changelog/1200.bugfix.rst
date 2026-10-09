@@ -1,1 +1,0 @@
-Keep generated corpus bytes in separate executable target directories with their production metadata.

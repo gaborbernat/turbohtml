@@ -1,1 +1,0 @@
-``inner_html`` of a ``frame`` with children added through the DOM now returns an empty string.

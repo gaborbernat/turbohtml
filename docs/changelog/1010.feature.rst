@@ -1,1 +1,0 @@
-The standalone IDNA fuzz target checks URL and Unicode normalization invariants.

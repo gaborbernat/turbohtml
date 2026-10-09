@@ -1,1 +1,0 @@
-:func:`~turbohtml.clean.minify_js` rejects declarations in single-statement bodies and invalid binding patterns.

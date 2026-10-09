@@ -1,1 +1,0 @@
-Treat RELAX NG values without an explicit type as tokens.

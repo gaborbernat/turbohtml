@@ -1,1 +1,0 @@
-Serialize element and comment children of ``<script>``, ``<style>`` and the other raw-text elements as markup.

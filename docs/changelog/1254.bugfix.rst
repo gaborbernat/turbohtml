@@ -1,1 +1,0 @@
-:meth:`~turbohtml.Element.extend` no longer links a node twice when another thread links its imported copy first.

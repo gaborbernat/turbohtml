@@ -1,1 +1,0 @@
-:meth:`~turbohtml.Node.xpath` accepts ``or``, ``and``, ``div`` and ``mod`` after a ``*`` name test.

@@ -1,1 +1,0 @@
-:func:`~turbohtml.clean.minify_css` keeps ``{}`` blocks in custom property values.

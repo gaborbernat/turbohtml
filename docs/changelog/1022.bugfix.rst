@@ -1,1 +1,0 @@
-A trailing backslash no longer escapes the closer the CSS minifier adds at end of input.

@@ -1,1 +1,0 @@
-Reject RELAX NG include and externalRef patterns without href attributes, including unused definitions.

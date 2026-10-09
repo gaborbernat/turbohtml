@@ -1,1 +1,0 @@
-The sanitizer keeps escaped table sections and rows in source order.

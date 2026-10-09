@@ -1,1 +1,0 @@
-Folding in :func:`~turbohtml.clean.minify_js` no longer changes what a script does.

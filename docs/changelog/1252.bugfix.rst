@@ -1,1 +1,0 @@
-Raise ``MemoryError`` when parsing or rewriting HTML fails to allocate memory.

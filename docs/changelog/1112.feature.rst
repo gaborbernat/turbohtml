@@ -1,1 +1,0 @@
-CSS minification shortens escaped names and preserves their token boundaries.

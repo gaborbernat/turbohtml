@@ -1,1 +1,0 @@
-The JavaScript minifier no longer shadows a used outer binding or drops a ``var`` over a catch parameter.

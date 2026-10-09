@@ -1,1 +1,0 @@
-Add fixed text and encoding checks for streaming byte parsing.

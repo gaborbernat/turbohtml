@@ -1,2 +1,0 @@
-Fuzz retained wrappers, nested callbacks, parser reentry, hostile argument conversions and garbage collection with byte
-programs that a native tree verifier checks after every step.

@@ -1,1 +1,0 @@
-:func:`~turbohtml.clean.minify_js` accepts more valid scripts, such as ``await`` identifiers and class static blocks.

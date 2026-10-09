@@ -1,1 +1,0 @@
-A ``selectedcontent`` nested in an ``option`` or another ``selectedcontent`` stays empty instead of exhausting memory.

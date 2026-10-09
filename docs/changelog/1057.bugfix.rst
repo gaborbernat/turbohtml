@@ -1,1 +1,0 @@
-Parsing many selected ``option`` elements is no longer quadratic, and nested options stay out of ``selectedcontent``.

@@ -1,1 +1,0 @@
-Preserve font shorthand components around unresolved functions during CSS minification.

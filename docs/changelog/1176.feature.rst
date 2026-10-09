@@ -1,1 +1,0 @@
-Fuzz canonical-equivalent IDNA hosts against independent normalized URL targets.

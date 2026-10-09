@@ -1,1 +1,0 @@
-Preserve separators between stray CSS text and following nested rules.

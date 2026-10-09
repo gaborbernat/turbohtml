@@ -1,1 +1,0 @@
-:meth:`~turbohtml.Node.to_markdown` keeps emphasis, strikethrough and code intact when read back.

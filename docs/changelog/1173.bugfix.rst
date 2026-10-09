@@ -1,1 +1,0 @@
-Keep repeated box shorthand components when functions remain unresolved.

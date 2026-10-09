@@ -1,1 +1,0 @@
-Exercise qualified public APIs through checked Atheris consumers.

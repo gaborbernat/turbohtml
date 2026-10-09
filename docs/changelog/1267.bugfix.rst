@@ -1,1 +1,0 @@
-``to_markdown`` drops a ``<br>`` that nothing visible follows and keeps one after an inner block in the next block.

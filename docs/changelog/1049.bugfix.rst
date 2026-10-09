@@ -1,1 +1,0 @@
-The CSS minifier keeps the space that ends a hex escape in a property name.

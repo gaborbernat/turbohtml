@@ -1,2 +1,0 @@
-Add bounded CSS structure generation from pinned Domato and Blink tables, with distinct variable/keyframe bindings and
-independent AST budget checks.

@@ -1,1 +1,0 @@
-Preserve invalid top-level delimiters in background-position values during CSS minification.

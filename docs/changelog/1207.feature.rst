@@ -1,2 +1,0 @@
-Admit generated XML, CSS, Markdown and encoding bytes through public fuzz consumers, and seed coverage-guided CI from
-their generation contexts.

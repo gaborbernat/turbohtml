@@ -1,1 +1,0 @@
-Add an allocation-failure sweep that fails each PyMem allocation of the fuzz seeds in turn and expects MemoryError.

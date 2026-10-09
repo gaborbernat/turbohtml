@@ -1,1 +1,0 @@
-Add encoding stream and decoded-text invariants to the fuzz oracles.

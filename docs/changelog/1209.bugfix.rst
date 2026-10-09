@@ -1,1 +1,0 @@
-``to_markdown`` writes an empty ``<blockquote>`` as ``>`` and an empty ``<pre>`` as a fence without a blank line.

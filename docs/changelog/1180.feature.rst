@@ -1,1 +1,0 @@
-Extend encoding fuzz fixtures with BOM and conflicting declarations.

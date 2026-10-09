@@ -1,1 +1,0 @@
-Raise ``MemoryError`` when a CSS selector query fails to allocate memory.

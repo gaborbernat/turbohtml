@@ -1,1 +1,0 @@
-Reject unresolved XSD built-in type names and global elements without names.
