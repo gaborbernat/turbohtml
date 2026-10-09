@@ -4840,15 +4840,8 @@ done:
     return result;
 }
 
-/* Free the copy a failed sanitize built and make sure an exception is set: a Python callback or API call sets its own,
-   a failed tree allocation (arena_alloc, node_new) sets none, so report that the way the rewriter does for its output
-   buffer. Out of line, since inlined the check cost sanitize 3,400 instructions a call. */
-static TH_NOINLINE PyObject *sanitize_failed(th_tree *tree) {
-    if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        PyErr_NoMemory();    /* GCOVR_EXCL_LINE: allocation-failure path */
-    } /* GCOVR_EXCL_LINE: llvm flags the OOM branch's closing brace */
-    th_tree_free(tree);
-    return NULL;
+static TH_NOINLINE PyObject *no_memory_unless_set(void) {
+    return PyErr_Occurred() ? NULL : PyErr_NoMemory();
 }
 
 TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args), (module, args),
@@ -4955,7 +4948,8 @@ TH_NODE_API(, PyObject *, turbohtml_sanitize, (PyObject * module, PyObject *args
     Py_DECREF(s.star);
     Py_DECREF(s.re_search);
     if (failed) {
-        return sanitize_failed(s.tree);
+        th_tree_free(s.tree);
+        return no_memory_unless_set();
     }
     if (retained_source == NULL) {
         return wrap_fresh_tree_node(PyModule_GetState(module), s.tree, root);
