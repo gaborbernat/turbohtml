@@ -1,0 +1,1 @@
+``to_markdown`` escapes a ``&`` that starts a character reference finished by the next text node.
