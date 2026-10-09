@@ -329,7 +329,9 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
     case TH_NODE_TEXT:
         if (text_is_span(node) && realize_span(tree, node) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
             out->failed = 1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
-        } else if (opts->xml) {
+            break;                                                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (opts->xml) {
             sbuf_put_xml_text(out, node->text, node->text_len, 0);
         } else {
             sbuf_put_text(out, node->text, node->text_len, 0, opts->formatter);
