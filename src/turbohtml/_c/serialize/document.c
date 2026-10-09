@@ -202,7 +202,7 @@ SER_NOINLINE static void ser_put_rawtext(sbuf *out, th_tree *tree, th_node *elem
             ser_put_rawtext_markup(out, tree, element, child, opts, 0);
             return;
         }
-        ser_put_node_text(out, tree, child);
+        sbuf_put_ucs4(out, need_text(tree, child), child->text_len);
     }
 }
 
@@ -419,7 +419,7 @@ SER_NOINLINE void ser_put_rawtext_markup(sbuf *out, th_tree *tree, th_node *elem
     while (node != NULL) {
         if ((node->type == TH_NODE_TEXT || node->type == TH_NODE_CDATA) &&
             is_rawtext_element(node->parent, tree->scripting)) {
-            ser_put_node_text(out, tree, node);
+            sbuf_put_ucs4(out, need_text(tree, node), node->text_len);
             node = ser_markup_next(out, node, element);
         } else if (node->type == TH_NODE_COMMENT && strip_comments) {
             node = ser_markup_next(out, node, element);
