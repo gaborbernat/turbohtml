@@ -210,12 +210,8 @@ release = [
 [tool.cibuildwheel]
 # abi3 is impossible here (the SWAR paths need the non-limited PyUnicode buffer
 # APIs), so we ship a wheel per interpreter; cibuildwheel automates the matrix.
-# requires-python bounds the low end; free-threading wheels for 3.14+/3.15+ are
-# built automatically, and cpython-prerelease covers 3.15 while it is in beta.
-# "pypy" selects pp311; "pypy-eol" adds pp310, whose final PyPy release (7.3.19) still receives wheels here because
-# core/pycompat.h seals the C types through an explicit tp_new rather than through the
-# Py_TPFLAGS_DISALLOW_INSTANTIATION flag its cpyext ignores.
-enable = [ "cpython-prerelease", "pypy", "pypy-eol" ]
+# requires-python bounds the low end; free-threading wheels for 3.14+/3.15+ are built automatically.
+enable = [ "pypy" ]
 build-frontend = "build[uv]"
 test-command = "python -c \"import turbohtml; assert turbohtml.unescape(turbohtml.escape('a & b')) == 'a & b'\""
 # Profile-guided optimization for the manylinux/musllinux wheels, where the gcc the spike measured runs. before-build
