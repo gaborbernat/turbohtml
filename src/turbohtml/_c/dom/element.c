@@ -15,8 +15,8 @@ static int element_attr_value(PyObject *value, Py_UCS4 **points, Py_ssize_t *len
 
 /* Encode a str key into a freshly allocated UTF-8 buffer for an attribute lookup;
    *out_len its length. Folded to match an HTML tree's lowercased names, kept verbatim
-   for a case-sensitive XML tree. NULL with TypeError when the key is not a str. Caller
-   frees with PyMem_Free. */
+   for a case-sensitive XML tree. NULL with TypeError when the key is not a str, or with
+   MemoryError. Caller frees with PyMem_Free. */
 char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len) {
     if (!PyUnicode_Check(key)) {
         PyErr_SetString(PyExc_TypeError, "attribute name must be a str");
@@ -28,8 +28,8 @@ char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len) {
         return NULL;    /* GCOVR_EXCL_LINE: surrogate path */
     }
     char *name = PyMem_Malloc((size_t)(len ? len : 1));
-    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-        return NULL;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    if (name == NULL) {                  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return (void *)PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     int fold = !th_tree_is_xml(tree);
     for (Py_ssize_t index = 0; index < len; index++) {
@@ -127,8 +127,8 @@ TH_NODE_API(static, int, attrs_ass_subscript, (PyObject * self, PyObject *key, P
     }
     Py_ssize_t len;
     char *name = attr_key_utf8(tree, key, &len);
-    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: a validated name is a str that encodes */
-        return -1;      /* GCOVR_EXCL_LINE: unreachable after th_validate_markup_name */
+    if (name == NULL) { /* GCOVR_EXCL_BR_LINE: a validated name encodes, so only an allocation fails here */
+        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_UCS4 *points;
     Py_ssize_t value_len;
@@ -141,10 +141,15 @@ TH_NODE_API(static, int, attrs_ass_subscript, (PyObject * self, PyObject *key, P
         Py_END_CRITICAL_SECTION();
     }
     PyMem_Free(name);
-    if (!bad) {
-        PyMem_Free(points);
+    if (bad) {
+        return -1;
     }
-    return rc < 0 ? -1 : 0;
+    PyMem_Free(points);
+    if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails to allocate */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
 }
 
 TH_NODE_API(static, int, attrs_contains, (PyObject * self, PyObject *key), (self, key),
@@ -863,7 +868,11 @@ static int set_value_attr(PyObject *self, th_node *node, PyObject *value) {
     rc = th_node_attr_set(tree, node, "value", 5, points, len, 1);
     Py_END_CRITICAL_SECTION();
     PyMem_Free(points);
-    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on OOM */
+    if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: th_node_attr_set only fails on OOM */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
 }
 
 /* Replace a textarea's children with a single Text node holding value, or clear it
@@ -975,7 +984,11 @@ static int set_select_value(PyObject *self, th_node *select, PyObject *value) {
         int select_it = want && (multiple || !selected_one);
         if (select_it) {
             selected_one = 1;
-            th_node_attr_set(tree, option, "selected", 8, NULL, 0, 0);
+            if (th_node_attr_set(tree, option, "selected", 8, NULL, 0, 0) < 0) { /* GCOVR_EXCL_BR_LINE: OOM only */
+                PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+                error = 1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+                break;            /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
         } else {
             th_node_attr_del(tree, option, "selected", 8);
         }
@@ -1257,7 +1270,11 @@ TH_NODE_API(static, int, element_set_checked, (PyObject * self, PyObject *value,
         th_node_attr_del(tree, node, "checked", 7);
     }
     Py_END_CRITICAL_SECTION();
-    return rc < 0 ? -1 : 0; /* GCOVR_EXCL_BR_LINE: allocation failure */
+    if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: the attribute store and the radio scan fail only to allocate */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
 }
 
 static th_node *fieldset_first_legend(th_node *fieldset) {
@@ -2462,6 +2479,7 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
         }
         char *stored = PyMem_Malloc((size_t)name_len);
         if (stored == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
             return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
         }
         for (Py_ssize_t byte = 0; byte < name_len; byte++) {
@@ -2485,8 +2503,9 @@ static int fill_element_attrs(th_tree *tree, th_node *node, PyObject *attrs, PyO
         int rc = th_tree_set_attr(tree, node, filled++, stored, name_len, points, value_len, has_value);
         PyMem_Free(stored);
         PyMem_Free(points);
-        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        if (rc < 0) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+            return -1;        /* GCOVR_EXCL_LINE: allocation-failure path */
         }
     }
     node->attr_count = filled;
