@@ -623,11 +623,7 @@ static th_node *pretty_emit_run(sbuf *out, th_tree *tree, th_node *start, const 
     }
     for (th_node *node = start;; node = node->next_sibling) {
         if (node->type == TH_NODE_TEXT) {
-            if (text_is_span(node) && realize_span(tree, node) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-                out->failed = 1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
-                return last; /* GCOVR_EXCL_LINE: the trims below would read the missing text */
-            }
-            const Py_UCS4 *text = node->text;
+            const Py_UCS4 *text = need_text(tree, node);
             Py_ssize_t begin = 0;
             Py_ssize_t end = node->text_len;
             while (node == start && is_space(text[begin])) {
