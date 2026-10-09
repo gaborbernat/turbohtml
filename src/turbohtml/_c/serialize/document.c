@@ -195,6 +195,16 @@ Py_UCS4 *th_tree_serialize(th_tree *tree, Py_ssize_t *out_len) {
 #define SER_NOINLINE
 #endif
 
+/* Realize a text span for the compact walk, marking out failed when the copy cannot be allocated. Out of line, so the
+   failure handling leaves serialize_compact_step small enough that the XML text writer stays inlined into it. */
+SER_NOINLINE static int ser_realize_failed(sbuf *out, th_tree *tree, th_node *node) {
+    if (realize_span(tree, node) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        out->failed = 1;                    /* GCOVR_EXCL_LINE: allocation-failure path */
+        return 1;                           /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return 0;
+}
+
 /* A raw-text element's text children go out literally; the first markup child hands the rest to the markup walk. */
 SER_NOINLINE static void ser_put_rawtext(sbuf *out, th_tree *tree, th_node *element, const th_serialize_opts *opts) {
     for (th_node *child = element->first_child; child != NULL; child = child->next_sibling) {
@@ -327,9 +337,10 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         /* a CDATA section is a Text node, so its escaped text is the one HTML form that holds a ">" */
         TH_FALLTHROUGH;
     case TH_NODE_TEXT:
-        if (text_is_span(node) && realize_span(tree, node) == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-            out->failed = 1;                                          /* GCOVR_EXCL_LINE: allocation-failure path */
-        } else if (opts->xml) {
+        if (text_is_span(node) && ser_realize_failed(out, tree, node)) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            break;                                                       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (opts->xml) {
             sbuf_put_xml_text(out, node->text, node->text_len, 0);
         } else {
             sbuf_put_text(out, node->text, node->text_len, 0, opts->formatter);
