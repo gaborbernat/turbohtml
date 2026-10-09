@@ -1358,10 +1358,18 @@ static void md_emit_url_without_breaks(md_ctx *ctx, const char *base, const Py_U
 }
 
 /* Write a link/image title inside its `"..."` delimiters: a `"` would close the
-   title early and a `\` would escape the next character, so both are backslashed. */
+   title early and a `\` would escape the next character, so both are backslashed, as
+   is a `&` that would decode as a character reference. A line break is written as its
+   numeric reference, which a title decodes (CommonMark 6.3): written raw, the next line
+   could open a block (a `>` quote, a `#` heading) and end the paragraph mid-link. */
 static void md_emit_title(md_ctx *ctx, const Py_UCS4 *title, Py_ssize_t len) {
     for (Py_ssize_t index = 0; index < len; index++) {
-        if (title[index] == '"' || title[index] == '\\') {
+        if (title[index] == '\n' || title[index] == '\r') {
+            sbuf_puts(&ctx->out, title[index] == '\n' ? "&#10;" : "&#13;");
+            continue;
+        }
+        if (title[index] == '"' || title[index] == '\\' ||
+            (title[index] == '&' && md_starts_reference(title, index, len))) {
             sbuf_putc(&ctx->out, '\\');
         }
         md_put_literal(ctx, title[index]);
