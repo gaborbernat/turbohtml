@@ -5,10 +5,8 @@ submodules:
   exclude: all
 build:
   os: ubuntu-lts-latest
-  tools:
-    python: "3"
+  tools: {}
   commands:
-    - pip install uv
-    - uv venv
-    - uv pip install tox-uv
-    - .venv/bin/tox run -e docs --
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - ~/.local/bin/uv tool install tox --with tox-uv -p 3.15 --managed-python
+    - ~/.local/bin/tox run -e docs --

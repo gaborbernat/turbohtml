@@ -22,7 +22,7 @@ jobs:
         # The C-coverage gate runs where gcov/llvm-cov exist; on Windows the same
         # suite runs without it (MSVC has no gcov), gated natively in tox.toml.
         os: ["ubuntu-24.04", "macos-15", "windows-2025"]
-        py: ["3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.15t", "3.14t"]
+        py: ["3.15", "3.14", "3.13", "3.12", "3.11", "3.15t", "3.14t"]
         include:
           - {os: "ubuntu-24.04", label: Linux, cov: "gcov"}
           - {os: "macos-15", label: macOS, cov: "xcrun llvm-cov gcov"}
@@ -44,6 +44,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - wait: test-data
       - name: ✅ Run ${{ matrix.py }}
@@ -52,7 +53,7 @@ jobs:
           UV_PYTHON_PREFERENCE: only-managed
           COV_GCOV: ${{ matrix.cov }}
       - name: Report failed selector branches
-        if: ${{ failure() && runner.os == 'macOS' && contains(fromJSON('["3.10","3.11","3.12","3.13","3.14"]'), matrix.py) }}
+        if: ${{ failure() && runner.os == 'macOS' && contains(fromJSON('["3.11","3.12","3.13","3.14"]'), matrix.py) }}
         run: |
           xcrun clang --version
           xcode-select -p
@@ -71,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py: ["pypy3.11", "pypy3.10"]
+        py: ["pypy3.11"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,6 +90,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - wait: test-data
       - name: ✅ Run ${{ matrix.py }}
@@ -123,6 +125,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - wait: test-data
       - name: ✅ Run scalar
@@ -144,6 +147,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run preprocess-identity
         run: uvx --with tox-uv tox run -e preprocess-identity
@@ -164,6 +168,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run ${{ matrix.tox_env }}
         run: uvx --with tox-uv tox run -e ${{ matrix.tox_env }}
@@ -197,6 +202,7 @@ jobs:
           - name: 🔄 Install uv
             uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
             with:
+              python-version: "3.15"
               enable-cache: false
       - name: ✅ Run the conformance suites
         run: uvx --with tox-uv tox run -e conformance
@@ -227,6 +233,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Build with -Werror
         run: uvx --with tox-uv tox run -e warnings
@@ -254,10 +261,14 @@ jobs:
           persist-credentials: false
       - name: 🐍 Install arm64 dev Python (carries the .lib meson needs)
         if: matrix.arm
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        env:
+          UV_VENV_SEED: "true"
         with:
-          python-version: "3.13"
-          architecture: arm64
+          enable-cache: false
+          activate-environment: true
+          python-version: "3.15"
+          python-arch: aarch64
       - name: 🧰 Activate native arm64 MSVC (so meson picks cl over MinGW gcc)
         if: matrix.arm
         uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4.1.0
@@ -266,6 +277,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Build with -Werror
         run: uvx --with tox-uv tox run -e warnings
@@ -292,6 +304,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run clang-tidy
         run: uvx pre-commit run clang-tidy --all-files --show-diff-on-failure --color always
@@ -314,6 +327,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: 🔍 Check the interpreter is free-threaded and TSan-instrumented
         run: >-

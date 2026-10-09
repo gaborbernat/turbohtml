@@ -27,6 +27,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run fuzz-smoke
         run: uvx --with tox-uv tox run -e fuzz-smoke
@@ -44,6 +45,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run msan
         run: uvx --with tox-uv tox run -e msan
@@ -72,11 +74,12 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run fuzz-oracle
         # the seed regenerates every finding from the public code, so it stays out of the tox command line it echoes
         run: |
-          FUZZ_RNG_SEED="$(python3 -c 'import secrets; print(secrets.randbits(32))')"
+          FUZZ_RNG_SEED="$(uv run --no-project --python 3.15 python -c 'import secrets; print(secrets.randbits(32))')"
           export FUZZ_RNG_SEED
           uvx --with tox-uv tox run -e fuzz-oracle -- --minutes "${MINUTES}"
         env:
@@ -105,11 +108,12 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run fuzz-round-trip
         # the seed regenerates every finding from the public code, so it stays out of the tox command line it echoes
         run: |
-          FUZZ_RNG_SEED="$(python3 -c 'import secrets; print(secrets.randbits(32))')"
+          FUZZ_RNG_SEED="$(uv run --no-project --python 3.15 python -c 'import secrets; print(secrets.randbits(32))')"
           export FUZZ_RNG_SEED
           uvx --with tox-uv tox run -e fuzz-round-trip -- --minutes "${MINUTES}"
         env:
@@ -153,6 +157,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run fuzz-amplify
         run: uvx --with tox-uv tox run -e fuzz-amplify
@@ -173,6 +178,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run fuzz-alloc
         run: uvx --with tox-uv tox run -e fuzz-alloc
@@ -217,13 +223,14 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run fuzz (deep)
         # the Monday 04:00 slot runs each target longer; the daily 06:00 slot and manual dispatch use the shorter budget
         # The seed is secret: with the public code it regenerates every crasher, so it stays out of the command line
         # tox echoes and reaches fuzz.py only through the environment and the encrypted .replay files.
         run: |
-          FUZZ_RNG_SEED="$(python3 -c 'import secrets; print(secrets.randbits(32))')"
+          FUZZ_RNG_SEED="$(uv run --no-project --python 3.15 python -c 'import secrets; print(secrets.randbits(32))')"
           export FUZZ_RNG_SEED
           uvx --with tox-uv tox run -e fuzz -- --minutes "${MINUTES}"
         env:
@@ -233,7 +240,7 @@ jobs:
         # runs even when the crash hunt above failed; its findings join the crashers that the steps below encrypt
         if: success() || failure()
         run: |
-          FUZZ_RNG_SEED="$(python3 -c 'import secrets; print(secrets.randbits(32))')"
+          FUZZ_RNG_SEED="$(uv run --no-project --python 3.15 python -c 'import secrets; print(secrets.randbits(32))')"
           export FUZZ_RNG_SEED
           uvx --with tox-uv tox run -e fuzz-amplify -- search --minutes "${MINUTES}"
         env:

@@ -26,9 +26,7 @@ from turbohtml._html import _markup_soft_str as soft_str
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
-    from typing import Protocol, SupportsFloat, SupportsInt
-
-    from typing_extensions import Self
+    from typing import Protocol, Self, SupportsFloat, SupportsInt
 
     class _HasHtml(Protocol):
         """An object that renders itself as already-safe HTML."""

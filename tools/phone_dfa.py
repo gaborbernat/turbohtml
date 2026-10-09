@@ -14,14 +14,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import pairwise, starmap
+from re import (
+    _constants as sre_constants,  # ruff: ignore[import-private-name] # ty: ignore[unresolved-import] # no public regex token API
+)
+from re import (
+    _parser as sre_parse,  # ruff: ignore[import-private-name] # ty: ignore[unresolved-import] # no public regex token API
+)
 from typing import TYPE_CHECKING, Final, TypeAlias, cast
-
-try:
-    from re import _constants as sre_constants  # ty: ignore[unresolved-import]  # sre_parse's private home since 3.11
-    from re import _parser as sre_parse  # ty: ignore[unresolved-import]  # sre_parse's private home since 3.11
-except ImportError:  # Python 3.10 keeps the pre-3.11 module names
-    import sre_constants  # ty: ignore[unresolved-import]  # removed from the stubs after its deprecation
-    import sre_parse  # ty: ignore[unresolved-import]  # removed from the stubs after its deprecation
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence

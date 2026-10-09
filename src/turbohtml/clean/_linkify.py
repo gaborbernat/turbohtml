@@ -35,8 +35,7 @@ from turbohtml._html import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-
-    from typing_extensions import Self
+    from typing import Self
 
     from turbohtml._html import Node, _PhoneConfig
 

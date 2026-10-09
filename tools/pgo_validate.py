@@ -23,11 +23,10 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Final, cast
-
-import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

@@ -4,10 +4,9 @@ import gc
 import re
 import sys
 import threading
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, assert_type, cast
 
 import pytest
-from typing_extensions import assert_type
 
 import turbohtml
 from turbohtml import Document, Element, XPath, XPathString, parse, parse_xml

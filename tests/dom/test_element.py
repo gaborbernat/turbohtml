@@ -6,13 +6,12 @@ from collections.abc import MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Final, NoReturn, cast
+from typing import TYPE_CHECKING, Any, Final, NoReturn, assert_type, cast
 
 import pytest
 from bench.ci import benchmarks
 from bench.core import OPERATIONS
 from bench.operations import INPUTS
-from typing_extensions import assert_type
 
 from turbohtml import Comment, Document, Element, Namespace, Node, Text, parse, parse_xml
 from turbohtml.mutations import MutationObserver
