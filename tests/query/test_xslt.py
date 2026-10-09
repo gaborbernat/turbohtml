@@ -2537,17 +2537,60 @@ def test_transform_number_format_tokens(fmt: str, expected: str) -> None:
     assert _run("<r/>", body) == expected
 
 
+def test_transform_number_roman_over_4999_falls_back_to_decimal() -> None:
+    body = '<xsl:template match="/"><xsl:number value="5000" format="I"/></xsl:template>'
+    assert _run("<r/>", body) == "5000"
+
+
+@pytest.mark.parametrize("fmt", [pytest.param("a", id="alpha"), pytest.param("i", id="roman")])
+def test_transform_number_zero_count_falls_back_to_decimal(fmt: str) -> None:
+    body = (
+        f'<xsl:template match="/"><xsl:for-each select="r/p">'
+        f'<xsl:number level="any" count="q" format="{fmt}"/></xsl:for-each></xsl:template>'
+    )
+    assert _run("<r><p/></r>", body) == "0"
+
+
 @pytest.mark.parametrize(
-    ("value", "fmt", "expected"),
+    ("value", "expected"),
     [
-        pytest.param("0", "i", "0", id="roman-zero-falls-to-decimal"),
-        pytest.param("-3", "a", "-3", id="alpha-negative-falls-to-decimal"),
-        pytest.param("5000", "I", "5000", id="roman-over-4999-falls-to-decimal"),
+        pytest.param("1 div 0", "Infinity", id="positive-infinity"),
+        pytest.param("-1 div 0", "-Infinity", id="negative-infinity"),
+        pytest.param("0 div 0", "NaN", id="nan"),
+        pytest.param("-3", "-3", id="negative"),
+        pytest.param("0.49999999999999994", "0.49999999999999994", id="just-below-one-half"),
     ],
 )
-def test_transform_number_out_of_range_falls_back_to_decimal(value: str, fmt: str, expected: str) -> None:
-    body = f'<xsl:template match="/"><xsl:number value="{value}" format="{fmt}"/></xsl:template>'
+def test_transform_number_value_error_inserts_string_value(value: str, expected: str) -> None:
+    body = f'<xsl:template match="/"><xsl:number value="{value}" format="(1)"/></xsl:template>'
     assert _run("<r/>", body) == expected
+
+
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        pytest.param('format="(1)"', "(12345678901234567741440)", id="prefix-and-suffix"),
+        pytest.param('format="a"', "12345678901234567741440", id="alpha-uses-decimal"),
+        pytest.param('format="1.a"', "12345678901234567741440", id="first-token-only"),
+        pytest.param('format="0000000000000000000000001"', "0012345678901234567741440", id="min-width"),
+        pytest.param('grouping-separator="," grouping-size="3"', "12,345,678,901,234,567,741,440", id="grouping"),
+    ],
+)
+def test_transform_number_value_past_long_formats_exact_integer(attributes: str, expected: str) -> None:
+    body = f'<xsl:template match="/"><xsl:number value="12345678901234567890123" {attributes}/></xsl:template>'
+    assert _run("<r/>", body) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("9223372036854774784", id="largest-double-below-2-63"),
+        pytest.param("9223372036854775808", id="2-63"),
+    ],
+)
+def test_transform_number_value_at_long_boundary_formats_exactly(value: str) -> None:
+    body = f'<xsl:template match="/"><xsl:number value="{value}" format="(1)"/></xsl:template>'
+    assert _run("<r/>", body) == f"({value})"
 
 
 def test_transform_literal_element_with_long_attribute_name() -> None:
