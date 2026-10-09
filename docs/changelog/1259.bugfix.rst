@@ -1,0 +1,1 @@
+``to_markdown`` writes line breaks in link and image titles as character references and escapes a ``&`` that starts one.
