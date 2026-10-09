@@ -1550,7 +1550,8 @@ def test_renderers_complete_every_parsed_depth(build: Callable[[], Document | El
 
 
 def test_markdown_closes_every_nested_emphasis() -> None:
-    assert _nested("i", 40).to_markdown() == "*" * 40 + "X" + "*" * 40
+    # forty delimiters in a row would pair as strong emphasis, so the inner runs alternate and fall back to tags
+    assert _nested("i", 40).to_markdown() == "*_" + "<em>" * 37 + "_X_" + "</em>" * 37 + "_*"
 
 
 def test_annotated_text_labels_every_nested_div() -> None:
