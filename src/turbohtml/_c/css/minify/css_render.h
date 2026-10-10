@@ -101,7 +101,7 @@ CSS_NOINLINE static void css_close_raw_blocks(token_vec *vec, Py_ssize_t start, 
    closers from css_close_bare_blocks. A value that stops earlier has none open: css_read_until ends a declaration
    before the end of the input only at a `;` or `}` outside every block its depth count tracks. */
 static CSS_FORCEINLINE void css_render_components(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end,
-                                                  int is_color, int drop_zero_unit, const css_char *property,
+                                                  int color_mode, int drop_zero_unit, const css_char *property,
                                                   Py_ssize_t property_len, comp_vec *comps) {
     Py_ssize_t index = start;
     while (index < end) {
@@ -134,13 +134,13 @@ static CSS_FORCEINLINE void css_render_components(css_buf *pool, token_vec *vec,
             css_format_dimension(pool, token, drop_zero_unit, property, property_len, &comp.off, &comp.len);
             comp.kind = token->unit_len ? CK_DIM : CK_NUM;
         } else if (token->kind == CSS_HASH) {
-            if (!css_color_keyword_or_hash(pool, token, 1, &comp.off, &comp.len)) {
+            if (!css_color_keyword_or_hash(pool, token, color_mode != 0, &comp.off, &comp.len)) {
                 comp.off = pool_run(pool, token->text, token->text_len); /* GCOVR_EXCL_LINE: hash always renders */
                 comp.len = token->text_len;                              /* GCOVR_EXCL_LINE */
             }
             comp.kind = CK_HASH;
         } else if (token->kind == CSS_IDENT) {
-            if (!css_color_keyword_or_hash(pool, token, is_color, &comp.off, &comp.len)) {
+            if (!css_color_keyword_or_hash(pool, token, color_mode == 1, &comp.off, &comp.len)) {
                 comp.off = pool_run(pool, token->text, token->text_len);
                 comp.len = token->text_len;
             }
@@ -193,32 +193,58 @@ static void css_assemble(css_buf *pool, comp_vec *comps, css_buf *out) {
 }
 
 /* Property classification for the value pipeline. */
-static int css_prop_is_color(const css_char *prop, Py_ssize_t len) {
-    static const char *const color_props[] = {"color",
-                                              "background-color",
-                                              "border-color",
-                                              "border-top-color",
-                                              "border-right-color",
-                                              "border-bottom-color",
-                                              "border-left-color",
-                                              "outline-color",
-                                              "text-decoration-color",
-                                              "caret-color",
-                                              "column-rule-color",
-                                              "fill",
-                                              "stroke",
-                                              "stop-color",
-                                              "flood-color",
-                                              "lighting-color",
-                                              "text-emphasis-color"};
-    css_char first = css_lower(prop[0]);
-    for (size_t index = 0; index < sizeof(color_props) / sizeof(color_props[0]); index++) {
-        if (css_run_ieq_first(prop, len, first, color_props[index])) {
+#define CSS_COLOR_EQ(literal) (len == (Py_ssize_t)(sizeof(literal) - 1) && css_run_ieq(prop, len, literal))
+static int css_prop_color_mode(const css_char *prop, Py_ssize_t len) {
+    switch (css_lower(prop[0])) {
+    case 'a':
+        return CSS_COLOR_EQ("accent-color") ? 2 : 0;
+    case 'b':
+        if (CSS_COLOR_EQ("background") || CSS_COLOR_EQ("border")) {
+            return 2;
+        }
+        if (CSS_COLOR_EQ("background-color") || CSS_COLOR_EQ("border-color") || CSS_COLOR_EQ("border-top-color") ||
+            CSS_COLOR_EQ("border-right-color") || CSS_COLOR_EQ("border-bottom-color") ||
+            CSS_COLOR_EQ("border-left-color")) {
             return 1;
         }
+        return (CSS_COLOR_EQ("border-top") || CSS_COLOR_EQ("border-right") || CSS_COLOR_EQ("border-bottom") ||
+                CSS_COLOR_EQ("border-left") || CSS_COLOR_EQ("border-block") || CSS_COLOR_EQ("border-inline") ||
+                CSS_COLOR_EQ("border-block-start") || CSS_COLOR_EQ("border-block-end") ||
+                CSS_COLOR_EQ("border-inline-start") || CSS_COLOR_EQ("border-inline-end") || CSS_COLOR_EQ("box-shadow"))
+                   ? 2
+                   : 0;
+    case 'c':
+        if (CSS_COLOR_EQ("color") || CSS_COLOR_EQ("caret-color") || CSS_COLOR_EQ("column-rule-color")) {
+            return 1;
+        }
+        return CSS_COLOR_EQ("column-rule") ? 2 : 0;
+    case 'f':
+        return CSS_COLOR_EQ("fill") || CSS_COLOR_EQ("flood-color") ? 1 : 0;
+    case 'l':
+        return CSS_COLOR_EQ("lighting-color") ? 1 : 0;
+    case 'o':
+        if (CSS_COLOR_EQ("outline-color")) {
+            return 1;
+        }
+        return CSS_COLOR_EQ("outline") ? 2 : 0;
+    case 's':
+        if (CSS_COLOR_EQ("stroke") || CSS_COLOR_EQ("stop-color")) {
+            return 1;
+        }
+        return CSS_COLOR_EQ("scrollbar-color") ? 2 : 0;
+    case 't':
+        if (CSS_COLOR_EQ("text-decoration-color") || CSS_COLOR_EQ("text-emphasis-color")) {
+            return 1;
+        }
+        if (CSS_COLOR_EQ("text-decoration") || CSS_COLOR_EQ("text-emphasis") || CSS_COLOR_EQ("text-shadow")) {
+            return 2;
+        }
+        return 0;
+    default:
+        return 0;
     }
-    return 0;
 }
+#undef CSS_COLOR_EQ
 
 /* Render a custom property or otherwise-raw value: collapse whitespace and comments, keep everything else verbatim. */
 CSS_NOINLINE static void css_render_raw_value(token_vec *vec, Py_ssize_t start, Py_ssize_t end, css_buf *out) {
