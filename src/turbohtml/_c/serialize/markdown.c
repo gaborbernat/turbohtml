@@ -19,6 +19,7 @@
    is invalid markdown. */
 
 #include "serialize/internal.h"
+#include "css/cssom/cssom.h"
 
 #include "dom/tree.h"
 #include "dom/tree_internal.h"
@@ -941,6 +942,20 @@ static int md_css_prop(const Py_UCS4 *style, Py_ssize_t style_len, const char *p
         }
     }
     return 0;
+}
+
+static int md_css_whitespace(md_ctx *ctx, th_node *node, int inherited) {
+    Py_ssize_t length;
+    const Py_UCS4 *style = md_attr(ctx->tree, node, "style", &length);
+    if (length == 0) {
+        return inherited;
+    }
+    int mode = th_css_inline_whitespace(style, length, inherited);
+    if (mode == -2) {        /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        ctx->out.failed = 1; /* GCOVR_EXCL_LINE: allocation-failure path */
+        return inherited;    /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return mode;
 }
 
 /* Whether the value is one of the four bold weights a Google Docs export emits. */
@@ -1957,6 +1972,7 @@ static void md_enter_cell_flat(md_ctx *ctx, th_node *node, Py_ssize_t owner) {
 }
 
 static void md_render_inline(md_ctx *ctx, th_node *node);
+static int md_render_whitespace(md_ctx *ctx, th_node *node, int inherited);
 
 static void md_cell_flat_child(md_ctx *ctx, Py_ssize_t owner, th_node *child) {
     if (child->type != TH_NODE_ELEMENT || child->ns != TH_NS_HTML || !md_is_cell_scaffold(child->atom)) {
@@ -2359,6 +2375,9 @@ static void md_render_inline(md_ctx *ctx, th_node *node) {
         return;
     }
     if (md_apply_converter(ctx, node)) {
+        return;
+    }
+    if (md_render_whitespace(ctx, node, TH_WS_NORMAL)) {
         return;
     }
     uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
@@ -3557,6 +3576,12 @@ static int md_table_step(md_ctx *ctx, md_frame *frame) {
             }
             md_enter_cell(ctx, table);
         }
+        if (md_render_whitespace(ctx, cell, TH_WS_NORMAL)) {
+            if (table->phase != MD_TABLE_STRIP) {
+                md_leave_cell(ctx, table);
+            }
+            continue;
+        }
         if (!md_text_only(cell)) {
             md_frame *walk =
                 md_push(ctx, cell, MD_WALK_INLINE, table->phase == MD_TABLE_STRIP ? MD_LEAVE_NONE : MD_LEAVE_CELL);
@@ -3643,14 +3668,19 @@ static th_node *md_pre_code(md_ctx *ctx, th_node *node) {
     return code;
 }
 
+static void md_render_pre_content(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t text_len, const Py_UCS4 *lang,
+                                  Py_ssize_t lang_len);
+
+static const Py_UCS4 *md_pre_language(md_ctx *ctx, th_node *node, th_node *code, Py_ssize_t *length) {
+    const Py_UCS4 *language = code == NULL ? NULL : md_code_language(ctx, code, length);
+    return language == NULL ? md_code_language(ctx, node, length) : language;
+}
+
 static void md_render_pre(md_ctx *ctx, th_node *node) {
     th_node *code = md_pre_code(ctx, node);
     th_node *content = code != NULL && code == node->first_child && code->next_sibling == NULL ? code : node;
     Py_ssize_t lang_len = 0;
-    const Py_UCS4 *lang = code == NULL ? NULL : md_code_language(ctx, code, &lang_len);
-    if (lang == NULL) {
-        lang = md_code_language(ctx, node, &lang_len);
-    }
+    const Py_UCS4 *lang = md_pre_language(ctx, node, code, &lang_len);
     Py_ssize_t text_len;
     Py_UCS4 *text;
     th_node *first = content->first_child;
@@ -3671,6 +3701,12 @@ static void md_render_pre(md_ctx *ctx, th_node *node) {
         text_len = code_text.len;
         text = code_text.data;
     }
+    md_render_pre_content(ctx, text, text_len, lang, lang_len);
+    PyMem_Free(text);
+}
+
+static void md_render_pre_content(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t text_len, const Py_UCS4 *lang,
+                                  Py_ssize_t lang_len) {
     const md_opts *opt = ctx->opt;
     /* drop one trailing newline so the close is not preceded by a blank line */
     Py_ssize_t end = text_len;
@@ -3718,11 +3754,117 @@ static void md_render_pre(md_ctx *ctx, th_node *node) {
         }
         ctx->line_has_content = 1;
     }
-    PyMem_Free(text);
+}
+
+static int md_render_whitespace(md_ctx *ctx, th_node *node, int inherited) {
+    int mode = md_css_whitespace(ctx, node, inherited);
+    if (mode == TH_WS_NORMAL || is_md_skipped(node)) {
+        return 0;
+    }
+    sbuf text = {0};
+    int inline_modes[MD_INLINE_FRAMES];
+    int *modes = inline_modes;
+    Py_ssize_t capacity = MD_INLINE_FRAMES;
+    Py_ssize_t depth = 0;
+    int pending = 0;
+    int boundary = 0;
+    th_node *parent = node;
+    th_node *child = node->first_child;
+    for (;;) {
+        while (child == NULL) {
+            if (parent == node) {
+                goto done;
+            }
+            boundary |= md_code_kind(parent) == MD_CODE_LINE;
+            child = parent->next_sibling;
+            parent = parent->parent;
+            mode = modes[--depth];
+        }
+        if (child->type == TH_NODE_TEXT && child->text_len > 0) {
+            const Py_UCS4 *data = need_text(ctx->tree, child);
+            if (boundary) {
+                md_code_boundary(&text, '\n', data[0]);
+                boundary = 0;
+                pending = 0;
+            }
+            for (Py_ssize_t index = 0; index < child->text_len; index++) {
+                Py_UCS4 character = data[index];
+                if (mode != TH_WS_PRESERVE && is_space(character)) {
+                    if (mode == TH_WS_LINES && character == '\n') {
+                        sbuf_putc(&text, '\n');
+                        pending = 0;
+                    } else {
+                        pending = 1;
+                    }
+                    continue;
+                }
+                if (pending && text.len > 0 && text.data[text.len - 1] != '\n') {
+                    sbuf_putc(&text, ' ');
+                }
+                pending = 0;
+                sbuf_putc(&text, character);
+            }
+        } else if (child->type == TH_NODE_ELEMENT) {
+            int kind = md_code_kind(child);
+            if (kind == MD_CODE_BREAK) {
+                sbuf_putc(&text, '\n');
+                pending = 0;
+                boundary = 0;
+            } else if (kind != MD_CODE_SKIPPED) {
+                if (depth == capacity) {
+                    int grown = md_grow_stack(ctx, (void **)&modes, &capacity, inline_modes, sizeof(int));
+                    if (grown < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                        goto done;   /* GCOVR_EXCL_LINE: allocation-failure path */
+                    }
+                }
+                modes[depth++] = mode;
+                mode = md_css_whitespace(ctx, child, child->atom == TH_TAG_PRE ? TH_WS_PRESERVE : mode);
+                boundary |= kind == MD_CODE_LINE;
+                parent = child;
+                child = child->first_child;
+                continue;
+            }
+        }
+        child = child->next_sibling;
+    }
+done:
+    if (modes != inline_modes) {
+        PyMem_Free(modes);
+    }
+    ctx->out.failed |= text.failed;
+    if (ctx->in_cell || ctx->inline_only || ctx->in_heading) {
+        md_before_visible(ctx);
+        sbuf_puts(&ctx->out, "<pre>");
+        for (Py_ssize_t index = 0; index < text.len; index++) {
+            Py_UCS4 character = text.data[index];
+            if (is_space(character) || md_is_ascii_punct(character)) {
+                sbuf_puts(&ctx->out, "&#");
+                md_put_decimal(&ctx->out, character);
+                sbuf_putc(&ctx->out, ';');
+            } else {
+                sbuf_putc(&ctx->out, character);
+            }
+        }
+        sbuf_puts(&ctx->out, "</pre>");
+        ctx->line_has_content = 1;
+    } else {
+        static const Py_UCS4 empty_language[] = {0};
+        Py_ssize_t language_len = 0;
+        const Py_UCS4 *language = node->atom == TH_TAG_PRE
+                                      ? md_pre_language(ctx, node, md_pre_code(ctx, node), &language_len)
+                                      : empty_language;
+        md_render_pre_content(ctx, text.data, text.len, language, language_len);
+        ctx->block_ended = 1;
+    }
+    PyMem_Free(text.data);
+    return 1;
 }
 
 static void md_render_block(md_ctx *ctx, th_node *node) {
     if (md_apply_converter(ctx, node)) {
+        return;
+    }
+    if (md_render_whitespace(ctx, node, TH_WS_NORMAL)) {
         return;
     }
     /* only an HTML element is ever classified as a block, so the namespace check
@@ -4020,6 +4162,21 @@ static void md_flush_references(md_ctx *ctx) {
     }
 }
 
+static int md_inherited_whitespace(md_ctx *ctx, th_node *node) {
+    for (th_node *parent = node->parent; parent != NULL; parent = parent->parent) {
+        if (parent->type == TH_NODE_ELEMENT) {
+            int mode = md_css_whitespace(ctx, parent, -1);
+            if (mode >= 0) {
+                return mode;
+            }
+            if (parent->atom == TH_TAG_PRE) {
+                return TH_WS_PRESERVE;
+            }
+        }
+    }
+    return TH_WS_NORMAL;
+}
+
 Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_ssize_t *out_len) {
     md_frame inline_frames[MD_INLINE_FRAMES];
     md_marker inline_markers[MD_INLINE_MARKERS];
@@ -4043,8 +4200,9 @@ Py_UCS4 *th_node_markdown(th_tree *tree, th_node *node, const md_opts *opt, Py_s
         ctx.started = 1;
         ctx.line_has_content = 1;
         md_emit_text(&ctx, need_text(tree, node), node->text_len);
-    } else if (md_apply_converter(&ctx, node)) {
-        /* a converter registered for the root element renders it whole */
+    } else if (md_apply_converter(&ctx, node) ||
+               (node->type == TH_NODE_ELEMENT &&
+                md_render_whitespace(&ctx, node, md_inherited_whitespace(&ctx, node)))) {
     } else if (node->type == TH_NODE_ELEMENT && node->ns == TH_NS_HTML && node->atom == TH_TAG_LI) {
         md_render_root_item(&ctx, node);
     } else if (is_md_block(node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN)) {

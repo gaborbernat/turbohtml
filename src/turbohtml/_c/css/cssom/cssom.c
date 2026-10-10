@@ -16,6 +16,7 @@
    the cascade resolution run under the caller's per-tree critical section. */
 
 #include "data/attr_atom.h"
+#include "css/cssom/cssom.h"
 #include "dom/nodes.h"
 #include "css/select/selector.h"
 
@@ -556,6 +557,47 @@ static Py_ssize_t css_parse_block(const Py_UCS4 *data, Py_ssize_t start, Py_ssiz
         pos = semi + 1;
     }
     return count;
+}
+
+int th_css_inline_whitespace(const Py_UCS4 *source, Py_ssize_t length, int inherited) {
+    Py_ssize_t clean_len;
+    Py_UCS4 *clean = css_strip_comments(source, length, &clean_len);
+    if (clean == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -2;       /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    css_decl *declarations = NULL;
+    Py_ssize_t capacity = 0;
+    Py_ssize_t count = css_parse_block(clean, 0, clean_len, &declarations, &capacity);
+    int mode = inherited;
+    int important = 0;
+    for (Py_ssize_t index = 0; index < count; index++) {
+        css_decl *declaration = &declarations[index];
+        if (!css_slice_ci_eq(declaration->name, declaration->name_len, "white-space")) {
+            continue;
+        }
+        const Py_UCS4 *value = declaration->value;
+        Py_ssize_t value_len = declaration->value_len;
+        int next = -2;
+        if (css_slice_ci_eq(value, value_len, "pre") || css_slice_ci_eq(value, value_len, "pre-wrap") ||
+            css_slice_ci_eq(value, value_len, "break-spaces")) {
+            next = TH_WS_PRESERVE;
+        } else if (css_slice_ci_eq(value, value_len, "pre-line")) {
+            next = TH_WS_LINES;
+        } else if (css_slice_ci_eq(value, value_len, "normal") || css_slice_ci_eq(value, value_len, "nowrap") ||
+                   css_slice_ci_eq(value, value_len, "initial")) {
+            next = TH_WS_NORMAL;
+        } else if (css_slice_ci_eq(value, value_len, "inherit") || css_slice_ci_eq(value, value_len, "unset") ||
+                   css_slice_ci_eq(value, value_len, "revert") || css_slice_ci_eq(value, value_len, "revert-layer")) {
+            next = inherited;
+        }
+        if (next >= -1 && declaration->important >= important) {
+            mode = next;
+            important = declaration->important;
+        }
+    }
+    PyMem_Free(declarations);
+    PyMem_Free(clean);
+    return count < 0 ? -2 : mode; /* GCOVR_EXCL_BR_LINE: a negative count requires allocation failure */
 }
 
 /* The end of the whitespace-delimited component starting at pos, treating a
