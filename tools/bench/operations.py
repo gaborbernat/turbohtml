@@ -853,6 +853,7 @@ _XPATH_PARITY = (
     ("//svg:rect (namespaces=)", "namespaces"),
     ("$rows/div (node-set variable)", "node_set_variable"),
     ("//a[@href] (precompiled, reused)", "precompiled"),
+    ("article and boilerplate classes (EXSLT)", "re:alternatives"),
 )
 _XPATH_ID_DOC: Final = "".join(f"<i id=r{index}></i>" for index in range(5_000))
 

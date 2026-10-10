@@ -612,9 +612,10 @@ static int regex_flags(struct th_tree *tree, xp_result *flags_arg, int *flags, i
         return 0;
     }
     Py_ssize_t len;
-    Py_UCS4 *letters = to_string(tree, flags_arg, &len);
-    if (letters == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
-        return -1;         /* GCOVR_EXCL_LINE */
+    const Py_UCS4 *letters;
+    Py_UCS4 *owned;
+    if (string_arg(tree, flags_arg, &letters, &len, &owned) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;                                                 /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < len; index++) {
         switch (letters[index]) {
@@ -637,7 +638,7 @@ static int regex_flags(struct th_tree *tree, xp_result *flags_arg, int *flags, i
             break;
         }
     }
-    PyMem_Free(letters);
+    PyMem_Free(owned);
     return 0;
 }
 
@@ -666,18 +667,23 @@ static int regex_test(xp_ctx *ctx, xp_result *args, int argc, xp_result *out) {
     int global;
     Py_ssize_t pattern_len;
     Py_ssize_t input_len;
-    Py_UCS4 *pattern = to_string(ctx->tree, &args[1], &pattern_len);
+    const Py_UCS4 *pattern;
+    Py_UCS4 *owned_pattern;
+    int failed = string_arg(ctx->tree, &args[1], &pattern, &pattern_len, &owned_pattern);
     Py_UCS4 *input = to_string(ctx->tree, &args[0], &input_len);
     /* GCOVR_EXCL_BR_START: alloc */
-    if (pattern == NULL || input == NULL || regex_flags(ctx->tree, argc >= 3 ? &args[2] : NULL, &flags, &global) < 0) {
-        PyMem_Free(pattern); /* GCOVR_EXCL_LINE */
-        PyMem_Free(input);   /* GCOVR_EXCL_LINE */
-        return -1;           /* GCOVR_EXCL_LINE */
+    if (failed < 0 || input == NULL || regex_flags(ctx->tree, argc >= 3 ? &args[2] : NULL, &flags, &global) < 0) {
+        PyMem_Free(owned_pattern); /* GCOVR_EXCL_LINE */
+        PyMem_Free(input);         /* GCOVR_EXCL_LINE */
+        return -1;                 /* GCOVR_EXCL_LINE */
     }
     /* GCOVR_EXCL_BR_STOP */
     xr_error error;
-    int found = xr_test(ctx->regex_cache, pattern, pattern_len, flags, input, input_len, &error);
-    PyMem_Free(pattern);
+    /* An empty computed string can have a null buffer; the regex cache compares pattern buffers with memcmp. */
+    const Py_UCS4 empty_pattern = 0;
+    int found =
+        xr_test(ctx->regex_cache, pattern_len ? pattern : &empty_pattern, pattern_len, flags, input, input_len, &error);
+    PyMem_Free(owned_pattern);
     PyMem_Free(input);
     if (found < 0) {
         return regex_error(ctx, &error);

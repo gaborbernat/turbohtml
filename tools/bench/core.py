@@ -1158,6 +1158,10 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
     "count(//a)": lambda doc, _text: doc.xpath("count(//a)"),
     "variable": lambda doc, _text: doc.xpath("//a[@href=$href]", href="/x"),
     "re:test": lambda doc, _text: doc.xpath("//a[re:test(@href, '[0-9]')]"),
+    "re:alternatives": lambda doc, _text: doc.xpath(
+        ".//*[re:test(@class, 'post[-_]text|post-body|post-?entry|post[-_]?content|article-?text|articleText|"
+        "(?:entry|page|text|article|art)-content|article__content|article(?:-|__)?body|articleBody|body-text')]"
+    ),
     "ends-with": lambda doc, _text: doc.xpath("//a[ends-with(@href, '/')]"),
     "string-join": lambda doc, _text: doc.xpath("string-join(//a/@href, ',')"),
     "lower-case": lambda doc, _text: doc.xpath("//a[lower-case(@href) = @href]"),

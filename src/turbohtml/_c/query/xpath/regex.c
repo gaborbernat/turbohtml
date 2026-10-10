@@ -101,8 +101,10 @@ typedef struct {
 typedef struct {
     int32_t *dense;
     int32_t *sparse;
+    int32_t *active;
     Py_ssize_t *slots;
     int32_t len;
+    int32_t active_len;
 } xr_list;
 
 /* Rust regex's default size_limit, applied to each growable buffer; capping the program bounds a Pike VM step too,
@@ -132,8 +134,10 @@ typedef struct {
     int32_t prefix;    /* how many literal characters every match starts with */
     uint8_t anchored;
     uint8_t backrefs;
+    uint8_t first_filter;
+    uint32_t first_ascii[4];
     xr_list lists[2];
-    int32_t *states;   /* backs both lists' dense and sparse arrays */
+    int32_t *states;   /* backs both lists' dense, sparse and active arrays */
     Py_ssize_t *cells; /* backs both lists' capture slots */
     xr_frame *frames;
     Py_ssize_t *scratch;
@@ -144,6 +148,7 @@ typedef struct {
 
 struct xr_cache {
     xr_program *programs[XR_CACHE_SLOTS];
+    xr_program *recent;
     Py_ssize_t allowance; /* backtracking steps granted so far in the evaluation */
     Py_ssize_t budget;    /* the part of the allowance still unspent */
 };
@@ -268,10 +273,8 @@ static int xr_consume(const xr_program *program, const xr_inst *inst, Py_UCS4 ch
         return 1;
     case XRI_ANY_NL:
         return ch != '\n';
-    case XRI_CLASS:
+    default: /* XRI_CLASS */
         return xr_class_match(&program->classes[inst->arg], program->ranges, ch);
-    default:
-        return 0;
     }
 }
 
@@ -1425,6 +1428,54 @@ static void xr_program_free(xr_program *program) {
     PyMem_Free(program);
 }
 
+/* Assertions can narrow the matches further; this filter only rules out impossible ASCII starts. */
+static int xr_first_chars(xr_program *program) {
+    uint8_t *seen = PyMem_Calloc((size_t)program->code_count, sizeof(uint8_t));
+    int32_t *pending = PyMem_Malloc((size_t)program->code_count * sizeof(int32_t));
+    if (seen == NULL || pending == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyMem_Free(seen);                  /* GCOVR_EXCL_LINE */
+        PyMem_Free(pending);               /* GCOVR_EXCL_LINE */
+        PyErr_NoMemory();                  /* GCOVR_EXCL_LINE */
+        return -1;                         /* GCOVR_EXCL_LINE */
+    }
+    int32_t count = 1;
+    pending[0] = 0;
+    program->first_filter = 1;
+    while (count > 0) {
+        int32_t pc = pending[--count];
+        if (seen[pc]) {
+            continue;
+        }
+        seen[pc] = 1;
+        const xr_inst *inst = &program->code[pc];
+        if (inst->op == XRI_CHAR) {
+            if (inst->arg < 128) {
+                program->first_ascii[inst->arg >> 5] |= (uint32_t)1 << (inst->arg & 31);
+            }
+            continue;
+        }
+        if (inst->op <= XRI_CLASS) {
+            for (Py_UCS4 ch = 0; ch < 128; ch++) {
+                if (xr_consume(program, inst, ch)) {
+                    program->first_ascii[ch >> 5] |= (uint32_t)1 << (ch & 31);
+                }
+            }
+            continue;
+        }
+        if (inst->op == XRI_MATCH) {
+            program->first_filter = 2;
+            break;
+        }
+        pending[count++] = inst->op == XRI_JMP || inst->op == XRI_SPLIT ? inst->next : pc + 1;
+        if (inst->op == XRI_SPLIT) {
+            pending[count++] = inst->alt;
+        }
+    }
+    PyMem_Free(seen);
+    PyMem_Free(pending);
+    return 0;
+}
+
 static xr_program *xr_assemble(xr_parser *parser, int32_t root, int flags) {
     xr_compiler compiler = {0};
     compiler.nodes = parser->nodes;
@@ -1513,7 +1564,7 @@ static int xr_prepare(xr_program *program, int captures) {
     if (program->frames == NULL) {
         program->frames = PyMem_Malloc((count + 1) * sizeof(xr_frame));
         program->scratch = PyMem_Malloc((size_t)(program->slots + program->registers) * sizeof(Py_ssize_t));
-        program->states = PyMem_Calloc(4 * count, sizeof(int32_t));
+        program->states = PyMem_Calloc(6 * count, sizeof(int32_t));
         /* GCOVR_EXCL_BR_START: allocation failure */
         if (program->frames == NULL || program->scratch == NULL || program->states == NULL) {
             PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -1521,8 +1572,9 @@ static int xr_prepare(xr_program *program, int captures) {
         }
         /* GCOVR_EXCL_BR_STOP */
         for (size_t index = 0; index < 2; index++) {
-            program->lists[index].dense = program->states + 2 * index * count;
-            program->lists[index].sparse = program->states + (2 * index + 1) * count;
+            program->lists[index].dense = program->states + 3 * index * count;
+            program->lists[index].sparse = program->states + (3 * index + 1) * count;
+            program->lists[index].active = program->states + (3 * index + 2) * count;
         }
     }
     if (captures && program->cells == NULL) {
@@ -1614,6 +1666,7 @@ static void xr_add(xr_program *program, xr_list *list, int32_t pc, const Py_UCS4
                 }
                 pc++;
             } else {
+                list->active[list->active_len++] = pc;
                 if (width > 0) {
                     memcpy(list->slots + (size_t)pc * (size_t)width, caps, (size_t)width * sizeof(Py_ssize_t));
                 }
@@ -1625,6 +1678,11 @@ static void xr_add(xr_program *program, xr_list *list, int32_t pc, const Py_UCS4
 
 static int xr_pike(xr_program *program, const Py_UCS4 *text, Py_ssize_t len, Py_ssize_t start, int must_advance,
                    Py_ssize_t *spans) {
+    if (program->prefilter < 0 && program->first_filter == 0 && (program->frames != NULL || len - start >= 64)) {
+        if (xr_first_chars(program) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                     /* GCOVR_EXCL_LINE */
+        }
+    }
     int32_t width = spans == NULL ? 0 : program->slots;
     if (xr_prepare(program, width > 0) < 0) {
         return -1;
@@ -1632,6 +1690,7 @@ static int xr_pike(xr_program *program, const Py_UCS4 *text, Py_ssize_t len, Py_
     xr_list *current = &program->lists[0];
     xr_list *next = &program->lists[1];
     current->len = 0;
+    current->active_len = 0;
     int matched = 0;
     for (Py_ssize_t pos = start; pos <= len; pos++) {
         if (!matched && (pos == start || !program->anchored)) {
@@ -1644,14 +1703,22 @@ static int xr_pike(xr_program *program, const Py_UCS4 *text, Py_ssize_t len, Py_
             for (int32_t slot = 0; slot < width; slot++) {
                 program->scratch[slot] = -1;
             }
-            xr_add(program, current, 0, text, len, pos, width);
+            if (program->first_filter != 1 ||
+                (pos < len &&
+                 (text[pos] >= 128 || (program->first_ascii[text[pos] >> 5] & ((uint32_t)1 << (text[pos] & 31)))))) {
+                xr_add(program, current, 0, text, len, pos, width);
+            }
         }
         if (current->len == 0) {
-            break;
+            if (matched || program->anchored) {
+                break;
+            }
+            continue;
         }
         next->len = 0;
-        for (int32_t index = 0; index < current->len; index++) {
-            int32_t pc = current->dense[index];
+        next->active_len = 0;
+        for (int32_t index = 0; index < current->active_len; index++) {
+            int32_t pc = current->active[index];
             const xr_inst *inst = &program->code[pc];
             if (inst->op == XRI_MATCH) {
                 if (must_advance && pos == start) {
@@ -1875,10 +1942,16 @@ static xr_program *xr_cache_get(xr_cache **cache_ref, const Py_UCS4 *pattern, Py
     }
     cache->allowance += text_len * XR_BUDGET_PER_CHAR;
     cache->budget += text_len * XR_BUDGET_PER_CHAR;
-    xr_program **slot = &cache->programs[xr_hash(pattern, len) & (XR_CACHE_SLOTS - 1)];
-    xr_program *program = *slot;
+    xr_program *program = cache->recent;
     if (program != NULL && program->flags == flags && program->pattern_len == len &&
         memcmp(program->pattern, pattern, (size_t)len * sizeof(Py_UCS4)) == 0) {
+        return program;
+    }
+    xr_program **slot = &cache->programs[xr_hash(pattern, len) & (XR_CACHE_SLOTS - 1)];
+    program = *slot;
+    if (program != NULL && program->flags == flags && program->pattern_len == len &&
+        memcmp(program->pattern, pattern, (size_t)len * sizeof(Py_UCS4)) == 0) {
+        cache->recent = program;
         return program;
     }
     program = xr_compile(pattern, len, flags, error);
@@ -1887,6 +1960,7 @@ static xr_program *xr_cache_get(xr_cache **cache_ref, const Py_UCS4 *pattern, Py
             xr_program_free(*slot);
         }
         *slot = program;
+        cache->recent = program;
     }
     return program;
 }

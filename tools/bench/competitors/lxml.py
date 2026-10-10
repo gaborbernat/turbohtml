@@ -343,6 +343,11 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
     "count(//a)": lambda tree, _text: tree.xpath("count(//a)"),
     "variable": lambda tree, _text: tree.xpath("//a[@href=$href]", href="/x"),
     "re:test": lambda tree, _text: tree.xpath("//a[re:test(@href, '[0-9]')]", namespaces=_EXSLT_NS),
+    "re:alternatives": lambda tree, _text: tree.xpath(
+        ".//*[re:test(@class, 'post[-_]text|post-body|post-?entry|post[-_]?content|article-?text|articleText|"
+        "(?:entry|page|text|article|art)-content|article__content|article(?:-|__)?body|articleBody|body-text')]",
+        namespaces=_EXSLT_NS,
+    ),
     "set:distinct": lambda tree, _text: tree.xpath("set:distinct(//a)", namespaces=_EXSLT_NS),
     "smart_strings": lambda tree, _text: tree.xpath("//a/@href", smart_strings=True),
     "extension": lambda tree, _text: tree.xpath("ext_count(//a)", extensions=_COUNT_EXTENSIONS),
