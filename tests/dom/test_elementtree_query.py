@@ -57,6 +57,12 @@ def test_element_tree_absolute_child_xpath_selects_root() -> None:
     assert tree.find("/html") is tree
 
 
+def test_element_tree_xpath_selects_unicode_name() -> None:
+    tree: Final = etree.Element("root")
+    child: Final = etree.SubElement(tree, "é")
+    assert tree.find("//é") is child
+
+
 @pytest.mark.parametrize("quote", [pytest.param("'", id="single"), pytest.param('"', id="double")])
 def test_element_tree_xpath_does_not_rewrite_quoted_slashes(tree: ElementView, quote: str) -> None:
     tree.set("data-path", "//p")
@@ -64,7 +70,7 @@ def test_element_tree_xpath_does_not_rewrite_quoted_slashes(tree: ElementView, q
 
 
 def test_element_tree_repr_contains_tag(tree: ElementView) -> None:
-    assert re.fullmatch(r"<Element div at 0x[0-9a-f]+>", repr(tree))
+    assert re.fullmatch(r"<Element div at 0x[0-9a-fA-F]+>", repr(tree))
 
 
 def test_element_tree_keyword_factory_retains_attributes() -> None:

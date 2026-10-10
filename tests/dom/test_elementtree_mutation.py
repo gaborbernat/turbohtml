@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from turbohtml import Element, Text, etree
+from turbohtml import Element, Text, etree, parse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -125,6 +125,19 @@ def test_element_tree_document_root_ignores_outside_content(operation: Callable[
     tree: Final = etree.document_fromstring("<p>text</p>")
     operation(tree)
     assert etree.tostring(tree, encoding="unicode") == "<html><body><p>text</p></body></html>"
+
+
+def test_element_tree_detaches_document_root() -> None:
+    document: Final = parse("<p>text</p>")
+    root: Final = document.root
+    assert root is not None
+    tree: Final = etree.ElementView(root)
+    tree.drop_tree()
+    assert (document.root, tree.getparent(), etree.tostring(tree, encoding="unicode")) == (
+        None,
+        None,
+        "<html><head/><body><p>text</p></body></html>",
+    )
 
 
 @pytest.mark.parametrize(

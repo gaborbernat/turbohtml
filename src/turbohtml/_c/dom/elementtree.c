@@ -1736,9 +1736,9 @@ static PyObject *view_construct(module_state *state, PyObject *args, PyObject *k
     /* GCOVR_EXCL_BR_START: the untested arms require allocation failure */
     if (options == NULL || extra == NULL) {
         /* GCOVR_EXCL_BR_STOP */
-        Py_XDECREF(options);
-        Py_XDECREF(extra);
-        return NULL;
+        Py_XDECREF(options); /* GCOVR_EXCL_LINE: allocation failure */
+        Py_XDECREF(extra);   /* GCOVR_EXCL_LINE: allocation failure */
+        return NULL;         /* GCOVR_EXCL_LINE: allocation failure */
     }
     static const char *names[] = {"tag", "attrib"};
     for (size_t index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
@@ -1759,8 +1759,10 @@ static PyObject *view_construct(module_state *state, PyObject *args, PyObject *k
     PyObject *result = NULL;
     if (parsed) {
         PyObject *attrs = PyDict_New();
+        /* GCOVR_EXCL_BR_START: the untested arms require allocation failure */
         if (attrs != NULL && (attrib == Py_None || PyDict_Update(attrs, attrib) == 0) &&
             PyDict_Update(attrs, extra) == 0) {
+            /* GCOVR_EXCL_BR_STOP */
             PyObject *node = view_create(state, tag, attrs);
             result = node == NULL ? NULL : view_wrap(state, node);
             Py_XDECREF(node);
@@ -2344,7 +2346,9 @@ static int view_restore_head(NodeObject *owner, PyObject *source) {
     }
     th_tree *tree = tree_of((PyObject *)owner);
     int status = 0;
+    /* GCOVR_EXCL_BR_START: status stops the loop only after allocation failure */
     for (int pass = 0; pass < 2 && status == 0; pass++) {
+        /* GCOVR_EXCL_BR_STOP */
         for (th_node *node = body->first_child; node != NULL;
              node = pass == 0 ? node->next_sibling : preorder_next(node, body)) {
             if (node->type != TH_NODE_ELEMENT || (pass == 1 && node->atom != TH_TAG_META && node->atom != TH_TAG_LINK &&

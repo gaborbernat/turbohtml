@@ -165,6 +165,12 @@ def test_element_tree_factory_retains_valid_attributes() -> None:
         pytest.param('_a="', "_a__", id="underscore-prefix"),
         pytest.param('A_.-:="', "a_.-:__", id="name-punctuation"),
         pytest.param('1a="', "_a__", id="digit-prefix"),
+        pytest.param("é bad", "__bad", id="non-ascii-prefix"),
+        pytest.param("aé=", "aé_", id="unicode-letter"),
+        pytest.param("a\u0661=", "a\u0661_", id="unicode-decimal"),
+        pytest.param("a²=", "a²_", id="unicode-digit"),
+        pytest.param("a½=", "a½_", id="unicode-number"),
+        pytest.param("a💡=", "a__", id="unicode-symbol"),
     ],
 )
 def test_element_tree_factory_normalizes_invalid_names(name: str, expected: str) -> None:

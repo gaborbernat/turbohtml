@@ -10,6 +10,8 @@ from turbohtml import etree
     [
         pytest.param("", "<html/>", id="empty"),
         pytest.param("<p>text</p>", "<html><body><p>text</p></body></html>", id="body"),
+        pytest.param("<p>ab\u00a0é</p>", "<html><body><p>ab\u00a0é</p></body></html>", id="unicode-text"),
+        pytest.param("<p>abé</p>", "<html><body><p>abé</p></body></html>", id="unicode-non-whitespace"),
         pytest.param("<title>title</title>", "<html><head><title>title</title></head></html>", id="head"),
         pytest.param("<frameset></frameset>", "<html><frameset/></html>", id="frameset"),
         pytest.param("<head><title>x</title>", "<html><head><title>x</title></head></html>", id="explicit-head-only"),
@@ -77,6 +79,8 @@ def test_element_tree_document_parsing(markup: str | bytes, expected: str) -> No
     [
         pytest.param("", "<span/>", id="empty"),
         pytest.param("  \n", "<span/>", id="whitespace-only"),
+        pytest.param("\u00a0<p>text</p>\u00a0", "<p>text</p>\u00a0", id="unicode-whitespace"),
+        pytest.param("é<p>text</p>", "<div>é<p>text</p></div>", id="unicode-leading-text"),
         pytest.param("<!doctype html><p>text</p>", "<html><body><p>text</p></body></html>", id="doctype"),
         pytest.param("<", "<span>&lt;</span>", id="incomplete-tag"),
         pytest.param("<frameset></frameset>", "<html><head/><frameset/></html>", id="frameset"),
