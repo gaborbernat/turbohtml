@@ -813,20 +813,24 @@ commands = [
 commands_post = []  # drop the base env's C coverage report
 
 [env.tsan]
+# uv venv rejects the nightly interpreter's +dev version.
+runner = "virtualenv"
 description = "detect data races with ThreadSanitizer; run inside the digest-pinned cpython-tsan image"
 # the no-GIL TSan interpreter is the container's own python, not a uv-managed one
 base_python = [ "{env:TSAN_PYTHON:python3.15t}" ]
 package = "skip"
+deps = []
 dependency_groups = [ "test" ]
 # let meson autodetect the container's TSan-capable compiler (the one CPython was built with); do not force CC=clang
 set_env = { UV_PYTHON_PREFERENCE = "only-system", TSAN_OPTIONS = "halt_on_error=0 allocator_may_return_null=1 suppressions={tox_root}{/}tools{/}tsan-suppressions.txt" }
 commands_pre = [
   # build the extension with TSan instrumentation against the container's TSan interpreter
   [
-    "uv",
+    "python",
+    "-m",
     "pip",
     "install",
-    "--reinstall",
+    "--force-reinstall",
     "--no-deps",
     "--no-build-isolation",
     "--editable",
