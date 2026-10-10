@@ -1,0 +1,3 @@
+Preserve inline CSS ``white-space`` modes in Markdown output, including inherited modes
+on selected subtrees. Use preformatted blocks for preserved spacing and embedded
+``<pre>`` HTML inside table cells, headings and links.
