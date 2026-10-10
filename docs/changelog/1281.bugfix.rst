@@ -1,2 +1,0 @@
-Retain Markdown fence languages across class ordering and whitespace around ``<code>``; recognize ``language-*`` classes
-on ``<pre>``.

@@ -1,1 +1,0 @@
-Speed up XPath ``re:test()`` and ``matches()`` filters with many alternatives or repeated patterns.

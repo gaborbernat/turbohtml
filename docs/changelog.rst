@@ -7,6 +7,17 @@
 .. towncrier release notes start
 
 **********************
+ v1.14.1 (2026-10-10)
+**********************
+
+Bug fixes - 1.14.1
+==================
+
+- Retain Markdown fence languages across class ordering and whitespace around ``<code>``; recognize ``language-*``
+  classes on ``<pre>``. (:issue:`1281`)
+- Speed up XPath ``re:test()`` and ``matches()`` filters with many alternatives or repeated patterns. (:issue:`1282`)
+
+**********************
  v1.14.0 (2026-10-09)
 **********************
 
