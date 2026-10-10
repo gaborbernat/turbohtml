@@ -312,11 +312,9 @@ jobs:
   tsan:
     name: 🧵 ThreadSanitizer
     runs-on: ubuntu-24.04
-    # prebuilt no-GIL CPython compiled with --with-thread-sanitizer from nascheme/cpython_sanity Dockerfile.cpython
-    # (fa9ffe62); the digest pins the image observed on 2026-10-07: CPython 3.14.8t, CONFIG_ARGS --disable-gil
-    # --with-thread-sanitizer CC=clang-21, Ubuntu clang 21.1.8 on Ubuntu 26.04, linux/amd64
+    # Upstream tags its Python 3.15 TSan build as 3.15t-dev; pin the digest so nightly rebuilds cannot change the runtime.
     container:
-      image: ghcr.io/nascheme/cpython-tsan:3.14t@sha256:d9b5658a3914135521d3dd0de77c6bb4ab8796d92074554396524ce2f5982ecd
+      image: ghcr.io/nascheme/cpython-tsan:3.15t-dev@sha256:00220ef2d363541741c5dda18fa7f936c11240fc1b9680ea87c5a7287e33f0f5
       options: --shm-size=2g # TSan shadow memory needs the headroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -330,7 +328,7 @@ jobs:
           enable-cache: false
       - name: 🔍 Check the interpreter is free-threaded and TSan-instrumented
         run: >-
-          python3 -c "import sysconfig; assert sysconfig.get_config_var('Py_GIL_DISABLED') == 1; assert '--with-thread-sanitizer' in sysconfig.get_config_var('CONFIG_ARGS')"
+          python3 -c "import sys, sysconfig; assert sys.version_info[:2] == (3, 15); assert sysconfig.get_config_var('Py_GIL_DISABLED') == 1; assert '--with-thread-sanitizer' in sysconfig.get_config_var('CONFIG_ARGS')"
       - name: ✅ Run tsan
         run: uvx --python-preference only-managed --python 3.15 --with tox-uv tox run -e tsan
         env:
