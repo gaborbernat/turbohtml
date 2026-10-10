@@ -218,7 +218,8 @@ commands = [
 
 [env.type]
 description = "run the type checker on the code base"
-base_python = [ "3.15" ]
+# minify-html lacks Python 3.15 support: https://github.com/wilsonzlin/minify-html/issues/287
+base_python = [ "3.14" ]
 dependency_groups = [ "type" ]
 commands = [ [ "ty", "check", "--output-format", "concise", "--error-on-warning", "src", "tests", "tools" ] ]
 
