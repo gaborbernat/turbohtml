@@ -132,10 +132,19 @@ def test_css_whitespace_inline_boundaries() -> None:
     )
 
 
-def test_css_whitespace_table_cell() -> None:
-    assert parse('<table><tr><td style="white-space:pre">one  two\n&lt;&amp;&gt;|</td></tr></table>').to_markdown() == (
-        "| <pre>one&#32;&#32;two&#10;&#60;&#38;&#62;&#124;</pre> |\n| --- |"
-    )
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        pytest.param(
+            'style="white-space:pre"',
+            "| <pre>one&#32;&#32;two&#10;&#60;&#38;&#62;&#124;</pre> |\n| --- |",
+            id="preserved",
+        ),
+        pytest.param('class="cell"', "| one two \\<&>\\| |\n| --- |", id="unrelated-attribute"),
+    ],
+)
+def test_css_whitespace_table_cell(attributes: str, expected: str) -> None:
+    assert parse(f"<table><tr><td {attributes}>one  two\n&lt;&amp;&gt;|</td></tr></table>").to_markdown() == expected
 
 
 def test_css_whitespace_deep_tree() -> None:

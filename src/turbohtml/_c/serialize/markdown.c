@@ -2377,7 +2377,7 @@ static void md_render_inline(md_ctx *ctx, th_node *node) {
     if (md_apply_converter(ctx, node)) {
         return;
     }
-    if (md_render_whitespace(ctx, node, TH_WS_NORMAL)) {
+    if (node->attr_count > 0 && md_render_whitespace(ctx, node, TH_WS_NORMAL)) {
         return;
     }
     uint16_t atom = node->ns == TH_NS_HTML ? node->atom : TH_TAG_UNKNOWN;
@@ -3576,7 +3576,7 @@ static int md_table_step(md_ctx *ctx, md_frame *frame) {
             }
             md_enter_cell(ctx, table);
         }
-        if (md_render_whitespace(ctx, cell, TH_WS_NORMAL)) {
+        if (cell->attr_count > 0 && md_render_whitespace(ctx, cell, TH_WS_NORMAL)) {
             if (table->phase != MD_TABLE_STRIP) {
                 md_leave_cell(ctx, table);
             }
@@ -3864,7 +3864,7 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
     if (md_apply_converter(ctx, node)) {
         return;
     }
-    if (md_render_whitespace(ctx, node, TH_WS_NORMAL)) {
+    if (node->attr_count > 0 && md_render_whitespace(ctx, node, TH_WS_NORMAL)) {
         return;
     }
     /* only an HTML element is ever classified as a block, so the namespace check
