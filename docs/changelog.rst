@@ -7,6 +7,23 @@
 .. towncrier release notes start
 
 **********************
+ v1.15.0 (2026-10-10)
+**********************
+
+Features - 1.15.0
+=================
+
+- Add ``turbohtml.etree`` views for extraction code that uses ElementTree text, tail, mutation and XPath operations. The
+  C adapter shares native DOM nodes and supports copying across lxml API boundaries. (:issue:`1284`)
+
+Bug fixes - 1.15.0
+==================
+
+- Preserve inline CSS ``white-space`` modes in Markdown output, including inherited modes on selected subtrees. Use
+  preformatted blocks for preserved spacing and embedded ``<pre>`` HTML inside table cells, headings and links.
+  (:issue:`1283`)
+
+**********************
  v1.14.1 (2026-10-10)
 **********************
 
