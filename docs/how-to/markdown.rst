@@ -46,6 +46,28 @@ itself. Class order and ASCII whitespace between classes do not affect recogniti
 child remains part of the code content. ``Markdown.Code(language="python")`` supplies a fallback for blocks without a
 language class; an element's class takes precedence.
 
+Inline CSS ``white-space: pre``, ``pre-wrap`` and ``break-spaces`` exports the element's text as a preformatted block,
+preserving spaces, tabs and line breaks. ``pre-line`` keeps line breaks and collapses spaces and tabs. Descendants
+inherit the mode and can override it with their own inline declaration. Styled prose carries no language label; existing
+``<pre>`` blocks retain their code-language settings.
+
+.. testcode::
+
+    print(turbohtml.parse('<p style="white-space: pre-wrap">one\ntwo</p>').to_markdown())
+
+.. testoutput::
+
+    ```
+    one
+    two
+    ```
+
+Preformatted output preserves spacing at the cost of inline emphasis and link formatting inside that element. It also
+turns a styled inline element into a block. Table cells, headings and link text use embedded ``<pre>`` HTML instead of
+fences; character references keep those fragments on one Markdown source line. Markdown readers must allow embedded HTML
+to display these fragments. This conversion considers inline declarations and their inheritance, without loading
+stylesheets or reproducing browser line wrapping.
+
 .. testcode::
 
     from turbohtml import Markdown
