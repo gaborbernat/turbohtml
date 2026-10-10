@@ -15,10 +15,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pgo_build
-import tomllib
 
 from bench import corpus, operations, report
 

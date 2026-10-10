@@ -3,10 +3,9 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from itertools import repeat
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, assert_type, cast
 
 import pytest
-from typing_extensions import assert_type
 
 from turbohtml import Comment, Document, Element, Node, Text, parse, parse_fragment, parse_xml
 from turbohtml.clean import collapse_whitespace_node, sanitize_node, strip_comments_node, transform_node

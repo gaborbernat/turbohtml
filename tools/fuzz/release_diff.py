@@ -32,8 +32,7 @@ from fuzz.round_trip_oracles import MAX_INPUT, ORACLES, UNBOUNDED, Floor
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from typing_extensions import Self
+    from typing import Self
 
 __all__ = ["Worker", "compare", "main"]
 

@@ -22,7 +22,7 @@ jobs:
         # The C-coverage gate runs where gcov/llvm-cov exist; on Windows the same
         # suite runs without it (MSVC has no gcov), gated natively in tox.toml.
         os: ["ubuntu-24.04", "macos-15", "windows-2025"]
-        py: ["3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.15t", "3.14t"]
+        py: ["3.15", "3.14", "3.13", "3.12", "3.11", "3.15t", "3.14t"]
         include:
           - {os: "ubuntu-24.04", label: Linux, cov: "gcov"}
           - {os: "macos-15", label: macOS, cov: "xcrun llvm-cov gcov"}
@@ -44,6 +44,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - wait: test-data
       - name: ✅ Run ${{ matrix.py }}
@@ -52,7 +53,7 @@ jobs:
           UV_PYTHON_PREFERENCE: only-managed
           COV_GCOV: ${{ matrix.cov }}
       - name: Report failed selector branches
-        if: ${{ failure() && runner.os == 'macOS' && contains(fromJSON('["3.10","3.11","3.12","3.13","3.14"]'), matrix.py) }}
+        if: ${{ failure() && runner.os == 'macOS' && contains(fromJSON('["3.11","3.12","3.13","3.14"]'), matrix.py) }}
         run: |
           xcrun clang --version
           xcode-select -p
@@ -71,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py: ["pypy3.11", "pypy3.10"]
+        py: ["pypy3.11"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,6 +90,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - wait: test-data
       - name: ✅ Run ${{ matrix.py }}
@@ -123,6 +125,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - wait: test-data
       - name: ✅ Run scalar
@@ -144,6 +147,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run preprocess-identity
         run: uvx --with tox-uv tox run -e preprocess-identity
@@ -164,6 +168,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run ${{ matrix.tox_env }}
         run: uvx --with tox-uv tox run -e ${{ matrix.tox_env }}
@@ -197,6 +202,7 @@ jobs:
           - name: 🔄 Install uv
             uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
             with:
+              python-version: "3.15"
               enable-cache: false
       - name: ✅ Run the conformance suites
         run: uvx --with tox-uv tox run -e conformance
@@ -227,6 +233,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Build with -Werror
         run: uvx --with tox-uv tox run -e warnings
@@ -254,10 +261,13 @@ jobs:
           persist-credentials: false
       - name: 🐍 Install arm64 dev Python (carries the .lib meson needs)
         if: matrix.arm
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        env:
+          UV_VENV_SEED: "true"
         with:
-          python-version: "3.13"
-          architecture: arm64
+          enable-cache: false
+          activate-environment: true
+          python-version: "3.15"
       - name: 🧰 Activate native arm64 MSVC (so meson picks cl over MinGW gcc)
         if: matrix.arm
         uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4.1.0
@@ -266,11 +276,12 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Build with -Werror
         run: uvx --with tox-uv tox run -e warnings
         env:
-          UV_PYTHON_PREFERENCE: ${{ matrix.arm && 'only-system' || 'only-managed' }}
+          UV_PYTHON_PREFERENCE: only-managed
   clang-tidy:
     name: 🧹 clang-tidy (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
@@ -292,6 +303,7 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: ✅ Run clang-tidy
         run: uvx pre-commit run clang-tidy --all-files --show-diff-on-failure --color always
@@ -300,11 +312,9 @@ jobs:
   tsan:
     name: 🧵 ThreadSanitizer
     runs-on: ubuntu-24.04
-    # prebuilt no-GIL CPython compiled with --with-thread-sanitizer from nascheme/cpython_sanity Dockerfile.cpython
-    # (fa9ffe62); the digest pins the image observed on 2026-10-07: CPython 3.14.8t, CONFIG_ARGS --disable-gil
-    # --with-thread-sanitizer CC=clang-21, Ubuntu clang 21.1.8 on Ubuntu 26.04, linux/amd64
+    # Upstream tags its Python 3.15 TSan build as 3.15t-dev; pin the digest so nightly rebuilds cannot change the runtime.
     container:
-      image: ghcr.io/nascheme/cpython-tsan:3.14t@sha256:d9b5658a3914135521d3dd0de77c6bb4ab8796d92074554396524ce2f5982ecd
+      image: ghcr.io/nascheme/cpython-tsan:3.15t-dev@sha256:00220ef2d363541741c5dda18fa7f936c11240fc1b9680ea87c5a7287e33f0f5
       options: --shm-size=2g # TSan shadow memory needs the headroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -314,11 +324,13 @@ jobs:
       - name: 🔄 Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          python-version: "3.15"
           enable-cache: false
       - name: 🔍 Check the interpreter is free-threaded and TSan-instrumented
         run: >-
-          python3 -c "import sysconfig; assert sysconfig.get_config_var('Py_GIL_DISABLED') == 1; assert '--with-thread-sanitizer' in sysconfig.get_config_var('CONFIG_ARGS')"
+          python3 -c "import sys, sysconfig; assert sys.version_info[:2] == (3, 15); assert sysconfig.get_config_var('Py_GIL_DISABLED') == 1; assert '--with-thread-sanitizer' in sysconfig.get_config_var('CONFIG_ARGS')"
       - name: ✅ Run tsan
-        run: uvx --with tox-uv tox run -e tsan
+        run: >-
+          TSAN_PYTHON=$(python3 -c 'import sys; print(sys.executable)') uvx --python-preference only-managed --python 3.15 --with tox-uv tox run -e tsan --skip-missing-interpreters false
         env:
           UV_PYTHON_PREFERENCE: only-system # use the container's TSan interpreter, not a uv-managed one

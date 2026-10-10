@@ -16,7 +16,7 @@ thin typed facade is the only Python you touch. It is not a drop-in for the libr
 $ pip install turbohtml
 ```
 
-Wheels ship per interpreter for CPython 3.10–3.15 (including free-threading), so there is nothing to compile.
+Wheels ship per interpreter for CPython 3.11–3.15 (including free-threading), so there is nothing to compile.
 
 ## Quickstart
 

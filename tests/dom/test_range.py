@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, assert_type
 
 import pytest
-from typing_extensions import assert_type
 
 from turbohtml import (
     CData,

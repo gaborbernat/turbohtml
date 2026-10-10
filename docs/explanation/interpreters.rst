@@ -2,10 +2,10 @@
  Interpreters
 ##############
 
-turbohtml runs on CPython 3.10 and newer, on the free-threaded build, and on PyPy 3.10 and 3.11. The same C core serves
-all of them: there is no pure-Python fallback, and no separate PyPy backend. What differs is the layer underneath, and
-it differs enough to be worth understanding before you choose PyPy for an HTML workload. How the core adapts to that
-layer is a maintenance concern, covered in :doc:`/development/cpyext`.
+turbohtml runs on CPython 3.11 and newer, on the free-threaded build, and on PyPy 3.11. The same C core serves all of
+them: there is no pure-Python fallback, and no separate PyPy backend. What differs is the layer underneath, and it
+differs enough to be worth understanding before you choose PyPy for an HTML workload. How the core adapts to that layer
+is a maintenance concern, covered in :doc:`/development/cpyext`.
 
 ***********************
  What cpyext costs you

@@ -39,6 +39,11 @@ jobs:
         with:
           fetch-depth: 0 # CIFuzz looks for a base build among the three commits up to the base commit
           persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.15"
+          enable-cache: false
       - name: 📥 Check out the storage repository
         run: bash tools/fuzz/cflite_storage.sh clone
         env:
@@ -54,7 +59,7 @@ jobs:
           restore-keys: cflite-build-${{ matrix.sanitizer }}-
       - name: 🧬 Fuzz the change for 600 s
         run: |
-          python3 tools/fuzz/cflite.py --mode code-change --sanitizer "${SANITIZER}" --seconds 600 \
+          uv run --no-project --python 3.15 python tools/fuzz/cflite.py --mode code-change --sanitizer "${SANITIZER}" --seconds 600 \
             --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite" --base-commit "${BEFORE}" --upload-build
         env:
           SANITIZER: ${{ matrix.sanitizer }}
@@ -122,6 +127,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.15"
+          enable-cache: false
       - name: 📥 Check out the storage repository
         run: bash tools/fuzz/cflite_storage.sh clone
         env:
@@ -129,7 +139,7 @@ jobs:
           STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
       - name: 🧬 Fuzz for 3600 s
         run: |
-          python3 tools/fuzz/cflite.py --mode batch --sanitizer "${SANITIZER}" --seconds 3600 \
+          uv run --no-project --python 3.15 python tools/fuzz/cflite.py --mode batch --sanitizer "${SANITIZER}" --seconds 3600 \
             --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite"
         env:
           SANITIZER: ${{ matrix.sanitizer }}
@@ -155,6 +165,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.15"
+          enable-cache: false
       - name: 📥 Check out the storage repository
         run: bash tools/fuzz/cflite_storage.sh clone
         env:
@@ -162,7 +177,7 @@ jobs:
           STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
       - name: ✂️ Prune the corpus
         run: |
-          python3 tools/fuzz/cflite.py --mode prune --sanitizer address --seconds 600 \
+          uv run --no-project --python 3.15 python tools/fuzz/cflite.py --mode prune --sanitizer address --seconds 600 \
             --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite"
       - name: 📤 Store the pruned corpus and logs
         if: success() || failure()
@@ -179,6 +194,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: 🔄 Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.15"
+          enable-cache: false
       - name: 📥 Check out the storage repository
         run: bash tools/fuzz/cflite_storage.sh clone
         env:
@@ -186,12 +206,8 @@ jobs:
           STORAGE_TOKEN: ${{ secrets.CFLITE_STORAGE_TOKEN }}
       - name: 📊 Measure coverage over the stored corpus
         run: |
-          python3 tools/fuzz/cflite.py --mode coverage --sanitizer coverage --seconds 600 \
+          uv run --no-project --python 3.15 python tools/fuzz/cflite.py --mode coverage --sanitizer coverage --seconds 600 \
             --source "${GITHUB_WORKSPACE}" --workspace "${RUNNER_TEMP}/cflite"
-      - name: 🔄 Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: false
       - name: 🚧 Check reachability floors
         # each Atheris target's callback and Python-implemented exports must execute at least one line
         run: uvx --with tox-uv tox run -e fuzz-reachability -- --coverage-dir "${RUNNER_TEMP}/cflite/build-out"

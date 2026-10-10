@@ -2,9 +2,7 @@
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from enum import Enum, IntEnum
 from re import Pattern
-from typing import ClassVar, Literal, TypeAlias, TypeVar, final
-
-from typing_extensions import Self
+from typing import ClassVar, Literal, Self, TypeAlias, TypeVar, final
 
 from turbohtml._internal._locations import SourceLocation
 from turbohtml._internal._render import Canonical, Html, Markdown, PlainText

@@ -14,7 +14,7 @@ the result record, and the window and output formatting the :mod:`datetime` modu
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Final, Literal, NamedTuple
 
 from turbohtml._html import parse
@@ -115,4 +115,4 @@ def dates(html: str, options: DateExtraction | None = None, /) -> PublicationDat
 
 def _today() -> date:
     """Today's date in UTC, the default upper bound so a stray future stamp never wins."""
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()

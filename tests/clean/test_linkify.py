@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, assert_type, cast
 
 import pytest
 from bench.operations import INPUTS
-from typing_extensions import assert_type
 
 from turbohtml import Document, Element, Text, parse, parse_fragment
 from turbohtml._html import _linkify_find, _linkify_fold, _linkify_scan, _phone_e164, _phone_regions

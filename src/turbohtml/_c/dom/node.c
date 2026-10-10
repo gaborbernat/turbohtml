@@ -40,7 +40,7 @@ void th_node_freelist_clear(module_state *state) {
     /* GCOVR_EXCL_START
        The drain runs only from html_clear (the module m_clear slot) at interpreter finalization, and only
        when the pool is non-empty at that instant. Whether CPython reaches this with a populated pool is
-       nondeterministic across interpreters -- some 3.10/3.11 macOS and Linux runs finalize with the pool
+       nondeterministic across interpreters -- some macOS and Linux runs finalize with the pool
        already empty -- so the loop body cannot be covered portably; the OS reclaims the wrappers at process
        exit regardless. */
     while (state->node_freelist != NULL) {

@@ -5,9 +5,7 @@ env_list = [
   "3.13",
   "3.12",
   "3.11",
-  "3.10",
   "pypy3.11",
-  "pypy3.10",
   "3.14t",
   "3.15t",
   "docs",
@@ -20,6 +18,7 @@ skip_missing_interpreters = true
 
 [env_run_base]
 description = { replace = "if", condition = "factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = "run the test suite under {env_name} with the Python coverage gate (no gcov for this interpreter)", else = "run the test suite under {env_name} with the Python and C coverage gates" }
+default_base_python = [ "3.15" ]
 package = "skip"  # we install an instrumented editable build ourselves below
 # gcovr (via lxml) has no wheels for 3.15 or the free-threaded builds, and there is
 # no gcov on Windows, so pull it in only where the coverage gate actually runs
@@ -91,11 +90,6 @@ commands = [
     "--ignore={tox_root}{/}tests{/}fuzz_build",
     { replace = "posargs", default = [ "tests" ], extend = true },
   ],
-  # enforce 100% C LINE coverage everywhere gcov runs, and 100% BRANCH coverage on
-  # every version except 3.10: its pre-PEP-623 PyUnicode_DATA/READ/WRITE macros emit
-  # ternaries whose non-compact sides PyUnicode_New objects can never take, so 3.10
-  # floors at 97% (gcc counts a few more of these dead branches than llvm). 3.11+
-  # collapsed those macros to branchless inline functions.
   { replace = "if", condition = "factor.win32 or factor['3.15'] or factor['3.14t'] or factor['3.15t']", then = [
     "python",
     "-c",
@@ -112,7 +106,7 @@ commands = [
     "--fail-under-line",
     "100",
     "--fail-under-branch",
-    { replace = "if", condition = "factor['3.10']", then = "97", else = "100" },
+    "100",
     "--json",
     "{env_tmp_dir}{/}c_coverage.json",
     "--html-details",
@@ -161,16 +155,12 @@ if sys.platform == 'darwin' and report.is_file():
   ],
 ]
 
+[env_pkg_base]
+default_base_python = [ "3.15" ]
+
 [env."pypy3.11"]
 description = "run the test suite under PyPy 3.11 through cpyext"
 base_python = [ "pypy3.11" ]
-deps = { replace = "ref", of = [ "env", "_pypy", "deps" ] }
-commands_pre = [ { replace = "ref", of = [ "env", "_pypy", "commands_pre" ], extend = true } ]
-commands = [ { replace = "ref", of = [ "env", "_pypy", "commands" ], extend = true } ]
-
-[env."pypy3.10"]
-description = "run the test suite under PyPy 3.10 through cpyext"
-base_python = [ "pypy3.10" ]
 deps = { replace = "ref", of = [ "env", "_pypy", "deps" ] }
 commands_pre = [ { replace = "ref", of = [ "env", "_pypy", "commands_pre" ], extend = true } ]
 commands = [ { replace = "ref", of = [ "env", "_pypy", "commands" ], extend = true } ]
@@ -228,7 +218,8 @@ commands = [
 
 [env.type]
 description = "run the type checker on the code base"
-base_python = [ "3.14" ]  # lightningcss in the bench group has no 3.15 build yet (PyO3 0.27 caps at 3.14)
+# minify-html lacks Python 3.15 support: https://github.com/wilsonzlin/minify-html/issues/287
+base_python = [ "3.14" ]
 dependency_groups = [ "type" ]
 commands = [ [ "ty", "check", "--output-format", "concise", "--error-on-warning", "src", "tests", "tools" ] ]
 
@@ -301,6 +292,7 @@ commands = [ [ "python", "{tox_root}{/}tools{/}js_sanitize.py" ] ]
 
 [env.atheris]
 description = "verify public consumers and native rejection against released Linux Atheris"
+# Atheris lacks Python 3.15 support: https://github.com/google/atheris/issues/114
 base_python = [ "3.14" ]
 package = "skip"
 deps = [
@@ -358,7 +350,7 @@ commands = [ [ "python", "-m", "bench", { replace = "posargs", extend = true } ]
 
 [env.codspeed]
 description = "run the pytest-codspeed hot-path benchmarks (the CodSpeed CI regression gate)"
-base_python = [ "3.14" ]
+base_python = [ "3.15" ]
 package = "skip"  # commands_pre reinstalls a deterministic LTO editable build; a plain editable package would undo it
 deps = []  # drop the gcovr the coverage gate pulls in; the benchmarks never measure coverage
 dependency_groups = [ "test" ]  # carries pytest-codspeed, the benchmark fixture, and the meson build backend
@@ -790,7 +782,7 @@ commands = [ [ "python", "{tox_root}{/}tasks{/}release.py", "--version", "{posar
 
 [env.scalar]
 description = "run the test suite against the portable SWAR scan loops that TH_FORCE_SCALAR selects over NEON and SSE2"
-base_python = [ "3.14" ]
+base_python = [ "3.15" ]
 package = "skip"  # commands_pre installs the forced-scalar editable build
 # no gcovr: the SIMD build owns the coverage gate, this run diffs the scalar arms against the same expectations
 deps = []
@@ -822,20 +814,24 @@ commands = [
 commands_post = []  # drop the base env's C coverage report
 
 [env.tsan]
+# uv venv rejects the nightly interpreter's +dev version.
+runner = "virtualenv"
 description = "detect data races with ThreadSanitizer; run inside the digest-pinned cpython-tsan image"
 # the no-GIL TSan interpreter is the container's own python, not a uv-managed one
-base_python = [ "python3.14t" ]
+base_python = [ "{env:TSAN_PYTHON:python3.15t}" ]
 package = "skip"
+deps = []
 dependency_groups = [ "test" ]
 # let meson autodetect the container's TSan-capable compiler (the one CPython was built with); do not force CC=clang
 set_env = { UV_PYTHON_PREFERENCE = "only-system", TSAN_OPTIONS = "halt_on_error=0 allocator_may_return_null=1 suppressions={tox_root}{/}tools{/}tsan-suppressions.txt" }
 commands_pre = [
   # build the extension with TSan instrumentation against the container's TSan interpreter
   [
-    "uv",
+    "python",
+    "-m",
     "pip",
     "install",
-    "--reinstall",
+    "--force-reinstall",
     "--no-deps",
     "--no-build-isolation",
     "--editable",

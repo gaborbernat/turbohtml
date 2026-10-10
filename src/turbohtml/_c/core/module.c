@@ -4,7 +4,7 @@
    The tokenizer adds the Token and Tokenizer types plus tokenize(); those heap
    types live in per-module state so the module supports sub-interpreters and
    the free-threaded build. These sources use only public, version-portable
-   APIs, so they build on CPython 3.10 through 3.15. */
+   APIs, so they build on CPython 3.11 through 3.15. */
 
 #include "core/common.h"
 #include "core/vec.h"

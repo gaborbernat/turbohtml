@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from turbohtml._html import Element, _register_xpath_string  # Element stays importable so autodoc resolves it
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing import Self
 
 
 # isinstance(result, str) must hold for callers, and the C core builds the value

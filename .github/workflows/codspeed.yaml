@@ -70,7 +70,7 @@ jobs:
           # CodSpeed diffs this run against the base commit's run, measured whenever that commit landed, so an
           # interpreter patch released in between changes the instruction counts of untouched benchmarks. Pin the
           # exact build and bump it by hand.
-          python-version: "3.14.7"
+          python-version: "3.15.0"
       # Build outside instrumentation so setup is not measured. Use LTO because fresh PGO profiles produce different
       # binaries; release wheels retain PGO+LTO.
       - name: 🏗️ Build the deterministic LTO extension and install benchmark deps

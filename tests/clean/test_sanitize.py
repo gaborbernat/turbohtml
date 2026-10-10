@@ -8,11 +8,10 @@ from dataclasses import dataclass, replace
 from html import escape
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, assert_type, cast
 
 import pytest
 from bench.operations import INPUTS
-from typing_extensions import assert_type
 
 from turbohtml import Comment, Document, Element, parse, parse_fragment, parse_xml
 from turbohtml._html import _sanitize, _sanitize_policy

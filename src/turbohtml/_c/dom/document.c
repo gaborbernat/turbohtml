@@ -182,13 +182,6 @@ static int meta_is_digit(Py_UCS4 c) {
     return c >= '0' && c <= '9';
 }
 
-/* One code-point read for every meta-refresh scan loop. Routing all reads through a single site keeps Python 3.10's
-   dead PyUnicode_DATA/READ macro branches from multiplying across the loops; the coverage build runs at -O0 so this
-   stays a real call, while release inlines it. */
-static Py_UCS4 meta_char(int kind, const void *data, Py_ssize_t index) {
-    return PyUnicode_READ(kind, data, index);
-}
-
 /* Parse a meta-refresh `content` ("<delay>" or "<delay>;url=<url>") into ``(delay, url)``, resolving the url against
    `fallback` and using `fallback` itself when the directive has none. Returns the tuple, None when there is no leading
    delay, or NULL on error. */
@@ -197,16 +190,16 @@ static PyObject *parse_meta_refresh(PyObject *content, PyObject *fallback) {
     const void *data = PyUnicode_DATA(content);
     Py_ssize_t len = PyUnicode_GET_LENGTH(content);
     Py_ssize_t pos = 0;
-    while (pos < len && meta_is_space(meta_char(kind, data, pos))) {
+    while (pos < len && meta_is_space(PyUnicode_READ(kind, data, pos))) {
         pos++;
     }
     Py_ssize_t number_start = pos;
-    while (pos < len && meta_is_digit(meta_char(kind, data, pos))) {
+    while (pos < len && meta_is_digit(PyUnicode_READ(kind, data, pos))) {
         pos++;
     }
-    if (pos < len && meta_char(kind, data, pos) == '.') {
+    if (pos < len && PyUnicode_READ(kind, data, pos) == '.') {
         pos++;
-        while (pos < len && meta_is_digit(meta_char(kind, data, pos))) {
+        while (pos < len && meta_is_digit(PyUnicode_READ(kind, data, pos))) {
             pos++;
         }
     }
@@ -223,36 +216,38 @@ static PyObject *parse_meta_refresh(PyObject *content, PyObject *fallback) {
         return NULL;     /* GCOVR_EXCL_LINE */
     }
     PyObject *url = NULL;
-    while (pos < len && meta_char(kind, data, pos) != ';' && meta_char(kind, data, pos) != ',') {
+    while (pos < len && PyUnicode_READ(kind, data, pos) != ';' && PyUnicode_READ(kind, data, pos) != ',') {
         pos++;
     }
     if (pos < len) {
         pos++; /* step past the ';' or ',' */
-        while (pos < len && meta_is_space(meta_char(kind, data, pos))) {
+        while (pos < len && meta_is_space(PyUnicode_READ(kind, data, pos))) {
             pos++;
         }
         /* an optional "url" "=" prefix, e.g. "url=next" or "URL = next" */
-        if (pos + 2 < len && (meta_char(kind, data, pos) | 0x20) == 'u' &&
-            (meta_char(kind, data, pos + 1) | 0x20) == 'r' && (meta_char(kind, data, pos + 2) | 0x20) == 'l') {
+        if (pos + 2 < len && (PyUnicode_READ(kind, data, pos) | 0x20) == 'u' &&
+            (PyUnicode_READ(kind, data, pos + 1) | 0x20) == 'r' &&
+            (PyUnicode_READ(kind, data, pos + 2) | 0x20) == 'l') {
             Py_ssize_t after = pos + 3;
-            while (after < len && meta_is_space(meta_char(kind, data, after))) {
+            while (after < len && meta_is_space(PyUnicode_READ(kind, data, after))) {
                 after++;
             }
-            if (after < len && meta_char(kind, data, after) == '=') {
+            if (after < len && PyUnicode_READ(kind, data, after) == '=') {
                 after++;
-                while (after < len && meta_is_space(meta_char(kind, data, after))) {
+                while (after < len && meta_is_space(PyUnicode_READ(kind, data, after))) {
                     after++;
                 }
                 pos = after;
             }
         }
         Py_ssize_t url_end = len;
-        while (url_end > pos && meta_is_space(meta_char(kind, data, url_end - 1))) {
+        while (url_end > pos && meta_is_space(PyUnicode_READ(kind, data, url_end - 1))) {
             url_end--;
         }
         if (url_end > pos) {
-            Py_UCS4 quote = meta_char(kind, data, pos);
-            if ((quote == '"' || quote == '\'') && url_end - 1 > pos && meta_char(kind, data, url_end - 1) == quote) {
+            Py_UCS4 quote = PyUnicode_READ(kind, data, pos);
+            if ((quote == '"' || quote == '\'') && url_end - 1 > pos &&
+                PyUnicode_READ(kind, data, url_end - 1) == quote) {
                 pos++;
                 url_end--;
             }
@@ -377,10 +372,10 @@ static int equiv_is_refresh(PyObject *equiv) {
     const void *data = PyUnicode_DATA(equiv);
     Py_ssize_t start = 0;
     Py_ssize_t end = PyUnicode_GET_LENGTH(equiv);
-    while (start < end && meta_is_space(meta_char(kind, data, start))) {
+    while (start < end && meta_is_space(PyUnicode_READ(kind, data, start))) {
         start++;
     }
-    while (end > start && meta_is_space(meta_char(kind, data, end - 1))) {
+    while (end > start && meta_is_space(PyUnicode_READ(kind, data, end - 1))) {
         end--;
     }
     static const char target[] = "refresh";
@@ -388,7 +383,7 @@ static int equiv_is_refresh(PyObject *equiv) {
         return 0;
     }
     for (Py_ssize_t index = 0; index < end - start; index++) {
-        if ((meta_char(kind, data, start + index) | 0x20) != (Py_UCS4)target[index]) {
+        if ((PyUnicode_READ(kind, data, start + index) | 0x20) != (Py_UCS4)target[index]) {
             return 0;
         }
     }
