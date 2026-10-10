@@ -331,6 +331,6 @@ jobs:
           python3 -c "import sys, sysconfig; assert sys.version_info[:2] == (3, 15); assert sysconfig.get_config_var('Py_GIL_DISABLED') == 1; assert '--with-thread-sanitizer' in sysconfig.get_config_var('CONFIG_ARGS')"
       - name: ✅ Run tsan
         run: >-
-          TSAN_PYTHON=$(python3 -c 'import sys; print(sys.executable)') uvx --python-preference only-managed --python 3.15 --with tox-uv tox run -e tsan
+          TSAN_PYTHON=$(python3 -c 'import sys; print(sys.executable)') uvx --python-preference only-managed --python 3.15 --with tox-uv tox run -e tsan --skip-missing-interpreters false
         env:
           UV_PYTHON_PREFERENCE: only-system # use the container's TSan interpreter, not a uv-managed one
