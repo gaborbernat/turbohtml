@@ -35,14 +35,14 @@ turbohtml uses `tox <https://tox.wiki>`_ with `tox-uv <https://github.com/tox-de
     $ git clone https://github.com/tox-dev/turbohtml
     $ cd turbohtml
     $ git submodule update --init tests/html5lib-tests   # tokenizer and encoding conformance data
-    $ uvx --with tox-uv tox r -e 3.14   # build, test, and check coverage
+    $ uvx --with tox-uv tox r -e 3.15   # build, test, and check coverage
 
 The ``tests/html5lib-tests`` submodule holds the tokenizer and encoding conformance data. Do not initialize every
 submodule: the ``tools/bench-data`` submodules reference multi-MiB real documents (pinned upstream commits, nothing
 copied into this repository) that ``tox r -e bench`` reads and nothing else; fetch them on demand with ``git submodule
 update --init --depth 1 tools/bench-data/whatwg-html tools/bench-data/war-and-peace``.
 
-``tox r -e 3.14`` builds the extension, runs the test suite, and **fails unless both Python and C coverage are 100%**
+``tox r -e 3.15`` builds the extension, runs the test suite, and **fails unless both Python and C coverage are 100%**
 (line and branch). Other environments: ``type`` (`ty <https://github.com/astral-sh/ty>`_), ``docs`` (Sphinx), ``fix``
 (`pre-commit <https://pre-commit.com>`_), ``pkg_meta`` (wheel/sdist metadata), ``bench`` (`pyperf
 <https://pyperf.readthedocs.io>`_ comparison against each competitor library, each in its own isolated ``uv`` venv; see
@@ -418,6 +418,9 @@ Character Database file it downloads. Bump the version or commit and its checksu
 let the header banner record the exact commit or version. The `security policy
 <https://github.com/tox-dev/turbohtml/blob/main/.github/SECURITY.md>`_ places this in the wider threat model.
 
+Run ``tox r -e 3.11,3.15`` before requesting review. Link an upstream issue beside any temporary interpreter override,
+and keep the pull request in draft until CI passes.
+
 **Coverage gates on two toolchains.** Both the gcc (Linux) and llvm-cov (macOS, Windows) gates require full line and
 branch coverage; an exclusion needs a written reason that testing it is impossible.
 
@@ -434,7 +437,7 @@ Regenerate the entity tables (after a CPython update changes :mod:`python:html.e
 
     $ tox r -e regen
 
-Run the full check matrix on your machine (per-interpreter, 3.10–3.15 plus free-threading):
+Run the full check matrix on your machine (per-interpreter, 3.11–3.15 plus free-threading):
 
 .. code-block:: console
 
