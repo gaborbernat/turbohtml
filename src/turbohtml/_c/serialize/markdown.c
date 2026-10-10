@@ -3601,39 +3601,55 @@ static void md_emit_pre_text(md_ctx *ctx, const Py_UCS4 *text, Py_ssize_t end) {
     }
 }
 
-static void md_render_pre(md_ctx *ctx, th_node *node) {
-    th_node *code = node->first_child;
-    th_node *content = node;
-    Py_ssize_t lang_len = 0;
-    const Py_UCS4 *lang = NULL;
-    if (code != NULL && code->type == TH_NODE_ELEMENT && code->ns == TH_NS_HTML && code->atom == TH_TAG_CODE &&
-        code->next_sibling == NULL) {
-        content = code;
-        Py_ssize_t cls_len;
-        const Py_UCS4 *cls = md_attr(ctx->tree, code, "class", &cls_len);
-        if (cls != NULL) {
-            const char *want = "language-";
-            Py_ssize_t want_len = 9;
-            if (cls_len > want_len) {
-                int match = 1;
-                for (Py_ssize_t index = 0; index < want_len; index++) {
-                    if (cls[index] != (Py_UCS4)(unsigned char)want[index]) {
-                        match = 0;
-                        break;
-                    }
-                }
-                if (match) {
-                    lang = cls + want_len;
-                    lang_len = cls_len - want_len;
-                    for (Py_ssize_t index = 0; index < lang_len; index++) {
-                        if (is_space(lang[index])) {
-                            lang_len = index;
-                            break;
-                        }
-                    }
+static const Py_UCS4 *md_code_language(md_ctx *ctx, th_node *node, Py_ssize_t *length) {
+    Py_ssize_t class_len;
+    const Py_UCS4 *classes = md_attr(ctx->tree, node, "class", &class_len);
+    for (Py_ssize_t start = 0; start < class_len;) {
+        if (is_space(classes[start])) {
+            start++;
+            continue;
+        }
+        Py_ssize_t end = start;
+        while (end < class_len && !is_space(classes[end])) {
+            end++;
+        }
+        static const Py_UCS4 prefix[] = {'l', 'a', 'n', 'g', 'u', 'a', 'g', 'e', '-'};
+        if (end - start > 9 && memcmp(classes + start, prefix, sizeof(prefix)) == 0) {
+            *length = end - start - 9;
+            return classes + start + 9;
+        }
+        start = end;
+    }
+    return NULL;
+}
+
+static th_node *md_pre_code(md_ctx *ctx, th_node *node) {
+    th_node *code = NULL;
+    for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_TEXT) {
+            const Py_UCS4 *text = need_text(ctx->tree, child);
+            for (Py_ssize_t index = 0; index < child->text_len; index++) {
+                if (!is_space(text[index])) {
+                    return NULL;
                 }
             }
+        } else if (child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML && child->atom == TH_TAG_CODE &&
+                   code == NULL) {
+            code = child;
+        } else {
+            return NULL;
         }
+    }
+    return code;
+}
+
+static void md_render_pre(md_ctx *ctx, th_node *node) {
+    th_node *code = md_pre_code(ctx, node);
+    th_node *content = code != NULL && code == node->first_child && code->next_sibling == NULL ? code : node;
+    Py_ssize_t lang_len = 0;
+    const Py_UCS4 *lang = code == NULL ? NULL : md_code_language(ctx, code, &lang_len);
+    if (lang == NULL) {
+        lang = md_code_language(ctx, node, &lang_len);
     }
     Py_ssize_t text_len;
     Py_UCS4 *text;

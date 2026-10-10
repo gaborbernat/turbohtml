@@ -41,6 +41,11 @@ more. Its knobs are grouped into themed sub-configs (``Markdown.Headings``, ``Ma
 ...) so no single object is a wall of options. The :doc:`/migration/index` guide maps each old option to its turbohtml
 field.
 
+Code fences use the first nonempty ``language-*`` class on the sole ``<code>`` child of ``<pre>``, then on ``<pre>``
+itself. Class order and ASCII whitespace between classes do not affect recognition. Whitespace around the ``<code>``
+child remains part of the code content. ``Markdown.Code(language="python")`` supplies a fallback for blocks without a
+language class; an element's class takes precedence.
+
 .. testcode::
 
     from turbohtml import Markdown
