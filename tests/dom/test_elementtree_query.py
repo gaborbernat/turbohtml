@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -63,7 +64,7 @@ def test_element_tree_xpath_does_not_rewrite_quoted_slashes(tree: ElementView, q
 
 
 def test_element_tree_repr_contains_tag(tree: ElementView) -> None:
-    assert repr(tree) == f"<Element div at {id(tree):#x}>"
+    assert re.fullmatch(r"<Element div at 0x[0-9a-f]+>", repr(tree))
 
 
 def test_element_tree_keyword_factory_retains_attributes() -> None:

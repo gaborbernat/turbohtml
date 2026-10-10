@@ -52,7 +52,10 @@ static PyMethodDef view_forget_method = {"_forget", view_forget, METH_O, NULL};
 static void view_dealloc(PyObject *self) {
     PyTypeObject *type = Py_TYPE(self);
     PyObject_GC_UnTrack(self);
+#ifndef PYPY_VERSION
+    /* PyPy clears weakrefs before tp_dealloc; its API cannot rewrap a dying object. */
     PyObject_ClearWeakRefs(self);
+#endif
     view_clear_refs(self);
     type->tp_free(self);
     Py_DECREF(type);

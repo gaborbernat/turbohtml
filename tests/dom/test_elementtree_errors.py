@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import sys
+import weakref
 from inspect import unwrap
 from operator import attrgetter
 from typing import TYPE_CHECKING, Final, cast
@@ -182,9 +184,11 @@ def test_element_tree_lxml_comment_cannot_be_root() -> None:
 def test_element_tree_propagates_truth_value_error(
     tree: ElementView, operation: Callable[[ElementView, bool], None]
 ) -> None:
-    value: Final = memoryview(b"x")
-    value.release()
-    with pytest.raises(ValueError, match="released memoryview"):
+    expired = etree.Element("p")
+    value: Final = weakref.proxy(expired)
+    del expired
+    gc.collect()
+    with pytest.raises(ReferenceError, match="referenced object no longer exists"):
         operation(tree, cast("bool", value))
 
 
