@@ -1253,6 +1253,8 @@ def test_regex_dynamic_flags_keep_patterns_separate() -> None:
         pytest.param("re:test('10', 0)", True, id="numeric-pattern"),
         pytest.param("re:test('x', 'x', 0)", True, id="numeric-flags"),
         pytest.param("re:test('x', 'X', '')", False, id="empty-flags"),
+        pytest.param("re:test('x', str:concat(//missing))", True, id="computed-empty-pattern"),
+        pytest.param("re:test('x', 'X', str:concat(//missing))", False, id="computed-empty-flags"),
     ],
 )
 def test_regex_coerces_arguments(expression: str, *, expected: bool) -> None:

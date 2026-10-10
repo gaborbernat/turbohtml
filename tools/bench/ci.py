@@ -284,6 +284,7 @@ _ADDITIONAL_CASES: Final[dict[str, tuple[str, int]]] = {
     "xpath-compare-unequal": ("xpath-compare", 6),
     "xpath-regex-exslt": ("xpath", 12),
     "xpath-regex-matches": ("xpath", 16),
+    "xpath-regex-alternatives": ("xpath", 25),
     "xpath-compare-scalar": ("xpath-compare", 9),
     "xpath-order-le": ("xpath-order", 5),
     "xpath-order-gt": ("xpath-order", 8),

@@ -154,6 +154,10 @@ _XPATH_CALLS: dict[str, Callable[..., object]] = {
     "count(//a)": lambda sel, _text: sel.xpath("count(//a)"),
     "variable": lambda sel, _text: sel.xpath("//a[@href=$href]", href="/x"),
     "re:test": lambda sel, _text: sel.xpath("//a[re:test(@href, '[0-9]')]"),
+    "re:alternatives": lambda sel, _text: sel.xpath(
+        ".//*[re:test(@class, 'post[-_]text|post-body|post-?entry|post[-_]?content|article-?text|articleText|"
+        "(?:entry|page|text|article|art)-content|article__content|article(?:-|__)?body|articleBody|body-text')]"
+    ),
     "set:distinct": lambda sel, _text: sel.xpath("set:distinct(//a)"),
     "smart_strings": lambda sel, _text: sel.xpath("//a/@href"),
     "extension": lambda sel, _text: sel.xpath("ext_count(//a)", extensions=_COUNT_EXTENSIONS),
