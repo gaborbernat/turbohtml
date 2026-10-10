@@ -131,6 +131,36 @@ from ._stubs.dom import (
 from ._stubs.dom import (
     parse_xml as parse_xml,
 )
+from ._stubs.etree import ElementView as ElementView
+from ._stubs.etree import _elementtree_context as _elementtree_context
+from ._stubs.etree import _elementtree_document_fromstring as _elementtree_document_fromstring
+from ._stubs.etree import (
+    _elementtree_element as _elementtree_element,
+)
+from ._stubs.etree import _elementtree_fragment_fromstring as _elementtree_fragment_fromstring
+from ._stubs.etree import (
+    _elementtree_from_lxml as _elementtree_from_lxml,
+)
+from ._stubs.etree import _elementtree_fromstring as _elementtree_fromstring
+from ._stubs.etree import (
+    _elementtree_strip_elements as _elementtree_strip_elements,
+)
+from ._stubs.etree import (
+    _elementtree_strip_tags as _elementtree_strip_tags,
+)
+from ._stubs.etree import (
+    _elementtree_subelement as _elementtree_subelement,
+)
+from ._stubs.etree import (
+    _elementtree_to_lxml as _elementtree_to_lxml,
+)
+from ._stubs.etree import (
+    _elementtree_to_lxml_html as _elementtree_to_lxml_html,
+)
+from ._stubs.etree import (
+    _elementtree_tostring as _elementtree_tostring,
+)
+from ._stubs.etree import _ElementXPath as _ElementXPath
 from ._stubs.features import (
     _bleach_allow_relative as _bleach_allow_relative,
 )

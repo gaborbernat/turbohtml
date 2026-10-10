@@ -64,6 +64,9 @@ enum th_node_type {
    reads it so it never renders a `<tag>` the author never wrote. */
 #define TH_ELEM_IMPLIED 0x40u
 
+/* Detached ElementTree views need a parent for their tail, hidden from element ancestry. */
+#define TH_ELEM_TAIL_HOLDER 0x80u
+
 /* A TH_NODE_CONTENT node reuses two otherwise-unused tag_flags bits to record that
    it is a shadow root (attach_shadow) rather than a template's content fragment.
    TH_SHADOW_ROOT marks the node so node_wrap types it as ShadowRoot; TH_SHADOW_CLOSED

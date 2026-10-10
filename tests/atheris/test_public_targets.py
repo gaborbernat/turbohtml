@@ -81,7 +81,7 @@ def test_atheris_public_consumers_run_with_native_coverage(tmp_path: Path) -> No
         check=True,
     )
     targets: Final = json.loads(inventory.stdout)
-    assert (targets["owners"], len(targets["targets"])) == (209, 33)
+    assert (targets["owners"], len(targets["targets"])) == (223, 34)
     generated_seeds: Final[dict[str, bytes]] = {}
     for profile in ("html", "xml", "css-stylesheet", "markdown-source", "markdown-html", "encoding"):
         generated: Final = tmp_path / ("generated-" + profile)

@@ -8,7 +8,7 @@ from html import escape
 from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
 import turbohtml as dom
-from turbohtml import build, mutations, query, rewrite, saxparse, traverse, treebuild
+from turbohtml import build, etree, mutations, query, rewrite, saxparse, traverse, treebuild
 
 from .atheris_registry import Target
 
@@ -59,6 +59,67 @@ def _construction(text: str) -> DomObservation:
             dom.Namespace.HTML.value,
         )),
         repr((text, text, text, text, text, text, "html", dom.Namespace.SVG, "math", "html")),
+    )
+
+
+def _elementtree(text: str) -> DomObservation:
+    root: Final = etree.Element("div", {"class": "one two"})
+    child: Final = etree.SubElement(root, "span")
+    child.text = "prefix" + text
+    child.tail = "tail"
+    matches: Final = etree.XPath(".//span")(root) == [child]
+    identity: Final = etree.ElementView(child.node) is child
+
+    @etree.document_context
+    def detach() -> bool:
+        root.remove(child)
+        return child.getroottree().getroot() is root
+
+    context: Final = detach()
+    root.append(child)
+    etree.strip_tags(root, "span")
+    etree.SubElement(root, "script").text = "discard"
+    etree.strip_elements(root, "script")
+    markup: Final = f"<p>prefix{escape(text)}</p>"
+    document: Final = etree.document_fromstring(markup)
+    snippet: Final = etree.fromstring(markup)
+    fragment: Final = etree.fragment_fromstring(markup + "trailing")
+    bridge: Final = etree.Element("p", {"data": text.encode().hex()})
+    copied: str | None = None
+    html_attribute: str | None = None
+    try:
+        external = etree.to_lxml(bridge)
+    except ModuleNotFoundError:
+        # lxml is optional in the native fuzz runtime.
+        pass
+    else:
+        copied = etree.tostring(etree.from_lxml(external), encoding="unicode")
+        html_attribute = etree.to_lxml_html(bridge).get("data")
+    return DomObservation(
+        repr((
+            matches,
+            identity,
+            context,
+            root.text,
+            document.text_content(),
+            snippet.text,
+            fragment.tail,
+            fragment.getparent(),
+            copied,
+            html_attribute,
+        )),
+        repr((
+            True,
+            True,
+            True,
+            "prefix" + text + "tail",
+            "prefix" + text,
+            "prefix" + text,
+            "trailing",
+            None,
+            f'<p data="{text.encode().hex()}"/>' if copied is not None else None,
+            text.encode().hex() if copied is not None else None,
+        )),
     )
 
 
@@ -360,6 +421,7 @@ class DomObservation(NamedTuple):
 
 _OBSERVERS: Final[dict[str, Callable[[str], DomObservation]]] = {
     "dom-construction": _construction,
+    "dom-elementtree": _elementtree,
     "dom-traversal": _traversal,
     "dom-query": _query,
     "dom-mutation": _mutation,
@@ -386,6 +448,25 @@ _OWNERS: Final[dict[str, tuple[str, ...]]] = {
         )
     )
     + tuple("turbohtml.build." + name for name in ("Attributes", "Content", "E", "ElementMaker", "document")),
+    "dom-elementtree": tuple(
+        "turbohtml.etree." + name
+        for name in (
+            "Element",
+            "ElementView",
+            "SubElement",
+            "XPath",
+            "document_context",
+            "document_fromstring",
+            "fragment_fromstring",
+            "from_lxml",
+            "fromstring",
+            "strip_elements",
+            "strip_tags",
+            "to_lxml",
+            "to_lxml_html",
+            "tostring",
+        )
+    ),
     "dom-traversal": tuple("turbohtml." + name for name in ("Axis", "NodeFilter", "NodeIterator", "TreeWalker"))
     + tuple("turbohtml.traverse." + name for name in ("NodeFilter", "NodeIterator", "TreeWalker")),
     "dom-query": (

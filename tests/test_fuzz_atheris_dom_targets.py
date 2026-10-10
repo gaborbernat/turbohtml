@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from typing import Final
+import sys
+from typing import TYPE_CHECKING, Final
 
 import pytest
 from fuzz.atheris_dom_targets import DomObservation, dom_observation, dom_targets
 
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
+
 _DOMAINS: Final = (
     "dom-construction",
+    "dom-elementtree",
     "dom-traversal",
     "dom-query",
     "dom-mutation",
@@ -46,7 +51,7 @@ def test_dom_registered_callback(domain: str) -> None:
 def test_dom_ownership() -> None:
     targets: Final = dom_targets()
     exports: Final = [export for target in targets for export in target.exports]
-    assert (tuple(target.name for target in targets), len(exports), len(set(exports))) == (_DOMAINS, 64, 64)
+    assert (tuple(target.name for target in targets), len(exports), len(set(exports))) == (_DOMAINS, 78, 78)
 
 
 def test_dom_verification_rejects_changed_result() -> None:
@@ -69,3 +74,19 @@ def test_dom_input_bound() -> None:
 def test_dom_unknown_domain() -> None:
     with pytest.raises(KeyError, match="unknown"):
         dom_observation(b"text", "unknown")
+
+
+def test_dom_elementtree_without_lxml(mocker: MockerFixture) -> None:
+    mocker.patch.dict(sys.modules, {"lxml.etree": None})
+    assert dom_observation(b"text", "dom-elementtree").actual == repr((
+        True,
+        True,
+        True,
+        "prefixtexttail",
+        "prefixtext",
+        "prefixtext",
+        "trailing",
+        None,
+        None,
+        None,
+    ))

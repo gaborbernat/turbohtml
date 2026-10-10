@@ -152,7 +152,7 @@ def test_generation_cli_execution_context(tmp_path: Path, mocker: MockerFixture)
 
 
 def test_generation_preserves_qualified_owners() -> None:
-    assert (len(owner_inventory()), len(public_targets())) == (209, 33)
+    assert (len(owner_inventory()), len(public_targets())) == (223, 34)
 
 
 @pytest.mark.parametrize(

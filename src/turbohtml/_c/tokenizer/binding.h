@@ -38,12 +38,20 @@ static inline PyObject *th_buf_to_str(const th_buf *buf) {
 }
 
 typedef struct {
-    PyObject *token_type;             /* Token */
-    PyObject *tokenizer_type;         /* Tokenizer */
-    PyObject *iter_type;              /* the iterator returned by feed()/close()/tokenize() */
-    PyObject *kind_enum;              /* TokenType (enum.IntEnum) */
-    PyObject *kinds[7];               /* cached TokenType members, indexed by enum th_kind */
-    PyObject *node_type;              /* Node (the sealed-hierarchy base) */
+    PyObject *token_type;     /* Token */
+    PyObject *tokenizer_type; /* Tokenizer */
+    PyObject *iter_type;      /* the iterator returned by feed()/close()/tokenize() */
+    PyObject *kind_enum;      /* TokenType (enum.IntEnum) */
+    PyObject *kinds[7];       /* cached TokenType members, indexed by enum th_kind */
+    PyObject *node_type;      /* Node (the sealed-hierarchy base) */
+    PyObject *element_view_type;
+    PyObject *element_view_cache;
+    PyObject *element_view_iterator_type;
+    PyObject *element_view_origins;
+    PyObject *element_view_context_type;
+    PyObject *element_view_xpath_type;
+    PyObject *element_view_xpath_cache;
+    PyObject *element_view_root_type;
     PyObject *element_type;           /* Element */
     PyObject *text_type;              /* Text */
     PyObject *comment_type;           /* Comment */
@@ -118,6 +126,7 @@ typedef struct {
 int token_register(PyObject *module, module_state *state);
 int tokenizer_register(PyObject *module, module_state *state);
 int tree_register(PyObject *module, module_state *state);
+int elementtree_register(PyObject *module, module_state *state);
 int sax_register(PyObject *module, module_state *state);
 int rewrite_register(PyObject *module, module_state *state);
 int phone_register(PyObject *module, module_state *state);

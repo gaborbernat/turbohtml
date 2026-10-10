@@ -365,6 +365,7 @@ typedef struct {
 
 typedef struct {
     PyObject_HEAD NodeObject *owner;
+    int flat;
 } AttrsObject;
 
 /* The serialize(minify=...) options object: four independent round-trip-safe markup
