@@ -58,27 +58,29 @@ readability-plus-markdownify pipeline with no intermediate string.
 
 ## Capabilities
 
-| Task | API | | ----------------- |
------------------------------------------------------------------------------------------------------- | | Escape /
-unescape | `escape`, `unescape` — byte-for-byte with `html.escape`/`html.unescape` | | Tokenize | `tokenize`,
-`Tokenizer` — WHATWG streaming tokenizer with incremental `feed`/`close` | | Parse | `parse`, `parse_fragment`,
-`parse_xml`, `IncrementalParser` — encoding sniffing and source positions | | Detect | `detect`, `detect_all` —
-standalone encoding detection (the `chardet`/`charset-normalizer` successor) | | Query | `find`/`find_all`, CSS
-`select`/`select_one`, XPath `xpath`/`xpath_one`, `matches`/`closest` | | Computed style | `computed_style` — resolve
-the CSS cascade to a computed value (CSSOM) | | Convert | `css_to_xpath` — translate a CSS selector to XPath 1.0 (the
-`cssselect` successor) | | Transform | `transform.Transform` — apply an XSLT 1.0 stylesheet | | Validate |
-`validate.XMLSchema`, `RelaxNG`, and HTML5 authoring conformance checks | | Serialize | `serialize`/`encode` with an
-`Html` config (`Formatter` escaping, `Indent`/`Minify` whitespace) | | Minify | `minify` (HTML), `minify_css`,
-`minify_js` — value-safe, and `Minify(minify_js=...)` for `<script>` | | Sanitize | `sanitize` — allowlist scrub of
-untrusted HTML (the `bleach.clean` successor) | | Linkify | `linkify` — auto-link URLs and emails without touching
-existing links (the `bleach.linkify` successor) | | Rewrite | `rewrite.rewrite` — edit markup in one streaming pass, no
-tree (the `lol-html` successor) | | Forms | `field_value`, `checked`, `form_data` — read and submit form controls with
-WHATWG semantics | | Markdown | `to_markdown` with a `Markdown` config — GitHub-Flavored Markdown export | | Plain text
-| `to_text`, `to_annotated_text` with a `PlainText` config — layout-aware text, optional labeled spans | | Extract |
-`tables`, `structured_data` (JSON-LD / Microdata / OpenGraph), `article` (main content), `feed` | | Build / edit |
-`Element`, `E`/`ElementMaker`, `unwrap`/`wrap`/`decompose`/`replace_with` and live `attrs` | | Command line | the
-`turbohtml` console script — `to-markdown`, `to-text`, `detect`, `minify`, `sanitize` over stdin | | Migration |
-`turbohtml.migration.*` — drop-in shims for `markupsafe` and template autoescaping |
+| Task              | API                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| Escape / unescape | `escape`, `unescape` — byte-for-byte with `html.escape`/`html.unescape`                                |
+| Tokenize          | `tokenize`, `Tokenizer` — WHATWG streaming tokenizer with incremental `feed`/`close`                   |
+| Parse             | `parse`, `parse_fragment`, `parse_xml`, `IncrementalParser` — encoding sniffing and source positions   |
+| Detect            | `detect`, `detect_all` — standalone encoding detection (the `chardet`/`charset-normalizer` successor)  |
+| Query             | `find`/`find_all`, CSS `select`/`select_one`, XPath `xpath`/`xpath_one`, `matches`/`closest`           |
+| Computed style    | `computed_style` — resolve the CSS cascade to a computed value (CSSOM)                                 |
+| Convert           | `css_to_xpath` — translate a CSS selector to XPath 1.0 (the `cssselect` successor)                     |
+| Transform         | `transform.Transform` — apply an XSLT 1.0 stylesheet                                                   |
+| Validate          | `validate.XMLSchema`, `RelaxNG`, and HTML5 authoring conformance checks                                |
+| Serialize         | `serialize`/`encode` with an `Html` config (`Formatter` escaping, `Indent`/`Minify` whitespace)        |
+| Minify            | `minify` (HTML), `minify_css`, `minify_js` — value-safe, and `Minify(minify_js=...)` for `<script>`    |
+| Sanitize          | `sanitize` — allowlist scrub of untrusted HTML (the `bleach.clean` successor)                          |
+| Linkify           | `linkify` — auto-link URLs and emails without touching existing links (the `bleach.linkify` successor) |
+| Rewrite           | `rewrite.rewrite` — edit markup in one streaming pass, no tree (the `lol-html` successor)              |
+| Forms             | `field_value`, `checked`, `form_data` — read and submit form controls with WHATWG semantics            |
+| Markdown          | `to_markdown` with a `Markdown` config — GitHub-Flavored Markdown export                               |
+| Plain text        | `to_text`, `to_annotated_text` with a `PlainText` config — layout-aware text, optional labeled spans   |
+| Extract           | `tables`, `structured_data` (JSON-LD / Microdata / OpenGraph), `article` (main content), `feed`        |
+| Build / edit      | `Element`, `E`/`ElementMaker`, `unwrap`/`wrap`/`decompose`/`replace_with` and live `attrs`             |
+| Command line      | the `turbohtml` console script — `to-markdown`, `to-text`, `detect`, `minify`, `sanitize` over stdin   |
+| Migration         | `turbohtml.migration.*` — drop-in shims for `markupsafe` and template autoescaping                     |
 
 ## Performance
 
