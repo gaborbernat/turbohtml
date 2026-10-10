@@ -1,5 +1,5 @@
 default_language_version:
-  python: python3.15
+  python: python3.14
 ci:
   skip: ["clang-tidy"] # needs a local Meson build of the C extension, unavailable on pre-commit.ci
 repos:
