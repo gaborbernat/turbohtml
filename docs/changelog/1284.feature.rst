@@ -1,0 +1,2 @@
+Add ``turbohtml.etree`` views for extraction code that uses ElementTree text, tail, mutation and XPath operations. The C
+adapter shares native DOM nodes and supports copying across lxml API boundaries.
