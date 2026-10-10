@@ -70,6 +70,7 @@ py.extension_module(
         'src/turbohtml/_c/dom/binding.c',
         'src/turbohtml/_c/dom/node.c',
         'src/turbohtml/_c/dom/element.c',
+        'src/turbohtml/_c/dom/elementtree.c',
         'src/turbohtml/_c/dom/form_value.c',
         'src/turbohtml/_c/dom/shadow.c',
         'src/turbohtml/_c/dom/leaf.c',
@@ -149,6 +150,7 @@ py.install_sources(
         'src/turbohtml/convert.py',
         'src/turbohtml/cssom.py',
         'src/turbohtml/detect.py',
+        'src/turbohtml/etree.py',
         'src/turbohtml/mutations.py',
         'src/turbohtml/rewrite.py',
         'src/turbohtml/saxparse.py',
@@ -209,6 +211,7 @@ py.install_sources(
     [
         'src/turbohtml/_stubs/__init__.pyi',
         'src/turbohtml/_stubs/dom.pyi',
+        'src/turbohtml/_stubs/etree.pyi',
         'src/turbohtml/_stubs/features.pyi',
         'src/turbohtml/_stubs/query.pyi',
         'src/turbohtml/_stubs/serialize.pyi',

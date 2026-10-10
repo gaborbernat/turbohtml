@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from typing import Final, cast
+
+import pytest
+
+from turbohtml import etree
+
+
+@pytest.mark.parametrize(
+    ("encoding", "with_tail", "expected"),
+    [
+        pytest.param(None, True, b"<p>caf&#233;</p>tail", id="ascii"),
+        pytest.param("utf-8", True, b"<p>caf\xc3\xa9</p>tail", id="utf8"),
+        pytest.param("unicode", False, "<p>café</p>", id="without-tail"),
+        pytest.param(str, True, "<p>café</p>tail", id="string-type"),
+    ],
+)
+def test_element_tree_serialization_encoding(
+    encoding: str | type[str] | None, expected: str | bytes, *, with_tail: bool
+) -> None:
+    tree: Final = etree.fragment_fromstring("<p>café</p>tail")
+    assert etree.tostring(tree, encoding=encoding, with_tail=with_tail) == expected
+
+
+def test_element_tree_rejects_non_string_encoding() -> None:
+    with pytest.raises(TypeError):
+        etree.tostring(etree.Element("p"), encoding=cast("str", 42))
+
+
+def test_element_tree_own_text_excludes_descendant_text() -> None:
+    tree: Final = etree.fromstring("<div><p>child</p></div>")
+    assert (tree.text, tree[0].text) == (None, "child")

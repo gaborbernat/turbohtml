@@ -32,6 +32,7 @@ line** wraps that surface for the shell, one subcommand per entry point (:doc:`r
 
     reference/parsing
     reference/nodes
+    reference/etree
     reference/tokenizer
 
 .. toctree::

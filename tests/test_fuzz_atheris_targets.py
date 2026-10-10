@@ -20,8 +20,8 @@ def test_atheris_targets_complete_qualified_inventory() -> None:
         len(MODULES),
         {name: owners[name] for name in ("turbohtml.parse", "turbohtml.parse_xml", "turbohtml.__main__.main")},
     ) == (
-        209,
-        20,
+        223,
+        21,
         {
             "turbohtml.parse": "html-document",
             "turbohtml.parse_xml": "xml-schema",

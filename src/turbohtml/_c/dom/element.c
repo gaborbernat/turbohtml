@@ -59,6 +59,13 @@ static void attrs_dealloc(PyObject *self) {
     Py_DECREF(type);
 }
 
+static PyObject *attrs_value(PyObject *self, const th_node_attr *attr) {
+    if (((AttrsObject *)self)->flat) {
+        return attr->value == NULL ? PyUnicode_FromString("") : ucs4_to_str(attr->value, attr->value_len);
+    }
+    return attr_value_obj(attr);
+}
+
 TH_NODE_API(static, Py_ssize_t, attrs_length, (PyObject * self), (self), (PyObject * self),
             ((AttrsObject *)self)->owner, NULL) {
     Py_ssize_t count;
@@ -85,7 +92,7 @@ TH_NODE_API(static, PyObject *, attrs_subscript, (PyObject * self, PyObject *key
     Py_BEGIN_CRITICAL_SECTION(owner->handle);
     index = find_attr_index(tree_of((PyObject *)owner), node, name, len);
     if (index >= 0) {
-        result = attr_value_obj(&node->attrs[index]);
+        result = attrs_value(self, &node->attrs[index]);
     }
     Py_END_CRITICAL_SECTION();
     PyMem_Free(name);
@@ -201,7 +208,7 @@ static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
             const th_node_attr *attr = &attrs[index];
             PyObject *item;
             if (kind == ATTRS_VALUES) {
-                item = attr_value_obj(attr);
+                item = attrs_value(self, attr);
             } else {
                 PyObject *name = attr_name_obj(tree, attr);
                 if (name == NULL) { /* GCOVR_EXCL_BR_LINE: a stored name always decodes */
@@ -212,7 +219,7 @@ static PyObject *attrs_collect(PyObject *self, enum attrs_view kind) {
                 if (kind == ATTRS_KEYS) {
                     item = name;
                 } else {
-                    PyObject *value = attr_value_obj(attr);
+                    PyObject *value = attrs_value(self, attr);
                     if (value == NULL) { /* GCOVR_EXCL_BR_LINE: value object build cannot be forced to fail */
                         Py_DECREF(name); /* GCOVR_EXCL_LINE: alloc-failure path */
                         Py_DECREF(out);  /* GCOVR_EXCL_LINE: alloc-failure path */
@@ -286,7 +293,7 @@ TH_NODE_API(static, PyObject *, attrs_get, (PyObject * self, PyObject *args), (s
         Py_BEGIN_CRITICAL_SECTION(owner->handle);
         index = find_attr_index(tree_of((PyObject *)owner), node, name, len);
         if (index >= 0) {
-            result = attr_value_obj(&node->attrs[index]);
+            result = attrs_value(self, &node->attrs[index]);
         }
         Py_END_CRITICAL_SECTION();
         PyMem_Free(name);
@@ -325,8 +332,8 @@ TH_NODE_API(static, PyObject *, attrs_copy, (PyObject * self, PyObject *ignored)
 }
 
 /* Remove the attribute at index and return its value; the caller holds the tree lock. */
-static PyObject *attrs_take(th_tree *tree, th_node *node, Py_ssize_t index) {
-    PyObject *value = attr_value_obj(&node->attrs[index]);
+static PyObject *attrs_take(PyObject *self, th_tree *tree, th_node *node, Py_ssize_t index) {
+    PyObject *value = attrs_value(self, &node->attrs[index]);
     Py_ssize_t name_len;
     const char *name = th_attr_name(tree, node->attrs[index].name_atom, &name_len);
     th_node_attr_del(tree, node, name, name_len);
@@ -353,7 +360,7 @@ TH_NODE_API(static, PyObject *, attrs_pop, (PyObject * self, PyObject *args), (s
         Py_BEGIN_CRITICAL_SECTION(owner->handle);
         Py_ssize_t index = find_attr_index(tree_of((PyObject *)owner), node, name, len);
         if (index >= 0) {
-            result = attrs_take(tree_of((PyObject *)owner), node, index);
+            result = attrs_take(self, tree_of((PyObject *)owner), node, index);
         }
         Py_END_CRITICAL_SECTION();
         PyMem_Free(name);
@@ -379,7 +386,7 @@ TH_NODE_API(static, PyObject *, attrs_popitem, (PyObject * self, PyObject *ignor
     if (node->attr_count > 0) {
         Py_ssize_t last = node->attr_count - 1;
         name = attr_name_obj(tree, &node->attrs[last]);
-        value = attrs_take(tree, node, last);
+        value = attrs_take(self, tree, node, last);
     }
     Py_END_CRITICAL_SECTION();
     if (name == NULL) {

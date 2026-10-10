@@ -330,6 +330,9 @@ static int html_exec(PyObject *module) {
         return -1;
     }
 #endif
+    if (elementtree_register(module, state) < 0) { /* GCOVR_EXCL_BR_LINE: module-init allocation failure */
+        return -1;                                 /* GCOVR_EXCL_LINE: allocation failure */
+    }
     return observe_register(module, state);
 }
 
@@ -343,32 +346,40 @@ static int html_traverse(PyObject *module, visitproc visit, void *arg) {
     for (int index = 0; index < 5; index++) {
         Py_VISIT(state->kinds[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
-    Py_VISIT(state->node_type);              /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->element_type);           /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->text_type);              /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->comment_type);           /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->doctype_type);           /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->pi_type);                /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->cdata_type);             /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->document_type);          /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->document_fragment_type); /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->shadow_root_type);       /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->parser_type);            /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->parse_error_type);       /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->parse_error_exc);        /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->handle_type);            /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->detect_stream_type);     /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->attrs_type);             /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->walker_type);            /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->element_walker_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->tree_walker_type);       /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->node_iterator_type);     /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->string_walker_type);     /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->serialize_iter_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->sax_events_type);        /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->rewrite_handle_type);    /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->phone_config_type);      /* GCOVR_EXCL_BR_LINE: same */
-    Py_VISIT(state->namespace_enum);         /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->node_type);                  /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_type);          /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_cache);         /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_iterator_type); /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_origins);       /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_context_type);  /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_xpath_type);    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_xpath_cache);   /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_view_root_type);     /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_type);               /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->text_type);                  /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->comment_type);               /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->doctype_type);               /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->pi_type);                    /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->cdata_type);                 /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->document_type);              /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->document_fragment_type);     /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->shadow_root_type);           /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->parser_type);                /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->parse_error_type);           /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->parse_error_exc);            /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->handle_type);                /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->detect_stream_type);         /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->attrs_type);                 /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->walker_type);                /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->element_walker_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->tree_walker_type);           /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->node_iterator_type);         /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->string_walker_type);         /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->serialize_iter_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->sax_events_type);            /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->rewrite_handle_type);        /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->phone_config_type);          /* GCOVR_EXCL_BR_LINE: same */
+    Py_VISIT(state->namespace_enum);             /* GCOVR_EXCL_BR_LINE: same */
     for (int index = 0; index < 3; index++) {
         Py_VISIT(state->namespaces[index]); /* GCOVR_EXCL_BR_LINE: same */
     }
@@ -423,6 +434,14 @@ static int html_clear(PyObject *module) {
         Py_CLEAR(state->kinds[index]);
     }
     Py_CLEAR(state->node_type);
+    Py_CLEAR(state->element_view_cache);
+    Py_CLEAR(state->element_view_iterator_type);
+    Py_CLEAR(state->element_view_origins);
+    Py_CLEAR(state->element_view_context_type);
+    Py_CLEAR(state->element_view_xpath_type);
+    Py_CLEAR(state->element_view_xpath_cache);
+    Py_CLEAR(state->element_view_root_type);
+    Py_CLEAR(state->element_view_type);
     Py_CLEAR(state->element_type);
     Py_CLEAR(state->text_type);
     Py_CLEAR(state->comment_type);
