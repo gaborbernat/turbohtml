@@ -714,6 +714,17 @@ CSS_NOINLINE static int css_font_has_duplicate_weight(css_buf *pool, const css_c
     return 0;
 }
 
+CSS_NOINLINE static int css_font_options_overlong(css_buf *pool, const css_comp *items, Py_ssize_t count) {
+    if (count == 5) {
+        for (Py_ssize_t index = 0; index + 1 < count; index++) {
+            if (css_comp_kw(pool, &items[index], "oblique") && items[index + 1].kind == CK_DIM) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 /* Minify the font shorthand (CSS Fonts 4 §2.7): lower-case the family, normalize font-weight (normal->drop, bold->700,
    400->drop) and drop a normal line-height. The shorthand resets every pre-size longhand to its initial value, so
    dropping a `normal` token there is safe whichever longhand it nominally binds to. */
@@ -761,6 +772,10 @@ static void css_handle_font(css_buf *pool, comp_vec *comps) {
             size -= 2;
         }
         if (size > 1 && css_font_has_duplicate_weight(pool, values.items, size)) {
+            css_free(values.items);
+            return;
+        }
+        if (size > 4 && css_font_options_overlong(pool, values.items, size)) {
             css_free(values.items);
             return;
         }
