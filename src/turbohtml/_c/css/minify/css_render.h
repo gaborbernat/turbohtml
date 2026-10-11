@@ -101,8 +101,8 @@ CSS_NOINLINE static void css_close_raw_blocks(token_vec *vec, Py_ssize_t start, 
    closers from css_close_bare_blocks. A value that stops earlier has none open: css_read_until ends a declaration
    before the end of the input only at a `;` or `}` outside every block its depth count tracks. */
 static CSS_FORCEINLINE void css_render_components(css_buf *pool, token_vec *vec, Py_ssize_t start, Py_ssize_t end,
-                                                  int color_mode, int drop_zero_unit, const css_char *property,
-                                                  Py_ssize_t property_len, comp_vec *comps) {
+                                                  int color_mode, int drop_zero_unit, const css_calc_context *context,
+                                                  comp_vec *comps) {
     Py_ssize_t index = start;
     while (index < end) {
         css_token *token = &vec->items[index];
@@ -124,14 +124,14 @@ static CSS_FORCEINLINE void css_render_components(css_buf *pool, token_vec *vec,
         if (token->kind == CSS_IDENT && index + 1 < end && vec->items[index + 1].kind == CSS_DELIM &&
             vec->items[index + 1].delim == '(') {
             Py_ssize_t close_index = css_match_paren(vec, index + 1, end);
-            css_emit_function(pool, vec, index, close_index, property, property_len, &comp.off, &comp.len, &comp.kind);
+            css_emit_function(pool, vec, index, close_index, context, &comp.off, &comp.len, &comp.kind);
             comp.isfunc = comp.kind == CK_FUNC;
             comp_vec_push(comps, comp);
             index = close_index + 1;
             continue;
         }
         if (token->kind == CSS_NUM) {
-            css_format_dimension(pool, token, drop_zero_unit, property, property_len, &comp.off, &comp.len);
+            css_format_dimension(pool, token, drop_zero_unit, context->prop, context->prop_len, &comp.off, &comp.len);
             comp.kind = token->unit_len ? CK_DIM : CK_NUM;
         } else if (token->kind == CSS_HASH) {
             if (!css_color_keyword_or_hash(pool, token, color_mode != 0, &comp.off, &comp.len)) {
