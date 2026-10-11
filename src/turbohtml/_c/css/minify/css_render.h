@@ -458,6 +458,76 @@ static void css_handle_color_single(css_buf *pool, comp_vec *comps, const css_ch
     }
 }
 
+static Py_ssize_t css_func_name_len(const css_buf *pool, const css_comp *comp) {
+    Py_ssize_t length = 0;
+    while (pool->data[comp->off + length] != '(') {
+        length++;
+    }
+    return length;
+}
+
+CSS_NOINLINE static int css_text_decoration_drop_safe(css_buf *pool, const comp_vec *comps) {
+    if (comps->len == 2 && comps->items[0].kind == CK_IDENT && comps->items[1].kind == CK_IDENT &&
+        ((css_comp_kw(pool, &comps->items[0], "none") && css_comp_kw(pool, &comps->items[1], "solid")) ||
+         (css_comp_kw(pool, &comps->items[0], "solid") && css_comp_kw(pool, &comps->items[1], "none")))) {
+        return 1;
+    }
+    int none = 0;
+    int solid = 0;
+    int currentcolor = 0;
+    int other_lines = 0;
+    int other_styles = 0;
+    int other_colors = 0;
+    for (Py_ssize_t index = 0; index < comps->len; index++) {
+        const css_comp *comp = &comps->items[index];
+        if (comp->kind == CK_SEP) {
+            return 0;
+        }
+        if (comp->kind == CK_FUNC) {
+            static const char *const color_funcs[] = {"rgb",       "rgba",       "hsl",        "hsla",  "hwb",
+                                                      "lab",       "lch",        "oklab",      "oklch", "color",
+                                                      "color-mix", "light-dark", "device-cmyk"};
+            static const char *const length_funcs[] = {"calc", "min", "max", "clamp"};
+            const css_char *name = pool->data + comp->off;
+            Py_ssize_t name_len = css_func_name_len(pool, comp);
+            if (css_prop_in(name, name_len, color_funcs, sizeof(color_funcs) / sizeof(char *))) {
+                other_colors++;
+            } else if (!css_prop_in(name, name_len, length_funcs, sizeof(length_funcs) / sizeof(char *))) {
+                return 0;
+            }
+            continue;
+        }
+        if (comp->kind == CK_IDENT) {
+            if (css_comp_kw(pool, comp, "none")) {
+                none++;
+            } else if (css_comp_kw(pool, comp, "solid")) {
+                solid++;
+            } else if (css_comp_kw(pool, comp, "currentcolor")) {
+                currentcolor++;
+            } else if (css_comp_kw(pool, comp, "underline") || css_comp_kw(pool, comp, "overline") ||
+                       css_comp_kw(pool, comp, "line-through") || css_comp_kw(pool, comp, "blink") ||
+                       css_comp_kw(pool, comp, "spelling-error") || css_comp_kw(pool, comp, "grammar-error")) {
+                other_lines++;
+            } else if (css_comp_kw(pool, comp, "double") || css_comp_kw(pool, comp, "dotted") ||
+                       css_comp_kw(pool, comp, "dashed") || css_comp_kw(pool, comp, "wavy")) {
+                other_styles++;
+            } else if (css_comp_kw(pool, comp, "inherit") || css_comp_kw(pool, comp, "initial") ||
+                       css_comp_kw(pool, comp, "unset") || css_comp_kw(pool, comp, "revert") ||
+                       css_comp_kw(pool, comp, "revert-layer")) {
+                return 0;
+            } else if (!css_comp_kw(pool, comp, "auto") && !css_comp_kw(pool, comp, "from-font")) {
+                other_colors++;
+            }
+        } else if (comp->kind == CK_HASH) {
+            other_colors++;
+        } else if (comp->kind != CK_DIM && comp->kind != CK_NUM) {
+            return 0;
+        }
+    }
+    return none <= 1 && solid <= 1 && currentcolor <= 1 && (!none || !other_lines) && (!solid || !other_styles) &&
+           (!currentcolor || !other_colors);
+}
+
 static void css_handle_color_drop(css_buf *pool, comp_vec *comps, const css_char *prop, Py_ssize_t prop_len) {
     static const char *const border_drop[] = {"none", "currentcolor", "medium"};
     static const char *const outline_drop[] = {"none", "medium"};
@@ -472,6 +542,9 @@ static void css_handle_color_drop(css_buf *pool, comp_vec *comps, const css_char
     } else if (css_run_ieq(prop, prop_len, "column-rule")) {
         drop = column_drop;
     } else if (css_run_ieq(prop, prop_len, "text-decoration")) {
+        if (comps->len > 1 && !css_text_decoration_drop_safe(pool, comps)) {
+            return;
+        }
         drop = decoration_drop;
     } else if (css_run_ieq(prop, prop_len, "text-emphasis")) {
         drop = emphasis_drop;
