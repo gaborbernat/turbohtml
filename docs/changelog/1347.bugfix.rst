@@ -1,0 +1,1 @@
+Restore base URL resolution speed after URL normalization changes.

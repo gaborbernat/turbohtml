@@ -1,0 +1,1 @@
+Preserve spaces in opaque base URL paths.

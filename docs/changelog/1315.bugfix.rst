@@ -1,0 +1,1 @@
+Reject a line break after ``throw`` in JavaScript minification.

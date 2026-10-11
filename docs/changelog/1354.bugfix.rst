@@ -1,0 +1,1 @@
+Remove dangling ampersands when cleaning empty URL queries.

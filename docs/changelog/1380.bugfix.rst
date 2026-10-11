@@ -1,0 +1,1 @@
+Keep duplicate background attachments invalid during CSS minification.

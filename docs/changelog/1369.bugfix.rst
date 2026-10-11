@@ -1,0 +1,1 @@
+Preserve long CSS percentage offsets during minification.

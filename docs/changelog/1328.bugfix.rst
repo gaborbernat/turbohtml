@@ -1,0 +1,1 @@
+Resolve percent-encoded dot segments in URL paths.

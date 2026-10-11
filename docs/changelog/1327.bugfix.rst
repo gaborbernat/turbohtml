@@ -1,0 +1,1 @@
+Parse bracketed URL hosts correctly after userinfo.

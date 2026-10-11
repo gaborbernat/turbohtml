@@ -1,0 +1,1 @@
+Preserve long RGB channel values during CSS minification.
