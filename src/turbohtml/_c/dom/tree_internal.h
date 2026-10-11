@@ -132,11 +132,12 @@ struct th_tree {
     int declarative_shadow; /* allow a <template shadowrootmode> to attach a shadow root to its parent */
     int has_nul;            /* the input contains a U+0000; otherwise text needs no NUL filtering */
     int xml;                /* parsed under XML rules: tag and attribute names are case-sensitive */
-    int can_span;           /* input is borrowed and outlives the tree: text nodes may be
-                               zero-copy spans into it instead of materialized copies */
-    int track_positions;    /* record each element's source line/col in trailing node slots */
-    int track_locations;    /* record each element's granular source spans (implies track_positions) */
-    int kind;               /* borrowed input storage */
+    int has_xml_ns;
+    int can_span;        /* input is borrowed and outlives the tree: text nodes may be
+                            zero-copy spans into it instead of materialized copies */
+    int track_positions; /* record each element's source line/col in trailing node slots */
+    int track_locations; /* record each element's granular source spans (implies track_positions) */
+    int kind;            /* borrowed input storage */
     const void *data;
     void *owned_data; /* normalized one-shot input retained when source spans need it */
     Py_ssize_t length;
