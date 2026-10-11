@@ -651,6 +651,9 @@ int th_url_split(PyObject *arg, th_url_parts *out, int host_brackets_only) {
     while (read < raw_len && input_char(kind, data, read) <= 0x20) {
         read++;
     }
+    while (read < raw_len && input_char(kind, data, raw_len - 1) <= 0x20) {
+        raw_len--;
+    }
     Py_ssize_t len = 0;
     for (; read < raw_len; read++) {
         Py_UCS4 ch = input_char(kind, data, read);
@@ -1542,6 +1545,19 @@ PyObject *turbohtml_url_scrub(PyObject *Py_UNUSED(module), PyObject *arg) {
         } else {
             work[at++] = work[index];
             index++;
+        }
+    }
+    Py_ssize_t before_trim = at;
+    while (at > 0 && work[at - 1] <= 0x20) {
+        at--;
+    }
+    /* Normalization drops empty query/fragment markers, which can leave a dangling '&' for the next clean pass. */
+    if (at < before_trim) {
+        if (at >= 4 && work[at - 4] == '/' && work[at - 3] == '&' && work[at - 2] == '?' && work[at - 1] == '#') {
+            at -= 2;
+        } else if (at >= 3 && work[at - 3] == '/' && work[at - 2] == '&' &&
+                   (work[at - 1] == '?' || work[at - 1] == '#')) {
+            at--;
         }
     }
     if (at >= 2 && work[at - 2] == '/' && work[at - 1] == '&') {

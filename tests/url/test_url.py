@@ -967,6 +967,13 @@ def _oracle_scrub(url: str) -> str:
     if remainder.startswith("<![CDATA["):
         remainder = remainder.removeprefix("<![CDATA[").removesuffix("]]>")
     remainder = _MARKUP_DELIMITER.split(remainder, maxsplit=1)[0].replace("&amp;", "&")
+    trimmed: Final = remainder.rstrip(_C0_AND_SPACE)
+    if trimmed != remainder:
+        remainder = trimmed
+        if remainder.endswith("/&?#"):
+            remainder = remainder[:-2]
+        elif remainder.endswith(("/&?", "/&#")):
+            remainder = remainder[:-1]
     return remainder.removesuffix("&") if remainder.endswith("/&") else remainder
 
 
@@ -1016,6 +1023,10 @@ _EDGE_CASES = (
     "https://x.example/path/&amp;",
     "https://x.example/path/&",
     "https://x.example/&amp;",
+    "https://x.example/&\x01>",
+    "https://x.example/&?\x01>",
+    "https://x.example/&#\x01>",
+    "https://x.example/&?#\x01>",
     "trailing&",
 )
 
@@ -1115,9 +1126,9 @@ def _split_corpus() -> list[str]:
     return sorted(set(urls))
 
 
-def test_url_split_matches_urllib_over_corpus() -> None:
+def test_url_split_matches_urllib_after_input_trim() -> None:
     for url in _split_corpus():
-        reference = urlsplit(url)
+        reference = urlsplit(url.rstrip(_C0_OR_SPACE))
         scheme, netloc, path, query, fragment, _userinfo, host, *_rest = _url_split(url)
         assert (scheme, netloc, path, query, fragment) == (
             reference.scheme,
