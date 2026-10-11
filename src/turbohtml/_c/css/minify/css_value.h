@@ -841,6 +841,8 @@ CSS_NOINLINE static int css_try_color_func(css_buf *pool, token_vec *vec, Py_ssi
         int is_pct = token->unit_len == 1 && (token->text + token->text_len)[0] == '%';
         if (is_pct) {
             magnitude /= 100.0;
+        } else if (token->unit_len) {
+            return 0;
         }
         values[count] = magnitude;
         types[count] = is_pct;
