@@ -357,6 +357,51 @@ static int css_comp_is_repeat_keyword(css_buf *pool, const css_comp *comp) {
                                       css_comp_kw(pool, comp, "repeat") || css_comp_kw(pool, comp, "no-repeat"));
 }
 
+static int css_background_non_color(css_buf *pool, const css_comp *comp) {
+    static const char *const keywords[] = {
+        "fixed",    "scroll",   "local",  "none",    "border-box", "padding-box", "content-box",
+        "repeat-x", "repeat-y", "cover",  "contain", "auto",       "left",        "right",
+        "top",      "bottom",   "center", "space",   "round",      "repeat",      "no-repeat",
+    };
+    static const char *const functions[] = {
+        "image-set",
+        "linear-gradient",
+        "radial-gradient",
+        "conic-gradient",
+        "repeating-linear-gradient",
+        "repeating-radial-gradient",
+        "repeating-conic-gradient",
+        "calc",
+        "min",
+        "max",
+        "clamp",
+    };
+    if (comp->kind == CK_SEP || comp->kind == CK_URL || comp->kind == CK_NUM || comp->kind == CK_DIM ||
+        comp->kind == CK_PCT) {
+        return 1;
+    }
+    if (comp->kind == CK_IDENT) {
+        if (comp->len == 5 && css_comp_kw(pool, comp, "fixed")) {
+            return 1;
+        }
+        return css_prop_in(pool->data + comp->off, comp->len, keywords, sizeof(keywords) / sizeof(char *));
+    }
+    return comp->kind == CK_FUNC && css_prop_in(pool->data + comp->off, css_func_name_len(pool, comp), functions,
+                                                sizeof(functions) / sizeof(char *));
+}
+
+static CSS_FORCEINLINE int css_background_has_other_color(css_buf *pool, const comp_vec *run, Py_ssize_t transparent) {
+    if (run->len == 2) {
+        return !css_background_non_color(pool, &run->items[1 - transparent]);
+    }
+    for (Py_ssize_t index = 0; index < run->len; index++) {
+        if (index != transparent && !css_background_non_color(pool, &run->items[index])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void css_position_single(css_buf *pool, const css_comp *items, Py_ssize_t count, comp_vec *out) {
     pos_val run[64];
     Py_ssize_t resolved = css_position_run(pool, items, count, run);
@@ -383,7 +428,9 @@ CSS_NOINLINE static int css_background_unshortenable(css_buf *pool, const comp_v
 
 /* Resolve one background layer in place over a single comma-separated run (CSS Backgrounds 3 §3.10). */
 static void css_background_run(css_buf *pool, comp_vec *run) {
-    if (run->len > 1 && css_background_unshortenable(pool, run)) {
+    int skip_attachment_scan = run->len == 2 && run->items[0].kind == CK_IDENT && run->items[1].kind == CK_IDENT &&
+                               (run->items[0].len < 5 || run->items[0].len > 6);
+    if (run->len > 1 && !skip_attachment_scan && css_background_unshortenable(pool, run)) {
         return;
     }
     int had_tokens = run->len > 0;
@@ -454,7 +501,17 @@ static void css_background_run(css_buf *pool, comp_vec *run) {
                 continue;
             }
         } else if (comp->kind == CK_HASH && comp_ieq(pool, comp, "#0000")) {
-            comp_vec_splice(run, index, 1, NULL, 0);
+            if (run->len > 1 && css_background_has_other_color(pool, run, index)) {
+                return;
+            }
+            if (run->len == 2) {
+                if (index == 0) {
+                    run->items[0] = run->items[1];
+                }
+                run->len = 1;
+            } else {
+                comp_vec_splice(run, index, 1, NULL, 0);
+            }
             continue;
         } else if (css_func_name_is(pool, comp, "var")) {
             index++;
