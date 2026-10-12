@@ -1,1 +1,0 @@
-Keep Windows drive roots when normalizing file URLs.

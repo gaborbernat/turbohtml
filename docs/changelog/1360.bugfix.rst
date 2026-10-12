@@ -1,1 +1,0 @@
-Preserve letter case and percent-encode non-ASCII characters in opaque URL hosts.

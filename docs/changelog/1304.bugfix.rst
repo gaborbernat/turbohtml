@@ -1,1 +1,0 @@
-Keep valid CSS rules active when another rule with the same declarations has an invalid selector.

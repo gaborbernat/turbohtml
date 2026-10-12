@@ -1,1 +1,0 @@
-Reject URL credentials when no host is present.

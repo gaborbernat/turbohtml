@@ -1,1 +1,0 @@
-Preserve checked task-list items when serializing HTML to Markdown.

@@ -1,1 +1,0 @@
-Preserve empty URL authorities during normalization.

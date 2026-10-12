@@ -1,1 +1,0 @@
-Keep content inside a heading when a nested MathML or SVG element blocks its end tag.

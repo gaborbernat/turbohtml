@@ -1,1 +1,0 @@
-Preserve repeated substitution functions in the border-color shorthand.

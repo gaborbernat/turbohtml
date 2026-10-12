@@ -1,1 +1,0 @@
-Preserve angle hue units and invalid dimensions in CSS color functions during minification.

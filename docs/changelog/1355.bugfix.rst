@@ -1,1 +1,0 @@
-Preserve CSS drop-shadow offsets during minification.

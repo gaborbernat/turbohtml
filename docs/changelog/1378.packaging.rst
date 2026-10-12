@@ -1,1 +1,0 @@
-Ship third-party license notices in the ``licenses/`` directory.

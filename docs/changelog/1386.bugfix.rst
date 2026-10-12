@@ -1,1 +1,0 @@
-Preserve Unicode whitespace in base URLs.

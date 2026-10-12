@@ -1,1 +1,0 @@
-Normalize Windows drive separators in file URL paths.

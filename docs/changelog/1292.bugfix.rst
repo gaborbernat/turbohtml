@@ -1,1 +1,0 @@
-Preserve earlier CSS background longhands when a later shorthand has an invalid bare identifier.

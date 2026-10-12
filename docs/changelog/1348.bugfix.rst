@@ -1,1 +1,0 @@
-Trim trailing C0 controls and spaces before normalizing URLs.

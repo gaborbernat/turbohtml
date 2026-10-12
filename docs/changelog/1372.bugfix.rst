@@ -1,1 +1,0 @@
-Keep mixed legacy RGB syntax invalid during CSS minification.

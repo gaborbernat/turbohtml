@@ -1,1 +1,0 @@
-Keep malformed background values stable across repeated CSS minification.

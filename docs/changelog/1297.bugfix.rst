@@ -1,1 +1,0 @@
-Preserve ordered-list numbering when HTML ``reversed`` or ``value`` attributes cannot be represented in Markdown.

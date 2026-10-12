@@ -1,1 +1,0 @@
-Keep font shorthands with misplaced CSS-wide keywords invalid during minification.

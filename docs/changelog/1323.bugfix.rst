@@ -1,1 +1,0 @@
-Keep overlong CSS ``gap``, ``overflow``, and ``overscroll-behavior`` values invalid.

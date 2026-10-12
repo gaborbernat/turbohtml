@@ -1,1 +1,0 @@
-Percent-encode usernames and passwords when normalizing URLs.

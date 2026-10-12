@@ -1,1 +1,0 @@
-Keep invalid background-position orders invalid during CSS minification.

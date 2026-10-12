@@ -1,1 +1,0 @@
-Preserve emphasis around nonbreaking and other Unicode spaces in Markdown output.

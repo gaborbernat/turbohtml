@@ -1,1 +1,0 @@
-Keep apostrophes in non-special URL queries when normalizing URLs.
