@@ -100,6 +100,7 @@ test = [
   "pytest-cov>=7.1",
   "pytest-mock>=3.16",
   "pytest-run-parallel>=0.10", # runs each test in many threads to surface free-threaded data races
+  "pytest-xdist>=3.8",
   "tenacity>=9.1.4",           # the retry policy wrapping every tools/ HTTP fetch (httpfetch.py)
   "tinycss2>=1.5.1",           # preserve nested CSS contexts during structural reduction
   "typing-extensions>=4.16",
@@ -398,6 +399,7 @@ ini_options.filterwarnings = [
 # Optional competitors lack wheels on parts of the test matrix. Exclude their checks
 # from portable coverage; the oracle marker scopes exclusions within consolidated modules.
 run.omit = [
+  ".tox/*/cbuild/*",                                   # generated editable-build files can be imported during another tox env's run
   "tests/benchmarks/*",                                # run only under --codspeed (the CI benchmark job), never in the coverage run
   "tests/conformance/test_c14n_conformance.py",        # runs only in the dedicated conformance env; the matrix deselects tests/conformance
   "tests/conformance/test_cssom_jsdom_conformance.py", # differential oracle: skips when the node/jsdom toolchain is absent
