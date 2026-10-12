@@ -6,17 +6,19 @@
 
 .. towncrier release notes start
 
-*********************
+**********************
  v1.15.1 (2026-10-12)
-*********************
+**********************
 
 Bug fixes - 1.15.1
 ==================
+
 - Close unclosed CSS blocks at EOF so repeated minification keeps the same output. (:issue:`1285`)
 - Keep CSS zero-length dimensions followed by negative numbers stable across repeated minification. (:issue:`1286`)
 - Preserve invalid CSS Unicode ranges so minification cannot turn them into valid font ranges. (:issue:`1287`)
 - Keep empty ``<h1>`` and ``<h2>`` elements when exporting Markdown with setext headings. (:issue:`1288`)
-- Escape a literal ``!`` before a Markdown link so CommonMark preserves the link instead of treating it as an image. (:issue:`1289`)
+- Escape a literal ``!`` before a Markdown link so CommonMark preserves the link instead of treating it as an image.
+  (:issue:`1289`)
 - Preserve zero-length units in CSS declarations when dropping them would change the value type or make an invalid
   declaration valid. (:issue:`1290`)
 - Preserve emphasis around nonbreaking and other Unicode spaces in Markdown output. (:issue:`1291`)
@@ -25,13 +27,15 @@ Bug fixes - 1.15.1
 - Preserve hash tokens in CSS properties that do not accept colors. (:issue:`1294`)
 - Preserve invalid integer syntax in CSS order declarations during minification. (:issue:`1295`)
 - Preserve nested emphasis when adjacent closing delimiters would change the rendered Markdown. (:issue:`1296`)
-- Preserve ordered-list numbering when HTML ``reversed`` or ``value`` attributes cannot be represented in Markdown. (:issue:`1297`)
+- Preserve ordered-list numbering when HTML ``reversed`` or ``value`` attributes cannot be represented in Markdown.
+  (:issue:`1297`)
 - Preserve checked task-list items when serializing HTML to Markdown. (:issue:`1298`)
 - Preserve ``colspan`` and ``rowspan`` in Markdown tables by serializing those tables as HTML. (:issue:`1299`)
 - Drop element wrappers with invalid XML names while retaining their children during XML serialization. (:issue:`1300`)
 - Preserve CSS exponent and unit boundaries during minification. (:issue:`1301`)
 - Preserve numeric types when folding zero-valued CSS calc() expressions. (:issue:`1302`)
-- Keep ``calc()`` when folding a negative value for a CSS property that clamps it at computed-value time. (:issue:`1303`)
+- Keep ``calc()`` when folding a negative value for a CSS property that clamps it at computed-value time.
+  (:issue:`1303`)
 - Keep valid CSS rules active when another rule with the same declarations has an invalid selector. (:issue:`1304`)
 - Preserve emphasis next to strikethrough when punctuation would change how Markdown delimiters bind. (:issue:`1307`)
 - Keep invalid background-position orders invalid during CSS minification. (:issue:`1308`)
@@ -51,7 +55,8 @@ Bug fixes - 1.15.1
 - Preserve invalid CSS ``outline`` declarations that use the retired ``invert`` color. (:issue:`1322`)
 - Keep overlong CSS ``gap``, ``overflow``, and ``overscroll-behavior`` values invalid. (:issue:`1323`)
 - Trim trailing C0 controls from URLs before normalization. (:issue:`1324`)
-- Keep invalid CSS ``font`` declarations with repeated explicit weights from becoming active after minification. (:issue:`1325`)
+- Keep invalid CSS ``font`` declarations with repeated explicit weights from becoming active after minification.
+  (:issue:`1325`)
 - Keep invalid CSS ``font`` values with excess pre-size options invalid during minification. (:issue:`1326`)
 - Parse bracketed URL hosts correctly after userinfo. (:issue:`1327`)
 - Resolve percent-encoded dot segments in URL paths. (:issue:`1328`)
@@ -66,17 +71,20 @@ Bug fixes - 1.15.1
 - Normalize Windows drive separators in file URL paths. (:issue:`1337`)
 - Preserve angle hue units and invalid dimensions in CSS color functions during minification. (:issue:`1338`)
 - Preserve invalid CSS text-decoration shorthands when removing initial values would make them valid. (:issue:`1339`)
-- Preserve in-scope namespace declarations and namespace URI attribute order when canonicalizing parsed XML. (:issue:`1340`)
+- Preserve in-scope namespace declarations and namespace URI attribute order when canonicalizing parsed XML.
+  (:issue:`1340`)
 - Preserve invalid CSS ``text-emphasis`` shorthands and defaults before ``var()`` substitutions. (:issue:`1341`)
 - Honor ``__html__`` on values returned by ``__html__`` in the MarkupSafe migration API. (:issue:`1342`)
 - Keep the source tree stable while `sanitize_node` copies a node on free-threaded Python. (:issue:`1343`)
-- Preserve invalid border, outline, and column-rule shorthands that mix a CSS-wide keyword with another value. (:issue:`1344`)
+- Preserve invalid border, outline, and column-rule shorthands that mix a CSS-wide keyword with another value.
+  (:issue:`1344`)
 - Accept ``suffix=`` in ``Markup.removesuffix`` in the MarkupSafe migration API. (:issue:`1345`)
 - Preserve box shadows whose length values are split by a color or ``inset`` token. (:issue:`1346`)
 - Restore base URL resolution speed after URL normalization changes. (:issue:`1347`)
 - Trim trailing C0 controls and spaces before normalizing URLs. (:issue:`1348`)
 - Normalize backslashes as path separators for special-scheme URLs. (:issue:`1349`)
-- Keep text-decoration line keywords separated by default styles or colors so invalid values stay invalid. (:issue:`1350`)
+- Keep text-decoration line keywords separated by default styles or colors so invalid values stay invalid.
+  (:issue:`1350`)
 - Reject invalid XML characters in doctype markup and literals. (:issue:`1351`)
 - Preserve border, outline, and column-rule shorthands with duplicate style values. (:issue:`1352`)
 - Preserve repeated substitution functions in the border-color shorthand. (:issue:`1353`)
@@ -115,10 +123,12 @@ Bug fixes - 1.15.1
 
 Improved documentation - 1.15.1
 ===============================
+
 - Document the email address for private vulnerability reports. (:issue:`1390`)
 
 Packaging updates - 1.15.1
 ==========================
+
 - Ship third-party license notices in the ``licenses/`` directory. (:issue:`1378`)
 
 **********************
