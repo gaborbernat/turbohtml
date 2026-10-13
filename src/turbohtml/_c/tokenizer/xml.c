@@ -592,7 +592,7 @@ static int prefix_in_scope(xml_parser *parser, Py_ssize_t start, Py_ssize_t end,
 static int check_qname_prefix(xml_parser *parser, Py_ssize_t start, Py_ssize_t end) {
     for (Py_ssize_t index = start; index < end; index++) {
         if (cp(parser, index) == ':') {
-            if (index == start || index == end - 1) {
+            if (index == start || index == end - 1 || !is_name_start(cp(parser, index + 1))) {
                 record(parser, "xml-invalid-name", start);
                 return -1;
             }
@@ -1250,7 +1250,7 @@ static int consume_namespace_decl(xml_parser *parser, Py_ssize_t name_start, Py_
     Py_ssize_t prefix_len = name_end - prefix_start;
     /* an empty prefix is not an NCName, and an empty URI would undeclare the prefix, which only Namespaces in XML 1.1
        allows (NSC: No Prefix Undeclaring) */
-    if (prefix_len == 0 || parser->scratch_len == 0) {
+    if (prefix_len == 0 || !is_name_start(cp(parser, prefix_start)) || parser->scratch_len == 0) {
         record(parser, "xml-invalid-namespace-decl", name_start);
         return -1;
     }
