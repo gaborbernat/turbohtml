@@ -156,6 +156,33 @@ def test_document_leading_comment_dropped_without_comments() -> None:
     assert parse("<!--top--><p>x").canonicalize() == b"<html><head></head><body><p>x</p></body></html>"
 
 
+@pytest.mark.parametrize(
+    ("xml", "comment_length"),
+    [
+        pytest.param(False, 8192, id="html-medium"),
+        pytest.param(False, 32768, id="html-large"),
+        pytest.param(True, 8192, id="xml-medium"),
+        pytest.param(True, 32768, id="xml-large"),
+    ],
+)
+def test_document_drops_large_comments(*, xml: bool, comment_length: int) -> None:
+    source = '<r xmlns="urn:x">x</r>' if xml else "<p>x</p>"
+    document = parse_xml if xml else parse
+    expected = b'<r xmlns="urn:x">x</r>' if xml else b"<html><head></head><body><p>x</p></body></html>"
+    assert document(source + "<!--" + "x" * comment_length + "-->").canonicalize() == expected
+
+
+@pytest.mark.parametrize("xml", [pytest.param(False, id="html"), pytest.param(True, id="xml")])
+def test_document_canonicalizes_many_elements(*, xml: bool) -> None:
+    if xml:
+        source = '<r xmlns="urn:x">' + "<a/>" * 1024 + "</r>"
+        expected = b'<r xmlns="urn:x">' + b"<a></a>" * 1024 + b"</r>"
+    else:
+        source = "<main>" + "<p>x</p>" * 512 + "</main>"
+        expected = b"<html><head></head><body><main>" + b"<p>x</p>" * 512 + b"</main></body></html>"
+    assert (parse_xml if xml else parse)(source).canonicalize() == expected
+
+
 def test_document_processing_instructions_bracket_the_root() -> None:
     doc = parse("<p>x")
     root = doc.select_one("html")
@@ -709,6 +736,272 @@ def test_xml_c14n_1_1_keeps_only_named_inherited_attributes() -> None:
     assert document.children[0].children[0].canonicalize(Canonical(version="1.1")) == (
         b'<p:a xmlns:p="urn:p" xml:base="urn:root" xml:lang="fr" xml:space="preserve"></p:a>'
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "selector", "expected"),
+    [
+        pytest.param(
+            '<r xml:base="something/else"><a xml:base="bar/"><b xml:base="foo"/></a></r>',
+            "b",
+            b'<b xml:base="something/bar/foo"></b>',
+            id="relative-chain",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar"><a xml:base=".."><b xml:base=".."><d xml:base="x"/></b></a></r>',
+            "d",
+            b'<d xml:base="../x"></d>',
+            id="leading-parent-segment",
+        ),
+        pytest.param(
+            '<r xml:base="https://example.org/a/b"><a xml:base="../c/"><b xml:base="d"/></a></r>',
+            "b",
+            b'<b xml:base="https://example.org/c/d"></b>',
+            id="absolute-chain",
+        ),
+        pytest.param(
+            '<r xml:base="https://example.org/a/"><a><b/></a></r>',
+            "b",
+            b'<b xml:base="https://example.org/a/"></b>',
+            id="absent-apex-base",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar"><b/></r>',
+            "b",
+            b'<b xml:base="foo/bar"></b>',
+            id="absent-apex-base-fast-path",
+        ),
+        pytest.param(
+            '<r xmlns:p="urn:p" xml:base="foo/bar"><b/></r>',
+            "b",
+            b'<b xmlns:p="urn:p" xml:base="foo/bar"></b>',
+            id="absent-apex-base-with-namespace",
+        ),
+        pytest.param(
+            '<r xml:base="a/"><b own="x" xml:base="b"/></r>',
+            "b",
+            b'<b own="x" xml:base="a/b"></b>',
+            id="base-after-ordinary-attribute",
+        ),
+        pytest.param(
+            '<r xmlns:p="urn:p" xml:base="a/"><b own="x" xml:base="b"/></r>',
+            "b",
+            b'<b xmlns:p="urn:p" own="x" xml:base="a/b"></b>',
+            id="base-after-ordinary-attribute-with-namespace",
+        ),
+        pytest.param(
+            '<r xml:base="abc/"><a xml:base="../"/></r>',
+            "a",
+            b"<a></a>",
+            id="empty-result",
+        ),
+        pytest.param(
+            '<r xmlns:p="urn:p" xml:base="abc/"><a xml:base="../"/></r>',
+            "a",
+            b'<a xmlns:p="urn:p"></a>',
+            id="empty-result-with-namespace",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar"><a xml:base=""><b xml:base="./"/></a></r>',
+            "b",
+            b'<b xml:base="foo/bar"></b>',
+            id="empty-middle-base",
+        ),
+        pytest.param(
+            '<r xml:base="../"><a xml:base="../"><b xml:base="x#fragment"/></a></r>',
+            "b",
+            b'<b xml:base="../../x"></b>',
+            id="fragment-and-leading-parents",
+        ),
+        pytest.param(
+            '<r xml:base="a/b?old"><b xml:base="?new"/></r>',
+            "b",
+            b'<b xml:base="a/b?new"></b>',
+            id="query-only-reference",
+        ),
+        pytest.param(
+            '<r xml:base="a//b/"><b xml:base="../x"/></r>',
+            "b",
+            b'<b xml:base="a/x"></b>',
+            id="consecutive-slashes",
+        ),
+        pytest.param(
+            '<r xml:base="mé/"><b xml:base="café"/></r>',
+            "b",
+            '<b xml:base="mé/café"></b>'.encode(),
+            id="unicode-path",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar"><b xml:base="https://example.org/a/../b#fragment"/></r>',
+            "b",
+            b'<b xml:base="https://example.org/b"></b>',
+            id="absolute-reference",
+        ),
+        pytest.param(
+            '<r xml:base="https://example.org/a/"><b xml:base="//other.org/x/../y"/></r>',
+            "b",
+            b'<b xml:base="https://other.org/y"></b>',
+            id="authority-reference",
+        ),
+        pytest.param(
+            '<r xml:base=".."><b xml:base=".."/></r>',
+            "b",
+            b'<b xml:base="../../"></b>',
+            id="terminal-parent-segments",
+        ),
+        pytest.param(
+            '<r xml:base=".."><b xml:base="?q"/></r>',
+            "b",
+            b'<b xml:base="../?q"></b>',
+            id="terminal-parent-with-query",
+        ),
+        pytest.param(
+            '<r xml:base="..?old"><b xml:base="x"/></r>',
+            "b",
+            b'<b xml:base="../x"></b>',
+            id="terminal-parent-before-query",
+        ),
+        pytest.param(
+            '<r xml:base="a/.."><b xml:base="x"/></r>',
+            "b",
+            b'<b xml:base="x"></b>',
+            id="terminal-parent-after-slash",
+        ),
+        pytest.param(
+            '<r xml:base="urn:.."><b xml:base="x"/></r>',
+            "b",
+            b'<b xml:base="urn:../x"></b>',
+            id="terminal-parent-after-scheme",
+        ),
+        pytest.param(
+            '<r xml:base="a.."><b xml:base="x"/></r>',
+            "b",
+            b'<b xml:base="x"></b>',
+            id="literal-dot-suffix",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar#old"><b xml:base="x"/></r>',
+            "b",
+            b'<b xml:base="foo/x"></b>',
+            id="base-fragment",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar#old"><b xml:base=""/></r>',
+            "b",
+            b'<b xml:base="foo/bar"></b>',
+            id="empty-reference-removes-base-fragment",
+        ),
+        pytest.param(
+            '<r xml:base="urn:thing#old"><b xml:base=""/></r>',
+            "b",
+            b'<b xml:base="urn:thing"></b>',
+            id="empty-opaque-reference-removes-base-fragment",
+        ),
+        pytest.param(
+            '<r xml:base="https://example.org"><b xml:base="x"/></r>',
+            "b",
+            b'<b xml:base="https://example.org/x"></b>',
+            id="empty-authority-path",
+        ),
+        pytest.param(
+            '<r xml:base="https://example.org/a/"><b xml:base="../../../x"/></r>',
+            "b",
+            b'<b xml:base="https://example.org/x"></b>',
+            id="parent-above-root",
+        ),
+        pytest.param(
+            '<r xml:base="foo/bar"><b xml:base="https://other.org"/></r>',
+            "b",
+            b'<b xml:base="https://other.org"></b>',
+            id="absolute-empty-path",
+        ),
+    ],
+)
+def test_xml_c14n_1_1_fixes_ancestor_base(source: str, selector: str, expected: bytes) -> None:
+    document = parse_xml(source)
+    node = document.select_one(selector)
+    assert node is not None
+    assert node.canonicalize(Canonical(version="1.1")) == expected
+
+
+@pytest.mark.parametrize(
+    ("base", "reference", "expected"),
+    [
+        pytest.param("../ab/", "b", "../ab/b", id="leading-parent-prefix"),
+        pytest.param("ab/", "b", "ab/b", id="ordinary-relative-base"),
+        pytest.param(".a/", "b", ".a/b", id="dot-starting-segment"),
+        pytest.param("a:b/", "c", "a:b/c", id="base-scheme"),
+        pytest.param("a/?q/", "b", "a/b", id="base-query"),
+        pytest.param("a/#f/", "b", "a/b", id="base-fragment"),
+        pytest.param("/a/", "b", "/a/b", id="rooted-base"),
+        pytest.param("./a/", "b", "a/b", id="dot-base-segment"),
+        pytest.param("a/../", "b", "b", id="parent-after-segment"),
+        pytest.param("a/", "é", "a/é", id="unicode-reference"),
+        pytest.param("a/", "", "a/", id="empty-reference"),
+        pytest.param("a/", ".", "a/", id="dot-reference"),
+        pytest.param("a/", "..", "", id="parent-reference"),
+        pytest.param("a/", ".b", "a/.b", id="dot-starting-reference"),
+        pytest.param("a/", ".ab", "a/.ab", id="long-dot-starting-reference"),
+        pytest.param("a/", "ab", "a/ab", id="two-character-reference"),
+        pytest.param("a/", "b/c", "a/b/c", id="reference-slash"),
+        pytest.param("a/", "b:c", "b:c", id="reference-scheme"),
+        pytest.param("a/", "b?q", "a/b?q", id="reference-query"),
+        pytest.param("a/", "b#f", "a/b", id="reference-fragment"),
+    ],
+)
+def test_xml_c14n_1_1_resolves_relative_base_segments(base: str, reference: str, expected: str) -> None:
+    node = parse_xml(f'<r xml:base="{base}"><b xml:base="{reference}"/></r>').select_one("b")
+    assert node is not None
+    assert node.canonicalize(Canonical(version="1.1")) == (
+        f'<b xml:base="{expected}"></b>'.encode() if expected else b"<b></b>"
+    )
+
+
+def test_xml_c14n_1_0_does_not_fix_ancestor_base() -> None:
+    node = parse_xml('<r xml:base="foo/bar"><a xml:base="../x"/></r>').select_one("a")
+    assert node is not None
+    assert node.canonicalize(Canonical(version="1.0")) == b'<a xml:base="../x"></a>'
+
+
+def test_html_c14n_1_1_fixes_ancestor_base() -> None:
+    node = _one('<div xml:base="something/else"><section xml:base="bar/"><p xml:base="foo">x</p></section></div>', "p")
+    assert node.canonicalize(Canonical(version="1.1")) == b'<p xml:base="something/bar/foo">x</p>'
+
+
+@pytest.mark.parametrize(
+    ("bindings", "attributes"),
+    [
+        pytest.param("", "", id="fast-path"),
+        pytest.param('xmlns:p="urn:p"', "", id="namespace-stack"),
+        pytest.param(
+            'xmlns:p="urn:p"',
+            " ".join(f'a{index}="x"' for index in range(33)),
+            id="namespace-heap-attributes",
+        ),
+        pytest.param(
+            " ".join(f'xmlns:p{index}="urn:{index}"' for index in range(33)),
+            "",
+            id="namespace-heap-bindings",
+        ),
+        pytest.param(
+            " ".join(f'xmlns:p{index}="urn:{index}"' for index in range(33)),
+            " ".join(f'a{index}="x"' for index in range(33)),
+            id="namespace-both-heap",
+        ),
+    ],
+)
+def test_xml_c14n_1_1_rejects_invalid_ancestor_base(bindings: str, attributes: str) -> None:
+    node = parse_xml(f'<r xml:base="http://[bad" {bindings}><b xml:base="x" {attributes}/></r>').select_one("b")
+    assert node is not None
+    with pytest.raises(ValueError, match="Invalid IPv6 URL"):
+        node.canonicalize(Canonical(version="1.1"))
+
+
+def test_html_c14n_1_1_rejects_invalid_ancestor_base_with_many_attributes() -> None:
+    attributes: Final = " ".join(f'a{index}="x"' for index in range(33))
+    node = _one(f'<div xml:base="http://[bad"><p xml:base="x" {attributes}></p></div>', "p")
+    with pytest.raises(ValueError, match="Invalid IPv6 URL"):
+        node.canonicalize(Canonical(version="1.1"))
 
 
 def test_xml_c14n_comment_is_omitted_without_option() -> None:

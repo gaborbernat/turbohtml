@@ -369,6 +369,7 @@ static void c14n_xml_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_
         return;          /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     Py_ssize_t count = 0;
+    int needs_base_fixup = 0;
     for (Py_ssize_t index = 0; index < node->attr_count; index++) {
         Py_ssize_t name_len;
         const char *name = th_attr_name(tree, node->attrs[index].name_atom, &name_len);
@@ -385,6 +386,7 @@ static void c14n_xml_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_
             for (Py_ssize_t index = 0; index < ancestor->attr_count; index++) {
                 Py_ssize_t name_len;
                 const char *name = th_attr_name(tree, ancestor->attrs[index].name_atom, &name_len);
+                needs_base_fixup |= name_len == 8 && memcmp(name, "xml:base", 8) == 0;
                 if (name_len <= 4 || memcmp(name, "xml:", 4) != 0 ||
                     (opts->version == 1 && !c14n_xml_1_1_inherits_xml_attribute(name, name_len))) {
                     continue;
@@ -394,6 +396,30 @@ static void c14n_xml_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_
                                                         ancestor->attrs[index].value_len, namespaces, ns_count);
                 }
             }
+        }
+    }
+    Py_UCS4 *fixed_base = NULL;
+    if (node == apex && opts->version == 1 && needs_base_fixup) {
+        Py_ssize_t base_len;
+        if (c14n_base_fixup(tree, node, &fixed_base, &base_len) < 0) {
+            if (attrs != stack_attrs) {
+                PyMem_Free(attrs);
+            }
+            if (namespaces != stack_namespaces) {
+                PyMem_Free(namespaces);
+            }
+            out->failed = 1;
+            return;
+        }
+        Py_ssize_t base_index = 0;
+        while (attrs[base_index].name_len != 8 || memcmp(attrs[base_index].name, "xml:base", 8) != 0) {
+            base_index++;
+        }
+        if (base_len == 0) {
+            attrs[base_index] = attrs[--count];
+        } else {
+            attrs[base_index].value = fixed_base;
+            attrs[base_index].value_len = base_len;
         }
     }
     if (count > 1) {
@@ -408,6 +434,9 @@ static void c14n_xml_open_tag(sbuf *out, th_tree *tree, th_node *node, const th_
     }
     if (attrs != stack_attrs) {
         PyMem_Free(attrs);
+    }
+    if (fixed_base != NULL) {
+        PyMem_Free(fixed_base);
     }
     if (namespaces != stack_namespaces) {
         PyMem_Free(namespaces);
@@ -509,6 +538,7 @@ static void c14n_xml_document(sbuf *out, th_tree *tree, th_node *doc, const th_c
 Py_UCS4 *th_node_canonicalize_xml(th_tree *tree, th_node *node, const th_c14n_opts *opts, Py_ssize_t *out_len) {
     sbuf out = {NULL, 0, 0, 0};
     if (node->type == TH_NODE_DOCUMENT) {
+        sbuf_presize_for_c14n(&out, tree);
         c14n_xml_document(&out, tree, node, opts);
     } else {
         c14n_xml_subtree(&out, tree, node, opts);
