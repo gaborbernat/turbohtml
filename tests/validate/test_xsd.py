@@ -156,8 +156,137 @@ def test_facets(facets: str, base: str, value: str, ok: bool) -> None:  # ruff:i
         pytest.param("a{2,}", "aaaaa", True, id="unbounded-lower"),
         pytest.param("a{3}", "aaa", True, id="exact"),
         pytest.param("[a-c]+", "abc", True, id="class-range"),
+        pytest.param(r"a\{2\}", "a{2}", True, id="escaped-braces"),
+        pytest.param("[{}]", "{", True, id="braces-in-class"),
+        pytest.param(r"a\]", "a]", True, id="escaped-closing-bracket"),
+        pytest.param("[a-a]", "a", True, id="class-range-equal-endpoints"),
+        pytest.param(r"[\t-\n]", "\t", True, id="class-range-escaped-endpoints"),
+        pytest.param("[-a]", "-", True, id="class-leading-hyphen"),
+        pytest.param(r"[\^a]", "^", True, id="class-escaped-caret"),
+        pytest.param(r"[\[a]", "[", True, id="class-escaped-opening-bracket"),
         pytest.param("[^0-9]+", "abc", True, id="class-negate"),
+        pytest.param("[a-z-[aeiou]]", "b", True, id="class-subtract-consonant"),
+        pytest.param("[a-z-[aeiou]]", "a", False, id="class-subtract-vowel"),
+        pytest.param("[a-z-[aeiou]]", "1", False, id="class-subtract-outside-base"),
+        pytest.param("a[b-c-[c]]", "ab", True, id="class-subtract-with-literal-prefix"),
+        pytest.param("a[b-c-[c]]", "ac", False, id="class-subtract-with-excluded-suffix"),
+        pytest.param("a[b-c-[c]]", "xb", False, id="class-subtract-with-mismatched-prefix"),
+        pytest.param("[^a-z-[0-9]]", "!", True, id="negated-class-subtract-punctuation"),
+        pytest.param("[^a-z-[0-9]]", "1", False, id="negated-class-subtract-digit"),
+        pytest.param("[a-z-[aeiou-[e]]]", "e", True, id="nested-class-subtract-restores-letter"),
+        pytest.param("[a-z-[aeiou-[e]]]", "a", False, id="nested-class-subtract-vowel"),
+        pytest.param(r"[\w-[\d]]", "a", True, id="builtin-class-subtract-letter"),
+        pytest.param(r"[\w-[\d]]", "1", False, id="builtin-class-subtract-digit"),
+        pytest.param(r"[\d-[0-9]]", "\u0660", True, id="unicode-digit-subtract-ascii"),
+        pytest.param(r"[\d-[0-9]]", "1", False, id="ascii-digit-subtracted"),
+        pytest.param(r"\p{Lu}", "A", True, id="category-uppercase"),
+        pytest.param(r"\p{Lu}", "a", False, id="category-uppercase-rejects-lowercase"),
+        pytest.param(r"a\p{Lu}", "bA", False, id="category-with-mismatched-prefix"),
+        pytest.param(r"\p{Lu}|a", "A", True, id="category-alternative"),
+        pytest.param(r"\p{Lu}|a", "a", True, id="category-literal-alternative"),
+        pytest.param(r"\p{Lu}|a", "b", False, id="category-alternatives-reject"),
+        pytest.param(r"\p{Lu}?", "a", False, id="optional-category-reject"),
+        pytest.param(r"\P{Lu}", "a", True, id="complement-category-lowercase"),
+        pytest.param(r"\P{Lu}", "A", False, id="complement-category-uppercase"),
+        pytest.param(r"\p{L}", "中", True, id="category-all-letters"),
+        pytest.param(r"\p{M}", "\u0300", True, id="category-all-marks"),
+        pytest.param(r"\p{N}", "²", True, id="category-all-numbers"),
+        pytest.param(r"\p{P}", "_", True, id="category-all-punctuation"),
+        pytest.param(r"\p{Z}", " ", True, id="category-all-separators"),
+        pytest.param(r"\p{S}", "😀", True, id="category-all-symbols"),
+        pytest.param(r"\p{C}", "\ue000", True, id="category-all-other"),
+        pytest.param(r"\p{Cn}", "\u0378", True, id="category-unassigned"),
+        pytest.param(r"\p{Lu}", "\U0001d400", True, id="category-supplementary-uppercase"),
+        pytest.param(r"[\p{Lu}a]", "a", True, id="category-class-union-literal"),
+        pytest.param(r"[\p{Lu}a]", "A", True, id="category-class-union-property"),
+        pytest.param(r"[\p{Lu}a]", "b", False, id="category-class-union-outside"),
+        pytest.param(r"[\p{Lu}\d]", "1", True, id="category-class-union-builtin"),
+        pytest.param(r"[^\p{Lu}]", "A", False, id="category-negated-class"),
+        pytest.param(r"[^a\p{Lu}]", "b", True, id="category-negated-class-with-range"),
+        pytest.param(r"[^a\p{Lu}]", "a", False, id="category-negated-class-range-rejects"),
+        pytest.param(r"[^a\p{Lu}]", "A", False, id="category-negated-class-property-rejects"),
+        pytest.param(r"[\p{L}-[\p{Lu}]]", "a", True, id="category-subtract-uppercase"),
+        pytest.param(r"[\p{L}-[\p{Lu}]]", "A", False, id="category-subtract-uppercase-rejects"),
+        pytest.param(r"[\p{L}-[\p{Lu}]]", "1", False, id="category-subtract-outside-base"),
+        pytest.param(r"[\P{Lu}]", "a", True, id="complement-category-in-class"),
+        pytest.param(r"\p{IsBasicLatin}", "A", True, id="block-basic-latin"),
+        pytest.param(r"\p{IsBasicLatin}", "é", False, id="block-basic-latin-outside"),
+        pytest.param(r"\P{IsBasicLatin}", "é", True, id="complement-block-outside"),
+        pytest.param(r"\P{IsBasicLatin}", "A", False, id="complement-block-inside"),
+        pytest.param(r"\p{IsLatin-1Supplement}", "é", True, id="block-latin-1-hyphen"),
+        pytest.param(r"\p{IsLatin-1Supplement}", "A", False, id="block-latin-1-before"),
+        pytest.param(r"\P{IsLatin-1Supplement}", "A", True, id="complement-block-before"),
+        pytest.param(r"\P{IsLatin-1Supplement}", "Ā", True, id="complement-block-after"),
+        pytest.param(r"\p{IsCJKUnifiedIdeographsExtensionB}", "\U00020000", True, id="block-supplementary-start"),
+        pytest.param(r"\p{IsCJKUnifiedIdeographsExtensionB}", "\U0002a6df", True, id="block-supplementary-end"),
+        pytest.param(r"\p{IsCJKUnifiedIdeographsExtensionB}", "\U0002a700", False, id="block-supplementary-next"),
+        pytest.param(r"\p{IsSupplementaryPrivateUseArea-B}", "\U00100000", True, id="block-highest-range"),
+        pytest.param(r"\P{IsSupplementaryPrivateUseArea-B}", "A", True, id="complement-highest-range"),
+        pytest.param(r"[\p{IsBasicLatin}]", "A", True, id="block-in-class"),
+        pytest.param(r"[a\p{IsGreekandCoptic}]", "\u03b1", True, id="block-class-union"),
+        pytest.param(r"[^\p{IsBasicLatin}]", "é", True, id="block-negated-class"),
+        pytest.param(r"[\P{IsBasicLatin}A]", "A", True, id="complement-block-class-union"),
+        pytest.param(r"[\P{IsBasicLatin}A]", "B", False, id="complement-block-class-outside"),
+        pytest.param(r"[\p{L}-[\p{IsBasicLatin}]]", "é", True, id="category-minus-block"),
+        pytest.param(r"[\p{L}-[\p{IsBasicLatin}]]", "A", False, id="category-minus-block-rejects"),
+        pytest.param(r"\p{IsGreek}", "\u03b1", True, id="legacy-greek-block"),
+        pytest.param(r"\P{IsGreek}", "A", True, id="legacy-greek-complement"),
+        pytest.param(r"\p{IsCombiningMarksforSymbols}", "\u20d0", True, id="legacy-combining-block"),
+        pytest.param(r"\p{IsPrivateUse}", "\ue000", True, id="legacy-private-use-bmp"),
+        pytest.param(r"\p{IsPrivateUse}", "\U000f0000", True, id="legacy-private-use-plane-15"),
+        pytest.param(r"\p{IsPrivateUse}", "\U00100000", True, id="legacy-private-use-plane-16"),
+        pytest.param(r"\p{IsPrivateUse}", "\uf900", False, id="legacy-private-use-gap"),
+        pytest.param(r"\P{IsPrivateUse}", "\uf900", True, id="legacy-private-use-complement-gap"),
+        pytest.param(r"\P{IsPrivateUse}", "\ue000", False, id="legacy-private-use-complement-range"),
         pytest.param(r"\d\s\w", "1 a", True, id="builtin-classes"),
+        pytest.param(r"\d", "\u0660", True, id="digit-class-arabic-indic"),
+        pytest.param(r"\d", "\u0966", True, id="digit-class-devanagari"),
+        pytest.param(r"\d", "\U0001d7ce", True, id="digit-class-supplementary"),
+        pytest.param(r"\d", "²", False, id="digit-class-other-number"),
+        pytest.param(r"\d", "中", False, id="digit-class-empty-page"),
+        pytest.param(r"\D", "\u0660", False, id="nondigit-class-arabic-indic"),
+        pytest.param(r"\D", "²", True, id="nondigit-class-other-number"),
+        pytest.param(r"[\d]", "\u0966", True, id="digit-class-in-brackets"),
+        pytest.param(r"[\d]", "²", False, id="digit-class-in-brackets-other-number"),
+        pytest.param(r"[\D]", "\u0966", False, id="nondigit-class-in-brackets"),
+        pytest.param(r"[\D]", "²", True, id="nondigit-class-in-brackets-other-number"),
+        pytest.param(r"\w", "ª", True, id="word-class-non-name-letter"),
+        pytest.param(r"\w", "°", True, id="word-class-symbol"),
+        pytest.param(r"\w", "$", True, id="word-class-ascii-symbol"),
+        pytest.param(r"\w", "_", False, id="word-class-ascii-punctuation"),
+        pytest.param(r"\w", "\u0300", True, id="word-class-combining-mark"),
+        pytest.param(r"\w", "\u00a0", False, id="word-class-separator"),
+        pytest.param(r"\w", "\u037e", False, id="word-class-unicode-punctuation"),
+        pytest.param(r"\w", "\ue000", False, id="word-class-private-use"),
+        pytest.param(r"\w", "中", True, id="word-class-full-page"),
+        pytest.param(r"\w", "😀", True, id="word-class-emoji"),
+        pytest.param(r"\W", "_", True, id="nonword-class-punctuation"),
+        pytest.param(r"\W", "$", False, id="nonword-class-symbol"),
+        pytest.param(r"[\w]", "°", True, id="word-class-in-brackets"),
+        pytest.param(r"[\w]", "_", False, id="word-class-in-brackets-punctuation"),
+        pytest.param(r"\i", "a", True, id="name-start-letter"),
+        pytest.param(r"\i", ":", True, id="name-start-colon"),
+        pytest.param(r"\i", "_", True, id="name-start-underscore"),
+        pytest.param(r"\i", "1", False, id="name-start-digit"),
+        pytest.param(r"\i", "\u0300", False, id="name-start-combining-mark"),
+        pytest.param(r"\i", "中", True, id="name-start-cjk"),
+        pytest.param(r"\i", "😀", True, id="name-start-supplementary"),
+        pytest.param(r"\I", "1", True, id="not-name-start-digit"),
+        pytest.param(r"\I", "a", False, id="not-name-start-letter"),
+        pytest.param(r"\c", "1", True, id="name-char-digit"),
+        pytest.param(r"\c", "-", True, id="name-char-hyphen"),
+        pytest.param(r"\c", "\u0300", True, id="name-char-combining-mark"),
+        pytest.param(r"\c", "\u037e", False, id="name-char-greek-question-mark"),
+        pytest.param(r"\C", "\u037e", True, id="not-name-char-punctuation"),
+        pytest.param(r"\C", "a", False, id="not-name-char-letter"),
+        pytest.param(r"[\i]", ":", True, id="name-start-in-brackets"),
+        pytest.param(r"[\i]", "1", False, id="name-start-in-brackets-digit"),
+        pytest.param(r"[\c]", "-", True, id="name-char-in-brackets"),
+        pytest.param(r"[\c]", "\u037e", False, id="name-char-in-brackets-punctuation"),
+        pytest.param(r"[\I]", "1", True, id="not-name-start-in-brackets"),
+        pytest.param(r"[\I]", "a", False, id="not-name-start-in-brackets-letter"),
+        pytest.param(r"[\C]", "\u037e", True, id="not-name-char-in-brackets"),
+        pytest.param(r"[\C]", "a", False, id="not-name-char-in-brackets-letter"),
         pytest.param(r"[\d.]+", "3.14", True, id="class-with-builtin"),
         pytest.param(r"\D+", "abc", True, id="not-digit"),
         pytest.param("colou?r", "color", True, id="optional-u"),
@@ -168,6 +297,165 @@ def test_facets(facets: str, base: str, value: str, ok: bool) -> None:  # ruff:i
 )
 def test_regex_pattern(pattern: str, value: str, ok: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]  # a pytest parametrize value, not a boolean-trap call site
     assert check(restricted(f'<xs:pattern value="{pattern}"/>'), f"<v>{value}</v>").valid is ok
+
+
+@pytest.mark.parametrize(
+    ("category", "value"),
+    [
+        pytest.param("Cc", "\t", id="control"),
+        pytest.param("Cf", "\u00ad", id="format"),
+        pytest.param("Cn", "\u0378", id="unassigned"),
+        pytest.param("Co", "\ue000", id="private-use"),
+        pytest.param("Ll", "a", id="lowercase"),
+        pytest.param("Lm", "\u02b0", id="modifier-letter"),
+        pytest.param("Lo", "\u00aa", id="other-letter"),
+        pytest.param("Lt", "\u01c5", id="titlecase"),
+        pytest.param("Lu", "A", id="uppercase"),
+        pytest.param("Mc", "\u0903", id="spacing-mark"),
+        pytest.param("Me", "\u0488", id="enclosing-mark"),
+        pytest.param("Mn", "\u0300", id="nonspacing-mark"),
+        pytest.param("Nd", "0", id="decimal-digit"),
+        pytest.param("Nl", "\u16ee", id="letter-number"),
+        pytest.param("No", "²", id="other-number"),
+        pytest.param("Pc", "_", id="connector-punctuation"),
+        pytest.param("Pd", "-", id="dash-punctuation"),
+        pytest.param("Pe", ")", id="close-punctuation"),
+        pytest.param("Pf", "»", id="final-punctuation"),
+        pytest.param("Pi", "«", id="initial-punctuation"),
+        pytest.param("Po", "!", id="other-punctuation"),
+        pytest.param("Ps", "(", id="open-punctuation"),
+        pytest.param("Sc", "$", id="currency-symbol"),
+        pytest.param("Sk", "^", id="modifier-symbol"),
+        pytest.param("Sm", "+", id="math-symbol"),
+        pytest.param("So", "¦", id="other-symbol"),
+        pytest.param("Zl", "\u2028", id="line-separator"),
+        pytest.param("Zp", "\u2029", id="paragraph-separator"),
+        pytest.param("Zs", " ", id="space-separator"),
+    ],
+)
+def test_regex_category_property(category: str, value: str) -> None:
+    assert check(restricted(f'<xs:pattern value="\\p{{{category}}}"/>'), f"<v>{value}</v>").valid
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        pytest.param("[z-a]", id="reversed-ascii"),
+        pytest.param("[😀-A]", id="reversed-supplementary"),
+        pytest.param(r"[a-\n]", id="reversed-escaped-endpoint"),
+        pytest.param(r"[a-\d]", id="builtin-endpoint"),
+        pytest.param(r"[a-\p{Lu}]", id="category-endpoint"),
+        pytest.param(r"[a-\q]", id="unknown-escape-endpoint"),
+        pytest.param("[a-\\Ā]", id="nonascii-escape-endpoint"),
+        pytest.param(r"[a-\]", id="reversed-closing-bracket-endpoint"),
+        pytest.param("[a-\\", id="range-backslash-at-end"),
+    ],
+)
+def test_regex_invalid_range_raises(pattern: str) -> None:
+    with pytest.raises(ValueError, match=r"^schema pattern has an invalid character range at offset 1$"):
+        XMLSchema(restricted(f'<xs:pattern value="{pattern}"/>'))
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        pytest.param("[]", id="empty"),
+        pytest.param("[^]", id="negated-empty"),
+        pytest.param("[a", id="unclosed"),
+        pytest.param("[abc", id="unclosed-multiple-chars"),
+        pytest.param("[a\\", id="unclosed-backslash"),
+        pytest.param("[a[b]", id="unescaped-opening-bracket"),
+        pytest.param("[a^]", id="unescaped-caret"),
+        pytest.param("[a-b-c]", id="middle-hyphen"),
+        pytest.param(r"[\d-a]", id="middle-hyphen-after-builtin"),
+        pytest.param(r"[\p{Lu}-a]", id="middle-hyphen-after-category"),
+        pytest.param("[a-[b]c]", id="trailing-subtraction-content"),
+        pytest.param("[a-[b]", id="unclosed-subtraction"),
+        pytest.param("[-[a]]", id="subtraction-without-base"),
+        pytest.param("[a-", id="unclosed-trailing-hyphen"),
+        pytest.param("[", id="open-only"),
+        pytest.param(r"[a\]", id="escaped-close-without-terminator"),
+    ],
+)
+def test_regex_invalid_class_raises(pattern: str) -> None:
+    with pytest.raises(ValueError, match=r"^schema pattern has an invalid character class at offset \d+$"):
+        XMLSchema(restricted(f'<xs:pattern value="{pattern}"/>'))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "offset"),
+    [
+        pytest.param(r"\q", 0, id="unknown-atom-escape"),
+        pytest.param(r"a\q", 1, id="unknown-atom-escape-after-literal"),
+        pytest.param(r"(a\q)", 2, id="unknown-escape-in-group"),
+        pytest.param(r"[a\q]", 2, id="unknown-class-escape"),
+        pytest.param(r"\u0041", 0, id="nonstandard-unicode-escape"),
+        pytest.param("\\Ā", 0, id="nonascii-escape"),
+        pytest.param("a\\", 1, id="trailing-backslash"),
+    ],
+)
+def test_regex_invalid_escape_raises(pattern: str, offset: int) -> None:
+    with pytest.raises(ValueError, match=rf"^schema pattern has an invalid escape at offset {offset}$"):
+        XMLSchema(restricted(f'<xs:pattern value="{pattern}"/>'))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "offset"),
+    [
+        pytest.param("(", 0, id="open-only"),
+        pytest.param("(ab", 0, id="unclosed"),
+        pytest.param("((ab)", 0, id="unclosed-outer"),
+        pytest.param(")", 0, id="close-only"),
+        pytest.param("a)", 1, id="unmatched-close"),
+        pytest.param("a)b", 1, id="discarded-suffix"),
+        pytest.param("(a))", 3, id="extra-close"),
+    ],
+)
+def test_regex_unmatched_parenthesis_raises(pattern: str, offset: int) -> None:
+    with pytest.raises(ValueError, match=rf"^schema pattern has an unmatched parenthesis at offset {offset}$"):
+        XMLSchema(restricted(f'<xs:pattern value="{pattern}"/>'))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "offset"),
+    [
+        pytest.param("?a", 0, id="leading-question"),
+        pytest.param("*a", 0, id="leading-star"),
+        pytest.param("+a", 0, id="leading-plus"),
+        pytest.param("a?+", 2, id="stacked-question-plus"),
+        pytest.param("a**", 2, id="stacked-stars"),
+        pytest.param("a++", 2, id="stacked-pluses"),
+        pytest.param("a{2", 1, id="unclosed-exact"),
+        pytest.param("a{2,3", 1, id="unclosed-range"),
+        pytest.param("a{2,", 1, id="unclosed-minimum"),
+        pytest.param("a{2,x}", 1, id="nondigit-upper"),
+        pytest.param("a{b", 1, id="nondigit-bound"),
+        pytest.param("a{2,!}", 1, id="punctuation-upper"),
+        pytest.param("a{2x", 1, id="missing-comma"),
+        pytest.param("a{,2}", 1, id="missing-lower"),
+        pytest.param("a{}", 1, id="empty-bound"),
+        pytest.param("{2}", 0, id="bare-bound"),
+        pytest.param("{x}", 0, id="bare-nondigit-bound"),
+        pytest.param("}", 0, id="bare-close"),
+        pytest.param("a}", 1, id="close-after-atom"),
+    ],
+)
+def test_regex_invalid_quantifier_raises(pattern: str, offset: int) -> None:
+    with pytest.raises(ValueError, match=rf"^schema pattern has an invalid quantifier at offset {offset}$"):
+        XMLSchema(restricted(f'<xs:pattern value="{pattern}"/>'))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "offset"),
+    [
+        pytest.param("]", 0, id="close-only"),
+        pytest.param("a]", 1, id="close-after-literal"),
+        pytest.param("a]b", 1, id="discarded-suffix"),
+    ],
+)
+def test_regex_unmatched_bracket_raises(pattern: str, offset: int) -> None:
+    with pytest.raises(ValueError, match=rf"^schema pattern has an unmatched closing bracket at offset {offset}$"):
+        XMLSchema(restricted(f'<xs:pattern value="{pattern}"/>'))
 
 
 _NESTING_ERROR: Final[str] = (
@@ -183,6 +471,38 @@ _STATES_ERROR: Final[str] = (
     [
         pytest.param("(" * 50000 + "a" + ")" * 50000, _NESTING_ERROR, id="nested-groups"),
         pytest.param("(" * 251 + "a" + ")" * 251, _NESTING_ERROR, id="nesting-one-past-cap"),
+        pytest.param(
+            "[" + "a-[" * 251 + "b" + "]" * 252,
+            "schema pattern nests character classes deeper than 250 levels at offset 752; flatten the class",
+            id="class-subtraction-nesting-one-past-cap",
+        ),
+        pytest.param(r"\p{Bad}", "schema pattern has an invalid category escape at offset 3", id="invalid-category"),
+        pytest.param(r"\p{Cs}", "schema pattern has an invalid category escape at offset 3", id="surrogate-category"),
+        pytest.param(
+            r"[\p{Bad}]", "schema pattern has an invalid category escape at offset 4", id="invalid-category-in-class"
+        ),
+        pytest.param(r"\p{Lu", "schema pattern has an invalid category escape at offset 3", id="open-category"),
+        pytest.param(r"\p", "schema pattern has an invalid category escape at offset 2", id="bare-category"),
+        pytest.param(r"\pa", "schema pattern has an invalid category escape at offset 2", id="category-without-braces"),
+        pytest.param(r"\p{IsUnknown}", "schema pattern has an invalid category escape at offset 3", id="invalid-block"),
+        pytest.param(
+            r"\p{IxBasicLatin}", "schema pattern has an invalid category escape at offset 3", id="invalid-block-prefix"
+        ),
+        pytest.param(
+            r"\p{IsHighSurrogates}",
+            "schema pattern has an invalid category escape at offset 3",
+            id="high-surrogates-block",
+        ),
+        pytest.param(
+            r"\p{IsLowSurrogates}",
+            "schema pattern has an invalid category escape at offset 3",
+            id="low-surrogates-block",
+        ),
+        pytest.param(
+            r"\p{IsHighPrivateUseSurrogates}",
+            "schema pattern has an invalid category escape at offset 3",
+            id="private-use-surrogates-block",
+        ),
         pytest.param("(a{5000}){5000}", _STATES_ERROR, id="repeat-product"),
         pytest.param("(a{0,3000}){0,3000}", _STATES_ERROR, id="optional-repeat-product"),
         pytest.param("a{999999999999}", _STATES_ERROR, id="huge-count"),
@@ -529,11 +849,8 @@ def test_datatype_edges(type_name: str, value: str, ok: bool) -> None:  # ruff:i
         pytest.param(r"a\tb", "a\tb", True, id="escaped-tab"),
         pytest.param(r"[\.]+", "...", True, id="class-literal-escape"),
         pytest.param("[abc]+", "cba", True, id="class-multichar"),
-        pytest.param("a{b", "a{b", True, id="brace-literal"),
-        pytest.param("{x}", "{x}", True, id="lone-brace"),
         pytest.param("a{0}b", "b", True, id="repeat-zero"),
         pytest.param("a{0,2}", "aa", True, id="repeat-zero-two"),
-        pytest.param("a{2,", "a{2,", True, id="unterminated-brace"),
         pytest.param("(a|)b", "b", True, id="empty-alternative"),
     ],
 )
@@ -714,12 +1031,14 @@ def test_instance_comment_before_root() -> None:
     [
         pytest.param("xs:NMTOKEN", "", False, id="nmtoken-empty"),
         pytest.param("xs:NCName", "1abc", False, id="ncname-bad-start"),
+        pytest.param("xs:NCName", ":root", False, id="ncname-colon-start"),
         pytest.param("xs:Name", "a b", False, id="name-bad-middle"),
         pytest.param("xs:decimal", "12.50", True, id="decimal-both-parts"),
         pytest.param("xs:double", "1.5e3", True, id="double-frac-and-exp"),
         pytest.param("xs:time", "12:60:00", False, id="time-bad-minute"),
         pytest.param("xs:duration", "P", False, id="duration-nothing"),
         pytest.param("xs:language", "1", False, id="language-digit-start"),
+        pytest.param("xs:language", "~", False, id="language-punctuation-start"),
         pytest.param("xs:hexBinary", "0", False, id="hex-single"),
         pytest.param("xs:base64Binary", "$$$$", False, id="base64-bad-char"),
     ],
@@ -727,6 +1046,39 @@ def test_instance_comment_before_root() -> None:
 def test_datatype_boundary_edges(type_name: str, value: str, ok: bool) -> None:  # ruff:ignore[boolean-type-hint-positional-argument]  # a pytest parametrize value, not a boolean-trap call site
     schema = f'<xs:schema {XS}><xs:element name="v" type="{type_name}"/></xs:schema>'
     assert xsd_ok(schema, f"<v>{value}</v>") is ok
+
+
+@pytest.mark.parametrize("type_name", ["xs:Name", "xs:NCName", "xs:QName"])
+@pytest.mark.parametrize(
+    ("codepoint", "expected"),
+    [
+        pytest.param(0x80, False, id="below-first-range"),
+        pytest.param(0xC0, True, id="first-range"),
+        pytest.param(0x37E, False, id="greek-question-mark"),
+        pytest.param(0x37F, True, id="after-greek-gap"),
+        pytest.param(0xFDCF, True, id="before-noncharacter-gap"),
+        pytest.param(0xFDD0, False, id="noncharacter-gap"),
+        pytest.param(0xEFFFF, True, id="last-supplementary-name"),
+        pytest.param(0xF0000, False, id="above-last-range"),
+    ],
+)
+def test_datatype_name_start_ranges(*, type_name: str, codepoint: int, expected: bool) -> None:
+    assert XMLSchema(typed(type_name)).is_valid(parse_xml(f"<v>{chr(codepoint)}</v>")) is expected
+
+
+@pytest.mark.parametrize("type_name", ["xs:Name", "xs:NCName", "xs:NMTOKEN", "xs:QName"])
+@pytest.mark.parametrize(
+    ("codepoint", "expected"),
+    [
+        pytest.param(0xB7, True, id="middle-dot"),
+        pytest.param(0x300, True, id="combining-mark"),
+        pytest.param(0x203F, True, id="connector-punctuation"),
+        pytest.param(0x37E, False, id="greek-question-mark"),
+        pytest.param(0xF0000, False, id="above-last-range"),
+    ],
+)
+def test_datatype_name_char_ranges(*, type_name: str, codepoint: int, expected: bool) -> None:
+    assert XMLSchema(typed(type_name)).is_valid(parse_xml(f"<v>a{chr(codepoint)}</v>")) is expected
 
 
 @pytest.mark.parametrize(
@@ -928,17 +1280,13 @@ def test_datatype_name_boundaries(type_name: str, value: str, ok: bool) -> None:
 @pytest.mark.parametrize(
     ("pattern", "value", "ok"),
     [
-        pytest.param("[", "x", False, id="class-open-only"),
-        pytest.param("[abc", "a", True, id="class-unterminated"),
         pytest.param("[a-]", "-", True, id="dash-before-close"),
-        pytest.param("(ab", "ab", True, id="group-unterminated"),
         pytest.param(r"a\\", "a", False, id="backslash-at-end"),
         pytest.param("a{2}", "aa", True, id="bound-exact-close"),
         pytest.param("a{2,3}", "aaa", True, id="bound-comma-upper"),
         pytest.param("a{2,}", "aaaa", True, id="bound-comma-open"),
-        pytest.param("a{2", "a{2", True, id="bound-unterminated"),
         pytest.param(r"[\d]+", "12", True, id="class-digit-builtin"),
-        pytest.param(r"[\w]+", "ab_1", True, id="class-word-builtin"),
+        pytest.param(r"[\w]+", "ab$1", True, id="class-word-builtin"),
         pytest.param(r"[\s]+", " \t", True, id="class-space-builtin"),
         pytest.param(r"[\D]+", "abc", True, id="class-not-digit-builtin"),
         pytest.param(r"[\S]+", "abc", True, id="class-not-space-builtin"),
@@ -991,9 +1339,6 @@ def test_datatype_all_subtypes_valid(type_name: str, value: str) -> None:
 @pytest.mark.parametrize(
     ("pattern", "value", "ok"),
     [
-        pytest.param(r"[a\]", "a", True, id="class-backslash-end"),
-        pytest.param(r"[a-\]", "z", False, id="class-range-backslash-end"),
-        pytest.param("a{2,3", "a{2,3", True, id="bound-no-close"),
         pytest.param(r"a\d", "a5", True, id="atom-escape-not-end"),
         pytest.param(r"[\s]x", " x", True, id="class-space-then"),
         pytest.param(r"[\D]", "5", False, id="class-not-digit-vs-digit"),
@@ -1192,11 +1537,6 @@ def test_group_with_annotation_before_model() -> None:
 @pytest.mark.parametrize(
     ("pattern", "value", "ok"),
     [
-        pytest.param("[a\\", "a", True, id="class-lone-backslash-at-end"),
-        pytest.param("[a-\\", "a", False, id="range-backslash-at-end"),
-        pytest.param("a\\", "a", False, id="atom-backslash-at-end"),
-        pytest.param("a{2,x}", "a{2,x}", True, id="bound-nondigit-upper"),
-        pytest.param("a{2x", "a{2x", True, id="bound-no-close-brace"),
         pytest.param("[\\s]", "x", False, id="class-space-vs-nonspace"),
     ],
 )
@@ -1218,17 +1558,6 @@ def test_schema_with_unnamespaced_sequence_is_not_recognized() -> None:
 def test_simple_typed_element_with_text_and_element_child() -> None:
     schema = f'<xs:schema {XS}><xs:element name="v" type="xs:string"/></xs:schema>'
     assert not xsd_ok(schema, "<v>text<child/>more</v>")
-
-
-@pytest.mark.parametrize(
-    ("pattern", "value"),
-    [
-        pytest.param("a{2,", "a{2,", id="bound-comma-then-end"),
-        pytest.param("a{2,!}", "a{2,!}", id="bound-nondigit-below-zero"),
-    ],
-)
-def test_regex_bound_upper_boundaries(pattern: str, value: str) -> None:
-    assert pattern_ok(pattern, value)  # not a valid quantifier, so the braces are literal
 
 
 def test_non_mixed_with_whitespace_element_and_comment() -> None:

@@ -30,6 +30,102 @@ _NEWLY = CSSMinify(baseline=2021)
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        pytest.param(
+            "a{outline-width:0;outline-width:2px;outline-color:blue;outline-style:dashed}",
+            "a{outline-width:0;outline-width:2px;outline-color:blue;outline-style:dashed}",
+            id="outline-width",
+        ),
+        pytest.param(
+            "a{outline-color:transparent;outline-color:blue;outline-style:dashed;outline-width:2px}",
+            "a{outline-color:#0000;outline-color:blue;outline-style:dashed;outline-width:2px}",
+            id="outline-color",
+        ),
+        pytest.param(
+            "a{margin-top:1px;margin-top:2px;margin-right:3px;margin-bottom:4px;margin-left:5px}",
+            "a{margin-top:1px;margin-top:2px;margin-right:3px;margin-bottom:4px;margin-left:5px}",
+            id="margin",
+        ),
+        pytest.param(
+            "a{flex-direction:row;flex-direction:column;flex-wrap:wrap}",
+            "a{flex-direction:row;flex-direction:column;flex-wrap:wrap}",
+            id="flex-flow",
+        ),
+        pytest.param(
+            "a{flex-direction:row;flex-wrap:nowrap;flex-wrap:wrap}",
+            "a{flex-direction:row;flex-wrap:nowrap;flex-wrap:wrap}",
+            id="flex-wrap",
+        ),
+        pytest.param(
+            "a{outline-width:1px;outline-style:solid;outline-color:red;outline-color:blue}",
+            "a{outline-width:1px;outline-style:solid;outline-color:red;outline-color:blue}",
+            id="outline-color-last",
+        ),
+        pytest.param(
+            "a{outline-width:1px;outline-style:solid;outline-style:dashed;outline-color:red}",
+            "a{outline-width:1px;outline-style:solid;outline-style:dashed;outline-color:red}",
+            id="outline-style-middle",
+        ),
+        pytest.param(
+            "a{outline-width:1px;outline-width:2px;outline-width:2px;outline-style:solid;outline-color:red}",
+            "a{outline-width:1px;outline-width:2px;outline-style:solid;outline-color:red}",
+            id="outline-duplicate-fallback",
+        ),
+        pytest.param(
+            "a{color:red;color:blue;margin-top:1px;margin-right:2px;margin-bottom:3px;margin-left:4px}",
+            "a{color:red;color:blue;margin:1px 2px 3px 4px}",
+            id="margin-unrelated-fallback",
+        ),
+        pytest.param(
+            "a{color:red;color:blue;flex-direction:row;flex-wrap:wrap}",
+            "a{color:red;color:blue;flex-flow:row wrap}",
+            id="flex-unrelated-fallback",
+        ),
+        pytest.param(
+            "a{color:red;color:blue;outline-width:1px;outline-style:solid;outline-color:red}",
+            "a{color:red;color:blue;outline:1px solid red}",
+            id="outline-unrelated-fallback",
+        ),
+    ],
+)
+def test_minify_css_repeated_longhand_blocks_shorthand(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.fixture
+def large_rule_prefix() -> str:
+    return ";".join(f"--x{index}:v" for index in range(33))
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "margin-top:1px;margin-right:2px;margin-bottom:3px;margin-left:4px",
+            "margin:1px 2px 3px 4px",
+            id="margin",
+        ),
+        pytest.param("flex-direction:row;flex-wrap:wrap", "flex-flow:row wrap", id="flex-flow"),
+    ],
+)
+def test_minify_css_large_rule_merges_unique_longhands(source: str, expected: str, large_rule_prefix: str) -> None:
+    assert minify_css(f"a{{{large_rule_prefix};{source}}}") == f"a{{{large_rule_prefix};{expected}}}"
+
+
+def test_minify_css_large_rules_keep_outline_fallback(large_rule_prefix: str) -> None:
+    source: Final = (
+        f"a{{{large_rule_prefix};outline-width:1px;outline-style:solid;outline-color:red}}"
+        f"b{{{large_rule_prefix};outline-width:0;outline-width:2px;outline-style:dashed;outline-color:blue}}"
+    )
+    expected: Final = (
+        f"a{{{large_rule_prefix};outline:1px solid red}}"
+        f"b{{{large_rule_prefix};outline-width:0;outline-width:2px;outline-style:dashed;outline-color:blue}}"
+    )
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
         pytest.param("a{color:#ffffff}", "a{color:#fff}", id="hex-shorten-6-to-3"),
         pytest.param("a{color:#AABBCC}", "a{color:#abc}", id="hex-lowercase-and-shorten"),
         pytest.param("a{color:#ff0000}", "a{color:red}", id="hex-to-shorter-name"),
