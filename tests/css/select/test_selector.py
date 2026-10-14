@@ -933,14 +933,16 @@ def _css_path(html: str, selector: str, index: int = 0) -> str:
             "html > body > div:nth-of-type(2) > p",
             id="duplicate-id-is-not-an-anchor",
         ),
-        # an id carrying whitespace or a CSS delimiter cannot serialize, so it is skipped
-        pytest.param(
-            '<body><div id="a b"><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-space"
-        ),
-        pytest.param('<body><div id="a.b"><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-dot"),
-        pytest.param(
-            '<body><div id="a:b"><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-colon"
-        ),
+        pytest.param('<body><div id="a b"><p>x</p></div></body>', "p", 0, "#a\\ b > p", id="escaped-id-space"),
+        pytest.param('<body><div id="a.b"><p>x</p></div></body>', "p", 0, r"#a\.b > p", id="escaped-id-dot"),
+        pytest.param('<body><div id="a:b"><p>x</p></div></body>', "p", 0, r"#a\:b > p", id="escaped-id-colon"),
+        pytest.param('<body><div id="1"><p>x</p></div></body>', "p", 0, r"#\31  > p", id="escaped-id-digit"),
+        pytest.param('<body><div id="-1"><p>x</p></div></body>', "p", 0, r"#-\31  > p", id="escaped-id-dash-digit"),
+        pytest.param('<body><div id="-."><p>x</p></div></body>', "p", 0, r"#-\. > p", id="escaped-id-dash-dot"),
+        pytest.param('<body><div id="-"><p>x</p></div></body>', "p", 0, r"#\- > p", id="escaped-id-lone-dash"),
+        pytest.param('<body><div id="-x"><p>x</p></div></body>', "p", 0, "#-x > p", id="id-dash-letter"),
+        pytest.param('<body><div id="😀"><p>x</p></div></body>', "p", 0, "#😀 > p", id="id-astral"),
+        pytest.param('<body><div id="a\x01b"><p>x</p></div></body>', "p", 0, r"#a\1 b > p", id="escaped-id-control"),
         pytest.param('<body><div id=""><p>x</p></div></body>', "p", 0, "html > body > div > p", id="unsafe-id-empty"),
         pytest.param("<body><div id><p>x</p></div></body>", "p", 0, "html > body > div > p", id="valueless-id"),
         pytest.param(
@@ -1008,6 +1010,97 @@ def _css_path(html: str, selector: str, index: int = 0) -> str:
 )
 def test_css_path(html: str, selector: str, index: int, expected: str) -> None:
     assert _css_path(html, selector, index) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "escaped"),
+    [
+        pytest.param("a.b", r"a\.b", id="class-delimiter"),
+        pytest.param("a#b", r"a\#b", id="id-delimiter"),
+        pytest.param("a:b", r"a\:b", id="pseudo-delimiter"),
+        pytest.param("a[b]", r"a\[b\]", id="attribute-delimiters"),
+        pytest.param("a+b", r"a\+b", id="sibling-combinator"),
+        pytest.param("a,b", r"a\,b", id="selector-separator"),
+        pytest.param("a\\b", r"a\\b", id="backslash"),
+        pytest.param("a\x01b", r"a\1 b", id="control-character"),
+        pytest.param("a\x7fb", r"a\7f b", id="delete-character"),
+    ],
+)
+def test_css_path_escapes_html_tag_name(name: str, escaped: str) -> None:
+    document = parse(f"<!doctype html><{name}>x</{name}>")
+    element = document.select("body > *")[0]
+    path = element.css_path()
+    assert (path, document.select(path)) == (f"html > body > {escaped}", [element])
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param('<r xmlns:p="urn:p"><p:b/></r>', r"r > p\:b", id="qualified-name"),
+        pytest.param("<r><a.b/></r>", r"r > a\.b", id="dotted-name"),
+        pytest.param('<r xmlns:p="urn:p"><p:b/><p:b/></r>', r"r > p\:b:nth-of-type(2)", id="qualified-siblings"),
+    ],
+)
+def test_css_path_escapes_xml_tag_name(source: str, expected: str) -> None:
+    document = parse_xml(source)
+    element = document.select("*")[-1]
+    path = element.css_path()
+    assert (path, document.select(path)) == (expected, [element])
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("1x", r"\31 x", id="leading-digit"),
+        pytest.param("-1x", r"-\31 x", id="digit-after-dash"),
+        pytest.param("-", r"\-", id="lone-dash"),
+        pytest.param("a1.b", r"a1\.b", id="digit-after-letter-in-escaped-tag"),
+        pytest.param("a.b1", r"a\.b1", id="digit-after-escape"),
+        pytest.param("-.", r"-\.", id="dash-punctuation"),
+        pytest.param("-x", "-x", id="dash-letter"),
+        pytest.param("a1", "a1", id="digit-after-letter"),
+        pytest.param("ab1", "ab1", id="digit-after-two-letters"),
+    ],
+)
+def test_css_path_escapes_constructed_tag_name(name: str, expected: str) -> None:
+    assert Element(name).css_path() == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("plain-tag", "plain-tag", id="plain"),
+        pytest.param("a.b", r"a\.b", id="escaped"),
+    ],
+)
+def test_css_path_reuses_tag_name_safety(name: str, expected: str) -> None:
+    element = Element(name)
+    assert (element.css_path(), element.css_path()) == (expected, expected)
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        pytest.param("a.b", "plain-tag", "plain-tag", id="escaped-to-plain"),
+        pytest.param("plain-tag", "a.b", r"a\.b", id="plain-to-escaped"),
+    ],
+)
+def test_css_path_reflects_renamed_tag(before: str, after: str, expected: str) -> None:
+    element = Element(before)
+    element.css_path()
+    element.tag = after
+    assert element.css_path() == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [pytest.param("a\x00b", id="null"), pytest.param("a\ud800b", id="surrogate")],
+)
+def test_css_path_does_not_anchor_unrepresentable_id(value: str) -> None:
+    document = parse("<p>x</p>")
+    element = document.select("p")[0]
+    element.attrs["id"] = value
+    assert element.css_path() == "html > body > p"
 
 
 def test_css_path_of_detached_element_is_its_tag() -> None:

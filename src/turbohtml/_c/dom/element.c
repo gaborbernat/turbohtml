@@ -2007,6 +2007,66 @@ static void path_puts(path_buf *buf, const char *ascii) {
     buf->len += len;
 }
 
+static void path_put_css_ident(path_buf *buf, const Py_UCS4 *text, Py_ssize_t len) {
+    Py_ssize_t start = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 code = text[index];
+        int digit = code >= '0' && code <= '9';
+        int hex_escape = code <= 0x1F || code == 0x7F || (digit && (index == 0 || (index == 1 && text[0] == '-')));
+        int slash_escape = !sel_is_ident(code) || (index == 0 && code == '-' && len == 1);
+        if (!hex_escape && !slash_escape) {
+            continue;
+        }
+        if (index > start) {
+            path_put_ucs4(buf, text + start, index - start);
+        }
+        if (hex_escape) {
+            char digits[8];
+            int count = 0;
+            do {
+                digits[count++] = "0123456789abcdef"[code & 15];
+                code >>= 4;
+            } while (code);
+            path_reserve(buf, count + 2);
+            if (!buf->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                buf->data[buf->len++] = '\\';
+                while (count > 0) {
+                    buf->data[buf->len++] = (Py_UCS4)digits[--count];
+                }
+                buf->data[buf->len++] = ' ';
+            }
+        } else {
+            path_reserve(buf, 2);
+            if (!buf->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                buf->data[buf->len++] = '\\';
+                buf->data[buf->len++] = code;
+            }
+        }
+        start = index + 1;
+    }
+    if (start < len) {
+        path_put_ucs4(buf, text + start, len - start);
+    }
+}
+
+static int path_css_ident_safe(const Py_UCS4 *text, Py_ssize_t len) {
+    if (len == 1 && text[0] == '-') {
+        return 0;
+    }
+    if (text[0] >= '0' && text[0] <= '9') {
+        return 0;
+    }
+    if (len > 1 && text[0] == '-' && text[1] >= '0' && text[1] <= '9') {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (!sel_is_ident(text[index])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Write a positive integer in decimal. */
 static void path_put_int(path_buf *buf, Py_ssize_t value) {
     char digits[20];
@@ -2024,17 +2084,18 @@ static void path_put_int(path_buf *buf, Py_ssize_t value) {
     }
 }
 
-/* Whether an id value is a bare CSS identifier the selector parser reads back
-   verbatim (every code point an identifier char), so #value round-trips with no
-   escaping. An empty value (a valueless id) never qualifies. */
-static int path_id_safe(const Py_UCS4 *value, Py_ssize_t len) {
+static int path_id_safe(const Py_UCS4 *value, Py_ssize_t len, int *escaped) {
     if (len == 0) {
         return 0;
     }
+    *escaped =
+        (value[0] >= '0' && value[0] <= '9') || (value[0] == '-' && (len == 1 || (value[1] >= '0' && value[1] <= '9')));
     for (Py_ssize_t index = 0; index < len; index++) {
-        if (!sel_is_ident(value[index])) {
+        /* CSS input preprocessing replaces these code points, so the selector would name a different ID. */
+        if (value[index] == 0 || (value[index] >= 0xD800 && value[index] <= 0xDFFF)) {
             return 0;
         }
+        *escaped |= !sel_is_ident(value[index]);
     }
     return 1;
 }
@@ -2214,10 +2275,11 @@ TH_NODE_API(static, PyObject *, element_css_path, (PyObject * self, PyObject *ig
         int anchored = 0;
         for (Py_ssize_t index = 0; index < count; index++) {
             const th_node_attr *id = find_node_attr(chain[index], TH_ATTR_ID);
-            if (id != NULL && id->value != NULL && path_id_safe(id->value, id->value_len) && id_map != NULL &&
+            int escaped;
+            if (id != NULL && id->value != NULL && path_id_safe(id->value, id->value_len, &escaped) && id_map != NULL &&
                 path_id_unique(id_map, id->value, id->value_len)) {
                 top = index;
-                anchored = 1;
+                anchored = escaped ? 2 : 1;
                 break;
             }
         }
@@ -2229,9 +2291,24 @@ TH_NODE_API(static, PyObject *, element_css_path, (PyObject * self, PyObject *ig
             if (anchored && index == top) {
                 const th_node_attr *id = find_node_attr(element, TH_ATTR_ID);
                 path_puts(&buf, "#");
-                path_put_ucs4(&buf, id->value, id->value_len);
+                if (anchored == 2) {
+                    path_put_css_ident(&buf, id->value, id->value_len);
+                } else {
+                    path_put_ucs4(&buf, id->value, id->value_len);
+                }
             } else {
-                path_put_ucs4(&buf, element->text, element->text_len);
+                if (element->atom == TH_TAG_UNKNOWN && element->css_name_safety != 1) {
+                    if (element->css_name_safety == 0) {
+                        element->css_name_safety = path_css_ident_safe(element->text, element->text_len) ? 1 : 2;
+                    }
+                    if (element->css_name_safety == 2) {
+                        path_put_css_ident(&buf, element->text, element->text_len);
+                    } else {
+                        path_put_ucs4(&buf, element->text, element->text_len);
+                    }
+                } else {
+                    path_put_ucs4(&buf, element->text, element->text_len);
+                }
                 int needs_index;
                 int sibling_index = path_step_index(handle_obj, element, &needs_index);
                 if (sibling_index < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
