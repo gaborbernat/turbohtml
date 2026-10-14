@@ -707,6 +707,37 @@ static PyObject *css_slice_str(const Py_UCS4 *data, Py_ssize_t len) {
 }
 
 static PyObject *css_decoded_name(PyObject *name);
+static PyObject *css_property_name(const Py_UCS4 *data, Py_ssize_t len) {
+    if (len > 1 && data[0] == '-' && data[1] == '-') {
+        return css_slice_str(data, len);
+    }
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (data[index] >= 'A' && data[index] <= 'Z') {
+            goto lowercase;
+        }
+    }
+    return css_slice_str(data, len);
+
+lowercase:
+    {
+        Py_UCS4 maximum = 0;
+        for (Py_ssize_t index = 0; index < len; index++) {
+            if (data[index] > maximum) {
+                maximum = data[index];
+            }
+        }
+        PyObject *name = PyUnicode_New(len, maximum);
+        if (name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return NULL;    /* GCOVR_EXCL_LINE */
+        }
+        for (Py_ssize_t index = 0; index < len; index++) {
+            Py_UCS4 point = data[index];
+            PyUnicode_WRITE(PyUnicode_KIND(name), PyUnicode_DATA(name), index,
+                            point >= 'A' && point <= 'Z' ? point + ('a' - 'A') : point);
+        }
+        return name;
+    }
+}
 
 /* Build the ((name, value, important), ...) tuple for a parsed declaration list. */
 static PyObject *css_decls_to_tuple(const css_decl *decls, Py_ssize_t count) {
@@ -715,30 +746,30 @@ static PyObject *css_decls_to_tuple(const css_decl *decls, Py_ssize_t count) {
         return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (Py_ssize_t index = 0; index < count; index++) {
-        PyObject *raw_name = css_slice_str(decls[index].name, decls[index].name_len);
-        PyObject *value = css_slice_str(decls[index].value, decls[index].value_len);
-        /* the whole triple must survive to be stored; any half-built member is freed here */
-        if (raw_name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
-            Py_XDECREF(raw_name);                /* GCOVR_EXCL_LINE: allocation-failure path */
-            Py_XDECREF(value);                   /* GCOVR_EXCL_LINE: allocation-failure path */
-            Py_DECREF(result);                   /* GCOVR_EXCL_LINE: allocation-failure path */
-            return NULL;                         /* GCOVR_EXCL_LINE: allocation-failure path */
+        PyObject *raw_name = decls[index].escaped_name ? css_slice_str(decls[index].name, decls[index].name_len) : NULL;
+        if (decls[index].escaped_name && raw_name == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            Py_DECREF(result);                               /* GCOVR_EXCL_LINE */
+            return NULL;                                     /* GCOVR_EXCL_LINE */
         }
-        PyObject *triple;
+        PyObject *name;
         if (decls[index].escaped_name) {
-            PyObject *name = css_decoded_name(raw_name);
-            if (name == NULL) {      /* GCOVR_EXCL_BR_LINE: allocation failure */
-                Py_DECREF(raw_name); /* GCOVR_EXCL_LINE */
-                Py_DECREF(value);    /* GCOVR_EXCL_LINE */
-                Py_DECREF(result);   /* GCOVR_EXCL_LINE */
-                return NULL;         /* GCOVR_EXCL_LINE */
-            }
-            triple = PyTuple_Pack(4, name, value, decls[index].important ? Py_True : Py_False, raw_name);
-            Py_DECREF(name);
+            name = css_decoded_name(raw_name);
         } else {
-            triple = PyTuple_Pack(3, raw_name, value, decls[index].important ? Py_True : Py_False);
+            name = css_property_name(decls[index].name, decls[index].name_len);
         }
-        Py_DECREF(raw_name);
+        PyObject *value = css_slice_str(decls[index].value, decls[index].value_len);
+        if (name == NULL || value == NULL) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
+            Py_XDECREF(raw_name);            /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(name);                /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_XDECREF(value);               /* GCOVR_EXCL_LINE: allocation-failure path */
+            Py_DECREF(result);               /* GCOVR_EXCL_LINE: allocation-failure path */
+            return NULL;                     /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyObject *triple = raw_name == NULL
+                               ? PyTuple_Pack(3, name, value, decls[index].important ? Py_True : Py_False)
+                               : PyTuple_Pack(4, name, value, decls[index].important ? Py_True : Py_False, raw_name);
+        Py_XDECREF(raw_name);
+        Py_DECREF(name);
         Py_DECREF(value);
         if (triple == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             Py_DECREF(result); /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -768,8 +799,6 @@ static int css_declaration_items(PyObject *items) {
     return 0;
 }
 
-/* _css_declaration_index(items) -> {name: index}: the winning declaration of each property, a later duplicate
-   winning the way the cascade resolves it, keyed in first-seen order so iteration visits each property once. */
 static PyObject *css_decoded_name(PyObject *name) {
     Py_ssize_t length = PyUnicode_GET_LENGTH(name);
     Py_UCS4 *decoded = PyUnicode_AsUCS4Copy(name);
@@ -777,11 +806,12 @@ static PyObject *css_decoded_name(PyObject *name) {
         return NULL;       /* GCOVR_EXCL_LINE */
     }
     css_unescape_name(decoded, &length);
-    PyObject *result = css_slice_str(decoded, length);
+    PyObject *result = css_property_name(decoded, length);
     PyMem_Free(decoded);
     return result;
 }
 
+/* _css_declaration_index(items) -> {name: index}: important declarations win over normal duplicates. */
 PyObject *turbohtml_css_declaration_index(PyObject *Py_UNUSED(module), PyObject *items) {
     if (css_declaration_items(items) < 0) {
         return NULL;
@@ -791,16 +821,41 @@ PyObject *turbohtml_css_declaration_index(PyObject *Py_UNUSED(module), PyObject 
         return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(items); index++) {
+        PyObject *triple = PyTuple_GET_ITEM(items, index);
+        PyObject *name = PyTuple_GET_ITEM(triple, 0);
         PyObject *position = PyLong_FromSsize_t(index);
         if (position == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             Py_DECREF(index_of); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;         /* GCOVR_EXCL_LINE */
         }
-        int stored = PyDict_SetItem(index_of, PyTuple_GET_ITEM(PyTuple_GET_ITEM(items, index), 0), position);
+        int stored = PyDict_SetItem(index_of, name, position);
         Py_DECREF(position);
         if (stored < 0) {        /* GCOVR_EXCL_BR_LINE: a str-keyed insert only fails on allocation failure */
             Py_DECREF(index_of); /* GCOVR_EXCL_LINE: allocation-failure path */
             return NULL;         /* GCOVR_EXCL_LINE */
+        }
+    }
+    if (PyDict_Size(index_of) < PyTuple_GET_SIZE(items)) {
+        for (Py_ssize_t index = 0; index < PyTuple_GET_SIZE(items); index++) {
+            PyObject *triple = PyTuple_GET_ITEM(items, index);
+            if (PyTuple_GET_ITEM(triple, 2) != Py_True) {
+                continue;
+            }
+            PyObject *name = PyTuple_GET_ITEM(triple, 0);
+            if (PyLong_AsSsize_t(PyDict_GetItem(index_of, name)) == index) {
+                continue;
+            }
+            PyObject *position = PyLong_FromSsize_t(index);
+            if (position == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+                Py_DECREF(index_of); /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            int stored = PyDict_SetItem(index_of, name, position);
+            Py_DECREF(position);
+            if (stored < 0) {        /* GCOVR_EXCL_BR_LINE: allocation failure */
+                Py_DECREF(index_of); /* GCOVR_EXCL_LINE: allocation-failure path */
+                return NULL;         /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
         }
     }
     return index_of;
