@@ -414,9 +414,12 @@ typedef struct {
     Py_ssize_t name_len;
     const Py_UCS4 *value;
     Py_ssize_t value_len;
-    int important;
-    int escaped_name;
+    unsigned char important;
+    unsigned char escaped_name;
+    unsigned char mixed_wide;
 } css_decl;
+
+static int css_mixed_wide_keyword(const Py_UCS4 *value, Py_ssize_t len);
 
 /* Trim leading and trailing whitespace from a slice in place. */
 static void css_trim(const Py_UCS4 **data, Py_ssize_t *len) {
@@ -632,7 +635,13 @@ static Py_ssize_t css_parse_block(Py_UCS4 *data, Py_ssize_t start, Py_ssize_t en
                     *out = bigger;
                     *capacity = grown;
                 }
-                (*out)[count++] = (css_decl){name, name_len, value, value_len, important, !decode_names && escaped};
+                (*out)[count++] = (css_decl){name,
+                                             name_len,
+                                             value,
+                                             value_len,
+                                             important,
+                                             !decode_names && escaped,
+                                             decode_names && css_mixed_wide_keyword(value, value_len)};
             }
         }
         pos = semi + 1;
@@ -1226,6 +1235,79 @@ static int css_apply_box(css_slot slots[NUM_PROPS], const css_decl *decl, const 
     return 0;
 }
 
+static int css_mixed_wide_keyword(const Py_UCS4 *value, Py_ssize_t len) {
+    if (len < 5) {
+        return 0;
+    }
+    int candidate = 0;
+    for (Py_ssize_t pos = 0; pos + 2 < len; pos++) {
+        Py_UCS4 first = value[pos] | 32;
+        if (first != 'i' && first != 'r' && first != 'u') {
+            continue;
+        }
+        Py_UCS4 second = value[pos + 1] | 32;
+        Py_UCS4 third = value[pos + 2] | 32;
+        if ((first == 'i' && second == 'n' && (third == 'h' || third == 'i')) ||
+            (first == 'r' && second == 'e' && third == 'v') || (first == 'u' && second == 'n' && third == 's')) {
+            candidate = 1;
+            break;
+        }
+    }
+    if (!candidate) {
+        return 0;
+    }
+    Py_UCS4 quote = 0;
+    int depth = 0;
+    for (Py_ssize_t pos = 0; pos < len; pos++) {
+        Py_UCS4 ch = value[pos];
+        if (ch == '\\' && pos + 1 < len) { /* GCOVR_EXCL_BR_LINE: a terminal escape cannot precede a keyword */
+            pos++;
+            continue;
+        }
+        if (quote != 0) {
+            if (ch == quote) {
+                quote = 0;
+            }
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            quote = ch;
+            continue;
+        }
+        if (ch == '(') {
+            depth++;
+            continue;
+        }
+        if (ch == ')' && depth > 0) {
+            depth--;
+            continue;
+        }
+        Py_UCS4 first = css_lower(ch);
+        if (depth > 0 || (first != 'i' && first != 'r' && first != 'u')) {
+            continue;
+        }
+        if (pos > 0) {
+            Py_UCS4 previous = value[pos - 1];
+            if ((previous >= 'a' && previous <= 'z') || (previous >= 'A' && previous <= 'Z') ||
+                (previous >= '0' && previous <= '9') || previous == '-' || previous == '_' || previous >= 128) {
+                continue;
+            }
+        }
+        Py_ssize_t stop = pos + 1;
+        while (stop < len &&
+               ((value[stop] >= 'a' && value[stop] <= 'z') || (value[stop] >= 'A' && value[stop] <= 'Z') ||
+                (value[stop] >= '0' && value[stop] <= '9') || value[stop] == '-' || value[stop] == '_' ||
+                value[stop] >= 128)) {
+            stop++;
+        }
+        if (css_wide_keyword(value + pos, stop - pos)) {
+            return pos != 0 || stop != len;
+        }
+        pos = stop - 1;
+    }
+    return 0;
+}
+
 /* Feed one declaration into the cascade slots, expanding a shorthand across its
    longhands. Every candidate for one declaration shares an order stamp. */
 static void css_apply_decl(css_slot slots[NUM_PROPS], const css_decl *decl, int inline_style, int spec_a, int spec_b,
@@ -1243,6 +1325,9 @@ static void css_apply_decl(css_slot slots[NUM_PROPS], const css_decl *decl, int 
     }
     int direct = css_prop_id(decl->name, decl->name_len);
     if (direct >= 0) {
+        if (decl->mixed_wide) {
+            return;
+        }
         css_set_slot(slots, direct, decl->value, decl->value_len, &rank);
         return;
     }
