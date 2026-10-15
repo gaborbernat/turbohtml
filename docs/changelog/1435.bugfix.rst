@@ -1,1 +1,0 @@
-Preserve invalid background declarations and both background-size components during CSS minification.

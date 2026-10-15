@@ -1,1 +1,0 @@
-Reject malformed and misplaced XML Schema regex quantifiers, including unescaped braces.

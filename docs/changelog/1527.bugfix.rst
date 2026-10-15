@@ -1,1 +1,0 @@
-Preserve HSL colors with saturation above 100% when minifying CSS.

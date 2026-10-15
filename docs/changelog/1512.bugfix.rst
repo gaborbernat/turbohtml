@@ -1,1 +1,0 @@
-Ignore non-CSS ``<style>`` blocks when resolving computed styles, with case-sensitive type matching for SVG.

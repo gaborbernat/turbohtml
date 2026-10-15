@@ -1,1 +1,0 @@
-Omit ancestor ``xml:*`` attributes when exclusively canonicalizing XML or HTML subtrees.

@@ -1,1 +1,0 @@
-Match XML Schema regex ``\d`` and ``\D`` against Unicode decimal digits rather than ASCII digits alone.

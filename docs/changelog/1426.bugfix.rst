@@ -1,1 +1,0 @@
-Raise ``MemoryError`` when XPath or XSLT runs out of memory instead of reporting malformed input or returning a result.

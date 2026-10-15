@@ -1,1 +1,0 @@
-Preserve valid CSS longhands when another longhand cannot form a valid shorthand.

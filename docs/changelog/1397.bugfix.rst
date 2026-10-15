@@ -1,1 +1,0 @@
-Restore the empty XML namespace for HTML elements nested under SVG or MathML.

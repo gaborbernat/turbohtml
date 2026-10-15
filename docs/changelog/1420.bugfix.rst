@@ -1,1 +1,0 @@
-Percent-encode brackets in URL userinfo when resolving document base URLs.

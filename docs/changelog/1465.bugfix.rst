@@ -1,1 +1,0 @@
-Reject unmatched XML Schema regex parentheses instead of accepting partial patterns.

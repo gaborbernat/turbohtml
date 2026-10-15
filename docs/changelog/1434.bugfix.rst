@@ -1,1 +1,0 @@
-Keep CSS shorthand merges on one side of nested rules, and drop fallback fragments when resolving empty HTML base URLs.

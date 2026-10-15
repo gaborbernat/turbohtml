@@ -1,1 +1,0 @@
-Order RSS 1.0 entries by the channel's RDF sequence when present.

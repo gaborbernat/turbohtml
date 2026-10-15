@@ -1,1 +1,0 @@
-Read Atom feed and entry fields when the Atom namespace uses a prefix.

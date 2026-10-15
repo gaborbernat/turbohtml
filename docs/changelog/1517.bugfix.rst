@@ -1,1 +1,0 @@
-Expand RDFa CURIE and SafeCURIE values in ``about`` and ``resource`` attributes.

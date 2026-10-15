@@ -1,1 +1,0 @@
-Preserve RGB channels in fully transparent hexadecimal CSS colors.

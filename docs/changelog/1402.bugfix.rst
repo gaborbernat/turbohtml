@@ -1,1 +1,0 @@
-Reject relative namespace URIs during XML canonicalization.

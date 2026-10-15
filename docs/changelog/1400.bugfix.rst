@@ -1,1 +1,0 @@
-Omit invalid Unicode attribute names from XML serialization.

@@ -1,1 +1,0 @@
-Keep commas inside `srcset` and `imagesrcset` URLs when finding, rewriting, and checking image candidates.

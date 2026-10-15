@@ -1,1 +1,0 @@
-Resolve or reject special URL hosts before shortening paths after extra authority slashes.

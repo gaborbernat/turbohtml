@@ -1,1 +1,0 @@
-Reject extra host text after a bracketed IPv6 address.

@@ -1,1 +1,0 @@
-Respect the feed's default namespace when inheriting an Atom author.

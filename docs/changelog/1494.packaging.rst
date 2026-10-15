@@ -1,1 +1,0 @@
-Allow GCC 16 to build CSS path escaping with ``-Werror``.

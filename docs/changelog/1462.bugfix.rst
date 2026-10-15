@@ -1,1 +1,0 @@
-Reject reversed XML Schema regex character ranges and multi-character range endpoints.

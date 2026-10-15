@@ -1,1 +1,0 @@
-Ignore longhand declarations that mix CSS-wide keywords with other value tokens, preserving earlier valid values.

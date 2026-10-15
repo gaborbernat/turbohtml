@@ -1,1 +1,0 @@
-Require XML whitespace around doctype external identifiers.
