@@ -531,13 +531,16 @@ def test_feed_rss_without_channel_is_empty() -> None:
 
 
 def test_feed_atom_self_link_is_not_permalink() -> None:
-    result = parse_feed('<feed><title>t</title><link href="http://example.com/self" rel="self"/></feed>')
+    result = parse_feed(
+        '<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title>'
+        '<link href="http://example.com/self" rel="self"/></feed>'
+    )
     assert result.link is None
 
 
 def test_feed_atom_two_secondary_links_no_permalink() -> None:
     xml = (
-        "<feed><title>t</title>"
+        '<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title>'
         '<link href="http://example.com/a" rel="self"/>'
         '<link href="http://example.com/b" rel="edit"/></feed>'
     )
@@ -545,12 +548,16 @@ def test_feed_atom_two_secondary_links_no_permalink() -> None:
 
 
 def test_feed_atom_link_without_rel_is_alternate() -> None:
-    result = parse_feed('<feed><title>t</title><link href="http://example.com/x"/></feed>')
+    result = parse_feed(
+        '<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><link href="http://example.com/x"/></feed>'
+    )
     assert result.link == "http://example.com/x"
 
 
 def test_feed_atom_link_valueless_rel_is_not_alternate() -> None:
-    result = parse_feed('<feed><title>t</title><link href="http://example.com/x" rel/></feed>')
+    result = parse_feed(
+        '<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><link href="http://example.com/x" rel/></feed>'
+    )
     assert result.link is None
 
 
@@ -656,12 +663,16 @@ def test_feed_rss_author_without_name_uses_own_text() -> None:
 
 
 def test_feed_atom_id_without_guid() -> None:
-    result = parse_feed("<feed><title>t</title><entry><title>e</title><id>urn:only-id</id></entry></feed>")
+    result = parse_feed(
+        '<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><entry><title>e</title><id>urn:only-id</id></entry></feed>'
+    )
     assert result.entries[0].id == "urn:only-id"
 
 
 def test_feed_entry_without_any_id_is_none() -> None:
-    result = parse_feed("<feed><title>t</title><entry><title>e</title></entry></feed>")
+    result = parse_feed(
+        '<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><entry><title>e</title></entry></feed>'
+    )
     assert result.entries[0].id is None
 
 
@@ -867,7 +878,10 @@ def test_feed_atom_nested_xml_bases_resolve_links() -> None:
 
 
 def test_feed_atom_link_xml_base_overrides_parent() -> None:
-    xml = '<feed xml:base="https://example.org/a/"><link xml:base="https://cdn.example/b/" href="c"/></feed>'
+    xml = (
+        '<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://example.org/a/">'
+        '<link xml:base="https://cdn.example/b/" href="c"/></feed>'
+    )
     assert parse_feed(xml).link == "https://cdn.example/b/c"
 
 
@@ -887,7 +901,7 @@ def test_feed_rdf_xml_base_resolves_link_text() -> None:
 
 
 def test_feed_atom_relative_xml_base_keeps_relative_link() -> None:
-    xml = '<feed xml:base="../a/"><link href="b"/></feed>'
+    xml = '<feed xmlns="http://www.w3.org/2005/Atom" xml:base="../a/"><link href="b"/></feed>'
     assert parse_feed(xml).link == "a/b"
 
 
@@ -901,7 +915,7 @@ def test_feed_atom_relative_xml_base_keeps_relative_link() -> None:
     ],
 )
 def test_feed_xml_base_respects_reference_schemes(href: str, expected: str) -> None:
-    xml = f'<feed xml:base="https://example.org/a/"><link href="{href}"/></feed>'
+    xml = f'<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://example.org/a/"><link href="{href}"/></feed>'
     assert parse_feed(xml).link == expected
 
 
