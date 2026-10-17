@@ -520,6 +520,19 @@ def test_computed_style_allocation_failure_raises_memory_error(alloc_sweep: Call
 @pytest.mark.fuzz_build
 @pytest.mark.parametrize(
     "call",
+    [pytest.param(lambda node: node.data, id="data"), pytest.param(lambda node: node.text, id="text")],
+)
+def test_text_access_allocation_failure_raises_memory_error(
+    alloc_sweep: Callable[..., list[str]], call: Callable[[turbohtml.Text], object]
+) -> None:
+    assert set(alloc_sweep(call, lambda: cast("turbohtml.Text", turbohtml.parse_fragment("a" * 8192).children[0]))) == {
+        "MemoryError"
+    }
+
+
+@pytest.mark.fuzz_build
+@pytest.mark.parametrize(
+    "call",
     [
         pytest.param(lambda node: node.inner_html, id="inner-html"),
         pytest.param(lambda node: node.inner_xml, id="inner-xml"),

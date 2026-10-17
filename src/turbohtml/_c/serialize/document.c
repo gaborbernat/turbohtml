@@ -846,7 +846,12 @@ Py_UCS4 *th_node_data(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
         return NULL;   /* GCOVR_EXCL_LINE: allocation-failure path */
     }
     if (len) {
-        memcpy(out, need_text(tree, node), (size_t)len * sizeof(Py_UCS4));
+        const Py_UCS4 *text = need_text(tree, node);
+        if (text == NULL) {
+            PyMem_Free(out);
+            return NULL;
+        }
+        memcpy(out, text, (size_t)len * sizeof(Py_UCS4));
     }
     return out;
 }
