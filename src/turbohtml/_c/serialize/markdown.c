@@ -2806,10 +2806,10 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
             (child->first_child == NULL || child->first_child->type == TH_NODE_ELEMENT)) {
             int lead = md_run_lead(ctx, child, atom);
             if (lead != MD_LEAD_INLINE) {
-                md_render_inline(ctx, child);
                 /* inline content after a wrapper that wrote anything continues the line it
                    ended on, or the block a closing inner block leaves owed */
                 *in_run = lead != MD_LEAD_NOTHING;
+                md_render_inline(ctx, child);
                 return;
             }
         }
