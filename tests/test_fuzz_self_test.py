@@ -35,6 +35,7 @@ from turbohtml.clean import (
     minify_css_inline,
     minify_js,
 )
+from turbohtml.extract import normalize_url
 from turbohtml.migration.stdlib import HTMLParser
 from turbohtml.rewrite import rewrite
 from turbohtml.transform import Transform
@@ -493,6 +494,16 @@ def test_xslt_number_allocation_failure_raises_memory_error(alloc_sweep: Callabl
         "</xsl:stylesheet>"
     )
     assert set(alloc_sweep(Transform(stylesheet), lambda: parse_xml("<r><p/><p/></r>"))) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+def test_url_normalization_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
+    assert set(alloc_sweep(lambda _: normalize_url("http://example.com/a"))) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+def test_foreign_attributes_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
+    assert set(alloc_sweep(lambda _: parse("<svg viewbox='0 0 1 1' data-custom='x'></svg>"))) == {"MemoryError"}
 
 
 if TYPE_CHECKING:

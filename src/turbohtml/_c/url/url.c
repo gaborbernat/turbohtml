@@ -2210,13 +2210,19 @@ static PyObject *encode_component(PyObject *text, int set_id, int special_path) 
     if (encoded != NULL) {
         return encoded;
     }
+    if (!PyErr_ExceptionMatches(PyExc_UnicodeEncodeError)) {
+        return NULL;
+    }
     PyObject *type;
     PyObject *value;
     PyObject *traceback;
     PyErr_Fetch(&type, &value, &traceback);
     PyErr_NormalizeException(&type, &value, &traceback);
     PyObject *reason = PyObject_GetAttrString(value, "reason"); /* UnicodeEncodeError always carries a reason str */
-    PyErr_Format(PyExc_ValueError, "URL component %R has a character that cannot be percent-encoded: %U", text, reason);
+    if (reason != NULL) {
+        PyErr_Format(PyExc_ValueError, "URL component %R has a character that cannot be percent-encoded: %U", text,
+                     reason);
+    }
     Py_XDECREF(reason);
     Py_DECREF(type);
     Py_DECREF(value);
