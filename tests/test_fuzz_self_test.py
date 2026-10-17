@@ -513,6 +513,8 @@ def test_foreign_attributes_allocation_failure_raises_memory_error(alloc_sweep: 
         pytest.param(lambda node: node.inner_html, id="inner-html"),
         pytest.param(lambda node: node.inner_xml, id="inner-xml"),
         pytest.param(lambda node: node.serialize(), id="serialize"),
+        pytest.param(lambda node: node.to_markdown(), id="markdown"),
+        pytest.param(lambda node: node.to_text(), id="text"),
     ],
 )
 def test_lazy_text_serialization_allocation_failure_raises_memory_error(
