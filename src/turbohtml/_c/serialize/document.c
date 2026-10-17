@@ -397,9 +397,9 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         /* a CDATA section is a Text node, so its escaped text is the one HTML form that holds a ">" */
         TH_FALLTHROUGH;
     case TH_NODE_TEXT:
-        if (need_text(tree, node) == NULL && node->text_len > 0) {
-            out->failed = 1;
-            return NULL;
+        if (need_text(tree, node) == NULL && node->text_len > 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+            out->failed = 1;                                       /* GCOVR_EXCL_LINE: allocation failure */
+            return NULL;                                           /* GCOVR_EXCL_LINE: allocation failure */
         }
         if (opts->xml) {
             sbuf_put_xml_text(out, node->text, node->text_len, 0);
@@ -847,9 +847,9 @@ Py_UCS4 *th_node_data(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     }
     if (len) {
         const Py_UCS4 *text = need_text(tree, node);
-        if (text == NULL) {
-            PyMem_Free(out);
-            return NULL;
+        if (text == NULL) {  /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+            PyMem_Free(out); /* GCOVR_EXCL_LINE: allocation failure */
+            return NULL;     /* GCOVR_EXCL_LINE: allocation failure */
         }
         memcpy(out, text, (size_t)len * sizeof(Py_UCS4));
     }

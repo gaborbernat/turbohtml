@@ -858,9 +858,9 @@ static inline int md_non_ascii_space(Py_UCS4 ch) {
 }
 
 static void md_emit_text(md_ctx *ctx, th_node *node, const Py_UCS4 *text, Py_ssize_t len) {
-    if (text == NULL && len > 0) {
-        ctx->out.failed = 1;
-        return;
+    if (text == NULL && len > 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+        ctx->out.failed = 1;       /* GCOVR_EXCL_LINE: allocation failure */
+        return;                    /* GCOVR_EXCL_LINE: allocation failure */
     }
     if (ctx->line_number_start > 0 && !ctx->space_pending && ctx->pending == NULL) {
         Py_ssize_t start = ctx->line_number_start - 1;
@@ -2787,9 +2787,9 @@ static inline void md_block_child(md_ctx *ctx, th_node *child, int *in_run) {
         int only_ws = child->type == TH_NODE_TEXT;
         if (only_ws) {
             const Py_UCS4 *text = need_text(ctx->tree, child);
-            if (text == NULL && child->text_len > 0) {
-                ctx->out.failed = 1;
-                return;
+            if (text == NULL && child->text_len > 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+                ctx->out.failed = 1;                   /* GCOVR_EXCL_LINE: allocation failure */
+                return;                                /* GCOVR_EXCL_LINE: allocation failure */
             }
             for (Py_ssize_t index = 0; index < child->text_len; index++) {
                 if (!is_space(text[index])) {
@@ -4410,7 +4410,7 @@ static void md_leave(md_ctx *ctx) {
    nesting depth. The next child is read only once the previous one is done, as a
    recursive walk would, so a converter that edits the tree sees the same walk. */
 static void md_run(md_ctx *ctx) {
-    while (ctx->frame_count > 0 && !ctx->tree->failed) {
+    while (ctx->frame_count > 0 && !ctx->tree->failed) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
         md_frame *frame = &ctx->frames[ctx->frame_count - 1];
         th_node *child = NULL;
         if (frame->walk == MD_WALK_TABLE) {
@@ -4421,19 +4421,19 @@ static void md_run(md_ctx *ctx) {
             child = frame->child == NULL ? frame->node->first_child : frame->child->next_sibling;
             /* text lays out without running Python or pushing a frame, so a run of it renders in place */
             if (frame->walk == MD_WALK_INLINE) {
-                for (; child != NULL && child->type == TH_NODE_TEXT && !ctx->tree->failed;
+                for (; child != NULL && child->type == TH_NODE_TEXT && !ctx->tree->failed; /* GCOVR_EXCL_BR_LINE: OOM */
                      child = child->next_sibling) {
                     md_emit_text(ctx, child, need_text(ctx->tree, child), child->text_len);
                 }
             } else if (frame->walk == MD_WALK_BLOCK) {
-                for (; child != NULL && child->type == TH_NODE_TEXT && !ctx->tree->failed;
+                for (; child != NULL && child->type == TH_NODE_TEXT && !ctx->tree->failed; /* GCOVR_EXCL_BR_LINE: OOM */
                      child = child->next_sibling) {
                     md_block_child(ctx, child, &frame->in_run);
                 }
             }
         }
-        if (ctx->tree->failed) {
-            break;
+        if (ctx->tree->failed) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+            break;               /* GCOVR_EXCL_LINE: allocation failure */
         }
         if (child == NULL) {
             md_leave(ctx);
