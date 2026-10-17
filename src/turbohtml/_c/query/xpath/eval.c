@@ -1287,7 +1287,8 @@ static int eval_path_step_inner(const xp_program *prog, const xn *step, const st
         }
 #endif
         if (step->first >= 0) {
-            xp_nodeset slice = {following->items + before, following->len - before, 0, following->snapshots};
+            xp_nodeset slice = {following->items == NULL ? NULL : following->items + before, following->len - before, 0,
+                                following->snapshots};
             int rc;
             if (accepted != NULL) {
                 *accepted = *following;
