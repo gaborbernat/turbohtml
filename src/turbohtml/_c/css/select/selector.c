@@ -1054,6 +1054,9 @@ int sel_parse_alts(sel_parser *parser, sel_complex **out_alts, int *out_count, i
 }
 
 void selector_free(sel_compiled *compiled) {
+    if (compiled == NULL) {
+        return;
+    }
     sel_free_alts(compiled->alts, compiled->count);
     PyMem_Free(compiled->source);
     PyMem_Free(compiled);

@@ -35,6 +35,7 @@ from turbohtml.clean import (
     minify_css_inline,
     minify_js,
 )
+from turbohtml.cssom import computed_style
 from turbohtml.extract import normalize_url
 from turbohtml.migration.stdlib import HTMLParser
 from turbohtml.rewrite import rewrite
@@ -504,6 +505,16 @@ def test_url_normalization_allocation_failure_raises_memory_error(alloc_sweep: C
 @pytest.mark.fuzz_build
 def test_foreign_attributes_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
     assert set(alloc_sweep(lambda _: parse("<svg viewbox='0 0 1 1' data-custom='x'></svg>"))) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+def test_computed_style_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
+    def setup() -> turbohtml.Element:
+        return cast(
+            "turbohtml.Element", parse("<style>:unknown{color:red}p{color:blue}</style><p>x</p>").select_one("p")
+        )
+
+    assert set(alloc_sweep(computed_style, setup)) == {"MemoryError"}
 
 
 @pytest.mark.fuzz_build

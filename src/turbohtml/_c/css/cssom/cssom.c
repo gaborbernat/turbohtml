@@ -1630,6 +1630,15 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
             compiled[rule] = selector_compile(state->selector_error, tree, selector);
             Py_DECREF(selector);
             if (compiled[rule] == NULL) {
+                if (!PyErr_ExceptionMatches(state->selector_error)) {
+                    for (Py_ssize_t done = 0; done < rule; done++) {
+                        selector_free(compiled[done]);
+                    }
+                    PyMem_Free(compiled);
+                    css_free_rules(rules, rule_count);
+                    PyMem_Free(clean);
+                    goto fail;
+                }
                 /* an unsupported or invalid selector list drops its rule (it matches nothing) */
                 PyErr_Clear();
             } else {
