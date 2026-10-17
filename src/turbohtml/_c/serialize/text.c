@@ -193,6 +193,10 @@ static void text_emit_word(text_ctx *ctx, const Py_UCS4 *word, Py_ssize_t len) {
 
 /* Emit inline text with normal-flow whitespace collapsing (no escaping). */
 static void text_emit_text(text_ctx *ctx, const Py_UCS4 *text, Py_ssize_t len) {
+    if (text == NULL && len > 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+        ctx->out.failed = 1;       /* GCOVR_EXCL_LINE: allocation failure */
+        return;                    /* GCOVR_EXCL_LINE: allocation failure */
+    }
     Py_ssize_t pos = 0;
     while (pos < len) {
         if (is_space(text[pos])) {
@@ -576,6 +580,10 @@ static inline void text_block_child(text_ctx *ctx, text_frame *frame, th_node *c
         int only_ws = child->type == TH_NODE_TEXT;
         if (only_ws) {
             const Py_UCS4 *text = need_text(ctx->tree, child);
+            if (text == NULL && child->text_len > 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+                ctx->out.failed = 1;                   /* GCOVR_EXCL_LINE: allocation failure */
+                return;                                /* GCOVR_EXCL_LINE: allocation failure */
+            }
             for (Py_ssize_t index = 0; index < child->text_len; index++) {
                 if (!is_space(text[index])) {
                     only_ws = 0;
@@ -984,7 +992,7 @@ static void text_leave(text_ctx *ctx) {
    nesting depth. The next child is read only once the previous one is done, as a
    recursive walk would. */
 static void text_run(text_ctx *ctx) {
-    while (ctx->frame_count > 0) {
+    while (ctx->frame_count > 0 && !ctx->tree->failed) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
         text_frame *frame = &ctx->frames[ctx->frame_count - 1];
         th_node *child = NULL;
         if (frame->walk == TEXT_WALK_TABLE) {
@@ -995,14 +1003,19 @@ static void text_run(text_ctx *ctx) {
             child = frame->child == NULL ? frame->node->first_child : frame->child->next_sibling;
             /* text lays out without pushing a frame, so a run of it renders in place */
             if (frame->walk == TEXT_WALK_INLINE) {
-                for (; child != NULL && child->type == TH_NODE_TEXT; child = child->next_sibling) {
+                for (; child != NULL && child->type == TH_NODE_TEXT && !ctx->tree->failed; /* GCOVR_EXCL_BR_LINE: OOM */
+                     child = child->next_sibling) {
                     text_emit_text(ctx, need_text(ctx->tree, child), child->text_len);
                 }
             } else if (frame->walk == TEXT_WALK_BLOCK) {
-                for (; child != NULL && child->type == TH_NODE_TEXT; child = child->next_sibling) {
+                for (; child != NULL && child->type == TH_NODE_TEXT && !ctx->tree->failed; /* GCOVR_EXCL_BR_LINE: OOM */
+                     child = child->next_sibling) {
                     text_block_child(ctx, frame, child);
                 }
             }
+        }
+        if (ctx->tree->failed) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+            break;               /* GCOVR_EXCL_LINE: allocation failure */
         }
         if (child == NULL) {
             text_leave(ctx);
@@ -1059,7 +1072,7 @@ static void text_render_root(text_ctx *ctx, th_node *node) {
         PyMem_Free(ctx->frames);
     }
     text_flush_references(ctx);
-    ctx->out.failed |= ctx->failed;
+    ctx->out.failed |= ctx->failed | ctx->tree->failed;
 }
 
 Py_UCS4 *th_node_layout_text(th_tree *tree, th_node *node, const text_opts *opt, Py_ssize_t *out_len) {

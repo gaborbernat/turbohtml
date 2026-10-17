@@ -35,6 +35,8 @@ from turbohtml.clean import (
     minify_css_inline,
     minify_js,
 )
+from turbohtml.cssom import computed_style
+from turbohtml.extract import normalize_url
 from turbohtml.migration.stdlib import HTMLParser
 from turbohtml.rewrite import rewrite
 from turbohtml.transform import Transform
@@ -493,6 +495,58 @@ def test_xslt_number_allocation_failure_raises_memory_error(alloc_sweep: Callabl
         "</xsl:stylesheet>"
     )
     assert set(alloc_sweep(Transform(stylesheet), lambda: parse_xml("<r><p/><p/></r>"))) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+def test_url_normalization_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
+    assert set(alloc_sweep(lambda _: normalize_url("http://example.com/a"))) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+def test_foreign_attributes_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
+    assert set(alloc_sweep(lambda _: parse("<svg viewbox='0 0 1 1' data-custom='x'></svg>"))) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+def test_computed_style_allocation_failure_raises_memory_error(alloc_sweep: Callable[..., list[str]]) -> None:
+    def setup() -> turbohtml.Element:
+        return cast(
+            "turbohtml.Element", parse("<style>:unknown{color:red}p{color:blue}</style><p>x</p>").select_one("p")
+        )
+
+    assert set(alloc_sweep(computed_style, setup)) == {"MemoryError"}
+
+
+@pytest.mark.fuzz_build
+@pytest.mark.parametrize(
+    "call",
+    [pytest.param(lambda node: node.data, id="data"), pytest.param(lambda node: node.text, id="text")],
+)
+def test_text_access_allocation_failure_raises_memory_error(
+    alloc_sweep: Callable[..., list[str]], call: Callable[[turbohtml.Text], object]
+) -> None:
+    assert set(alloc_sweep(call, lambda: cast("turbohtml.Text", turbohtml.parse_fragment("a" * 8192).children[0]))) == {
+        "MemoryError"
+    }
+
+
+@pytest.mark.fuzz_build
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda node: node.inner_html, id="inner-html"),
+        pytest.param(lambda node: node.inner_xml, id="inner-xml"),
+        pytest.param(lambda node: node.serialize(), id="serialize"),
+        pytest.param(lambda node: node.to_markdown(), id="markdown"),
+        pytest.param(lambda node: node.to_text(), id="text"),
+    ],
+)
+def test_lazy_text_serialization_allocation_failure_raises_memory_error(
+    alloc_sweep: Callable[..., list[str]], call: Callable[[turbohtml.Node], object]
+) -> None:
+    assert set(alloc_sweep(call, lambda: turbohtml.parse_fragment(f"<p>{'text' * 2048}</p>").children[0])) == {
+        "MemoryError"
+    }
 
 
 if TYPE_CHECKING:

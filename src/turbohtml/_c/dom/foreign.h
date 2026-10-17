@@ -268,6 +268,9 @@ static int is_foreign_breakout(uint16_t atom) {
 static th_node *insert_foreign(th_tree *tree, th_token *token, uint8_t ns) {
     token->self_closing_acknowledged = 1;
     th_node *node = insert_element(tree, token);
+    if (tree->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return node;    /* GCOVR_EXCL_LINE */
+    }
     node->ns = ns;
     /* HTML category flags do not transfer (an svg <tr> is not special); only
        the integration-point elements are in the spec's special category */
@@ -291,6 +294,9 @@ static th_node *insert_foreign(th_tree *tree, th_token *token, uint8_t ns) {
         const char *mixed = foreign_adjust_attr(name, name_len, ns);
         if (mixed != NULL) {
             node->attrs[index].name_atom = intern_attr_dynamic(tree, mixed, (Py_ssize_t)strlen(mixed));
+            if (tree->failed) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return node;    /* GCOVR_EXCL_LINE */
+            }
         }
     }
     if (ns == TH_NS_SVG && node->text != NULL) { /* GCOVR_EXCL_BR_LINE: an SVG element always has a tag name */

@@ -3073,8 +3073,8 @@ static int format_multi(xb *out, const Py_UCS4 *format, Py_ssize_t format_len, c
         ntok++;
     }
     static const Py_UCS4 one = '1';
-    if (xb_add(out, format + sep_start[0], sep_len[0]) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-        return -1;                                            /* GCOVR_EXCL_LINE */
+    if (sep_len[0] != 0 && xb_add(out, format + sep_start[0], sep_len[0]) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+        return -1;                                                               /* GCOVR_EXCL_LINE */
     }
     for (Py_ssize_t index = 0; index < nvalues; index++) {
         Py_ssize_t pick = index < ntok ? index : ntok - 1;
@@ -3773,7 +3773,7 @@ TH_NOINLINE static int emit_out_of_range_value(engine *eng, th_node *instruction
     /* GCOVR_EXCL_BR_START: allocation failure */
     if (xb_add(&buffer, format, token_start) < 0 ||
         emit_digits(&buffer, digits, digits_len, width, gsep, gsep_len, gsize) < 0 ||
-        xb_add(&buffer, format + suffix_start, format_len - suffix_start) < 0) {
+        (suffix_start < format_len && xb_add(&buffer, format + suffix_start, format_len - suffix_start) < 0)) {
         xb_free(&buffer);                  /* GCOVR_EXCL_LINE */
         return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
     }

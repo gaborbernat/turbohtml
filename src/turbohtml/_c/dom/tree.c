@@ -4646,6 +4646,9 @@ int th_tree_fragment_context_known(const char *context, Py_ssize_t context_len) 
 }
 
 void th_tree_free(th_tree *tree) {
+    if (tree == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure before tree creation */
+        return;         /* GCOVR_EXCL_LINE */
+    }
     arena_block *block = tree->arena;
     while (block != NULL) {
         arena_block *next = block->next;

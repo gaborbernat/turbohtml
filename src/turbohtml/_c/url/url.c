@@ -2210,14 +2210,20 @@ static PyObject *encode_component(PyObject *text, int set_id, int special_path) 
     if (encoded != NULL) {
         return encoded;
     }
+    if (!PyErr_ExceptionMatches(PyExc_UnicodeEncodeError)) { /* GCOVR_EXCL_BR_LINE: encoder OOM */
+        return NULL;                                         /* GCOVR_EXCL_LINE: allocation failure */
+    }
     PyObject *type;
     PyObject *value;
     PyObject *traceback;
     PyErr_Fetch(&type, &value, &traceback);
     PyErr_NormalizeException(&type, &value, &traceback);
     PyObject *reason = PyObject_GetAttrString(value, "reason"); /* UnicodeEncodeError always carries a reason str */
-    PyErr_Format(PyExc_ValueError, "URL component %R has a character that cannot be percent-encoded: %U", text, reason);
-    Py_XDECREF(reason);
+    if (reason != NULL) {                                       /* GCOVR_EXCL_BR_LINE: reason lookup OOM */
+        PyErr_Format(PyExc_ValueError, "URL component %R has a character that cannot be percent-encoded: %U", text,
+                     reason);
+    }
+    Py_XDECREF(reason); /* GCOVR_EXCL_BR_LINE: reason lookup OOM */
     Py_DECREF(type);
     Py_DECREF(value);
     Py_XDECREF(traceback);

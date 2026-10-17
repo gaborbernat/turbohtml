@@ -1630,6 +1630,15 @@ static css_sheet *css_collect_sheets(module_state *state, th_tree *tree, th_node
             compiled[rule] = selector_compile(state->selector_error, tree, selector);
             Py_DECREF(selector);
             if (compiled[rule] == NULL) {
+                if (!PyErr_ExceptionMatches(state->selector_error)) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+                    for (Py_ssize_t done = 0; done < rule; done++) {  /* GCOVR_EXCL_LINE: allocation failure */
+                        selector_free(compiled[done]);                /* GCOVR_EXCL_LINE: allocation failure */
+                    } /* GCOVR_EXCL_LINE: allocation failure */
+                    PyMem_Free(compiled);              /* GCOVR_EXCL_LINE: allocation failure */
+                    css_free_rules(rules, rule_count); /* GCOVR_EXCL_LINE: allocation failure */
+                    PyMem_Free(clean);                 /* GCOVR_EXCL_LINE: allocation failure */
+                    goto fail;                         /* GCOVR_EXCL_LINE: allocation failure */
+                }
                 /* an unsupported or invalid selector list drops its rule (it matches nothing) */
                 PyErr_Clear();
             } else {
