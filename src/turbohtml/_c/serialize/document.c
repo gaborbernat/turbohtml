@@ -397,10 +397,14 @@ static th_node *serialize_compact_step(sbuf *out, th_tree *tree, th_node *node, 
         /* a CDATA section is a Text node, so its escaped text is the one HTML form that holds a ">" */
         TH_FALLTHROUGH;
     case TH_NODE_TEXT:
+        if (need_text(tree, node) == NULL && node->text_len > 0) {
+            out->failed = 1;
+            return NULL;
+        }
         if (opts->xml) {
-            sbuf_put_xml_text(out, need_text(tree, node), node->text_len, 0);
+            sbuf_put_xml_text(out, node->text, node->text_len, 0);
         } else {
-            sbuf_put_text(out, need_text(tree, node), node->text_len, 0, opts->formatter);
+            sbuf_put_text(out, node->text, node->text_len, 0, opts->formatter);
         }
         break;
     case TH_NODE_COMMENT:

@@ -506,6 +506,23 @@ def test_foreign_attributes_allocation_failure_raises_memory_error(alloc_sweep: 
     assert set(alloc_sweep(lambda _: parse("<svg viewbox='0 0 1 1' data-custom='x'></svg>"))) == {"MemoryError"}
 
 
+@pytest.mark.fuzz_build
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda node: node.inner_html, id="inner-html"),
+        pytest.param(lambda node: node.inner_xml, id="inner-xml"),
+        pytest.param(lambda node: node.serialize(), id="serialize"),
+    ],
+)
+def test_lazy_text_serialization_allocation_failure_raises_memory_error(
+    alloc_sweep: Callable[..., list[str]], call: Callable[[turbohtml.Node], object]
+) -> None:
+    assert set(alloc_sweep(call, lambda: turbohtml.parse_fragment(f"<p>{'text' * 2048}</p>").children[0])) == {
+        "MemoryError"
+    }
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
