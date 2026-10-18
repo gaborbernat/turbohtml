@@ -690,7 +690,7 @@ static int tuple_set_or_fail(PyObject *tuple, Py_ssize_t index, PyObject *value)
     if (value == NULL) {
         if (!PyErr_Occurred()) { /* GCOVR_EXCL_BR_LINE: allocation-failure path */
             PyErr_NoMemory();    /* GCOVR_EXCL_LINE */
-        }
+        } /* GCOVR_EXCL_LINE: brace of the allocation-failure branch */
         return -1;
     }
     PyTuple_SET_ITEM(tuple, index, value);

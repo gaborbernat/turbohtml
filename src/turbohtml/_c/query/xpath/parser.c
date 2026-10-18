@@ -36,7 +36,7 @@ static int32_t new_node(parser *ps, enum xn_kind kind) {
     int32_t node = xn_new(ps->prog, kind);
     if (node < 0) {                /* GCOVR_EXCL_BR_LINE: allocation-failure path */
         fail(ps, "out of memory"); /* GCOVR_EXCL_LINE */
-    }
+    } /* GCOVR_EXCL_LINE: brace of the allocation-failure branch */
     return node;
 }
 
