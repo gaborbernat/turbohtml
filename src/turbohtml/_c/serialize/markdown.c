@@ -371,20 +371,22 @@ static int md_needs_raw_emphasis(th_tree *tree, th_node *root) {
                 return 1;
             }
         } else if (current->type == TH_NODE_TEXT) {
-            const Py_UCS4 *text = need_text(tree, current);
+            int source_span = text_is_span(current);
+            Py_ssize_t offset = source_span ? text_span_offset(current) : 0;
             for (Py_ssize_t index = 0; index < current->text_len; index++) {
-                if (open > 1 &&
-                    (text[index] >= 0x80 || text[index] == '&' || text[index] == '\\' || text[index] == '|')) {
+                Py_UCS4 ch =
+                    source_span ? PyUnicode_READ(tree->kind, tree->data, offset + index) : current->text[index];
+                if (open > 1 && (ch >= 0x80 || ch == '&' || ch == '\\' || ch == '|')) {
                     return 1;
                 }
-                if (text[index] >= 0x80 && md_is_emphasis_node(current->parent) &&
+                if (ch >= 0x80 && md_is_emphasis_node(current->parent) &&
                     ((current->parent->prev_sibling != NULL && current->parent->prev_sibling->type == TH_NODE_TEXT &&
                       current->parent->prev_sibling->text_len > 0) ||
                      (current->parent->next_sibling != NULL && current->parent->next_sibling->type == TH_NODE_TEXT &&
                       current->parent->next_sibling->text_len > 0))) {
                     return 1;
                 }
-                if (text[index] == '\\' && md_is_emphasis_node(current->parent)) {
+                if (ch == '\\' && md_is_emphasis_node(current->parent)) {
                     if (md_is_emphasis_node(current->parent->prev_sibling) ||
                         md_is_emphasis_node(current->parent->next_sibling)) {
                         return 1;
