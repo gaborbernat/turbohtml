@@ -3711,25 +3711,14 @@ static int balancer_block_closes_open_p(const th_node *element) {
     return 0;
 }
 
-/* A kept option/optgroup with an open option (or, for optgroup, option/optgroup) reachable in select scope: the
-   in-body option/optgroup start-tag rules close it, splitting the kept nesting on re-parse (HTML 13.2.6.4.7). */
+/* An option or optgroup start tag closes the current option or optgroup, but not one behind another open element. */
 static int balancer_option_autocloses(const th_node *element) {
     if (element->atom != TH_TAG_OPTION && element->atom != TH_TAG_OPTGROUP) {
         return 0;
     }
-    for (const th_node *ancestor = element->parent; ancestor != NULL; ancestor = ancestor->parent) {
-        if (ancestor->ns != TH_NS_HTML) {
-            return 0;
-        }
-        uint16_t atom = ancestor->atom;
-        if (atom == TH_TAG_OPTION || (element->atom == TH_TAG_OPTGROUP && atom == TH_TAG_OPTGROUP)) {
-            return 1;
-        }
-        if (atom == TH_TAG_SELECT || (ancestor->tag_flags & TH_TAG_SCOPING)) {
-            return 0;
-        }
-    }
-    return 0;
+    const th_node *parent = element->parent;
+    return parent->ns == TH_NS_HTML &&
+           (parent->atom == TH_TAG_OPTION || (element->atom == TH_TAG_OPTGROUP && parent->atom == TH_TAG_OPTGROUP));
 }
 
 /* Whether an HTML `atom` element is an ancestor of `element` in the default scope: the scan stops at a scoping
@@ -4009,7 +3998,10 @@ static int balancer_context_breaks(const th_node *element, balance_context conte
         /* only the list-item and heading rules read the name a reparse lowercases into a known tag */
         rule = balancer_rule(reparsed_atom(element)) & (CONTEXT_LIST_ITEM | CONTEXT_DEFINITION | RULE_HEADING);
     }
-    if (rule & bits) {
+    if (rule & bits & ~(uint32_t)(CONTEXT_OPTION | CONTEXT_OPTION_GROUP)) {
+        return 1;
+    }
+    if ((rule & bits & (CONTEXT_OPTION | CONTEXT_OPTION_GROUP)) && balancer_option_autocloses(element)) {
         return 1;
     }
     if (!(rule & RULE_BEYOND_BITS)) {
