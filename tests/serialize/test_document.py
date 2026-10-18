@@ -991,6 +991,13 @@ def test_xml_processing_instruction_closes_with_question_mark() -> None:
     assert node.serialize(Html(xml=True, layout=Indent(2))) == "<doc><?t d?></doc>"
 
 
+@pytest.mark.parametrize("invalid", ["\x00", "\x0c", "\uffff"])
+def test_xml_processing_instruction_drops_forbidden_characters(invalid: str) -> None:
+    output: Final = Element("doc", children=[ProcessingInstruction("t", f"a{invalid}b")]).serialize(_XML)
+    assert output == "<doc><?t ab?></doc>"
+    ET.fromstring(output)  # ruff:ignore[suspicious-xml-element-tree-usage]  # the assertion checks our own XML output
+
+
 @pytest.mark.parametrize(
     "target",
     [
