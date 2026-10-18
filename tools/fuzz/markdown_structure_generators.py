@@ -95,9 +95,9 @@ def markdown_source_check(source: str, render: Callable[[Node], str] = Node.to_m
 
 def markdown_html_check(markup: str, render: Callable[[Node], str] = Node.to_markdown) -> str | None:
     """Compare source meaning because a stable conversion can lose HTML semantics."""
-    expected: Final = _html_meaning(markup)
+    expected: Final = markdown_html_meaning(markup)
     converted: Final = _READER.render(render(parse_fragment(markup)))
-    if _html_meaning(converted) == expected:
+    if markdown_html_meaning(converted) == expected:
         return None
     if any(char in markup and char not in converted for char in "\x1c\x1d\x1e\x1f\x85"):
         msg = "Markdown reader discards control whitespace at paragraph edges"
@@ -105,7 +105,8 @@ def markdown_html_check(markup: str, render: Callable[[Node], str] = Node.to_mar
     return "Markdown conversion changes meaning"
 
 
-def _html_meaning(markup: str) -> tuple[_Meaning, ...]:
+def markdown_html_meaning(markup: str) -> tuple[_Meaning, ...]:
+    """Collapse reader HTML to the structure and text the Markdown oracle compares."""
     # read the tree to_markdown converts, so a parser that lags the WHATWG tree builder cannot pose as a lost meaning
     root: Final = parse_fragment(markup)
     if any(sum(1 for _ in element.ancestors) > 128 for element in root.iter_elements()):
@@ -758,6 +759,7 @@ __all__ = [
     "markdown_generate",
     "markdown_grammar",
     "markdown_html_check",
+    "markdown_html_meaning",
     "markdown_snapshot",
     "markdown_source_check",
     "markdown_source_seeds",
