@@ -3177,6 +3177,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_SELECT) {
+            tree->reparse_hazard = 1; /* ignored tags inside select can become elements after serialization */
             /* select content is plain in-body content now; a nested
                select start closes the open one instead of nesting */
             if (tree->fragment_root != NULL && tree->ctx_atom == TH_TAG_SELECT) {
@@ -3263,6 +3264,7 @@ static enum th_drain drain_in_body(th_tree *tree, th_token *tok, th_insert *dc) 
             return TH_DRAIN_NEXT;
         }
         if (atom == TH_TAG_OPTION || atom == TH_TAG_OPTGROUP) {
+            tree->reparse_hazard = 1; /* nested option markup can reopen as elements after serialization */
             if (has_in_scope(tree, TH_TAG_SELECT) || (tree->fragment_root != NULL && tree->ctx_atom == TH_TAG_SELECT)) {
                 /* inside a select (or a select-context fragment, where no select node
                    is on the stack), implied end tags close open option and (for an

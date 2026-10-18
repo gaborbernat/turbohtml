@@ -3219,6 +3219,8 @@ _PARSE_STABLE_RULES = [
     pytest.param("<a><object><b><a>x", frozenset({"a", "b"}), id="link-behind-unwrapped-marker"),
     pytest.param("<nobr><object><b><nobr>x", frozenset({"nobr", "b"}), id="nobr-behind-unwrapped-marker"),
     pytest.param("<button><select><i><button>x", frozenset({"button"}), id="button-in-button"),
+    pytest.param("<optgroup><optgroup>", frozenset({"optgroup"}), id="nested-optgroup-reopens"),
+    pytest.param("<select><table>", frozenset({"select", "table"}), id="select-ignored-table-reopens"),
     pytest.param("<select><object><input>x", frozenset({"select", "input"}), id="input-closes-select"),
     pytest.param(
         "<select><dd><object><option>x", frozenset({"select", "dd", "option"}), id="option-closes-implied-parent"
