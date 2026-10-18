@@ -57,6 +57,12 @@ jobs:
           esac
           echo "Next version: $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
+      - name: Require a news fragment
+        run: |
+          if ! compgen -G 'docs/changelog/*.*.rst' > /dev/null; then
+            echo '::error::add a docs/changelog/*.rst fragment before preparing a release'
+            exit 1
+          fi
       - name: 🚀 Run the release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
