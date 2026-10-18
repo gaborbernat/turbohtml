@@ -1236,6 +1236,7 @@ def css_semantics_check(
     document = parse(markup)
     style = _css_style(document, stylesheet)
     sheet = style.text
+    _require_supported_css_shorthands(sheet)
     elements = list(document.iter_elements())
     before = [computed_style(element) for element in elements]
     style.text = minify(sheet)
@@ -1258,6 +1259,16 @@ def css_semantics_check(
         except SelectorSyntaxError:
             return "minified selector does not parse"
     return None
+
+
+def _require_supported_css_shorthands(sheet: str) -> None:
+    for rule in StyleSheet(sheet).rules:
+        for name in ("margin", "padding", "border-width"):
+            if (value := rule.style.get(name)) is not None and any(
+                _read_value("border-top-width" if name == "border-width" else f"{name}-top", part) is _INVALID
+                for part in value.split()
+            ):
+                raise OutOfScopeError
 
 
 def _css_style(document: Document, stylesheet: str | None) -> Element:

@@ -408,6 +408,11 @@ def test_css_semantics_check_passes_minify_css() -> None:
     assert css_semantics_check(markup) is None
 
 
+def test_css_semantics_check_preserves_interleaved_margin_shorthand() -> None:
+    markup = "<style>i{margin-right:0}i{margin:0 10px;margin-top:0;margin-bottom:0}i{margin-left:1.5px}</style><i></i>"
+    assert css_semantics_check(markup) is None
+
+
 @pytest.mark.parametrize(
     ("markup", "minify", "expected"),
     [
@@ -456,6 +461,12 @@ def test_css_semantics_check_flags_a_broken_minifier(markup: str, minify: Callab
 def test_css_semantics_check_skips_a_document_without_style() -> None:
     with pytest.raises(OutOfScopeError):
         css_semantics_check("<p>x")
+
+
+def test_css_semantics_check_skips_invalid_distributive_shorthand() -> None:
+    markup = "<style>i{margin-right:0}i{margin:0 1px 1r;margin-top:0;margin-bottom:0px}</style><i></i>"
+    with pytest.raises(OutOfScopeError):
+        css_semantics_check(markup)
 
 
 @pytest.mark.parametrize(
@@ -1849,6 +1860,9 @@ def test_atheris_reference_empty_css_records() -> None:
         pytest.param(b"color: (", (("color", "(", False),), id="open-block"),
         pytest.param(b'content: "x', (("content", '"x', False),), id="open-string"),
         pytest.param(b'content: "a\n/* x', (("content", '"a\n/* x', False),), id="open-comment-after-string"),
+        pytest.param(
+            b'x: "open\n; color: red } }', (("x", '"open\n; color: red } }', False),), id="bad-string-before-braces"
+        ),
         pytest.param(b"a: b}", (("a", "b}", False),), id="top-level-closer"),
     ],
 )
@@ -1872,6 +1886,11 @@ def test_atheris_reference_css_block_records(data: bytes, expected: tuple[tuple[
 def test_atheris_reference_selector_specificity() -> None:
     expression, specificity = selector_observation(b"div#a > p.x")
     assert (bool(expression), specificity) == (True, ((1, 1, 2),))
+
+
+def test_atheris_reference_selector_uses_standards_mode() -> None:
+    expression, specificity = selector_observation(b"#A")
+    assert (bool(expression), specificity) == (True, ((1, 0, 0),))
 
 
 def test_atheris_reference_untranslatable_selector() -> None:
@@ -2279,8 +2298,12 @@ def test_atheris_callback_handles_injected_assertion(*, lossy: bool) -> None:
 def test_atheris_callback_reports_failure_mismatch(
     mocker: MockerFixture, raised: type[Exception] | None, error: type[Exception] | None, match: str, *, failed: bool
 ) -> None:
+    calls = 0
+
     def consume(_data: bytes, _header: Header) -> None:
-        if raised is not None:
+        nonlocal calls
+        calls += 1
+        if raised is not None and (not failed or calls == 1):
             raise raised
 
     reject = mocker.MagicMock()
@@ -2291,6 +2314,16 @@ def test_atheris_callback_reports_failure_mismatch(
         with pytest.raises(error, match=match):
             callback(SEED_HEADER)
     assert reject.call_count == 0
+
+
+def test_atheris_callback_rejects_documented_error_after_injection(mocker: MockerFixture) -> None:
+    def consume(_data: bytes, _header: Header) -> None:
+        msg = "invalid input"
+        raise UnicodeError(msg)
+
+    reject = mocker.MagicMock()
+    rejecting_callback(consume, (UnicodeError,), reject, lambda _position: (1, True))(SEED_HEADER)
+    reject.assert_called_once_with()
 
 
 def test_atheris_rejection_hook_propagates_loader_error(mocker: MockerFixture) -> None:

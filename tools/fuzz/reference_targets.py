@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 
-_SELECTOR_DOCUMENT: Final = '<div id="a"><p class="x">one</p><p>two</p></div>'
+_SELECTOR_DOCUMENT: Final = '<!doctype html><div id="a"><p class="x">one</p><p>two</p></div>'
 
 
 def reference_targets() -> tuple[Target, ...]:
@@ -297,7 +297,7 @@ def _opaque_end(text: str, pos: int) -> int:
         pos += 1
         while pos < len(text) and text[pos] not in {quote, "\n"}:
             pos += 2 if text[pos] == "\\" else 1
-        return pos if pos < len(text) else -1
+        return pos if pos < len(text) and text[pos] == quote else -1
     return pos
 
 
