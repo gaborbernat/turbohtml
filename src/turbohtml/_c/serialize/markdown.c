@@ -3823,6 +3823,7 @@ static TH_NOINLINE int md_cell_has_span(th_node *cell) {
    while every pipe row holds at least one cell (GFM 4.10), so it is left out. */
 static Py_ssize_t md_collect_rows(th_node *table, th_node **rows, Py_ssize_t *count, int *has_spans) {
     Py_ssize_t columns = 0;
+    Py_ssize_t fewest = PY_SSIZE_T_MAX;
     th_node *node = table->first_child;
     while (node != NULL) {
         if (node->type == TH_NODE_ELEMENT) {
@@ -3841,6 +3842,9 @@ static Py_ssize_t md_collect_rows(th_node *table, th_node **rows, Py_ssize_t *co
                     }
                     if (cells > 0) {
                         rows[(*count)++] = node;
+                        if (cells < fewest) {
+                            fewest = cells;
+                        }
                     }
                     if (cells > columns) {
                         columns = cells;
@@ -3856,6 +3860,9 @@ static Py_ssize_t md_collect_rows(th_node *table, th_node **rows, Py_ssize_t *co
             node = node->parent;
         }
         node = node->next_sibling;
+    }
+    if (rows != NULL && fewest < columns) {
+        *has_spans = 1;
     }
     return columns;
 }
@@ -4056,9 +4063,6 @@ static int md_table_step(md_ctx *ctx, md_frame *frame) {
         th_node *cell = md_table_next_cell(table);
         if (cell == NULL) {
             if (table->phase == MD_TABLE_ROWS) {
-                for (; table->column < table->columns; table->column++) {
-                    sbuf_puts(&ctx->out, "  |");
-                }
                 ctx->line_has_content = 1;
                 if (table->has_header && table->row == 0) {
                     md_emit_separator_row(ctx, table->columns);

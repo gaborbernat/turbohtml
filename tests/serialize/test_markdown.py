@@ -1690,6 +1690,11 @@ def test_trailing_break_at_an_inline_root_is_dropped() -> None:
             id="table-rowspan-keeps-html",
         ),
         pytest.param(
+            "<table><tr><td>A</td><td>B</td></tr><tr><td>C</td></tr></table>",
+            "<table><tbody><tr><td>A</td><td>B</td></tr><tr><td>C</td></tr></tbody></table>",
+            id="table-ragged-rows-keep-html",
+        ),
+        pytest.param(
             "<table><thead><tr><th>H</th></tr></thead><tbody><tr><td>v</td></tr></tbody></table>",
             "| H |\n| --- |\n| v |",
             id="table-thead-tbody",
@@ -1748,8 +1753,8 @@ def test_trailing_break_at_an_inline_root_is_dropped() -> None:
         ),
         pytest.param(
             "<table><tr><td>a</td></tr><tr><td>b</td><td>c</td></tr></table>",
-            "| a |  |\n| --- | --- |\n| b | c |",
-            id="table-short-row-padded-with-empty-cells",
+            "<table><tbody><tr><td>a</td></tr><tr><td>b</td><td>c</td></tr></tbody></table>",
+            id="table-short-row-keeps-html",
         ),
         pytest.param("<em><table><tr><th>a</th></tr></table></em>", "| *a* |\n| --- |", id="table-in-emphasis"),
         pytest.param(
@@ -2087,8 +2092,8 @@ def test_edge_cases(html: str, expected: str) -> None:
     [
         pytest.param(
             "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td></tr></table>",
-            "| A | B |\n| --- | --- |\n| 1 |  |",
-            id="ragged-row-padded",
+            "<table><tbody><tr><th>A</th><th>B</th></tr><tr><td>1</td></tr></tbody></table>",
+            id="ragged-row-keeps-html",
         ),
         pytest.param(
             "<table><tr><!--c--><td>a</td></tr><tr><td>b</td></tr></table>",
