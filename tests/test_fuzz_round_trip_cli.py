@@ -516,6 +516,8 @@ _TARGETS: Final = {target.name: target for target in public_targets()}
         pytest.param("dom-construction", ["_check", "ElementMaker", "document"], id="partial-and-alias"),
         pytest.param("dom-rewrite", ["_check", "rewrite"], id="protocol-stubs"),
         pytest.param("dom-range", ["_check"], id="c-types"),
+        pytest.param("html-incremental", ["_incremental_chunks"], id="chunked-incremental"),
+        pytest.param("html-tokenizer", ["_token_chunks"], id="chunked-tokenizer"),
     ],
 )
 def test_reachability_target_functions_follow_registry(target: str, names: list[str]) -> None:

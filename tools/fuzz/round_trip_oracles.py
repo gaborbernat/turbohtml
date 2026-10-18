@@ -1668,6 +1668,7 @@ def _css_valid_source(text: str) -> bool:
     recovered = tinycss2.serialize(tokens)
     return not (
         _css_has_parse_error(tokens)
+        or any(recovered.count(delimiter) > text.count(delimiter) for delimiter in ")}]")
         or (recovered.replace("/**/", "").startswith(text.replace("/**/", "")) and recovered != text)
         or any(not _css_rule_valid(rule) for rule in tinycss2.parse_stylesheet(text))
     )
@@ -1677,6 +1678,10 @@ def _css_rule_valid(rule: object) -> bool:
     if isinstance(rule, ParseError):
         return False
     if isinstance(rule, QualifiedRule):
+        try:
+            css_to_xpath(tinycss2.serialize(rule.prelude))
+        except (ExpressionError, SelectorSyntaxError):
+            return False
         return all(not isinstance(item, ParseError) for item in tinycss2.parse_declaration_list(rule.content))
     if (
         isinstance(rule, AtRule)
@@ -2056,7 +2061,9 @@ def _generate_css(rng: random.Random) -> str:
 
 def _generate_css_fixpoint(rng: random.Random) -> str:
     source = _generate_css(rng)
-    return source if _css_valid_source(source) else _stylesheet(rng)
+    while not _css_valid_source(source):
+        source = _stylesheet(rng)
+    return source
 
 
 def _seeds_css_fixpoint() -> list[str]:

@@ -370,7 +370,7 @@ static int md_needs_raw_emphasis(th_tree *tree, th_node *root) {
                  (current->prev_sibling != NULL && current->prev_sibling->atom == TH_TAG_BR))) {
                 return 1;
             }
-        } else if (current->type == TH_NODE_TEXT) {
+        } else if (current->type == TH_NODE_TEXT && (open > 1 || md_is_emphasis_node(current->parent))) {
             int source_span = text_is_span(current);
             Py_ssize_t offset = source_span ? text_span_offset(current) : 0;
             for (Py_ssize_t index = 0; index < current->text_len; index++) {
@@ -379,14 +379,14 @@ static int md_needs_raw_emphasis(th_tree *tree, th_node *root) {
                 if (open > 1 && (ch >= 0x80 || ch == '&' || ch == '\\' || ch == '|')) {
                     return 1;
                 }
-                if (ch >= 0x80 && md_is_emphasis_node(current->parent) &&
+                if (ch >= 0x80 &&
                     ((current->parent->prev_sibling != NULL && current->parent->prev_sibling->type == TH_NODE_TEXT &&
                       current->parent->prev_sibling->text_len > 0) ||
                      (current->parent->next_sibling != NULL && current->parent->next_sibling->type == TH_NODE_TEXT &&
                       current->parent->next_sibling->text_len > 0))) {
                     return 1;
                 }
-                if (ch == '\\' && md_is_emphasis_node(current->parent)) {
+                if (ch == '\\') {
                     if (md_is_emphasis_node(current->parent->prev_sibling) ||
                         md_is_emphasis_node(current->parent->next_sibling)) {
                         return 1;

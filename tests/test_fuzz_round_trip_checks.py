@@ -391,6 +391,9 @@ def test_markdown_check_skips_break_inside_table_cell_formatting() -> None:
         "0;@a}t",
         "@supports(){(x+2",
         "a{h:calc(+c(x+2",
+        "a{t:''({",
+        ":::before{x:1}",
+        "[/\n**/f\"\"]{x:''}",
         "@media{a b{{}}a b{f:1}a b{{()}}}",
     ],
 )
@@ -688,6 +691,8 @@ def test_markdown_source_grammar_skips_lost_control_whitespace() -> None:
         pytest.param(b"\xff\xfe" + "<p>é</p>".encode("utf-16-le"), "UTF-8", True, "é", id="utf16-bom"),
         pytest.param(b"<meta charset=windows-1252><p>\xe9</p>", "UTF-8", True, "é", id="prescan"),
         pytest.param(b" " * 1025 + b"<meta charset=windows-1251><p>\xc0</p>", "UTF-8", True, "\u0410", id="late-meta"),
+        pytest.param(b"<p>a<!--c-->b<strong>c</strong>d</p>", "UTF-8", False, "abcd", id="comment-tails"),
+        pytest.param(("<div>" * 1200 + "x" + "</div>" * 1200).encode(), "UTF-8", False, "x", id="deep-tree"),
     ],
 )
 def test_encoding_mutation_context(data: bytes, encoding: str, expected: str, *, sniff: bool) -> None:

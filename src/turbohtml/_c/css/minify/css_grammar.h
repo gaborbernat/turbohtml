@@ -1060,12 +1060,13 @@ static void css_parse_qualified(css_buf *pool, cursor *cur, int top, int keyfram
        the invalid rule is dropped with its block (CSS Syntax 3 §5.4.3), matching lightningcss 1.33.0 and csso 5.0.5.
        With no block it is stray recovery text kept verbatim, and a stray '}' is that text's terminator to consume. */
     if (top && token) {
-        Py_ssize_t block = css_find_top_block(cur->vec, prelude_end);
+        Py_ssize_t block = cur->no_top_block ? -1 : css_find_top_block(cur->vec, prelude_end);
         if (block >= 0) {
             cur->index = block + 1;
             css_skip_block(cur);
             return;
         }
+        cur->no_top_block = 1;
         if (token->delim == '}') {
             cur->index++;
         }
@@ -1133,7 +1134,7 @@ static void css_merge_rule_bodies(css_buf *pool, rule_item *prev, const rule_ite
     /* the merged body parses below the rule list that holds it, so it inherits that list's depth */
     token_vec tokens = {.depth = depth, .oom = pool->oom};
     css_tokenize(combined.data, combined.len, &tokens);
-    cursor inner = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, pool->oom}};
+    cursor inner = {&tokens, 0, baseline, -1, 0, {NULL, 0, 0, pool->oom}, 0};
     decl_vec decls = {NULL, 0, 0, pool->oom, 0};
     css_parse_declarations(pool, &inner, &decls, 0);
     cbuf_free(&inner.media_next);
@@ -1762,7 +1763,7 @@ CSS_NOINLINE static void css_rejoin_media(css_buf *pool, cursor *cur, rule_vec *
     /* the block parses where the first one did, so it inherits the rule list's depth */
     token_vec tokens = {.depth = cur->vec->depth, .oom = pool->oom};
     css_tokenize(run->text.data, run->text.len, &tokens);
-    cursor inner = {&tokens, 0, cur->baseline, -1, 0, {NULL, 0, 0, pool->oom}};
+    cursor inner = {&tokens, 0, cur->baseline, -1, 0, {NULL, 0, 0, pool->oom}, 0};
     css_buf merged = {NULL, 0, 0, pool->oom};
     css_parse_at(pool, &inner, &merged, 0);
     cbuf_free(&inner.media_next);
