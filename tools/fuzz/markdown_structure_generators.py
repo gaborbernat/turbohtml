@@ -201,10 +201,10 @@ def _draws_nothing(record: _Meaning) -> bool:
 
 
 def _children(element: _TreeNode, *, preserve: bool) -> tuple[_Meaning, ...]:
-    records: Final[list[_Meaning]] = list(_text(element.text, preserve=preserve, keep=element.tag in _INLINE_HOSTS))
+    records: Final[list[_Meaning]] = list(_text(element.text, preserve=preserve))
     for child in element:
         records.extend(_element(child, element.tag, preserve=preserve))
-        records.extend(_text(child.tail, preserve=preserve, keep=element.tag in _INLINE_HOSTS))
+        records.extend(_text(child.tail, preserve=preserve))
     spaced: Final = _spacing(_merge(records), preserve=preserve, inline=element.tag in _INLINE_TEXT)
     return spaced if preserve or element.tag in _INLINE_TEXT else _block_end(spaced)
 
@@ -418,13 +418,11 @@ def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], 
     return tuple(sorted((({"src": "", "alt": ""} if tag == "img" else {}) | semantic).items()))
 
 
-def _text(text: str, *, preserve: bool, keep: bool) -> tuple[_Meaning, ...]:
+def _text(text: str, *, preserve: bool) -> tuple[_Meaning, ...]:
     if not text:
         return ()
     if not preserve:
         text = re.sub(r"[ \t\n\f\r]+", " ", text)
-        if not keep and not text.strip(" \t\n\f\r"):
-            return ()
     return (("#text", (("value", text),), ()),)
 
 

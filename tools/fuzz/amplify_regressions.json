@@ -775,5 +775,27 @@
       "head": "<select>",
       "left": "<option selected>x"
     }
+  },
+  {
+    "name": "1536-nested-inline-blocks",
+    "source": "https://github.com/tox-dev/turbohtml/pull/1536",
+    "targets": [
+      "to_markdown"
+    ],
+    "shape": {
+      "kind": "repeat",
+      "left": "<i><div>x</div>"
+    }
+  },
+  {
+    "name": "1536-trailing-break-scan",
+    "source": "https://github.com/tox-dev/turbohtml/pull/1536",
+    "targets": [
+      "to_markdown"
+    ],
+    "shape": {
+      "kind": "repeat",
+      "left": "<br>"
+    }
   }
 ]

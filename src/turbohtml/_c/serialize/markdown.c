@@ -123,6 +123,7 @@ typedef struct {
     uint8_t html;       /* enum md_html */
     uint8_t flags;      /* MD_MARK_* */
     uint8_t emitted;    /* the open run was written, so the close run must be too */
+    uint8_t spanning;   /* HTML marker kept open across blocks */
 } md_marker;
 
 /* The layout state one list threads through its items, including the items it
@@ -289,9 +290,10 @@ typedef struct {
     md_marker *inline_markers;
     Py_ssize_t marker_count;
     Py_ssize_t marker_cap;
-    Py_ssize_t marker_base; /* markers below it belong to the output a cell or converter set aside */
-    md_marker *pending;     /* the innermost marker above marker_base, NULL when there is none */
-    md_reference *refs;     /* collected reference-link targets */
+    Py_ssize_t marker_base;   /* markers below it belong to the output a cell or converter set aside */
+    Py_ssize_t open_markdown; /* emitted markers that still need closing at a block */
+    md_marker *pending;       /* the innermost marker above marker_base, NULL when there is none */
+    md_reference *refs;       /* collected reference-link targets */
     Py_ssize_t ref_count;
     Py_ssize_t ref_cap;
     int started;          /* has any block content been emitted yet */
@@ -322,6 +324,8 @@ typedef struct {
     int failed;                 /* a reference buffer allocation failed */
     int escape_prose;           /* escape what a reader would parse in prose; off under Escaping(mode="none") */
     int amp_open;               /* the last text node ended in an `&` and name, which the next can finish */
+    int deep_block_span;        /* nested inline tags crossed a block boundary */
+    th_node *trailing_br_next;  /* next adjacent break after a trailing break */
     uint8_t escape_mask;        /* the MD_ASCII classes the options escape */
     uint8_t run_stop;           /* the MD_ASCII classes that end a bulk-copied run */
     Py_ssize_t break_start;     /* where the last hard break was written in out... */
@@ -576,7 +580,11 @@ static TH_NOINLINE void md_emit_pending(md_ctx *ctx) {
             marker->open = "_";
             marker->close = "_";
         }
-        if (md_marker_html(ctx, index, first)) {
+        if (ctx->deep_block_span && marker->html != 0) {
+            marker->open = MD_HTML_TAGS[marker->html - 1][0];
+            marker->close = MD_HTML_TAGS[marker->html - 1][1];
+            marker->spanning = 1;
+        } else if (md_marker_html(ctx, index, first)) {
             marker->open = MD_HTML_TAGS[marker->html - 1][0];
             marker->close = MD_HTML_TAGS[marker->html - 1][1];
         }
@@ -599,6 +607,9 @@ static TH_NOINLINE void md_emit_pending(md_ctx *ctx) {
             md_puts8(&ctx->out, marker->open);
         }
         marker->emitted = 1;
+        if (!marker->spanning) {
+            ctx->open_markdown++;
+        }
         ctx->line_has_content = 1;
     }
 }
@@ -1405,12 +1416,19 @@ static void md_settle_run(md_ctx *ctx, Py_ssize_t index, th_node *node) {
    a block that starts inside an emphasis element closes every run written so far;
    md_before_visible reopens them at the next visible character, in the new block. */
 static void md_suspend_markers(md_ctx *ctx) {
+    if (ctx->marker_count - ctx->marker_base > 8) {
+        ctx->deep_block_span = 1;
+    }
+    if (ctx->open_markdown == 0) {
+        return;
+    }
     for (Py_ssize_t index = ctx->marker_count; index > ctx->marker_base; index--) {
         md_marker *marker = &ctx->markers[index - 1];
-        if (marker->emitted) {
+        if (marker->emitted && !marker->spanning) {
             md_settle_run(ctx, index - 1, NULL);
             md_put_close(ctx, marker->close);
             marker->emitted = 0;
+            ctx->open_markdown--;
         }
     }
 }
@@ -1419,7 +1437,15 @@ static const char *md_pop_marker(md_ctx *ctx, Py_ssize_t marker) {
     if (marker < 0) {
         return NULL;
     }
+    for (Py_ssize_t index = marker; index < ctx->marker_count; index++) {
+        if (ctx->markers[index].emitted && !ctx->markers[index].spanning) {
+            ctx->open_markdown--;
+        }
+    }
     ctx->marker_count = marker;
+    if (ctx->marker_count - ctx->marker_base <= 8) {
+        ctx->deep_block_span = 0;
+    }
     md_settle_pending(ctx);
     return ctx->markers[marker].emitted ? ctx->markers[marker].close : NULL;
 }
@@ -2187,6 +2213,37 @@ static void md_emit_alt(md_ctx *ctx, const Py_UCS4 *alt, Py_ssize_t alt_len, int
     ctx->line_has_content = 1;
 }
 
+static void md_emit_html_attribute(sbuf *out, const Py_UCS4 *value, Py_ssize_t len) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        switch (value[index]) {
+        case '&':
+            sbuf_puts(out, "&amp;");
+            break;
+        case '<':
+            sbuf_puts(out, "&lt;");
+            break;
+        case '"':
+            sbuf_puts(out, "&quot;");
+            break;
+        case '\n':
+            sbuf_puts(out, "&#10;");
+            break;
+        case '\r':
+            sbuf_puts(out, "&#13;");
+            break;
+        case '\t':
+            sbuf_puts(out, "&#9;");
+            break;
+        case '\f':
+            sbuf_puts(out, "&#12;");
+            break;
+        default:
+            sbuf_putc(out, value[index]);
+            break;
+        }
+    }
+}
+
 static void md_emit_image(md_ctx *ctx, th_node *node) {
     const md_opts *opt = ctx->opt;
     if (opt->image_mode == TH_MD_IMAGE_IGNORE) {
@@ -2205,6 +2262,27 @@ static void md_emit_image(md_ctx *ctx, th_node *node) {
     }
     Py_ssize_t src_len;
     const Py_UCS4 *src = md_attr(ctx->tree, node, "src", &src_len);
+    if (src != NULL) {
+        for (Py_ssize_t index = 0; index < src_len; index++) {
+            if (src[index] == '\n' || src[index] == '\r' || src[index] == '\t' || src[index] == '\f') {
+                sbuf_puts(&ctx->out, "<img src=\"");
+                md_emit_html_attribute(&ctx->out, src, src_len);
+                sbuf_puts(&ctx->out, "\" alt=\"");
+                if (alt != NULL) {
+                    md_emit_html_attribute(&ctx->out, alt, alt_len);
+                }
+                Py_ssize_t raw_title_len;
+                const Py_UCS4 *raw_title = md_attr(ctx->tree, node, "title", &raw_title_len);
+                if (raw_title != NULL) {
+                    sbuf_puts(&ctx->out, "\" title=\"");
+                    md_emit_html_attribute(&ctx->out, raw_title, raw_title_len);
+                }
+                sbuf_puts(&ctx->out, "\">");
+                ctx->line_has_content = 1;
+                return;
+            }
+        }
+    }
     sbuf_puts(&ctx->out, "![");
     md_emit_alt(ctx, alt, alt_len, 1);
     sbuf_puts(&ctx->out, "](");
@@ -2262,6 +2340,10 @@ static int md_is_link(md_ctx *ctx, th_node *node) {
    a break in a block (the body at least), so the climb meets that block and never a
    parentless node. */
 static int md_br_trailing(md_ctx *ctx, th_node *node) {
+    if (ctx->trailing_br_next == node) {
+        ctx->trailing_br_next = node->next_sibling;
+        return 1;
+    }
     /* link text flattens its blocks onto its line (md_render_inline_tag), so inside a
        link a block ends nothing; link holds the link the scan is in */
     th_node *link = NULL;
@@ -2276,6 +2358,7 @@ static int md_br_trailing(md_ctx *ctx, th_node *node) {
             if (cursor == link) {
                 link = NULL;
             } else if (link == NULL && is_md_block(cursor->ns == TH_NS_HTML ? cursor->atom : TH_TAG_UNKNOWN)) {
+                ctx->trailing_br_next = node->next_sibling;
                 return 1;
             }
             next = cursor->next_sibling;
@@ -2292,6 +2375,7 @@ static int md_br_trailing(md_ctx *ctx, th_node *node) {
         } else if (cursor->type == TH_NODE_ELEMENT && !is_md_skipped(cursor)) {
             uint16_t atom = cursor->ns == TH_NS_HTML ? cursor->atom : TH_TAG_UNKNOWN;
             if (link == NULL && is_md_block(atom)) {
+                ctx->trailing_br_next = node->next_sibling;
                 return 1;
             }
             if (ctx->opt->converters != NULL || atom == TH_TAG_IMG || atom == TH_TAG_Q) {

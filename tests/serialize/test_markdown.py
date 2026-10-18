@@ -45,6 +45,65 @@ def md(html: str) -> str:
     return parse(html).to_markdown()
 
 
+@pytest.mark.parametrize("depth", [16, 32, 64])
+def test_deep_inline_wrappers_spanning_blocks_have_linear_output(depth: int) -> None:
+    source: Final = "<i><div>" * depth + "x" + "</div>" * depth
+    result: Final = md(source)
+    assert len(result) <= len(source) * 2
+    assert result.count("<em>") == depth
+    assert result.count("</em>") == depth
+    assert "x" in result
+
+
+@pytest.mark.parametrize("depth", [16, 32])
+def test_deep_emphasis_before_block_has_linear_output(depth: int) -> None:
+    source: Final = "<i>y" * depth + "<div>x</div>" + "</i>" * depth
+    result: Final = md(source)
+    assert "x" in result
+    assert len(result) <= len(source) * 4
+
+
+def test_pending_emphasis_after_deep_block_keeps_text() -> None:
+    source: Final = "<i>y" * 8 + "<i><div>x</div>" + "</i>" * 9
+    assert "x" in md(source)
+
+
+def test_link_inside_deep_block_keeps_destination() -> None:
+    source: Final = "<i>" * 9 + "<div>x</div><a href=/t>y</a>" + "</i>" * 9
+    assert "[y](/t)" in md(source)
+
+
+def test_google_style_inside_deep_block_keeps_both_blocks() -> None:
+    source: Final = '<span style="font-weight:bold">B' + "<i>" * 9 + "<div>x</div><div>z</div>" + "</i>" * 9
+    result: Final = parse(source).to_markdown(Markdown(google=Markdown.GoogleDoc(enabled=True)))
+    assert "x" in result
+    assert "z" in result
+    assert len(result) <= len(source) * 4
+
+
+def test_many_trailing_breaks_keep_visible_text() -> None:
+    assert md("x" + "<br>" * 128) == "x"
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\f"])
+@pytest.mark.parametrize("attribute", ["src", "alt", "title"])
+def test_image_url_whitespace_survives_markdown(separator: str, attribute: str) -> None:
+    fragment: Final = parse_fragment("<img>")
+    image: Final = fragment.select("img")[0]
+    image.attrs["src"] = f'a{separator}&<"b'
+    image.attrs["alt"] = 'x&<"'
+    image.attrs["title"] = 'title&<"'
+    rendered: Final = MarkdownIt("commonmark", {"html": True}).render(fragment.to_markdown())
+    result: Final = parse_fragment(rendered).select("img")[0]
+    assert result.attr(attribute) == image.attr(attribute)
+
+
+def test_image_url_whitespace_without_optional_attributes() -> None:
+    fragment: Final = parse_fragment('<img src="a\nb">')
+    rendered: Final = MarkdownIt("commonmark", {"html": True}).render(fragment.to_markdown())
+    assert parse_fragment(rendered).select("img")[0].attr("src") == "a\nb"
+
+
 @pytest.mark.parametrize(
     ("html", "expected"),
     [
@@ -1805,11 +1864,11 @@ def test_escaping_none(html: str, options: Markdown, expected: str) -> None:
         pytest.param('<a href="http://x/y">http://x/y</a>', "<http://x/y>", id="autolink"),
         pytest.param('<a href="a\nb">x</a>', "[x](ab)", id="newline-dropped"),
         pytest.param('<a href="a\tb">x</a>', "[x](ab)", id="tab-dropped"),
-        pytest.param('<img src="i&#13;e">', "![](ie)", id="carriage-return-dropped"),
+        pytest.param('<img src="i&#13;e">', '<img src="i&#13;e" alt="">', id="image-carriage-return-preserved"),
         pytest.param('<a href="é\nx">t</a>', "[t](éx)", id="newline-dropped-after-non-ascii"),
         pytest.param('<a href="\n&lt;">x</a>', "[x](<\\<>)", id="leading-angle-after-dropped-newline"),
         pytest.param('<a href="a\x01b">x</a>', "[x](<a\x01b>)", id="control-takes-angle-form"),
-        pytest.param('<img src="a\x0cb">', "![](<a\x0cb>)", id="form-feed-takes-angle-form"),
+        pytest.param('<img src="a\x0cb">', '<img src="a&#12;b" alt="">', id="image-form-feed-preserved"),
     ],
 )
 def test_link_destination(html: str, expected: str) -> None:
