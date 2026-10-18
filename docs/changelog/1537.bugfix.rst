@@ -1,0 +1,2 @@
+Keep sanitizer string and node outputs aligned for select and nested options. Preserve nested Markdown emphasis,
+punctuation, and breaks across CommonMark reparses.
