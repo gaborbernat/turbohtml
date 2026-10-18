@@ -301,10 +301,12 @@ def test_cflite_runs_build_then_mode_on_standalone_filestore(docker: MagicMock, 
         (BUILD_IMAGE, _expected(tmp_path)),
         (RUN_IMAGE, {**_expected(tmp_path), "MODE": "batch", "FUZZ_SECONDS": "3600", "OUTPUT_SARIF": "True"}),
     ]
-    assert commands[0][:9] == [
+    assert commands[0][:11] == [
         "docker",
         "run",
         "--rm",
+        "--security-opt",
+        "label=disable",
         "-v",
         "/var/run/docker.sock:/var/run/docker.sock",
         "-v",

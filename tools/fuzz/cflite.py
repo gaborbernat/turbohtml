@@ -110,11 +110,13 @@ def _add_seeds(build: Path, corpus: Path) -> None:
 
 def _docker(image: str, environment: dict[str, str], mounts: Sequence[Path], log: Path) -> int:
     # CFLite starts the builder and runner as sibling containers through the socket and hands them its own volumes, so
-    # each mount keeps its host path
+    # each mount keeps its host path; SELinux labels on the outer container block the nested builder's writes
     command: Final = [
         "docker",
         "run",
         "--rm",
+        "--security-opt",
+        "label=disable",
         "-v",
         "/var/run/docker.sock:/var/run/docker.sock",
         *(argument for mount in mounts for argument in ("-v", f"{mount}:{mount}")),
