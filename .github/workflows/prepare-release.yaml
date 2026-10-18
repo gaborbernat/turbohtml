@@ -36,6 +36,12 @@ jobs:
             echo '::error::add a docs/changelog/*.rst fragment before preparing a release'
             exit 1
           fi
+          for fragment in docs/changelog/*.rst; do
+            if [[ ! "$fragment" =~ ^docs/changelog/[0-9]+\.(breaking|feature|bugfix|doc|packaging)(\.[0-9]+)?\.rst$ ]]; then
+              echo "::error::unsupported news fragment: $fragment"
+              exit 1
+            fi
+          done
       - name: Set up remote tracking
         run: |
           git remote -v

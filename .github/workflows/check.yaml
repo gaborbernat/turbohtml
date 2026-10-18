@@ -358,7 +358,14 @@ jobs:
         with:
           python-version: "3.15"
           enable-cache: false
-      - run: uvx towncrier check --compare-with "origin/${GITHUB_BASE_REF}"
+      - run: |
+          for fragment in docs/changelog/*.rst; do
+            if [[ ! "$fragment" =~ ^docs/changelog/[0-9]+\.(breaking|feature|bugfix|doc|packaging)(\.[0-9]+)?\.rst$ ]]; then
+              echo "::error::unsupported news fragment: $fragment"
+              exit 1
+            fi
+          done
+          uvx towncrier check --compare-with "origin/${GITHUB_BASE_REF}"
   gate:
     name: Required checks pass
     if: always()
