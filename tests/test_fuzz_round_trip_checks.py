@@ -333,6 +333,19 @@ def test_markdown_check_passes_to_markdown() -> None:
         "<strong><b><<b>😀</b></b><b>*",
         "<em><code>\\</code></em><b><del>*<br></b>&",
         "<table><td>&nbsp </><br>]",
+        "<em><br>[<br>",
+        "d<b>😀=</b><del>;<strong>&gt",
+        "<b><b>\\ </b><strong>\\<g></b>~",
+        "><b><br> <br>",
+        "<strong><br>x<br></strong>[",
+        "><em><br><m><br><i>#<br></i>o",
+        "<ol><li><i><br></i><br><em><b>😀",
+        "<br><strong>><br></strong><",
+        "<ol><li><i><br></i><br>><b>😀",
+        ";<strong><b>d </b><b>\\<t",
+        "<strong><b></b></strong><p><i><br></i><br>é",
+        "<br><i>*<br></i> <",
+        "<del>[</del>\\<em><em>h|</em>>(<br><del><br><el",
     ],
 )
 def test_markdown_check_accepts_equivalent_html(markup: str) -> None:
@@ -350,6 +363,11 @@ def test_markdown_check_keeps_nested_closing_runs_separate() -> None:
 def test_markdown_check_skips_a_block_inside_an_inline() -> None:
     with pytest.raises(OutOfScopeError):
         markdown_check("<del><pre>x</pre></del>")
+
+
+def test_markdown_check_skips_reader_html_outside_the_meaning_model() -> None:
+    with pytest.raises(OutOfScopeError):
+        markdown_check('<ul><li><b><br></b><br><a href="a ">><em>😀')
 
 
 @pytest.mark.parametrize("markup", ["<em>_<br><br></em>)", "<del>y<br><br></del>>"])

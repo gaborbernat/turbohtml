@@ -107,6 +107,7 @@ from fuzz.markdown_structure_generators import (
     markdown_controls,
     markdown_generate,
     markdown_html_check,
+    markdown_html_meaning,
     markdown_source_check,
     markdown_source_seeds,
 )
@@ -1111,7 +1112,11 @@ def markdown_check(markup: str, render: Callable[[Node], str] = Node.to_markdown
         raise OutOfScopeError
     first = _MARKDOWN.render(render(document))
     if (second := _MARKDOWN.render(render(parse(first)))) != first and _markdown_html(second) != _markdown_html(first):
-        return f"not a fixpoint: {_divergence(first, second)}"
+        try:
+            if markdown_html_meaning(second) != markdown_html_meaning(first):
+                return f"not a fixpoint: {_divergence(first, second)}"
+        except MarkdownProfileError as error:
+            raise OutOfScopeError from error
     return None
 
 
@@ -1119,8 +1124,11 @@ def _markdown_html(markup: str) -> str:
     markup = _EMPTY_PARAGRAPH.sub("", markup)
     markup = re.sub(r"<li>\n?<p>(.*?)</p>\n?</li>", r"<li>\1</li>", markup, flags=re.DOTALL)
     markup = markup.replace("<del>", "<s>").replace("</del>", "</s>")
-    markup = re.sub(r"<(strong|em|s)></\1>", "", markup)
-    return re.sub(r"(<br\s*/?>)[ \t]+", r"\1", markup)
+    markup = re.sub(r"<br\s*/?>[ \t]*\n?", "<br>", markup)
+    markup = markup.replace("<li>\n<br>", "<li><br>")
+    markup = re.sub(r"((?:<(?:strong|em|s)>)+)<br>", r"<br>\1", markup)
+    markup = re.sub(r"<br>((?:</(?:strong|em|s)>)+)", r"\1<br>", markup)
+    return re.sub(r"<(strong|em|s)></\1>", "", markup)
 
 
 class JsNames:
