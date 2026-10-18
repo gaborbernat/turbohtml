@@ -619,6 +619,25 @@ static void css_dedup(css_buf *pool, decl_vec *decls) {
     if (table != stack_table) {
         css_free(table);
     }
+    css_decl active[32];
+    Py_ssize_t positions[32];
+    Py_ssize_t count = 0;
+    for (Py_ssize_t index = 0; index < decls->len; index++) {
+        if (!decls->items[index].dropped) {
+            if (count == 32) {
+                return;
+            }
+            positions[count] = index;
+            active[count++] = decls->items[index];
+        }
+    }
+    /* The hash remembers only the latest value for a property; a small remaining list can still contain older equals.
+     */
+    decl_vec remaining = {active, count, count, pool->oom, 0};
+    css_dedup_pairwise(pool, &remaining);
+    for (Py_ssize_t index = 0; index < count; index++) {
+        decls->items[positions[index]].dropped = active[index].dropped;
+    }
 }
 
 #endif /* TURBOHTML_CSS_SELECTOR_H */
