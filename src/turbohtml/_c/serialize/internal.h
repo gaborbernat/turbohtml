@@ -296,11 +296,14 @@ static inline void sbuf_put_comment(sbuf *out, const Py_UCS4 *text, Py_ssize_t l
     sbuf_put_ucs4_tail(out, text, start, len);
 }
 
-/* A `?>` in the data would end the instruction. */
+/* A `?>` in the data would end the instruction, and XML forbids C0 controls. */
 static inline void sbuf_put_xml_pi_data(sbuf *out, const Py_UCS4 *text, Py_ssize_t len) {
     Py_ssize_t start = 0;
-    for (Py_ssize_t index = 0; index + 1 < len; index++) {
-        if (text[index] == '?' && text[index + 1] == '>') {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (xml_char_invalid(text[index])) {
+            sbuf_put_ucs4(out, text + start, index - start);
+            start = index + 1;
+        } else if (index + 1 < len && text[index] == '?' && text[index + 1] == '>') {
             sbuf_put_ucs4(out, text + start, index + 1 - start);
             sbuf_putc(out, ' ');
             start = index + 1;
@@ -774,9 +777,10 @@ static inline int xml_attr_name_writable(const char *name, Py_ssize_t name_len, 
     if (first >= 0x80) {
         return th_xml_attr_name_wellformed_utf8(name, name_len);
     }
-    if ((XML_NAME_FLAGS[first] & 0x1) == 0) {
+    if (first == ':' || (XML_NAME_FLAGS[first] & 0x1) == 0) {
         return 0;
     }
+    int colon = 0;
     for (Py_ssize_t index = 1; index < name_len; index++) {
         unsigned char character = (unsigned char)name[index];
         if (character >= 0x80) {
@@ -784,6 +788,12 @@ static inline int xml_attr_name_writable(const char *name, Py_ssize_t name_len, 
         }
         if ((XML_NAME_FLAGS[character] & 0x2) == 0) {
             return 0;
+        }
+        if (character == ':') {
+            if (index == name_len - 1 || colon) {
+                return 0;
+            }
+            colon = 1;
         }
     }
     return 1;

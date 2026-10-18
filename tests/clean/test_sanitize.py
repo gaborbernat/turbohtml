@@ -3131,6 +3131,17 @@ _PARSE_STABLE_CASES = [
 ]
 
 
+@pytest.mark.parametrize("container", ["desc", "span"])
+def test_sanitize_nested_option_under_kept_container_matches_string_path(container: str) -> None:
+    markup: Final = f"<option><{container}><option>"
+    policy: Final = Policy(tags=frozenset({"option", container}), on_disallowed_tag=OnDisallowed.REMOVE)
+    expected: Final = f"<option><{container}><option></option></{container}></option>"
+    assert (sanitize(markup, policy), sanitize_node(parse_fragment(markup, "div"), policy).inner_html) == (
+        expected,
+        expected,
+    )
+
+
 @pytest.mark.parametrize(("payload", "policy", "expected"), _PARSE_STABLE_CASES)
 def test_parse_stable_output_matches_exactly(payload: str, policy: Policy, expected: str) -> None:
     assert sanitize(payload, policy) == expected
@@ -3480,9 +3491,9 @@ _SETTLE_SCAN_CASES: Final = [
     pytest.param(
         lambda: E.div(E.select(E.optgroup(E.span(E.section(E.optgroup("x")))))),
         frozenset({"div", "select", "optgroup", "span"}),
-        "<div><select><optgroup><span>&lt;section&gt;&lt;optgroup&gt;x&lt;/optgroup&gt;&lt;/section&gt;</span></optgroup>"
+        "<div><select><optgroup><span>&lt;section&gt;<optgroup>x</optgroup>&lt;/section&gt;</span></optgroup>"
         "</select></div>",
-        id="optgroup-scan-passes-a-span",
+        id="optgroup-behind-span-stays-nested",
     ),
     pytest.param(
         lambda: E.div(E.span(E.section(E.option("x")))),

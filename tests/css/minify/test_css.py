@@ -527,6 +527,19 @@ def test_minify_css_transparent_hex_keeps_rgb(source: str, expected: str) -> Non
     assert (result, minify_css(result)) == (expected, expected)
 
 
+def test_minify_css_large_dedup_remains_a_fixpoint() -> None:
+    source: Final = (
+        "a{x:0;"
+        + "".join(f"p{index}:0;" for index in range(15))
+        + "x:1;x:0;"
+        + "".join(f"p{index}:0;" for index in range(15))
+        + "}"
+    )
+    result: Final = minify_css(source)
+    assert result == minify_css(result)
+    assert result.count("x:0") == 1
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
@@ -3245,6 +3258,10 @@ def test_minify_css_keeps_overlong_calculated_font_size_invalid() -> None:
     assert minify_css("a{font:normal normal normal normal normal calc(16px) serif}") == (
         "a{font:normal normal normal normal normal 16px serif}"
     )
+
+
+def test_minify_css_quoted_hyphen_family_settles_in_one_pass() -> None:
+    assert minify_css("a{font:x -E}") == "a{font:x '-e'}"
 
 
 @pytest.mark.parametrize(
