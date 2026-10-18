@@ -410,8 +410,9 @@ def _literal_parts(element: _TreeNode) -> Iterator[str | None]:
 
 def _attributes(tag: str, attributes: dict[str, str]) -> tuple[tuple[str, str], ...]:
     # an empty title gives no advisory information (WHATWG 3.2.6.1), the same as none
+    # URL navigation and Markdown destinations both discard tabs and line breaks.
     semantic: Final = {
-        name: value
+        name: re.sub(r"[\t\n\r]", "", value) if name in {"href", "src"} else value
         for name, value in attributes.items()
         if name in _SEMANTIC_ATTRIBUTES.get(tag, ()) and (value or name != "title")
     }

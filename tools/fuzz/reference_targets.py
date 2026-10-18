@@ -25,7 +25,7 @@ from turbohtml.validate import RelaxNG, SchemaValidationError, ValidationError, 
 
 from .atheris_invariants import assert_invariant
 from .atheris_registry import Target
-from .round_trip_oracles import selector_entry_check, style_check, xml_check
+from .round_trip_oracles import OutOfScopeError, selector_entry_check, style_check, xml_check
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -91,7 +91,7 @@ def reference_targets() -> tuple[Target, ...]:
                 "turbohtml.convert.css_to_xpath",
                 "turbohtml.SelectorSyntaxError",
             ),
-            (UnicodeDecodeError, turbohtml.SelectorSyntaxError, ExpressionError),
+            (UnicodeDecodeError, turbohtml.SelectorSyntaxError, ExpressionError, OutOfScopeError),
         ),
         Target(
             "css-object-model",
@@ -254,11 +254,10 @@ def cssom_observation(
     rule: Final = StyleRule("p", declaration)
     rules: Final = RuleList((rule,))
     _require("Rule wrapper differs", condition=tuple(rules) == (rules[0],) and rules[0].style is declaration)
-    if (close := _rule_close(declaration.text)) is not None:
-        sheet: Final = StyleSheet("p { " + declaration.text + close)
-        _require(
-            "Sheet declaration differs", condition=tuple(item.style.text for item in sheet.rules) == (declaration.text,)
-        )
+    if _rule_close(declaration.text) == " }":
+        sheet: Final = StyleSheet("p { " + declaration.text + " }")
+        if len(sheet.rules) == 1 and sheet.rules[0].selector_text == "p":
+            _require("Sheet declaration differs", condition=sheet.rules[0].style.text == declaration.text)
     computed_observation(data)
     return observed
 

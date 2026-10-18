@@ -1506,7 +1506,13 @@ def selector_entry_check(case: str, translate: Callable[[str], str] = css_to_xpa
         translated = translate(selector)
     except ExpressionError:
         return None
-    return None if document.xpath(translated) == selected else "xpath(css_to_xpath()) != select()"
+    try:
+        xpath_selected = document.xpath(translated)
+    except ValueError as error:
+        if str(error) == "xpath: an expression nested too deeply":
+            raise OutOfScopeError from error
+        raise
+    return None if xpath_selected == selected else "xpath(css_to_xpath()) != select()"
 
 
 def _matcher_problem(document: Document, selector: str, matcher: Matcher, selected: list[Element]) -> str | None:

@@ -1869,6 +1869,8 @@ def test_atheris_reference_empty_css_records() -> None:
             b'x: "open\n; color: red } }', (("x", '"open\n; color: red } }', False),), id="bad-string-before-braces"
         ),
         pytest.param(b"a: b}", (("a", "b}", False),), id="top-level-closer"),
+        pytest.param(b'{{}}"""\n":}5{', (('{{}}"""\n"', "}5{", False),), id="malformed-nested-rule-split"),
+        pytest.param(b'a: before"\n{ b: x:} 0', (("a", 'before"\n{ b: x:} 0', False),), id="open-block-in-bad-string"),
     ],
 )
 def test_atheris_reference_css_records_left_open_at_end(

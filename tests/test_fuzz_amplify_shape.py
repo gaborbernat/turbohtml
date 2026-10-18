@@ -678,7 +678,9 @@ def test_markdown_unsupported_element() -> None:
         pytest.param("<em>d <p>e</p></em>", id="space-before-block-in-emphasis"),
         pytest.param('<i><a href="/t"><br></a></i>', id="emphasis-around-link-holding-break"),
         pytest.param('<p>x<a href="/t"><br></a></p>', id="break-in-empty-link-ends-block"),
+        pytest.param('<a href="a\nb">ok</a>', id="link-url-line-break"),
         pytest.param("<span>a</span>  <span>b</span>", id="spaces-between-inline-elements"),
+        pytest.param('<img src="a\nb" alt="ok">', id="plain-image-url-line-break"),
         pytest.param('<img src="a\nb" alt="ok" odd"="">', id="image-url-line-break"),
     ],
 )
