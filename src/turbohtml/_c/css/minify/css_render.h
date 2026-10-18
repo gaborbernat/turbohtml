@@ -195,7 +195,16 @@ static void css_assemble(css_buf *pool, comp_vec *comps, css_buf *out) {
 }
 
 /* Property classification for the value pipeline. */
-#define CSS_COLOR_EQ(literal) (len == (Py_ssize_t)(sizeof(literal) - 1) && css_run_ieq(prop, len, literal))
+static int css_color_eq_exact_len(const css_char *prop, Py_ssize_t len, const char *name) {
+    for (Py_ssize_t index = 0; index < len; index++) {
+        if (css_lower(prop[index]) != (css_char)(unsigned char)name[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+#define CSS_COLOR_EQ(literal) (len == (Py_ssize_t)(sizeof(literal) - 1) && css_color_eq_exact_len(prop, len, literal))
 static int css_prop_color_mode(const css_char *prop, Py_ssize_t len) {
     switch (css_lower(prop[0])) {
     case 'a':
