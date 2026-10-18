@@ -269,8 +269,9 @@ def test_xml_check_skips_unbound_prefixes(markup: str) -> None:
         xml_check(markup)
 
 
-def test_xml_check_waives_unrepresentable_doctype_metadata() -> None:
-    assert xml_check('<!DOCTYPEL PUBLIC"<') is None
+@pytest.mark.parametrize("markup", ['<!DOCTYPEL PUBLIC"<', '<!DOCTYPEl PUBLIC"<""'])
+def test_xml_check_waives_unrepresentable_doctype_metadata(markup: str) -> None:
+    assert xml_check(markup) is None
 
 
 @pytest.mark.parametrize(
@@ -324,6 +325,20 @@ def test_markdown_check_passes_to_markdown() -> None:
     assert markdown_check("<h2>t</h2><p>*a* and <em>b</em></p><ul><li>c</li></ul>") is None
 
 
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<ol><li><i> </i></><li>&",
+        "<ul><li><d> <i><li>/",
+        "<strong><b><<b>😀</b></b><b>*",
+        "<em><code>\\</code></em><b><del>*<br></b>&",
+        "<table><td>&nbsp </><br>]",
+    ],
+)
+def test_markdown_check_accepts_equivalent_html(markup: str) -> None:
+    assert markdown_check(markup) is None
+
+
 def test_markdown_check_flags_unescaped_text() -> None:
     assert markdown_check("<p>*a*</p>", lambda node: node.text) == "not a fixpoint: '<' vs letter"
 
@@ -348,7 +363,19 @@ def test_markdown_check_skips_break_inside_table_cell_formatting() -> None:
         markdown_check("<table><td><em>\\<i>😀</i><br>")
 
 
-@pytest.mark.parametrize("source", ["@media{[", '@media{["\n', "a{font:x -E", "\\1;-", "0;@a}t"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "@media{[",
+        '@media{["\n',
+        "a{font:x -E",
+        "\\1;-",
+        "0;@a}t",
+        "@supports(){(x+2",
+        "a{h:calc(+c(x+2",
+        "@media{a b{{}}a b{f:1}a b{{()}}}",
+    ],
+)
 def test_css_fixpoint_skips_incomplete_stylesheets(source: str) -> None:
     with pytest.raises(OutOfScopeError):
         ORACLES["css-fixpoint"].check(source)

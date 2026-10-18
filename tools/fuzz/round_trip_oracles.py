@@ -146,6 +146,7 @@ from fuzz.xml_structure_generators import (
     xml_source_seeds,
 )
 from markdown_it import MarkdownIt
+from tinycss2.ast import AtRule, ParseError, QualifiedRule
 from typing_extensions import override
 
 from turbohtml import (
@@ -947,6 +948,7 @@ def _xml_has_unbound_prefix(document: Document) -> bool:
 
 # XML 1.0 Char (https://www.w3.org/TR/xml/#NT-Char) and Name (https://www.w3.org/TR/xml/#NT-Name) productions
 _XML_CHAR: Final = re.compile(r"[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+_XML_PUBID: Final = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \r\n-'()+,./:=?;!*#@$_%")
 _NAME_START: Final = (
     r":A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c\u200d\u2070-\u218f\u2c00-\u2fef"
     r"\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\U00010000-\U000effff"
@@ -956,9 +958,7 @@ _XML_NAME: Final = re.compile(rf"[{_NAME_START}][{_NAME_START}\-.0-9\xb7\u0300-\
 
 def _xml_lossy(document: Document) -> bool:
     for node in document.descendants:
-        if isinstance(node, Doctype) and (
-            _XML_NAME.fullmatch(node.name) is None or (node.public_id is not None and node.system_id is None)
-        ):
+        if isinstance(node, Doctype) and _xml_doctype_lossy(node):
             return True
         if isinstance(node, (Text, CData, ProcessingInstruction)) and _XML_CHAR.search(node.data):
             return True
@@ -977,6 +977,16 @@ def _xml_lossy(document: Document) -> bool:
         ):
             return True
     return False
+
+
+def _xml_doctype_lossy(node: Doctype) -> bool:
+    if _XML_NAME.fullmatch(node.name) is None:
+        return True
+    if node.public_id is not None and (
+        node.system_id is None or any(character not in _XML_PUBID for character in node.public_id)
+    ):
+        return True
+    return node.system_id is not None and _XML_CHAR.search(node.system_id) is not None
 
 
 def _attr_text(value: str | list[str] | None) -> str:
@@ -1099,10 +1109,18 @@ def markdown_check(markup: str, render: Callable[[Node], str] = Node.to_markdown
         for element in document.iter_elements()
     ):
         raise OutOfScopeError
-    first = _EMPTY_PARAGRAPH.sub("", _MARKDOWN.render(render(document)))
-    if (second := _EMPTY_PARAGRAPH.sub("", _MARKDOWN.render(render(parse(first))))) != first:
+    first = _MARKDOWN.render(render(document))
+    if (second := _MARKDOWN.render(render(parse(first)))) != first and _markdown_html(second) != _markdown_html(first):
         return f"not a fixpoint: {_divergence(first, second)}"
     return None
+
+
+def _markdown_html(markup: str) -> str:
+    markup = _EMPTY_PARAGRAPH.sub("", markup)
+    markup = re.sub(r"<li>\n?<p>(.*?)</p>\n?</li>", r"<li>\1</li>", markup, flags=re.DOTALL)
+    markup = markup.replace("<del>", "<s>").replace("</del>", "</s>")
+    markup = re.sub(r"<(strong|em|s)></\1>", "", markup)
+    return re.sub(r"(<br\s*/?>)[ \t]+", r"\1", markup)
 
 
 class JsNames:
@@ -1631,16 +1649,23 @@ def _css_valid_source(text: str) -> bool:
     recovered = tinycss2.serialize(tokens)
     return not (
         _css_has_parse_error(tokens)
-        or (recovered.startswith(text) and recovered != text)
-        or any(
-            rule.type == "error"
-            or (
-                rule.type == "qualified-rule"
-                and any(item.type == "error" for item in tinycss2.parse_declaration_list(rule.content))
-            )
-            for rule in tinycss2.parse_stylesheet(text)
-        )
+        or (recovered.replace("/**/", "").startswith(text.replace("/**/", "")) and recovered != text)
+        or any(not _css_rule_valid(rule) for rule in tinycss2.parse_stylesheet(text))
     )
+
+
+def _css_rule_valid(rule: object) -> bool:
+    if isinstance(rule, ParseError):
+        return False
+    if isinstance(rule, QualifiedRule):
+        return all(not isinstance(item, ParseError) for item in tinycss2.parse_declaration_list(rule.content))
+    if (
+        isinstance(rule, AtRule)
+        and rule.lower_at_keyword in {"media", "supports", "container", "layer"}
+        and rule.content is not None
+    ):
+        return all(_css_rule_valid(nested) for nested in tinycss2.parse_rule_list(rule.content))
+    return True
 
 
 def _css_has_parse_error(tokens: list[object]) -> bool:
