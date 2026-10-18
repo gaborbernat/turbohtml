@@ -253,10 +253,16 @@ static int css_prop_color_mode(const css_char *prop, Py_ssize_t len) {
         if (CSS_COLOR_EQ("text-emphasis-color")) {
             return 1;
         }
-        if (CSS_COLOR_EQ("text-decoration") || CSS_COLOR_EQ("text-emphasis") || CSS_COLOR_EQ("text-shadow")) {
-            return 2;
+        switch (len) {
+        case sizeof("text-decoration") - 1:
+            return css_color_eq_exact_len(prop, len, "text-decoration") ? 2 : 0;
+        case sizeof("text-emphasis") - 1:
+            return css_color_eq_exact_len(prop, len, "text-emphasis") ? 2 : 0;
+        case sizeof("text-shadow") - 1:
+            return css_color_eq_exact_len(prop, len, "text-shadow") ? 2 : 0;
+        default:
+            return 0;
         }
-        return 0;
     default:
         return 0;
     }
