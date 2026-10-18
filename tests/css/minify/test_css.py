@@ -263,6 +263,24 @@ def test_minify_css_invalid_shorthand_keeps_longhand(
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("a{margin-right:1px;margin:2px;margin-top:3px;margin-bottom:4px;margin-left:5px}", id="box"),
+        pytest.param("a{flex-direction:row;flex-flow:column wrap;flex-wrap:nowrap}", id="pair"),
+        pytest.param("a{outline-width:1px;outline:2px solid red;outline-style:dashed;outline-color:blue}", id="triple"),
+    ],
+)
+def test_minify_css_interleaved_shorthand_keeps_longhands(source: str) -> None:
+    assert minify_css(source) == source
+
+
+def test_minify_css_interleaved_duplicate_shorthand_keeps_longhands() -> None:
+    source = "a{margin-top:1px;margin:0;margin:0;margin-right:2px;margin-bottom:3px;margin-left:4px}"
+    expected = "a{margin-top:1px;margin:0;margin-right:2px;margin-bottom:3px;margin-left:4px}"
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(
     ("source", "expected"),
     [
         pytest.param("a{color:#ffffff}", "a{color:#fff}", id="hex-shorten-6-to-3"),
