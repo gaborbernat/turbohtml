@@ -3232,6 +3232,15 @@ def _svg_child_named(name: str) -> Element:
     return svg
 
 
+def _escaped_form_in_math() -> Element:
+    # A form escaped inside a math text point, its mglyph child left behind in MathML.
+    return E.form(_math_text_point(E.form(Element("mglyph"))))
+
+
+def _option_past_item() -> Element:
+    return E.div(E.select(E.li(E.span(E.div(E.li(E.option("x")))))))
+
+
 _BALANCED_WALK_CASES: Final[list[pytest.ParameterSet]] = [
     pytest.param(
         lambda: E.div(E.li(E.span(E.li("x"), E.li("y")))),
@@ -3258,7 +3267,7 @@ _BALANCED_WALK_CASES: Final[list[pytest.ParameterSet]] = [
         id="item-scan-passes-an-address",
     ),
     pytest.param(
-        lambda: E.div(E.select(E.li(E.span(E.div(E.li(E.option("x"))))))),
+        _option_past_item,
         frozenset({"div", "select", "li", "option"}),
         "<div><select><li>&lt;span&gt;<div>&lt;li&gt;<option>x</option>&lt;/li&gt;</div>&lt;/span&gt;</li></select></div>",
         id="option-judged-past-a-recorded-item",
@@ -3399,7 +3408,7 @@ _SETTLE_SCAN_CASES: Final[list[pytest.ParameterSet]] = [
         id="cell-orphaned-by-foreign-content",
     ),
     pytest.param(
-        lambda: E.table(E.tr(E.td(E.form(_math_text_point(E.form(Element("mglyph"))))))),
+        lambda: E.table(E.tr(E.td(_escaped_form_in_math()))),
         frozenset({"table", "tbody", "tr", "td", "form", "math", "mi", "mglyph"}),
         "<table><tbody><tr><td><form><math><mi>&lt;form&gt;&lt;mglyph&gt;&lt;/mglyph&gt;&lt;/form&gt;</mi></math></form>"
         "</td></tr></tbody></table>",
