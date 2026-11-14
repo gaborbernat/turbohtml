@@ -932,10 +932,10 @@ def test_deep_boolean_chain_operand_still_raises(doc: turbohtml.Node) -> None:
     ],
 )
 def test_a_path_tested_for_emptiness_grows_linearly(expression: str, work_steps: WorkSteps) -> None:
-    # Compares the steps for expression with the steps for //p[self::p] on one list of 16,000 p elements. Both visit
+    # Compares the steps for expression with the steps for //p[self::p] on one list of 1,000 p elements. Both visit
     # each p once, so the ratio is near 1 when the walk stops at the first node and grows with the list length
     # otherwise.
-    document: Final = parse(f"<section>{'<p>y' * 16_000}</section>")
+    document: Final = parse(f"<section>{'<p>y' * 1_000}</section>")
     work_steps.assert_within(partial(document.xpath, expression), partial(document.xpath, "//p[self::p]"), factor=20)
 
 

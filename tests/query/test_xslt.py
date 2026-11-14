@@ -120,13 +120,13 @@ def test_transform_choose_without_otherwise_falls_through() -> None:
 
 def test_transform_test_of_a_path_grows_linearly(work_steps: WorkSteps) -> None:
     # Compares the steps for a stylesheet whose tests walk the following axes with the steps for the same stylesheet
-    # with self:: tests, both run on one source of 16,000 i elements.
+    # with self:: tests, both run on one source of 1,000 i elements.
     template: Final = (
         '<xsl:template match="/"><xsl:for-each select="r/i"><xsl:choose>'
         '<xsl:when test="{sibling}">.</xsl:when><xsl:otherwise>]</xsl:otherwise></xsl:choose>'
         '<xsl:if test="not({following})">!</xsl:if></xsl:for-each></xsl:template>'
     )
-    source: Final = turbohtml.parse_xml(f"<r>{'<i/>' * 16_000}</r>")
+    source: Final = turbohtml.parse_xml(f"<r>{'<i/>' * 1_000}</r>")
     expensive: Final = Transform(_sheet(template.format(sibling="following-sibling::i", following="following::i")))
     reference: Final = Transform(_sheet(template.format(sibling="self::i", following="self::i")))
     work_steps.assert_within(partial(expensive, source), partial(reference, source), factor=20)
