@@ -87,7 +87,7 @@ def css_to_xpath(selector: str, *, prefix: str = "descendant-or-self::") -> str:
 
 class ExpressionError(SelectorError, RuntimeError):
     """
-    The selector is valid CSS but has no XPath 1.0 equivalent, or its XPath would pass 16,777,216 characters.
+    The selector is valid CSS but has no XPath 1.0 equivalent, or its expression would pass 16,777,216 characters.
 
     For example ``:dir()`` or ``*:first-of-type`` has no equivalent.
     """
