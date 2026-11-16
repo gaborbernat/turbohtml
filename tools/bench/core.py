@@ -367,19 +367,20 @@ def _find(text: str) -> None:
     _parsed(text).find_all("a")
 
 
-def _find_cold(case: tuple[str, turbohtml.Document]) -> None:
-    query_kind, document = case
-    if query_kind == "find":
-        document.find("a")
-    elif query_kind == "all":
-        document.find_all("a")
-    else:
-        document.find_all("a", limit=1)
+def _find_cold(case: tuple[str, turbohtml.Document, int]) -> None:
+    query_kind, document, repeats = case
+    for _ in range(repeats):
+        if query_kind == "find":
+            document.find("a")
+        elif query_kind == "all":
+            document.find_all("a")
+        else:
+            document.find_all("a", limit=1)
 
 
-def _find_cold_setup(case: tuple[str, str]) -> tuple[str, turbohtml.Document]:
-    query_kind, source = case
-    return query_kind, turbohtml.parse(source)
+def _find_cold_setup(case: tuple[str, str, int]) -> tuple[str, turbohtml.Document, int]:
+    query_kind, source, repeats = case
+    return query_kind, turbohtml.parse(source), repeats
 
 
 def _select(text: str) -> None:
@@ -1075,8 +1076,18 @@ def _xpath_paths(document: turbohtml.Document) -> None:
             node.xpath_path()
 
 
-def _last_path_element(text: str) -> turbohtml.Element:
-    return turbohtml.parse(text).select("li")[-1]
+def _last_path_elements(text: str) -> list[turbohtml.Element]:
+    return turbohtml.parse(text).select("li")[-512:]
+
+
+def _css_path_each(elements: list[turbohtml.Element]) -> None:
+    for element in elements:
+        element.css_path()
+
+
+def _xpath_path_each(elements: list[turbohtml.Element]) -> None:
+    for element in elements:
+        element.xpath_path()
 
 
 def _css_paths_after_class_edits(document: turbohtml.Document) -> None:
@@ -1735,8 +1746,8 @@ OPERATIONS: Final[dict[str, tuple[Timed, str]]] = {
     "path-xpath-wide": (_xpath_path, "turbohtml"),
     "path-cold": (Mutating(setup=turbohtml.parse, run=_css_paths), "turbohtml"),
     "path-xpath-cold": (Mutating(setup=turbohtml.parse, run=_xpath_paths), "turbohtml"),
-    "path-one-cold": (Mutating(setup=_last_path_element, run=turbohtml.Element.css_path), "turbohtml"),
-    "path-xpath-one-cold": (Mutating(setup=_last_path_element, run=turbohtml.Element.xpath_path), "turbohtml"),
+    "path-one-cold": (Mutating(setup=_last_path_elements, run=_css_path_each), "turbohtml"),
+    "path-xpath-one-cold": (Mutating(setup=_last_path_elements, run=_xpath_path_each), "turbohtml"),
     "path-class-edit": (Mutating(setup=turbohtml.parse, run=_css_paths_after_class_edits), "turbohtml"),
     "translate": (_translate, "turbohtml"),
     "specificity": (_specificity, "turbohtml"),
