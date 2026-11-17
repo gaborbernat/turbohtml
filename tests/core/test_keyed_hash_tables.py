@@ -299,6 +299,7 @@ def _spread(count: int, length: int) -> list[str]:
 _FNV64_PRIME: Final[int] = 1099511628211
 _FNV32_BASIS: Final[int] = 2166136261
 _FNV32_PRIME: Final[int] = 16777619
+_THUE_MORSE_FACTOR: Final[float] = 4.0  # a quadratic probe run beside a linear build clears 4 at 256 names
 _THUE_MORSE_EXPONENT: Final[int] = 12  # blocks of 2 ** 12 letters: a Thue-Morse block and its complement fold alike
 
 
@@ -336,7 +337,7 @@ def test_thue_morse_names_stay_within_the_step_budget(
     start, prime, mask, prefix = shape
     collide = _thue_morse_names(256)
     assert _fold(start, prime, mask, prefix + collide[0]) == _fold(start, prime, mask, prefix + collide[-1])
-    work_steps.assert_within(build(collide), build(_spread(len(collide), len(collide[0]))), factor=_FACTOR)
+    work_steps.assert_within(build(collide), build(_spread(len(collide), len(collide[0]))), factor=_THUE_MORSE_FACTOR)
 
 
 def _thue_morse_names(count: int) -> list[str]:

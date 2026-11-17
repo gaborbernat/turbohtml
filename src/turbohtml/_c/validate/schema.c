@@ -1187,13 +1187,16 @@ static int named_push(th_schema *schema, named_vec *vec, const Py_UCS4 *name, Py
 /* The keyed chain (core/hash.h) over the UTF-8 encoding of the name: ns_hash_bytes and the attribute indexes hash
    interned bytes the same way, so a table keyed one way is probed the other way without decoding. */
 static uint64_t named_hash(const Py_UCS4 *name, Py_ssize_t len) {
+    Py_UCS4 seen = 0;
+    for (Py_ssize_t index = 0; index < len; index++) {
+        seen |= name[index];
+    }
+    if (seen < 0x80) {
+        return th_mix_ucs4_ascii(0, name, len);
+    }
     th_mix_stream stream;
     th_mix_stream_init(&stream, 0);
     for (Py_ssize_t index = 0; index < len; index++) {
-        if (name[index] < 0x80) {
-            th_mix_stream_byte(&stream, name[index]);
-            continue;
-        }
         unsigned char encoded[4];
         int count = utf8_encode(name[index], encoded);
         for (int byte = 0; byte < count; byte++) {

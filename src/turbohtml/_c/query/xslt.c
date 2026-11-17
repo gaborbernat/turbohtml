@@ -4709,12 +4709,7 @@ static int number_hash_seed(uint64_t *seed) {
 }
 
 static uint32_t number_units_hash(uint64_t seed, const Py_UCS4 *text, Py_ssize_t len) {
-    th_mix_stream stream;
-    th_mix_stream_init(&stream, seed);
-    for (Py_ssize_t index = 0; index < len; index++) {
-        th_mix_stream_unit(&stream, text[index]);
-    }
-    return (uint32_t)th_mix_stream_finish(&stream);
+    return (uint32_t)th_mix_u32s(seed, text, len);
 }
 
 static xslt_number_uri *number_uri_slot(xslt_number_uri *uris, size_t capacity, uint32_t hash, const Py_UCS4 *text,
@@ -5299,16 +5294,11 @@ static long unindexed_any_number(engine *eng, th_node *start, xslt_number_patter
 /* The names a walk tallies all come from number_default_name in one state of the namespace index, where uri_id
    stands for the uri: reading the uri text here would cost its length at every element the walk passes. */
 static uint32_t number_name_hash(uint64_t seed, const xslt_number_name *name) {
-    th_mix_stream stream;
-    th_mix_stream_init(&stream, seed);
-    th_mix_stream_word(&stream, (uint64_t)name->type);
-    th_mix_stream_word(&stream, (uint64_t)name->ns);
-    th_mix_stream_word(&stream, (uint64_t)name->uri_id);
-    th_mix_stream_word(&stream, (uint64_t)name->name_len);
-    for (Py_ssize_t index = 0; index < name->name_len; index++) {
-        th_mix_stream_unit(&stream, name->name[index]);
-    }
-    return (uint32_t)th_mix_stream_finish(&stream);
+    uint64_t state = th_mix_word(seed, (uint64_t)name->type);
+    state = th_mix_word(state, (uint64_t)name->ns);
+    state = th_mix_word(state, (uint64_t)name->uri_id);
+    state = th_mix_word(state, (uint64_t)name->name_len);
+    return (uint32_t)th_mix_u32s(state, name->name, name->name_len);
 }
 
 static int number_tally_names(const xslt_number_name *left, const xslt_number_name *right) {

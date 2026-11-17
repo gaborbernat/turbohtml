@@ -85,6 +85,10 @@ static inline uint64_t th_key_mix(uint64_t key) {
 extern uint64_t th_mix_key[3];
 
 static inline uint64_t th_mum(uint64_t a, uint64_t b) {
+#if defined(__SIZEOF_INT128__)
+    const unsigned __int128 product = (unsigned __int128)a * b;
+    return (uint64_t)product ^ (uint64_t)(product >> 64);
+#else
     const uint64_t a_lo = (uint32_t)a;
     const uint64_t a_hi = a >> 32;
     const uint64_t b_lo = (uint32_t)b;
@@ -97,6 +101,7 @@ static inline uint64_t th_mum(uint64_t a, uint64_t b) {
     const uint64_t high = (hi_lo >> 32) + (cross >> 32) + hi_hi;
     const uint64_t low = (cross << 32) | (uint32_t)lo_lo;
     return low ^ high;
+#endif
 }
 
 typedef struct {
@@ -140,14 +145,63 @@ static inline uint64_t th_mix_stream_finish(const th_mix_stream *stream) {
     return th_mum(state ^ th_mix_key[2], stream->length ^ th_mix_key[1]);
 }
 
+static inline uint64_t th_mix_word(uint64_t state, uint64_t word) {
+    return th_mum(state ^ word, th_mix_key[0]);
+}
+
+static inline uint64_t th_mix_finish(uint64_t state, uint64_t length) {
+    return th_mum(state ^ th_mix_key[2], length ^ th_mix_key[1]);
+}
+
+/* ASCII characters hashed as the bytes of their UTF-8 encoding: th_mix_bytes of the same name, without the narrowing.
+ */
+static inline uint64_t th_mix_ucs4_ascii(uint64_t seed, const uint32_t *chars, Py_ssize_t len) {
+    uint64_t state = seed;
+    Py_ssize_t index = 0;
+    for (; index + 8 <= len; index += 8) {
+        uint64_t word = 0;
+        for (int at = 7; at >= 0; at--) {
+            word = (word << 8) | chars[index + at];
+        }
+        state = th_mix_word(state, word);
+    }
+    uint64_t tail = 0;
+    for (Py_ssize_t at = 0; index + at < len; at++) {
+        tail |= (uint64_t)chars[index + at] << (8 * at);
+    }
+    state = th_mum(state ^ tail, th_mix_key[1]);
+    return th_mix_finish(state, (uint64_t)len);
+}
+
+/* Units of 32 bits, two to a block: the hash of a code point array, continuing from seed. */
+static inline uint64_t th_mix_u32s(uint64_t seed, const uint32_t *units, Py_ssize_t len) {
+    uint64_t state = seed;
+    Py_ssize_t index = 0;
+    for (; index + 2 <= len; index += 2) {
+        state = th_mix_word(state, (uint64_t)units[index] | ((uint64_t)units[index + 1] << 32));
+    }
+    const uint64_t tail = index < len ? units[index] : 0;
+    state = th_mum(state ^ tail, th_mix_key[1]);
+    return th_mix_finish(state, (uint64_t)len);
+}
+
 static inline uint64_t th_mix_bytes(uint64_t seed, const void *data, Py_ssize_t len) {
     const unsigned char *bytes = data;
-    th_mix_stream stream;
-    th_mix_stream_init(&stream, seed);
-    for (Py_ssize_t index = 0; index < len; index++) {
-        th_mix_stream_byte(&stream, bytes[index]);
+    uint64_t state = seed;
+    Py_ssize_t index = 0;
+    for (; index + 8 <= len; index += 8) {
+        uint64_t word = 0;
+        for (int at = 7; at >= 0; at--) {
+            word = (word << 8) | bytes[index + at];
+        }
+        state = th_mum(state ^ word, th_mix_key[0]);
     }
-    return th_mix_stream_finish(&stream);
+    uint64_t tail = 0;
+    for (Py_ssize_t at = 0; index + at < len; at++) {
+        tail |= (uint64_t)bytes[index + at] << (8 * at);
+    }
+    state = th_mum(state ^ tail, th_mix_key[1]);
+    return th_mum(state ^ th_mix_key[2], (uint64_t)len ^ th_mix_key[1]);
 }
 
 #endif /* TURBOHTML_CORE_HASH_H */

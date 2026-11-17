@@ -466,12 +466,15 @@ static int local_names_equal(const xml_parser *parser, Py_ssize_t a, Py_ssize_t 
 }
 
 static uint64_t prefix_hash(const xml_parser *parser, Py_ssize_t start, Py_ssize_t len) {
-    th_mix_stream stream;
-    th_mix_stream_init(&stream, parser->hash_seed);
-    for (Py_ssize_t offset = 0; offset < len; offset++) {
-        th_mix_stream_unit(&stream, cp(parser, start + offset));
+    uint64_t state = parser->hash_seed;
+    Py_ssize_t offset = 0;
+    for (; offset + 2 <= len; offset += 2) {
+        state =
+            th_mix_word(state, (uint64_t)cp(parser, start + offset) | ((uint64_t)cp(parser, start + offset + 1) << 32));
     }
-    return th_mix_stream_finish(&stream);
+    const uint64_t tail = offset < len ? cp(parser, start + offset) : 0;
+    state = th_mum(state ^ tail, th_mix_key[1]);
+    return th_mix_finish(state, (uint64_t)len);
 }
 
 /* The prefix-table slot holding prefix [start, start+len), or the empty slot it would take. */
