@@ -587,7 +587,7 @@ static inline uint32_t intern_attr_dynamic(th_tree *tree, const char *bytes, Py_
     if (tree->attr_fast == NULL) {
         return intern_attr_slow(tree, bytes, len);
     }
-    uint32_t hash = (uint32_t)th_mix_bytes(0, bytes, len);
+    uint32_t hash = th_fnv1a_bytes(bytes, len);
     uint32_t found = dynamic_slot(tree, bytes, len, hash);
     if (found != 0) {
         return TH_ATTR__DYNAMIC_BASE + (found - 1);
@@ -610,7 +610,7 @@ static inline uint32_t th_attr_lookup_inline(th_tree *tree, const char *bytes, P
         return atom;
     }
     /* hashed before the table test, so the hash loop follows the static-name scan without a branch between */
-    uint32_t hash = (uint32_t)th_mix_bytes(0, bytes, len);
+    uint32_t hash = th_fnv1a_bytes(bytes, len);
     if (tree->attr_fast == NULL) {
         return tree->attr_slots == NULL ? UINT32_MAX : th_attr_lookup_slow(tree, bytes, len);
     }
