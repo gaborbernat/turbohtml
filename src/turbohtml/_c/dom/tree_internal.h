@@ -561,6 +561,24 @@ static inline void node_insert_before(th_node *parent, th_node *child, th_node *
     }
 }
 
+/* dynamic_slot on the FNV-1a tier: UINT32_MAX once a walk passes TH_FAST_PROBE_LIMIT without a match, so the caller
+   moves the table to th_name_hash and looks again. */
+static inline uint32_t dynamic_slot_fast(th_tree *tree, const char *bytes, Py_ssize_t len, uint32_t hash) {
+    uint32_t mask = tree->attr_slot_mask;
+    uint32_t walked = 0;
+    for (uint32_t probe = hash & mask; tree->attr_slots[probe] != 0; probe = (probe + 1) & mask) {
+        TH_WORK_STEP();
+        const th_attr_record *rec = &tree->attr_recs[tree->attr_slots[probe] - 1];
+        if (rec->name_len == (uint32_t)len && memcmp(rec->name, bytes, (size_t)len) == 0) {
+            return tree->attr_slots[probe];
+        }
+        if (++walked > TH_FAST_PROBE_LIMIT) {
+            return UINT32_MAX;
+        }
+    }
+    return 0;
+}
+
 /* The record index + 1 for an interned name, or 0 when it is not in the built table.
    The name comparison is by bytes, so a hash collision is not a special case. */
 static inline uint32_t dynamic_slot(th_tree *tree, const char *bytes, Py_ssize_t len, uint32_t hash) {
@@ -579,6 +597,8 @@ static inline uint32_t dynamic_slot(th_tree *tree, const char *bytes, Py_ssize_t
    its step for a table that is not built yet or is on th_name_hash (dom/tree.c). */
 uint32_t intern_attr_insert(th_tree *tree, const char *bytes, Py_ssize_t len, uint32_t hash);
 uint32_t intern_attr_slow(th_tree *tree, const char *bytes, Py_ssize_t len);
+uint32_t intern_attr_rekeyed(th_tree *tree, const char *bytes, Py_ssize_t len);
+uint32_t th_attr_lookup_rekeyed(th_tree *tree, const char *bytes, Py_ssize_t len);
 
 /* Intern UTF-8 name bytes into the per-tree dynamic table, returning the atom. The parser (tree.c) and the
    construction API (mutate.c) share it; inline, as the keyed step grew the extern function past what link-time
@@ -588,7 +608,10 @@ static inline uint32_t intern_attr_dynamic(th_tree *tree, const char *bytes, Py_
         return intern_attr_slow(tree, bytes, len);
     }
     uint32_t hash = th_fnv1a_bytes(bytes, len);
-    uint32_t found = dynamic_slot(tree, bytes, len, hash);
+    uint32_t found = dynamic_slot_fast(tree, bytes, len, hash);
+    if (found == UINT32_MAX) {
+        return intern_attr_rekeyed(tree, bytes, len);
+    }
     if (found != 0) {
         return TH_ATTR__DYNAMIC_BASE + (found - 1);
     }
@@ -614,7 +637,10 @@ static inline uint32_t th_attr_lookup_inline(th_tree *tree, const char *bytes, P
     if (tree->attr_fast == NULL) {
         return tree->attr_slots == NULL ? UINT32_MAX : th_attr_lookup_slow(tree, bytes, len);
     }
-    uint32_t found = dynamic_slot(tree, bytes, len, hash);
+    uint32_t found = dynamic_slot_fast(tree, bytes, len, hash);
+    if (found == UINT32_MAX) {
+        return th_attr_lookup_rekeyed(tree, bytes, len);
+    }
     return found != 0 ? TH_ATTR__DYNAMIC_BASE + (found - 1) : UINT32_MAX;
 }
 

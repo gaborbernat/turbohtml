@@ -83,27 +83,13 @@ static uint16_t tok_atom(const th_token *tok) {
     return tok->atom;
 }
 
-/* 1 when the run of filled slots through slot is longer than TH_FAST_RUN_LIMIT. A
-   lookup walks at most the run its home falls in, so bounding every run bounds hits
-   and misses alike. Every run was within the limit before this seat, so the walks back
-   and ahead each cover at most the limit: neither is a counted work step. */
-static int attr_run_long(const th_tree *tree, uint32_t slot) {
-    uint32_t mask = tree->attr_slot_mask;
-    uint32_t length = 1;
-    for (uint32_t probe = (slot - 1) & mask; tree->attr_slots[probe] != 0; probe = (probe - 1) & mask) {
-        length++;
-    }
-    for (uint32_t probe = (slot + 1) & mask; tree->attr_slots[probe] != 0; probe = (probe + 1) & mask) {
-        length++;
-    }
-    return length > TH_FAST_RUN_LIMIT;
-}
+/* Move the dynamic table to th_name_hash, rehashing every record, and seat it at cap. Once the table is keyed no
+   walk is bounded by a probe count: the key spreads the names the document chose. */
+static int attr_table_go_keyed(th_tree *tree, uint32_t cap);
 
-/* Replace the slots with cap of them and seat every record under its stored hash,
-   which is th_name_hash when keyed, else FNV-1a. Doubling cannot lengthen the longest
-   run: the records of a run in the new slots have their homes inside it, so they
-   already formed a run at least as long in the old ones. A failure flags the parse
-   as arena_alloc does. */
+/* Replace the slots with cap of them and seat every record under its stored hash. On the FNV-1a tier a walk that
+   passes TH_FAST_PROBE_LIMIT abandons the tier: the records are rehashed and the table is built keyed at cap, so every
+   walk on the FNV-1a tier is bounded by the limit. A failure flags the parse as arena_alloc does. */
 static int attr_slots_rebuild(th_tree *tree, uint32_t cap, int keyed) {
     uint32_t *slots = PyMem_Calloc(cap, sizeof(uint32_t));
     if (slots == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -113,8 +99,13 @@ static int attr_slots_rebuild(th_tree *tree, uint32_t cap, int keyed) {
     uint32_t mask = cap - 1;
     for (uint32_t index = 0; index < tree->attr_rec_count; index++) {
         uint32_t probe = tree->attr_recs[index].hash & mask;
+        uint32_t walked = 0;
         while (slots[probe] != 0) {
             TH_WORK_STEP();
+            if (!keyed && ++walked > TH_FAST_PROBE_LIMIT) {
+                PyMem_Free(slots);
+                return attr_table_go_keyed(tree, cap);
+            }
             probe = (probe + 1) & mask;
         }
         slots[probe] = index + 1;
@@ -126,16 +117,12 @@ static int attr_slots_rebuild(th_tree *tree, uint32_t cap, int keyed) {
     return 0;
 }
 
-/* Move the table to th_name_hash for the rest of the tree's life: FNV-1a is fixed,
-   so a document can pick names that share one run of slots, and once a run grows
-   past TH_FAST_RUN_LIMIT every record is rehashed under a key the document cannot
-   see and seated again. */
-static TH_NOINLINE int attr_table_rekey(th_tree *tree) {
+static int attr_table_go_keyed(th_tree *tree, uint32_t cap) {
     for (uint32_t index = 0; index < tree->attr_rec_count; index++) {
         th_attr_record *rec = &tree->attr_recs[index];
         rec->hash = th_name_hash(rec->name, (Py_ssize_t)rec->name_len);
     }
-    return attr_slots_rebuild(tree, tree->attr_slot_mask + 1, 1);
+    return attr_slots_rebuild(tree, cap, 1);
 }
 
 /* Ensure the dynamic table can take one more record: grow the record array, and
@@ -169,14 +156,32 @@ static int attr_table_reserve(th_tree *tree) {
     return 0;
 }
 
-/* Add a name the table does not hold, hashed to hash under the table's current hash.
-   Out of line, since a tree adds each name once and looks it up for every element. */
+/* Add a name the table does not hold, hashed to hash under the table's current hash. Out of line, since a tree adds
+   each name once and looks it up for every element. The walk to the empty slot is bounded on the FNV-1a tier: past the
+   limit the table is rebuilt keyed and the name is added under the keyed hash. */
 TH_NOINLINE uint32_t intern_attr_insert(th_tree *tree, const char *bytes, Py_ssize_t len, uint32_t hash) {
     if (len > 6 && memcmp(bytes, "xmlns:", 6) == 0) {
         tree->has_prefix_decl = 1;
     }
     if (attr_table_reserve(tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return TH_ATTR_UNKNOWN;         /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (tree->attr_fast == NULL) {
+        hash = th_name_hash(bytes, len);
+    }
+    uint32_t mask = tree->attr_slot_mask;
+    uint32_t probe = hash & mask;
+    uint32_t walked = 0;
+    while (tree->attr_slots[probe] != 0) {
+        TH_WORK_STEP();
+        if (tree->attr_fast != NULL && ++walked > TH_FAST_PROBE_LIMIT) {
+            if (attr_table_go_keyed(tree, mask + 1) <
+                0) {                    /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                return TH_ATTR_UNKNOWN; /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+            return intern_attr_insert(tree, bytes, len, hash);
+        }
+        probe = (probe + 1) & mask;
     }
     char *stored = arena_alloc(tree, len + 1);
     if (stored == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
@@ -186,19 +191,28 @@ TH_NOINLINE uint32_t intern_attr_insert(th_tree *tree, const char *bytes, Py_ssi
     stored[len] = '\0';
     uint32_t index = tree->attr_rec_count++;
     tree->attr_recs[index] = (th_attr_record){stored, (uint32_t)len, hash};
-    uint32_t mask = tree->attr_slot_mask;
-    uint32_t probe = hash & mask;
-    while (tree->attr_slots[probe] != 0) {
-        TH_WORK_STEP();
-        probe = (probe + 1) & mask;
-    }
     tree->attr_slots[probe] = index + 1;
-    if (tree->attr_fast != NULL && tree->attr_rec_count > TH_FAST_RUN_LIMIT && attr_run_long(tree, probe)) {
-        if (attr_table_rekey(tree) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
-            return TH_ATTR_UNKNOWN;       /* GCOVR_EXCL_LINE: allocation-failure path */
-        }
-    }
     return TH_ATTR__DYNAMIC_BASE + index;
+}
+
+/* intern_attr_dynamic's step once the FNV-1a walk passed the limit: the table moves to th_name_hash, then the name is
+   interned on the keyed table. Out of line, so the inline FNV-1a path stays small. */
+TH_NOINLINE uint32_t intern_attr_rekeyed(th_tree *tree, const char *bytes, Py_ssize_t len) {
+    if (tree->attr_fast != NULL &&
+        attr_table_go_keyed(tree, tree->attr_slot_mask + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return TH_ATTR_UNKNOWN;                                    /* GCOVR_EXCL_LINE */
+    }
+    return intern_attr_slow(tree, bytes, len);
+}
+
+/* th_attr_lookup_inline's step once the FNV-1a walk passed the limit: the table moves to th_name_hash, then the name is
+   looked up there. */
+TH_NOINLINE uint32_t th_attr_lookup_rekeyed(th_tree *tree, const char *bytes, Py_ssize_t len) {
+    if (tree->attr_fast != NULL &&
+        attr_table_go_keyed(tree, tree->attr_slot_mask + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return UINT32_MAX;                                         /* GCOVR_EXCL_LINE */
+    }
+    return th_attr_lookup_slow(tree, bytes, len);
 }
 
 /* intern_attr_dynamic for a table that is not built yet, which starts on FNV-1a, or
