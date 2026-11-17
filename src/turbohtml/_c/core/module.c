@@ -386,25 +386,30 @@ TH_NOINLINE uint32_t th_name_hash(const void *data, Py_ssize_t len) {
     return (uint32_t)(state[0] ^ state[1] ^ state[2] ^ state[3]);
 }
 
-uint64_t th_chain_mult;
+uint64_t th_mix_key[3];
 
 static int name_hash_key_status;
 
 static void name_hash_key_compute(void) {
-    static const char *const salts[3] = {"turbohtml:name-hash:0", "turbohtml:name-hash:1", "turbohtml:chain-mult"};
-    for (int index = 0; index < 3; index++) {
+    static const char *const salts[2] = {"turbohtml:name-hash:0", "turbohtml:name-hash:1"};
+    static const char *const mix_salts[3] = {"turbohtml:mix-key:0", "turbohtml:mix-key:1", "turbohtml:mix-key:2"};
+    for (int index = 0; index < 2; index++) {
         PyObject *salt = PyBytes_FromString(salts[index]);
         if (salt == NULL) {            /* GCOVR_EXCL_BR_LINE: bytes allocation cannot be forced from a test */
             name_hash_key_status = -1; /* GCOVR_EXCL_LINE: allocation-failure path */
             return;                    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
-        uint64_t key = (uint64_t)PyObject_Hash(salt);
+        th_name_hash_key[index] = (uint64_t)PyObject_Hash(salt);
         Py_DECREF(salt);
-        if (index < 2) {
-            th_name_hash_key[index] = key;
-        } else {
-            th_chain_mult = key | 1;
+    }
+    for (int index = 0; index < 3; index++) {
+        PyObject *salt = PyBytes_FromString(mix_salts[index]);
+        if (salt == NULL) {            /* GCOVR_EXCL_BR_LINE: bytes allocation cannot be forced from a test */
+            name_hash_key_status = -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            return;                    /* GCOVR_EXCL_LINE: allocation-failure path */
         }
+        th_mix_key[index] = (uint64_t)PyObject_Hash(salt) | 1;
+        Py_DECREF(salt);
     }
 }
 

@@ -205,7 +205,7 @@ TH_NOINLINE uint32_t intern_attr_insert(th_tree *tree, const char *bytes, Py_ssi
    one on th_name_hash. Out of line, so the FNV-1a lookup keeps its registers. */
 TH_NOINLINE uint32_t intern_attr_slow(th_tree *tree, const char *bytes, Py_ssize_t len) {
     if (tree->attr_slots == NULL) {
-        return intern_attr_insert(tree, bytes, len, th_fnv1a_bytes(bytes, len));
+        return intern_attr_insert(tree, bytes, len, (uint32_t)th_mix_bytes(0, bytes, len));
     }
     uint32_t hash = th_name_hash(bytes, len);
     uint32_t found = dynamic_slot(tree, bytes, len, hash);

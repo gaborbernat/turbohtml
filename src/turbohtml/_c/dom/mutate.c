@@ -434,14 +434,15 @@ static inline int attr_name_folds_to(th_tree *tree, uint32_t atom, const char *n
 /* The keyed chain (core/hash.h) over a name's ASCII-lowercased bytes; *cased reports whether lowercasing changed any.
  */
 static uint32_t attr_name_folded_hash(const char *name, Py_ssize_t name_len, int *cased) {
-    uint64_t hash = 0;
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, 0);
     *cased = 0;
     for (Py_ssize_t offset = 0; offset < name_len; offset++) {
         const uint32_t byte = (unsigned char)name[offset];
         *cased |= lower_ascii(byte) != byte;
-        hash = th_chain_step(hash, lower_ascii(byte));
+        th_mix_stream_byte(&stream, lower_ascii(byte));
     }
-    return (uint32_t)th_chain_finish(hash);
+    return (uint32_t)th_mix_stream_finish(&stream);
 }
 
 /* Entries go to the head of their chain, so a chain runs from the highest position down. */

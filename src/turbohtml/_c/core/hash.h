@@ -79,17 +79,75 @@ static inline uint64_t th_key_mix(uint64_t key) {
     return hash ^ (hash >> 31);
 }
 
-/* One step of the keyed chain a name table folds its name through when the name arrives from the document and the
-   table never moves to th_name_hash. Each step is th_key_mix, so every step depends on th_name_hash_key, which the
-   document cannot read: no name has a home the document can compute offline. */
-extern uint64_t th_chain_mult;
+/* Keyed name hashing in 8-byte blocks: each block is folded through a 64x64->128 multiply against secret-xored words
+   (wyhash's mum step), with the per-process key in th_mix_key. Ordinary names cost one multiply per eight bytes, and no
+   key-independent collision family exists for this shape. */
+extern uint64_t th_mix_key[3];
 
-static inline uint64_t th_chain_step(uint64_t hash, uint64_t unit) {
-    return (hash ^ unit) * th_chain_mult;
+static inline uint64_t th_mum(uint64_t a, uint64_t b) {
+    const uint64_t a_lo = (uint32_t)a;
+    const uint64_t a_hi = a >> 32;
+    const uint64_t b_lo = (uint32_t)b;
+    const uint64_t b_hi = b >> 32;
+    const uint64_t lo_lo = a_lo * b_lo;
+    const uint64_t hi_lo = a_hi * b_lo;
+    const uint64_t lo_hi = a_lo * b_hi;
+    const uint64_t hi_hi = a_hi * b_hi;
+    const uint64_t cross = (lo_lo >> 32) + (uint32_t)hi_lo + lo_hi;
+    const uint64_t high = (hi_lo >> 32) + (cross >> 32) + hi_hi;
+    const uint64_t low = (cross << 32) | (uint32_t)lo_lo;
+    return low ^ high;
 }
 
-static inline uint64_t th_chain_finish(uint64_t hash) {
-    return th_key_mix(hash);
+typedef struct {
+    uint64_t state;
+    uint64_t word;
+    uint64_t length;
+    unsigned fill;
+} th_mix_stream;
+
+static inline void th_mix_stream_init(th_mix_stream *stream, uint64_t seed) {
+    stream->state = seed;
+    stream->word = 0;
+    stream->length = 0;
+    stream->fill = 0;
+}
+
+static inline void th_mix_stream_byte(th_mix_stream *stream, uint64_t byte) {
+    stream->word |= (byte & 0xFFu) << (8 * stream->fill);
+    stream->length++;
+    if (++stream->fill == 8) {
+        stream->state = th_mum(stream->state ^ stream->word, th_mix_key[0]);
+        stream->word = 0;
+        stream->fill = 0;
+    }
+}
+
+static inline void th_mix_stream_unit(th_mix_stream *stream, uint64_t unit) {
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        th_mix_stream_byte(stream, unit >> shift);
+    }
+}
+
+static inline void th_mix_stream_word(th_mix_stream *stream, uint64_t word) {
+    for (unsigned shift = 0; shift < 64; shift += 8) {
+        th_mix_stream_byte(stream, word >> shift);
+    }
+}
+
+static inline uint64_t th_mix_stream_finish(const th_mix_stream *stream) {
+    const uint64_t state = th_mum(stream->state ^ stream->word, th_mix_key[1]);
+    return th_mum(state ^ th_mix_key[2], stream->length ^ th_mix_key[1]);
+}
+
+static inline uint64_t th_mix_bytes(uint64_t seed, const void *data, Py_ssize_t len) {
+    const unsigned char *bytes = data;
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, seed);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        th_mix_stream_byte(&stream, bytes[index]);
+    }
+    return th_mix_stream_finish(&stream);
 }
 
 #endif /* TURBOHTML_CORE_HASH_H */

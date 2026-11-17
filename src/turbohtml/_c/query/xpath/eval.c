@@ -434,11 +434,7 @@ static char *ns_scratch(struct xp_ns_index *index, size_t needed) {
 }
 
 static uint32_t ns_hash(const char *bytes, Py_ssize_t len) {
-    uint64_t hash = 0;
-    for (Py_ssize_t at = 0; at < len; at++) {
-        hash = th_chain_step(hash, (unsigned char)bytes[at]);
-    }
-    return (uint32_t)th_chain_finish(hash);
+    return (uint32_t)th_mix_bytes(0, bytes, len);
 }
 
 static int ns_rehash(struct xp_ns_index *index, size_t capacity) {

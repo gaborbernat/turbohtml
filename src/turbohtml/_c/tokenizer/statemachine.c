@@ -883,18 +883,19 @@ static int attr_name_dup(const th_attr *a, const th_attr *b) {
     return 1;
 }
 
-/* FNV-1a over a name's raw storage bytes. Equal names share width and content
-   (buffers reset to the 1-byte kind and promote only on demand), so equal names
-   always hash equal; a hash collision between distinct names is resolved by
-   attr_name_dup. Once the index is keyed, attr_seen_slow replaces it with
-   th_name_hash of the same bytes. */
+/* The keyed block hash (core/hash.h) of a name's raw storage bytes. Equal names share width and content
+   (buffers reset to the 1-byte kind and promote only on demand), so equal names always hash equal; a hash
+   collision between distinct names is resolved by attr_name_dup. Once the index is keyed, attr_seen_slow
+   replaces it with th_name_hash of the same bytes. */
 static uint32_t attr_name_hash(const th_buf *name) {
-    return th_fnv1a_bytes(name->data, name->len * name->kind);
+    return (uint32_t)th_mix_bytes(0, name->data, name->len * name->kind);
 }
 
 /* Seat attrs[0, count) in the duplicate index at the current epoch. They go in the order
    attr_seen_probe seated them, so in a doubled index none lands further from its home
    than it sat before. */
+static void attr_seen_rekey(th_tokenizer *self, Py_ssize_t cur, Py_ssize_t seated);
+
 static void attr_seen_seat(th_tokenizer *self, Py_ssize_t count) {
     const th_attr *attrs = self->tok.attrs;
     Py_ssize_t mask = self->attr_seen_cap - 1;

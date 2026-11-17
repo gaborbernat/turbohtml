@@ -49,7 +49,7 @@ typedef struct {
     Py_ssize_t shadowed;   /* the binding of the same prefix this one hides until it closes, or -1 */
     Py_UCS4 *uri;          /* the namespace name the prefix binds, for expanded-name comparison */
     Py_ssize_t uri_len;
-    uint64_t uri_hash; /* the keyed chain state past the URI, valid once uri_hashed is set */
+    th_mix_stream uri_stream; /* the keyed state past the URI, valid once uri_hashed is set */
     int uri_hashed;
     Py_ssize_t depth;
 } xml_nsdecl;
@@ -466,11 +466,12 @@ static int local_names_equal(const xml_parser *parser, Py_ssize_t a, Py_ssize_t 
 }
 
 static uint64_t prefix_hash(const xml_parser *parser, Py_ssize_t start, Py_ssize_t len) {
-    uint64_t hash = parser->hash_seed;
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, parser->hash_seed);
     for (Py_ssize_t offset = 0; offset < len; offset++) {
-        hash = th_chain_step(hash, cp(parser, start + offset));
+        th_mix_stream_unit(&stream, cp(parser, start + offset));
     }
-    return th_chain_finish(hash);
+    return th_mix_stream_finish(&stream);
 }
 
 /* The prefix-table slot holding prefix [start, start+len), or the empty slot it would take. */
@@ -538,7 +539,7 @@ static TH_NOINLINE int declare_prefix(xml_parser *parser, Py_ssize_t start, Py_s
     if (owned_uri == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return -1;           /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    parser->ns[parser->ns_len++] = (xml_nsdecl){start, len, -1, -1, owned_uri, uri_len, 0, 0, depth};
+    parser->ns[parser->ns_len++] = (xml_nsdecl){start, len, -1, -1, owned_uri, uri_len, (th_mix_stream){0}, 0, depth};
     if (parser->prefix_slots_cap == 0 && parser->ns_len < PREFIX_TABLE_MIN_BINDINGS) {
         return 0;
     }
@@ -1300,27 +1301,27 @@ static uint64_t dup_hash_atom(uint64_t seed, uint32_t atom) {
 /* Slot hash for the expanded-name keying: salt, then the namespace URI, a ':' separator
    so "ab"+"c" and "a"+"bc" differ, then the local name. `uri_hash` is the state decl_uri_hash
    kept after the salt and the URI, so no attribute reads the URI again. */
-static uint64_t dup_hash_expanded(uint64_t uri_hash, const xml_parser *parser, Py_ssize_t local_start,
+static uint64_t dup_hash_expanded(const th_mix_stream *uri, const xml_parser *parser, Py_ssize_t local_start,
                                   Py_ssize_t local_len) {
-    uint64_t hash = th_chain_step(uri_hash, ':');
+    th_mix_stream stream = *uri;
+    th_mix_stream_unit(&stream, ':');
     for (Py_ssize_t offset = 0; offset < local_len; offset++) {
-        hash = th_chain_step(hash, cp(parser, local_start + offset));
+        th_mix_stream_unit(&stream, cp(parser, local_start + offset));
     }
-    return th_chain_finish(hash);
+    return th_mix_stream_finish(&stream);
 }
 
 /* Folded on the first prefixed attribute that reads the binding, so a declaration no attribute uses costs nothing. */
-static uint64_t decl_uri_hash(xml_parser *parser, xml_nsdecl *decl) {
+static const th_mix_stream *decl_uri_hash(xml_parser *parser, xml_nsdecl *decl) {
     if (!decl->uri_hashed) {
-        uint64_t hash = parser->hash_seed;
+        th_mix_stream_init(&decl->uri_stream, parser->hash_seed);
         for (Py_ssize_t offset = 0; offset < decl->uri_len; offset++) {
             TH_WORK_STEP();
-            hash = th_chain_step(hash, decl->uri[offset]);
+            th_mix_stream_unit(&decl->uri_stream, decl->uri[offset]);
         }
-        decl->uri_hash = hash;
         decl->uri_hashed = 1;
     }
-    return decl->uri_hash;
+    return &decl->uri_stream;
 }
 
 /* Parse one attribute onto `element`, tracking any xmlns declaration at `depth`.

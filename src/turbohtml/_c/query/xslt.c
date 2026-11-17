@@ -4708,17 +4708,13 @@ static int number_hash_seed(uint64_t *seed) {
     return 0;
 }
 
-static uint64_t number_hash_text(uint64_t hash, const Py_UCS4 *text, Py_ssize_t len) {
+static uint32_t number_units_hash(uint64_t seed, const Py_UCS4 *text, Py_ssize_t len) {
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, seed);
     for (Py_ssize_t index = 0; index < len; index++) {
-        hash = th_chain_step(hash, text[index]);
+        th_mix_stream_unit(&stream, text[index]);
     }
-    return hash;
-}
-
-static uint32_t number_hash_finish(uint64_t hash) {
-    hash = (hash ^ (hash >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
-    hash = (hash ^ (hash >> 27)) * UINT64_C(0x94D049BB133111EB);
-    return (uint32_t)(hash ^ (hash >> 31));
+    return (uint32_t)th_mix_stream_finish(&stream);
 }
 
 static xslt_number_uri *number_uri_slot(xslt_number_uri *uris, size_t capacity, uint32_t hash, const Py_UCS4 *text,
@@ -4764,7 +4760,7 @@ static int number_uri_id(xslt_number_index *index, const Py_UCS4 *text, Py_ssize
         index->uris = uris;
         index->uri_capacity = capacity;
     }
-    const uint32_t hash = number_hash_finish(number_hash_text(index->uri_seed, text, len));
+    const uint32_t hash = number_units_hash(index->uri_seed, text, len);
     xslt_number_uri *uri = number_uri_slot(index->uris, index->uri_capacity, hash, text, len);
     if (uri->id == 0) {
         *uri = (xslt_number_uri){text, len, hash, (uint32_t)++index->uri_count};
@@ -5303,12 +5299,16 @@ static long unindexed_any_number(engine *eng, th_node *start, xslt_number_patter
 /* The names a walk tallies all come from number_default_name in one state of the namespace index, where uri_id
    stands for the uri: reading the uri text here would cost its length at every element the walk passes. */
 static uint32_t number_name_hash(uint64_t seed, const xslt_number_name *name) {
-    uint64_t hash = seed;
-    hash = th_chain_step(hash, (uint64_t)name->type);
-    hash = th_chain_step(hash, (uint64_t)name->ns);
-    hash = th_chain_step(hash, (uint64_t)name->uri_id);
-    hash = th_chain_step(hash, (uint64_t)name->name_len);
-    return number_hash_finish(number_hash_text(hash, name->name, name->name_len));
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, seed);
+    th_mix_stream_word(&stream, (uint64_t)name->type);
+    th_mix_stream_word(&stream, (uint64_t)name->ns);
+    th_mix_stream_word(&stream, (uint64_t)name->uri_id);
+    th_mix_stream_word(&stream, (uint64_t)name->name_len);
+    for (Py_ssize_t index = 0; index < name->name_len; index++) {
+        th_mix_stream_unit(&stream, name->name[index]);
+    }
+    return (uint32_t)th_mix_stream_finish(&stream);
 }
 
 static int number_tally_names(const xslt_number_name *left, const xslt_number_name *right) {

@@ -239,11 +239,7 @@ typedef struct {
 
 /* The keyed chain (core/hash.h) over the prefix, from the per-walk salt, so chosen prefixes cannot share a slot. */
 static uint64_t c14n_xml_prefix_hash(const c14n_xml_scope *scope, const char *name, Py_ssize_t name_len) {
-    uint64_t hash = scope->hash_seed;
-    for (Py_ssize_t offset = 0; offset < name_len; offset++) {
-        hash = th_chain_step(hash, (unsigned char)name[offset]);
-    }
-    return th_chain_finish(hash);
+    return th_mix_bytes(scope->hash_seed, name, name_len);
 }
 
 /* The slot holding prefix [name, name+name_len), or the free slot it would take. */

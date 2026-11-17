@@ -1191,19 +1191,20 @@ static int named_push(th_schema *schema, named_vec *vec, const Py_UCS4 *name, Py
 /* The keyed chain (core/hash.h) over the UTF-8 encoding of the name: ns_hash_bytes and the attribute indexes hash
    interned bytes the same way, so a table keyed one way is probed the other way without decoding. */
 static uint64_t named_hash(const Py_UCS4 *name, Py_ssize_t len) {
-    uint64_t hash = 0;
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, 0);
     for (Py_ssize_t index = 0; index < len; index++) {
         if (name[index] < 0x80) {
-            hash = th_chain_step(hash, name[index]);
+            th_mix_stream_byte(&stream, name[index]);
             continue;
         }
         unsigned char encoded[4];
         int count = utf8_encode(name[index], encoded);
         for (int byte = 0; byte < count; byte++) {
-            hash = th_chain_step(hash, encoded[byte]);
+            th_mix_stream_byte(&stream, encoded[byte]);
         }
     }
-    return th_chain_finish(hash);
+    return th_mix_stream_finish(&stream);
 }
 
 static int named_index(th_schema *schema, named_vec *vec) {
@@ -1261,11 +1262,7 @@ static Py_ssize_t named_find_index(const named_vec *vec, const Py_UCS4 *name, Py
 }
 
 static uint64_t ns_hash_bytes(const char *bytes, Py_ssize_t len) {
-    uint64_t hash = 0;
-    for (Py_ssize_t index = 0; index < len; index++) {
-        hash = th_chain_step(hash, (unsigned char)bytes[index]);
-    }
-    return th_chain_finish(hash);
+    return th_mix_bytes(0, bytes, len);
 }
 
 static int ns_grow(th_schema *schema) {

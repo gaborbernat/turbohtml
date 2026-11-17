@@ -720,11 +720,12 @@ static pattern *pat_onemore(th_schema *schema, pattern *p1) {
 static pattern *rng_resolve(th_schema *schema, int def_index);
 
 static uint64_t def_slot_hash(const Py_UCS4 *name, Py_ssize_t len) {
-    uint64_t hash = 0;
+    th_mix_stream stream;
+    th_mix_stream_init(&stream, 0);
     for (Py_ssize_t index = 0; index < len; index++) {
-        hash = th_chain_step(hash, name[index]);
+        th_mix_stream_unit(&stream, name[index]);
     }
-    return th_chain_finish(hash);
+    return th_mix_stream_finish(&stream);
 }
 
 static uint64_t nc_name_hash(const nameclass *nc) {

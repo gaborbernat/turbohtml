@@ -296,6 +296,68 @@ def _spread(count: int, length: int) -> list[str]:
     return ["".join(rng.choices(string.ascii_lowercase, k=length)) for _ in range(count)]
 
 
+_FNV64_PRIME: Final[int] = 1099511628211
+_FNV32_BASIS: Final[int] = 2166136261
+_FNV32_PRIME: Final[int] = 16777619
+_THUE_MORSE_EXPONENT: Final[int] = 12  # blocks of 2 ** 12 letters: a Thue-Morse block and its complement fold alike
+
+
+def _xml_prefix_start() -> int:
+    return (hash(b"turbohtml:xml-attr-dup") ^ _FNV64[0]) & _MASK64
+
+
+def _c14n_prefix_start() -> int:
+    return (hash(b"turbohtml:c14n-prefix") ^ _FNV64[0]) & _MASK64
+
+
+def _path_type_start() -> int:
+    return ((hash(b"turbohtml:path-type") ^ _FNV64[0]) * _FNV64_PRIME * _FNV64_PRIME) & _MASK64
+
+
+@pytest.mark.parametrize(
+    ("build", "shape"),
+    [
+        pytest.param(_xml_prefixes, (_xml_prefix_start(), _FNV64_PRIME, _MASK64, ""), id="xml-prefixes"),
+        pytest.param(
+            _xml_expanded_attributes, (_xml_prefix_start(), _FNV64_PRIME, _MASK64, "urn:x:"), id="xml-expanded"
+        ),
+        pytest.param(_c14n_declarations, (_c14n_prefix_start(), _FNV64_PRIME, _MASK64, ""), id="c14n-prefixes"),
+        pytest.param(_path_type_children, (_path_type_start(), _FNV64_PRIME, _MASK64, ""), id="element-path-types"),
+        pytest.param(_route_children, (_XSLT64[0], _XSLT64[1], _MASK64, ""), id="relaxng-route-keys"),
+        pytest.param(_relaxng_defines, (_XSLT64[0], _XSLT64[1], _MASK64, ""), id="relaxng-defines"),
+        pytest.param(_xsd_attributes, (_XSLT64[0], _XSLT64[1], _MASK64, ""), id="xsd-attribute-names"),
+        pytest.param(_xsd_prefixes, (_XSLT64[0], _XSLT64[1], _MASK64, ""), id="xsd-namespace-prefixes"),
+        pytest.param(_xpath_namespace_uris, (_FNV32_BASIS, _FNV32_PRIME, 0xFFFFFFFF, ""), id="xpath-namespace-uris"),
+    ],
+)
+def test_thue_morse_names_stay_within_the_step_budget(
+    work_steps: WorkSteps, build: Callable[[list[str]], Callable[[], object]], shape: tuple[int, int, int, str]
+) -> None:
+    start, prime, mask, prefix = shape
+    collide = _thue_morse_names(256)
+    assert _fold(start, prime, mask, prefix + collide[0]) == _fold(start, prime, mask, prefix + collide[-1])
+    work_steps.assert_within(build(collide), build(_spread(len(collide), len(collide[0]))), factor=_FACTOR)
+
+
+def _thue_morse_names(count: int) -> list[str]:
+    # Every name concatenates eight Thue-Morse blocks, each the block or its complement; the blocks fold alike from any
+    # state at this exponent, so the names share one hash under the FNV-1a shapes the tables used before.
+    word: list[int] = [0]
+    for _ in range(_THUE_MORSE_EXPONENT):
+        word += [1 - letter for letter in word]
+    block = "".join("ab"[letter] for letter in word)
+    complement = "".join("ab"[1 - letter] for letter in word)
+    width = count.bit_length() - 1
+    return ["".join(complement if (index >> bit) & 1 else block for bit in range(width)) for index in range(count)]
+
+
+def _fold(start: int, prime: int, mask: int, text: str) -> int:
+    state = start
+    for char in text:
+        state = ((state ^ ord(char)) * prime) & mask
+    return state
+
+
 def _css_rule_selectors(names: list[str]) -> Callable[[], object]:
     source: Final = "".join(f"{name}{{order:{index}}}" for index, name in enumerate(names))
     return lambda: minify_css(source)
