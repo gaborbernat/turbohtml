@@ -4694,23 +4694,21 @@ static int number_namespace_atom(engine *eng, const th_node *node, const xslt_nu
     return 0;
 }
 
-/* Salted FNV-1a finished with the splitmix64 mix, as the XML parser hashes the names of its own tables
-   (tokenizer/xml.c): the source document picks the names and namespaces hashed here, and unsalted ones could be
-   chosen to share a slot. Python's randomized bytes hash is the salt: unpredictable per process, yet fixed under
-   PYTHONHASHSEED. */
+/* The keyed chain (core/hash.h) over the names, salted from Python's randomized bytes hash as the XML parser salts its
+   own tables (tokenizer/xml.c): the source document picks the names and namespaces hashed here. */
 static int number_hash_seed(uint64_t *seed) {
     PyObject *salt = PyBytes_FromStringAndSize("turbohtml:xslt-number", 21);
     if (salt == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
         return -1;      /* GCOVR_EXCL_LINE */
     }
-    *seed = (uint64_t)PyObject_Hash(salt) ^ UINT64_C(14695981039346656037);
+    *seed = (uint64_t)PyObject_Hash(salt);
     Py_DECREF(salt);
     return 0;
 }
 
 static uint64_t number_hash_text(uint64_t hash, const Py_UCS4 *text, Py_ssize_t len) {
     for (Py_ssize_t index = 0; index < len; index++) {
-        hash = (hash ^ text[index]) * UINT64_C(1099511628211);
+        hash = th_chain_step(hash, text[index]);
     }
     return hash;
 }
@@ -4725,6 +4723,7 @@ static xslt_number_uri *number_uri_slot(xslt_number_uri *uris, size_t capacity, 
                                         Py_ssize_t len) {
     size_t slot = th_hash_slot(hash, capacity);
     while (uris[slot].id != 0 && !str_eq(uris[slot].text, uris[slot].len, text, len)) {
+        TH_WORK_STEP();
         slot = (slot + 1) & (capacity - 1);
     }
     return &uris[slot];
@@ -5303,10 +5302,10 @@ static long unindexed_any_number(engine *eng, th_node *start, xslt_number_patter
    stands for the uri: reading the uri text here would cost its length at every element the walk passes. */
 static uint32_t number_name_hash(uint64_t seed, const xslt_number_name *name) {
     uint64_t hash = seed;
-    hash = (hash ^ (uint64_t)name->type) * UINT64_C(1099511628211);
-    hash = (hash ^ (uint64_t)name->ns) * UINT64_C(1099511628211);
-    hash = (hash ^ (uint64_t)name->uri_id) * UINT64_C(1099511628211);
-    hash = (hash ^ (uint64_t)name->name_len) * UINT64_C(1099511628211);
+    hash = th_chain_step(hash, (uint64_t)name->type);
+    hash = th_chain_step(hash, (uint64_t)name->ns);
+    hash = th_chain_step(hash, (uint64_t)name->uri_id);
+    hash = th_chain_step(hash, (uint64_t)name->name_len);
     return number_hash_finish(number_hash_text(hash, name->name, name->name_len));
 }
 
@@ -5321,6 +5320,7 @@ static xslt_number_tally *number_tally_slot(xslt_number_tally *tallies, size_t c
                                             const xslt_number_name *name) {
     size_t slot = th_hash_slot(hash, capacity);
     while (tallies[slot].count != 0 && !number_tally_names(&tallies[slot].name, name)) {
+        TH_WORK_STEP();
         slot = (slot + 1) & (capacity - 1);
     }
     return &tallies[slot];

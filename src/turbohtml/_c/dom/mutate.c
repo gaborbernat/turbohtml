@@ -431,16 +431,17 @@ static inline int attr_name_folds_to(th_tree *tree, uint32_t atom, const char *n
     return offset == name_len;
 }
 
-/* FNV-1a of a name's ASCII-lowercased bytes; *cased reports whether lowercasing changed any. */
+/* The keyed chain (core/hash.h) over a name's ASCII-lowercased bytes; *cased reports whether lowercasing changed any.
+ */
 static uint32_t attr_name_folded_hash(const char *name, Py_ssize_t name_len, int *cased) {
-    uint32_t hash = 2166136261u;
+    uint64_t hash = 0;
     *cased = 0;
     for (Py_ssize_t offset = 0; offset < name_len; offset++) {
         const uint32_t byte = (unsigned char)name[offset];
         *cased |= lower_ascii(byte) != byte;
-        hash = (hash ^ lower_ascii(byte)) * 16777619u;
+        hash = th_chain_step(hash, lower_ascii(byte));
     }
-    return hash;
+    return (uint32_t)th_chain_finish(hash);
 }
 
 /* Entries go to the head of their chain, so a chain runs from the highest position down. */
@@ -1428,7 +1429,7 @@ static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right
     }
     for (Py_ssize_t index = 0; index < right->attr_count; index++) {
         /* an element never carries one name twice, so every name takes a fresh slot */
-        size_t slot = ((size_t)right->attrs[index].name_atom * 2654435761U) & (capacity - 1);
+        size_t slot = (size_t)th_key_mix(right->attrs[index].name_atom) & (capacity - 1);
         while (slots[slot] != 0) {
             slot = (slot + 1) & (capacity - 1);
         }
@@ -1443,7 +1444,7 @@ static int attrs_equal_indexed(th_tree *left_tree, th_node *left, th_tree *right
             const char *name = th_attr_name(left_tree, atom, &name_len);
             atom = th_attr_lookup(right_tree, name, name_len);
         }
-        size_t slot = ((size_t)atom * 2654435761U) & (capacity - 1);
+        size_t slot = (size_t)th_key_mix(atom) & (capacity - 1);
         while (slots[slot] != 0 && right->attrs[slots[slot] - 1].name_atom != atom) {
             slot = (slot + 1) & (capacity - 1);
         }

@@ -679,23 +679,23 @@ static pattern *pat_onemore(th_schema *schema, pattern *p1) {
 
 static pattern *rng_resolve(th_schema *schema, int def_index);
 
-static uint64_t def_hash(const Py_UCS4 *name, Py_ssize_t len) {
-    uint64_t hash = UINT64_C(1469598103934665603);
+static uint64_t def_slot_hash(const Py_UCS4 *name, Py_ssize_t len) {
+    uint64_t hash = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
-        hash ^= name[index];
-        hash *= UINT64_C(1099511628211);
+        hash = th_chain_step(hash, name[index]);
     }
-    return hash;
+    return th_chain_finish(hash);
 }
 
 static uint64_t nc_name_hash(const nameclass *nc) {
-    return def_hash(nc->uri, nc->uri_len) * UINT64_C(0x9E3779B97F4A7C15) ^ def_hash(nc->local, nc->local_len);
+    return def_slot_hash(nc->uri, nc->uri_len) * UINT64_C(0x9E3779B97F4A7C15) ^ def_slot_hash(nc->local, nc->local_len);
 }
 
 static void def_slot_add(def_vec *defines, Py_ssize_t index) {
     def_entry *entry = &defines->items[index];
-    size_t slot = (size_t)def_hash(entry->name, entry->len) & (defines->slot_cap - 1);
+    size_t slot = (size_t)def_slot_hash(entry->name, entry->len) & (defines->slot_cap - 1);
     while (defines->slots[slot] != 0) {
+        TH_WORK_STEP();
         slot = (slot + 1) & (defines->slot_cap - 1);
     }
     defines->slots[slot] = (size_t)index + 1;
@@ -726,8 +726,9 @@ static Py_ssize_t def_find(const def_vec *defines, const Py_UCS4 *name, Py_ssize
         }
         return -1;
     }
-    size_t slot = (size_t)def_hash(name, len) & (defines->slot_cap - 1);
+    size_t slot = (size_t)def_slot_hash(name, len) & (defines->slot_cap - 1);
     while (defines->slots[slot] != 0) {
+        TH_WORK_STEP();
         Py_ssize_t index = (Py_ssize_t)defines->slots[slot] - 1;
         if (u_eq_u(defines->items[index].name, defines->items[index].len, name, len)) {
             return index;
@@ -2329,7 +2330,7 @@ static int route_parent_add(th_schema *schema, route_unit *child, route_unit *pa
 
 static uint64_t route_key_hash(int kind, const Py_UCS4 *uri, Py_ssize_t uri_len, const Py_UCS4 *local,
                                Py_ssize_t local_len) {
-    return (def_hash(uri, uri_len) * UINT64_C(0x9E3779B97F4A7C15) ^ def_hash(local, local_len)) +
+    return (def_slot_hash(uri, uri_len) * UINT64_C(0x9E3779B97F4A7C15) ^ def_slot_hash(local, local_len)) +
            (uint64_t)kind * UINT64_C(0xC2B2AE3D27D4EB4F);
 }
 
@@ -2338,6 +2339,7 @@ static route_key *route_key_slot(const rng_routing *routing, uint64_t hash, int 
                                  Py_ssize_t uri_len, const Py_UCS4 *local, Py_ssize_t local_len) {
     size_t slot = (size_t)(hash ^ (hash >> 32)) & (routing->key_cap - 1);
     for (;; slot = (slot + 1) & (routing->key_cap - 1)) {
+        TH_WORK_STEP();
         route_key *key = &routing->keys[slot];
         if (key->units == NULL || (key->kind == kind && u_eq_u(key->local, key->local_len, local, local_len) &&
                                    u_eq_u(key->uri, key->uri_len, uri, uri_len))) {
@@ -3734,7 +3736,7 @@ static uint64_t nc_struct_hash(const nameclass *nc) {
     for (; nc->type == NC_CHOICE || nc->type == NC_EXCEPT; nc = nc->a) {
         hash = (hash ^ nc_struct_hash(nc->b)) * UINT64_C(0x100000001B3) + (uint64_t)nc->type;
     }
-    uint64_t leaf = nc->type == NC_NS ? def_hash(nc->uri, nc->uri_len) : nc->type == NC_NAME ? nc->hash : 0;
+    uint64_t leaf = nc->type == NC_NS ? def_slot_hash(nc->uri, nc->uri_len) : nc->type == NC_NAME ? nc->hash : 0;
     return (hash ^ leaf) * UINT64_C(0x100000001B3) + (uint64_t)nc->type;
 }
 
@@ -3966,6 +3968,7 @@ static int ns_split(th_schema *schema, nsnode *node, const nameclass *name, nsno
 
 /* The union of two treaps as one canonical treap. A subtree both sides hold is the same node on each, so the recursion
    stops there: a union of sets that differ in a few names costs about the size of the difference. */
+/* A grammar's defines union the same two classes again and again, so the last result answers a repeat of its pair. */
 static int ns_union(th_schema *schema, nsnode *first, nsnode *second, nsnode **out) {
     TH_WORK_STEP();
     if (first == NULL) {
@@ -3984,6 +3987,10 @@ static int ns_union(th_schema *schema, nsnode *first, nsnode *second, nsnode **o
         first = second;
         second = swap;
     }
+    if (first == schema->rng_union_first && second == schema->rng_union_second) {
+        *out = schema->rng_union_out;
+        return 0;
+    }
     nsnode *below = NULL, *above = NULL;
     if (ns_split(schema, second, first->name, &below, &above) < 0) { /* GCOVR_EXCL_BR_LINE: budget in a split */
         return -1;                                                   /* GCOVR_EXCL_LINE */
@@ -3999,6 +4006,9 @@ static int ns_union(th_schema *schema, nsnode *first, nsnode *second, nsnode **o
     if (joined == NULL) { /* GCOVR_EXCL_BR_LINE: budget in make, see ns_make */
         return -1;        /* GCOVR_EXCL_LINE */
     }
+    schema->rng_union_first = first;
+    schema->rng_union_second = second;
+    schema->rng_union_out = joined;
     *out = joined;
     return 0;
 }

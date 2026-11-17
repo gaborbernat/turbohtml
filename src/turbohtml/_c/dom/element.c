@@ -2428,15 +2428,17 @@ void path_positions_free(void *positions) {
 
 /* The slot of node's type, or the free slot it would take, hashed over what sel_same_type compares. */
 static path_type_slot *path_type_find(path_type_slot *slots, size_t capacity, uint64_t seed, const th_node *node) {
-    uint64_t hash = (seed ^ UINT64_C(14695981039346656037) ^ node->ns) * UINT64_C(1099511628211);
-    hash = (hash ^ node->atom) * UINT64_C(1099511628211);
+    uint64_t hash = th_chain_step(seed, node->ns);
+    hash = th_chain_step(hash, node->atom);
     if (node->atom == TH_TAG_UNKNOWN) {
         for (Py_ssize_t index = 0; index < node->text_len; index++) {
-            hash = (hash ^ node->text[index]) * UINT64_C(1099511628211);
+            hash = th_chain_step(hash, node->text[index]);
         }
     }
+    hash = th_chain_finish(hash);
     size_t slot = th_hash_slot(th_fibonacci_hash((uint32_t)(hash >> 32)), capacity);
     while (slots[slot].first != NULL && !sel_same_type(slots[slot].first, node)) {
+        TH_WORK_STEP();
         slot = (slot + 1) & (capacity - 1);
     }
     return &slots[slot];

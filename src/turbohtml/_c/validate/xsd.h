@@ -1886,13 +1886,9 @@ static int xsd_index_attrs(valctx *ctx, th_node *instance, xattr_index *index) {
     for (Py_ssize_t position = 0; position < instance->attr_count; position++) {
         Py_ssize_t length;
         const char *name = th_attr_name(ctx->tree, instance->attrs[position].name_atom, &length);
-        uint64_t hash = UINT64_C(1469598103934665603);
-        for (Py_ssize_t byte = 0; byte < length; byte++) {
-            hash ^= (unsigned char)name[byte];
-            hash *= UINT64_C(1099511628211);
-        }
-        size_t slot = (size_t)hash & (index->capacity - 1);
+        size_t slot = (size_t)ns_hash_bytes(name, length) & (index->capacity - 1);
         while (index->slots[slot] != 0) {
+            TH_WORK_STEP();
             slot = (slot + 1) & (index->capacity - 1);
         }
         index->slots[slot] = position + 1;
@@ -1930,6 +1926,7 @@ static void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl
     if (attrs->slots != NULL) {
         size_t slot = (size_t)named_hash(name, name_len) & (attrs->capacity - 1);
         while (attrs->slots[slot] != 0) {
+            TH_WORK_STEP();
             const th_node_attr *candidate = &instance->attrs[attrs->slots[slot] - 1];
             Py_ssize_t length;
             const char *bytes = th_attr_name(inst, candidate->name_atom, &length);
@@ -2102,12 +2099,7 @@ static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, e
         }
         int known = 0;
         if (names.slots != NULL) {
-            uint64_t hash = UINT64_C(1469598103934665603);
-            for (Py_ssize_t byte = 0; byte < alen; byte++) {
-                hash ^= (unsigned char)abytes[byte];
-                hash *= UINT64_C(1099511628211);
-            }
-            size_t slot = (size_t)hash & (names.slot_cap - 1);
+            size_t slot = (size_t)ns_hash_bytes(abytes, alen) & (names.slot_cap - 1);
             while (names.slots[slot] != NULL) {
                 named_node *item = names.slots[slot];
                 if (u_eq_utf8(item->name, item->len, abytes, alen)) {

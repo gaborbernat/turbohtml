@@ -434,11 +434,11 @@ static char *ns_scratch(struct xp_ns_index *index, size_t needed) {
 }
 
 static uint32_t ns_hash(const char *bytes, Py_ssize_t len) {
-    uint32_t hash = 2166136261u;
+    uint64_t hash = 0;
     for (Py_ssize_t at = 0; at < len; at++) {
-        hash = (hash ^ (unsigned char)bytes[at]) * 16777619u;
+        hash = th_chain_step(hash, (unsigned char)bytes[at]);
     }
-    return hash;
+    return (uint32_t)th_chain_finish(hash);
 }
 
 static int ns_rehash(struct xp_ns_index *index, size_t capacity) {
@@ -471,6 +471,7 @@ static uint32_t ns_intern(struct xp_ns_index *index, const char *bytes, Py_ssize
     size_t mask = index->bucket_capacity - 1;
     size_t slot = hash & mask;
     while (index->buckets[slot] != 0) {
+        TH_WORK_STEP();
         const ns_string *known = &index->strings[index->buckets[slot] - 1];
         if (known->len == len && memcmp(known->bytes, bytes, (size_t)len) == 0) {
             return index->buckets[slot];

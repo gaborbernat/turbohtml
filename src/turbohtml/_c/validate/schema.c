@@ -20,6 +20,7 @@
    default-namespace schema and a namespaced instance validate correctly. */
 
 #include "core/common.h"
+#include "core/hash.h"
 #include "dom/ownership.h"
 #include "core/vec.h"
 #include "core/work_steps.h"
@@ -921,6 +922,8 @@ typedef struct th_schema {
     Py_ssize_t rng_nodes;  /* compile-time 7.4 check: treap nodes allocated against RNG_INTERLEAVE_NODE_LIMIT */
     th_node **rng_checked; /* compile-time 7.4 check: open-addressed set of interleaves already checked */
     nsnode **rng_table;    /* compile-time 7.4 check: hash-consed treap nodes, open addressed */
+    nsnode *rng_union_first, *rng_union_second,
+        *rng_union_out; /* compile-time 7.4 check: the last union, see ns_union */
     size_t rng_table_cap, rng_table_len;
     size_t rng_checked_cap, rng_checked_len;
     nspair rng_disjoint[8]; /* compile-time 7.4 check: the last disjoint pairs, round robin */
@@ -1178,31 +1181,22 @@ static int named_push(th_schema *schema, named_vec *vec, const Py_UCS4 *name, Py
     return 0;
 }
 
-TH_NOINLINE static uint64_t named_hash_wide(const Py_UCS4 *name, Py_ssize_t len) {
-    uint64_t hash = UINT64_C(1469598103934665603);
+/* The keyed chain (core/hash.h) over the UTF-8 encoding of the name: ns_hash_bytes and the attribute indexes hash
+   interned bytes the same way, so a table keyed one way is probed the other way without decoding. */
+static uint64_t named_hash(const Py_UCS4 *name, Py_ssize_t len) {
+    uint64_t hash = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
+        if (name[index] < 0x80) {
+            hash = th_chain_step(hash, name[index]);
+            continue;
+        }
         unsigned char encoded[4];
         int count = utf8_encode(name[index], encoded);
         for (int byte = 0; byte < count; byte++) {
-            hash ^= encoded[byte];
-            hash *= UINT64_C(1099511628211);
+            hash = th_chain_step(hash, encoded[byte]);
         }
     }
-    return hash;
-}
-
-/* FNV-1a over the UTF-8 encoding of the name, the hash ns_hash_bytes and the attribute indexes take over interned
-   attribute-name bytes, so a table keyed one way is probed the other way without decoding. An ASCII name has one byte
-   per code point, so only a name holding a wider code point is hashed a second time. */
-static inline uint64_t named_hash(const Py_UCS4 *name, Py_ssize_t len) {
-    uint64_t hash = UINT64_C(1469598103934665603);
-    Py_UCS4 seen = 0;
-    for (Py_ssize_t index = 0; index < len; index++) {
-        seen |= name[index];
-        hash ^= name[index];
-        hash *= UINT64_C(1099511628211);
-    }
-    return seen < 0x80 ? hash : named_hash_wide(name, len);
+    return th_chain_finish(hash);
 }
 
 static int named_index(th_schema *schema, named_vec *vec) {
@@ -1260,12 +1254,11 @@ static Py_ssize_t named_find_index(const named_vec *vec, const Py_UCS4 *name, Py
 }
 
 static uint64_t ns_hash_bytes(const char *bytes, Py_ssize_t len) {
-    uint64_t hash = UINT64_C(1469598103934665603);
+    uint64_t hash = 0;
     for (Py_ssize_t index = 0; index < len; index++) {
-        hash ^= (unsigned char)bytes[index];
-        hash *= UINT64_C(1099511628211);
+        hash = th_chain_step(hash, (unsigned char)bytes[index]);
     }
-    return hash;
+    return th_chain_finish(hash);
 }
 
 static int ns_grow(th_schema *schema) {

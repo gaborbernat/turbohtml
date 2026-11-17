@@ -237,25 +237,22 @@ typedef struct {
     Py_ssize_t copied; /* code points of declarations written on an element that does not carry them */
 } c14n_xml_scope;
 
-/* Salted FNV-1a under a splitmix64 finalizer, the hash the XML parser keys its own prefix table with. */
+/* The keyed chain (core/hash.h) over the prefix, from the per-walk salt, so chosen prefixes cannot share a slot. */
 static uint64_t c14n_xml_prefix_hash(const c14n_xml_scope *scope, const char *name, Py_ssize_t name_len) {
-    uint64_t hash = scope->hash_seed ^ UINT64_C(14695981039346656037);
+    uint64_t hash = scope->hash_seed;
     for (Py_ssize_t offset = 0; offset < name_len; offset++) {
-        hash = (hash ^ (unsigned char)name[offset]) * UINT64_C(1099511628211);
+        hash = th_chain_step(hash, (unsigned char)name[offset]);
     }
-    hash = (hash ^ (hash >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
-    hash = (hash ^ (hash >> 27)) * UINT64_C(0x94D049BB133111EB);
-    return hash ^ (hash >> 31);
+    return th_chain_finish(hash);
 }
 
 /* The slot holding prefix [name, name+name_len), or the free slot it would take. */
 static Py_ssize_t c14n_xml_prefix_slot(const c14n_xml_scope *scope, uint64_t hash, const char *name,
                                        Py_ssize_t name_len) {
     Py_ssize_t slot = (Py_ssize_t)(hash & (uint64_t)(scope->slots_cap - 1));
-    /* One step per lookup, not per probe: how far a probe runs depends on the per-process hash salt, so
-       counting probes would make the work-step tests pass or fail with PYTHONHASHSEED. */
     TH_WORK_STEP();
     while (scope->slots[slot] != 0) {
+        TH_WORK_STEP();
         const c14n_xml_prefix *known = &scope->prefixes[scope->slots[slot] - 1];
         if (known->name_len == name_len && memcmp(known->name, name, (size_t)name_len) == 0) {
             return slot;

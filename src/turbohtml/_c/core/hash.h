@@ -79,4 +79,17 @@ static inline uint64_t th_key_mix(uint64_t key) {
     return hash ^ (hash >> 31);
 }
 
+/* One step of the keyed chain a name table folds its name through when the name arrives from the document and the
+   table never moves to th_name_hash. Each step is th_key_mix, so every step depends on th_name_hash_key, which the
+   document cannot read: no name has a home the document can compute offline. */
+extern uint64_t th_chain_mult;
+
+static inline uint64_t th_chain_step(uint64_t hash, uint64_t unit) {
+    return (hash ^ unit) * th_chain_mult;
+}
+
+static inline uint64_t th_chain_finish(uint64_t hash) {
+    return th_key_mix(hash);
+}
+
 #endif /* TURBOHTML_CORE_HASH_H */

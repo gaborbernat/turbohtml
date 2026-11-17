@@ -10,6 +10,7 @@ import pytest
 import turbohtml
 from turbohtml.clean import minify_css, minify_js
 from turbohtml.transform import Transform
+from turbohtml.validate import RelaxNG, XMLSchema
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -131,6 +132,170 @@ def _radio_group(names: list[str]) -> Callable[[], object]:
     return check
 
 
+def _relaxng_defines(names: list[str]) -> Callable[[], object]:
+    defines: Final = "".join(
+        f'<define name="{name}"><element name="{name}"><empty/></element></define>' for name in names
+    )
+    refs: Final = "".join(f'<ref name="{name}"/>' for name in names)
+    schema: Final = f'<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><choice>{refs}</choice></start>{defines}</grammar>'
+    return lambda: RelaxNG(schema)
+
+
+def _xsd_prefixes(names: list[str]) -> Callable[[], object]:
+    declarations: Final = " ".join(f'xmlns:{name}="urn:{index}"' for index, name in enumerate(names))
+    schema: Final = (
+        f'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" {declarations}><xs:element name="r"/></xs:schema>'
+    )
+    return lambda: XMLSchema(schema)
+
+
+def _xsd_attributes(names: list[str]) -> Callable[[], object]:
+    declared: Final = "".join(f'<xs:attribute name="{name}" type="xs:string"/>' for name in names)
+    schema: Final = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType>'
+        f"{declared}</xs:complexType></xs:element></xs:schema>"
+    )
+    attributes: Final = " ".join(f'{name}="x"' for name in names)
+    instance: Final = f"<r {attributes}/>"
+    return lambda: XMLSchema(schema).validate(turbohtml.parse_xml(instance))
+
+
+def _xpath_namespace_uris(names: list[str]) -> Callable[[], object]:
+    declarations: Final = " ".join(f'xmlns:p{index}="{name}"' for index, name in enumerate(names))
+    document: Final = turbohtml.parse_xml(f"<r {declarations}></r>")
+    return lambda: document.xpath("//r")
+
+
+def _mixed_fnv64(salt: bytes, units: list[int]) -> int:
+    # The XML parser's and c14n's tables: FNV-1a from the salt's Python hash, finished with the splitmix64 mix.
+    state = (hash(salt) ^ _FNV64[0]) & _MASK64
+    for unit in units:
+        state = ((state ^ unit) * _FNV64[1]) & _MASK64
+    state = ((state ^ (state >> 30)) * 0xBF58476D1CE4E5B9) & _MASK64
+    state = ((state ^ (state >> 27)) * 0x94D049BB133111EB) & _MASK64
+    return state ^ (state >> 31)
+
+
+def _c14n_prefix_slot(name: str) -> int:
+    return _mixed_fnv64(b"turbohtml:c14n-prefix", list(name.encode()))
+
+
+def _path_type_slot(name: str) -> int:
+    # The element path cache: FNV-1a over the namespace, the atom (0 for an unknown tag) and the tag text, then the
+    # Fibonacci step on the high half; a 256-slot table keeps the top eight bits.
+    state = ((hash(b"turbohtml:path-type") ^ _FNV64[0]) * _FNV64[1]) & _MASK64
+    state = (state * _FNV64[1]) & _MASK64
+    for char in name:
+        state = ((state ^ ord(char)) * _FNV64[1]) & _MASK64
+    return (((state >> 32) * 0x61C88647) & 0xFFFFFFFF) >> 24
+
+
+def _route_slot(name: str) -> int:
+    # RELAX NG's route key of an element with no namespace: the empty URI's FNV-1a state times the golden ratio, XOR the
+    # local name's FNV-1a state, folded to the low bits of a 512-slot table.
+    state = ((_XSLT64[0] * 0x9E3779B97F4A7C15) & _MASK64) ^ _fnv_units(_XSLT64, [ord(char) for char in name])
+    return (state ^ (state >> 32)) & 511
+
+
+def _fnv_units(basis: tuple[int, int], units: list[int]) -> int:
+    state = basis[0]
+    for unit in units:
+        state = ((state ^ unit) * basis[1]) & _MASK64
+    return state
+
+
+def _c14n_declarations(names: list[str]) -> Callable[[], object]:
+    declarations: Final = " ".join(f'xmlns:{name}="urn:{index}"' for index, name in enumerate(names))
+    document: Final = turbohtml.parse_xml(f"<r {declarations}><x/></r>")
+    return document.canonicalize
+
+
+def _path_type_children(names: list[str]) -> Callable[[], object]:
+    # The first path on a fresh list counts only its own steps; the second resolves every sibling of the list.
+    body: Final = "".join(f"<{name}></{name}>" for name in names)
+    document: Final = turbohtml.parse(f"<div>{body}</div>")
+    children: Final = document.select("div > *")
+    return lambda: (children[0].css_path(), children[-1].css_path())
+
+
+def _route_children(names: list[str]) -> Callable[[], object]:
+    elements: Final = "".join(f'<element name="{name}"><empty/></element>' for name in names)
+    schema: Final = (
+        '<grammar xmlns="http://relaxng.org/ns/structure/1.0"><start><element name="root">'
+        f"<zeroOrMore><choice>{elements}</choice></zeroOrMore></element></start></grammar>"
+    )
+    validator: Final = RelaxNG(schema)
+    body: Final = "".join(f"<{name}/>" for name in names)
+    document: Final = turbohtml.parse_xml(f"<root>{body}</root>")
+    return lambda: validator.validate(document)
+
+
+def _xml_prefixes(names: list[str]) -> Callable[[], object]:
+    declarations: Final = " ".join(f'xmlns:{name}="urn:{index}"' for index, name in enumerate(names))
+    return lambda: turbohtml.parse_xml(f"<r {declarations}/>")
+
+
+_XML_SALT: Final[str] = "turbohtml:xml-attr-dup"
+_MASK64: Final[int] = (1 << 64) - 1
+_XSLT_FNV64_BASIS: Final[int] = 14695981039346656037
+
+
+def _xml_prefix_slot(name: str) -> int:
+    return _mixed_fnv64(b"turbohtml:xml-attr-dup", [ord(char) for char in name])
+
+
+def _xml_expanded_attributes(names: list[str]) -> Callable[[], object]:
+    attributes: Final = " ".join(f'p:{name}="1"' for name in names)
+    return lambda: turbohtml.parse_xml(f'<r xmlns:p="urn:x" {attributes}/>')
+
+
+def _xml_expanded_slot(name: str) -> int:
+    return _mixed_fnv64(b"turbohtml:xml-attr-dup", [ord(char) for char in f"urn:x:{name}"])
+
+
+@pytest.mark.parametrize(
+    ("slot", "bits", "count", "build"),
+    [
+        pytest.param(_xml_prefix_slot, 9, 128, _xml_prefixes, id="xml-prefixes"),
+        pytest.param(_xml_expanded_slot, 9, 128, _xml_expanded_attributes, id="xml-expanded-attribute-names"),
+        pytest.param(_c14n_prefix_slot, 9, 256, _c14n_declarations, id="c14n-prefixes"),
+        pytest.param(_path_type_slot, 8, 128, _path_type_children, id="element-path-types"),
+        pytest.param(_route_slot, 9, 256, _route_children, id="relaxng-route-keys"),
+    ],
+)
+def test_names_on_one_home_slot_under_a_mixed_hash_stay_within_the_step_budget(
+    work_steps: WorkSteps,
+    slot: Callable[[str], int],
+    bits: int,
+    count: int,
+    build: Callable[[list[str]], Callable[[], object]],
+) -> None:
+    collide = _colliding_on_slot(slot, bits, count, 12)
+    work_steps.assert_within(build(collide), build(_spread(len(collide), len(collide[0]))), factor=_FACTOR)
+
+
+def _colliding_on_slot(slot: Callable[[str], int], bits: int, count: int, length: int) -> list[str]:
+    # Random lowercase names kept when they share the first kept name's low `bits` slot bits, so the run stays on one
+    # home until the table grows past 2 ** bits slots.
+    rng: Final = random.Random(1)  # ruff: ignore[suspicious-non-cryptographic-random-usage]  # reproducible input
+    mask: Final = (1 << bits) - 1
+    names: list[str] = []
+    home = -1
+    while len(names) < count:
+        name = "".join(rng.choices(string.ascii_lowercase, k=length))
+        value = slot(name) & mask
+        if home < 0:
+            home = value
+        if value == home:
+            names.append(name)
+    return names
+
+
+def _spread(count: int, length: int) -> list[str]:
+    rng: Final = random.Random(1)  # ruff: ignore[suspicious-non-cryptographic-random-usage]  # reproducible input
+    return ["".join(rng.choices(string.ascii_lowercase, k=length)) for _ in range(count)]
+
+
 def _css_rule_selectors(names: list[str]) -> Callable[[], object]:
     source: Final = "".join(f"{name}{{order:{index}}}" for index, name in enumerate(names))
     return lambda: minify_css(source)
@@ -153,6 +318,10 @@ def _css_rule_selectors(names: list[str]) -> Callable[[], object]:
         pytest.param(_FNV64, _css_path, id="css-path-ids"),
         pytest.param(_FNV64, _radio_group, id="radio-group-form-ids"),
         pytest.param(_FNV32, _css_rule_selectors, id="css-rule-selectors"),
+        pytest.param(_XSLT64, _xsd_prefixes, id="xsd-namespace-prefixes"),
+        pytest.param(_XSLT64, _relaxng_defines, id="relaxng-defines"),
+        pytest.param(_XSLT64, _xsd_attributes, id="xsd-attribute-names"),
+        pytest.param(_FNV32, _xpath_namespace_uris, id="xpath-namespace-uris"),
     ],
 )
 def test_names_on_one_home_slot_stay_within_the_step_budget(
@@ -180,11 +349,6 @@ def _block_pairs(fnv: tuple[int, int], steps: int) -> list[tuple[str, str]]:
         pairs.append((groups[shared][0], groups[shared][1]))
         state = shared
     return pairs
-
-
-def _spread(count: int, length: int) -> list[str]:
-    rng: Final = random.Random(1)  # ruff: ignore[suspicious-non-cryptographic-random-usage]  # reproducible input
-    return ["".join(rng.choices(string.ascii_lowercase, k=length)) for _ in range(count)]
 
 
 def test_attribute_lookup_after_the_name_table_moved_to_the_keyed_hash() -> None:

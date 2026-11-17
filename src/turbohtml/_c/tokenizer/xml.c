@@ -14,6 +14,7 @@
 #include "dom/tree.h"
 #include "dom/tree_internal.h" /* arena, node_new, node_append */
 
+#include "core/hash.h"
 #include "core/vec.h"
 #include "core/work_steps.h"
 #include "tokenizer/xml_names.h"
@@ -48,7 +49,7 @@ typedef struct {
     Py_ssize_t shadowed;   /* the binding of the same prefix this one hides until it closes, or -1 */
     Py_UCS4 *uri;          /* the namespace name the prefix binds, for expanded-name comparison */
     Py_ssize_t uri_len;
-    uint64_t uri_hash; /* the salted FNV state past the URI, valid once uri_hashed is set */
+    uint64_t uri_hash; /* the keyed chain state past the URI, valid once uri_hashed is set */
     int uri_hashed;
     Py_ssize_t depth;
 } xml_nsdecl;
@@ -417,9 +418,6 @@ static Py_UCS4 *arena_copy(th_tree *tree, const Py_UCS4 *src, Py_ssize_t len) {
     return out;
 }
 
-#define FNV_PRIME UINT64_C(1099511628211)
-#define FNV_BASIS UINT64_C(14695981039346656037)
-
 /* splitmix64 finalizer: a full-avalanche bijection so the low slot bits depend on every
    input bit. Without it, sequential interned atoms keep a near-permutation low-bit pattern
    that avoids slot collisions below a full table, which both hides the probe path and leaves
@@ -468,17 +466,18 @@ static int local_names_equal(const xml_parser *parser, Py_ssize_t a, Py_ssize_t 
 }
 
 static uint64_t prefix_hash(const xml_parser *parser, Py_ssize_t start, Py_ssize_t len) {
-    uint64_t hash = parser->hash_seed ^ FNV_BASIS;
+    uint64_t hash = parser->hash_seed;
     for (Py_ssize_t offset = 0; offset < len; offset++) {
-        hash = (hash ^ cp(parser, start + offset)) * FNV_PRIME;
+        hash = th_chain_step(hash, cp(parser, start + offset));
     }
-    return hash_mix(hash);
+    return th_chain_finish(hash);
 }
 
 /* The prefix-table slot holding prefix [start, start+len), or the empty slot it would take. */
 static Py_ssize_t prefix_slot(const xml_parser *parser, uint64_t hash, Py_ssize_t start, Py_ssize_t len) {
     Py_ssize_t slot = (Py_ssize_t)(hash & (uint64_t)(parser->prefix_slots_cap - 1));
     while (parser->prefix_slots[slot].gen == PREFIX_SLOT_LIVE) {
+        TH_WORK_STEP();
         const xml_nsprefix *known = &parser->prefixes[parser->prefix_slots[slot].index];
         if (known->len == len && local_names_equal(parser, known->start, start, len)) {
             return slot;
@@ -1295,7 +1294,7 @@ static int consume_namespace_decl(xml_parser *parser, Py_ssize_t name_start, Py_
 
 /* Slot hash for the raw-name keying: fold the attribute's interned atom into the salt. */
 static uint64_t dup_hash_atom(uint64_t seed, uint32_t atom) {
-    return hash_mix(seed ^ FNV_BASIS ^ atom);
+    return hash_mix(seed ^ atom);
 }
 
 /* Slot hash for the expanded-name keying: salt, then the namespace URI, a ':' separator
@@ -1303,20 +1302,20 @@ static uint64_t dup_hash_atom(uint64_t seed, uint32_t atom) {
    kept after the salt and the URI, so no attribute reads the URI again. */
 static uint64_t dup_hash_expanded(uint64_t uri_hash, const xml_parser *parser, Py_ssize_t local_start,
                                   Py_ssize_t local_len) {
-    uint64_t hash = (uri_hash ^ ':') * FNV_PRIME;
+    uint64_t hash = th_chain_step(uri_hash, ':');
     for (Py_ssize_t offset = 0; offset < local_len; offset++) {
-        hash = (hash ^ cp(parser, local_start + offset)) * FNV_PRIME;
+        hash = th_chain_step(hash, cp(parser, local_start + offset));
     }
-    return hash_mix(hash);
+    return th_chain_finish(hash);
 }
 
 /* Folded on the first prefixed attribute that reads the binding, so a declaration no attribute uses costs nothing. */
 static uint64_t decl_uri_hash(xml_parser *parser, xml_nsdecl *decl) {
     if (!decl->uri_hashed) {
-        uint64_t hash = parser->hash_seed ^ FNV_BASIS;
+        uint64_t hash = parser->hash_seed;
         for (Py_ssize_t offset = 0; offset < decl->uri_len; offset++) {
             TH_WORK_STEP();
-            hash = (hash ^ decl->uri[offset]) * FNV_PRIME;
+            hash = th_chain_step(hash, decl->uri[offset]);
         }
         decl->uri_hash = hash;
         decl->uri_hashed = 1;
@@ -1437,6 +1436,7 @@ static int consume_attribute(xml_parser *parser, th_node *element, Py_ssize_t de
     uint64_t hash = dup_hash_atom(parser->hash_seed, atom);
     Py_ssize_t slot = (Py_ssize_t)(hash & (uint64_t)(parser->dup_cap - 1));
     while (parser->dup[slot].gen == parser->dup_gen) {
+        TH_WORK_STEP();
         if (element->attrs[parser->dup[slot].index].name_atom == atom) {
             record(parser, "xml-duplicate-attribute", name_start);
             return -1;
@@ -1568,6 +1568,7 @@ static int consume_start_tag(xml_parser *parser) {
         uint64_t hash = dup_hash_expanded(decl_uri_hash(parser, decl_ns), parser, local_start, local_len);
         Py_ssize_t slot = (Py_ssize_t)(hash & (uint64_t)(parser->dup_cap - 1));
         while (parser->dup[slot].gen == parser->dup_gen) {
+            TH_WORK_STEP();
             /* Compare the stored hash first, so stepping over a neighbor in the probe run does not re-read its URI. */
             if (parser->dup[slot].hash == hash) {
                 const xml_attr_span *previous = &parser->attr_spans[parser->dup[slot].index];
